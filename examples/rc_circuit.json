@@ -1,0 +1,35 @@
+{
+    "name": "RC Low-pass Filter",
+    "description": "Simple RC circuit with step input",
+    "components": [
+        {
+            "type": "voltage_source",
+            "name": "V1",
+            "npos": "in",
+            "nneg": "0",
+            "waveform": {
+                "type": "dc",
+                "value": 5.0
+            }
+        },
+        {
+            "type": "resistor",
+            "name": "R1",
+            "n1": "in",
+            "n2": "out",
+            "value": "1k"
+        },
+        {
+            "type": "capacitor",
+            "name": "C1",
+            "n1": "out",
+            "n2": "0",
+            "value": "1u"
+        }
+    ],
+    "simulation": {
+        "type": "transient",
+        "tstop": 5e-3,
+        "dt": 1e-6
+    }
+}
