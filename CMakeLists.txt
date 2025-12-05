@@ -79,3 +79,25 @@ endif()
 if(SPICELAB_BUILD_PYTHON)
     add_subdirectory(python)
 endif()
+
+# Custom targets for running examples
+add_custom_target(run_buck
+    COMMAND $<TARGET_FILE:spicelab> -v run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o buck_result.csv
+    DEPENDS spicelab
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running buck converter simulation..."
+)
+
+add_custom_target(run_rc
+    COMMAND $<TARGET_FILE:spicelab> -v run ${CMAKE_SOURCE_DIR}/examples/rc_circuit.json -o rc_result.csv
+    DEPENDS spicelab
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running RC circuit simulation..."
+)
+
+add_custom_target(run_rlc
+    COMMAND $<TARGET_FILE:spicelab> -v run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o rlc_result.csv
+    DEPENDS spicelab
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running RLC circuit simulation..."
+)
