@@ -31,6 +31,7 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_mna.cpp
         tests/test_solver.cpp
         tests/test_simulation.cpp
+        tests/test_power_electronics.cpp
     )
 
     target_link_libraries(spicelab_tests

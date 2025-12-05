@@ -257,6 +257,23 @@ ParseResult<Circuit> NetlistParser::parse_json(const std::string& content) {
                 params.ideal = comp.value("ideal", true);
                 circuit.add_diode(name, anode, cathode, params);
             }
+            else if (type == "switch" || type == "S") {
+                std::string n1 = get_node("n1");
+                std::string n2 = get_node("n2");
+                std::string ctrl_pos = get_node("ctrl_pos");
+                std::string ctrl_neg = get_node("ctrl_neg");
+                if (ctrl_pos.empty()) ctrl_pos = get_node("ctrl");
+                if (ctrl_neg.empty()) ctrl_neg = "0";  // Default control negative to ground
+                if (n1.empty() || n2.empty() || ctrl_pos.empty()) {
+                    return ParseError{"Switch " + name + " requires 'n1', 'n2', and 'ctrl_pos'"};
+                }
+                SwitchParams params;
+                params.ron = comp.value("ron", 1e-3);
+                params.roff = comp.value("roff", 1e9);
+                params.vth = comp.value("vth", 0.5);
+                params.initial_state = comp.value("initial_state", false);
+                circuit.add_switch(name, n1, n2, ctrl_pos, ctrl_neg, params);
+            }
             else {
                 return ParseError{"Unknown component type: " + type};
             }

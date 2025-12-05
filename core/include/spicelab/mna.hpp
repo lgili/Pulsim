@@ -5,6 +5,15 @@
 
 namespace spicelab {
 
+// Switch state information
+struct SwitchState {
+    std::string name;
+    bool is_closed;
+    Real last_control_voltage;
+    Real turn_on_time;   // Time of last turn-on event
+    Real turn_off_time;  // Time of last turn-off event
+};
+
 // MNA (Modified Nodal Analysis) matrix assembler
 class MNAAssembler {
 public:
@@ -32,6 +41,15 @@ public:
     // Check if circuit has nonlinear elements
     bool has_nonlinear() const { return has_nonlinear_; }
 
+    // Switch state management
+    const std::vector<SwitchState>& switch_states() const { return switch_states_; }
+    void update_switch_states(const Vector& x, Real time);
+    bool check_switch_events(const Vector& x) const;
+
+    // Get switch state by name
+    SwitchState* find_switch_state(const std::string& name);
+    const SwitchState* find_switch_state(const std::string& name) const;
+
 private:
     // Stamp functions for each component type
     void stamp_resistor(std::vector<Triplet>& triplets, Vector& b,
@@ -51,6 +69,8 @@ private:
     void stamp_current_source(Vector& b, const Component& comp, Real time);
     void stamp_diode(std::vector<Triplet>& triplets, Vector& f,
                     const Component& comp, const Vector& x);
+    void stamp_switch(std::vector<Triplet>& triplets, Vector& b,
+                     const Component& comp, const SwitchState& state);
 
     // Evaluate waveform at time t
     Real evaluate_waveform(const Waveform& waveform, Real time);
@@ -61,6 +81,9 @@ private:
     // Branch current indices for voltage sources and inductors
     std::unordered_map<std::string, Index> branch_indices_;
     Index next_branch_idx_ = 0;
+
+    // Switch states
+    std::vector<SwitchState> switch_states_;
 };
 
 }  // namespace spicelab

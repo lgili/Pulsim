@@ -63,6 +63,7 @@ SpiceLab uses a JSON-based netlist format:
 | Voltage Source | `voltage_source`, `V` | `waveform` |
 | Current Source | `current_source`, `I` | `waveform` |
 | Diode | `diode`, `D` | `is`, `n`, `ideal` |
+| Switch | `switch`, `S` | `ron`, `roff`, `vth`, `ctrl_pos`, `ctrl_neg` |
 
 ### Waveform Types
 
@@ -113,7 +114,7 @@ spicelab-core/
 ## Roadmap
 
 - [x] MVP-0: Basic kernel (R, L, C, sources, transient)
-- [ ] MVP-1: Power electronics (switches, events, losses)
+- [x] MVP-1: Power electronics (switches, events, losses)
 - [ ] MVP-2: Full features (MOSFETs, thermal, gRPC API)
 - [ ] MVP-3: Performance (SUNDIALS, parallel)
 

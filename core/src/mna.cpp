@@ -16,6 +16,17 @@ MNAAssembler::MNAAssembler(const Circuit& circuit)
         if (comp.type() == ComponentType::Diode) {
             has_nonlinear_ = true;
         }
+        // Initialize switch states
+        if (comp.type() == ComponentType::Switch) {
+            const auto& params = std::get<SwitchParams>(comp.params());
+            SwitchState state;
+            state.name = comp.name();
+            state.is_closed = params.initial_state;
+            state.last_control_voltage = 0.0;
+            state.turn_on_time = -1.0;
+            state.turn_off_time = -1.0;
+            switch_states_.push_back(state);
+        }
     }
 }
 
@@ -295,6 +306,108 @@ void MNAAssembler::stamp_diode(std::vector<Triplet>& triplets, Vector& f,
     }
 }
 
+void MNAAssembler::stamp_switch(std::vector<Triplet>& triplets, Vector& /*b*/,
+                                const Component& comp, const SwitchState& state) {
+    const auto& params = std::get<SwitchParams>(comp.params());
+
+    Index n1 = circuit_.node_index(comp.nodes()[0]);
+    Index n2 = circuit_.node_index(comp.nodes()[1]);
+
+    // Switch is modeled as a variable resistor
+    Real R = state.is_closed ? params.ron : params.roff;
+    Real g = 1.0 / R;
+
+    // Stamp conductance (same as resistor)
+    if (n1 >= 0) {
+        triplets.emplace_back(n1, n1, g);
+        if (n2 >= 0) {
+            triplets.emplace_back(n1, n2, -g);
+        }
+    }
+    if (n2 >= 0) {
+        triplets.emplace_back(n2, n2, g);
+        if (n1 >= 0) {
+            triplets.emplace_back(n2, n1, -g);
+        }
+    }
+}
+
+SwitchState* MNAAssembler::find_switch_state(const std::string& name) {
+    for (auto& state : switch_states_) {
+        if (state.name == name) {
+            return &state;
+        }
+    }
+    return nullptr;
+}
+
+const SwitchState* MNAAssembler::find_switch_state(const std::string& name) const {
+    for (const auto& state : switch_states_) {
+        if (state.name == name) {
+            return &state;
+        }
+    }
+    return nullptr;
+}
+
+void MNAAssembler::update_switch_states(const Vector& x, Real time) {
+    for (const auto& comp : circuit_.components()) {
+        if (comp.type() != ComponentType::Switch) continue;
+
+        const auto& params = std::get<SwitchParams>(comp.params());
+        SwitchState* state = find_switch_state(comp.name());
+        if (!state) continue;
+
+        // Get control voltage (nodes[2] - nodes[3])
+        Index n_ctrl_pos = circuit_.node_index(comp.nodes()[2]);
+        Index n_ctrl_neg = circuit_.node_index(comp.nodes()[3]);
+
+        Real v_ctrl = 0.0;
+        if (n_ctrl_pos >= 0) v_ctrl += x(n_ctrl_pos);
+        if (n_ctrl_neg >= 0) v_ctrl -= x(n_ctrl_neg);
+
+        bool was_closed = state->is_closed;
+        state->last_control_voltage = v_ctrl;
+
+        // Hysteresis-free comparison for now
+        if (v_ctrl > params.vth && !state->is_closed) {
+            state->is_closed = true;
+            state->turn_on_time = time;
+        } else if (v_ctrl <= params.vth && state->is_closed) {
+            state->is_closed = false;
+            state->turn_off_time = time;
+        }
+
+        // Track state change (for event detection)
+        (void)was_closed;  // Could be used for event logging
+    }
+}
+
+bool MNAAssembler::check_switch_events(const Vector& x) const {
+    for (const auto& comp : circuit_.components()) {
+        if (comp.type() != ComponentType::Switch) continue;
+
+        const auto& params = std::get<SwitchParams>(comp.params());
+        const SwitchState* state = find_switch_state(comp.name());
+        if (!state) continue;
+
+        // Get control voltage
+        Index n_ctrl_pos = circuit_.node_index(comp.nodes()[2]);
+        Index n_ctrl_neg = circuit_.node_index(comp.nodes()[3]);
+
+        Real v_ctrl = 0.0;
+        if (n_ctrl_pos >= 0) v_ctrl += x(n_ctrl_pos);
+        if (n_ctrl_neg >= 0) v_ctrl -= x(n_ctrl_neg);
+
+        // Check if state would change
+        bool would_close = v_ctrl > params.vth;
+        if (would_close != state->is_closed) {
+            return true;  // Event detected
+        }
+    }
+    return false;
+}
+
 void MNAAssembler::assemble_dc(SparseMatrix& G, Vector& b) {
     Index n = variable_count();
     std::vector<Triplet> triplets;
@@ -317,6 +430,13 @@ void MNAAssembler::assemble_dc(SparseMatrix& G, Vector& b) {
             case ComponentType::CurrentSource:
                 stamp_current_source(b, comp, 0.0);
                 break;
+            case ComponentType::Switch: {
+                const SwitchState* state = find_switch_state(comp.name());
+                if (state) {
+                    stamp_switch(triplets, b, comp, *state);
+                }
+                break;
+            }
             default:
                 break;  // Other components handled in nonlinear assembly
         }
@@ -351,6 +471,13 @@ void MNAAssembler::assemble_transient(SparseMatrix& G, Vector& b,
             case ComponentType::CurrentSource:
                 stamp_current_source(b, comp, 0.0);
                 break;
+            case ComponentType::Switch: {
+                const SwitchState* state = find_switch_state(comp.name());
+                if (state) {
+                    stamp_switch(triplets, b, comp, *state);
+                }
+                break;
+            }
             default:
                 break;
         }

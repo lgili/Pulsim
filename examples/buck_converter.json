@@ -1,0 +1,27 @@
+{
+    "components": [
+        {"type": "voltage_source", "name": "Vdc", "npos": "vcc", "nneg": "0", "waveform": 48.0},
+        {"type": "voltage_source", "name": "Vpwm", "npos": "ctrl", "nneg": "0", "waveform": {
+            "type": "pulse",
+            "v1": 0.0,
+            "v2": 5.0,
+            "td": 0.0,
+            "tr": 1e-9,
+            "tf": 1e-9,
+            "pw": 25e-6,
+            "period": 50e-6
+        }},
+        {"type": "switch", "name": "S1", "n1": "vcc", "n2": "sw_node", "ctrl_pos": "ctrl", "ctrl_neg": "0",
+            "ron": 0.01, "roff": 1e9, "vth": 2.5},
+        {"type": "diode", "name": "D1", "anode": "0", "cathode": "sw_node", "ideal": true},
+        {"type": "inductor", "name": "L1", "n1": "sw_node", "n2": "out", "value": "100u"},
+        {"type": "capacitor", "name": "C1", "n1": "out", "n2": "0", "value": "100u"},
+        {"type": "resistor", "name": "Rload", "n1": "out", "n2": "0", "value": 10.0}
+    ],
+    "simulation": {
+        "tstop": 2e-3,
+        "dt": 0.5e-6,
+        "dtmax": 2e-6,
+        "uic": true
+    }
+}
