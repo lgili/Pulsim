@@ -1,0 +1,172 @@
+#pragma once
+
+#include "spicelab/types.hpp"
+#include <memory>
+#include <optional>
+#include <variant>
+
+namespace spicelab {
+
+// Forward declarations
+class Component;
+
+// Source waveform types
+struct DCWaveform {
+    Real value;
+};
+
+struct PulseWaveform {
+    Real v1;      // Initial value
+    Real v2;      // Pulsed value
+    Real td;      // Delay time
+    Real tr;      // Rise time
+    Real tf;      // Fall time
+    Real pw;      // Pulse width
+    Real period;  // Period
+};
+
+struct SineWaveform {
+    Real offset;     // DC offset
+    Real amplitude;  // Peak amplitude
+    Real frequency;  // Frequency in Hz
+    Real delay;      // Delay time
+    Real damping;    // Damping factor (theta)
+};
+
+struct PWLWaveform {
+    std::vector<std::pair<Real, Real>> points;  // (time, value) pairs
+};
+
+using Waveform = std::variant<DCWaveform, PulseWaveform, SineWaveform, PWLWaveform>;
+
+// Component parameters
+struct ResistorParams {
+    Real resistance;
+    Real tc1 = 0.0;  // Temperature coefficient 1
+    Real tc2 = 0.0;  // Temperature coefficient 2
+};
+
+struct CapacitorParams {
+    Real capacitance;
+    Real initial_voltage = 0.0;
+};
+
+struct InductorParams {
+    Real inductance;
+    Real initial_current = 0.0;
+};
+
+struct VoltageSourceParams {
+    Waveform waveform;
+    Real internal_resistance = 0.0;
+};
+
+struct CurrentSourceParams {
+    Waveform waveform;
+};
+
+struct DiodeParams {
+    Real is = 1e-14;   // Saturation current
+    Real n = 1.0;      // Ideality factor
+    Real rs = 0.0;     // Series resistance
+    Real vt = 0.026;   // Thermal voltage (kT/q at 300K)
+    bool ideal = true; // Use ideal model if true
+};
+
+struct SwitchParams {
+    Real ron = 1e-3;   // On resistance
+    Real roff = 1e9;   // Off resistance
+    Real vth = 0.5;    // Threshold voltage
+    bool initial_state = false;  // false = open, true = closed
+};
+
+using ComponentParams = std::variant<
+    ResistorParams,
+    CapacitorParams,
+    InductorParams,
+    VoltageSourceParams,
+    CurrentSourceParams,
+    DiodeParams,
+    SwitchParams
+>;
+
+// Component representation
+class Component {
+public:
+    Component(std::string name, ComponentType type,
+              std::vector<NodeId> nodes, ComponentParams params)
+        : name_(std::move(name))
+        , type_(type)
+        , nodes_(std::move(nodes))
+        , params_(std::move(params)) {}
+
+    const std::string& name() const { return name_; }
+    ComponentType type() const { return type_; }
+    const std::vector<NodeId>& nodes() const { return nodes_; }
+    const ComponentParams& params() const { return params_; }
+
+    // For components that add branch currents (V sources, inductors)
+    bool has_branch_current() const {
+        return type_ == ComponentType::VoltageSource ||
+               type_ == ComponentType::Inductor;
+    }
+
+private:
+    std::string name_;
+    ComponentType type_;
+    std::vector<NodeId> nodes_;
+    ComponentParams params_;
+};
+
+// Circuit representation (Internal Representation - IR)
+class Circuit {
+public:
+    Circuit() = default;
+
+    // Add components
+    void add_resistor(const std::string& name, const NodeId& n1, const NodeId& n2, Real resistance);
+    void add_capacitor(const std::string& name, const NodeId& n1, const NodeId& n2, Real capacitance, Real ic = 0.0);
+    void add_inductor(const std::string& name, const NodeId& n1, const NodeId& n2, Real inductance, Real ic = 0.0);
+    void add_voltage_source(const std::string& name, const NodeId& npos, const NodeId& nneg, const Waveform& waveform);
+    void add_current_source(const std::string& name, const NodeId& npos, const NodeId& nneg, const Waveform& waveform);
+    void add_diode(const std::string& name, const NodeId& anode, const NodeId& cathode, const DiodeParams& params = {});
+    void add_switch(const std::string& name, const NodeId& n1, const NodeId& n2,
+                    const NodeId& ctrl_pos, const NodeId& ctrl_neg, const SwitchParams& params = {});
+
+    // Access components
+    const std::vector<Component>& components() const { return components_; }
+    const Component* find_component(const std::string& name) const;
+
+    // Node management
+    Index node_count() const { return static_cast<Index>(node_map_.size()); }
+    Index branch_count() const { return branch_count_; }
+    Index total_variables() const { return node_count() + branch_count_; }
+
+    // Map node name to index (excluding ground)
+    Index node_index(const NodeId& node) const;
+    bool is_ground(const NodeId& node) const;
+
+    // Get node name from index
+    const NodeId& node_name(Index index) const;
+
+    // Get all node names
+    std::vector<NodeId> node_names() const;
+
+    // Signal name for output (e.g., "V(out)", "I(L1)")
+    std::string signal_name(Index index) const;
+
+    // Validation
+    bool validate(std::string& error_message) const;
+
+private:
+    void ensure_node(const NodeId& node);
+    void add_component(Component component);
+
+    std::vector<Component> components_;
+    std::unordered_map<NodeId, Index> node_map_;
+    std::vector<NodeId> node_names_;  // Reverse mapping
+    Index branch_count_ = 0;
+    std::unordered_map<std::string, Index> branch_map_;  // Component name -> branch index
+};
+
+}  // namespace spicelab
