@@ -92,7 +92,8 @@ SimulationResult Simulator::run_transient(SimulationCallback callback) {
     return run_transient(callback, nullptr);
 }
 
-SimulationResult Simulator::run_transient(SimulationCallback callback, EventCallback event_callback) {
+SimulationResult Simulator::run_transient(SimulationCallback callback, EventCallback event_callback,
+                                          SimulationControl* control) {
     SimulationResult result;
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -140,6 +141,24 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
     int step_count = 0;
 
     while (time < options_.tstop) {
+        if (control) {
+            if (control->should_stop()) {
+                result.final_status = SolverStatus::Success;
+                result.error_message = "Simulation stopped by user";
+                break;
+            }
+
+            while (control->should_pause() && !control->should_stop()) {
+                control->wait_until_resumed();
+            }
+
+            if (control->should_stop()) {
+                result.final_status = SolverStatus::Success;
+                result.error_message = "Simulation stopped by user";
+                break;
+            }
+        }
+
         // Don't overshoot tstop
         if (time + dt > options_.tstop) {
             dt = options_.tstop - time;

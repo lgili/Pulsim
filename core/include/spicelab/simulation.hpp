@@ -11,6 +11,21 @@ namespace spicelab {
 // Callback for streaming results during simulation
 using SimulationCallback = std::function<void(Real time, const Vector& state)>;
 
+// Forward declaration for cooperative control of long-running simulations
+class SimulationControl {
+public:
+    virtual ~SimulationControl() = default;
+
+    // Return true when simulation should stop gracefully
+    virtual bool should_stop() const = 0;
+
+    // Return true when simulation should pause at the next safe point
+    virtual bool should_pause() const = 0;
+
+    // Block until the simulation is allowed to proceed again
+    virtual void wait_until_resumed() = 0;
+};
+
 // Event callback for switch state changes
 struct SwitchEvent {
     std::string switch_name;
@@ -43,7 +58,8 @@ public:
     SimulationResult run_transient(SimulationCallback callback);
 
     // Run transient with event callback
-    SimulationResult run_transient(SimulationCallback callback, EventCallback event_callback);
+    SimulationResult run_transient(SimulationCallback callback, EventCallback event_callback,
+                                   SimulationControl* control = nullptr);
 
     // Access the circuit
     const Circuit& circuit() const { return circuit_; }

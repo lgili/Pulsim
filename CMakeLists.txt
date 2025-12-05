@@ -10,6 +10,27 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(SPICELAB_BUILD_TESTS "Build tests" ON)
 option(SPICELAB_BUILD_CLI "Build CLI application" ON)
 option(SPICELAB_BUILD_PYTHON "Build Python bindings" OFF)
+option(SPICELAB_BUILD_GRPC "Build gRPC API server" OFF)
+
+# If project-level tests are disabled, also disable CTest/BUILD_TESTING
+# so FetchContent dependencies (Eigen, abseil, etc.) won't add their
+# test targets (e.g. "check", "meta") which can conflict with other
+# dependencies when pulled into the superproject.
+if(NOT SPICELAB_BUILD_TESTS)
+    set(BUILD_TESTING OFF CACHE BOOL "Disable tests for dependencies" FORCE)
+endif()
+# When project tests are disabled, disable BUILD_TESTING and common
+# test-related options for third-party FetchContent deps to avoid
+# global target name collisions (e.g. Eigen's test targets like
+# `check`/`meta` conflict with abseil's targets pulled by gRPC).
+if(NOT SPICELAB_BUILD_TESTS)
+    message(STATUS "SPICELAB_BUILD_TESTS=OFF -> disabling dependency tests (BUILD_TESTING/EIGEN_* )")
+    # Prevent fetched projects from enabling their own testing targets
+    set(BUILD_TESTING OFF CACHE BOOL "Disable building tests in dependencies" FORCE)
+    # Eigen-specific guards (try both variable names used across versions)
+    set(EIGEN_BUILD_TESTS OFF CACHE BOOL "Disable Eigen tests in dependencies" FORCE)
+    set(EIGEN_BUILD_TESTING OFF CACHE BOOL "Disable Eigen testing in dependencies" FORCE)
+endif()
 
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
@@ -78,6 +99,11 @@ endif()
 # Python bindings
 if(SPICELAB_BUILD_PYTHON)
     add_subdirectory(python)
+endif()
+
+# gRPC API server
+if(SPICELAB_BUILD_GRPC)
+    add_subdirectory(api-grpc)
 endif()
 
 # Custom targets for running examples

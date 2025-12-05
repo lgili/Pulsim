@@ -5,6 +5,7 @@ add_library(spicelab_core
     src/solver.cpp
     src/devices.cpp
     src/simulation.cpp
+    src/thermal.cpp
 )
 
 target_include_directories(spicelab_core
@@ -32,6 +33,7 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_solver.cpp
         tests/test_simulation.cpp
         tests/test_power_electronics.cpp
+        tests/test_thermal.cpp
     )
 
     target_link_libraries(spicelab_tests
