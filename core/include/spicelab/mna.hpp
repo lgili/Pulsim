@@ -36,7 +36,7 @@ public:
     void evaluate_sources(Vector& b, Real time);
 
     // Get the total number of variables (nodes + branch currents)
-    Index variable_count() const { return circuit_.total_variables(); }
+    Index variable_count() const { return next_branch_idx_; }
 
     // Check if circuit has nonlinear elements
     bool has_nonlinear() const { return has_nonlinear_; }
@@ -71,6 +71,13 @@ private:
                     const Component& comp, const Vector& x);
     void stamp_switch(std::vector<Triplet>& triplets, Vector& b,
                      const Component& comp, const SwitchState& state);
+    void stamp_mosfet(std::vector<Triplet>& triplets, Vector& f,
+                     const Component& comp, const Vector& x);
+    void stamp_transformer_dc(std::vector<Triplet>& triplets, Vector& b,
+                             const Component& comp, Index branch_idx_p, Index branch_idx_s);
+    void stamp_transformer_transient(std::vector<Triplet>& triplets, Vector& b,
+                                    const Component& comp, Index branch_idx_p, Index branch_idx_s,
+                                    const Vector& x_prev, Real dt);
 
     // Evaluate waveform at time t
     Real evaluate_waveform(const Waveform& waveform, Real time);

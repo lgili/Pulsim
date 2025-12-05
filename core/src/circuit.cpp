@@ -81,6 +81,30 @@ void Circuit::add_switch(const std::string& name, const NodeId& n1,
                            params));
 }
 
+void Circuit::add_mosfet(const std::string& name, const NodeId& drain,
+                         const NodeId& gate, const NodeId& source,
+                         const MOSFETParams& params) {
+    ensure_node(drain);
+    ensure_node(gate);
+    ensure_node(source);
+    add_component(Component(name, ComponentType::MOSFET, {drain, gate, source}, params));
+}
+
+void Circuit::add_transformer(const std::string& name, const NodeId& p1,
+                              const NodeId& p2, const NodeId& s1,
+                              const NodeId& s2, const TransformerParams& params) {
+    ensure_node(p1);
+    ensure_node(p2);
+    ensure_node(s1);
+    ensure_node(s2);
+
+    // Transformer adds two branch currents (primary and secondary)
+    branch_map_[name + "_p"] = branch_count_++;
+    branch_map_[name + "_s"] = branch_count_++;
+
+    add_component(Component(name, ComponentType::Transformer, {p1, p2, s1, s2}, params));
+}
+
 const Component* Circuit::find_component(const std::string& name) const {
     auto it = std::find_if(components_.begin(), components_.end(),
                           [&name](const Component& c) { return c.name() == name; });

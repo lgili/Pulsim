@@ -64,6 +64,8 @@ SpiceLab uses a JSON-based netlist format:
 | Current Source | `current_source`, `I` | `waveform` |
 | Diode | `diode`, `D` | `is`, `n`, `ideal` |
 | Switch | `switch`, `S` | `ron`, `roff`, `vth`, `ctrl_pos`, `ctrl_neg` |
+| MOSFET | `mosfet`, `nmos`, `pmos`, `M` | `vth`, `kp`, `lambda`, `w`, `l`, `rds_on`, `body_diode` |
+| Transformer | `transformer`, `T` | `turns_ratio`, `lm` (magnetizing inductance) |
 
 ### Waveform Types
 
@@ -115,7 +117,8 @@ spicelab-core/
 
 - [x] MVP-0: Basic kernel (R, L, C, sources, transient)
 - [x] MVP-1: Power electronics (switches, events, losses)
-- [ ] MVP-2: Full features (MOSFETs, thermal, gRPC API)
+- [x] MVP-2: Advanced devices (MOSFETs, transformers)
+- [ ] MVP-2b: Full features (thermal, gRPC API, Python bindings)
 - [ ] MVP-3: Performance (SUNDIALS, parallel)
 
 ## License

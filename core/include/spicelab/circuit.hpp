@@ -80,6 +80,44 @@ struct SwitchParams {
     bool initial_state = false;  // false = open, true = closed
 };
 
+// MOSFET type
+enum class MOSFETType { NMOS, PMOS };
+
+struct MOSFETParams {
+    MOSFETType type = MOSFETType::NMOS;
+
+    // Level 1 (Shichman-Hodges) parameters
+    Real vth = 2.0;      // Threshold voltage (V)
+    Real kp = 20e-6;     // Transconductance parameter (A/V²)
+    Real lambda = 0.0;   // Channel-length modulation (1/V)
+    Real w = 100e-6;     // Channel width (m)
+    Real l = 10e-6;      // Channel length (m)
+
+    // Body diode parameters (optional)
+    bool body_diode = false;
+    Real is_body = 1e-14;  // Body diode saturation current
+    Real n_body = 1.0;     // Body diode ideality factor
+
+    // Parasitic capacitances (optional)
+    Real cgs = 0.0;  // Gate-source capacitance
+    Real cgd = 0.0;  // Gate-drain capacitance
+    Real cds = 0.0;  // Drain-source capacitance
+
+    // On/Off resistance for ideal mode
+    Real rds_on = 0.0;  // If > 0, use simple switch model
+    Real rds_off = 1e9;
+
+    // Computed Kp' = Kp * W/L
+    Real kp_effective() const { return kp * w / l; }
+};
+
+struct TransformerParams {
+    Real turns_ratio = 1.0;   // N1:N2 (primary to secondary)
+    Real lm = 1e-3;           // Magnetizing inductance (H), 0 = ideal
+    Real ll1 = 0.0;           // Primary leakage inductance
+    Real ll2 = 0.0;           // Secondary leakage inductance
+};
+
 using ComponentParams = std::variant<
     ResistorParams,
     CapacitorParams,
@@ -87,7 +125,9 @@ using ComponentParams = std::variant<
     VoltageSourceParams,
     CurrentSourceParams,
     DiodeParams,
-    SwitchParams
+    SwitchParams,
+    MOSFETParams,
+    TransformerParams
 >;
 
 // Component representation
@@ -132,6 +172,10 @@ public:
     void add_diode(const std::string& name, const NodeId& anode, const NodeId& cathode, const DiodeParams& params = {});
     void add_switch(const std::string& name, const NodeId& n1, const NodeId& n2,
                     const NodeId& ctrl_pos, const NodeId& ctrl_neg, const SwitchParams& params = {});
+    void add_mosfet(const std::string& name, const NodeId& drain, const NodeId& gate,
+                    const NodeId& source, const MOSFETParams& params = {});
+    void add_transformer(const std::string& name, const NodeId& p1, const NodeId& p2,
+                        const NodeId& s1, const NodeId& s2, const TransformerParams& params = {});
 
     // Access components
     const std::vector<Component>& components() const { return components_; }

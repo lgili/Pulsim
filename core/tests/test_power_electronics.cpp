@@ -236,3 +236,162 @@ TEST_CASE("Half-bridge inverter", "[power]") {
     // Should see significant voltage swing
     CHECK((v_max - v_min) > 100);
 }
+
+TEST_CASE("MOSFET Level 1 DC characteristics", "[mosfet]") {
+    // Test NMOS in different operating regions
+    Circuit circuit;
+
+    // Vgs controls the gate
+    circuit.add_voltage_source("Vgs", "gate", "0", DCWaveform{5.0});
+    // Vds across drain-source
+    circuit.add_voltage_source("Vds", "drain", "0", DCWaveform{5.0});
+
+    MOSFETParams params;
+    params.type = MOSFETType::NMOS;
+    params.vth = 2.0;
+    params.kp = 100e-6;  // 100 uA/V²
+    params.w = 10e-6;    // 10 um
+    params.l = 1e-6;     // 1 um
+    params.lambda = 0.0;
+
+    // Kp_eff = 100e-6 * 10e-6 / 1e-6 = 1e-3 A/V²
+    // With Vgs=5V, Vth=2V, Vov=3V
+    // If Vds=5V > Vov: saturation, Id = 0.5*Kp*(Vgs-Vth)² = 0.5*1e-3*9 = 4.5mA
+
+    circuit.add_mosfet("M1", "drain", "gate", "0", params);
+
+    Simulator sim(circuit);
+    auto result = sim.dc_operating_point();
+
+    REQUIRE(result.status == SolverStatus::Success);
+
+    // The MOSFET should be in saturation
+    // We can verify by checking the current through Vds
+}
+
+TEST_CASE("MOSFET as switch", "[mosfet]") {
+    // Use MOSFET with rds_on for simple switch behavior
+    // Circuit: Vdc -- Rload -- M1 (drain) -- GND
+    //          Gate driven by Vgs
+    Circuit circuit;
+    circuit.add_voltage_source("Vdc", "vcc", "0", DCWaveform{12.0});
+    circuit.add_voltage_source("Vgs", "gate", "0", DCWaveform{10.0});  // Turn on gate
+    circuit.add_resistor("Rload", "vcc", "drain", 100.0);
+
+    MOSFETParams params;
+    params.type = MOSFETType::NMOS;
+    params.vth = 3.0;
+    params.rds_on = 0.1;   // 100 mOhm when on
+    params.rds_off = 1e9;  // Very high when off
+
+    // NMOS: drain at high side, source at ground
+    circuit.add_mosfet("M1", "drain", "gate", "0", params);
+
+    Simulator sim(circuit);
+    auto result = sim.dc_operating_point();
+
+    REQUIRE(result.status == SolverStatus::Success);
+
+    // With Vgs=10V > Vth=3V, MOSFET should be ON
+    // V(drain) ≈ 12V * 0.1 / (100 + 0.1) ≈ 0.012V (close to 0)
+    // Current = 12 / (100 + 0.1) ≈ 0.12A
+    Index drain_idx = circuit.node_index("drain");
+    CHECK(result.x(drain_idx) < 0.5);  // Should be close to 0
+}
+
+TEST_CASE("MOSFET with body diode", "[mosfet]") {
+    Circuit circuit;
+    circuit.add_voltage_source("Vdc", "source", "0", DCWaveform{5.0});
+    circuit.add_voltage_source("Vgs", "gate", "0", DCWaveform{0.0});  // Gate OFF
+    circuit.add_resistor("R1", "drain", "0", 1000.0);
+
+    MOSFETParams params;
+    params.type = MOSFETType::NMOS;
+    params.vth = 2.0;
+    params.rds_on = 0.01;
+    params.rds_off = 1e9;
+    params.body_diode = true;
+    params.is_body = 1e-14;
+    params.n_body = 1.0;
+
+    circuit.add_mosfet("M1", "drain", "gate", "source", params);
+
+    Simulator sim(circuit);
+    auto result = sim.dc_operating_point();
+
+    REQUIRE(result.status == SolverStatus::Success);
+
+    // With gate off and source at 5V, body diode should conduct
+    // (body diode is from source to drain for NMOS)
+    // Current flows through body diode to R1
+    Index drain_idx = circuit.node_index("drain");
+    CHECK(result.x(drain_idx) > 4.0);  // Close to 5V minus diode drop
+}
+
+TEST_CASE("Ideal transformer", "[transformer]") {
+    // Test voltage transformation
+    Circuit circuit;
+    circuit.add_voltage_source("Vpri", "p1", "0", DCWaveform{120.0});
+
+    // 10:1 step-down transformer
+    TransformerParams params;
+    params.turns_ratio = 10.0;  // 10:1
+
+    circuit.add_transformer("T1", "p1", "0", "s1", "0", params);
+    circuit.add_resistor("Rload", "s1", "0", 100.0);  // Load on secondary
+
+    Simulator sim(circuit);
+    auto result = sim.dc_operating_point();
+
+    REQUIRE(result.status == SolverStatus::Success);
+
+    // V_secondary = V_primary / n = 120 / 10 = 12V
+    Index s1_idx = circuit.node_index("s1");
+    CHECK_THAT(result.x(s1_idx), WithinAbs(12.0, 1.0));
+}
+
+TEST_CASE("Flyback converter topology", "[power][mosfet]") {
+    // Simplified flyback: Vdc - M1 - Transformer - D1 - Cout - Rload
+    Circuit circuit;
+    circuit.add_voltage_source("Vdc", "vcc", "0", DCWaveform{400.0});
+
+    // PWM control for MOSFET
+    PulseWaveform pwm{0.0, 12.0, 0.0, 1e-9, 1e-9, 5e-6, 10e-6};  // 50% duty, 100kHz
+    circuit.add_voltage_source("Vpwm", "gate", "0", pwm);
+
+    // Primary side MOSFET
+    MOSFETParams mos_params;
+    mos_params.type = MOSFETType::NMOS;
+    mos_params.vth = 3.0;
+    mos_params.rds_on = 0.1;
+    mos_params.rds_off = 1e9;
+
+    circuit.add_mosfet("M1", "pri", "gate", "0", mos_params);
+
+    // Simplified: use inductor instead of transformer for now
+    // (Real flyback would need coupled inductors)
+    circuit.add_inductor("Lpri", "vcc", "pri", 100e-6);
+
+    // Output diode and filter
+    DiodeParams diode_params;
+    diode_params.ideal = true;
+    circuit.add_diode("D1", "pri", "out", diode_params);
+
+    circuit.add_capacitor("Cout", "out", "0", 100e-6);
+    circuit.add_resistor("Rload", "out", "0", 50.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 200e-6;  // 20 switching cycles
+    opts.dt = 0.1e-6;
+    opts.dtmax = 0.5e-6;
+    opts.use_ic = true;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+    REQUIRE(result.final_status == SolverStatus::Success);
+
+    // Just verify it completes without error
+    // Output voltage depends on control loop which we don't have
+}

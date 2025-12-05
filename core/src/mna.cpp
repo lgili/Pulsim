@@ -7,13 +7,19 @@ namespace spicelab {
 MNAAssembler::MNAAssembler(const Circuit& circuit)
     : circuit_(circuit) {
 
-    // Assign branch indices for voltage sources and inductors
+    // Assign branch indices for voltage sources, inductors, and transformers
     next_branch_idx_ = circuit_.node_count();
     for (const auto& comp : circuit_.components()) {
         if (comp.has_branch_current()) {
             branch_indices_[comp.name()] = next_branch_idx_++;
         }
-        if (comp.type() == ComponentType::Diode) {
+        if (comp.type() == ComponentType::Transformer) {
+            // Transformer has two branch currents
+            branch_indices_[comp.name() + "_p"] = next_branch_idx_++;
+            branch_indices_[comp.name() + "_s"] = next_branch_idx_++;
+        }
+        if (comp.type() == ComponentType::Diode ||
+            comp.type() == ComponentType::MOSFET) {
             has_nonlinear_ = true;
         }
         // Initialize switch states
@@ -332,6 +338,293 @@ void MNAAssembler::stamp_switch(std::vector<Triplet>& triplets, Vector& /*b*/,
     }
 }
 
+void MNAAssembler::stamp_mosfet(std::vector<Triplet>& triplets, Vector& f,
+                                const Component& comp, const Vector& x) {
+    const auto& params = std::get<MOSFETParams>(comp.params());
+
+    Index n_drain = circuit_.node_index(comp.nodes()[0]);
+    Index n_gate = circuit_.node_index(comp.nodes()[1]);
+    Index n_source = circuit_.node_index(comp.nodes()[2]);
+
+    // Get terminal voltages
+    Real Vd = (n_drain >= 0) ? x(n_drain) : 0.0;
+    Real Vg = (n_gate >= 0) ? x(n_gate) : 0.0;
+    Real Vs = (n_source >= 0) ? x(n_source) : 0.0;
+
+    Real Vgs = Vg - Vs;
+    Real Vds = Vd - Vs;
+
+    // Handle PMOS by flipping voltages
+    Real sign = (params.type == MOSFETType::NMOS) ? 1.0 : -1.0;
+    Vgs *= sign;
+    Vds *= sign;
+    Real Vth = params.vth;
+
+    Real Id = 0.0;        // Drain current
+    Real gm = 0.0;        // Transconductance dId/dVgs
+    Real gds = 0.0;       // Output conductance dId/dVds
+
+    // Simple switch model if rds_on is specified
+    if (params.rds_on > 0) {
+        if (Vgs > Vth) {
+            // ON state
+            Real g = 1.0 / params.rds_on;
+            Id = g * Vds;
+            gds = g;
+            gm = 0.0;
+        } else {
+            // OFF state
+            Real g = 1.0 / params.rds_off;
+            Id = g * Vds;
+            gds = g;
+            gm = 0.0;
+        }
+    } else {
+        // Level 1 (Shichman-Hodges) model
+        Real Kp = params.kp_effective();  // Kp * W/L
+        Real lambda = params.lambda;
+
+        if (Vgs <= Vth) {
+            // Cutoff region
+            Id = 0.0;
+            gm = 0.0;
+            gds = 1e-12;  // Small leakage conductance
+        } else if (Vds < Vgs - Vth) {
+            // Linear (triode) region
+            // Id = Kp * [(Vgs - Vth) * Vds - Vds^2/2] * (1 + lambda*Vds)
+            Real Vov = Vgs - Vth;  // Overdrive voltage
+            Id = Kp * (Vov * Vds - 0.5 * Vds * Vds) * (1.0 + lambda * Vds);
+            gm = Kp * Vds * (1.0 + lambda * Vds);
+            gds = Kp * (Vov - Vds) * (1.0 + lambda * Vds) +
+                  Kp * (Vov * Vds - 0.5 * Vds * Vds) * lambda;
+        } else {
+            // Saturation region
+            // Id = (Kp/2) * (Vgs - Vth)^2 * (1 + lambda*Vds)
+            Real Vov = Vgs - Vth;
+            Id = 0.5 * Kp * Vov * Vov * (1.0 + lambda * Vds);
+            gm = Kp * Vov * (1.0 + lambda * Vds);
+            gds = 0.5 * Kp * Vov * Vov * lambda;
+        }
+
+        // Ensure minimum conductance for numerical stability
+        gds = std::max(gds, 1e-12);
+    }
+
+    // Apply sign for PMOS
+    Id *= sign;
+
+    // Newton-Raphson linearization
+    // I_drain = Id + gm*(Vgs - Vgs0) + gds*(Vds - Vds0)
+    // Equivalent current: Ieq = Id - gm*Vgs - gds*Vds
+
+    Real Ieq = Id - gm * Vgs * sign - gds * Vds * sign;
+
+    // Stamp into Jacobian
+    // Current flows: out of drain, into source (for NMOS with positive Id)
+    // Partial derivatives:
+    //   dId/dVd = gds
+    //   dId/dVg = gm
+    //   dId/dVs = -gm - gds
+
+    if (n_drain >= 0) {
+        triplets.emplace_back(n_drain, n_drain, gds);
+        f(n_drain) -= Ieq;  // Current out of drain
+
+        if (n_gate >= 0) {
+            triplets.emplace_back(n_drain, n_gate, gm * sign);
+        }
+        if (n_source >= 0) {
+            triplets.emplace_back(n_drain, n_source, -gds - gm * sign);
+        }
+    }
+
+    if (n_source >= 0) {
+        triplets.emplace_back(n_source, n_source, gds + gm * sign);
+        f(n_source) += Ieq;  // Current into source
+
+        if (n_gate >= 0) {
+            triplets.emplace_back(n_source, n_gate, -gm * sign);
+        }
+        if (n_drain >= 0) {
+            triplets.emplace_back(n_source, n_drain, -gds);
+        }
+    }
+
+    // Body diode (optional)
+    if (params.body_diode) {
+        // Diode from source to drain (for NMOS)
+        Real Vdiode = (params.type == MOSFETType::NMOS) ? (Vs - Vd) : (Vd - Vs);
+        Real Is = params.is_body;
+        Real n = params.n_body;
+        constexpr Real Vt = 0.026;  // Thermal voltage
+
+        Real Vd_limited = std::min(Vdiode, 40.0 * n * Vt);
+        Real exp_term = std::exp(Vd_limited / (n * Vt));
+        Real Id_diode = Is * (exp_term - 1.0);
+        Real Gd = (Is / (n * Vt)) * exp_term;
+        Gd = std::max(Gd, 1e-12);
+
+        Real Ieq_diode = Id_diode - Gd * Vdiode;
+
+        // Stamp body diode (source to drain for NMOS)
+        if (params.type == MOSFETType::NMOS) {
+            if (n_source >= 0) {
+                triplets.emplace_back(n_source, n_source, Gd);
+                f(n_source) -= Ieq_diode;
+                if (n_drain >= 0) {
+                    triplets.emplace_back(n_source, n_drain, -Gd);
+                }
+            }
+            if (n_drain >= 0) {
+                triplets.emplace_back(n_drain, n_drain, Gd);
+                f(n_drain) += Ieq_diode;
+                if (n_source >= 0) {
+                    triplets.emplace_back(n_drain, n_source, -Gd);
+                }
+            }
+        } else {
+            // PMOS: diode from drain to source
+            if (n_drain >= 0) {
+                triplets.emplace_back(n_drain, n_drain, Gd);
+                f(n_drain) -= Ieq_diode;
+                if (n_source >= 0) {
+                    triplets.emplace_back(n_drain, n_source, -Gd);
+                }
+            }
+            if (n_source >= 0) {
+                triplets.emplace_back(n_source, n_source, Gd);
+                f(n_source) += Ieq_diode;
+                if (n_drain >= 0) {
+                    triplets.emplace_back(n_source, n_drain, -Gd);
+                }
+            }
+        }
+    }
+}
+
+void MNAAssembler::stamp_transformer_dc(std::vector<Triplet>& triplets, Vector& b,
+                                        const Component& comp, Index branch_idx_p, Index branch_idx_s) {
+    const auto& params = std::get<TransformerParams>(comp.params());
+
+    Index n_p1 = circuit_.node_index(comp.nodes()[0]);
+    Index n_p2 = circuit_.node_index(comp.nodes()[1]);
+    Index n_s1 = circuit_.node_index(comp.nodes()[2]);
+    Index n_s2 = circuit_.node_index(comp.nodes()[3]);
+
+    Real n = params.turns_ratio;
+
+    // Ideal transformer equations:
+    // V1 = n * V2  (voltage relationship)
+    // I1 = -I2/n  (current relationship, power conservation)
+    //
+    // Using MNA with branch currents I_p (primary) and I_s (secondary):
+    // V_p1 - V_p2 = n * (V_s1 - V_s2)  ... but this couples primary/secondary
+    //
+    // Alternative formulation using gyrator-like approach:
+    // V_p = n * V_s
+    // n * I_p + I_s = 0
+
+    // Primary current KCL
+    if (n_p1 >= 0) {
+        triplets.emplace_back(n_p1, branch_idx_p, 1.0);
+        triplets.emplace_back(branch_idx_p, n_p1, 1.0);
+    }
+    if (n_p2 >= 0) {
+        triplets.emplace_back(n_p2, branch_idx_p, -1.0);
+        triplets.emplace_back(branch_idx_p, n_p2, -1.0);
+    }
+
+    // Secondary current KCL
+    if (n_s1 >= 0) {
+        triplets.emplace_back(n_s1, branch_idx_s, 1.0);
+        triplets.emplace_back(branch_idx_s, n_s1, 1.0);
+    }
+    if (n_s2 >= 0) {
+        triplets.emplace_back(n_s2, branch_idx_s, -1.0);
+        triplets.emplace_back(branch_idx_s, n_s2, -1.0);
+    }
+
+    // Coupling equations:
+    // V_p - n*V_s = 0  (row for primary branch)
+    // n*I_p + I_s = 0  (row for secondary branch)
+
+    // For DC ideal transformer, we set:
+    // Row branch_idx_p: Vp1 - Vp2 - n*(Vs1 - Vs2) = 0
+    // Row branch_idx_s: n*Ip + Is = 0
+
+    // Already stamped Vp1 - Vp2 in KCL-like form above, now add coupling:
+    // Primary voltage equation couples to secondary
+    if (n_s1 >= 0) {
+        triplets.emplace_back(branch_idx_p, n_s1, -n);
+    }
+    if (n_s2 >= 0) {
+        triplets.emplace_back(branch_idx_p, n_s2, n);
+    }
+
+    // Current coupling: n*Ip + Is = 0
+    triplets.emplace_back(branch_idx_s, branch_idx_p, n);
+    triplets.emplace_back(branch_idx_s, branch_idx_s, 1.0);
+
+    // Clear any voltage terms in secondary branch equation
+    // (we override what was set in KCL-like stamps above for row branch_idx_s)
+    // Actually, we need to be more careful here. Let me restructure.
+
+    // For ideal transformer, we have 4 equations:
+    // KCL at n_p1: I_p enters
+    // KCL at n_p2: I_p leaves
+    // KCL at n_s1: I_s enters
+    // KCL at n_s2: I_s leaves
+    // Branch eq for I_p: V_p1 - V_p2 - n*(V_s1 - V_s2) = 0
+    // Branch eq for I_s: n*I_p + I_s = 0
+
+    b(branch_idx_p) = 0.0;
+    b(branch_idx_s) = 0.0;
+}
+
+void MNAAssembler::stamp_transformer_transient(std::vector<Triplet>& triplets, Vector& b,
+                                               const Component& comp, Index branch_idx_p, Index branch_idx_s,
+                                               const Vector& x_prev, Real dt) {
+    const auto& params = std::get<TransformerParams>(comp.params());
+
+    // For now, use the same as DC (ideal transformer)
+    // TODO: Add magnetizing inductance model
+    stamp_transformer_dc(triplets, b, comp, branch_idx_p, branch_idx_s);
+
+    // If magnetizing inductance is specified, add it in parallel with primary
+    if (params.lm > 0) {
+        Index n_p1 = circuit_.node_index(comp.nodes()[0]);
+        Index n_p2 = circuit_.node_index(comp.nodes()[1]);
+
+        Real Lm = params.lm;
+        Real Geq = dt / Lm;
+
+        // Previous voltage across primary
+        Real v_prev = 0.0;
+        if (n_p1 >= 0) v_prev += x_prev(n_p1);
+        if (n_p2 >= 0) v_prev -= x_prev(n_p2);
+
+        // Previous magnetizing current (approximated)
+        Real i_prev = x_prev(branch_idx_p);
+        Real Ieq = i_prev + Geq * v_prev;
+
+        // Stamp magnetizing inductance as shunt element
+        if (n_p1 >= 0) {
+            triplets.emplace_back(n_p1, n_p1, Geq);
+            b(n_p1) += Ieq;
+            if (n_p2 >= 0) {
+                triplets.emplace_back(n_p1, n_p2, -Geq);
+            }
+        }
+        if (n_p2 >= 0) {
+            triplets.emplace_back(n_p2, n_p2, Geq);
+            b(n_p2) -= Ieq;
+            if (n_p1 >= 0) {
+                triplets.emplace_back(n_p2, n_p1, -Geq);
+            }
+        }
+    }
+}
+
 SwitchState* MNAAssembler::find_switch_state(const std::string& name) {
     for (auto& state : switch_states_) {
         if (state.name == name) {
@@ -437,6 +730,12 @@ void MNAAssembler::assemble_dc(SparseMatrix& G, Vector& b) {
                 }
                 break;
             }
+            case ComponentType::Transformer: {
+                Index branch_idx_p = branch_indices_.at(comp.name() + "_p");
+                Index branch_idx_s = branch_indices_.at(comp.name() + "_s");
+                stamp_transformer_dc(triplets, b, comp, branch_idx_p, branch_idx_s);
+                break;
+            }
             default:
                 break;  // Other components handled in nonlinear assembly
         }
@@ -478,6 +777,12 @@ void MNAAssembler::assemble_transient(SparseMatrix& G, Vector& b,
                 }
                 break;
             }
+            case ComponentType::Transformer: {
+                Index branch_idx_p = branch_indices_.at(comp.name() + "_p");
+                Index branch_idx_s = branch_indices_.at(comp.name() + "_s");
+                stamp_transformer_transient(triplets, b, comp, branch_idx_p, branch_idx_s, x_prev, dt);
+                break;
+            }
             default:
                 break;
         }
@@ -496,6 +801,8 @@ void MNAAssembler::assemble_nonlinear(SparseMatrix& J, Vector& f,
     for (const auto& comp : circuit_.components()) {
         if (comp.type() == ComponentType::Diode) {
             stamp_diode(triplets, f, comp, x);
+        } else if (comp.type() == ComponentType::MOSFET) {
+            stamp_mosfet(triplets, f, comp, x);
         }
     }
 

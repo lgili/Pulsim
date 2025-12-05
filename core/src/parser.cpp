@@ -274,6 +274,52 @@ ParseResult<Circuit> NetlistParser::parse_json(const std::string& content) {
                 params.initial_state = comp.value("initial_state", false);
                 circuit.add_switch(name, n1, n2, ctrl_pos, ctrl_neg, params);
             }
+            else if (type == "mosfet" || type == "nmos" || type == "pmos" || type == "M") {
+                std::string drain = get_node("drain");
+                std::string gate = get_node("gate");
+                std::string source = get_node("source");
+                if (drain.empty()) drain = get_node("d");
+                if (gate.empty()) gate = get_node("g");
+                if (source.empty()) source = get_node("s");
+                if (drain.empty() || gate.empty() || source.empty()) {
+                    return ParseError{"MOSFET " + name + " requires 'drain', 'gate', and 'source'"};
+                }
+                MOSFETParams params;
+                if (type == "pmos") {
+                    params.type = MOSFETType::PMOS;
+                } else {
+                    params.type = comp.value("pmos", false) ? MOSFETType::PMOS : MOSFETType::NMOS;
+                }
+                params.vth = comp.value("vth", 2.0);
+                params.kp = comp.value("kp", 20e-6);
+                params.lambda = comp.value("lambda", 0.0);
+                params.w = comp.value("w", 100e-6);
+                params.l = comp.value("l", 10e-6);
+                params.body_diode = comp.value("body_diode", false);
+                params.is_body = comp.value("is_body", 1e-14);
+                params.n_body = comp.value("n_body", 1.0);
+                params.cgs = comp.value("cgs", 0.0);
+                params.cgd = comp.value("cgd", 0.0);
+                params.cds = comp.value("cds", 0.0);
+                params.rds_on = comp.value("rds_on", 0.0);
+                params.rds_off = comp.value("rds_off", 1e9);
+                circuit.add_mosfet(name, drain, gate, source, params);
+            }
+            else if (type == "transformer" || type == "T") {
+                std::string p1 = get_node("p1");
+                std::string p2 = get_node("p2");
+                std::string s1 = get_node("s1");
+                std::string s2 = get_node("s2");
+                if (p1.empty() || p2.empty() || s1.empty() || s2.empty()) {
+                    return ParseError{"Transformer " + name + " requires 'p1', 'p2', 's1', 's2'"};
+                }
+                TransformerParams params;
+                params.turns_ratio = comp.value("turns_ratio", 1.0);
+                params.lm = comp.value("lm", 0.0);
+                params.ll1 = comp.value("ll1", 0.0);
+                params.ll2 = comp.value("ll2", 0.0);
+                circuit.add_transformer(name, p1, p2, s1, s2, params);
+            }
             else {
                 return ParseError{"Unknown component type: " + type};
             }

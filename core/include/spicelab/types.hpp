@@ -39,6 +39,7 @@ enum class ComponentType {
     Diode,
     Switch,
     MOSFET,
+    Transformer,
 };
 
 // Analysis types
