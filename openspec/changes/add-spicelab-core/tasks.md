@@ -217,16 +217,16 @@
 ## Phase 5: Maturation (Future)
 
 ### 5.1 Format Support
-- [ ] 5.1.1 Implement SPICE netlist parser (.cir/.sp,asc)
-- [ ] 5.1.2 Implement YAML netlist parser
-- [ ] 5.1.3 Implement subcircuit support (.subckt)
-- [ ] 5.1.4 Implement FMU export (Model Exchange)
-- [ ] 5.1.5 Implement FMU co-simulation support
+- [x] 5.1.1 Implement SPICE netlist parser (.cir/.sp,asc)
+- [x] 5.1.2 Implement YAML netlist parser
+- [x] 5.1.3 Implement subcircuit support (.subckt)
+- [x] 5.1.4 Implement FMU export (Model Exchange)
+- [x] 5.1.5 Implement FMU co-simulation support
 
 ### 5.2 Advanced Models
-- [ ] 5.2.1 Implement higher-level MOSFET models
-- [ ] 5.2.2 Implement magnetic core models (with saturation)
-- [ ] 5.2.3 Implement control blocks (PI, PID, comparator)
+- [x] 5.2.1 Implement higher-level MOSFET models
+- [x] 5.2.2 Implement magnetic core models (with saturation)
+- [x] 5.2.3 Implement control blocks (PI, PID, comparator)
 
 ### 5.3 Front-end (future scope)
 - [ ] 5.3.1 Create React web UI skeleton
