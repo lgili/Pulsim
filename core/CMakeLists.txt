@@ -35,6 +35,7 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_power_electronics.cpp
         tests/test_thermal.cpp
         tests/test_cli.cpp
+        tests/test_mvp2_validation.cpp
     )
 
     target_link_libraries(spicelab_tests

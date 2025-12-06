@@ -161,17 +161,17 @@
 - [x] 3.6.7 Add Python client tests
 
 ### 3.7 CLI Enhancements (cli)
-- [ ] 3.7.1 Add `serve` command for API server
-- [ ] 3.7.2 Add `sweep` command with parallel execution
-- [ ] 3.7.3 Add HDF5 and Parquet output support
-- [ ] 3.7.4 Add configuration file support
-- [ ] 3.7.5 Add `info` command for device documentation
+- [x] 3.7.1 Add `serve` command for API server
+- [x] 3.7.2 Add `sweep` command with parallel execution
+- [x] 3.7.3 Add HDF5 and Parquet output support
+- [x] 3.7.4 Add configuration file support
+- [x] 3.7.5 Add `info` command for device documentation
 
 ### 3.8 MVP-2 Validation
-- [ ] 3.8.1 Simulate full-bridge inverter
-- [ ] 3.8.2 Validate MOSFET switching waveforms against datasheet
-- [ ] 3.8.3 Validate thermal response with step power
-- [ ] 3.8.4 Verify efficiency calculation against manual computation
+- [x] 3.8.1 Simulate full-bridge inverter
+- [x] 3.8.2 Validate MOSFET switching waveforms against datasheet
+- [x] 3.8.3 Validate thermal response with step power
+- [x] 3.8.4 Verify efficiency calculation against manual computation
 
 ## Phase 4: MVP-3 - Performance and Scale
 
