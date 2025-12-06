@@ -209,6 +209,10 @@ class Circuit {
 public:
     Circuit() = default;
 
+    // Circuit name/title
+    const std::string& name() const { return name_; }
+    void set_name(const std::string& name) { name_ = name; }
+
     // Add components
     void add_resistor(const std::string& name, const NodeId& n1, const NodeId& n2, Real resistance);
     void add_capacitor(const std::string& name, const NodeId& n1, const NodeId& n2, Real capacitance, Real ic = 0.0);
@@ -254,6 +258,7 @@ private:
     void ensure_node(const NodeId& node);
     void add_component(Component component);
 
+    std::string name_;
     std::vector<Component> components_;
     std::unordered_map<NodeId, Index> node_map_;
     std::vector<NodeId> node_names_;  // Reverse mapping

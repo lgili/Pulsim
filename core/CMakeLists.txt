@@ -10,6 +10,13 @@ add_library(spicelab_core
     src/devices.cpp
     src/simulation.cpp
     src/thermal.cpp
+    src/parser/spice_parser.cpp
+    src/parser/yaml_parser.cpp
+    src/parser/subcircuit.cpp
+    src/fmu/fmu_export.cpp
+    src/models/mosfet_models.cpp
+    src/models/magnetic_core.cpp
+    src/models/control_blocks.cpp
 )
 
 target_include_directories(spicelab_core
