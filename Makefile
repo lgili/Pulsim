@@ -6,7 +6,9 @@
 #  make lib        # build library target only
 #  make cli        # build CLI executable
 #  make grpc       # build gRPC server
-#  make tests      # build and run tests
+#  make tests      # build and run C++ tests
+#  make pytest     # build Python module and run pytest
+#  make test-all   # run both C++ and Python tests
 #  make run RUN_BIN=build/cli/spicelab  # run a built binary
 #  make run-grpc   # run the gRPC server
 #  make clean      # remove build directory
@@ -23,7 +25,7 @@ CTEST ?= ctest
 RUN_BIN ?= $(BUILD_DIR)/cli/spicelab
 GRPC_BIN ?= $(BUILD_DIR)/api-grpc/spicelab_grpc_server
 
-.PHONY: all help configure build lib cli grpc tests run run-grpc clean distclean
+.PHONY: all help configure build lib cli grpc python tests pytest test-all run run-grpc clean distclean
 
 all: build
 
@@ -34,7 +36,10 @@ help:
 	@printf "  make lib              - build core library only\n"
 	@printf "  make cli              - build CLI executable\n"
 	@printf "  make grpc             - build gRPC server\n"
-	@printf "  make tests            - build and run tests (requires BUILD_TESTS=ON)\n"
+	@printf "  make python           - build Python module\n"
+	@printf "  make tests            - build and run C++ tests\n"
+	@printf "  make pytest           - build Python module and run pytest\n"
+	@printf "  make test-all         - run both C++ and Python tests\n"
 	@printf "  make run RUN_BIN=...  - run a built binary (default $(RUN_BIN))\n"
 	@printf "  make run-grpc         - run gRPC server (default $(GRPC_BIN))\n"
 	@printf "  make clean            - remove $(BUILD_DIR)\n"
@@ -61,6 +66,13 @@ grpc: configure
 	@echo "Building gRPC server target"
 	@$(CMAKE) --build $(BUILD_DIR) --target spicelab_grpc_server -- -j$(JOBS)
 
+python:
+	@echo "Building Python module"
+	@mkdir -p $(BUILD_DIR)
+	@$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DSPICELAB_BUILD_PYTHON=ON >/dev/null
+	@$(CMAKE) --build $(BUILD_DIR) --target _spicelab -- -j$(JOBS)
+	@cp -r python/tests $(BUILD_DIR)/python/ 2>/dev/null || true
+
 tests:
 	@echo "Running tests (convenience mode: forcing SPICELAB_BUILD_TESTS=ON and Debug build)"
 	@mkdir -p $(BUILD_DIR)
@@ -79,6 +91,13 @@ tests:
 		echo "You can also run 'ctest --test-dir $(BUILD_DIR)' to run all registered tests."; \
 		exit 2; \
 	fi
+
+pytest: python
+	@echo "Running Python tests with pytest"
+	@pytest $(BUILD_DIR)/python/tests/ -v
+
+test-all: tests pytest
+	@echo "All tests completed"
 
 run:
 	@echo "Running: $(RUN_BIN)"
