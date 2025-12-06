@@ -105,7 +105,7 @@
 - [x] 2.6.1 Simulate buck converter with ideal components
 - [x] 2.6.2 Verify switching waveforms
 - [x] 2.6.3 Verify loss calculations
-- [ ] 2.6.4 Create example Jupyter notebook
+- [x] 2.6.4 Create example Jupyter notebook
 
 ## Phase 3: MVP-2 - Full Features
 
