@@ -12,6 +12,7 @@ from ._spicelab import (
     PulseWaveform,
     SineWaveform,
     PWLWaveform,
+    PWMWaveform,
 
     # Component Parameters
     DiodeParams,
@@ -58,6 +59,7 @@ __all__ = [
     "PulseWaveform",
     "SineWaveform",
     "PWLWaveform",
+    "PWMWaveform",
 
     # Component Parameters
     "DiodeParams",
