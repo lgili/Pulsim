@@ -152,13 +152,13 @@
 - [x] 3.5.7 Add integration tests for API
 
 ### 3.6 Python gRPC Client (python-bindings)
-- [ ] 3.6.1 Generate Python gRPC stubs
-- [ ] 3.6.2 Implement Client class with connection management
-- [ ] 3.6.3 Implement streaming result handling
-- [ ] 3.6.4 Add DataFrame/xarray conversion
-- [ ] 3.6.5 Add async iterator interface
-- [ ] 3.6.6 Add Jupyter widgets for streaming plots
-- [ ] 3.6.7 Add Python client tests
+- [x] 3.6.1 Generate Python gRPC stubs
+- [x] 3.6.2 Implement Client class with connection management
+- [x] 3.6.3 Implement streaming result handling
+- [x] 3.6.4 Add DataFrame/xarray conversion
+- [x] 3.6.5 Add async iterator interface
+- [x] 3.6.6 Add Jupyter widgets for streaming plots
+- [x] 3.6.7 Add Python client tests
 
 ### 3.7 CLI Enhancements (cli)
 - [ ] 3.7.1 Add `serve` command for API server
