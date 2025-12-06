@@ -209,15 +209,15 @@
 - [x] 4.5.6 Create Kubernetes deployment manifests
 
 ### 4.6 Documentation
-- [ ] 4.6.1 Write user guide with examples
-- [ ] 4.6.2 Document netlist format and device models
-- [ ] 4.6.3 Create API reference (doxygen for C++, sphinx for Python)
-- [ ] 4.6.4 Create tutorial Jupyter notebooks
+- [x] 4.6.1 Write user guide with examples
+- [x] 4.6.2 Document netlist format and device models
+- [x] 4.6.3 Create API reference (doxygen for C++, sphinx for Python)
+- [x] 4.6.4 Create tutorial Jupyter notebooks
 
 ## Phase 5: Maturation (Future)
 
 ### 5.1 Format Support
-- [ ] 5.1.1 Implement SPICE netlist parser (.cir/.sp)
+- [ ] 5.1.1 Implement SPICE netlist parser (.cir/.sp,asc)
 - [ ] 5.1.2 Implement YAML netlist parser
 - [ ] 5.1.3 Implement subcircuit support (.subckt)
 - [ ] 5.1.4 Implement FMU export (Model Exchange)
