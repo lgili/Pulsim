@@ -111,6 +111,18 @@ ParseResult<Waveform> NetlistParser::parse_waveform(const json& j) {
         return Waveform{pwl};
     }
 
+    if (type == "pwm") {
+        PWMWaveform pwm;
+        pwm.v_off = j.value("v_off", 0.0);
+        pwm.v_on = j.value("v_on", 5.0);
+        pwm.frequency = j.value("frequency", 10e3);
+        pwm.duty = j.value("duty", 0.5);
+        pwm.dead_time = j.value("dead_time", 0.0);
+        pwm.phase = j.value("phase", 0.0);
+        pwm.complementary = j.value("complementary", false);
+        return Waveform{pwm};
+    }
+
     return ParseError{"Unknown waveform type: " + type};
 }
 

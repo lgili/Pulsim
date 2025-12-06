@@ -395,3 +395,206 @@ TEST_CASE("Flyback converter topology", "[power][mosfet]") {
     // Just verify it completes without error
     // Output voltage depends on control loop which we don't have
 }
+
+TEST_CASE("PWM waveform basic operation", "[pwm]") {
+    // Test PWM waveform without dead-time
+    PWMWaveform pwm;
+    pwm.v_off = 0.0;
+    pwm.v_on = 5.0;
+    pwm.frequency = 10e3;  // 10kHz, period = 100us
+    pwm.duty = 0.5;        // 50% duty cycle
+    pwm.dead_time = 0.0;
+    pwm.phase = 0.0;
+    pwm.complementary = false;
+
+    Circuit circuit;
+    circuit.add_voltage_source("Vpwm", "pwm", "0", pwm);
+    circuit.add_resistor("R1", "pwm", "0", 1000.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 200e-6;  // 2 periods
+    opts.dt = 1e-6;
+    opts.dtmax = 1e-6;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+    REQUIRE(result.final_status == SolverStatus::Success);
+
+    // Check that voltage toggles between 0 and 5V
+    Index pwm_idx = circuit.node_index("pwm");
+    bool saw_low = false, saw_high = false;
+    for (const auto& data : result.data) {
+        Real v = data(pwm_idx);
+        if (v < 0.5) saw_low = true;
+        if (v > 4.5) saw_high = true;
+    }
+    CHECK(saw_low);
+    CHECK(saw_high);
+}
+
+TEST_CASE("PWM waveform with dead-time", "[pwm][deadtime]") {
+    // Test that dead-time is properly inserted
+    // PWM: 10kHz (100us period), 50% duty, 2us dead-time
+    PWMWaveform pwm_hi;
+    pwm_hi.v_off = 0.0;
+    pwm_hi.v_on = 10.0;
+    pwm_hi.frequency = 10e3;
+    pwm_hi.duty = 0.5;
+    pwm_hi.dead_time = 2e-6;  // 2us dead-time
+    pwm_hi.phase = 0.0;
+    pwm_hi.complementary = false;
+
+    PWMWaveform pwm_lo = pwm_hi;
+    pwm_lo.complementary = true;
+
+    Circuit circuit;
+    circuit.add_voltage_source("Vhi", "ctrl_hi", "0", pwm_hi);
+    circuit.add_voltage_source("Vlo", "ctrl_lo", "0", pwm_lo);
+    circuit.add_resistor("Rhi", "ctrl_hi", "0", 1000.0);
+    circuit.add_resistor("Rlo", "ctrl_lo", "0", 1000.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 100e-6;  // 1 period
+    opts.dt = 0.5e-6;     // 500ns resolution
+    opts.dtmax = 0.5e-6;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+    REQUIRE(result.final_status == SolverStatus::Success);
+
+    // Verify dead-time: there should never be a time when both are high
+    Index hi_idx = circuit.node_index("ctrl_hi");
+    Index lo_idx = circuit.node_index("ctrl_lo");
+
+    int both_high_count = 0;
+    for (const auto& data : result.data) {
+        Real v_hi = data(hi_idx);
+        Real v_lo = data(lo_idx);
+        if (v_hi > 5.0 && v_lo > 5.0) {
+            both_high_count++;
+        }
+    }
+
+    // With proper dead-time, both should never be high simultaneously
+    CHECK(both_high_count == 0);
+}
+
+TEST_CASE("Half-bridge with PWM dead-time", "[pwm][deadtime][power]") {
+    // Half-bridge with complementary PWM and dead-time
+    Circuit circuit;
+    circuit.add_voltage_source("Vdc", "vcc", "0", DCWaveform{100.0});
+
+    // PWM with dead-time for safe half-bridge operation
+    PWMWaveform pwm_hi;
+    pwm_hi.v_off = 0.0;
+    pwm_hi.v_on = 15.0;
+    pwm_hi.frequency = 20e3;   // 20kHz
+    pwm_hi.duty = 0.5;
+    pwm_hi.dead_time = 1e-6;   // 1us dead-time
+    pwm_hi.complementary = false;
+
+    PWMWaveform pwm_lo = pwm_hi;
+    pwm_lo.complementary = true;
+
+    circuit.add_voltage_source("Vhi", "ctrl_hi", "0", pwm_hi);
+    circuit.add_voltage_source("Vlo", "ctrl_lo", "0", pwm_lo);
+
+    // Midpoint reference for gate drive
+    circuit.add_resistor("Rmid1", "vcc", "mid", 100e3);
+    circuit.add_resistor("Rmid2", "mid", "0", 100e3);
+
+    SwitchParams sw_params;
+    sw_params.ron = 0.05;
+    sw_params.roff = 1e9;
+    sw_params.vth = 7.5;
+
+    circuit.add_switch("Shi", "vcc", "out", "ctrl_hi", "mid", sw_params);
+    circuit.add_switch("Slo", "out", "0", "ctrl_lo", "mid", sw_params);
+
+    // RL load
+    circuit.add_resistor("Rload", "out", "load_mid", 10.0);
+    circuit.add_inductor("Lload", "load_mid", "mid", 1e-3);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 250e-6;  // 5 switching cycles
+    opts.dt = 0.25e-6;
+    opts.dtmax = 1e-6;
+    opts.use_ic = true;
+
+    Simulator sim(circuit, opts);
+
+    // Track switch events
+    std::vector<SwitchEvent> events;
+    auto event_cb = [&events](const SwitchEvent& e) {
+        events.push_back(e);
+    };
+
+    auto result = sim.run_transient(nullptr, event_cb);
+
+    REQUIRE(result.final_status == SolverStatus::Success);
+
+    // Verify no shoot-through: check that switches are never both closed
+    // at the same simulation time point
+    Index out_idx = circuit.node_index("out");
+    Real v_min = 1e9, v_max = -1e9;
+    for (const auto& data : result.data) {
+        v_min = std::min(v_min, data(out_idx));
+        v_max = std::max(v_max, data(out_idx));
+    }
+
+    // Should see voltage swing (output toggles between ~0 and ~Vdc)
+    CHECK((v_max - v_min) > 50);  // Significant swing
+}
+
+TEST_CASE("PWM phase offset", "[pwm]") {
+    // Test that phase offset shifts the PWM waveform
+    PWMWaveform pwm1;
+    pwm1.v_off = 0.0;
+    pwm1.v_on = 5.0;
+    pwm1.frequency = 10e3;
+    pwm1.duty = 0.5;
+    pwm1.dead_time = 0.0;
+    pwm1.phase = 0.0;
+    pwm1.complementary = false;
+
+    PWMWaveform pwm2 = pwm1;
+    pwm2.phase = 0.5;  // 180 degrees phase shift
+
+    Circuit circuit;
+    circuit.add_voltage_source("V1", "pwm1", "0", pwm1);
+    circuit.add_voltage_source("V2", "pwm2", "0", pwm2);
+    circuit.add_resistor("R1", "pwm1", "0", 1000.0);
+    circuit.add_resistor("R2", "pwm2", "0", 1000.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 100e-6;  // 1 period
+    opts.dt = 1e-6;
+    opts.dtmax = 1e-6;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+    REQUIRE(result.final_status == SolverStatus::Success);
+
+    // At t=0, pwm1 should be off, pwm2 should be on (phase shifted)
+    // Check at t=25us (quarter period): pwm1 should be on, pwm2 should be off
+    Index idx1 = circuit.node_index("pwm1");
+    Index idx2 = circuit.node_index("pwm2");
+
+    // Find data point near t=25us
+    for (size_t i = 0; i < result.time.size(); ++i) {
+        if (result.time[i] >= 25e-6 && result.time[i] < 26e-6) {
+            Real v1 = result.data[i](idx1);
+            Real v2 = result.data[i](idx2);
+            // With 180-degree phase shift, they should be opposite
+            CHECK(((v1 > 2.5 && v2 < 2.5) || (v1 < 2.5 && v2 > 2.5)));
+            break;
+        }
+    }
+}

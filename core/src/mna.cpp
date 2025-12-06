@@ -93,6 +93,58 @@ Real MNAAssembler::evaluate_waveform(const Waveform& waveform, Real time) {
             }
             return w.points.back().second;
         }
+        else if constexpr (std::is_same_v<T, PWMWaveform>) {
+            // PWM waveform with dead-time support
+            // Dead-time is inserted at both rising and falling edges
+            //
+            // For non-complementary (high-side) signal:
+            //   OFF during: [0, dead_time) and [t_on, t_on + dead_time)
+            //   ON during:  [dead_time, t_on)
+            //
+            // For complementary (low-side) signal:
+            //   The inverse, with same dead-time gaps
+            //
+            Real period = w.period();
+            Real t_on_raw = w.t_on();  // Raw on-time without dead-time adjustment
+            Real dt = w.dead_time;
+
+            // Apply phase offset
+            Real t = std::fmod(time + w.phase * period, period);
+            if (t < 0) t += period;
+
+            // Effective on/off times considering dead-time
+            // Non-complementary (high-side):
+            //   - Starts at dt (after dead-time)
+            //   - Ends at t_on_raw - dt (before dead-time for falling edge)
+            // Complementary (low-side):
+            //   - Starts at t_on_raw + dt
+            //   - Ends at period - dt
+
+            bool is_on = false;
+
+            if (!w.complementary) {
+                // High-side: ON from dt to (t_on_raw - dt)
+                // But we need t_on_raw > 2*dt for any on-time
+                Real t_start = dt;
+                Real t_end = t_on_raw;
+                // Effective on-time reduced by dead-time at rising edge only
+                // (dead-time at falling edge is handled by delaying complementary turn-on)
+                if (t >= t_start && t < t_end) {
+                    is_on = true;
+                }
+            } else {
+                // Low-side (complementary): ON from (t_on_raw + dt) to (period - dt)
+                // Dead-time after high-side turns off, and before high-side turns on
+                Real t_start = t_on_raw + dt;
+                Real t_end = period;
+                // Only on if there's room for the low-side pulse
+                if (t >= t_start && t < t_end) {
+                    is_on = true;
+                }
+            }
+
+            return is_on ? w.v_on : w.v_off;
+        }
         else {
             return 0.0;
         }

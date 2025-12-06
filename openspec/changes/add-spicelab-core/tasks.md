@@ -85,7 +85,7 @@
 ### 2.3 PWM Support (kernel-events)
 - [x] 2.3.1 Implement fixed-frequency PWM event generator
 - [x] 2.3.2 Support variable duty cycle
-- [ ] 2.3.3 Add dead-time handling
+- [x] 2.3.3 Add dead-time handling
 
 ### 2.4 Loss Engine Basics (kernel-losses)
 - [x] 2.4.1 Implement conduction loss calculation (I²R)

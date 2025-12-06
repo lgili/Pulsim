@@ -1,0 +1,103 @@
+{
+    "name": "Half-Bridge Inverter with PWM Dead-Time",
+    "description": "Half-bridge inverter using complementary PWM with 1µs dead-time to prevent shoot-through",
+    "components": [
+        {
+            "type": "voltage_source",
+            "name": "Vdc",
+            "npos": "vcc",
+            "nneg": "0",
+            "waveform": {"type": "dc", "value": 100.0}
+        },
+        {
+            "type": "voltage_source",
+            "name": "Vpwm_hi",
+            "npos": "ctrl_hi",
+            "nneg": "0",
+            "waveform": {
+                "type": "pwm",
+                "v_off": 0.0,
+                "v_on": 15.0,
+                "frequency": 20000,
+                "duty": 0.5,
+                "dead_time": 1e-6,
+                "phase": 0.0,
+                "complementary": false
+            }
+        },
+        {
+            "type": "voltage_source",
+            "name": "Vpwm_lo",
+            "npos": "ctrl_lo",
+            "nneg": "0",
+            "waveform": {
+                "type": "pwm",
+                "v_off": 0.0,
+                "v_on": 15.0,
+                "frequency": 20000,
+                "duty": 0.5,
+                "dead_time": 1e-6,
+                "phase": 0.0,
+                "complementary": true
+            }
+        },
+        {
+            "type": "resistor",
+            "name": "Rmid1",
+            "n1": "vcc",
+            "n2": "mid",
+            "value": "100k"
+        },
+        {
+            "type": "resistor",
+            "name": "Rmid2",
+            "n1": "mid",
+            "n2": "0",
+            "value": "100k"
+        },
+        {
+            "type": "switch",
+            "name": "S_hi",
+            "n1": "vcc",
+            "n2": "out",
+            "ctrl_pos": "ctrl_hi",
+            "ctrl_neg": "mid",
+            "ron": 0.05,
+            "roff": 1e9,
+            "vth": 7.5
+        },
+        {
+            "type": "switch",
+            "name": "S_lo",
+            "n1": "out",
+            "n2": "0",
+            "ctrl_pos": "ctrl_lo",
+            "ctrl_neg": "mid",
+            "ron": 0.05,
+            "roff": 1e9,
+            "vth": 7.5
+        },
+        {
+            "type": "resistor",
+            "name": "Rload",
+            "n1": "out",
+            "n2": "load_mid",
+            "value": 10.0
+        },
+        {
+            "type": "inductor",
+            "name": "Lload",
+            "n1": "load_mid",
+            "n2": "mid",
+            "value": "1m"
+        }
+    ],
+    "simulation": {
+        "type": "transient",
+        "tstart": 0.0,
+        "tstop": 500e-6,
+        "dt": 0.25e-6,
+        "dtmax": 1e-6,
+        "uic": true
+    }
+}
