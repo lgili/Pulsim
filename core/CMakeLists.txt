@@ -3,6 +3,7 @@ add_library(spicelab_core
     src/circuit.cpp
     src/mna.cpp
     src/solver.cpp
+    src/advanced_solver.cpp
     src/devices.cpp
     src/simulation.cpp
     src/thermal.cpp
@@ -20,6 +21,25 @@ target_link_libraries(spicelab_core
         nlohmann_json::nlohmann_json
 )
 
+# Optional SUNDIALS support
+if(SPICELAB_USE_SUNDIALS)
+    if(TARGET SUNDIALS::ida)
+        target_link_libraries(spicelab_core PUBLIC SUNDIALS::ida SUNDIALS::arkode)
+    elseif(TARGET sundials_ida_static)
+        target_link_libraries(spicelab_core PUBLIC sundials_ida_static sundials_arkode_static)
+    endif()
+endif()
+
+# Optional SuiteSparse KLU support
+if(SPICELAB_USE_SUITESPARSE)
+    if(TARGET SuiteSparse::KLU)
+        target_link_libraries(spicelab_core PUBLIC SuiteSparse::KLU)
+    elseif(KLU_FOUND)
+        target_include_directories(spicelab_core PUBLIC ${KLU_INCLUDE_DIRS})
+        target_link_libraries(spicelab_core PUBLIC ${KLU_LIBRARIES})
+    endif()
+endif()
+
 # Alias for cleaner usage
 add_library(spicelab::core ALIAS spicelab_core)
 
@@ -36,6 +56,7 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_thermal.cpp
         tests/test_cli.cpp
         tests/test_mvp2_validation.cpp
+        tests/test_advanced_solver.cpp
     )
 
     target_link_libraries(spicelab_tests
