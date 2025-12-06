@@ -1,0 +1,80 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "spicelab"
+version = "0.1.0"
+description = "High-performance circuit simulator for power electronics"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "SpiceLab Authors", email = "spicelab@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+keywords = ["circuit", "simulation", "spice", "power electronics", "eda"]
+dependencies = [
+    "numpy>=1.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+docs = [
+    "sphinx>=6.0",
+    "sphinx-rtd-theme>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/spicelab/spicelab-core"
+Documentation = "https://spicelab.readthedocs.io"
+Repository = "https://github.com/spicelab/spicelab-core"
+Issues = "https://github.com/spicelab/spicelab-core/issues"
+
+[tool.scikit-build]
+cmake.args = [
+    "-DSPICELAB_BUILD_TESTS=OFF",
+    "-DSPICELAB_BUILD_CLI=OFF",
+    "-DSPICELAB_BUILD_PYTHON=ON",
+    "-DSPICELAB_BUILD_GRPC=OFF",
+]
+wheel.packages = ["python/spicelab"]
+wheel.install-dir = "spicelab"
+
+[tool.scikit-build.cmake.define]
+CMAKE_BUILD_TYPE = "Release"
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["spicelab"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+]

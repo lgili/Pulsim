@@ -98,8 +98,8 @@
 - [x] 2.5.2 Create Python module `spicelab`
 - [x] 2.5.3 Expose `simulate()` function
 - [x] 2.5.4 Return results as numpy arrays
-- [ ] 2.5.5 Add Python tests with pytest
-- [ ] 2.5.6 Create pip-installable package
+- [x] 2.5.5 Add Python tests with pytest
+- [x] 2.5.6 Create pip-installable package
 
 ### 2.6 MVP-1 Validation
 - [x] 2.6.1 Simulate buck converter with ideal components

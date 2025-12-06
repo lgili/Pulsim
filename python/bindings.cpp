@@ -73,6 +73,18 @@ PYBIND11_MODULE(_spicelab, m) {
         .def(py::init<>())
         .def_readwrite("points", &PWLWaveform::points);
 
+    py::class_<PWMWaveform>(m, "PWMWaveform")
+        .def(py::init<>())
+        .def_readwrite("v_off", &PWMWaveform::v_off)
+        .def_readwrite("v_on", &PWMWaveform::v_on)
+        .def_readwrite("frequency", &PWMWaveform::frequency)
+        .def_readwrite("duty", &PWMWaveform::duty)
+        .def_readwrite("dead_time", &PWMWaveform::dead_time)
+        .def_readwrite("phase", &PWMWaveform::phase)
+        .def_readwrite("complementary", &PWMWaveform::complementary)
+        .def("period", &PWMWaveform::period)
+        .def("t_on", &PWMWaveform::t_on);
+
     // --- Component Parameters ---
     py::class_<DiodeParams>(m, "DiodeParams")
         .def(py::init<>())
