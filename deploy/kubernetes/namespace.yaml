@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spicelab
+  labels:
+    app.kubernetes.io/name: spicelab
+    app.kubernetes.io/part-of: spicelab
