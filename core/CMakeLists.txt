@@ -6,6 +6,7 @@ add_library(spicelab_core
     src/advanced_solver.cpp
     src/convergence_aids.cpp
     src/ac_analysis.cpp
+    src/parallel.cpp
     src/devices.cpp
     src/simulation.cpp
     src/thermal.cpp
@@ -61,6 +62,7 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_advanced_solver.cpp
         tests/test_convergence_aids.cpp
         tests/test_ac_analysis.cpp
+        tests/test_parallel.cpp
     )
 
     target_link_libraries(spicelab_tests
