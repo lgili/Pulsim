@@ -11,6 +11,8 @@ option(SPICELAB_BUILD_TESTS "Build tests" ON)
 option(SPICELAB_BUILD_CLI "Build CLI application" ON)
 option(SPICELAB_BUILD_PYTHON "Build Python bindings" OFF)
 option(SPICELAB_BUILD_GRPC "Build gRPC API server" OFF)
+option(SPICELAB_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
+option(SPICELAB_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
 
 # Prevent Eigen from enabling its own test targets when pulled via FetchContent.
 # We want to build the project's tests but avoid running large third-party test
@@ -90,8 +92,67 @@ if(SPICELAB_BUILD_TESTS)
     include(Catch)
 endif()
 
+# SUNDIALS - Advanced ODE/DAE solvers (IDA, CVODE, ARKODE)
+if(SPICELAB_USE_SUNDIALS)
+    # First try to find system-installed SUNDIALS
+    find_package(SUNDIALS CONFIG QUIET)
+    if(NOT SUNDIALS_FOUND)
+        message(STATUS "SUNDIALS not found on system, fetching from source...")
+        FetchContent_Declare(
+            sundials
+            GIT_REPOSITORY https://github.com/LLNL/sundials.git
+            GIT_TAG v6.7.0
+            GIT_SHALLOW TRUE
+        )
+        # Configure SUNDIALS build options
+        set(SUNDIALS_BUILD_SHARED_LIBS OFF CACHE BOOL "Build static SUNDIALS" FORCE)
+        set(BUILD_ARKODE ON CACHE BOOL "Enable ARKODE" FORCE)
+        set(BUILD_CVODE OFF CACHE BOOL "Disable CVODE" FORCE)
+        set(BUILD_CVODES OFF CACHE BOOL "Disable CVODES" FORCE)
+        set(BUILD_IDA ON CACHE BOOL "Enable IDA" FORCE)
+        set(BUILD_IDAS OFF CACHE BOOL "Disable IDAS" FORCE)
+        set(BUILD_KINSOL OFF CACHE BOOL "Disable KINSOL" FORCE)
+        set(SUNDIALS_BUILD_WITH_MONITORING OFF CACHE BOOL "Disable monitoring" FORCE)
+        set(EXAMPLES_ENABLE_C OFF CACHE BOOL "Disable C examples" FORCE)
+        set(EXAMPLES_ENABLE_CXX OFF CACHE BOOL "Disable C++ examples" FORCE)
+        set(EXAMPLES_INSTALL OFF CACHE BOOL "Don't install examples" FORCE)
+        FetchContent_MakeAvailable(sundials)
+    endif()
+    add_compile_definitions(SPICELAB_HAS_SUNDIALS)
+    message(STATUS "SUNDIALS support enabled")
+endif()
+
+# SuiteSparse KLU - Fast sparse LU for circuit matrices
+if(SPICELAB_USE_SUITESPARSE)
+    # Try to find system-installed SuiteSparse
+    find_package(SuiteSparse CONFIG QUIET)
+    if(SuiteSparse_FOUND)
+        message(STATUS "Found system SuiteSparse")
+        add_compile_definitions(SPICELAB_HAS_KLU)
+    else()
+        # Try pkg-config
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(KLU QUIET klu)
+            if(KLU_FOUND)
+                message(STATUS "Found KLU via pkg-config")
+                add_compile_definitions(SPICELAB_HAS_KLU)
+            else()
+                message(WARNING "SuiteSparse/KLU not found. Install with: brew install suite-sparse (macOS) or apt install libsuitesparse-dev (Linux)")
+            endif()
+        else()
+            message(WARNING "SuiteSparse/KLU not found and pkg-config not available")
+        endif()
+    endif()
+endif()
+
 # Core library
 add_subdirectory(core)
+
+# gRPC API server (must come before CLI to provide grpc_proto target)
+if(SPICELAB_BUILD_GRPC)
+    add_subdirectory(api-grpc)
+endif()
 
 # CLI application
 if(SPICELAB_BUILD_CLI)
@@ -109,11 +170,6 @@ endif()
 # Python bindings
 if(SPICELAB_BUILD_PYTHON)
     add_subdirectory(python)
-endif()
-
-# gRPC API server
-if(SPICELAB_BUILD_GRPC)
-    add_subdirectory(api-grpc)
 endif()
 
 # Custom targets for running examples (only when CLI is built)

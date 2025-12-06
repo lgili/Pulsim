@@ -64,6 +64,14 @@ struct TimePoint {
     Vector state;  // Node voltages and branch currents
 };
 
+// Integration methods for transient analysis
+enum class IntegrationMethod {
+    BackwardEuler,    // First-order implicit (default), O(dt)
+    Trapezoidal,      // Second-order implicit, O(dt^2)
+    BDF2,             // Second-order BDF, O(dt^2), more stable than Trap
+    GEAR2,            // Alias for Trapezoidal
+};
+
 // Simulation options
 struct SimulationOptions {
     // Time parameters
@@ -81,6 +89,14 @@ struct SimulationOptions {
 
     // Initial conditions
     bool use_ic = false;  // If true, skip DC operating point
+
+    // Integration method
+    IntegrationMethod integration_method = IntegrationMethod::BackwardEuler;
+
+    // Adaptive timestep control
+    bool adaptive_timestep = false;  // Enable error-based adaptive stepping
+    Real lte_rtol = 1e-3;            // Local truncation error relative tolerance
+    Real lte_atol = 1e-9;            // Local truncation error absolute tolerance
 
     // Output options
     std::vector<std::string> output_signals;

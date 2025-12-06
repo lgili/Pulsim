@@ -269,6 +269,192 @@ void MNAAssembler::stamp_inductor_transient(std::vector<Triplet>& triplets, Vect
     b(branch_idx) = Veq;
 }
 
+// =============================================================================
+// Trapezoidal (GEAR-2) Integration Companion Models
+// =============================================================================
+
+void MNAAssembler::stamp_capacitor_trapezoidal(std::vector<Triplet>& triplets, Vector& b,
+                                                const Component& comp,
+                                                const DynamicHistory& history, Real dt) {
+    const auto& params = std::get<CapacitorParams>(comp.params());
+    Real C = params.capacitance;
+
+    Index n1 = circuit_.node_index(comp.nodes()[0]);
+    Index n2 = circuit_.node_index(comp.nodes()[1]);
+
+    // Trapezoidal companion model:
+    // i = C * dv/dt ≈ C * (v_n - v_{n-1}) / dt
+    // With trapezoidal: i_n = (2C/dt) * v_n - (2C/dt) * v_{n-1} - i_{n-1}
+    // Equivalent conductance: Geq = 2C/dt
+    // Equivalent current source: Ieq = (2C/dt) * v_{n-1} + i_{n-1}
+    //
+    // For simplicity, we estimate i_{n-1} from v_{n-1} and v_{n-2}:
+    // i_{n-1} ≈ C * (v_{n-1} - v_{n-2}) / dt_prev
+    Real Geq = 2.0 * C / dt;
+
+    // Previous voltage
+    Real v_prev = 0.0;
+    if (n1 >= 0) v_prev += history.x_prev(n1);
+    if (n2 >= 0) v_prev -= history.x_prev(n2);
+
+    Real i_prev = 0.0;
+    if (history.has_prev2 && history.dt_prev > 0) {
+        // Calculate previous current from voltage derivative
+        Real v_prev2 = 0.0;
+        if (n1 >= 0) v_prev2 += history.x_prev2(n1);
+        if (n2 >= 0) v_prev2 -= history.x_prev2(n2);
+        i_prev = C * (v_prev - v_prev2) / history.dt_prev;
+    }
+
+    Real Ieq = Geq * v_prev + i_prev;
+
+    // Stamp conductance
+    if (n1 >= 0) {
+        triplets.emplace_back(n1, n1, Geq);
+        b(n1) += Ieq;
+        if (n2 >= 0) {
+            triplets.emplace_back(n1, n2, -Geq);
+        }
+    }
+    if (n2 >= 0) {
+        triplets.emplace_back(n2, n2, Geq);
+        b(n2) -= Ieq;
+        if (n1 >= 0) {
+            triplets.emplace_back(n2, n1, -Geq);
+        }
+    }
+}
+
+void MNAAssembler::stamp_capacitor_bdf2(std::vector<Triplet>& triplets, Vector& b,
+                                         const Component& comp,
+                                         const DynamicHistory& history, Real dt) {
+    const auto& params = std::get<CapacitorParams>(comp.params());
+    Real C = params.capacitance;
+
+    Index n1 = circuit_.node_index(comp.nodes()[0]);
+    Index n2 = circuit_.node_index(comp.nodes()[1]);
+
+    // BDF2 companion model:
+    // For constant step: i_n = (3C)/(2dt) * v_n - (4C)/(2dt) * v_{n-1} + (C)/(2dt) * v_{n-2}
+    // Equivalent conductance: Geq = 3C/(2dt)
+    // Equivalent current: Ieq = (4C)/(2dt) * v_{n-1} - (C)/(2dt) * v_{n-2}
+
+    Real Geq, Ieq;
+
+    Real v_prev = 0.0;
+    if (n1 >= 0) v_prev += history.x_prev(n1);
+    if (n2 >= 0) v_prev -= history.x_prev(n2);
+
+    if (history.has_prev2) {
+        Real v_prev2 = 0.0;
+        if (n1 >= 0) v_prev2 += history.x_prev2(n1);
+        if (n2 >= 0) v_prev2 -= history.x_prev2(n2);
+
+        // BDF2 coefficients (constant step)
+        Geq = 1.5 * C / dt;
+        Ieq = (2.0 * C / dt) * v_prev - (0.5 * C / dt) * v_prev2;
+    } else {
+        // Fall back to Backward Euler for first step
+        Geq = C / dt;
+        Ieq = Geq * v_prev;
+    }
+
+    // Stamp conductance
+    if (n1 >= 0) {
+        triplets.emplace_back(n1, n1, Geq);
+        b(n1) += Ieq;
+        if (n2 >= 0) {
+            triplets.emplace_back(n1, n2, -Geq);
+        }
+    }
+    if (n2 >= 0) {
+        triplets.emplace_back(n2, n2, Geq);
+        b(n2) -= Ieq;
+        if (n1 >= 0) {
+            triplets.emplace_back(n2, n1, -Geq);
+        }
+    }
+}
+
+void MNAAssembler::stamp_inductor_trapezoidal(std::vector<Triplet>& triplets, Vector& b,
+                                               const Component& comp, Index branch_idx,
+                                               const DynamicHistory& history, Real dt) {
+    const auto& params = std::get<InductorParams>(comp.params());
+    Real L = params.inductance;
+
+    Index n1 = circuit_.node_index(comp.nodes()[0]);
+    Index n2 = circuit_.node_index(comp.nodes()[1]);
+
+    // Trapezoidal companion model for inductor:
+    // v = L * di/dt
+    // With trapezoidal: v_n = (2L/dt) * i_n - (2L/dt) * i_{n-1} - v_{n-1}
+    // Rearranging for MNA: V(n1) - V(n2) = Req * I + Veq
+    // where Req = 2L/dt, Veq = -(2L/dt) * i_{n-1} - v_{n-1}
+
+    Real Req = 2.0 * L / dt;
+    Real i_prev = history.x_prev(branch_idx);
+
+    // Previous voltage across inductor
+    Real v_prev = 0.0;
+    if (n1 >= 0) v_prev += history.x_prev(n1);
+    if (n2 >= 0) v_prev -= history.x_prev(n2);
+
+    Real Veq = -Req * i_prev - v_prev;
+
+    // KCL stamps (current variable)
+    if (n1 >= 0) {
+        triplets.emplace_back(n1, branch_idx, 1.0);
+        triplets.emplace_back(branch_idx, n1, 1.0);
+    }
+    if (n2 >= 0) {
+        triplets.emplace_back(n2, branch_idx, -1.0);
+        triplets.emplace_back(branch_idx, n2, -1.0);
+    }
+
+    // V(n1) - V(n2) = Req * I + Veq
+    triplets.emplace_back(branch_idx, branch_idx, -Req);
+    b(branch_idx) = Veq;
+}
+
+void MNAAssembler::stamp_inductor_bdf2(std::vector<Triplet>& triplets, Vector& b,
+                                        const Component& comp, Index branch_idx,
+                                        const DynamicHistory& history, Real dt) {
+    const auto& params = std::get<InductorParams>(comp.params());
+    Real L = params.inductance;
+
+    Index n1 = circuit_.node_index(comp.nodes()[0]);
+    Index n2 = circuit_.node_index(comp.nodes()[1]);
+
+    Real Req, Veq;
+    Real i_prev = history.x_prev(branch_idx);
+
+    if (history.has_prev2) {
+        // BDF2 coefficients (constant step)
+        // i_n = (4/3) * i_{n-1} - (1/3) * i_{n-2} + (2/3) * (dt/L) * v_n
+        // Rearranging: v_n = (3L)/(2dt) * i_n - (4L)/(2dt) * i_{n-1} + (L)/(2dt) * i_{n-2}
+        Real i_prev2 = history.x_prev2(branch_idx);
+        Req = 1.5 * L / dt;
+        Veq = -(2.0 * L / dt) * i_prev + (0.5 * L / dt) * i_prev2;
+    } else {
+        // Fall back to Backward Euler for first step
+        Req = L / dt;
+        Veq = -Req * i_prev;
+    }
+
+    // KCL stamps (current variable)
+    if (n1 >= 0) {
+        triplets.emplace_back(n1, branch_idx, 1.0);
+        triplets.emplace_back(branch_idx, n1, 1.0);
+    }
+    if (n2 >= 0) {
+        triplets.emplace_back(n2, branch_idx, -1.0);
+        triplets.emplace_back(branch_idx, n2, -1.0);
+    }
+
+    triplets.emplace_back(branch_idx, branch_idx, -Req);
+    b(branch_idx) = Veq;
+}
+
 void MNAAssembler::stamp_voltage_source(std::vector<Triplet>& triplets, Vector& b,
                                         const Component& comp, Index branch_idx, Real time) {
     const auto& params = std::get<VoltageSourceParams>(comp.params());
@@ -1151,6 +1337,85 @@ void MNAAssembler::assemble_transient(SparseMatrix& G, Vector& b,
             case ComponentType::MOSFET:
                 // Stamp MOSFET parasitic capacitances (Cgs, Cgd, Cds)
                 stamp_mosfet_capacitances(triplets, b, comp, x_prev, dt);
+                break;
+            default:
+                break;
+        }
+    }
+
+    G.resize(n, n);
+    G.setFromTriplets(triplets.begin(), triplets.end());
+}
+
+void MNAAssembler::assemble_transient(SparseMatrix& G, Vector& b,
+                                      const DynamicHistory& history, Real dt,
+                                      IntegrationMethod method) {
+    Index n = variable_count();
+    std::vector<Triplet> triplets;
+    b = Vector::Zero(n);
+
+    for (const auto& comp : circuit_.components()) {
+        switch (comp.type()) {
+            case ComponentType::Resistor:
+                stamp_resistor(triplets, b, comp);
+                break;
+            case ComponentType::Capacitor:
+                switch (method) {
+                    case IntegrationMethod::Trapezoidal:
+                    case IntegrationMethod::GEAR2:
+                        stamp_capacitor_trapezoidal(triplets, b, comp, history, dt);
+                        break;
+                    case IntegrationMethod::BDF2:
+                        stamp_capacitor_bdf2(triplets, b, comp, history, dt);
+                        break;
+                    case IntegrationMethod::BackwardEuler:
+                    default:
+                        stamp_capacitor_transient(triplets, b, comp, history.x_prev, dt);
+                        break;
+                }
+                break;
+            case ComponentType::Inductor:
+                switch (method) {
+                    case IntegrationMethod::Trapezoidal:
+                    case IntegrationMethod::GEAR2:
+                        stamp_inductor_trapezoidal(triplets, b, comp,
+                                                   branch_indices_.at(comp.name()), history, dt);
+                        break;
+                    case IntegrationMethod::BDF2:
+                        stamp_inductor_bdf2(triplets, b, comp,
+                                            branch_indices_.at(comp.name()), history, dt);
+                        break;
+                    case IntegrationMethod::BackwardEuler:
+                    default:
+                        stamp_inductor_transient(triplets, b, comp,
+                                                branch_indices_.at(comp.name()), history.x_prev, dt);
+                        break;
+                }
+                break;
+            case ComponentType::VoltageSource:
+                stamp_voltage_source(triplets, b, comp, branch_indices_.at(comp.name()), 0.0);
+                break;
+            case ComponentType::CurrentSource:
+                stamp_current_source(b, comp, 0.0);
+                break;
+            case ComponentType::Switch: {
+                const SwitchState* state = find_switch_state(comp.name());
+                if (state) {
+                    stamp_switch(triplets, b, comp, *state);
+                }
+                break;
+            }
+            case ComponentType::Transformer: {
+                Index branch_idx_p = branch_indices_.at(comp.name() + "_p");
+                Index branch_idx_s = branch_indices_.at(comp.name() + "_s");
+                stamp_transformer_transient(triplets, b, comp, branch_idx_p, branch_idx_s, history.x_prev, dt);
+                break;
+            }
+            case ComponentType::Diode:
+                stamp_diode_capacitance(triplets, b, comp, history.x_prev, history.x_prev, dt);
+                break;
+            case ComponentType::MOSFET:
+                stamp_mosfet_capacitances(triplets, b, comp, history.x_prev, dt);
                 break;
             default:
                 break;

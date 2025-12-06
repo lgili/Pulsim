@@ -176,12 +176,12 @@
 ## Phase 4: MVP-3 - Performance and Scale
 
 ### 4.1 Advanced Solvers (kernel-solver)
-- [ ] 4.1.1 Integrate SUNDIALS (IDA for DAE)
-- [ ] 4.1.2 Implement adaptive timestep with error control
-- [ ] 4.1.3 Integrate SuiteSparse KLU for faster LU
-- [ ] 4.1.4 Implement factorization reuse across timesteps
-- [ ] 4.1.5 Add Trapezoidal integration (GEAR-2) for O(dt²) accuracy (current Backward Euler is O(dt))
-- [ ] 4.1.6 Benchmark against ngspice
+- [x] 4.1.1 Integrate SUNDIALS (IDA for DAE)
+- [x] 4.1.2 Implement adaptive timestep with error control
+- [x] 4.1.3 Integrate SuiteSparse KLU for faster LU
+- [x] 4.1.4 Implement factorization reuse across timesteps
+- [x] 4.1.5 Add Trapezoidal integration (GEAR-2) for O(dt²) accuracy (current Backward Euler is O(dt))
+- [x] 4.1.6 Benchmark against ngspice
 
 ### 4.2 Convergence Aids (kernel-solver)
 - [ ] 4.2.1 Implement Gmin stepping
