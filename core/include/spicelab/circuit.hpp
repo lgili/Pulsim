@@ -37,7 +37,22 @@ struct PWLWaveform {
     std::vector<std::pair<Real, Real>> points;  // (time, value) pairs
 };
 
-using Waveform = std::variant<DCWaveform, PulseWaveform, SineWaveform, PWLWaveform>;
+// PWM waveform with dead-time support for power electronics
+struct PWMWaveform {
+    Real v_off = 0.0;       // Off-state voltage (typically 0V)
+    Real v_on = 5.0;        // On-state voltage (gate drive voltage)
+    Real frequency = 10e3;  // Switching frequency (Hz)
+    Real duty = 0.5;        // Duty cycle (0.0 to 1.0)
+    Real dead_time = 0.0;   // Dead-time in seconds (inserted at both edges)
+    Real phase = 0.0;       // Phase offset (0.0 to 1.0, fraction of period)
+    bool complementary = false;  // If true, output is inverted (for low-side drive)
+
+    // Derived values
+    Real period() const { return 1.0 / frequency; }
+    Real t_on() const { return period() * duty; }  // On-time before dead-time adjustment
+};
+
+using Waveform = std::variant<DCWaveform, PulseWaveform, SineWaveform, PWLWaveform, PWMWaveform>;
 
 // Component parameters
 struct ResistorParams {
