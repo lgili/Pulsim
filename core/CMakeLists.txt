@@ -4,6 +4,8 @@ add_library(spicelab_core
     src/mna.cpp
     src/solver.cpp
     src/advanced_solver.cpp
+    src/convergence_aids.cpp
+    src/ac_analysis.cpp
     src/devices.cpp
     src/simulation.cpp
     src/thermal.cpp
@@ -57,6 +59,8 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_cli.cpp
         tests/test_mvp2_validation.cpp
         tests/test_advanced_solver.cpp
+        tests/test_convergence_aids.cpp
+        tests/test_ac_analysis.cpp
     )
 
     target_link_libraries(spicelab_tests
