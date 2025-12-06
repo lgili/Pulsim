@@ -1,149 +1,154 @@
 ## Phase 0: Project Setup
 
-- [ ] 0.1 Initialize CMake project structure with C++20 configuration
-- [ ] 0.2 Configure Conan or vcpkg for dependency management
-- [ ] 0.3 Add Eigen, nlohmann/json as initial dependencies
-- [ ] 0.4 Set up clang-format and clang-tidy configuration
-- [ ] 0.5 Configure CI pipeline (GitHub Actions) for Linux/macOS/Windows
-- [ ] 0.6 Create basic README with build instructions
+- [x] 0.1 Initialize CMake project structure with C++20 configuration
+- [x] 0.2 Configure Conan or vcpkg for dependency management
+- [x] 0.3 Add Eigen, nlohmann/json as initial dependencies
+- [x] 0.4 Set up clang-format and clang-tidy configuration
+- [x] 0.5 Configure CI pipeline (GitHub Actions) for Linux/macOS/Windows
+- [x] 0.6 Create basic README with build instructions
 
 ## Phase 1: MVP-0 - Minimal Kernel
 
 ### 1.1 Parser (kernel-parser)
-- [ ] 1.1.1 Define JSON netlist schema
-- [ ] 1.1.2 Implement JSON parser with nlohmann/json
-- [ ] 1.1.3 Create IR (Internal Representation) data structures
-- [ ] 1.1.4 Implement node name to index mapping
-- [ ] 1.1.5 Add validation for component parameters
-- [ ] 1.1.6 Add unit tests for parser
+- [x] 1.1.1 Define JSON netlist schema
+- [x] 1.1.2 Implement JSON parser with nlohmann/json
+- [x] 1.1.3 Create IR (Internal Representation) data structures
+- [x] 1.1.4 Implement node name to index mapping
+- [x] 1.1.5 Add validation for component parameters
+- [x] 1.1.6 Add unit tests for parser
 
 ### 1.2 MNA Assembly (kernel-mna)
-- [ ] 1.2.1 Implement sparse matrix class (CSR format) using Eigen
-- [ ] 1.2.2 Implement resistor stamp
-- [ ] 1.2.3 Implement capacitor companion model (Backward Euler)
-- [ ] 1.2.4 Implement inductor companion model (Backward Euler)
-- [ ] 1.2.5 Implement voltage source stamp
-- [ ] 1.2.6 Implement current source stamp
-- [ ] 1.2.7 Add ground node elimination
-- [ ] 1.2.8 Add unit tests for MNA assembly
+- [x] 1.2.1 Implement sparse matrix class (CSR format) using Eigen
+- [x] 1.2.2 Implement resistor stamp
+- [x] 1.2.3 Implement capacitor companion model (Backward Euler)
+- [x] 1.2.4 Implement inductor companion model (Backward Euler)
+- [x] 1.2.5 Implement voltage source stamp
+- [x] 1.2.6 Implement current source stamp
+- [x] 1.2.7 Add ground node elimination
+- [x] 1.2.8 Add unit tests for MNA assembly
+
 
 ### 1.3 Linear Solver (kernel-solver)
-- [ ] 1.3.1 Integrate Eigen SparseLU solver
-- [ ] 1.3.2 Implement factorization caching
-- [ ] 1.3.3 Add singular matrix detection and error reporting
-- [ ] 1.3.4 Add unit tests for linear solver
+- [x] 1.3.1 Integrate Eigen SparseLU solver
+- [x] 1.3.2 Implement factorization caching
+- [x] 1.3.3 Add singular matrix detection and error reporting
+- [x] 1.3.4 Add unit tests for linear solver
+
 
 ### 1.4 Nonlinear Solver (kernel-solver)
-- [ ] 1.4.1 Implement Newton-Raphson iteration loop
-- [ ] 1.4.2 Add convergence checking (abstol, reltol)
-- [ ] 1.4.3 Implement damping for divergent steps
-- [ ] 1.4.4 Add iteration limit and failure reporting
-- [ ] 1.4.5 Add unit tests for Newton solver
+- [x] 1.4.1 Implement Newton-Raphson iteration loop
+- [x] 1.4.2 Add convergence checking (abstol, reltol)
+- [x] 1.4.3 Implement damping for divergent steps
+- [x] 1.4.4 Add iteration limit and failure reporting
+- [x] 1.4.5 Add unit tests for Newton solver
+
 
 ### 1.5 Time Integration (kernel-solver)
-- [ ] 1.5.1 Implement Backward Euler time stepping
-- [ ] 1.5.2 Implement fixed timestep simulation loop
-- [ ] 1.5.3 Add DC operating point analysis
-- [ ] 1.5.4 Add result storage (in-memory)
-- [ ] 1.5.5 Add unit tests for transient simulation
+- [x] 1.5.1 Implement Backward Euler time stepping
+- [x] 1.5.2 Implement fixed timestep simulation loop
+- [x] 1.5.3 Add DC operating point analysis
+- [x] 1.5.4 Add result storage (in-memory)
+- [x] 1.5.5 Add unit tests for transient simulation
+
 
 ### 1.6 Basic CLI (cli)
-- [ ] 1.6.1 Create CLI application with argparse or CLI11
-- [ ] 1.6.2 Implement `run` command with basic options
-- [ ] 1.6.3 Implement CSV output
-- [ ] 1.6.4 Add `validate` command
-- [ ] 1.6.5 Add progress reporting to stderr
-- [ ] 1.6.6 Add integration tests for CLI
+- [x] 1.6.1 Create CLI application with argparse or CLI11
+- [x] 1.6.2 Implement `run` command with basic options
+- [x] 1.6.3 Implement CSV output
+- [x] 1.6.4 Add `validate` command
+- [x] 1.6.5 Add progress reporting to stderr
+- [x] 1.6.6 Add integration tests for CLI
+
 
 ### 1.7 MVP-0 Validation
-- [ ] 1.7.1 Create test circuits: RC, RL, RLC
-- [ ] 1.7.2 Verify against analytical solutions
-- [ ] 1.7.3 Create benchmark comparison with ngspice
+- [x] 1.7.1 Create test circuits: RC, RL, RLC
+- [x] 1.7.2 Verify against analytical solutions
+- [x] 1.7.3 Create benchmark comparison with ngspice (see benchmarks/BENCHMARK_REPORT.md)
 
 ## Phase 2: MVP-1 - Power Electronics Basics
 
 ### 2.1 Devices (kernel-devices)
-- [ ] 2.1.1 Implement ideal switch model (voltage-controlled)
-- [ ] 2.1.2 Implement ideal diode model
-- [ ] 2.1.3 Implement pulse voltage source
-- [ ] 2.1.4 Implement PWL voltage source
-- [ ] 2.1.5 Add unit tests for devices
+- [x] 2.1.1 Implement ideal switch model (voltage-controlled)
+- [x] 2.1.2 Implement ideal diode model
+- [x] 2.1.3 Implement pulse voltage source
+- [x] 2.1.4 Implement PWL voltage source
+- [x] 2.1.5 Add unit tests for devices
 
 ### 2.2 Event Manager (kernel-events)
-- [ ] 2.2.1 Implement event queue (priority queue by time)
-- [ ] 2.2.2 Implement zero-crossing detection
-- [ ] 2.2.3 Implement event-triggered timestep adjustment
-- [ ] 2.2.4 Handle switch state changes
-- [ ] 2.2.5 Add integration restart after events
-- [ ] 2.2.6 Add unit tests for event handling
+- [x] 2.2.1 Implement event queue (priority queue by time)
+- [x] 2.2.2 Implement zero-crossing detection
+- [x] 2.2.3 Implement event-triggered timestep adjustment
+- [x] 2.2.4 Handle switch state changes
+- [x] 2.2.5 Add integration restart after events
+- [x] 2.2.6 Add unit tests for event handling
 
 ### 2.3 PWM Support (kernel-events)
-- [ ] 2.3.1 Implement fixed-frequency PWM event generator
-- [ ] 2.3.2 Support variable duty cycle
+- [x] 2.3.1 Implement fixed-frequency PWM event generator
+- [x] 2.3.2 Support variable duty cycle
 - [ ] 2.3.3 Add dead-time handling
 
 ### 2.4 Loss Engine Basics (kernel-losses)
-- [ ] 2.4.1 Implement conduction loss calculation (I²R)
-- [ ] 2.4.2 Add loss accumulation over time
-- [ ] 2.4.3 Output loss summary per device
-- [ ] 2.4.4 Add unit tests for loss calculation
+- [x] 2.4.1 Implement conduction loss calculation (I²R)
+- [x] 2.4.2 Add loss accumulation over time
+- [x] 2.4.3 Output loss summary per device
+- [x] 2.4.4 Add unit tests for loss calculation
 
 ### 2.5 Native Python Bindings (python-bindings)
-- [ ] 2.5.1 Set up pybind11 in CMake
-- [ ] 2.5.2 Create Python module `spicelab`
-- [ ] 2.5.3 Expose `simulate()` function
-- [ ] 2.5.4 Return results as numpy arrays
+- [x] 2.5.1 Set up pybind11 in CMake
+- [x] 2.5.2 Create Python module `spicelab`
+- [x] 2.5.3 Expose `simulate()` function
+- [x] 2.5.4 Return results as numpy arrays
 - [ ] 2.5.5 Add Python tests with pytest
 - [ ] 2.5.6 Create pip-installable package
 
 ### 2.6 MVP-1 Validation
-- [ ] 2.6.1 Simulate buck converter with ideal components
-- [ ] 2.6.2 Verify switching waveforms
-- [ ] 2.6.3 Verify loss calculations
+- [x] 2.6.1 Simulate buck converter with ideal components
+- [x] 2.6.2 Verify switching waveforms
+- [x] 2.6.3 Verify loss calculations
 - [ ] 2.6.4 Create example Jupyter notebook
 
 ## Phase 3: MVP-2 - Full Features
 
 ### 3.1 Advanced Devices (kernel-devices)
-- [ ] 3.1.1 Implement Shockley diode model
+- [x] 3.1.1 Implement Shockley diode model
 - [ ] 3.1.2 Implement diode with junction capacitance
-- [ ] 3.1.3 Implement Level 1 MOSFET model
-- [ ] 3.1.4 Implement MOSFET with body diode
+- [x] 3.1.3 Implement Level 1 MOSFET model
+- [x] 3.1.4 Implement MOSFET with body diode
 - [ ] 3.1.5 Implement MOSFET capacitances (Cgs, Cgd, Cds)
 - [ ] 3.1.6 Implement IGBT simplified model
 - [ ] 3.1.7 Add parameter library for common devices
-- [ ] 3.1.8 Add unit tests for all models
+- [x] 3.1.8 Add unit tests for all models
 
 ### 3.2 Transformer (kernel-devices)
-- [ ] 3.2.1 Implement ideal transformer
-- [ ] 3.2.2 Add magnetizing inductance
-- [ ] 3.2.3 Add leakage inductances
-- [ ] 3.2.4 Add unit tests
+- [x] 3.2.1 Implement ideal transformer
+- [x] 3.2.2 Add magnetizing inductance
+- [x] 3.2.3 Add leakage inductances
+- [x] 3.2.4 Add unit tests
 
 ### 3.3 Switching Losses (kernel-losses)
-- [ ] 3.3.1 Implement turn-on energy (Eon) calculation
-- [ ] 3.3.2 Implement turn-off energy (Eoff) calculation
+- [x] 3.3.1 Implement turn-on energy (Eon) calculation
+- [x] 3.3.2 Implement turn-off energy (Eoff) calculation
 - [ ] 3.3.3 Implement diode reverse recovery loss (Err)
 - [ ] 3.3.4 Support lookup table interpolation
-- [ ] 3.3.5 Add loss breakdown output
+- [x] 3.3.5 Add loss breakdown output
 - [ ] 3.3.6 Add efficiency calculation
 
 ### 3.4 Thermal Modeling (kernel-thermal)
-- [ ] 3.4.1 Implement thermal node and network
-- [ ] 3.4.2 Implement Foster network from parameters
-- [ ] 3.4.3 Couple power loss to thermal network
-- [ ] 3.4.4 Implement temperature-dependent Rds_on
-- [ ] 3.4.5 Add junction temperature output
-- [ ] 3.4.6 Add thermal limit warnings
-- [ ] 3.4.7 Add unit tests
+- [x] 3.4.1 Implement thermal node and network
+- [x] 3.4.2 Implement Foster network from parameters
+- [x] 3.4.3 Couple power loss to thermal network
+- [x] 3.4.4 Implement temperature-dependent Rds_on
+- [x] 3.4.5 Add junction temperature output
+- [x] 3.4.6 Add thermal limit warnings
+- [x] 3.4.7 Add unit tests
 
 ### 3.5 gRPC API (api-grpc)
-- [ ] 3.5.1 Define protobuf messages and service
-- [ ] 3.5.2 Implement gRPC server skeleton
-- [ ] 3.5.3 Implement CreateSession/StartSimulation
-- [ ] 3.5.4 Implement StreamWaveforms with gRPC streaming
-- [ ] 3.5.5 Implement GetResult with format options
-- [ ] 3.5.6 Add session management and cleanup
+- [x] 3.5.1 Define protobuf messages and service
+- [x] 3.5.2 Implement gRPC server skeleton
+- [x] 3.5.3 Implement CreateSession/StartSimulation
+- [x] 3.5.4 Implement StreamWaveforms with gRPC streaming
+- [x] 3.5.5 Implement GetResult with format options
+- [x] 3.5.6 Add session management and cleanup
 - [ ] 3.5.7 Add integration tests for API
 
 ### 3.6 Python gRPC Client (python-bindings)
@@ -175,7 +180,7 @@
 - [ ] 4.1.2 Implement adaptive timestep with error control
 - [ ] 4.1.3 Integrate SuiteSparse KLU for faster LU
 - [ ] 4.1.4 Implement factorization reuse across timesteps
-- [ ] 4.1.5 Add Trapezoidal and Gear integration methods
+- [ ] 4.1.5 Add Trapezoidal integration (GEAR-2) for O(dt²) accuracy (current Backward Euler is O(dt))
 - [ ] 4.1.6 Benchmark against ngspice
 
 ### 4.2 Convergence Aids (kernel-solver)

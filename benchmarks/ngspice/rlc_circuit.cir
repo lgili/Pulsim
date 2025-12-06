@@ -1,0 +1,15 @@
+* RLC Series Circuit - ngspice benchmark
+* Equivalent to examples/rlc_circuit.json
+* Underdamped response
+
+V1 in 0 DC 10.0
+R1 in n1 10
+L1 n1 out 1m IC=0
+C1 out 0 10u IC=0
+
+.tran 1u 2m UIC
+.control
+run
+wrdata rlc_ngspice.csv v(out) i(V1)
+.endc
+.end

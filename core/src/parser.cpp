@@ -368,4 +368,15 @@ ParseResult<SimulationOptions> NetlistParser::parse_options(const std::string& c
     return opts;
 }
 
+ParseResult<SimulationOptions> NetlistParser::parse_simulation_options(const std::filesystem::path& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return ParseError{"Cannot open file: " + path.string()};
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return parse_options(buffer.str());
+}
+
 }  // namespace spicelab

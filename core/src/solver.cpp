@@ -96,13 +96,8 @@ NewtonResult NewtonSolver::solve(const Vector& x0, SystemFunction system_func) {
 
         dx = linear_result.x;
 
-        // Check for convergence using dx
-        Real dx_norm = dx.norm();
-        Real x_norm = result.x.norm();
-        if (x_norm > 0 && dx_norm / x_norm < options_.reltol) {
-            result.status = SolverStatus::Success;
-            return result;
-        }
+        // Apply update first, then check convergence
+        // (checking before update caused premature convergence)
 
         // Apply damping if enabled
         if (options_.auto_damping) {
