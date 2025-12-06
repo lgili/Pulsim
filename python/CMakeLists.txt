@@ -32,12 +32,12 @@ configure_file(
     COPYONLY
 )
 
-# Install targets
+# Install targets - install to root so scikit-build picks them up correctly
 install(TARGETS _spicelab
-    LIBRARY DESTINATION spicelab
+    LIBRARY DESTINATION .
 )
 
 install(DIRECTORY spicelab/
-    DESTINATION spicelab
+    DESTINATION .
     FILES_MATCHING PATTERN "*.py"
 )

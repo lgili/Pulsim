@@ -57,7 +57,6 @@ cmake.args = [
     "-DSPICELAB_BUILD_GRPC=OFF",
 ]
 wheel.packages = ["python/spicelab"]
-wheel.install-dir = "spicelab"
 
 [tool.scikit-build.cmake.define]
 CMAKE_BUILD_TYPE = "Release"
