@@ -195,10 +195,10 @@
 - [x] 4.3.4 Output magnitude/phase (Bode data)
 
 ### 4.4 Parallelization
-- [ ] 4.4.1 Multi-thread matrix assembly
-- [ ] 4.4.2 SIMD optimization for device evaluation
-- [ ] 4.4.3 Parallel parameter sweeps
-- [ ] 4.4.4 Job queue for batch runs
+- [x] 4.4.1 Multi-thread matrix assembly
+- [x] 4.4.2 SIMD optimization for device evaluation
+- [x] 4.4.3 Parallel parameter sweeps
+- [x] 4.4.4 Job queue for batch runs
 
 ### 4.5 Scale (api-grpc)
 - [ ] 4.5.1 Implement job queue with Redis or similar
