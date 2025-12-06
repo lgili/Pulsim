@@ -99,6 +99,8 @@ set(SPICELAB_GRPC_SOURCES
     src/main.cpp
     src/session_manager.cpp
     src/server_config.cpp
+    src/job_queue.cpp
+    src/metrics.cpp
 )
 
 add_executable(spicelab_grpc_server
@@ -134,6 +136,8 @@ if(SPICELAB_BUILD_TESTS)
         src/server.cpp
         src/session_manager.cpp
         src/server_config.cpp
+        src/job_queue.cpp
+        src/metrics.cpp
     )
 
     target_include_directories(spicelab_grpc_tests
@@ -149,6 +153,7 @@ if(SPICELAB_BUILD_TESTS)
             gRPC::grpc++
             gRPC::grpc++_reflection
             protobuf::libprotobuf
+            httplib::httplib
             Catch2::Catch2WithMain
     )
 

@@ -201,12 +201,12 @@
 - [x] 4.4.4 Job queue for batch runs
 
 ### 4.5 Scale (api-grpc)
-- [ ] 4.5.1 Implement job queue with Redis or similar
-- [ ] 4.5.2 Add worker pool for concurrent simulations
-- [ ] 4.5.3 Add per-user quotas and resource limits
-- [ ] 4.5.4 Add Prometheus metrics
-- [ ] 4.5.5 Create Docker image
-- [ ] 4.5.6 Create Kubernetes deployment manifests
+- [x] 4.5.1 Implement job queue with Redis or similar
+- [x] 4.5.2 Add worker pool for concurrent simulations
+- [x] 4.5.3 Add per-user quotas and resource limits
+- [x] 4.5.4 Add Prometheus metrics
+- [x] 4.5.5 Create Docker image
+- [x] 4.5.6 Create Kubernetes deployment manifests
 
 ### 4.6 Documentation
 - [ ] 4.6.1 Write user guide with examples
