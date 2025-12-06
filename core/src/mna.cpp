@@ -20,7 +20,8 @@ MNAAssembler::MNAAssembler(const Circuit& circuit)
             branch_indices_[comp.name() + "_s"] = next_branch_idx_++;
         }
         if (comp.type() == ComponentType::Diode ||
-            comp.type() == ComponentType::MOSFET) {
+            comp.type() == ComponentType::MOSFET ||
+            comp.type() == ComponentType::IGBT) {
             has_nonlinear_ = true;
         }
         // Initialize switch states
@@ -365,6 +366,92 @@ void MNAAssembler::stamp_diode(std::vector<Triplet>& triplets, Vector& f,
     }
 }
 
+void MNAAssembler::stamp_diode_capacitance(std::vector<Triplet>& triplets, Vector& b,
+                                           const Component& comp, const Vector& x,
+                                           const Vector& x_prev, Real dt) {
+    const auto& params = std::get<DiodeParams>(comp.params());
+
+    // Skip if no junction capacitance
+    if (params.cj0 <= 0.0 && params.tt <= 0.0) {
+        return;
+    }
+
+    Index n_anode = circuit_.node_index(comp.nodes()[0]);
+    Index n_cathode = circuit_.node_index(comp.nodes()[1]);
+
+    // Current voltage across diode
+    Real Vd = 0.0;
+    if (n_anode >= 0) Vd += x(n_anode);
+    if (n_cathode >= 0) Vd -= x(n_cathode);
+
+    // Previous voltage
+    Real Vd_prev = 0.0;
+    if (n_anode >= 0) Vd_prev += x_prev(n_anode);
+    if (n_cathode >= 0) Vd_prev -= x_prev(n_cathode);
+
+    Real C_total = 0.0;
+
+    // Junction (depletion) capacitance: Cj = Cj0 / (1 - Vd/Vj)^m
+    // Valid for Vd < Vj (forward bias limited)
+    if (params.cj0 > 0.0) {
+        Real Vj = params.vj;
+        Real m = params.m;
+
+        // Limit voltage to avoid singularity at Vd = Vj
+        Real Vd_eff = std::min(Vd, 0.9 * Vj);
+
+        Real Cj;
+        if (Vd_eff < 0.0) {
+            // Reverse bias: standard formula
+            Cj = params.cj0 / std::pow(1.0 - Vd_eff / Vj, m);
+        } else {
+            // Forward bias: linearize to avoid singularity
+            // Use linear extrapolation from Vd = 0
+            Real Cj0 = params.cj0;
+            Real dCj_dV = Cj0 * m / Vj;  // Derivative at Vd = 0
+            Cj = Cj0 + dCj_dV * Vd_eff;
+        }
+        C_total += Cj;
+    }
+
+    // Diffusion capacitance: Cd = tt * dId/dVd = tt * Gd
+    // In forward bias, the diffusion capacitance dominates
+    if (params.tt > 0.0 && !params.ideal) {
+        Real Vt = params.vt;
+        Real Is = params.is;
+        Real n = params.n;
+        Real Vd_limited = std::min(Vd, 40.0 * n * Vt);
+        Real exp_term = std::exp(Vd_limited / (n * Vt));
+        Real Gd = (Is / (n * Vt)) * exp_term;
+        Real Cd = params.tt * Gd;
+        C_total += Cd;
+    }
+
+    if (C_total <= 0.0) {
+        return;
+    }
+
+    // Backward Euler companion model for capacitor
+    Real Geq = C_total / dt;
+    Real Ieq = Geq * Vd_prev;
+
+    // Stamp conductance
+    if (n_anode >= 0) {
+        triplets.emplace_back(n_anode, n_anode, Geq);
+        b(n_anode) += Ieq;
+        if (n_cathode >= 0) {
+            triplets.emplace_back(n_anode, n_cathode, -Geq);
+        }
+    }
+    if (n_cathode >= 0) {
+        triplets.emplace_back(n_cathode, n_cathode, Geq);
+        b(n_cathode) -= Ieq;
+        if (n_anode >= 0) {
+            triplets.emplace_back(n_cathode, n_anode, -Geq);
+        }
+    }
+}
+
 void MNAAssembler::stamp_switch(std::vector<Triplet>& triplets, Vector& /*b*/,
                                 const Component& comp, const SwitchState& state) {
     const auto& params = std::get<SwitchParams>(comp.params());
@@ -550,6 +637,227 @@ void MNAAssembler::stamp_mosfet(std::vector<Triplet>& triplets, Vector& f,
                 if (n_drain >= 0) {
                     triplets.emplace_back(n_source, n_drain, -Gd);
                 }
+            }
+        }
+    }
+}
+
+void MNAAssembler::stamp_mosfet_capacitances(std::vector<Triplet>& triplets, Vector& b,
+                                             const Component& comp, const Vector& x_prev, Real dt) {
+    const auto& params = std::get<MOSFETParams>(comp.params());
+
+    // Skip if no capacitances are specified
+    if (params.cgs <= 0.0 && params.cgd <= 0.0 && params.cds <= 0.0) {
+        return;
+    }
+
+    Index n_drain = circuit_.node_index(comp.nodes()[0]);
+    Index n_gate = circuit_.node_index(comp.nodes()[1]);
+    Index n_source = circuit_.node_index(comp.nodes()[2]);
+
+    // Get previous terminal voltages
+    Real Vd_prev = (n_drain >= 0) ? x_prev(n_drain) : 0.0;
+    Real Vg_prev = (n_gate >= 0) ? x_prev(n_gate) : 0.0;
+    Real Vs_prev = (n_source >= 0) ? x_prev(n_source) : 0.0;
+
+    // Gate-Source Capacitance (Cgs)
+    if (params.cgs > 0.0) {
+        Real Geq = params.cgs / dt;
+        Real Vgs_prev = Vg_prev - Vs_prev;
+        Real Ieq = Geq * Vgs_prev;
+
+        // Stamp between gate and source
+        if (n_gate >= 0) {
+            triplets.emplace_back(n_gate, n_gate, Geq);
+            b(n_gate) += Ieq;
+            if (n_source >= 0) {
+                triplets.emplace_back(n_gate, n_source, -Geq);
+            }
+        }
+        if (n_source >= 0) {
+            triplets.emplace_back(n_source, n_source, Geq);
+            b(n_source) -= Ieq;
+            if (n_gate >= 0) {
+                triplets.emplace_back(n_source, n_gate, -Geq);
+            }
+        }
+    }
+
+    // Gate-Drain Capacitance (Cgd) - Miller capacitance
+    if (params.cgd > 0.0) {
+        Real Geq = params.cgd / dt;
+        Real Vgd_prev = Vg_prev - Vd_prev;
+        Real Ieq = Geq * Vgd_prev;
+
+        // Stamp between gate and drain
+        if (n_gate >= 0) {
+            triplets.emplace_back(n_gate, n_gate, Geq);
+            b(n_gate) += Ieq;
+            if (n_drain >= 0) {
+                triplets.emplace_back(n_gate, n_drain, -Geq);
+            }
+        }
+        if (n_drain >= 0) {
+            triplets.emplace_back(n_drain, n_drain, Geq);
+            b(n_drain) -= Ieq;
+            if (n_gate >= 0) {
+                triplets.emplace_back(n_drain, n_gate, -Geq);
+            }
+        }
+    }
+
+    // Drain-Source Capacitance (Cds)
+    if (params.cds > 0.0) {
+        Real Geq = params.cds / dt;
+        Real Vds_prev = Vd_prev - Vs_prev;
+        Real Ieq = Geq * Vds_prev;
+
+        // Stamp between drain and source
+        if (n_drain >= 0) {
+            triplets.emplace_back(n_drain, n_drain, Geq);
+            b(n_drain) += Ieq;
+            if (n_source >= 0) {
+                triplets.emplace_back(n_drain, n_source, -Geq);
+            }
+        }
+        if (n_source >= 0) {
+            triplets.emplace_back(n_source, n_source, Geq);
+            b(n_source) -= Ieq;
+            if (n_drain >= 0) {
+                triplets.emplace_back(n_source, n_drain, -Geq);
+            }
+        }
+    }
+}
+
+void MNAAssembler::stamp_igbt(std::vector<Triplet>& triplets, Vector& f,
+                              const Component& comp, const Vector& x) {
+    const auto& params = std::get<IGBTParams>(comp.params());
+
+    Index n_collector = circuit_.node_index(comp.nodes()[0]);
+    Index n_gate = circuit_.node_index(comp.nodes()[1]);
+    Index n_emitter = circuit_.node_index(comp.nodes()[2]);
+
+    // Get terminal voltages
+    Real Vc = (n_collector >= 0) ? x(n_collector) : 0.0;
+    Real Vg = (n_gate >= 0) ? x(n_gate) : 0.0;
+    Real Ve = (n_emitter >= 0) ? x(n_emitter) : 0.0;
+
+    Real Vge = Vg - Ve;
+    Real Vce = Vc - Ve;
+
+    Real Ic = 0.0;      // Collector current
+    Real gce = 0.0;     // Output conductance dIc/dVce
+    Real gm = 0.0;      // Transconductance dIc/dVge
+
+    // Simplified IGBT model:
+    // - When Vge < Vth: OFF state (high resistance)
+    // - When Vge >= Vth and Vce > Vce_sat: ON state with saturation voltage drop
+    // - The on-state is modeled as: Ic = (Vce - Vce_sat) / Rce_on
+
+    if (Vge < params.vth) {
+        // OFF state - very high resistance
+        Real g_off = 1.0 / params.rce_off;
+        Ic = g_off * Vce;
+        gce = g_off;
+        gm = 0.0;
+    } else {
+        // ON state - model with saturation voltage drop
+        // The IGBT conducts with a forward voltage drop Vce_sat
+        // Current through the device: Ic = (Vce - Vce_sat) / Rce_on for Vce > Vce_sat
+        // For Vce < Vce_sat, we model a smooth transition
+
+        Real g_on = 1.0 / params.rce_on;
+
+        if (Vce > params.vce_sat) {
+            // Normal forward conduction
+            Ic = (Vce - params.vce_sat) * g_on;
+            gce = g_on;
+            gm = 0.0;  // In this simplified model, gm only affects turn-on region
+        } else if (Vce > 0) {
+            // Transition region (0 < Vce < Vce_sat)
+            // Use smooth interpolation to avoid numerical issues
+            Real alpha = Vce / params.vce_sat;  // 0 to 1
+            Real g_eff = g_on * alpha;  // Smoothly vary conductance
+            Ic = g_eff * Vce;
+            gce = g_on * (2.0 * alpha);  // Derivative includes dg_eff/dVce
+        } else {
+            // Vce <= 0: reverse blocking (unless body diode conducts)
+            Real g_off = 1.0 / params.rce_off;
+            Ic = g_off * Vce;
+            gce = g_off;
+            gm = 0.0;
+        }
+    }
+
+    // Ensure minimum conductance for numerical stability
+    gce = std::max(gce, 1e-12);
+
+    // Newton-Raphson linearization
+    // I = Ic + gm*(Vge - Vge0) + gce*(Vce - Vce0)
+    // Equivalent current: Ieq = Ic - gm*Vge - gce*Vce
+    Real Ieq = Ic - gm * Vge - gce * Vce;
+
+    // Stamp into Jacobian
+    // Current flows: out of collector, into emitter
+    // Partial derivatives:
+    //   dIc/dVc = gce
+    //   dIc/dVg = gm
+    //   dIc/dVe = -gce - gm
+
+    if (n_collector >= 0) {
+        triplets.emplace_back(n_collector, n_collector, gce);
+        f(n_collector) -= Ieq;  // Current out of collector
+
+        if (n_gate >= 0) {
+            triplets.emplace_back(n_collector, n_gate, gm);
+        }
+        if (n_emitter >= 0) {
+            triplets.emplace_back(n_collector, n_emitter, -gce - gm);
+        }
+    }
+
+    if (n_emitter >= 0) {
+        triplets.emplace_back(n_emitter, n_emitter, gce + gm);
+        f(n_emitter) += Ieq;  // Current into emitter
+
+        if (n_gate >= 0) {
+            triplets.emplace_back(n_emitter, n_gate, -gm);
+        }
+        if (n_collector >= 0) {
+            triplets.emplace_back(n_emitter, n_collector, -gce);
+        }
+    }
+
+    // Anti-parallel (freewheeling) diode
+    if (params.body_diode) {
+        // Diode conducts when Vce < 0 (from emitter to collector)
+        Real Vdiode = Ve - Vc;  // Forward voltage for diode
+        Real Is = params.is_diode;
+        Real n = params.n_diode;
+        constexpr Real Vt = 0.026;  // Thermal voltage
+
+        Real Vd_limited = std::min(Vdiode, 40.0 * n * Vt);
+        Real exp_term = std::exp(Vd_limited / (n * Vt));
+        Real Id_diode = Is * (exp_term - 1.0);
+        Real Gd = (Is / (n * Vt)) * exp_term;
+        Gd = std::max(Gd, 1e-12);
+
+        Real Ieq_diode = Id_diode - Gd * Vdiode;
+
+        // Stamp body diode (emitter to collector)
+        if (n_emitter >= 0) {
+            triplets.emplace_back(n_emitter, n_emitter, Gd);
+            f(n_emitter) -= Ieq_diode;
+            if (n_collector >= 0) {
+                triplets.emplace_back(n_emitter, n_collector, -Gd);
+            }
+        }
+        if (n_collector >= 0) {
+            triplets.emplace_back(n_collector, n_collector, Gd);
+            f(n_collector) += Ieq_diode;
+            if (n_emitter >= 0) {
+                triplets.emplace_back(n_collector, n_emitter, -Gd);
             }
         }
     }
@@ -836,6 +1144,14 @@ void MNAAssembler::assemble_transient(SparseMatrix& G, Vector& b,
                 stamp_transformer_transient(triplets, b, comp, branch_idx_p, branch_idx_s, x_prev, dt);
                 break;
             }
+            case ComponentType::Diode:
+                // Stamp diode junction and diffusion capacitances
+                stamp_diode_capacitance(triplets, b, comp, x_prev, x_prev, dt);
+                break;
+            case ComponentType::MOSFET:
+                // Stamp MOSFET parasitic capacitances (Cgs, Cgd, Cds)
+                stamp_mosfet_capacitances(triplets, b, comp, x_prev, dt);
+                break;
             default:
                 break;
         }
@@ -856,6 +1172,8 @@ void MNAAssembler::assemble_nonlinear(SparseMatrix& J, Vector& f,
             stamp_diode(triplets, f, comp, x);
         } else if (comp.type() == ComponentType::MOSFET) {
             stamp_mosfet(triplets, f, comp, x);
+        } else if (comp.type() == ComponentType::IGBT) {
+            stamp_igbt(triplets, f, comp, x);
         }
     }
 

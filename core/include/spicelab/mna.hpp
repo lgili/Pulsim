@@ -69,10 +69,17 @@ private:
     void stamp_current_source(Vector& b, const Component& comp, Real time);
     void stamp_diode(std::vector<Triplet>& triplets, Vector& f,
                     const Component& comp, const Vector& x);
+    void stamp_diode_capacitance(std::vector<Triplet>& triplets, Vector& b,
+                                 const Component& comp, const Vector& x,
+                                 const Vector& x_prev, Real dt);
     void stamp_switch(std::vector<Triplet>& triplets, Vector& b,
                      const Component& comp, const SwitchState& state);
     void stamp_mosfet(std::vector<Triplet>& triplets, Vector& f,
                      const Component& comp, const Vector& x);
+    void stamp_mosfet_capacitances(std::vector<Triplet>& triplets, Vector& b,
+                                   const Component& comp, const Vector& x_prev, Real dt);
+    void stamp_igbt(std::vector<Triplet>& triplets, Vector& f,
+                   const Component& comp, const Vector& x);
     void stamp_transformer_dc(std::vector<Triplet>& triplets, Vector& b,
                              const Component& comp, Index branch_idx_p, Index branch_idx_s);
     void stamp_transformer_transient(std::vector<Triplet>& triplets, Vector& b,

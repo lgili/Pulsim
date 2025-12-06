@@ -8,3 +8,4 @@
 #include "spicelab/mna.hpp"
 #include "spicelab/solver.hpp"
 #include "spicelab/simulation.hpp"
+#include "spicelab/devices.hpp"

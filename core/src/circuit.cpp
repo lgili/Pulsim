@@ -90,6 +90,15 @@ void Circuit::add_mosfet(const std::string& name, const NodeId& drain,
     add_component(Component(name, ComponentType::MOSFET, {drain, gate, source}, params));
 }
 
+void Circuit::add_igbt(const std::string& name, const NodeId& collector,
+                       const NodeId& gate, const NodeId& emitter,
+                       const IGBTParams& params) {
+    ensure_node(collector);
+    ensure_node(gate);
+    ensure_node(emitter);
+    add_component(Component(name, ComponentType::IGBT, {collector, gate, emitter}, params));
+}
+
 void Circuit::add_transformer(const std::string& name, const NodeId& p1,
                               const NodeId& p2, const NodeId& s1,
                               const NodeId& s2, const TransformerParams& params) {
