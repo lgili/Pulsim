@@ -128,10 +128,10 @@
 ### 3.3 Switching Losses (kernel-losses)
 - [x] 3.3.1 Implement turn-on energy (Eon) calculation
 - [x] 3.3.2 Implement turn-off energy (Eoff) calculation
-- [ ] 3.3.3 Implement diode reverse recovery loss (Err)
-- [ ] 3.3.4 Support lookup table interpolation
+- [x] 3.3.3 Implement diode reverse recovery loss (Err)
+- [x] 3.3.4 Support lookup table interpolation
 - [x] 3.3.5 Add loss breakdown output
-- [ ] 3.3.6 Add efficiency calculation
+- [x] 3.3.6 Add efficiency calculation
 
 ### 3.4 Thermal Modeling (kernel-thermal)
 - [x] 3.4.1 Implement thermal node and network
@@ -149,7 +149,7 @@
 - [x] 3.5.4 Implement StreamWaveforms with gRPC streaming
 - [x] 3.5.5 Implement GetResult with format options
 - [x] 3.5.6 Add session management and cleanup
-- [ ] 3.5.7 Add integration tests for API
+- [x] 3.5.7 Add integration tests for API
 
 ### 3.6 Python gRPC Client (python-bindings)
 - [ ] 3.6.1 Generate Python gRPC stubs
