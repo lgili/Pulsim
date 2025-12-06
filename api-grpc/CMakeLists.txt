@@ -126,3 +126,33 @@ add_dependencies(spicelab_grpc_server spicelab_grpc_proto)
 install(TARGETS spicelab_grpc_server
     RUNTIME DESTINATION bin
 )
+
+# Integration tests for gRPC API
+if(SPICELAB_BUILD_TESTS)
+    add_executable(spicelab_grpc_tests
+        tests/test_grpc_api.cpp
+        src/server.cpp
+        src/session_manager.cpp
+        src/server_config.cpp
+    )
+
+    target_include_directories(spicelab_grpc_tests
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    target_link_libraries(spicelab_grpc_tests
+        PRIVATE
+            spicelab::core
+            spicelab::grpc_proto
+            gRPC::grpc++
+            gRPC::grpc++_reflection
+            protobuf::libprotobuf
+            Catch2::Catch2WithMain
+    )
+
+    add_dependencies(spicelab_grpc_tests spicelab_grpc_proto)
+
+    add_test(NAME grpc_api_tests COMMAND spicelab_grpc_tests)
+endif()

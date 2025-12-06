@@ -228,7 +228,10 @@ PYBIND11_MODULE(_spicelab, m) {
     // --- Simulator ---
     py::class_<PowerLosses>(m, "PowerLosses")
         .def_readonly("conduction_loss", &PowerLosses::conduction_loss)
-        .def_readonly("switching_loss", &PowerLosses::switching_loss)
+        .def_readonly("turn_on_loss", &PowerLosses::turn_on_loss)
+        .def_readonly("turn_off_loss", &PowerLosses::turn_off_loss)
+        .def_readonly("reverse_recovery_loss", &PowerLosses::reverse_recovery_loss)
+        .def("switching_loss", &PowerLosses::switching_loss)
         .def("total_loss", &PowerLosses::total_loss);
 
     py::class_<SwitchEvent>(m, "SwitchEvent")
