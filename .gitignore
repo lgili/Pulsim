@@ -28,6 +28,13 @@ __pycache__/
 *.egg-info/
 dist/
 *.so
+.skbuild-info.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# CMake API (scikit-build)
+.cmake/
 
 # OS
 .DS_Store

@@ -57,10 +57,14 @@ cmake.args = [
     "-DSPICELAB_BUILD_GRPC=OFF",
 ]
 wheel.packages = ["python/spicelab"]
-editable.mode = "inplace"
+editable.mode = "redirect"
+editable.rebuild = true
+build-dir = "build/{wheel_tag}"
 
 [tool.scikit-build.cmake.define]
 CMAKE_BUILD_TYPE = "Release"
+CMAKE_CXX_COMPILER = "/usr/bin/clang++"
+CMAKE_C_COMPILER = "/usr/bin/clang"
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

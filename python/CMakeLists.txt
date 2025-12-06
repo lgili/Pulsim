@@ -21,16 +21,9 @@ target_link_libraries(_spicelab
 )
 
 # Set the output name to match Python conventions
-# For editable installs, output directly to source tree
-if(DEFINED SKBUILD)
-    set_target_properties(_spicelab PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/python/spicelab"
-    )
-else()
-    set_target_properties(_spicelab PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/spicelab"
-    )
-endif()
+set_target_properties(_spicelab PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/spicelab"
+)
 
 # Copy Python wrapper module
 configure_file(
@@ -39,9 +32,9 @@ configure_file(
     COPYONLY
 )
 
-# Install targets - install to root so scikit-build picks them up correctly
+# Install targets
 install(TARGETS _spicelab
-    LIBRARY DESTINATION .
+    LIBRARY DESTINATION spicelab
 )
 
 install(DIRECTORY spicelab/

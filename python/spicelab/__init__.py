@@ -1,5 +1,7 @@
 """SpiceLab - High-performance circuit simulator for power electronics."""
 
+__version__ = "0.1.0"
+
 from ._spicelab import (
     # Enums
     ComponentType,
@@ -42,9 +44,6 @@ from ._spicelab import (
     ThermalSimulator,
     create_mosfet_thermal,
     fit_foster_network,
-
-    # Version
-    __version__,
 )
 
 __all__ = [
