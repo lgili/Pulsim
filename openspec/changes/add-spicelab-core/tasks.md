@@ -111,12 +111,12 @@
 
 ### 3.1 Advanced Devices (kernel-devices)
 - [x] 3.1.1 Implement Shockley diode model
-- [ ] 3.1.2 Implement diode with junction capacitance
+- [x] 3.1.2 Implement diode with junction capacitance
 - [x] 3.1.3 Implement Level 1 MOSFET model
 - [x] 3.1.4 Implement MOSFET with body diode
-- [ ] 3.1.5 Implement MOSFET capacitances (Cgs, Cgd, Cds)
-- [ ] 3.1.6 Implement IGBT simplified model
-- [ ] 3.1.7 Add parameter library for common devices
+- [x] 3.1.5 Implement MOSFET capacitances (Cgs, Cgd, Cds)
+- [x] 3.1.6 Implement IGBT simplified model
+- [x] 3.1.7 Add parameter library for common devices
 - [x] 3.1.8 Add unit tests for all models
 
 ### 3.2 Transformer (kernel-devices)

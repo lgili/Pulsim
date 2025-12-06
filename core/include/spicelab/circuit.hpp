@@ -86,6 +86,14 @@ struct DiodeParams {
     Real rs = 0.0;     // Series resistance
     Real vt = 0.026;   // Thermal voltage (kT/q at 300K)
     bool ideal = true; // Use ideal model if true
+
+    // Junction capacitance parameters
+    Real cj0 = 0.0;    // Zero-bias junction capacitance (F)
+    Real vj = 0.7;     // Junction potential (V)
+    Real m = 0.5;      // Grading coefficient (0.33 for linearly graded, 0.5 for abrupt)
+    Real tt = 0.0;     // Transit time (s) for diffusion capacitance
+    Real bv = 100.0;   // Reverse breakdown voltage (V)
+    Real ibv = 1e-10;  // Current at breakdown voltage (A)
 };
 
 struct SwitchParams {
@@ -126,6 +134,28 @@ struct MOSFETParams {
     Real kp_effective() const { return kp * w / l; }
 };
 
+// IGBT simplified model
+// Models IGBT as a voltage-controlled switch with on-state voltage drop
+struct IGBTParams {
+    Real vth = 5.0;      // Gate threshold voltage (V)
+    Real vce_sat = 2.0;  // Collector-emitter saturation voltage (V)
+    Real rce_on = 0.01;  // On-state resistance (Ohms)
+    Real rce_off = 1e9;  // Off-state resistance (Ohms)
+
+    // Tail current parameters (for turn-off transient)
+    Real tf = 0.0;       // Fall time (s), 0 = ideal
+    Real tr = 0.0;       // Rise time (s), 0 = ideal
+
+    // Input capacitance (gate)
+    Real cies = 0.0;     // Input capacitance (F)
+
+    // Anti-parallel diode (freewheeling)
+    bool body_diode = true;
+    Real is_diode = 1e-12;   // Diode saturation current
+    Real n_diode = 1.0;      // Diode ideality factor
+    Real vf_diode = 0.7;     // Diode forward voltage (simplified)
+};
+
 struct TransformerParams {
     Real turns_ratio = 1.0;   // N1:N2 (primary to secondary)
     Real lm = 1e-3;           // Magnetizing inductance (H), 0 = ideal
@@ -142,6 +172,7 @@ using ComponentParams = std::variant<
     DiodeParams,
     SwitchParams,
     MOSFETParams,
+    IGBTParams,
     TransformerParams
 >;
 
@@ -189,6 +220,8 @@ public:
                     const NodeId& ctrl_pos, const NodeId& ctrl_neg, const SwitchParams& params = {});
     void add_mosfet(const std::string& name, const NodeId& drain, const NodeId& gate,
                     const NodeId& source, const MOSFETParams& params = {});
+    void add_igbt(const std::string& name, const NodeId& collector, const NodeId& gate,
+                  const NodeId& emitter, const IGBTParams& params = {});
     void add_transformer(const std::string& name, const NodeId& p1, const NodeId& p2,
                         const NodeId& s1, const NodeId& s2, const TransformerParams& params = {});
 
