@@ -184,15 +184,15 @@
 - [x] 4.1.6 Benchmark against ngspice
 
 ### 4.2 Convergence Aids (kernel-solver)
-- [ ] 4.2.1 Implement Gmin stepping
-- [ ] 4.2.2 Implement source stepping
-- [ ] 4.2.3 Implement pseudo-transient continuation
+- [x] 4.2.1 Implement Gmin stepping
+- [x] 4.2.2 Implement source stepping
+- [x] 4.2.3 Implement pseudo-transient continuation
 
 ### 4.3 AC Analysis (kernel-solver)
-- [ ] 4.3.1 Implement linearization at operating point
-- [ ] 4.3.2 Implement complex impedance matrix solve
-- [ ] 4.3.3 Add frequency sweep
-- [ ] 4.3.4 Output magnitude/phase (Bode data)
+- [x] 4.3.1 Implement linearization at operating point
+- [x] 4.3.2 Implement complex impedance matrix solve
+- [x] 4.3.3 Add frequency sweep
+- [x] 4.3.4 Output magnitude/phase (Bode data)
 
 ### 4.4 Parallelization
 - [ ] 4.4.1 Multi-thread matrix assembly
