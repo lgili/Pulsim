@@ -12,18 +12,20 @@ option(SPICELAB_BUILD_CLI "Build CLI application" ON)
 option(SPICELAB_BUILD_PYTHON "Build Python bindings" OFF)
 option(SPICELAB_BUILD_GRPC "Build gRPC API server" OFF)
 
-# If project-level tests are disabled, also disable CTest/BUILD_TESTING
-# so FetchContent dependencies (Eigen, abseil, etc.) won't add their
-# test targets (e.g. "check", "meta") which can conflict with other
-# dependencies when pulled into the superproject.
-if(NOT SPICELAB_BUILD_TESTS)
-    set(BUILD_TESTING OFF CACHE BOOL "Disable tests for dependencies" FORCE)
-endif()
-# When project tests are disabled, disable BUILD_TESTING and common
-# test-related options for third-party FetchContent deps to avoid
-# global target name collisions (e.g. Eigen's test targets like
-# `check`/`meta` conflict with abseil's targets pulled by gRPC).
-if(NOT SPICELAB_BUILD_TESTS)
+# Prevent Eigen from enabling its own test targets when pulled via FetchContent.
+# We want to build the project's tests but avoid running large third-party test
+# suites that are not relevant and may fail on host platforms.
+set(EIGEN_BUILD_TESTS OFF CACHE BOOL "Disable Eigen tests in dependencies" FORCE)
+set(EIGEN_BUILD_TESTING OFF CACHE BOOL "Disable Eigen testing in dependencies" FORCE)
+
+# Control BUILD_TESTING based on SPICELAB_BUILD_TESTS. When tests are
+# explicitly enabled, force ENABLE CTest and allow test discovery. When
+# disabled, turn off testing for the project and common dependency test
+# flags to avoid target-name collisions in FetchContent dependencies.
+if(SPICELAB_BUILD_TESTS)
+    message(STATUS "SPICELAB_BUILD_TESTS=ON -> enabling CTest/BUID_TESTING")
+    set(BUILD_TESTING ON CACHE BOOL "Enable CTest and dependency tests" FORCE)
+else()
     message(STATUS "SPICELAB_BUILD_TESTS=OFF -> disabling dependency tests (BUILD_TESTING/EIGEN_* )")
     # Prevent fetched projects from enabling their own testing targets
     set(BUILD_TESTING OFF CACHE BOOL "Disable building tests in dependencies" FORCE)
@@ -94,6 +96,14 @@ add_subdirectory(core)
 # CLI application
 if(SPICELAB_BUILD_CLI)
     add_subdirectory(cli)
+endif()
+
+# If tests are enabled, ensure the CLI executable is built before running integration
+# tests that invoke it. `spicelab_tests` lives in the `core` subdirectory.
+if(SPICELAB_BUILD_TESTS AND SPICELAB_BUILD_CLI)
+    if(TARGET spicelab AND TARGET spicelab_tests)
+        add_dependencies(spicelab_tests spicelab)
+    endif()
 endif()
 
 # Python bindings

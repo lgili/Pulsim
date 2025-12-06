@@ -59,8 +59,11 @@ public:
     // Parse from string
     static ParseResult<Circuit> parse_string(const std::string& content);
 
-    // Parse simulation options from JSON
+    // Parse simulation options from JSON string
     static ParseResult<SimulationOptions> parse_options(const std::string& content);
+
+    // Parse simulation options from file
+    static ParseResult<SimulationOptions> parse_simulation_options(const std::filesystem::path& path);
 
     // Utility function (public for testing)
     static Real parse_value_with_suffix(const std::string& str);

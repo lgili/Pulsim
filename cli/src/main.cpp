@@ -37,8 +37,14 @@ void print_progress(Real time, Real tstop) {
               << std::setprecision(3) << time << "s)" << std::flush;
 }
 
+// Sentinel values to detect if CLI option was explicitly provided
+constexpr double CLI_SENTINEL = -1e99;
+constexpr int CLI_SENTINEL_INT = -1;
+
 int cmd_run(const std::string& netlist_file, const std::string& output_file,
-            const SimulationOptions& opts, bool verbose, bool quiet) {
+            double cli_tstop, double cli_dt, double cli_dtmax, double cli_tstart,
+            double cli_abstol, double cli_reltol, int cli_maxiter,
+            bool verbose, bool quiet) {
     try {
         // Parse netlist
         if (!quiet) {
@@ -53,6 +59,20 @@ int cmd_run(const std::string& netlist_file, const std::string& output_file,
 
         const Circuit& circuit = *parse_result;
 
+        // Parse simulation options from JSON file first
+        auto json_opts_result = NetlistParser::parse_simulation_options(netlist_file);
+        SimulationOptions opts = json_opts_result ? *json_opts_result : SimulationOptions{};
+
+        // Apply CLI overrides only if explicitly provided (not sentinel values)
+        if (cli_tstart != CLI_SENTINEL) opts.tstart = cli_tstart;
+        if (cli_tstop != CLI_SENTINEL) opts.tstop = cli_tstop;
+        if (cli_dt != CLI_SENTINEL) opts.dt = cli_dt;
+        if (cli_dtmax != CLI_SENTINEL) opts.dtmax = cli_dtmax;
+        if (cli_abstol != CLI_SENTINEL) opts.abstol = cli_abstol;
+        if (cli_reltol != CLI_SENTINEL) opts.reltol = cli_reltol;
+        if (cli_maxiter != CLI_SENTINEL_INT) opts.max_newton_iterations = cli_maxiter;
+        // Note: use_ic always comes from JSON only
+
         if (verbose) {
             std::cerr << "Circuit loaded:" << std::endl;
             std::cerr << "  Nodes: " << circuit.node_count() << std::endl;
@@ -66,6 +86,8 @@ int cmd_run(const std::string& netlist_file, const std::string& output_file,
             std::cerr << "  tstart: " << opts.tstart << "s" << std::endl;
             std::cerr << "  tstop: " << opts.tstop << "s" << std::endl;
             std::cerr << "  dt: " << opts.dt << "s" << std::endl;
+            std::cerr << "  dtmax: " << opts.dtmax << "s" << std::endl;
+            std::cerr << "  use_ic: " << (opts.use_ic ? "true" : "false") << std::endl;
         }
 
         Simulator sim(circuit, opts);
@@ -215,21 +237,31 @@ int main(int argc, char** argv) {
     auto* run_cmd = app.add_subcommand("run", "Run transient simulation");
     std::string netlist_file;
     std::string output_file;
-    SimulationOptions opts;
+    // Use sentinel values so we can detect if CLI option was explicitly provided
+    double cli_tstop = CLI_SENTINEL;
+    double cli_dt = CLI_SENTINEL;
+    double cli_dtmax = CLI_SENTINEL;
+    double cli_tstart = CLI_SENTINEL;
+    double cli_abstol = CLI_SENTINEL;
+    double cli_reltol = CLI_SENTINEL;
+    int cli_maxiter = CLI_SENTINEL_INT;
 
     run_cmd->add_option("netlist", netlist_file, "Netlist file (JSON format)")
         ->required()
         ->check(CLI::ExistingFile);
     run_cmd->add_option("-o,--output", output_file, "Output file (CSV)");
-    run_cmd->add_option("--tstop", opts.tstop, "Stop time")->default_val("1e-3");
-    run_cmd->add_option("--dt", opts.dt, "Time step")->default_val("1e-6");
-    run_cmd->add_option("--tstart", opts.tstart, "Start time")->default_val("0");
-    run_cmd->add_option("--abstol", opts.abstol, "Absolute tolerance")->default_val("1e-12");
-    run_cmd->add_option("--reltol", opts.reltol, "Relative tolerance")->default_val("1e-3");
-    run_cmd->add_option("--maxiter", opts.max_newton_iterations, "Max Newton iterations")->default_val("50");
+    run_cmd->add_option("--tstop", cli_tstop, "Stop time (overrides JSON)");
+    run_cmd->add_option("--dt", cli_dt, "Initial time step (overrides JSON)");
+    run_cmd->add_option("--dtmax", cli_dtmax, "Maximum time step (overrides JSON)");
+    run_cmd->add_option("--tstart", cli_tstart, "Start time (overrides JSON)");
+    run_cmd->add_option("--abstol", cli_abstol, "Absolute tolerance (overrides JSON)");
+    run_cmd->add_option("--reltol", cli_reltol, "Relative tolerance (overrides JSON)");
+    run_cmd->add_option("--maxiter", cli_maxiter, "Max Newton iterations (overrides JSON)");
 
     run_cmd->callback([&]() {
-        std::exit(cmd_run(netlist_file, output_file, opts, verbose, quiet));
+        std::exit(cmd_run(netlist_file, output_file, cli_tstop, cli_dt, cli_dtmax,
+                          cli_tstart, cli_abstol, cli_reltol, cli_maxiter,
+                          verbose, quiet));
     });
 
     // Validate command

@@ -34,6 +34,7 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_simulation.cpp
         tests/test_power_electronics.cpp
         tests/test_thermal.cpp
+        tests/test_cli.cpp
     )
 
     target_link_libraries(spicelab_tests
@@ -41,6 +42,11 @@ if(SPICELAB_BUILD_TESTS)
             spicelab::core
             Catch2::Catch2WithMain
     )
+
+    # Ensure the CLI executable is built before running integration tests that invoke it
+    if(TARGET spicelab)
+        add_dependencies(spicelab_tests spicelab)
+    endif()
 
     catch_discover_tests(spicelab_tests)
 endif()

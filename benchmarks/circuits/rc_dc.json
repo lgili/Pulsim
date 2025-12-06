@@ -1,0 +1,34 @@
+{
+    "name": "RC DC Step Response",
+    "description": "RC circuit with DC input (capacitor starts at 0V)",
+    "components": [
+        {
+            "type": "voltage_source",
+            "name": "V1",
+            "npos": "in",
+            "nneg": "0",
+            "waveform": 5.0
+        },
+        {
+            "type": "resistor",
+            "name": "R1",
+            "n1": "in",
+            "n2": "out",
+            "value": "1k"
+        },
+        {
+            "type": "capacitor",
+            "name": "C1",
+            "n1": "out",
+            "n2": "0",
+            "value": "1u",
+            "ic": 0.0
+        }
+    ],
+    "simulation": {
+        "type": "transient",
+        "tstop": 5e-3,
+        "dt": 1e-6,
+        "uic": true
+    }
+}

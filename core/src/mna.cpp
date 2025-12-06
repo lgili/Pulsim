@@ -1,6 +1,7 @@
 #include "spicelab/mna.hpp"
 #include <cmath>
 #include <stdexcept>
+#include <iostream>
 
 namespace spicelab {
 
