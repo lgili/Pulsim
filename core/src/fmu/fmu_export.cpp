@@ -286,7 +286,7 @@ std::string FmuExporter::generate_guid() {
     ss << "-4";  // Version 4 UUID
     for (int i = 0; i < 3; i++) ss << dis(gen);
     ss << "-";
-    ss << (dis(gen) & 0x3 | 0x8);  // Variant
+    ss << ((dis(gen) & 0x3) | 0x8);  // Variant
     for (int i = 0; i < 3; i++) ss << dis(gen);
     ss << "-";
     for (int i = 0; i < 12; i++) ss << dis(gen);
@@ -766,7 +766,7 @@ bool FmuExporter::write_source_files(const std::filesystem::path& fmu_dir) {
     }
 }
 
-bool FmuExporter::write_binaries(const std::filesystem::path& fmu_dir) {
+bool FmuExporter::write_binaries(const std::filesystem::path& /*fmu_dir*/) {
     // Note: Actual binary compilation would require invoking compiler
     // This is a placeholder - real implementation would compile the sources
     warnings_.push_back("Binary compilation not implemented - sources only");
@@ -792,19 +792,19 @@ bool FmuExporter::create_fmu_archive(const std::filesystem::path& fmu_dir,
 FmuModelExchange::FmuModelExchange() = default;
 FmuModelExchange::~FmuModelExchange() = default;
 
-bool FmuModelExchange::initialize(const std::string& instance_name,
-                                   const std::string& guid,
-                                   bool logging_on) {
+bool FmuModelExchange::initialize(const std::string& /*instance_name*/,
+                                   const std::string& /*guid*/,
+                                   bool /*logging_on*/) {
     // Create circuit and simulation
     circuit_ = std::make_unique<Circuit>();
     return true;
 }
 
 bool FmuModelExchange::setup_experiment(double start_time,
-                                         bool stop_time_defined,
-                                         double stop_time,
-                                         bool tolerance_defined,
-                                         double tolerance) {
+                                         bool /*stop_time_defined*/,
+                                         double /*stop_time*/,
+                                         bool /*tolerance_defined*/,
+                                         double /*tolerance*/) {
     current_time_ = start_time;
     return true;
 }
@@ -835,7 +835,7 @@ bool FmuModelExchange::new_discrete_states(bool& discrete_states_need_update,
                                             bool& nominals_of_continuous_states_changed,
                                             bool& values_of_continuous_states_changed,
                                             bool& next_event_time_defined,
-                                            double& next_event_time) {
+                                            double& /*next_event_time*/) {
     discrete_states_need_update = false;
     terminate_simulation = false;
     nominals_of_continuous_states_changed = false;
@@ -844,28 +844,28 @@ bool FmuModelExchange::new_discrete_states(bool& discrete_states_need_update,
     return true;
 }
 
-bool FmuModelExchange::get_real(const uint32_t* vr, size_t nvr, double* values) {
+bool FmuModelExchange::get_real(const uint32_t* /*vr*/, size_t /*nvr*/, double* /*values*/) {
     // Implementation would map value references to circuit values
     return true;
 }
 
-bool FmuModelExchange::set_real(const uint32_t* vr, size_t nvr, const double* values) {
+bool FmuModelExchange::set_real(const uint32_t* /*vr*/, size_t /*nvr*/, const double* /*values*/) {
     return true;
 }
 
-bool FmuModelExchange::get_integer(const uint32_t* vr, size_t nvr, int32_t* values) {
+bool FmuModelExchange::get_integer(const uint32_t* /*vr*/, size_t /*nvr*/, int32_t* /*values*/) {
     return true;
 }
 
-bool FmuModelExchange::set_integer(const uint32_t* vr, size_t nvr, const int32_t* values) {
+bool FmuModelExchange::set_integer(const uint32_t* /*vr*/, size_t /*nvr*/, const int32_t* /*values*/) {
     return true;
 }
 
-bool FmuModelExchange::get_boolean(const uint32_t* vr, size_t nvr, bool* values) {
+bool FmuModelExchange::get_boolean(const uint32_t* /*vr*/, size_t /*nvr*/, bool* /*values*/) {
     return true;
 }
 
-bool FmuModelExchange::set_boolean(const uint32_t* vr, size_t nvr, const bool* values) {
+bool FmuModelExchange::set_boolean(const uint32_t* /*vr*/, size_t /*nvr*/, const bool* /*values*/) {
     return true;
 }
 
@@ -912,7 +912,7 @@ bool FmuModelExchange::set_time(double time) {
     return true;
 }
 
-bool FmuModelExchange::completed_integrator_step(bool no_set_fmu_state_prior,
+bool FmuModelExchange::completed_integrator_step(bool /*no_set_fmu_state_prior*/,
                                                   bool& enter_event_mode,
                                                   bool& terminate_simulation) {
     enter_event_mode = check_events();
@@ -920,21 +920,21 @@ bool FmuModelExchange::completed_integrator_step(bool no_set_fmu_state_prior,
     return true;
 }
 
-bool FmuModelExchange::get_fmu_state(void** fmu_state) {
+bool FmuModelExchange::get_fmu_state(void** /*fmu_state*/) {
     return false;  // Not implemented
 }
 
-bool FmuModelExchange::set_fmu_state(void* fmu_state) {
+bool FmuModelExchange::set_fmu_state(void* /*fmu_state*/) {
     return false;
 }
 
-bool FmuModelExchange::free_fmu_state(void** fmu_state) {
+bool FmuModelExchange::free_fmu_state(void** /*fmu_state*/) {
     return false;
 }
 
-bool FmuModelExchange::get_directional_derivative(const uint32_t* unknown_refs, size_t n_unknown,
-                                                   const uint32_t* known_refs, size_t n_known,
-                                                   const double* seed, double* sensitivity) {
+bool FmuModelExchange::get_directional_derivative(const uint32_t* /*unknown_refs*/, size_t /*n_unknown*/,
+                                                   const uint32_t* /*known_refs*/, size_t /*n_known*/,
+                                                   const double* /*seed*/, double* /*sensitivity*/) {
     // Would compute Jacobian entries
     return false;
 }
@@ -981,16 +981,16 @@ bool FmuModelExchange::check_events() {
 FmuCoSimulation::FmuCoSimulation() = default;
 FmuCoSimulation::~FmuCoSimulation() = default;
 
-bool FmuCoSimulation::initialize(const std::string& instance_name,
-                                  const std::string& guid,
-                                  bool logging_on) {
+bool FmuCoSimulation::initialize(const std::string& /*instance_name*/,
+                                  const std::string& /*guid*/,
+                                  bool /*logging_on*/) {
     circuit_ = std::make_unique<Circuit>();
     return true;
 }
 
 bool FmuCoSimulation::setup_experiment(double start_time,
-                                        bool stop_time_defined,
-                                        double stop_time,
+                                        bool /*stop_time_defined*/,
+                                        double /*stop_time*/,
                                         bool tolerance_defined,
                                         double tolerance) {
     current_time_ = start_time;
@@ -1024,25 +1024,25 @@ bool FmuCoSimulation::set_real(const uint32_t* vr, size_t nvr, const double* val
     return true;
 }
 
-bool FmuCoSimulation::get_integer(const uint32_t* vr, size_t nvr, int32_t* values) {
+bool FmuCoSimulation::get_integer(const uint32_t* /*vr*/, size_t /*nvr*/, int32_t* /*values*/) {
     return true;
 }
 
-bool FmuCoSimulation::set_integer(const uint32_t* vr, size_t nvr, const int32_t* values) {
+bool FmuCoSimulation::set_integer(const uint32_t* /*vr*/, size_t /*nvr*/, const int32_t* /*values*/) {
     return true;
 }
 
-bool FmuCoSimulation::get_boolean(const uint32_t* vr, size_t nvr, bool* values) {
+bool FmuCoSimulation::get_boolean(const uint32_t* /*vr*/, size_t /*nvr*/, bool* /*values*/) {
     return true;
 }
 
-bool FmuCoSimulation::set_boolean(const uint32_t* vr, size_t nvr, const bool* values) {
+bool FmuCoSimulation::set_boolean(const uint32_t* /*vr*/, size_t /*nvr*/, const bool* /*values*/) {
     return true;
 }
 
 bool FmuCoSimulation::do_step(double current_communication_point,
                                double communication_step_size,
-                               bool no_set_fmu_state_prior,
+                               bool /*no_set_fmu_state_prior*/,
                                bool& early_return) {
     apply_inputs();
 
@@ -1066,35 +1066,35 @@ bool FmuCoSimulation::get_status(int* status) {
     return true;
 }
 
-bool FmuCoSimulation::get_real_status(int kind, double* value) {
+bool FmuCoSimulation::get_real_status(int /*kind*/, double* value) {
     *value = current_time_;
     return true;
 }
 
-bool FmuCoSimulation::get_integer_status(int kind, int* value) {
+bool FmuCoSimulation::get_integer_status(int /*kind*/, int* value) {
     *value = 0;
     return true;
 }
 
-bool FmuCoSimulation::get_boolean_status(int kind, bool* value) {
+bool FmuCoSimulation::get_boolean_status(int /*kind*/, bool* value) {
     *value = false;
     return true;
 }
 
-bool FmuCoSimulation::get_string_status(int kind, std::string& value) {
+bool FmuCoSimulation::get_string_status(int /*kind*/, std::string& value) {
     value = "";
     return true;
 }
 
-bool FmuCoSimulation::get_fmu_state(void** fmu_state) {
+bool FmuCoSimulation::get_fmu_state(void** /*fmu_state*/) {
     return false;
 }
 
-bool FmuCoSimulation::set_fmu_state(void* fmu_state) {
+bool FmuCoSimulation::set_fmu_state(void* /*fmu_state*/) {
     return false;
 }
 
-bool FmuCoSimulation::free_fmu_state(void** fmu_state) {
+bool FmuCoSimulation::free_fmu_state(void** /*fmu_state*/) {
     return false;
 }
 

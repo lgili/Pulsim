@@ -527,7 +527,7 @@ Real Simulator::calculate_reverse_recovery_loss(const Component& diode_comp, Rea
     return loss;
 }
 
-void Simulator::update_diode_states(const Vector& x, const Vector& x_prev, Real dt) {
+void Simulator::update_diode_states(const Vector& x, const Vector& /*x_prev*/, Real dt) {
     for (const auto& comp : circuit_.components()) {
         if (comp.type() != ComponentType::Diode) continue;
 

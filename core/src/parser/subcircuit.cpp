@@ -248,7 +248,7 @@ void SubcircuitExpander::expand_into(
     }
 
     const auto& ports = subckt->ports();
-    const auto& defaults = subckt->parameters();
+    [[maybe_unused]] const auto& defaults = subckt->parameters();
 
     // Expand components
     for (const auto& comp : subckt->components()) {

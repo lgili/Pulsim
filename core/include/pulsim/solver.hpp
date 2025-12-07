@@ -16,9 +16,9 @@ struct LinearSolveResult {
 // Result of Newton iteration
 struct NewtonResult {
     Vector x;
-    SolverStatus status;
-    int iterations;
-    Real final_residual;
+    SolverStatus status = SolverStatus::NumericalError;
+    int iterations = 0;
+    Real final_residual = 0.0;
     std::string error_message;
 };
 
