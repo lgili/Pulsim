@@ -63,6 +63,8 @@ if(APPLE)
             set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
         endif()
     endif()
+    # Use older libc++ ABI for broader macOS compatibility and avoid newer symbols
+    add_compile_definitions(_LIBCPP_ABI_VERSION=1 _LIBCPP_DISABLE_AVAILABILITY)
     add_compile_options(-stdlib=libc++)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
 endif()
