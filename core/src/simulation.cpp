@@ -313,6 +313,17 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
                         // Calculate switching loss (already accumulated in the function)
                         calculate_switching_loss(comp, *state, v_switch, i_switch, would_close);
 
+                        // Record event in result
+                        SimulationEvent sim_event;
+                        sim_event.time = t_event;
+                        sim_event.type = would_close ? SimulationEventType::SwitchClose
+                                                     : SimulationEventType::SwitchOpen;
+                        sim_event.component = comp.name();
+                        sim_event.description = comp.name() + (would_close ? " closed" : " opened");
+                        sim_event.value1 = v_switch;
+                        sim_event.value2 = i_switch;
+                        result.events.push_back(sim_event);
+
                         // Fire event callback
                         if (event_callback) {
                             SwitchEvent event;
@@ -356,10 +367,22 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
         time = next_time;
         step_count++;
 
-        // Store result
-        result.time.push_back(time);
-        result.data.push_back(x);
+        // Decimation and rolling buffer storage
+        bool should_store = (options_.streaming_decimation <= 1) ||
+                           (step_count % options_.streaming_decimation == 0);
 
+        if (should_store) {
+            // Rolling buffer: remove oldest point if at capacity
+            if (options_.streaming_rolling_buffer &&
+                static_cast<int64_t>(result.time.size()) >= options_.streaming_max_points) {
+                result.time.erase(result.time.begin());
+                result.data.erase(result.data.begin());
+            }
+            result.time.push_back(time);
+            result.data.push_back(x);
+        }
+
+        // Callback is separate from storage (invoked every step for real-time updates)
         if (callback) {
             callback(time, x);
         }
@@ -375,6 +398,299 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
 
     auto end_time = std::chrono::high_resolution_clock::now();
     result.total_time_seconds = std::chrono::duration<double>(end_time - start_time).count();
+
+    // Compute average newton iterations
+    if (step_count > 0) {
+        result.average_newton_iterations = static_cast<double>(result.newton_iterations_total) / step_count;
+    }
+
+    // Populate solver info
+    result.solver_info.method = options_.integration_method;
+    result.solver_info.abstol = options_.abstol;
+    result.solver_info.reltol = options_.reltol;
+    result.solver_info.adaptive_timestep = options_.adaptive_timestep;
+
+    return result;
+}
+
+SimulationResult Simulator::run_transient_with_progress(
+    SimulationCallback callback,
+    EventCallback event_callback,
+    SimulationControl* control,
+    const ProgressCallbackConfig& progress_config) {
+
+    SimulationResult result;
+    auto start_time = std::chrono::high_resolution_clock::now();
+    auto last_progress_time = start_time;
+
+    Index n = circuit_.total_variables();
+
+    // Reset power losses and performance counters
+    power_losses_ = PowerLosses{};
+    int convergence_failures = 0;
+    int timestep_reductions = 0;
+
+    // Build signal names and signal info
+    for (Index i = 0; i < n; ++i) {
+        result.signal_names.push_back(circuit_.signal_name(i));
+
+        // Build signal info
+        SignalInfo info;
+        info.name = circuit_.signal_name(i);
+        if (i < circuit_.node_count()) {
+            info.type = "voltage";
+            info.unit = "V";
+            info.nodes.push_back(circuit_.node_name(i));
+        } else {
+            info.type = "current";
+            info.unit = "A";
+        }
+        result.signal_info.push_back(info);
+    }
+
+    // Get initial state
+    Vector x;
+    if (options_.use_ic) {
+        x = Vector::Zero(n);
+    } else {
+        auto dc_result = dc_operating_point();
+        if (dc_result.status != SolverStatus::Success) {
+            result.final_status = dc_result.status;
+            result.error_message = "DC operating point failed: " + dc_result.error_message;
+            return result;
+        }
+        x = dc_result.x;
+        result.newton_iterations_total += dc_result.iterations;
+    }
+
+    // Initialize switch states
+    assembler_.update_switch_states(x, options_.tstart);
+
+    // Store initial state
+    Real time = options_.tstart;
+    result.time.push_back(time);
+    result.data.push_back(x);
+
+    if (callback) {
+        callback(time, x);
+    }
+
+    // Estimate total steps
+    Real total_sim_time = options_.tstop - options_.tstart;
+    int64_t estimated_steps = static_cast<int64_t>(total_sim_time / options_.dt);
+
+    // Time stepping loop
+    Real dt = options_.dt;
+    int step_count = 0;
+    int steps_since_progress = 0;
+
+    while (time < options_.tstop) {
+        // Handle pause/stop via control
+        if (control) {
+            if (control->should_stop()) {
+                result.final_status = SolverStatus::Success;
+                result.error_message = "Simulation stopped by user";
+                break;
+            }
+            while (control->should_pause() && !control->should_stop()) {
+                control->wait_until_resumed();
+            }
+            if (control->should_stop()) {
+                result.final_status = SolverStatus::Success;
+                result.error_message = "Simulation stopped by user";
+                break;
+            }
+        }
+
+        // Don't overshoot tstop
+        if (time + dt > options_.tstop) {
+            dt = options_.tstop - time;
+        }
+
+        Real next_time = time + dt;
+        auto step_result = step(next_time, dt, x);
+
+        if (step_result.status != SolverStatus::Success) {
+            // Try with smaller timestep
+            bool converged = false;
+            Real dt_try = dt * 0.5;
+            timestep_reductions++;
+
+            while (dt_try >= options_.dtmin && !converged) {
+                next_time = time + dt_try;
+                step_result = step(next_time, dt_try, x);
+
+                if (step_result.status == SolverStatus::Success) {
+                    converged = true;
+                    dt = dt_try;
+                } else {
+                    dt_try *= 0.5;
+                    timestep_reductions++;
+                }
+            }
+
+            if (!converged) {
+                result.final_status = step_result.status;
+                result.error_message = "Simulation failed at t=" + std::to_string(time) +
+                                      ": " + step_result.error_message;
+                break;
+            }
+        }
+
+        result.newton_iterations_total += step_result.iterations;
+
+        // Track convergence issues
+        if (step_result.iterations > 10) {
+            convergence_failures++;
+        }
+
+        // Check for switch events
+        if (assembler_.check_switch_events(step_result.x)) {
+            Real t_event;
+            Vector x_event;
+            if (find_event_time(time, next_time, x, t_event, x_event)) {
+                for (const auto& comp : circuit_.components()) {
+                    if (comp.type() != ComponentType::Switch) continue;
+
+                    const SwitchState* state = assembler_.find_switch_state(comp.name());
+                    if (!state) continue;
+
+                    const auto& params = std::get<SwitchParams>(comp.params());
+                    Index n_ctrl_pos = circuit_.node_index(comp.nodes()[2]);
+                    Index n_ctrl_neg = circuit_.node_index(comp.nodes()[3]);
+                    Real v_ctrl = 0.0;
+                    if (n_ctrl_pos >= 0) v_ctrl += x_event(n_ctrl_pos);
+                    if (n_ctrl_neg >= 0) v_ctrl -= x_event(n_ctrl_neg);
+
+                    bool would_close = v_ctrl > params.vth;
+                    if (would_close != state->is_closed) {
+                        Index n1 = circuit_.node_index(comp.nodes()[0]);
+                        Index n2 = circuit_.node_index(comp.nodes()[1]);
+                        Real v_switch = 0.0;
+                        if (n1 >= 0) v_switch += x_event(n1);
+                        if (n2 >= 0) v_switch -= x_event(n2);
+                        Real R = state->is_closed ? params.ron : params.roff;
+                        Real i_switch = v_switch / R;
+
+                        calculate_switching_loss(comp, *state, v_switch, i_switch, would_close);
+
+                        // Record event in result
+                        SimulationEvent sim_event;
+                        sim_event.time = t_event;
+                        sim_event.type = would_close ? SimulationEventType::SwitchClose
+                                                     : SimulationEventType::SwitchOpen;
+                        sim_event.component = comp.name();
+                        sim_event.description = comp.name() + (would_close ? " closed" : " opened");
+                        sim_event.value1 = v_switch;
+                        sim_event.value2 = i_switch;
+                        result.events.push_back(sim_event);
+
+                        if (event_callback) {
+                            SwitchEvent event;
+                            event.switch_name = comp.name();
+                            event.time = t_event;
+                            event.new_state = would_close;
+                            event.voltage = v_switch;
+                            event.current = i_switch;
+                            event_callback(event);
+                        }
+                    }
+                }
+
+                assembler_.update_switch_states(x_event, t_event);
+                Real dt_remaining = next_time - t_event;
+                if (dt_remaining > options_.dtmin) {
+                    step_result = step(next_time, dt_remaining, x_event);
+                } else {
+                    step_result.x = x_event;
+                }
+            } else {
+                assembler_.update_switch_states(step_result.x, next_time);
+            }
+        } else {
+            assembler_.update_switch_states(step_result.x, next_time);
+        }
+
+        accumulate_conduction_losses(step_result.x, dt);
+        update_diode_states(step_result.x, x, dt);
+
+        x = step_result.x;
+        time = next_time;
+        step_count++;
+        steps_since_progress++;
+
+        // Decimation and rolling buffer storage
+        bool should_store = (options_.streaming_decimation <= 1) ||
+                           (step_count % options_.streaming_decimation == 0);
+
+        if (should_store) {
+            // Rolling buffer: remove oldest point if at capacity
+            if (options_.streaming_rolling_buffer &&
+                static_cast<int64_t>(result.time.size()) >= options_.streaming_max_points) {
+                result.time.erase(result.time.begin());
+                result.data.erase(result.data.begin());
+            }
+            result.time.push_back(time);
+            result.data.push_back(x);
+        }
+
+        // Callback is separate from storage (invoked every step for real-time updates)
+        if (callback) {
+            callback(time, x);
+        }
+
+        // Progress callback with throttling
+        if (progress_config.callback) {
+            auto now = std::chrono::high_resolution_clock::now();
+            double ms_since_last = std::chrono::duration<double, std::milli>(now - last_progress_time).count();
+
+            if (ms_since_last >= progress_config.min_interval_ms ||
+                steps_since_progress >= progress_config.min_steps) {
+
+                SimulationProgress progress;
+                progress.current_time = time;
+                progress.total_time = options_.tstop;
+                progress.progress_percent = 100.0 * (time - options_.tstart) / total_sim_time;
+                progress.steps_completed = step_count;
+                progress.total_steps_estimate = estimated_steps;
+                progress.newton_iterations = step_result.iterations;
+                progress.convergence_warning = (step_result.iterations > 10);
+                progress.elapsed_seconds = std::chrono::duration<double>(now - start_time).count();
+
+                // Estimate remaining time
+                if (progress.progress_percent > 0.1) {
+                    double rate = progress.elapsed_seconds / (progress.progress_percent / 100.0);
+                    progress.estimated_remaining_seconds = rate * (1.0 - progress.progress_percent / 100.0);
+                }
+
+                progress_config.callback(progress);
+                last_progress_time = now;
+                steps_since_progress = 0;
+            }
+        }
+
+        // Adaptive timestep
+        if (step_result.iterations < 5 && dt < options_.dtmax) {
+            dt = std::min(dt * 1.2, options_.dtmax);
+        }
+    }
+
+    result.total_steps = step_count;
+    result.final_status = SolverStatus::Success;
+    result.convergence_failures = convergence_failures;
+    result.timestep_reductions = timestep_reductions;
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    result.total_time_seconds = std::chrono::duration<double>(end_time - start_time).count();
+
+    if (step_count > 0) {
+        result.average_newton_iterations = static_cast<double>(result.newton_iterations_total) / step_count;
+    }
+
+    result.solver_info.method = options_.integration_method;
+    result.solver_info.abstol = options_.abstol;
+    result.solver_info.reltol = options_.reltol;
+    result.solver_info.adaptive_timestep = options_.adaptive_timestep;
 
     return result;
 }

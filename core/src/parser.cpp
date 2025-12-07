@@ -335,6 +335,17 @@ ParseResult<Circuit> NetlistParser::parse_json(const std::string& content) {
             else {
                 return ParseError{"Unknown component type: " + type};
             }
+
+            // Parse schematic position if present
+            if (comp.contains("position") && comp["position"].is_object()) {
+                const auto& pos = comp["position"];
+                SchematicPosition schematic_pos;
+                schematic_pos.x = pos.value("x", 0.0);
+                schematic_pos.y = pos.value("y", 0.0);
+                schematic_pos.orientation = pos.value("orientation", 0);
+                schematic_pos.mirrored = pos.value("mirrored", false);
+                circuit.set_position(name, schematic_pos);
+            }
         } catch (const std::exception& e) {
             return ParseError{"Error parsing component " + name + ": " + e.what()};
         }
@@ -389,6 +400,177 @@ ParseResult<SimulationOptions> NetlistParser::parse_simulation_options(const std
     std::stringstream buffer;
     buffer << file.rdbuf();
     return parse_options(buffer.str());
+}
+
+std::string NetlistParser::to_json(const Circuit& circuit, bool include_positions) {
+    json j;
+    json components = json::array();
+
+    auto waveform_to_json = [](const Waveform& wf) -> json {
+        return std::visit([](auto&& w) -> json {
+            using T = std::decay_t<decltype(w)>;
+            if constexpr (std::is_same_v<T, DCWaveform>) {
+                return w.value;
+            } else if constexpr (std::is_same_v<T, PulseWaveform>) {
+                return json{
+                    {"type", "pulse"},
+                    {"v1", w.v1}, {"v2", w.v2},
+                    {"td", w.td}, {"tr", w.tr}, {"tf", w.tf},
+                    {"pw", w.pw}, {"period", w.period}
+                };
+            } else if constexpr (std::is_same_v<T, SineWaveform>) {
+                return json{
+                    {"type", "sin"},
+                    {"offset", w.offset}, {"amplitude", w.amplitude},
+                    {"frequency", w.frequency}, {"delay", w.delay},
+                    {"damping", w.damping}
+                };
+            } else if constexpr (std::is_same_v<T, PWLWaveform>) {
+                json pts = json::array();
+                for (const auto& [t, v] : w.points) {
+                    pts.push_back(json::array({t, v}));
+                }
+                return json{{"type", "pwl"}, {"points", pts}};
+            } else if constexpr (std::is_same_v<T, PWMWaveform>) {
+                return json{
+                    {"type", "pwm"},
+                    {"v_off", w.v_off}, {"v_on", w.v_on},
+                    {"frequency", w.frequency}, {"duty", w.duty},
+                    {"dead_time", w.dead_time}, {"phase", w.phase},
+                    {"complementary", w.complementary}
+                };
+            }
+            return json{};
+        }, wf);
+    };
+
+    for (const auto& comp : circuit.components()) {
+        json c;
+        c["name"] = comp.name();
+        const auto& nodes = comp.nodes();
+
+        switch (comp.type()) {
+            case ComponentType::Resistor: {
+                c["type"] = "resistor";
+                c["n1"] = nodes[0];
+                c["n2"] = nodes[1];
+                const auto& p = std::get<ResistorParams>(comp.params());
+                c["value"] = p.resistance;
+                break;
+            }
+            case ComponentType::Capacitor: {
+                c["type"] = "capacitor";
+                c["n1"] = nodes[0];
+                c["n2"] = nodes[1];
+                const auto& p = std::get<CapacitorParams>(comp.params());
+                c["value"] = p.capacitance;
+                if (p.initial_voltage != 0.0) c["ic"] = p.initial_voltage;
+                break;
+            }
+            case ComponentType::Inductor: {
+                c["type"] = "inductor";
+                c["n1"] = nodes[0];
+                c["n2"] = nodes[1];
+                const auto& p = std::get<InductorParams>(comp.params());
+                c["value"] = p.inductance;
+                if (p.initial_current != 0.0) c["ic"] = p.initial_current;
+                break;
+            }
+            case ComponentType::VoltageSource: {
+                c["type"] = "voltage_source";
+                c["npos"] = nodes[0];
+                c["nneg"] = nodes[1];
+                const auto& p = std::get<VoltageSourceParams>(comp.params());
+                c["waveform"] = waveform_to_json(p.waveform);
+                break;
+            }
+            case ComponentType::CurrentSource: {
+                c["type"] = "current_source";
+                c["npos"] = nodes[0];
+                c["nneg"] = nodes[1];
+                const auto& p = std::get<CurrentSourceParams>(comp.params());
+                c["waveform"] = waveform_to_json(p.waveform);
+                break;
+            }
+            case ComponentType::Diode: {
+                c["type"] = "diode";
+                c["anode"] = nodes[0];
+                c["cathode"] = nodes[1];
+                const auto& p = std::get<DiodeParams>(comp.params());
+                c["is"] = p.is;
+                c["n"] = p.n;
+                c["ideal"] = p.ideal;
+                break;
+            }
+            case ComponentType::Switch: {
+                c["type"] = "switch";
+                c["n1"] = nodes[0];
+                c["n2"] = nodes[1];
+                c["ctrl_pos"] = nodes[2];
+                c["ctrl_neg"] = nodes[3];
+                const auto& p = std::get<SwitchParams>(comp.params());
+                c["ron"] = p.ron;
+                c["roff"] = p.roff;
+                c["vth"] = p.vth;
+                c["initial_state"] = p.initial_state;
+                break;
+            }
+            case ComponentType::MOSFET: {
+                c["type"] = "mosfet";
+                c["drain"] = nodes[0];
+                c["gate"] = nodes[1];
+                c["source"] = nodes[2];
+                const auto& p = std::get<MOSFETParams>(comp.params());
+                c["pmos"] = (p.type == MOSFETType::PMOS);
+                c["vth"] = p.vth;
+                c["rds_on"] = p.rds_on;
+                break;
+            }
+            case ComponentType::IGBT: {
+                c["type"] = "igbt";
+                c["collector"] = nodes[0];
+                c["gate"] = nodes[1];
+                c["emitter"] = nodes[2];
+                const auto& p = std::get<IGBTParams>(comp.params());
+                c["vth"] = p.vth;
+                c["vce_sat"] = p.vce_sat;
+                c["rce_on"] = p.rce_on;
+                break;
+            }
+            case ComponentType::Transformer: {
+                c["type"] = "transformer";
+                c["p1"] = nodes[0];
+                c["p2"] = nodes[1];
+                c["s1"] = nodes[2];
+                c["s2"] = nodes[3];
+                const auto& p = std::get<TransformerParams>(comp.params());
+                c["turns_ratio"] = p.turns_ratio;
+                c["lm"] = p.lm;
+                break;
+            }
+            default:
+                c["type"] = "unknown";
+                break;
+        }
+
+        // Add position if present and requested
+        if (include_positions && circuit.has_position(comp.name())) {
+            auto pos = circuit.get_position(comp.name());
+            if (pos) {
+                c["position"] = json{
+                    {"x", pos->x},
+                    {"y", pos->y},
+                    {"orientation", pos->orientation},
+                    {"mirrored", pos->mirrored}
+                };
+            }
+        }
+
+        components.push_back(c);
+    }
+
+    j["components"] = components;
+    return j.dump(2);  // Pretty print with 2 spaces
 }
 
 }  // namespace pulsim
