@@ -25,11 +25,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set package version from tag
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          python -c "import os,re,pathlib; ver=os.environ['VERSION']; p=pathlib.Path('pyproject.toml'); txt=p.read_text(); new=re.sub(r'(?m)^(version\\s*=\\s*\"[^\"]+\"\\s*$)', lambda m: f\"version = \"{ver}\"\" if 'version' in m.group(0) else m.group(0), txt, count=1); assert new!=txt, 'version key not found in pyproject.toml'; p.write_text(new); print(f'version set to {ver}')"
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -46,39 +41,13 @@ jobs:
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
           CIBW_BEFORE_BUILD_LINUX: |
-            # manylinux images are minimal; ensure Python build tooling and CMake/Ninja are available.
-            python -m pip install --upgrade pip
-            python -m pip install --upgrade setuptools wheel
-            # Install scikit-build-core and pybind11 so CMake integration is available during build
-            python -m pip install scikit-build-core pybind11
-            # Install cmake and ninja (prebuilt wheels) to provide binaries used by scikit-build
+            python -m pip install --upgrade pip setuptools wheel
             python -m pip install cmake ninja
-          CIBW_ENVIRONMENT_LINUX: |
-            Python3_ROOT_DIR=/opt/python/{python}
-            Python3_EXECUTABLE=/opt/python/{python}/bin/python
-            CMAKE_PREFIX_PATH=/opt/python/{python}
-            # libpython symlink path
-            Python3_LIBRARY=/opt/python/{python}/lib/libpython3.so
           CIBW_BEFORE_BUILD_MACOS: |
-            # Force use of system Xcode clang to match Python's C++ ABI
-            export CC=/usr/bin/clang
-            export CXX=/usr/bin/clang++
-            export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
-            export MACOSX_DEPLOYMENT_TARGET=11.0
             brew install cmake ninja
-          CIBW_ENVIRONMENT_MACOS: |
-            Python3_ROOT_DIR={python}
-            Python3_EXECUTABLE={python}
-          CIBW_BUILD_VERBOSITY: 3
-          CIBW_TEST_REQUIRES: "pytest numpy"
-          CIBW_TEST_COMMAND: |
-            TMP_DIR=$(mktemp -d)
-            cp -R {project}/python/tests "$TMP_DIR"/tests
-            PYTHONPATH=$(python - <<'PY'
-            import site
-            print(site.getsitepackages()[0])
-            PY
-            ) pytest "$TMP_DIR"/tests -v
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_TEST_REQUIRES: pytest numpy
+          CIBW_TEST_COMMAND: pytest {project}/python/tests -v
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -92,11 +61,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set package version from tag
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          python -c "import os,re,pathlib; ver=os.environ['VERSION']; p=pathlib.Path('pyproject.toml'); txt=p.read_text(); new=re.sub(r'(?m)^(version\\s*=\\s*\"[^\"]+\"\\s*$)', lambda m: f\"version = \"{ver}\"\" if 'version' in m.group(0) else m.group(0), txt, count=1); assert new!=txt, 'version key not found in pyproject.toml'; p.write_text(new); print(f'version set to {ver}')"
 
       - name: Set up Python
         uses: actions/setup-python@v5
