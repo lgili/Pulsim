@@ -8,6 +8,7 @@
 #include "pulsim/parser.hpp"
 #include "pulsim/simulation.hpp"
 #include "pulsim/thermal.hpp"
+#include "pulsim/devices.hpp"
 
 namespace py = pybind11;
 using namespace pulsim;
@@ -112,6 +113,20 @@ PYBIND11_MODULE(_pulsim, m) {
         .def_readwrite("body_diode", &MOSFETParams::body_diode)
         .def_readwrite("rds_on", &MOSFETParams::rds_on)
         .def("kp_effective", &MOSFETParams::kp_effective);
+
+    py::class_<IGBTParams>(m, "IGBTParams")
+        .def(py::init<>())
+        .def_readwrite("vth", &IGBTParams::vth)
+        .def_readwrite("vce_sat", &IGBTParams::vce_sat)
+        .def_readwrite("rce_on", &IGBTParams::rce_on)
+        .def_readwrite("rce_off", &IGBTParams::rce_off)
+        .def_readwrite("tf", &IGBTParams::tf)
+        .def_readwrite("tr", &IGBTParams::tr)
+        .def_readwrite("cies", &IGBTParams::cies)
+        .def_readwrite("body_diode", &IGBTParams::body_diode)
+        .def_readwrite("is_diode", &IGBTParams::is_diode)
+        .def_readwrite("n_diode", &IGBTParams::n_diode)
+        .def_readwrite("vf_diode", &IGBTParams::vf_diode);
 
     py::class_<TransformerParams>(m, "TransformerParams")
         .def(py::init<>())
@@ -328,6 +343,49 @@ PYBIND11_MODULE(_pulsim, m) {
     m.def("fit_foster_network", &fit_foster_network,
           py::arg("zth_curve"), py::arg("num_stages") = 4,
           "Fit a Foster network from Zth curve datasheet points");
+
+    // --- Device Library ---
+    auto devices_mod = m.def_submodule("devices", "Pre-defined device parameter library");
+
+    // Diodes
+    devices_mod.def("diode_1N4007", &devices::diode_1N4007,
+        "General purpose rectifier diode 1N4007 (1000V, 1A)");
+    devices_mod.def("diode_1N4148", &devices::diode_1N4148,
+        "Small signal fast switching diode 1N4148 (100V)");
+    devices_mod.def("diode_1N5819", &devices::diode_1N5819,
+        "Schottky diode 1N5819 (40V, low forward voltage)");
+    devices_mod.def("diode_MUR860", &devices::diode_MUR860,
+        "Fast recovery diode MUR860 (600V, 8A, 50ns)");
+    devices_mod.def("diode_C3D10065A", &devices::diode_C3D10065A,
+        "SiC Schottky diode C3D10065A (650V, zero recovery)");
+
+    // MOSFETs
+    devices_mod.def("mosfet_IRF540N", &devices::mosfet_IRF540N,
+        "N-channel MOSFET IRF540N (100V, 33A, 44mOhm)");
+    devices_mod.def("mosfet_IRFZ44N", &devices::mosfet_IRFZ44N,
+        "N-channel MOSFET IRFZ44N (55V, 49A, 17.5mOhm)");
+    devices_mod.def("mosfet_IRF9540", &devices::mosfet_IRF9540,
+        "P-channel MOSFET IRF9540 (-100V, -23A)");
+    devices_mod.def("mosfet_BSC0902NS", &devices::mosfet_BSC0902NS,
+        "High-efficiency MOSFET BSC0902NS (30V, 2.1mOhm)");
+    devices_mod.def("mosfet_EPC2001C", &devices::mosfet_EPC2001C,
+        "GaN FET EPC2001C (100V, 4mOhm, ultra-fast)");
+
+    // IGBTs
+    devices_mod.def("igbt_IRG4PC40UD", &devices::igbt_IRG4PC40UD,
+        "General purpose IGBT IRG4PC40UD (600V, 40A)");
+    devices_mod.def("igbt_IRG4BC30KD", &devices::igbt_IRG4BC30KD,
+        "High-speed IGBT IRG4BC30KD (600V, 30A)");
+    devices_mod.def("igbt_IKW40N120H3", &devices::igbt_IKW40N120H3,
+        "High-voltage IGBT IKW40N120H3 (1200V, 40A)");
+
+    // Switches
+    devices_mod.def("switch_ideal", &devices::switch_ideal,
+        "Ideal switch (1uOhm on, 1TOhm off)");
+    devices_mod.def("switch_relay", &devices::switch_relay,
+        "Mechanical relay model (100mOhm contact)");
+    devices_mod.def("switch_ssr", &devices::switch_ssr,
+        "Solid-state relay model (20mOhm)");
 
     // Version info
     m.attr("__version__") = "0.1.0";

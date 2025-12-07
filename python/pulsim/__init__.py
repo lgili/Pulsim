@@ -20,6 +20,7 @@ from ._pulsim import (
     DiodeParams,
     SwitchParams,
     MOSFETParams,
+    IGBTParams,
     TransformerParams,
 
     # Simulation
@@ -44,6 +45,9 @@ from ._pulsim import (
     ThermalSimulator,
     create_mosfet_thermal,
     fit_foster_network,
+
+    # Device Library
+    devices,
 )
 
 __all__ = [
@@ -64,6 +68,7 @@ __all__ = [
     "DiodeParams",
     "SwitchParams",
     "MOSFETParams",
+    "IGBTParams",
     "TransformerParams",
 
     # Simulation
@@ -88,6 +93,9 @@ __all__ = [
     "ThermalSimulator",
     "create_mosfet_thermal",
     "fit_foster_network",
+
+    # Device Library
+    "devices",
 
     # Version
     "__version__",

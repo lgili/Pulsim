@@ -34,9 +34,15 @@ MOSFETLevel1::MOSFETLevel1(const MOSFETModelParams& params)
 {}
 
 Real MOSFETLevel1::compute_vth(Real vbs, Real temp) const {
-    // Threshold voltage with body effect
+    // Threshold voltage with body effect and temperature dependence
     Real vth = params_.vth0;
 
+    // Temperature dependence of Vth (typically -2mV/K for NMOS)
+    // Vth(T) = Vth(Tnom) + KT1 * (T - Tnom)
+    constexpr Real KT1 = -2.0e-3;  // Temperature coefficient (V/K)
+    vth += KT1 * (temp - params_.tnom);
+
+    // Body effect
     if (params_.gamma > 0) {
         Real phi_t = params_.phi * (temp / params_.tnom);
         vth += params_.gamma * (safe_sqrt(phi_t - vbs) - safe_sqrt(phi_t));
@@ -435,14 +441,19 @@ void MOSFETBSIM3::set_instance(const MOSFETInstance& inst) {
 void MOSFETBSIM3::compute_size_params() const {
     if (size_params_valid_) return;
 
-    // Effective length and width
-    leff_ = inst_.l - 2.0 * params_.ld;
-    weff_ = inst_.w - 2.0 * params_.wd;
+    // Effective length and width (with minimum value protection)
+    leff_ = std::max(inst_.l - 2.0 * params_.ld, 1e-9);
+    weff_ = std::max(inst_.w - 2.0 * params_.wd, 1e-9);
 
-    // Size-dependent threshold voltage
-    Real t0 = params_.dvt1 * leff_ / params_.nlx;
-    Real t1 = std::exp(-t0);
-    Real dsub = params_.dvt0 * (1.0 - t1) / t0;
+    // Size-dependent threshold voltage (short-channel effect)
+    Real dsub = 0.0;
+    if (params_.nlx > 0 && params_.dvt0 != 0) {
+        Real t0 = params_.dvt1 * leff_ / params_.nlx;
+        if (std::abs(t0) > 1e-10) {
+            Real t1 = std::exp(-std::min(t0, 50.0));  // Limit to prevent overflow
+            dsub = params_.dvt0 * (1.0 - t1) / t0;
+        }
+    }
 
     vth0_eff_ = params_.vth0 - dsub;
 
@@ -587,11 +598,20 @@ MOSFETOpPoint MOSFETBSIM3::evaluate(Real vgs, Real vds, Real vbs, Real temp) con
 
         // Numerical derivatives for gm and gds
         Real delta = 1e-6;
-        Real ids_gm = compute_ids_sat(vgs_eff + delta, vds_eff, vth_eff, op.vdsat, temp);
-        Real ids_gds = compute_ids_sat(vgs_eff, vds_eff + delta, vth_eff, op.vdsat, temp);
+        Real ids_base = std::abs(op.ids);
 
-        op.gm = (ids_gm - std::abs(op.ids)) / delta;
-        op.gds = (ids_gds - std::abs(op.ids)) / delta;
+        // Use correct function based on region
+        if (op.region == MOSRegion::LINEAR) {
+            Real ids_gm = compute_ids_linear(vgs_eff + delta, vds_eff, vth_eff, op.vdsat, temp);
+            Real ids_gds = compute_ids_linear(vgs_eff, vds_eff + delta, vth_eff, op.vdsat, temp);
+            op.gm = (ids_gm - ids_base) / delta;
+            op.gds = (ids_gds - ids_base) / delta;
+        } else {
+            Real ids_gm = compute_ids_sat(vgs_eff + delta, vds_eff, vth_eff, op.vdsat, temp);
+            Real ids_gds = compute_ids_sat(vgs_eff, vds_eff + delta, vth_eff, op.vdsat, temp);
+            op.gm = (ids_gm - ids_base) / delta;
+            op.gds = (ids_gds - ids_base) / delta;
+        }
     }
 
     // Body transconductance
@@ -632,24 +652,34 @@ Real MOSFETEKV::compute_n(Real vp, Real vbs) const {
 }
 
 Real MOSFETEKV::compute_if(Real vp, Real vs) const {
-    // Forward normalized current (EKV)
+    // Forward normalized current using smooth EKV interpolation function
+    // This ensures continuous transition between weak and strong inversion
     Real x = (vp - vs);
-    if (x > 0) {
+    // Smooth interpolation: (ln(1 + exp(x/2)))^2
+    // For large positive x: approaches (x/2)^2 (strong inversion)
+    // For large negative x: approaches exp(x) (weak inversion)
+    if (x > 40.0) {
         Real t = x / 2.0;
-        return t * t;  // Strong inversion
+        return t * t;  // Avoid overflow
+    } else if (x < -40.0) {
+        return std::exp(x);  // Avoid underflow in ln(1+exp)
     } else {
-        return std::exp(x);  // Weak inversion
+        Real t = std::log1p(std::exp(x / 2.0));
+        return t * t;
     }
 }
 
 Real MOSFETEKV::compute_ir(Real vp, Real vd) const {
-    // Reverse normalized current (EKV)
+    // Reverse normalized current using smooth EKV interpolation
     Real x = (vp - vd);
-    if (x > 0) {
+    if (x > 40.0) {
         Real t = x / 2.0;
         return t * t;
-    } else {
+    } else if (x < -40.0) {
         return std::exp(x);
+    } else {
+        Real t = std::log1p(std::exp(x / 2.0));
+        return t * t;
     }
 }
 
@@ -726,18 +756,38 @@ MOSFETOpPoint MOSFETEKV::evaluate(Real vgs, Real vds, Real vbs, Real temp) const
 
     op.vdsat = std::max(vp, 0.0);
 
-    // Transconductances (numerical)
+    // Transconductances using central difference for better accuracy
     Real delta = 1e-6;
-    Real vp2 = compute_vp(vgs_eff + delta, vbs_eff);
-    Real i_f2 = compute_if(vp2 / (n * vt), vs_norm);
-    Real i_r2 = compute_ir(vp2 / (n * vt), vd_norm);
-    Real ids2 = is * (i_f2 - i_r2);
-    op.gm = (ids2 - std::abs(ids)) / delta;
 
-    Real vp3 = vp_norm;
-    Real i_r3 = compute_ir(vp3, (vd + delta) / (n * vt));
-    Real ids3 = is * (i_f - i_r3);
-    op.gds = std::abs(ids - ids3) / delta;
+    // gm = dIds/dVgs
+    auto calc_ids_at_vgs = [&](Real vgs_test) {
+        Real vp_t = compute_vp(vgs_test, vbs_eff);
+        Real n_t = compute_n(vp_t, vbs_eff);
+        Real is_t = params_.kp * n_t * vt * vt * inst_.w / inst_.l;
+        Real i_f_t = compute_if(vp_t / (n_t * vt), vs / (n_t * vt));
+        Real i_r_t = compute_ir(vp_t / (n_t * vt), vd / (n_t * vt));
+        Real ids_t = is_t * (i_f_t - i_r_t);
+        if (params_.theta > 0) {
+            Real vov_t = std::max(vgs_test - op.vth * sign, 0.0);
+            ids_t /= (1.0 + params_.theta * vov_t);
+        }
+        if (params_.lambda > 0) {
+            ids_t *= (1.0 + params_.lambda * vds_eff);
+        }
+        return ids_t;
+    };
+
+    Real ids_plus = calc_ids_at_vgs(vgs_eff + delta);
+    Real ids_minus = calc_ids_at_vgs(vgs_eff - delta);
+    op.gm = (ids_plus - ids_minus) / (2.0 * delta);
+
+    // gds = dIds/dVds (simpler calculation)
+    Real i_r_plus = compute_ir(vp_norm, (vd + delta) / (n * vt));
+    Real i_r_minus = compute_ir(vp_norm, (vd - delta) / (n * vt));
+    op.gds = is * (i_r_minus - i_r_plus) / (2.0 * delta);
+    if (params_.lambda > 0) {
+        op.gds += std::abs(ids) * params_.lambda / (1.0 + params_.lambda * vds_eff);
+    }
 
     return op;
 }

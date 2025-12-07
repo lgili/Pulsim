@@ -356,28 +356,30 @@ LeadLagCompensator::LeadLagCompensator(const LeadLagParams& params)
 
 Real LeadLagCompensator::process(Real input, Real dt) {
     if (first_call_) {
-        state_ = input;
+        prev_output_ = params_.K * input;  // Initialize to DC gain
         prev_input_ = input;
-        output_ = params_.K * input;
+        output_ = prev_output_;
         first_call_ = false;
         return output_;
     }
 
-    // Transfer function: K * (1 + T1*s) / (1 + T2*s)
-    // Discretized using Tustin method:
-    // y = (a0*x + a1*x_prev + b1*y_prev) / b0
-    // where coefficients depend on T1, T2, and dt
+    // Transfer function: H(s) = K * (1 + s*T1) / (1 + s*T2)
+    // DC gain: H(0) = K
+    //
+    // Tustin discretization: s = (2/dt) * (z-1)/(z+1)
+    // H(z) = K * (1 + 2*T1/dt + (1 - 2*T1/dt)*z^-1) / (1 + 2*T2/dt + (1 - 2*T2/dt)*z^-1)
+    //
+    // Difference equation:
+    // y[n] = (a0*x[n] + a1*x[n-1] - b1*y[n-1]) / b0
 
-    Real alpha1 = 2.0 * params_.T1 / dt;
-    Real alpha2 = 2.0 * params_.T2 / dt;
+    Real a0 = params_.K * (dt + 2.0 * params_.T1);
+    Real a1 = params_.K * (dt - 2.0 * params_.T1);
+    Real b0 = dt + 2.0 * params_.T2;
+    Real b1 = dt - 2.0 * params_.T2;
 
-    Real a0 = params_.K * (1.0 + alpha1);
-    Real a1 = params_.K * (1.0 - alpha1);
-    Real b0 = 1.0 + alpha2;
-    Real b1 = 1.0 - alpha2;
+    output_ = (a0 * input + a1 * prev_input_ - b1 * prev_output_) / b0;
 
-    output_ = (a0 * input + a1 * prev_input_ + b1 * state_) / b0;
-    state_ = output_;
+    prev_output_ = output_;
     prev_input_ = input;
 
     return output_;
