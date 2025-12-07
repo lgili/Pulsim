@@ -81,6 +81,7 @@ build-dir = "build/{wheel_tag}"
 
 [tool.scikit-build.cmake.define]
 CMAKE_BUILD_TYPE = "Release"
+Python3_EXECUTABLE = "{python}"
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

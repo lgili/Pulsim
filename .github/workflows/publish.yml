@@ -48,11 +48,19 @@ jobs:
             python -m pip install scikit-build-core pybind11
             # Install cmake and ninja (prebuilt wheels) to provide binaries used by scikit-build
             python -m pip install cmake ninja
+          CIBW_ENVIRONMENT_LINUX: |
+            Python3_ROOT_DIR=/opt/python/{python}
+            Python3_EXECUTABLE=/opt/python/{python}/bin/python
           CIBW_BEFORE_BUILD_MACOS: |
             # Force use of system Xcode clang to match Python's C++ ABI
             export CC=/usr/bin/clang
             export CXX=/usr/bin/clang++
+            export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+            export MACOSX_DEPLOYMENT_TARGET=11.0
             brew install cmake ninja
+          CIBW_ENVIRONMENT_MACOS: |
+            Python3_ROOT_DIR={python}
+            Python3_EXECUTABLE={python}
           CIBW_BUILD_VERBOSITY: 2
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: pytest {project}/python/tests -v
