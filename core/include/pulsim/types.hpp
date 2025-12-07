@@ -58,6 +58,16 @@ enum class SolverStatus {
     NumericalError,
 };
 
+// Simulation state machine (for GUI integration)
+enum class SimulationState {
+    Idle,       // Not started
+    Running,    // Actively simulating
+    Paused,     // Paused, can resume
+    Stopping,   // Stop requested, finishing current step
+    Completed,  // Finished successfully
+    Error       // Terminated with error
+};
+
 // Simulation result for a single timestep
 struct TimePoint {
     Real time;
@@ -71,6 +81,10 @@ enum class IntegrationMethod {
     BDF2,             // Second-order BDF, O(dt^2), more stable than Trap
     GEAR2,            // Alias for Trapezoidal
 };
+
+// Streaming configuration for result storage (defined in simulation_control.hpp)
+// Forward declare here for use in SimulationOptions
+struct StreamingConfig;
 
 // Simulation options
 struct SimulationOptions {
@@ -100,6 +114,55 @@ struct SimulationOptions {
 
     // Output options
     std::vector<std::string> output_signals;
+
+    // Streaming configuration (for GUI result storage)
+    // decimation_factor: store every Nth point (1 = all points)
+    int streaming_decimation = 1;
+
+    // Rolling buffer: if true, keep only the last N points
+    bool streaming_rolling_buffer = false;
+    int64_t streaming_max_points = 100000;
+
+    // Progress callback throttling (used with run_transient_with_progress)
+    // The actual callback is passed to run_transient_with_progress()
+    double progress_min_interval_ms = 100.0;  // Minimum ms between callbacks
+    int progress_min_steps = 100;             // Minimum steps between callbacks
+    bool progress_include_memory = false;     // Track memory usage (slower)
+};
+
+// Signal metadata for result interpretation
+struct SignalInfo {
+    std::string name;           // e.g., "V(out)"
+    std::string type;           // "voltage", "current", "power"
+    std::string unit;           // "V", "A", "W"
+    std::string component;      // Associated component (if any)
+    std::vector<std::string> nodes;  // Related nodes
+};
+
+// Solver configuration info
+struct SolverInfo {
+    IntegrationMethod method = IntegrationMethod::BackwardEuler;
+    Real abstol = 1e-12;
+    Real reltol = 1e-3;
+    bool adaptive_timestep = false;
+};
+
+// Simulation event types
+enum class SimulationEventType {
+    SwitchClose,    // Switch closed
+    SwitchOpen,     // Switch opened
+    Convergence,    // Convergence issue
+    TimestepChange  // Timestep was adjusted
+};
+
+// Simulation event for GUI timeline display
+struct SimulationEvent {
+    Real time = 0.0;
+    SimulationEventType type = SimulationEventType::SwitchClose;
+    std::string component;         // Component name (for switch events)
+    std::string description;       // Human-readable description
+    Real value1 = 0.0;             // Context-dependent value (e.g., voltage)
+    Real value2 = 0.0;             // Context-dependent value (e.g., current)
 };
 
 // Result container
@@ -114,6 +177,24 @@ struct SimulationResult {
     int newton_iterations_total = 0;
     SolverStatus final_status = SolverStatus::Success;
     std::string error_message;
+
+    // Enhanced metadata (for GUI)
+    std::vector<SignalInfo> signal_info;
+    SolverInfo solver_info;
+
+    // Performance metrics
+    double average_newton_iterations = 0.0;
+    int convergence_failures = 0;       // Steps that needed damping
+    int timestep_reductions = 0;        // Adaptive timestep reductions
+    int64_t peak_memory_bytes = -1;     // -1 if not tracked
+
+    // Events (for GUI timeline display)
+    std::vector<SimulationEvent> events;
+
+    // Convenience methods
+    size_t num_signals() const { return signal_names.size(); }
+    size_t num_points() const { return time.size(); }
+    size_t num_events() const { return events.size(); }
 };
 
 }  // namespace pulsim

@@ -65,6 +65,9 @@ public:
     // Parse simulation options from file
     static ParseResult<SimulationOptions> parse_simulation_options(const std::filesystem::path& path);
 
+    // Export circuit to JSON string (for GUI)
+    static std::string to_json(const Circuit& circuit, bool include_positions = true);
+
     // Utility function (public for testing)
     static Real parse_value_with_suffix(const std::string& str);
 

@@ -54,6 +54,40 @@ struct PWMWaveform {
 
 using Waveform = std::variant<DCWaveform, PulseWaveform, SineWaveform, PWLWaveform, PWMWaveform>;
 
+/**
+ * @brief Schematic position for GUI layout persistence.
+ *
+ * Stores the visual position and orientation of a component in a schematic
+ * editor. This information is stored in the Circuit and can be exported/imported
+ * via JSON netlists.
+ *
+ * @section position_usage Usage Example
+ * @code
+ * Circuit circuit;
+ * circuit.add_resistor("R1", "a", "b", 1000.0);
+ *
+ * // Set position after placing component in GUI
+ * SchematicPosition pos;
+ * pos.x = 100.0;
+ * pos.y = 50.0;
+ * pos.orientation = 90;  // Rotated 90 degrees
+ * circuit.set_position("R1", pos);
+ *
+ * // Export to JSON (positions included)
+ * std::string json = NetlistParser::to_json(circuit, true);
+ *
+ * // Later, import and retrieve positions
+ * Circuit loaded = NetlistParser::parse_string(json).value();
+ * auto pos = loaded.get_position("R1");  // Returns optional
+ * @endcode
+ */
+struct SchematicPosition {
+    double x = 0.0;           ///< X coordinate in schematic units
+    double y = 0.0;           ///< Y coordinate in schematic units
+    int orientation = 0;      ///< Rotation: 0, 90, 180, or 270 degrees
+    bool mirrored = false;    ///< True if horizontally mirrored
+};
+
 // Component parameters
 struct ResistorParams {
     Real resistance;
@@ -254,6 +288,14 @@ public:
     // Validation
     bool validate(std::string& error_message) const;
 
+    // Schematic position management (for GUI)
+    void set_position(const std::string& component_name, const SchematicPosition& pos);
+    std::optional<SchematicPosition> get_position(const std::string& component_name) const;
+    bool has_position(const std::string& component_name) const;
+    std::unordered_map<std::string, SchematicPosition> all_positions() const;
+    void set_all_positions(const std::unordered_map<std::string, SchematicPosition>& positions);
+    void clear_positions();
+
 private:
     void ensure_node(const NodeId& node);
     void add_component(Component component);
@@ -264,6 +306,7 @@ private:
     std::vector<NodeId> node_names_;  // Reverse mapping
     Index branch_count_ = 0;
     std::unordered_map<std::string, Index> branch_map_;  // Component name -> branch index
+    std::unordered_map<std::string, SchematicPosition> positions_;  // Component positions for GUI
 };
 
 }  // namespace pulsim

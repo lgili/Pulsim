@@ -9,6 +9,7 @@ add_library(pulsim_core
     src/parallel.cpp
     src/devices.cpp
     src/simulation.cpp
+    src/simulation_control.cpp
     src/thermal.cpp
     src/parser/spice_parser.cpp
     src/parser/yaml_parser.cpp
@@ -17,6 +18,8 @@ add_library(pulsim_core
     src/models/mosfet_models.cpp
     src/models/magnetic_core.cpp
     src/models/control_blocks.cpp
+    src/metadata.cpp
+    src/validation.cpp
 )
 
 # Enable position-independent code for linking into shared libraries (Python bindings)
@@ -76,6 +79,8 @@ if(PULSIM_BUILD_TESTS)
         tests/test_mosfet_models.cpp
         tests/test_magnetic_core.cpp
         tests/test_control_blocks.cpp
+        tests/test_metadata.cpp
+        tests/test_validation.cpp
     )
 
     target_link_libraries(pulsim_tests

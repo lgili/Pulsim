@@ -217,4 +217,33 @@ void Circuit::add_component(Component component) {
     components_.push_back(std::move(component));
 }
 
+// Schematic position management
+void Circuit::set_position(const std::string& component_name, const SchematicPosition& pos) {
+    positions_[component_name] = pos;
+}
+
+std::optional<SchematicPosition> Circuit::get_position(const std::string& component_name) const {
+    auto it = positions_.find(component_name);
+    if (it != positions_.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+bool Circuit::has_position(const std::string& component_name) const {
+    return positions_.count(component_name) > 0;
+}
+
+std::unordered_map<std::string, SchematicPosition> Circuit::all_positions() const {
+    return positions_;
+}
+
+void Circuit::set_all_positions(const std::unordered_map<std::string, SchematicPosition>& positions) {
+    positions_ = positions;
+}
+
+void Circuit::clear_positions() {
+    positions_.clear();
+}
+
 }  // namespace pulsim

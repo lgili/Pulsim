@@ -8,6 +8,12 @@ from ._pulsim import (
     SolverStatus,
     MOSFETType,
     ThermalNetworkType,
+    SimulationState,
+    IntegrationMethod,
+    DiagnosticSeverity,
+    DiagnosticCode,
+    ParameterType,
+    SimulationEventType,
 
     # Waveforms
     DCWaveform,
@@ -32,9 +38,36 @@ from ._pulsim import (
     SwitchEvent,
     simulate,
 
+    # Simulation Control (GUI integration)
+    SimulationController,
+    SimulationProgress,
+    ProgressCallbackConfig,
+    StreamingConfig,
+
+    # Enhanced Result Types
+    SignalInfo,
+    SolverInfo,
+    SimulationEvent,
+
+    # Component Metadata (GUI integration)
+    ParameterMetadata,
+    PinMetadata,
+    ComponentMetadata,
+    ComponentRegistry,
+
+    # Schematic Position (GUI integration)
+    SchematicPosition,
+
+    # Validation (GUI integration)
+    Diagnostic,
+    ValidationResult,
+    validate_circuit,
+    diagnostic_code_description,
+
     # Parsing
     parse_netlist_file,
     parse_netlist_string,
+    circuit_to_json,
 
     # Thermal
     ThermalRCStage,
@@ -56,6 +89,12 @@ __all__ = [
     "SolverStatus",
     "MOSFETType",
     "ThermalNetworkType",
+    "SimulationState",
+    "IntegrationMethod",
+    "DiagnosticSeverity",
+    "DiagnosticCode",
+    "ParameterType",
+    "SimulationEventType",
 
     # Waveforms
     "DCWaveform",
@@ -80,9 +119,36 @@ __all__ = [
     "SwitchEvent",
     "simulate",
 
+    # Simulation Control (GUI integration)
+    "SimulationController",
+    "SimulationProgress",
+    "ProgressCallbackConfig",
+    "StreamingConfig",
+
+    # Enhanced Result Types
+    "SignalInfo",
+    "SolverInfo",
+    "SimulationEvent",
+
+    # Component Metadata (GUI integration)
+    "ParameterMetadata",
+    "PinMetadata",
+    "ComponentMetadata",
+    "ComponentRegistry",
+
+    # Schematic Position (GUI integration)
+    "SchematicPosition",
+
+    # Validation (GUI integration)
+    "Diagnostic",
+    "ValidationResult",
+    "validate_circuit",
+    "diagnostic_code_description",
+
     # Parsing
     "parse_netlist_file",
     "parse_netlist_string",
+    "circuit_to_json",
 
     # Thermal
     "ThermalRCStage",
