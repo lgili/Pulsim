@@ -28,7 +28,9 @@ __all__ = [
 
 # Optional widget imports (require ipywidgets)
 try:
-    from .widgets import StreamingPlot, InteractivePlot, plot_waveforms
+    from .widgets import StreamingPlot as StreamingPlot
+    from .widgets import InteractivePlot as InteractivePlot
+    from .widgets import plot_waveforms as plot_waveforms
     __all__.extend(["StreamingPlot", "InteractivePlot", "plot_waveforms"])
 except ImportError:
     pass

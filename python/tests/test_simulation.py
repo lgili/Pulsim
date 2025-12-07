@@ -1,7 +1,5 @@
 """Tests for circuit simulation."""
 
-import pytest
-import math
 import pulsim as sl
 
 
@@ -29,7 +27,7 @@ class TestSimulationOptions:
         opts.use_ic = True
 
         assert opts.tstop == 1e-3
-        assert opts.use_ic == True
+        assert opts.use_ic is True
 
 
 class TestDCAnalysis:

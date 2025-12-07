@@ -177,7 +177,7 @@ class TestComponentParams:
         params.initial_state = True
 
         assert params.ron == 0.001
-        assert params.initial_state == True
+        assert params.initial_state is True
 
     def test_mosfet_params(self):
         """MOSFET parameters."""

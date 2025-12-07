@@ -100,3 +100,14 @@ exclude_lines = [
     "def __repr__",
     "raise NotImplementedError",
 ]
+
+[tool.ruff]
+exclude = [
+    "python/pulsim/remote/simulator_pb2.py",
+    "python/pulsim/remote/simulator_pb2.pyi",
+    "python/pulsim/remote/simulator_pb2_grpc.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
