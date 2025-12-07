@@ -32,7 +32,7 @@ std::string trim(const std::string& s) {
     return s.substr(start, end - start + 1);
 }
 
-std::vector<std::string> split(const std::string& s, char delim = ' ') {
+[[maybe_unused]] std::vector<std::string> split(const std::string& s, char delim = ' ') {
     std::vector<std::string> result;
     std::istringstream iss(s);
     std::string token;
@@ -110,6 +110,7 @@ SpiceNetlist SpiceParser::parse_file(const std::filesystem::path& path) {
 
 SpiceNetlist SpiceParser::parse_string(const std::string& content,
                                         const std::string& source_name) {
+    (void)source_name;  // Reserved for future error reporting
     SpiceNetlist result;
     errors_.clear();
     warnings_.clear();
@@ -797,6 +798,7 @@ void LTspiceParser::parse_wire(const std::string& line, LTspiceSchematic& result
 }
 
 SpiceNetlist LTspiceParser::to_netlist(const LTspiceSchematic& schematic) {
+    (void)schematic;  // TODO: implement full schematic conversion
     SpiceNetlist result;
     result.title = "Converted from LTspice schematic";
 
