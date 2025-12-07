@@ -232,8 +232,8 @@ void ACAnalyzer::build_linearized_model(SparseMatrix& G_lin, SparseMatrix& C_lin
 
                 Index p1 = circuit_.node_index(comp.nodes()[0]);
                 Index p2 = circuit_.node_index(comp.nodes()[1]);
-                Index s1 = circuit_.node_index(comp.nodes()[2]);
-                Index s2 = circuit_.node_index(comp.nodes()[3]);
+                [[maybe_unused]] Index s1 = circuit_.node_index(comp.nodes()[2]);
+                [[maybe_unused]] Index s2 = circuit_.node_index(comp.nodes()[3]);
 
                 // For ideal transformer: add constraint equations
                 // V_p1 - V_p2 = n * (V_s1 - V_s2)

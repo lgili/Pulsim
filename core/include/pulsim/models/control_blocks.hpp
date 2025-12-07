@@ -339,7 +339,6 @@ private:
     Real output_ = 0.0;
     std::vector<Real> buffer_;
     size_t write_index_ = 0;
-    Real time_acc_ = 0.0;
 };
 
 // =============================================================================

@@ -32,18 +32,8 @@ std::string trim(const std::string& s) {
     return s.substr(start, end - start + 1);
 }
 
-[[maybe_unused]] std::vector<std::string> split(const std::string& s, char delim = ' ') {
-    std::vector<std::string> result;
-    std::istringstream iss(s);
-    std::string token;
-    while (std::getline(iss, token, delim)) {
-        token = trim(token);
-        if (!token.empty()) {
-            result.push_back(token);
-        }
-    }
-    return result;
-}
+// Note: split() is defined for future use but currently unused
+// std::vector<std::string> split(const std::string& s, char delim = ' ');
 
 std::vector<std::string> tokenize(const std::string& line) {
     std::vector<std::string> tokens;
@@ -109,8 +99,7 @@ SpiceNetlist SpiceParser::parse_file(const std::filesystem::path& path) {
 }
 
 SpiceNetlist SpiceParser::parse_string(const std::string& content,
-                                        const std::string& source_name) {
-    (void)source_name;  // Reserved for future error reporting
+                                        const std::string& /*source_name*/) {
     SpiceNetlist result;
     errors_.clear();
     warnings_.clear();
@@ -797,8 +786,8 @@ void LTspiceParser::parse_wire(const std::string& line, LTspiceSchematic& result
     result.wires.push_back(wire);
 }
 
-SpiceNetlist LTspiceParser::to_netlist(const LTspiceSchematic& schematic) {
-    (void)schematic;  // TODO: implement full schematic conversion
+SpiceNetlist LTspiceParser::to_netlist(const LTspiceSchematic& /*schematic*/) {
+    // TODO: implement full schematic conversion
     SpiceNetlist result;
     result.title = "Converted from LTspice schematic";
 

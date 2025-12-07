@@ -448,7 +448,7 @@ Real SaturableInductor::di_dt(Real voltage, Real current) const {
 // =============================================================================
 
 SaturableTransformer::SaturableTransformer(const SaturableTransformerParams& params)
-    : params_(params), phi_(0.0) {
+    : params_(params) {
     core_model_ = std::make_unique<CombinedCoreModel>(params.core);
 }
 

@@ -37,7 +37,6 @@ install(TARGETS _pulsim
     LIBRARY DESTINATION pulsim
 )
 
-install(DIRECTORY pulsim/
-    DESTINATION .
-    FILES_MATCHING PATTERN "*.py"
+install(FILES pulsim/__init__.py
+    DESTINATION pulsim
 )

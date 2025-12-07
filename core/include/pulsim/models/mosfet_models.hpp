@@ -2,6 +2,7 @@
 
 #include "pulsim/types.hpp"
 #include <cmath>
+#include <memory>
 #include <string>
 #include <unordered_map>
 

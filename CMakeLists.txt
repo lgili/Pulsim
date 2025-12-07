@@ -14,27 +14,9 @@ option(PULSIM_BUILD_GRPC "Build gRPC API server" OFF)
 option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
 option(PULSIM_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
 
-# Prevent Eigen from enabling its own test targets when pulled via FetchContent.
-# We want to build the project's tests but avoid running large third-party test
-# suites that are not relevant and may fail on host platforms.
-set(EIGEN_BUILD_TESTS OFF CACHE BOOL "Disable Eigen tests in dependencies" FORCE)
-set(EIGEN_BUILD_TESTING OFF CACHE BOOL "Disable Eigen testing in dependencies" FORCE)
-
-# Control BUILD_TESTING based on PULSIM_BUILD_TESTS. When tests are
-# explicitly enabled, force ENABLE CTest and allow test discovery. When
-# disabled, turn off testing for the project and common dependency test
-# flags to avoid target-name collisions in FetchContent dependencies.
-if(PULSIM_BUILD_TESTS)
-    message(STATUS "PULSIM_BUILD_TESTS=ON -> enabling CTest/BUID_TESTING")
-    set(BUILD_TESTING ON CACHE BOOL "Enable CTest and dependency tests" FORCE)
-else()
-    message(STATUS "PULSIM_BUILD_TESTS=OFF -> disabling dependency tests (BUILD_TESTING/EIGEN_* )")
-    # Prevent fetched projects from enabling their own testing targets
-    set(BUILD_TESTING OFF CACHE BOOL "Disable building tests in dependencies" FORCE)
-    # Eigen-specific guards (try both variable names used across versions)
-    set(EIGEN_BUILD_TESTS OFF CACHE BOOL "Disable Eigen tests in dependencies" FORCE)
-    set(EIGEN_BUILD_TESTING OFF CACHE BOOL "Disable Eigen testing in dependencies" FORCE)
-endif()
+# Note: We use FetchContent_Populate for Eigen (header-only) to avoid
+# processing its CMakeLists.txt which includes many test targets.
+# Other dependencies have their test options disabled via cache variables.
 
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
@@ -60,16 +42,31 @@ endif()
 # Dependencies via FetchContent
 include(FetchContent)
 
-# Eigen
+# Note: We don't set BUILD_TESTING OFF globally as it would disable our own tests.
+# Eigen is handled via FetchContent_Populate (not MakeAvailable) to skip its CMakeLists.txt.
+
+# Eigen - header-only, don't process its CMakeLists.txt to avoid test targets
 FetchContent_Declare(
     eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
     GIT_TAG 3.4.0
     GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(eigen)
+FetchContent_GetProperties(eigen)
+if(NOT eigen_POPULATED)
+    FetchContent_Populate(eigen)
+endif()
+# Create Eigen3::Eigen target manually (header-only)
+if(NOT TARGET Eigen3::Eigen)
+    add_library(Eigen3::Eigen INTERFACE IMPORTED)
+    set_target_properties(Eigen3::Eigen PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${eigen_SOURCE_DIR}"
+    )
+endif()
 
-# nlohmann/json
+# nlohmann/json - disable tests
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     json
     GIT_REPOSITORY https://github.com/nlohmann/json.git

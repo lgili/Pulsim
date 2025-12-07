@@ -2,6 +2,7 @@
 
 #include "pulsim/types.hpp"
 #include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -315,8 +316,6 @@ public:
 private:
     SaturableTransformerParams params_;
     std::unique_ptr<CombinedCoreModel> core_model_;
-
-    Real phi_ = 0.0;      // Current flux
 };
 
 }  // namespace pulsim::models

@@ -257,7 +257,7 @@ void ParallelMNAAssembler::assemble_dc_parallel(SparseMatrix& G, Vector& b) {
     G.setFromTriplets(all_triplets.begin(), all_triplets.end());
 
     auto end_time = std::chrono::high_resolution_clock::now();
-    double parallel_time = std::chrono::duration<double>(end_time - start_time).count();
+    [[maybe_unused]] double parallel_time = std::chrono::duration<double>(end_time - start_time).count();
 
     // Estimate sequential time for speedup calculation
     // (This is approximate - actual speedup depends on many factors)
@@ -525,7 +525,7 @@ ParameterSweepResult ParameterSweeper::sweep(const Circuit& base_circuit,
     }
 
     std::atomic<size_t> completed{0};
-    std::mutex result_mutex;
+    [[maybe_unused]] std::mutex result_mutex;
 
     // Run simulations in parallel
     std::vector<std::future<void>> futures;

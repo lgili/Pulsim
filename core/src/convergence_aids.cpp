@@ -16,7 +16,7 @@ void GminStepping::add_gmin(SparseMatrix& G, Index num_nodes, Real gmin) {
     }
 }
 
-NewtonResult GminStepping::solve(Index num_nodes, BuildSystemFunc build_func,
+NewtonResult GminStepping::solve(Index num_nodes, BuildSystemFunc /*build_func*/,
                                   JacobianFunc jacobian_func, const Vector& x0) {
     NewtonResult result;
     result.x = x0;
@@ -100,7 +100,7 @@ NewtonResult GminStepping::solve(Index num_nodes, BuildSystemFunc build_func,
 // Source Stepping Implementation
 // =============================================================================
 
-NewtonResult SourceStepping::solve(ScaledSystemFunc build_func,
+NewtonResult SourceStepping::solve(ScaledSystemFunc /*build_func*/,
                                     ScaledJacobianFunc jacobian_func,
                                     const Vector& x0) {
     NewtonResult result;

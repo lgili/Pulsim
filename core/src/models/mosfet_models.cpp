@@ -8,9 +8,9 @@ namespace pulsim::models {
 // Physical constants
 constexpr Real q_e = 1.602176634e-19;    // Electron charge (C)
 constexpr Real k_b = 1.380649e-23;       // Boltzmann constant (J/K)
-constexpr Real eps_si = 11.7 * 8.854e-12; // Silicon permittivity (F/m)
+[[maybe_unused]] constexpr Real eps_si = 11.7 * 8.854e-12; // Silicon permittivity (F/m)
 constexpr Real eps_ox = 3.9 * 8.854e-12;  // Oxide permittivity (F/m)
-constexpr Real ni_300 = 1.45e16;         // Intrinsic carrier concentration at 300K (1/m³)
+[[maybe_unused]] constexpr Real ni_300 = 1.45e16;  // Intrinsic carrier concentration at 300K (1/m³)
 
 // Helper functions
 inline Real safe_sqrt(Real x) {
@@ -170,7 +170,7 @@ Real MOSFETLevel2::compute_vth(Real vbs, Real temp) const {
     return params_.is_pmos ? -vth : vth;
 }
 
-Real MOSFETLevel2::compute_mobility(Real vgs, Real vds, Real temp) const {
+Real MOSFETLevel2::compute_mobility(Real vgs, Real /*vds*/, Real temp) const {
     Real u_eff = params_.u0;
 
     // Transverse field degradation
@@ -320,7 +320,7 @@ Real MOSFETLevel3::compute_vth(Real vbs, Real vds, Real temp) const {
     return params_.is_pmos ? -vth : vth;
 }
 
-Real MOSFETLevel3::compute_mobility(Real vgs, Real vbs, Real temp) const {
+Real MOSFETLevel3::compute_mobility(Real vgs, Real /*vbs*/, Real temp) const {
     Real u_eff = params_.u0;
 
     // Surface scattering
@@ -464,7 +464,7 @@ void MOSFETBSIM3::compute_size_params() const {
     size_params_valid_ = true;
 }
 
-Real MOSFETBSIM3::compute_vth(Real vbs, Real vds, Real temp) const {
+Real MOSFETBSIM3::compute_vth(Real vbs, Real vds, Real /*temp*/) const {
     compute_size_params();
 
     Real phi_s = params_.phi;
@@ -480,7 +480,7 @@ Real MOSFETBSIM3::compute_vth(Real vbs, Real vds, Real temp) const {
     return params_.is_pmos ? -vth : vth;
 }
 
-Real MOSFETBSIM3::compute_vdsat(Real vgs, Real vth, Real vbs, Real temp) const {
+Real MOSFETBSIM3::compute_vdsat(Real vgs, Real vth, Real vbs, Real /*temp*/) const {
     Real vov = vgs - vth;
     if (vov <= 0) return 0.0;
 
@@ -502,7 +502,7 @@ Real MOSFETBSIM3::compute_vdsat(Real vgs, Real vth, Real vbs, Real temp) const {
     return vdsat;
 }
 
-Real MOSFETBSIM3::compute_ids_linear(Real vgs, Real vds, Real vth, Real vdsat, Real temp) const {
+Real MOSFETBSIM3::compute_ids_linear(Real vgs, Real vds, Real vth, Real /*vdsat*/, Real /*temp*/) const {
     Real vov = vgs - vth;
     if (vov <= 0) return 0.0;
 
@@ -528,7 +528,7 @@ Real MOSFETBSIM3::compute_ids_linear(Real vgs, Real vds, Real vth, Real vdsat, R
     return ids;
 }
 
-Real MOSFETBSIM3::compute_ids_sat(Real vgs, Real vds, Real vth, Real vdsat, Real temp) const {
+Real MOSFETBSIM3::compute_ids_sat(Real vgs, Real vds, Real vth, Real vdsat, Real /*temp*/) const {
     Real vov = vgs - vth;
     if (vov <= 0) return 0.0;
 
