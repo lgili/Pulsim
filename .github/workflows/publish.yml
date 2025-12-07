@@ -52,6 +52,8 @@ jobs:
             Python3_ROOT_DIR=/opt/python/{python}
             Python3_EXECUTABLE=/opt/python/{python}/bin/python
             CMAKE_PREFIX_PATH=/opt/python/{python}
+            # libpython symlink path
+            Python3_LIBRARY=/opt/python/{python}/lib/libpython3.so
           CIBW_BEFORE_BUILD_MACOS: |
             # Force use of system Xcode clang to match Python's C++ ABI
             export CC=/usr/bin/clang
@@ -63,25 +65,15 @@ jobs:
             Python3_ROOT_DIR={python}
             Python3_EXECUTABLE={python}
           CIBW_BUILD_VERBOSITY: 3
-          CIBW_TEST_REQUIRES: pytest numpy
+          CIBW_TEST_REQUIRES: "pytest numpy"
           CIBW_TEST_COMMAND: |
-            cd /tmp
-            PYTHONPATH= python - <<'PY'
-            import sys, pathlib, importlib.util
-            print('sys.version=', sys.version)
-            print('sys.path[0]=', sys.path[0])
-            spec = importlib.util.find_spec('pulsim')
-            print('pulsim spec:', spec)
-            if spec and spec.origin:
-              pkg_path = pathlib.Path(spec.origin).parent
-              print('pulsim pkg dir:', pkg_path)
-              print('pkg contents:', [p.name for p in pkg_path.iterdir()])
-              so = list(pkg_path.glob('_pulsim*.so'))
-              print('found so:', [s.name for s in so])
-            else:
-              print('pulsim not found')
+            TMP_DIR=$(mktemp -d)
+            cp -R {project}/python/tests "$TMP_DIR"/tests
+            PYTHONPATH=$(python - <<'PY'
+            import site
+            print(site.getsitepackages()[0])
             PY
-            PYTHONPATH= pytest {project}/python/tests -v
+            ) pytest "$TMP_DIR"/tests -v
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -117,9 +109,6 @@ jobs:
     name: Publish to PyPI
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/pulsim/
     permissions:
       id-token: write
 

@@ -7,27 +7,42 @@ endif()
 if(NOT DEFINED Python3_ROOT_DIR AND DEFINED ENV{Python3_ROOT_DIR})
     set(Python3_ROOT_DIR "$ENV{Python3_ROOT_DIR}")
 endif()
+if(NOT DEFINED Python3_LIBRARY AND DEFINED ENV{Python3_LIBRARY})
+    set(Python3_LIBRARY "$ENV{Python3_LIBRARY}")
+    set(Python3_LIBRARIES "$ENV{Python3_LIBRARY}")
+endif()
+if(NOT DEFINED Python3_INCLUDE_DIR AND DEFINED ENV{Python3_INCLUDE_DIR})
+    set(Python3_INCLUDE_DIR "$ENV{Python3_INCLUDE_DIR}")
+endif()
 
 # Derive libpython path from the interpreter when possible to help FindPython locate Development/Embed components
 if(DEFINED Python3_EXECUTABLE)
     execute_process(
-        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; import sys; libdir=sysconfig.get_config_var('LIBDIR') or ''; soname=sysconfig.get_config_var('INSTSONAME') or ''; print(libdir); print(soname)"
+        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; libdir=sysconfig.get_config_var('LIBDIR') or ''; soname=sysconfig.get_config_var('INSTSONAME') or ''; incdir=sysconfig.get_paths().get('include', '') or ''; print(libdir); print(soname); print(incdir)"
         OUTPUT_VARIABLE PY_LIBINFO
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     string(REGEX MATCHALL "[^\n]+" PY_LIBINFO_LIST "${PY_LIBINFO}")
     list(LENGTH PY_LIBINFO_LIST PY_LIBINFO_LEN)
-    if(PY_LIBINFO_LEN GREATER 1)
+    if(PY_LIBINFO_LEN GREATER 2)
         list(GET PY_LIBINFO_LIST 0 PY_LIBDIR)
         list(GET PY_LIBINFO_LIST 1 PY_LIBSONAME)
-        if(PY_LIBDIR AND PY_LIBSONAME)
+        list(GET PY_LIBINFO_LIST 2 PY_INCDIR)
+        if(NOT DEFINED Python3_LIBRARY AND PY_LIBDIR AND PY_LIBSONAME)
             set(Python3_LIBRARY "${PY_LIBDIR}/${PY_LIBSONAME}" CACHE FILEPATH "")
             set(Python3_LIBRARIES "${Python3_LIBRARY}" CACHE FILEPATH "")
+        endif()
+        if(NOT DEFINED Python3_INCLUDE_DIR AND PY_INCDIR)
+            set(Python3_INCLUDE_DIR "${PY_INCDIR}" CACHE PATH "")
         endif()
     endif()
 endif()
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+set(Python3_FIND_IMPLEMENTATIONS "CPython")
+set(Python3_FIND_STRATEGY "LOCATION")
+set(Python3_FIND_UNVERSIONED_NAMES "FIRST")
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
 
 # On macOS prefer the Xcode clang and libc++ to ensure ABI compatibility
 if(APPLE)
