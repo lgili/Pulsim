@@ -10,13 +10,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include "spicelab/simulation.hpp"
-#include "spicelab/thermal.hpp"
+#include "pulsim/simulation.hpp"
+#include "pulsim/thermal.hpp"
 #include <cmath>
 #include <vector>
 #include <numeric>
 
-using namespace spicelab;
+using namespace pulsim;
 using Catch::Matchers::WithinRel;
 using Catch::Matchers::WithinAbs;
 

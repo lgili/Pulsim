@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.abspath('../../python/src'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'SpiceLab Python API'
-copyright = '2024, SpiceLab Contributors'
-author = 'SpiceLab Contributors'
+project = 'Pulsim Python API'
+copyright = '2024, Pulsim Contributors'
+author = 'Pulsim Contributors'
 version = '1.0.0'
 release = '1.0.0'
 

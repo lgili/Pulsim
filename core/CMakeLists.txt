@@ -1,4 +1,4 @@
-add_library(spicelab_core
+add_library(pulsim_core
     src/parser.cpp
     src/circuit.cpp
     src/mna.cpp
@@ -19,43 +19,43 @@ add_library(spicelab_core
     src/models/control_blocks.cpp
 )
 
-target_include_directories(spicelab_core
+target_include_directories(pulsim_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(spicelab_core
+target_link_libraries(pulsim_core
     PUBLIC
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
 )
 
 # Optional SUNDIALS support
-if(SPICELAB_USE_SUNDIALS)
+if(PULSIM_USE_SUNDIALS)
     if(TARGET SUNDIALS::ida)
-        target_link_libraries(spicelab_core PUBLIC SUNDIALS::ida SUNDIALS::arkode)
+        target_link_libraries(pulsim_core PUBLIC SUNDIALS::ida SUNDIALS::arkode)
     elseif(TARGET sundials_ida_static)
-        target_link_libraries(spicelab_core PUBLIC sundials_ida_static sundials_arkode_static)
+        target_link_libraries(pulsim_core PUBLIC sundials_ida_static sundials_arkode_static)
     endif()
 endif()
 
 # Optional SuiteSparse KLU support
-if(SPICELAB_USE_SUITESPARSE)
+if(PULSIM_USE_SUITESPARSE)
     if(TARGET SuiteSparse::KLU)
-        target_link_libraries(spicelab_core PUBLIC SuiteSparse::KLU)
+        target_link_libraries(pulsim_core PUBLIC SuiteSparse::KLU)
     elseif(KLU_FOUND)
-        target_include_directories(spicelab_core PUBLIC ${KLU_INCLUDE_DIRS})
-        target_link_libraries(spicelab_core PUBLIC ${KLU_LIBRARIES})
+        target_include_directories(pulsim_core PUBLIC ${KLU_INCLUDE_DIRS})
+        target_link_libraries(pulsim_core PUBLIC ${KLU_LIBRARIES})
     endif()
 endif()
 
 # Alias for cleaner usage
-add_library(spicelab::core ALIAS spicelab_core)
+add_library(pulsim::core ALIAS pulsim_core)
 
 # Tests
-if(SPICELAB_BUILD_TESTS)
-    add_executable(spicelab_tests
+if(PULSIM_BUILD_TESTS)
+    add_executable(pulsim_tests
         tests/test_main.cpp
         tests/test_parser.cpp
         tests/test_circuit.cpp
@@ -72,16 +72,16 @@ if(SPICELAB_BUILD_TESTS)
         tests/test_parallel.cpp
     )
 
-    target_link_libraries(spicelab_tests
+    target_link_libraries(pulsim_tests
         PRIVATE
-            spicelab::core
+            pulsim::core
             Catch2::Catch2WithMain
     )
 
     # Ensure the CLI executable is built before running integration tests that invoke it
-    if(TARGET spicelab)
-        add_dependencies(spicelab_tests spicelab)
+    if(TARGET pulsim)
+        add_dependencies(pulsim_tests pulsim)
     endif()
 
-    catch_discover_tests(spicelab_tests)
+    catch_discover_tests(pulsim_tests)
 endif()

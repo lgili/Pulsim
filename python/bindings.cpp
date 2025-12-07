@@ -3,17 +3,17 @@
 #include <pybind11/eigen.h>
 #include <pybind11/functional.h>
 
-#include "spicelab/types.hpp"
-#include "spicelab/circuit.hpp"
-#include "spicelab/parser.hpp"
-#include "spicelab/simulation.hpp"
-#include "spicelab/thermal.hpp"
+#include "pulsim/types.hpp"
+#include "pulsim/circuit.hpp"
+#include "pulsim/parser.hpp"
+#include "pulsim/simulation.hpp"
+#include "pulsim/thermal.hpp"
 
 namespace py = pybind11;
-using namespace spicelab;
+using namespace pulsim;
 
-PYBIND11_MODULE(_spicelab, m) {
-    m.doc() = "SpiceLab - High-performance circuit simulator for power electronics";
+PYBIND11_MODULE(_pulsim, m) {
+    m.doc() = "Pulsim - High-performance circuit simulator for power electronics";
 
     // --- Enums ---
     py::enum_<ComponentType>(m, "ComponentType")

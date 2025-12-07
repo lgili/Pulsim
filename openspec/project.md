@@ -1,7 +1,7 @@
 # Project Context
 
 ## Purpose
-SpiceLab is a high-performance circuit simulator focused on power electronics. It provides a standalone kernel with APIs for integration, Python bindings for automation, and eventually a modern web/desktop UI.
+Pulsim is a high-performance circuit simulator focused on power electronics. It provides a standalone kernel with APIs for integration, Python bindings for automation, and eventually a modern web/desktop UI.
 
 **Core Goals:**
 - High-performance transient simulation with hybrid event-driven capabilities
@@ -27,7 +27,7 @@ SpiceLab is a high-performance circuit simulator focused on power electronics. I
 ### Python Bindings (python/)
 - **Native**: pybind11 for direct kernel access
 - **Client**: gRPC client library
-- **Package**: pip-installable `spicelab`
+- **Package**: pip-installable `pulsim`
 
 ### Front-end (future)
 - **Web**: React + Vite + Tailwind

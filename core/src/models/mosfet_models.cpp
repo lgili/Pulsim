@@ -1,9 +1,9 @@
-#include "spicelab/models/mosfet_models.hpp"
+#include "pulsim/models/mosfet_models.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
-namespace spicelab::models {
+namespace pulsim::models {
 
 // Physical constants
 constexpr Real q_e = 1.602176634e-19;    // Electron charge (C)
@@ -826,4 +826,4 @@ std::unique_ptr<MOSFETModelBase> create_mosfet_model(
     }
 }
 
-}  // namespace spicelab::models
+}  // namespace pulsim::models

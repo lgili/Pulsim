@@ -1,11 +1,11 @@
-#include "spicelab/parser/yaml_parser.hpp"
+#include "pulsim/parser/yaml_parser.hpp"
 #include <algorithm>
 #include <fstream>
 #include <regex>
 #include <sstream>
 #include <unordered_map>
 
-namespace spicelab::parser {
+namespace pulsim::parser {
 
 // =============================================================================
 // Simple YAML Parser (Subset)
@@ -333,4 +333,4 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
     }
 }
 
-}  // namespace spicelab::parser
+}  // namespace pulsim::parser

@@ -1,5 +1,5 @@
 #include <CLI/CLI.hpp>
-#include <spicelab/spicelab.hpp>
+#include <pulsim/pulsim.hpp>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
@@ -12,24 +12,24 @@
 #include <algorithm>
 #include <filesystem>
 
-#ifdef SPICELAB_WITH_GRPC
-#include "spicelab/api/grpc/server_config.hpp"
-#include "spicelab/api/grpc/session_manager.hpp"
-#include "spicelab/api/grpc/simulator.grpc.pb.h"
+#ifdef PULSIM_WITH_GRPC
+#include "pulsim/api/grpc/server_config.hpp"
+#include "pulsim/api/grpc/session_manager.hpp"
+#include "pulsim/api/grpc/simulator.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
 #endif
 
-#ifdef SPICELAB_WITH_HDF5
+#ifdef PULSIM_WITH_HDF5
 #include <H5Cpp.h>
 #endif
 
-#ifdef SPICELAB_WITH_PARQUET
+#ifdef PULSIM_WITH_PARQUET
 #include <arrow/api.h>
 #include <arrow/io/file.h>
 #include <parquet/arrow/writer.h>
 #endif
 
-using namespace spicelab;
+using namespace pulsim;
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
@@ -45,7 +45,7 @@ constexpr double CLI_SENTINEL = -1e99;
 constexpr int CLI_SENTINEL_INT = -1;
 
 // Configuration file structure
-struct SpiceLabConfig {
+struct PulsimConfig {
     // Server settings
     std::string server_address = "0.0.0.0:50051";
     bool server_reflection = true;
@@ -66,12 +66,12 @@ struct SpiceLabConfig {
     // Output defaults
     std::string output_format = "csv";
 
-    static SpiceLabConfig load(const std::string& path);
-    static SpiceLabConfig load_default();
+    static PulsimConfig load(const std::string& path);
+    static PulsimConfig load_default();
 };
 
-SpiceLabConfig SpiceLabConfig::load(const std::string& path) {
-    SpiceLabConfig config;
+PulsimConfig PulsimConfig::load(const std::string& path) {
+    PulsimConfig config;
     std::ifstream file(path);
     if (!file.is_open()) {
         throw std::runtime_error("Cannot open config file: " + path);
@@ -111,13 +111,13 @@ SpiceLabConfig SpiceLabConfig::load(const std::string& path) {
     return config;
 }
 
-SpiceLabConfig SpiceLabConfig::load_default() {
+PulsimConfig PulsimConfig::load_default() {
     // Try standard locations
     std::vector<std::string> paths = {
-        "./spicelab.json",
-        "./spicelab.config.json",
-        std::string(std::getenv("HOME") ? std::getenv("HOME") : "") + "/.config/spicelab/config.json",
-        "/etc/spicelab/config.json"
+        "./pulsim.json",
+        "./pulsim.config.json",
+        std::string(std::getenv("HOME") ? std::getenv("HOME") : "") + "/.config/pulsim/config.json",
+        "/etc/pulsim/config.json"
     };
 
     for (const auto& path : paths) {
@@ -130,7 +130,7 @@ SpiceLabConfig SpiceLabConfig::load_default() {
         }
     }
 
-    return SpiceLabConfig{};
+    return PulsimConfig{};
 }
 
 OutputFormat parse_output_format(const std::string& filename, const std::string& format_hint) {
@@ -179,7 +179,7 @@ void write_csv(const SimulationResult& result, const std::string& filename) {
     }
 }
 
-#ifdef SPICELAB_WITH_HDF5
+#ifdef PULSIM_WITH_HDF5
 void write_hdf5(const SimulationResult& result, const std::string& filename) {
     H5::H5File file(filename, H5F_ACC_TRUNC);
 
@@ -221,7 +221,7 @@ void write_hdf5(const SimulationResult& result, const std::string& filename) {
 }
 #endif
 
-#ifdef SPICELAB_WITH_PARQUET
+#ifdef PULSIM_WITH_PARQUET
 void write_parquet(const SimulationResult& result, const std::string& filename) {
     // Build schema
     std::vector<std::shared_ptr<arrow::Field>> fields;
@@ -267,17 +267,17 @@ void write_output(const SimulationResult& result, const std::string& filename,
             write_csv(result, filename);
             break;
         case OutputFormat::HDF5:
-#ifdef SPICELAB_WITH_HDF5
+#ifdef PULSIM_WITH_HDF5
             write_hdf5(result, filename);
 #else
-            throw std::runtime_error("HDF5 support not compiled in. Rebuild with -DSPICELAB_WITH_HDF5=ON");
+            throw std::runtime_error("HDF5 support not compiled in. Rebuild with -DPULSIM_WITH_HDF5=ON");
 #endif
             break;
         case OutputFormat::Parquet:
-#ifdef SPICELAB_WITH_PARQUET
+#ifdef PULSIM_WITH_PARQUET
             write_parquet(result, filename);
 #else
-            throw std::runtime_error("Parquet support not compiled in. Rebuild with -DSPICELAB_WITH_PARQUET=ON");
+            throw std::runtime_error("Parquet support not compiled in. Rebuild with -DPULSIM_WITH_PARQUET=ON");
 #endif
             break;
     }
@@ -694,11 +694,11 @@ void print_device_info(const std::string& device_type) {
         std::cout << "  S, Switch        - Ideal voltage-controlled switch\n\n";
         std::cout << "Magnetics:\n";
         std::cout << "  X, Transformer   - Two-winding transformer\n\n";
-        std::cout << "Use 'spicelab info --device <type>' for detailed information.\n";
+        std::cout << "Use 'pulsim info --device <type>' for detailed information.\n";
     }
     else {
         std::cerr << "Unknown device type: " << device_type << std::endl;
-        std::cerr << "Use 'spicelab info --device list' to see available types.\n";
+        std::cerr << "Use 'pulsim info --device list' to see available types.\n";
     }
 }
 
@@ -942,16 +942,16 @@ int cmd_sweep(const std::string& netlist_file, const std::string& output_file,
     }
 }
 
-#ifdef SPICELAB_WITH_GRPC
-namespace spicelab::api::grpc {
-std::pair<std::unique_ptr<::grpc::Server>, std::unique_ptr<::spicelab::api::v1::SimulatorService::Service>>
+#ifdef PULSIM_WITH_GRPC
+namespace pulsim::api::grpc {
+std::pair<std::unique_ptr<::grpc::Server>, std::unique_ptr<::pulsim::api::v1::SimulatorService::Service>>
 build_server(SessionManager& manager, const ServerConfig& config);
 }
 
 int cmd_serve(const std::string& address, bool reflection, bool metrics,
               int max_sessions, bool verbose, bool quiet) {
     try {
-        using namespace spicelab::api::grpc;
+        using namespace pulsim::api::grpc;
 
         ServerConfig config;
         config.listen_address = address;
@@ -966,7 +966,7 @@ int cmd_serve(const std::string& address, bool reflection, bool metrics,
         auto& server = built.first;
 
         if (!quiet) {
-            std::cout << "SpiceLab gRPC server listening on " << address << std::endl;
+            std::cout << "Pulsim gRPC server listening on " << address << std::endl;
             if (reflection) {
                 std::cout << "  Reflection: enabled" << std::endl;
             }
@@ -987,8 +987,8 @@ int cmd_serve(const std::string& address, bool reflection, bool metrics,
 #endif
 
 int main(int argc, char** argv) {
-    CLI::App app{"SpiceLab - High-performance circuit simulator"};
-    app.set_version_flag("-V,--version", "SpiceLab 0.1.0");
+    CLI::App app{"Pulsim - High-performance circuit simulator"};
+    app.set_version_flag("-V,--version", "Pulsim 0.1.0");
 
     // Global options
     bool verbose = false;
@@ -1080,7 +1080,7 @@ int main(int argc, char** argv) {
                             sweep_params, sweep_threads, verbose, quiet));
     });
 
-#ifdef SPICELAB_WITH_GRPC
+#ifdef PULSIM_WITH_GRPC
     // Serve command
     auto* serve_cmd = app.add_subcommand("serve", "Start gRPC API server");
     std::string serve_address = "0.0.0.0:50051";

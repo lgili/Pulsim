@@ -3,7 +3,7 @@
 import pytest
 import tempfile
 import os
-import spicelab as sl
+import pulsim as sl
 
 
 class TestNetlistParsing:

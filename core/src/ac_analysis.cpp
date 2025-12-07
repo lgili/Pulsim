@@ -1,10 +1,10 @@
-#include "spicelab/ac_analysis.hpp"
+#include "pulsim/ac_analysis.hpp"
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
 #include <iostream>
 
-namespace spicelab {
+namespace pulsim {
 
 // =============================================================================
 // ACResult Implementation
@@ -815,4 +815,4 @@ ACResult ac_analysis(const Circuit& circuit, const ACOptions& options,
     return analyzer.analyze(options);
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

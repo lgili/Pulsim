@@ -1,1 +1,1 @@
-# SpiceLab Python test suite
+# Pulsim Python test suite

@@ -1,8 +1,8 @@
-#include "spicelab/circuit.hpp"
+#include "pulsim/circuit.hpp"
 #include <algorithm>
 #include <stdexcept>
 
-namespace spicelab {
+namespace pulsim {
 
 void Circuit::add_resistor(const std::string& name, const NodeId& n1,
                            const NodeId& n2, Real resistance) {
@@ -217,4 +217,4 @@ void Circuit::add_component(Component component) {
     components_.push_back(std::move(component));
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

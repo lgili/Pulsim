@@ -1,8 +1,8 @@
-#include "spicelab/models/control_blocks.hpp"
+#include "pulsim/models/control_blocks.hpp"
 #include <algorithm>
 #include <cmath>
 
-namespace spicelab::models {
+namespace pulsim::models {
 
 // =============================================================================
 // PI Controller Implementation
@@ -691,4 +691,4 @@ void Differentiator::reset() {
     first_call_ = true;
 }
 
-}  // namespace spicelab::models
+}  // namespace pulsim::models

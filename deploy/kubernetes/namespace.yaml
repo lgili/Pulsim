@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: spicelab
+  name: pulsim
   labels:
-    app.kubernetes.io/name: spicelab
-    app.kubernetes.io/part-of: spicelab
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/part-of: pulsim

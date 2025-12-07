@@ -1,7 +1,7 @@
 """Tests for circuit building and validation."""
 
 import pytest
-import spicelab as sl
+import pulsim as sl
 
 
 class TestCircuitConstruction:

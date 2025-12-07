@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package spicelab.api.v1;
+package pulsim.api.v1;
 
-option csharp_namespace = "SpiceLab.Api.V1";
-option go_package = "github.com/spicelab/api/v1;apiv1";
+option csharp_namespace = "Pulsim.Api.V1";
+option go_package = "github.com/pulsim/api/v1;apiv1";
 option java_multiple_files = true;
-option java_outer_classname = "SpiceLabSimulatorProto";
-option java_package = "com.spicelab.api.v1";
+option java_outer_classname = "PulsimSimulatorProto";
+option java_package = "com.pulsim.api.v1";
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";

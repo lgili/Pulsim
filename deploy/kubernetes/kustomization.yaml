@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: spicelab
+namespace: pulsim
 
 resources:
 - namespace.yaml
@@ -19,5 +19,5 @@ commonLabels:
   app.kubernetes.io/version: "1.0.0"
 
 images:
-- name: spicelab
+- name: pulsim
   newTag: latest

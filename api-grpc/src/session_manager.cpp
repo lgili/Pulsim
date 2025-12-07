@@ -1,12 +1,12 @@
-#include "spicelab/api/grpc/session_manager.hpp"
+#include "pulsim/api/grpc/session_manager.hpp"
 
-#include "spicelab/types.hpp"
+#include "pulsim/types.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <random>
 
-namespace spicelab::api::grpc {
+namespace pulsim::api::grpc {
 namespace {
 
 std::string generate_id(std::size_t length = 16) {
@@ -43,11 +43,11 @@ std::vector<int> resolve_indices(const std::vector<std::string>& all_signals,
     return indices;
 }
 
-std::vector<std::string> compute_signal_names(const spicelab::Circuit& circuit) {
+std::vector<std::string> compute_signal_names(const pulsim::Circuit& circuit) {
     std::vector<std::string> names;
-    const spicelab::Index count = circuit.total_variables();
+    const pulsim::Index count = circuit.total_variables();
     names.reserve(static_cast<std::size_t>(count));
-    for (spicelab::Index i = 0; i < count; ++i) {
+    for (pulsim::Index i = 0; i < count; ++i) {
         names.push_back(circuit.signal_name(i));
     }
     return names;
@@ -55,7 +55,7 @@ std::vector<std::string> compute_signal_names(const spicelab::Circuit& circuit) 
 
 }  // namespace
 
-class SimulationControlImpl : public spicelab::SimulationControl {
+class SimulationControlImpl : public pulsim::SimulationControl {
 public:
     bool should_stop() const override { return stop_.load(std::memory_order_acquire); }
     bool should_pause() const override { return pause_.load(std::memory_order_acquire); }
@@ -106,7 +106,7 @@ void WaveformSubscriber::enqueue_header_locked() {
     header_sent_ = true;
 }
 
-void WaveformSubscriber::push_sample(double time, const spicelab::Vector& state) {
+void WaveformSubscriber::push_sample(double time, const pulsim::Vector& state) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (closed_) {
         return;
@@ -168,8 +168,8 @@ bool WaveformSubscriber::next_event(Event& event) {
 
 struct SessionManager::SessionRuntime {
     SessionInfo info;
-    spicelab::Circuit circuit;
-    spicelab::SimulationOptions options;
+    pulsim::Circuit circuit;
+    pulsim::SimulationOptions options;
     std::vector<std::string> signal_names;
     std::vector<std::weak_ptr<WaveformSubscriber>> subscribers;
     std::mutex subscribers_mutex;
@@ -197,8 +197,8 @@ SessionManager::~SessionManager() {
 std::string SessionManager::create_session(const std::string& name,
                                            const std::string& owner,
                                            const std::optional<std::string>& model_id,
-                                           spicelab::Circuit circuit,
-                                           spicelab::SimulationOptions options,
+                                           pulsim::Circuit circuit,
+                                           pulsim::SimulationOptions options,
                                            const std::vector<std::string>& signals) {
     auto runtime = std::make_unique<SessionRuntime>();
     runtime->info.session_id = generate_id();
@@ -243,7 +243,7 @@ std::optional<SessionInfo> SessionManager::get_session(const std::string& sessio
 }
 
 bool SessionManager::start_session(const std::string& session_id,
-                                   const spicelab::SimulationOptions& overrides) {
+                                   const pulsim::SimulationOptions& overrides) {
     SessionRuntime* runtime = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -268,9 +268,9 @@ bool SessionManager::start_session(const std::string& session_id,
     }
 
     runtime->worker = std::make_unique<std::thread>([this, runtime]() {
-        spicelab::Simulator simulator(runtime->circuit, runtime->options);
+        pulsim::Simulator simulator(runtime->circuit, runtime->options);
 
-        auto broadcast_sample = [runtime](spicelab::Real time, const spicelab::Vector& state) {
+        auto broadcast_sample = [runtime](pulsim::Real time, const pulsim::Vector& state) {
             std::vector<std::shared_ptr<WaveformSubscriber>> subs;
             {
                 std::lock_guard<std::mutex> lock(runtime->subscribers_mutex);
@@ -292,7 +292,7 @@ bool SessionManager::start_session(const std::string& session_id,
 
         ResultSnapshot snapshot;
         snapshot.result = result;
-        snapshot.final_state = (result.final_status == spicelab::SolverStatus::Success)
+        snapshot.final_state = (result.final_status == pulsim::SolverStatus::Success)
             ? SessionState::Completed
             : SessionState::Failed;
         snapshot.error_message = result.error_message;
@@ -428,7 +428,7 @@ std::optional<ResultSnapshot> SessionManager::get_result(const std::string& sess
     return runtime->result;
 }
 
-std::optional<spicelab::SimulationOptions> SessionManager::get_options(const std::string& session_id) const {
+std::optional<pulsim::SimulationOptions> SessionManager::get_options(const std::string& session_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto* runtime = find_runtime(session_id);
     if (!runtime) {
@@ -465,4 +465,4 @@ SessionInfo SessionManager::to_info(const SessionRuntime& runtime) const {
     return runtime.info;
 }
 
-}  // namespace spicelab::api::grpc
+}  // namespace pulsim::api::grpc

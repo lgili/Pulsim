@@ -1,8 +1,8 @@
-#include "spicelab/solver.hpp"
+#include "pulsim/solver.hpp"
 #include <cmath>
 #include <iostream>
 
-namespace spicelab {
+namespace pulsim {
 
 void LinearSolver::analyze_pattern(const SparseMatrix& A) {
     solver_.analyzePattern(A);
@@ -133,4 +133,4 @@ NewtonResult NewtonSolver::solve(const Vector& x0, SystemFunction system_func) {
     return result;
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

@@ -1,4 +1,4 @@
-// CLI integration test: run `spicelab validate` and `spicelab run` and verify outputs
+// CLI integration test: run `pulsim validate` and `pulsim run` and verify outputs
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
@@ -20,13 +20,13 @@ using namespace std::filesystem;
 
 static std::string find_cli_binary() {
     const char* candidates[] = {
-        "./cli/spicelab",
-        "../cli/spicelab",
-        "../../cli/spicelab",
-        "build/cli/spicelab",
-        "../build/cli/spicelab",
-        "./spicelab",
-        "../spicelab"
+        "./cli/pulsim",
+        "../cli/pulsim",
+        "../../cli/pulsim",
+        "build/cli/pulsim",
+        "../build/cli/pulsim",
+        "./pulsim",
+        "../pulsim"
     };
 
     for (const char* c : candidates) {
@@ -45,7 +45,7 @@ static std::string find_cli_binary() {
         while (true) {
             size_t pos = pathstr.find(':', start);
             std::string dir = (pos == std::string::npos) ? pathstr.substr(start) : pathstr.substr(start, pos - start);
-            path p = path(dir) / "spicelab";
+            path p = path(dir) / "pulsim";
             if (exists(p) && is_regular_file(p)) return p.string();
             if (pos == std::string::npos) break;
             start = pos + 1;
@@ -56,7 +56,7 @@ static std::string find_cli_binary() {
 }
 
 TEST_CASE("CLI integration: validate and run", "[cli][integration]") {
-    path tmp = temp_directory_path() / path("spicelab-cli-test");
+    path tmp = temp_directory_path() / path("pulsim-cli-test");
     for (int i = 0; i < 1000 && exists(tmp); ++i) tmp += std::to_string(i);
     create_directories(tmp);
 

@@ -1,4 +1,4 @@
-# Top-level Makefile for spicelab-core
+# Top-level Makefile for pulsim-core
 # Usage:
 #  make            # configure + build (default target)
 #  make configure  # run cmake configure in ./build
@@ -9,7 +9,7 @@
 #  make tests      # build and run C++ tests
 #  make pytest     # build Python module and run pytest
 #  make test-all   # run both C++ and Python tests
-#  make run RUN_BIN=build/cli/spicelab  # run a built binary
+#  make run RUN_BIN=build/cli/pulsim  # run a built binary
 #  make run-grpc   # run the gRPC server
 #  make clean      # remove build directory
 #  make distclean  # clean + git clean (use with care)
@@ -22,8 +22,8 @@ CMAKE ?= cmake
 CTEST ?= ctest
 
 # Default binaries (can be overridden on command line)
-RUN_BIN ?= $(BUILD_DIR)/cli/spicelab
-GRPC_BIN ?= $(BUILD_DIR)/api-grpc/spicelab_grpc_server
+RUN_BIN ?= $(BUILD_DIR)/cli/pulsim
+GRPC_BIN ?= $(BUILD_DIR)/api-grpc/pulsim_grpc_server
 
 .PHONY: all help configure build lib cli grpc python tests pytest test-all run run-grpc clean distclean
 
@@ -48,7 +48,7 @@ help:
 configure:
 	@mkdir -p $(BUILD_DIR)
 	@echo "Configuring (build dir: $(BUILD_DIR))"
-	@cd $(BUILD_DIR) && $(CMAKE) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DSPICELAB_BUILD_TESTS=$(BUILD_TESTS) ..
+	@cd $(BUILD_DIR) && $(CMAKE) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DPULSIM_BUILD_TESTS=$(BUILD_TESTS) ..
 
 build: configure
 	@echo "Building (jobs=$(JOBS))"
@@ -56,33 +56,33 @@ build: configure
 
 lib: configure
 	@echo "Building library target"
-	@$(CMAKE) --build $(BUILD_DIR) --target spicelab_core -- -j$(JOBS)
+	@$(CMAKE) --build $(BUILD_DIR) --target pulsim_core -- -j$(JOBS)
 
 cli: configure
 	@echo "Building CLI target"
-	@$(CMAKE) --build $(BUILD_DIR) --target spicelab -- -j$(JOBS)
+	@$(CMAKE) --build $(BUILD_DIR) --target pulsim -- -j$(JOBS)
 
 grpc: configure
 	@echo "Building gRPC server target"
-	@$(CMAKE) --build $(BUILD_DIR) --target spicelab_grpc_server -- -j$(JOBS)
+	@$(CMAKE) --build $(BUILD_DIR) --target pulsim_grpc_server -- -j$(JOBS)
 
 python:
 	@echo "Building Python module"
 	@mkdir -p $(BUILD_DIR)
-	@$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DSPICELAB_BUILD_PYTHON=ON >/dev/null
-	@$(CMAKE) --build $(BUILD_DIR) --target _spicelab -- -j$(JOBS)
+	@$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DPULSIM_BUILD_PYTHON=ON >/dev/null
+	@$(CMAKE) --build $(BUILD_DIR) --target _pulsim -- -j$(JOBS)
 	@cp -r python/tests $(BUILD_DIR)/python/ 2>/dev/null || true
 
 tests:
-	@echo "Running tests (convenience mode: forcing SPICELAB_BUILD_TESTS=ON and Debug build)"
+	@echo "Running tests (convenience mode: forcing PULSIM_BUILD_TESTS=ON and Debug build)"
 	@mkdir -p $(BUILD_DIR)
 	@echo "Configuring $(BUILD_DIR) with tests enabled..."
-	@$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug -DSPICELAB_BUILD_TESTS=ON >/dev/null || true
+	@$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug -DPULSIM_BUILD_TESTS=ON >/dev/null || true
 	@echo "Building project test target"
-	@$(CMAKE) --build $(BUILD_DIR) --target spicelab_tests -- -j$(JOBS)
+	@$(CMAKE) --build $(BUILD_DIR) --target pulsim_tests -- -j$(JOBS)
 	@# Test executable may be placed under a subdirectory (e.g. core/). Try common locations.
-	@TEST_BIN="$(BUILD_DIR)/spicelab_tests"; \
-	if [ ! -x $$TEST_BIN ]; then TEST_BIN="$(BUILD_DIR)/core/spicelab_tests"; fi; \
+	@TEST_BIN="$(BUILD_DIR)/pulsim_tests"; \
+	if [ ! -x $$TEST_BIN ]; then TEST_BIN="$(BUILD_DIR)/core/pulsim_tests"; fi; \
 	if [ -x $$TEST_BIN ]; then \
 		echo "Running test executable: $$TEST_BIN"; \
 		$$TEST_BIN; \

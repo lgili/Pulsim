@@ -11,11 +11,11 @@ Requirements
 Installing from PyPI
 --------------------
 
-The easiest way to install SpiceLab is using pip:
+The easiest way to install Pulsim is using pip:
 
 .. code-block:: bash
 
-   pip install spicelab
+   pip install pulsim
 
 This will install the pre-built binary package if available for your platform.
 
@@ -23,14 +23,14 @@ This will install the pre-built binary package if available for your platform.
 Installing from Source
 ----------------------
 
-To build SpiceLab from source:
+To build Pulsim from source:
 
 1. Clone the repository:
 
    .. code-block:: bash
 
-      git clone https://github.com/your-org/spicelab-core.git
-      cd spicelab-core
+      git clone https://github.com/your-org/pulsim-core.git
+      cd pulsim-core
 
 2. Install build dependencies:
 
@@ -72,43 +72,43 @@ For additional functionality, install optional dependencies:
    pip install grpcio grpcio-tools
 
    # All optional dependencies
-   pip install spicelab[all]
+   pip install pulsim[all]
 
 
 Verifying Installation
 ----------------------
 
-Verify that SpiceLab is installed correctly:
+Verify that Pulsim is installed correctly:
 
 .. code-block:: python
 
-   import spicelab
-   print(spicelab.__version__)
+   import pulsim
+   print(pulsim.__version__)
 
    # Run a quick test
-   circuit = spicelab.Circuit("Test")
+   circuit = pulsim.Circuit("Test")
    circuit.add_resistor("R1", "a", "b", 1000)
-   print("SpiceLab is working!")
+   print("Pulsim is working!")
 
 
 Docker
 ------
 
-SpiceLab is also available as a Docker image:
+Pulsim is also available as a Docker image:
 
 .. code-block:: bash
 
    # Pull the image
-   docker pull spicelab:latest
+   docker pull pulsim:latest
 
    # Run the gRPC server
-   docker run -p 50051:50051 spicelab:latest
+   docker run -p 50051:50051 pulsim:latest
 
 Connect from Python:
 
 .. code-block:: python
 
-   from spicelab.client import SpiceLabClient
+   from pulsim.client import PulsimClient
 
-   client = SpiceLabClient("localhost:50051")
+   client = PulsimClient("localhost:50051")
    result = client.simulate("circuit.json")

@@ -1,7 +1,7 @@
 """Tests for thermal simulation."""
 
 import pytest
-import spicelab as sl
+import pulsim as sl
 
 
 class TestThermalModel:

@@ -1,4 +1,6 @@
-# SpiceLab
+# Pulsim
+
+**Power electronics simulation, simplified.**
 
 High-performance circuit simulator focused on power electronics.
 
@@ -30,18 +32,18 @@ ctest --test-dir build --output-on-failure
 
 ```bash
 # Run a simulation
-./build/cli/spicelab run examples/rc_circuit.json -o result.csv
+./build/cli/pulsim run examples/rc_circuit.json -o result.csv
 
 # Validate a netlist
-./build/cli/spicelab validate examples/voltage_divider.json
+./build/cli/pulsim validate examples/voltage_divider.json
 
 # Get circuit info
-./build/cli/spicelab info examples/rlc_circuit.json
+./build/cli/pulsim info examples/rlc_circuit.json
 ```
 
 ## Netlist Format
 
-SpiceLab uses a JSON-based netlist format:
+Pulsim uses a JSON-based netlist format:
 
 ```json
 {
@@ -83,7 +85,7 @@ Examples: `"1k"` = 1000, `"100n"` = 100e-9, `"4.7u"` = 4.7e-6
 ## CLI Options
 
 ```
-spicelab run <netlist> [options]
+pulsim run <netlist> [options]
   -o, --output    Output file (CSV)
   --tstop         Stop time (default: 1e-3)
   --dt            Time step (default: 1e-6)
@@ -93,17 +95,17 @@ spicelab run <netlist> [options]
   -v, --verbose   Verbose output
   -q, --quiet     Quiet mode
 
-spicelab validate <netlist>
+pulsim validate <netlist>
   Validates netlist syntax and circuit topology
 
-spicelab info <netlist>
+pulsim info <netlist>
   Shows circuit information
 ```
 
 ## Project Structure
 
 ```
-spicelab-core/
+pulsim-core/
 ├── core/               # C++ kernel library
 │   ├── include/        # Public headers
 │   ├── src/            # Implementation

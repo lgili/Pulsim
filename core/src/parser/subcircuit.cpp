@@ -1,10 +1,10 @@
-#include "spicelab/parser/subcircuit.hpp"
+#include "pulsim/parser/subcircuit.hpp"
 #include <algorithm>
 #include <cmath>
 #include <regex>
 #include <sstream>
 
-namespace spicelab::parser {
+namespace pulsim::parser {
 
 // =============================================================================
 // SubcircuitDefinition Implementation
@@ -412,4 +412,4 @@ std::shared_ptr<SubcircuitDefinition> rc_snubber(const std::string& name, double
 
 }  // namespace templates
 
-}  // namespace spicelab::parser
+}  // namespace pulsim::parser

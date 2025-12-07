@@ -1,35 +1,35 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: spicelab
-  namespace: spicelab
+  name: pulsim
+  namespace: pulsim
   labels:
-    app.kubernetes.io/name: spicelab
+    app.kubernetes.io/name: pulsim
     app.kubernetes.io/component: server
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: spicelab
+      app.kubernetes.io/name: pulsim
       app.kubernetes.io/component: server
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: spicelab
+        app.kubernetes.io/name: pulsim
         app.kubernetes.io/component: server
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: spicelab
+      serviceAccountName: pulsim
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
       containers:
-      - name: spicelab
-        image: spicelab:latest
+      - name: pulsim
+        image: pulsim:latest
         imagePullPolicy: IfNotPresent
         ports:
         - name: grpc
@@ -40,7 +40,7 @@ spec:
           protocol: TCP
         envFrom:
         - configMapRef:
-            name: spicelab-config
+            name: pulsim-config
         resources:
           requests:
             cpu: "500m"
@@ -74,7 +74,7 @@ spec:
         emptyDir: {}
       - name: config
         configMap:
-          name: spicelab-config
+          name: pulsim-config
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -82,6 +82,6 @@ spec:
             podAffinityTerm:
               labelSelector:
                 matchLabels:
-                  app.kubernetes.io/name: spicelab
+                  app.kubernetes.io/name: pulsim
               topologyKey: kubernetes.io/hostname
       terminationGracePeriodSeconds: 30

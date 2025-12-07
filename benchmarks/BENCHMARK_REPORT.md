@@ -1,8 +1,8 @@
-# SpiceLab vs ngspice Benchmark Report
+# Pulsim vs ngspice Benchmark Report
 
 ## Overview
 
-This report compares SpiceLab simulation results against ngspice (industry-standard open-source SPICE simulator) for basic RC, RL, and RLC circuits. Both simulators' results are compared against analytical solutions.
+This report compares Pulsim simulation results against ngspice (industry-standard open-source SPICE simulator) for basic RC, RL, and RLC circuits. Both simulators' results are compared against analytical solutions.
 
 ## Test Setup
 
@@ -35,7 +35,7 @@ This report compares SpiceLab simulation results against ngspice (industry-stand
 
 ### Adaptive Timestep (Default)
 
-| Circuit | SpiceLab Points | ngspice Points | SpiceLab RMS Error | ngspice RMS Error |
+| Circuit | Pulsim Points | ngspice Points | Pulsim RMS Error | ngspice RMS Error |
 |---------|-----------------|----------------|--------------------|-------------------|
 | RC      | 39              | 5,026          | 5.00e-02 V         | 7.43e-07 V        |
 | RL      | 30              | 1,016          | 1.20e-01 V         | 1.14e-05 V        |
@@ -43,7 +43,7 @@ This report compares SpiceLab simulation results against ngspice (industry-stand
 
 ### Fixed Timestep (dt = 1µs)
 
-| Circuit | SpiceLab Points | ngspice Points | SpiceLab RMS Error | ngspice RMS Error |
+| Circuit | Pulsim Points | ngspice Points | Pulsim RMS Error | ngspice RMS Error |
 |---------|-----------------|----------------|--------------------|-------------------|
 | RC      | 5,001           | 5,026          | 5.58e-04 V         | 7.43e-07 V        |
 | RL      | 10,001          | 1,016          | 7.90e-04 V         | 1.14e-05 V        |
@@ -53,11 +53,11 @@ This report compares SpiceLab simulation results against ngspice (industry-stand
 
 ### Integration Method Comparison
 
-The error difference between SpiceLab and ngspice is **expected** due to different integration methods:
+The error difference between Pulsim and ngspice is **expected** due to different integration methods:
 
 | Simulator | Integration Method | Order | Local Error | Accumulated Error |
 |-----------|-------------------|-------|-------------|-------------------|
-| SpiceLab  | Backward Euler    | 1st   | O(dt²)      | O(dt)             |
+| Pulsim  | Backward Euler    | 1st   | O(dt²)      | O(dt)             |
 | ngspice   | Trapezoidal       | 2nd   | O(dt³)      | O(dt²)            |
 
 For dt = 1µs and τ = 1ms:
@@ -66,7 +66,7 @@ For dt = 1µs and τ = 1ms:
 
 ### Verified O(dt) Error Behavior
 
-The SpiceLab error scales linearly with timestep, confirming correct Backward Euler implementation:
+The Pulsim error scales linearly with timestep, confirming correct Backward Euler implementation:
 
 | Timestep | RMS Error (RC) | Error Ratio |
 |----------|----------------|-------------|
@@ -89,7 +89,7 @@ During benchmarking, two critical bugs were discovered and fixed in the Newton s
 
 ### Performance
 
-SpiceLab achieves fast simulation times with adaptive stepping:
+Pulsim achieves fast simulation times with adaptive stepping:
 
 | Mode             | Points | Wall Time |
 |------------------|--------|-----------|
@@ -99,7 +99,7 @@ SpiceLab achieves fast simulation times with adaptive stepping:
 
 ### Qualitative Accuracy
 
-Despite using first-order integration, SpiceLab captures:
+Despite using first-order integration, Pulsim captures:
 - Correct steady-state values
 - Correct time constants
 - Correct oscillation frequencies (RLC)
@@ -115,12 +115,12 @@ For higher accuracy applications:
 
 Example with improved accuracy:
 ```bash
-./build/cli/spicelab run circuit.json -o output.csv --dt 1e-7 --dtmax 1e-7
+./build/cli/pulsim run circuit.json -o output.csv --dt 1e-7 --dtmax 1e-7
 ```
 
 ## Conclusion
 
-SpiceLab produces **correct results** that match the expected behavior of RC, RL, and RLC circuits:
+Pulsim produces **correct results** that match the expected behavior of RC, RL, and RLC circuits:
 
 1. ✅ Correctly models first-order RC and RL step responses
 2. ✅ Correctly models second-order underdamped RLC oscillations
@@ -134,9 +134,9 @@ The remaining error difference vs ngspice is **expected** due to using Backward 
 
 ## Files
 
-- `circuits/rc_step.json` - RC circuit (SpiceLab)
-- `circuits/rl_step.json` - RL circuit (SpiceLab)
-- `circuits/rlc_step.json` - RLC circuit (SpiceLab)
+- `circuits/rc_step.json` - RC circuit (Pulsim)
+- `circuits/rl_step.json` - RL circuit (Pulsim)
+- `circuits/rlc_step.json` - RLC circuit (Pulsim)
 - `ngspice/rc_step.cir` - RC circuit (ngspice)
 - `ngspice/rl_step.cir` - RL circuit (ngspice)
 - `ngspice/rlc_step.cir` - RLC circuit (ngspice)
@@ -146,11 +146,11 @@ The remaining error difference vs ngspice is **expected** due to using Backward 
 ## Running the Benchmarks
 
 ```bash
-# SpiceLab simulations (adaptive timestep)
-./build/cli/spicelab run benchmarks/circuits/rc_step.json -o benchmarks/results/rc_spicelab.csv
+# Pulsim simulations (adaptive timestep)
+./build/cli/pulsim run benchmarks/circuits/rc_step.json -o benchmarks/results/rc_pulsim.csv
 
-# SpiceLab simulations (fixed timestep for higher accuracy)
-./build/cli/spicelab run benchmarks/circuits/rc_step.json -o benchmarks/results/rc_spicelab_fixed.csv --dt 1e-6 --dtmax 1e-6
+# Pulsim simulations (fixed timestep for higher accuracy)
+./build/cli/pulsim run benchmarks/circuits/rc_step.json -o benchmarks/results/rc_pulsim_fixed.csv --dt 1e-6 --dtmax 1e-6
 
 # ngspice simulations
 cd benchmarks/ngspice && ngspice -b rc_step.cir && ngspice -b rl_step.cir && ngspice -b rlc_step.cir

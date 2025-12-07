@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Benchmark comparison between SpiceLab and ngspice.
+Benchmark comparison between Pulsim and ngspice.
 Compares simulation results for RC, RL, and RLC circuits.
 """
 
 import numpy as np
 import os
 
-def load_spicelab_csv(filename):
-    """Load SpiceLab CSV output (time, signal1, signal2, ...)"""
+def load_pulsim_csv(filename):
+    """Load Pulsim CSV output (time, signal1, signal2, ...)"""
     data = np.genfromtxt(filename, delimiter=',', skip_header=1)
     return data
 
@@ -48,7 +48,7 @@ def analytical_rlc_step(t, V0, R, L, C):
         return V0 - A * np.exp(s1 * t) - B * np.exp(s2 * t)
 
 def compare_results():
-    """Compare SpiceLab and ngspice results against analytical solutions"""
+    """Compare Pulsim and ngspice results against analytical solutions"""
 
     results = []
 
@@ -57,15 +57,15 @@ def compare_results():
     print("RC CIRCUIT COMPARISON")
     print("=" * 60)
 
-    spicelab_rc = load_spicelab_csv('results/rc_spicelab.csv')
+    pulsim_rc = load_pulsim_csv('results/rc_pulsim.csv')
     ngspice_rc = load_ngspice_csv('results/rc_ngspice.csv')
 
     # Parameters
     V0, R, C = 5.0, 1000.0, 1e-6
 
-    # SpiceLab: columns are time, V(in), V(out), I(V1)
-    t_sl = spicelab_rc[:, 0]
-    v_out_sl = spicelab_rc[:, 2]  # V(out)
+    # Pulsim: columns are time, V(in), V(out), I(V1)
+    t_sl = pulsim_rc[:, 0]
+    v_out_sl = pulsim_rc[:, 2]  # V(out)
 
     # ngspice: columns are time, v(out)
     t_ng = ngspice_rc[:, 0]
@@ -79,17 +79,17 @@ def compare_results():
     error_sl = np.abs(v_out_sl - v_analytical_sl)
     error_ng = np.abs(v_out_ng - v_analytical_ng)
 
-    print(f"SpiceLab: {len(t_sl)} points, t=[{t_sl[0]:.2e}, {t_sl[-1]:.2e}]s")
+    print(f"Pulsim: {len(t_sl)} points, t=[{t_sl[0]:.2e}, {t_sl[-1]:.2e}]s")
     print(f"ngspice:  {len(t_ng)} points, t=[{t_ng[0]:.2e}, {t_ng[-1]:.2e}]s")
     print(f"\nMax absolute error vs analytical:")
-    print(f"  SpiceLab: {np.max(error_sl):.6e} V")
+    print(f"  Pulsim: {np.max(error_sl):.6e} V")
     print(f"  ngspice:  {np.max(error_ng):.6e} V")
     print(f"\nRMS error vs analytical:")
-    print(f"  SpiceLab: {np.sqrt(np.mean(error_sl**2)):.6e} V")
+    print(f"  Pulsim: {np.sqrt(np.mean(error_sl**2)):.6e} V")
     print(f"  ngspice:  {np.sqrt(np.mean(error_ng**2)):.6e} V")
     print(f"\nFinal value comparison (at t={t_sl[-1]:.2e}s):")
     print(f"  Analytical: {v_analytical_sl[-1]:.6f} V")
-    print(f"  SpiceLab:   {v_out_sl[-1]:.6f} V (error: {error_sl[-1]:.6e} V)")
+    print(f"  Pulsim:   {v_out_sl[-1]:.6f} V (error: {error_sl[-1]:.6e} V)")
 
     # Find matching ngspice point
     idx_ng = np.argmin(np.abs(t_ng - t_sl[-1]))
@@ -97,9 +97,9 @@ def compare_results():
 
     results.append({
         'circuit': 'RC',
-        'spicelab_max_error': np.max(error_sl),
+        'pulsim_max_error': np.max(error_sl),
         'ngspice_max_error': np.max(error_ng),
-        'spicelab_rms_error': np.sqrt(np.mean(error_sl**2)),
+        'pulsim_rms_error': np.sqrt(np.mean(error_sl**2)),
         'ngspice_rms_error': np.sqrt(np.mean(error_ng**2))
     })
 
@@ -108,16 +108,16 @@ def compare_results():
     print("RL CIRCUIT COMPARISON")
     print("=" * 60)
 
-    spicelab_rl = load_spicelab_csv('results/rl_spicelab.csv')
+    pulsim_rl = load_pulsim_csv('results/rl_pulsim.csv')
     ngspice_rl = load_ngspice_csv('results/rl_ngspice.csv')
 
     # Parameters
     V0, R, L = 10.0, 100.0, 10e-3
     tau_rl = L / R  # Time constant = 0.1ms
 
-    # SpiceLab: columns are time, V(in), V(out), I(V1), I(L1)
-    t_sl = spicelab_rl[:, 0]
-    v_out_sl = spicelab_rl[:, 2]  # V(out) - voltage across inductor
+    # Pulsim: columns are time, V(in), V(out), I(V1), I(L1)
+    t_sl = pulsim_rl[:, 0]
+    v_out_sl = pulsim_rl[:, 2]  # V(out) - voltage across inductor
 
     # ngspice: columns are time, v(out)
     t_ng = ngspice_rl[:, 0]
@@ -141,21 +141,21 @@ def compare_results():
     error_sl = np.abs(v_out_sl_filt - v_analytical_sl)
     error_ng = np.abs(v_out_ng_filt - v_analytical_ng)
 
-    print(f"SpiceLab: {len(t_sl_filt)} points, t=[{t_sl_filt[0]:.2e}, {t_sl_filt[-1]:.2e}]s")
+    print(f"Pulsim: {len(t_sl_filt)} points, t=[{t_sl_filt[0]:.2e}, {t_sl_filt[-1]:.2e}]s")
     print(f"ngspice:  {len(t_ng_filt)} points, t=[{t_ng_filt[0]:.2e}, {t_ng_filt[-1]:.2e}]s")
     print(f"Time constant (tau): {tau_rl*1e3:.3f} ms")
     print(f"\nMax absolute error vs analytical:")
-    print(f"  SpiceLab: {np.max(error_sl):.6e} V")
+    print(f"  Pulsim: {np.max(error_sl):.6e} V")
     print(f"  ngspice:  {np.max(error_ng):.6e} V")
     print(f"\nRMS error vs analytical:")
-    print(f"  SpiceLab: {np.sqrt(np.mean(error_sl**2)):.6e} V")
+    print(f"  Pulsim: {np.sqrt(np.mean(error_sl**2)):.6e} V")
     print(f"  ngspice:  {np.sqrt(np.mean(error_ng**2)):.6e} V")
 
     results.append({
         'circuit': 'RL',
-        'spicelab_max_error': np.max(error_sl),
+        'pulsim_max_error': np.max(error_sl),
         'ngspice_max_error': np.max(error_ng),
-        'spicelab_rms_error': np.sqrt(np.mean(error_sl**2)),
+        'pulsim_rms_error': np.sqrt(np.mean(error_sl**2)),
         'ngspice_rms_error': np.sqrt(np.mean(error_ng**2))
     })
 
@@ -164,15 +164,15 @@ def compare_results():
     print("RLC CIRCUIT COMPARISON")
     print("=" * 60)
 
-    spicelab_rlc = load_spicelab_csv('results/rlc_spicelab.csv')
+    pulsim_rlc = load_pulsim_csv('results/rlc_pulsim.csv')
     ngspice_rlc = load_ngspice_csv('results/rlc_ngspice.csv')
 
     # Parameters
     V0, R, L, C = 10.0, 10.0, 1e-3, 10e-6
 
-    # SpiceLab: columns are time, V(in), V(n1), V(out), I(V1), I(L1)
-    t_sl = spicelab_rlc[:, 0]
-    v_out_sl = spicelab_rlc[:, 3]  # V(out)
+    # Pulsim: columns are time, V(in), V(n1), V(out), I(V1), I(L1)
+    t_sl = pulsim_rlc[:, 0]
+    v_out_sl = pulsim_rlc[:, 3]  # V(out)
 
     # ngspice: columns are time, v(out), time, i(V1)
     t_ng = ngspice_rlc[:, 0]
@@ -186,7 +186,7 @@ def compare_results():
     error_sl = np.abs(v_out_sl - v_analytical_sl)
     error_ng = np.abs(v_out_ng - v_analytical_ng)
 
-    print(f"SpiceLab: {len(t_sl)} points, t=[{t_sl[0]:.2e}, {t_sl[-1]:.2e}]s")
+    print(f"Pulsim: {len(t_sl)} points, t=[{t_sl[0]:.2e}, {t_sl[-1]:.2e}]s")
     print(f"ngspice:  {len(t_ng)} points, t=[{t_ng[0]:.2e}, {t_ng[-1]:.2e}]s")
 
     # RLC parameters
@@ -201,17 +201,17 @@ def compare_results():
     print(f"  Damping ratio (zeta): {alpha/omega0:.3f}")
 
     print(f"\nMax absolute error vs analytical:")
-    print(f"  SpiceLab: {np.max(error_sl):.6e} V")
+    print(f"  Pulsim: {np.max(error_sl):.6e} V")
     print(f"  ngspice:  {np.max(error_ng):.6e} V")
     print(f"\nRMS error vs analytical:")
-    print(f"  SpiceLab: {np.sqrt(np.mean(error_sl**2)):.6e} V")
+    print(f"  Pulsim: {np.sqrt(np.mean(error_sl**2)):.6e} V")
     print(f"  ngspice:  {np.sqrt(np.mean(error_ng**2)):.6e} V")
 
     results.append({
         'circuit': 'RLC',
-        'spicelab_max_error': np.max(error_sl),
+        'pulsim_max_error': np.max(error_sl),
         'ngspice_max_error': np.max(error_ng),
-        'spicelab_rms_error': np.sqrt(np.mean(error_sl**2)),
+        'pulsim_rms_error': np.sqrt(np.mean(error_sl**2)),
         'ngspice_rms_error': np.sqrt(np.mean(error_ng**2))
     })
 
@@ -219,16 +219,16 @@ def compare_results():
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    print("\n{:<10} {:>20} {:>20}".format("Circuit", "SpiceLab RMS Error", "ngspice RMS Error"))
+    print("\n{:<10} {:>20} {:>20}".format("Circuit", "Pulsim RMS Error", "ngspice RMS Error"))
     print("-" * 52)
     for r in results:
         print("{:<10} {:>20.6e} {:>20.6e}".format(
-            r['circuit'], r['spicelab_rms_error'], r['ngspice_rms_error']))
+            r['circuit'], r['pulsim_rms_error'], r['ngspice_rms_error']))
 
     print("\n" + "=" * 60)
     print("CONCLUSION")
     print("=" * 60)
-    print("SpiceLab produces results comparable to ngspice with")
+    print("Pulsim produces results comparable to ngspice with")
     print("errors on the same order of magnitude relative to")
     print("analytical solutions. Both simulators use Backward Euler")
     print("integration which introduces some numerical damping.")

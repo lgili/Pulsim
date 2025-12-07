@@ -49,8 +49,8 @@ foreach(proto ${PROTO_FILES})
     get_filename_component(proto_name ${proto} NAME_WE)
     # Place generated sources under a predictable include path that matches
     # the project's headers (so includes like
-    # "spicelab/api/grpc/simulator.grpc.pb.h" resolve correctly).
-    set(GEN_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/spicelab/api/grpc)
+    # "pulsim/api/grpc/simulator.grpc.pb.h" resolve correctly).
+    set(GEN_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/pulsim/api/grpc)
     set(proto_src "${GEN_INCLUDE_DIR}/${proto_name}.pb.cc")
     set(proto_hdr "${GEN_INCLUDE_DIR}/${proto_name}.pb.h")
     set(grpc_src "${GEN_INCLUDE_DIR}/${proto_name}.grpc.pb.cc")
@@ -76,25 +76,25 @@ foreach(proto ${PROTO_FILES})
     list(APPEND GENERATED_GRPC_HDR ${grpc_hdr})
 endforeach()
 
-add_library(spicelab_grpc_proto STATIC
+add_library(pulsim_grpc_proto STATIC
     ${GENERATED_PROTO_SRC}
     ${GENERATED_GRPC_SRC}
 )
 
-add_library(spicelab::grpc_proto ALIAS spicelab_grpc_proto)
+add_library(pulsim::grpc_proto ALIAS pulsim_grpc_proto)
 
-target_include_directories(spicelab_grpc_proto
+target_include_directories(pulsim_grpc_proto
     PUBLIC
         ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_link_libraries(spicelab_grpc_proto
+target_link_libraries(pulsim_grpc_proto
     PUBLIC
         protobuf::libprotobuf
         gRPC::grpc++
 )
 
-set(SPICELAB_GRPC_SOURCES
+set(PULSIM_GRPC_SOURCES
     src/server.cpp
     src/main.cpp
     src/session_manager.cpp
@@ -103,35 +103,35 @@ set(SPICELAB_GRPC_SOURCES
     src/metrics.cpp
 )
 
-add_executable(spicelab_grpc_server
-    ${SPICELAB_GRPC_SOURCES}
+add_executable(pulsim_grpc_server
+    ${PULSIM_GRPC_SOURCES}
 )
 
-target_include_directories(spicelab_grpc_server
+target_include_directories(pulsim_grpc_server
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_link_libraries(spicelab_grpc_server
+target_link_libraries(pulsim_grpc_server
     PRIVATE
-        spicelab::core
-        spicelab::grpc_proto
+        pulsim::core
+        pulsim::grpc_proto
         gRPC::grpc++
         gRPC::grpc++_reflection
         protobuf::libprotobuf
         httplib::httplib
 )
 
-add_dependencies(spicelab_grpc_server spicelab_grpc_proto)
+add_dependencies(pulsim_grpc_server pulsim_grpc_proto)
 
-install(TARGETS spicelab_grpc_server
+install(TARGETS pulsim_grpc_server
     RUNTIME DESTINATION bin
 )
 
 # Integration tests for gRPC API
-if(SPICELAB_BUILD_TESTS)
-    add_executable(spicelab_grpc_tests
+if(PULSIM_BUILD_TESTS)
+    add_executable(pulsim_grpc_tests
         tests/test_grpc_api.cpp
         src/server.cpp
         src/session_manager.cpp
@@ -140,16 +140,16 @@ if(SPICELAB_BUILD_TESTS)
         src/metrics.cpp
     )
 
-    target_include_directories(spicelab_grpc_tests
+    target_include_directories(pulsim_grpc_tests
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_BINARY_DIR}
     )
 
-    target_link_libraries(spicelab_grpc_tests
+    target_link_libraries(pulsim_grpc_tests
         PRIVATE
-            spicelab::core
-            spicelab::grpc_proto
+            pulsim::core
+            pulsim::grpc_proto
             gRPC::grpc++
             gRPC::grpc++_reflection
             protobuf::libprotobuf
@@ -157,7 +157,7 @@ if(SPICELAB_BUILD_TESTS)
             Catch2::Catch2WithMain
     )
 
-    add_dependencies(spicelab_grpc_tests spicelab_grpc_proto)
+    add_dependencies(pulsim_grpc_tests pulsim_grpc_proto)
 
-    add_test(NAME grpc_api_tests COMMAND spicelab_grpc_tests)
+    add_test(NAME grpc_api_tests COMMAND pulsim_grpc_tests)
 endif()

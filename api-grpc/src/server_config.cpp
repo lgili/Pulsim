@@ -1,11 +1,11 @@
-#include "spicelab/api/grpc/server_config.hpp"
+#include "pulsim/api/grpc/server_config.hpp"
 
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
 
-namespace spicelab::api::grpc {
+namespace pulsim::api::grpc {
 
 namespace {
 
@@ -66,21 +66,21 @@ std::chrono::seconds getenv_duration(const char* key, std::chrono::seconds fallb
 
 ServerConfig load_config_from_env() {
     ServerConfig config;
-    config.listen_address = getenv_or("SPICELAB_GRPC_ADDR", config.listen_address);
-    config.enable_reflection = getenv_bool("SPICELAB_GRPC_REFLECTION", config.enable_reflection);
-    config.enable_authentication = getenv_bool("SPICELAB_GRPC_AUTH", config.enable_authentication);
-    config.session_retention = getenv_duration("SPICELAB_SESSION_RETENTION", config.session_retention);
-    config.max_sessions = getenv_size("SPICELAB_MAX_SESSIONS", config.max_sessions);
-    config.max_sessions_per_user = getenv_size("SPICELAB_MAX_SESSIONS_PER_USER", config.max_sessions_per_user);
-    config.enable_metrics = getenv_bool("SPICELAB_GRPC_METRICS", config.enable_metrics);
-    config.metrics_listen_address = getenv_or("SPICELAB_METRICS_ADDR", config.metrics_listen_address);
-    config.metrics_port = static_cast<std::uint16_t>(getenv_size("SPICELAB_METRICS_PORT", config.metrics_port));
-    config.enable_tracing = getenv_bool("SPICELAB_GRPC_TRACING", config.enable_tracing);
-    config.otlp_endpoint = getenv_optional("SPICELAB_OTLP_ENDPOINT");
-    config.version = getenv_or("SPICELAB_VERSION", config.version);
+    config.listen_address = getenv_or("PULSIM_GRPC_ADDR", config.listen_address);
+    config.enable_reflection = getenv_bool("PULSIM_GRPC_REFLECTION", config.enable_reflection);
+    config.enable_authentication = getenv_bool("PULSIM_GRPC_AUTH", config.enable_authentication);
+    config.session_retention = getenv_duration("PULSIM_SESSION_RETENTION", config.session_retention);
+    config.max_sessions = getenv_size("PULSIM_MAX_SESSIONS", config.max_sessions);
+    config.max_sessions_per_user = getenv_size("PULSIM_MAX_SESSIONS_PER_USER", config.max_sessions_per_user);
+    config.enable_metrics = getenv_bool("PULSIM_GRPC_METRICS", config.enable_metrics);
+    config.metrics_listen_address = getenv_or("PULSIM_METRICS_ADDR", config.metrics_listen_address);
+    config.metrics_port = static_cast<std::uint16_t>(getenv_size("PULSIM_METRICS_PORT", config.metrics_port));
+    config.enable_tracing = getenv_bool("PULSIM_GRPC_TRACING", config.enable_tracing);
+    config.otlp_endpoint = getenv_optional("PULSIM_OTLP_ENDPOINT");
+    config.version = getenv_or("PULSIM_VERSION", config.version);
 
     if (config.enable_authentication) {
-        if (auto token = getenv_optional("SPICELAB_DEFAULT_TOKEN")) {
+        if (auto token = getenv_optional("PULSIM_DEFAULT_TOKEN")) {
             config.default_token = token;
             config.allowed_tokens.push_back(*token);
         }
@@ -89,4 +89,4 @@ ServerConfig load_config_from_env() {
     return config;
 }
 
-}  // namespace spicelab::api::grpc
+}  // namespace pulsim::api::grpc

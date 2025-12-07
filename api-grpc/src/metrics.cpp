@@ -1,10 +1,10 @@
-#include "spicelab/api/grpc/metrics.hpp"
+#include "pulsim/api/grpc/metrics.hpp"
 #include <httplib.h>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
 
-namespace spicelab::api::grpc {
+namespace pulsim::api::grpc {
 
 // =============================================================================
 // Helper Functions
@@ -385,59 +385,59 @@ void MetricsRegistry::clear() {
 }
 
 // =============================================================================
-// SpiceLabMetrics Implementation
+// PulsimMetrics Implementation
 // =============================================================================
 
-SpiceLabMetrics& SpiceLabMetrics::instance() {
-    static SpiceLabMetrics metrics;
+PulsimMetrics& PulsimMetrics::instance() {
+    static PulsimMetrics metrics;
     return metrics;
 }
 
-SpiceLabMetrics::SpiceLabMetrics()
+PulsimMetrics::PulsimMetrics()
     : grpc_requests_total_(MetricsRegistry::instance().counter(
-          "spicelab_grpc_requests_total", "Total number of gRPC requests"))
+          "pulsim_grpc_requests_total", "Total number of gRPC requests"))
     , grpc_errors_total_(MetricsRegistry::instance().counter(
-          "spicelab_grpc_errors_total", "Total number of gRPC errors"))
+          "pulsim_grpc_errors_total", "Total number of gRPC errors"))
     , grpc_request_duration_(MetricsRegistry::instance().histogram(
-          "spicelab_grpc_request_duration_seconds", "gRPC request latency in seconds"))
+          "pulsim_grpc_request_duration_seconds", "gRPC request latency in seconds"))
     , simulations_total_(MetricsRegistry::instance().counter(
-          "spicelab_simulations_total", "Total number of simulations run"))
+          "pulsim_simulations_total", "Total number of simulations run"))
     , simulations_failed_(MetricsRegistry::instance().counter(
-          "spicelab_simulations_failed_total", "Total number of failed simulations"))
+          "pulsim_simulations_failed_total", "Total number of failed simulations"))
     , simulation_duration_(MetricsRegistry::instance().histogram(
-          "spicelab_simulation_duration_seconds", "Simulation execution time",
+          "pulsim_simulation_duration_seconds", "Simulation execution time",
           Histogram::exponential_buckets(0.001, 2.0, 15)))
     , simulation_timesteps_(MetricsRegistry::instance().histogram(
-          "spicelab_simulation_timesteps", "Number of timesteps per simulation",
+          "pulsim_simulation_timesteps", "Number of timesteps per simulation",
           Histogram::exponential_buckets(100, 2.0, 15)))
     , newton_iterations_(MetricsRegistry::instance().histogram(
-          "spicelab_newton_iterations", "Total Newton iterations per simulation",
+          "pulsim_newton_iterations", "Total Newton iterations per simulation",
           Histogram::exponential_buckets(10, 2.0, 15)))
     , jobs_pending_(MetricsRegistry::instance().gauge(
-          "spicelab_jobs_pending", "Number of jobs waiting in queue"))
+          "pulsim_jobs_pending", "Number of jobs waiting in queue"))
     , jobs_running_(MetricsRegistry::instance().gauge(
-          "spicelab_jobs_running", "Number of jobs currently running"))
+          "pulsim_jobs_running", "Number of jobs currently running"))
     , jobs_completed_(MetricsRegistry::instance().counter(
-          "spicelab_jobs_completed_total", "Total number of completed jobs"))
+          "pulsim_jobs_completed_total", "Total number of completed jobs"))
     , jobs_failed_(MetricsRegistry::instance().counter(
-          "spicelab_jobs_failed_total", "Total number of failed jobs"))
+          "pulsim_jobs_failed_total", "Total number of failed jobs"))
     , jobs_cancelled_(MetricsRegistry::instance().counter(
-          "spicelab_jobs_cancelled_total", "Total number of cancelled jobs"))
+          "pulsim_jobs_cancelled_total", "Total number of cancelled jobs"))
     , jobs_timeout_(MetricsRegistry::instance().counter(
-          "spicelab_jobs_timeout_total", "Total number of timed out jobs"))
+          "pulsim_jobs_timeout_total", "Total number of timed out jobs"))
     , job_queue_time_(MetricsRegistry::instance().histogram(
-          "spicelab_job_queue_time_seconds", "Time spent in queue before execution",
+          "pulsim_job_queue_time_seconds", "Time spent in queue before execution",
           Histogram::exponential_buckets(0.01, 2.0, 12)))
     , workers_active_(MetricsRegistry::instance().gauge(
-          "spicelab_workers_active", "Number of workers currently processing jobs"))
+          "pulsim_workers_active", "Number of workers currently processing jobs"))
     , workers_idle_(MetricsRegistry::instance().gauge(
-          "spicelab_workers_idle", "Number of idle workers"))
+          "pulsim_workers_idle", "Number of idle workers"))
     , memory_usage_bytes_(MetricsRegistry::instance().gauge(
-          "spicelab_memory_usage_bytes", "Current memory usage in bytes"))
+          "pulsim_memory_usage_bytes", "Current memory usage in bytes"))
     , active_sessions_(MetricsRegistry::instance().gauge(
-          "spicelab_active_sessions", "Number of active simulation sessions"))
+          "pulsim_active_sessions", "Number of active simulation sessions"))
     , quota_exceeded_total_(MetricsRegistry::instance().counter(
-          "spicelab_quota_exceeded_total", "Total number of quota exceeded events"))
+          "pulsim_quota_exceeded_total", "Total number of quota exceeded events"))
 {}
 
 // =============================================================================
@@ -488,4 +488,4 @@ void MetricsServer::stop() {
     server_thread_.reset();
 }
 
-}  // namespace spicelab::api::grpc
+}  // namespace pulsim::api::grpc

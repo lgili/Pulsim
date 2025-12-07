@@ -1,10 +1,10 @@
-#include "spicelab/advanced_solver.hpp"
+#include "pulsim/advanced_solver.hpp"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
-#ifdef SPICELAB_HAS_SUNDIALS
+#ifdef PULSIM_HAS_SUNDIALS
 #include <ida/ida.h>
 #include <nvector/nvector_serial.h>
 #include <sunmatrix/sunmatrix_sparse.h>
@@ -12,7 +12,7 @@
 #include <sundials/sundials_types.h>
 #endif
 
-namespace spicelab {
+namespace pulsim {
 
 // =============================================================================
 // TimestepController Implementation
@@ -146,18 +146,18 @@ CompanionCoefficients get_companion_coefficients(IntegrationMethod method, Real 
 AdvancedLinearSolver::AdvancedLinearSolver(const Options& opts)
     : options_(opts)
 {
-#ifdef SPICELAB_HAS_KLU
+#ifdef PULSIM_HAS_KLU
     klu_defaults(&klu_common_);
 #endif
 }
 
 AdvancedLinearSolver::~AdvancedLinearSolver() {
-#ifdef SPICELAB_HAS_KLU
+#ifdef PULSIM_HAS_KLU
     cleanup_klu();
 #endif
 }
 
-#ifdef SPICELAB_HAS_KLU
+#ifdef PULSIM_HAS_KLU
 void AdvancedLinearSolver::cleanup_klu() {
     if (klu_numeric_) {
         klu_free_numeric(&klu_numeric_, &klu_common_);
@@ -251,10 +251,10 @@ LinearSolveResult AdvancedLinearSolver::solve_klu(const Vector& b) {
     result.status = SolverStatus::Success;
     return result;
 }
-#endif // SPICELAB_HAS_KLU
+#endif // PULSIM_HAS_KLU
 
 void AdvancedLinearSolver::analyze_pattern(const SparseMatrix& A) {
-#ifdef SPICELAB_HAS_KLU
+#ifdef PULSIM_HAS_KLU
     if (options_.backend == Backend::KLU) {
         // Pattern analysis is done in factorize_klu
         pattern_analyzed_ = false;  // Will be set true after factorization
@@ -305,7 +305,7 @@ bool AdvancedLinearSolver::needs_refactorization(const SparseMatrix& A_new) cons
 }
 
 bool AdvancedLinearSolver::factorize(const SparseMatrix& A) {
-#ifdef SPICELAB_HAS_KLU
+#ifdef PULSIM_HAS_KLU
     if (options_.backend == Backend::KLU) {
         bool success = factorize_klu(A);
         if (success) {
@@ -344,7 +344,7 @@ bool AdvancedLinearSolver::factorize(const SparseMatrix& A) {
 }
 
 LinearSolveResult AdvancedLinearSolver::solve(const Vector& b) {
-#ifdef SPICELAB_HAS_KLU
+#ifdef PULSIM_HAS_KLU
     if (options_.backend == Backend::KLU) {
         return solve_klu(b);
     }
@@ -524,7 +524,7 @@ NewtonResult AdvancedNewtonSolver::solve_with_continuation(
 // SUNDIALS IDA Solver Implementation
 // =============================================================================
 
-#ifdef SPICELAB_HAS_SUNDIALS
+#ifdef PULSIM_HAS_SUNDIALS
 
 struct SUNDIALSSolver::Impl {
     void* ida_mem = nullptr;
@@ -693,6 +693,6 @@ void SUNDIALSSolver::reset(const Vector& y0, const Vector& yp0) {
     IDAReInit(impl_->ida_mem, 0.0, impl_->y, impl_->yp);
 }
 
-#endif // SPICELAB_HAS_SUNDIALS
+#endif // PULSIM_HAS_SUNDIALS
 
-}  // namespace spicelab
+}  // namespace pulsim

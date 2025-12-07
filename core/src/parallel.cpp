@@ -1,5 +1,5 @@
-#include "spicelab/parallel.hpp"
-#include "spicelab/mna.hpp"
+#include "pulsim/parallel.hpp"
+#include "pulsim/mna.hpp"
 #include <algorithm>
 #include <chrono>
 #include <random>
@@ -14,10 +14,10 @@
     #else
         #include <cpuid.h>
     #endif
-    #define SPICELAB_X86
+    #define PULSIM_X86
 #endif
 
-namespace spicelab {
+namespace pulsim {
 
 // =============================================================================
 // Thread Pool Implementation
@@ -281,7 +281,7 @@ void ParallelMNAAssembler::assemble_transient_parallel(SparseMatrix& G, Vector& 
 // =============================================================================
 
 bool SIMDInfo::has_sse2() {
-#ifdef SPICELAB_X86
+#ifdef PULSIM_X86
     #ifdef _MSC_VER
     int cpuInfo[4];
     __cpuid(cpuInfo, 1);
@@ -299,7 +299,7 @@ bool SIMDInfo::has_sse2() {
 }
 
 bool SIMDInfo::has_avx() {
-#ifdef SPICELAB_X86
+#ifdef PULSIM_X86
     #ifdef _MSC_VER
     int cpuInfo[4];
     __cpuid(cpuInfo, 1);
@@ -317,7 +317,7 @@ bool SIMDInfo::has_avx() {
 }
 
 bool SIMDInfo::has_avx2() {
-#ifdef SPICELAB_X86
+#ifdef PULSIM_X86
     #ifdef _MSC_VER
     int cpuInfo[4];
     __cpuidex(cpuInfo, 7, 0);
@@ -335,7 +335,7 @@ bool SIMDInfo::has_avx2() {
 }
 
 bool SIMDInfo::has_avx512() {
-#ifdef SPICELAB_X86
+#ifdef PULSIM_X86
     #ifdef _MSC_VER
     int cpuInfo[4];
     __cpuidex(cpuInfo, 7, 0);
@@ -846,4 +846,4 @@ std::vector<SimulationResult> run_parallel(
     return results;
 }
 
-}  // namespace spicelab
+}  // namespace pulsim
