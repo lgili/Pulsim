@@ -70,6 +70,9 @@ if(PULSIM_BUILD_TESTS)
         tests/test_convergence_aids.cpp
         tests/test_ac_analysis.cpp
         tests/test_parallel.cpp
+        tests/test_mosfet_models.cpp
+        tests/test_magnetic_core.cpp
+        tests/test_control_blocks.cpp
     )
 
     target_link_libraries(pulsim_tests

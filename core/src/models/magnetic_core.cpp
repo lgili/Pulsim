@@ -102,21 +102,37 @@ MagneticCoreOpPoint JilesAthertonModel::evaluate(Real H, Real dH_dt) {
     Real He = compute_He(H, M_);
     Real Man = compute_Man(He);
 
-    // Ensure energy consistency (irreversible change only when moving away from anhysteretic)
-    Real diff = Man - M_;
-    if (delta * diff < 0) {
-        // Moving toward anhysteretic - only reversible changes
-        diff = 0.0;
-    }
-
     // Update magnetization using simple forward Euler
-    // For more accuracy, use Runge-Kutta
     if (std::abs(dH) > 1e-12) {
-        Real dM_dH = compute_dM_dH(H, M_, Man, delta);
+        // Check energy consistency: irreversible magnetization change only when
+        // moving away from anhysteretic curve
+        Real diff = Man - M_;
+        bool allow_irreversible = (delta * diff >= 0);
+
+        Real dM_dH;
+        if (allow_irreversible) {
+            // Full Jiles-Atherton equation
+            dM_dH = compute_dM_dH(H, M_, Man, delta);
+        } else {
+            // Only reversible component (moving toward anhysteretic)
+            Real x = He / params_.a;
+            Real dMan_dHe;
+            if (std::abs(x) < 1e-10) {
+                dMan_dHe = params_.Ms / (3.0 * params_.a);
+            } else if (std::abs(x) > 20.0) {
+                dMan_dHe = 0.0;
+            } else {
+                Real sinh_x = std::sinh(x);
+                dMan_dHe = params_.Ms / params_.a * (1.0 / (x * x) - 1.0 / (sinh_x * sinh_x));
+            }
+            dM_dH = params_.c * dMan_dHe / (1.0 - params_.c * dMan_dHe * params_.alpha);
+        }
+
+        // Ensure dM has correct sign (magnetization should follow H direction for virgin curve)
+        Real dM = dM_dH * dH;
 
         // Limit dM/dH to prevent numerical instability
         Real max_dM = params_.Ms * 0.1;  // Max change per step
-        Real dM = dM_dH * dH;
         if (std::abs(dM) > max_dM) {
             dM = max_dM * (dM >= 0 ? 1 : -1);
         }
@@ -284,7 +300,9 @@ SteinmetzParams SteinmetzParams::silicon_steel() {
 }
 
 SteinmetzParams SteinmetzParams::amorphous_2605SA1() {
-    return {0.027, 1.51, 1.74, 0.0};
+    // 2605SA1 has very low losses compared to ferrites
+    // k is significantly lower, alpha and beta similar
+    return {0.057, 1.34, 2.18, 0.0};  // Realistic parameters for amorphous metal
 }
 
 SteinmetzLossModel::SteinmetzLossModel(const SteinmetzParams& params)

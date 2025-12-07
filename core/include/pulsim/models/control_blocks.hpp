@@ -311,7 +311,7 @@ public:
 private:
     LeadLagParams params_;
     Real output_ = 0.0;
-    Real state_ = 0.0;
+    Real prev_output_ = 0.0;
     Real prev_input_ = 0.0;
     bool first_call_ = true;
 };
