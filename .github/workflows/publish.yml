@@ -41,10 +41,19 @@ jobs:
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
           CIBW_BEFORE_BUILD_LINUX: |
-            yum install -y cmake ninja-build || apt-get update && apt-get install -y cmake ninja-build
+            # manylinux images are minimal; ensure Python build tooling and CMake/Ninja are available.
+            python -m pip install --upgrade pip
+            python -m pip install --upgrade setuptools wheel
+            # Install scikit-build-core and pybind11 so CMake integration is available during build
+            python -m pip install scikit-build-core pybind11
+            # Install cmake and ninja (prebuilt wheels) to provide binaries used by scikit-build
+            python -m pip install cmake ninja
           CIBW_BEFORE_BUILD_MACOS: |
+            # Force use of system Xcode clang to match Python's C++ ABI
+            export CC=/usr/bin/clang
+            export CXX=/usr/bin/clang++
             brew install cmake ninja
-          CIBW_BUILD_VERBOSITY: 1
+          CIBW_BUILD_VERBOSITY: 2
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: pytest {project}/python/tests -v
 

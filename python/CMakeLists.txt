@@ -1,14 +1,35 @@
 # Python bindings using pybind11
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
-# Fetch pybind11
-FetchContent_Declare(
-    pybind11
-    GIT_REPOSITORY https://github.com/pybind/pybind11.git
-    GIT_TAG v2.12.0
-    GIT_SHALLOW TRUE
-)
-FetchContent_MakeAvailable(pybind11)
+# On macOS prefer the Xcode clang and libc++ to ensure ABI compatibility
+if(APPLE)
+    find_program(XCRUN_EXECUTABLE xcrun)
+    if(XCRUN_EXECUTABLE)
+        execute_process(COMMAND xcrun --find clang OUTPUT_VARIABLE XCODE_CLANG OUTPUT_STRIP_TRAILING_WHITESPACE)
+        execute_process(COMMAND xcrun --find clang++ OUTPUT_VARIABLE XCODE_CLANGPP OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(XCODE_CLANG)
+            set(CMAKE_C_COMPILER "${XCODE_CLANG}")
+        endif()
+        if(XCODE_CLANGPP)
+            set(CMAKE_CXX_COMPILER "${XCODE_CLANGPP}")
+        endif()
+    endif()
+    add_compile_options(-stdlib=libc++)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+endif()
+
+# Prefer pybind11 provided by the build environment (e.g., installed via pip)
+find_package(pybind11 CONFIG QUIET)
+if(NOT pybind11_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        pybind11
+        GIT_REPOSITORY https://github.com/pybind/pybind11.git
+        GIT_TAG v2.12.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(pybind11)
+endif()
 
 # Create the Python module
 pybind11_add_module(_pulsim
