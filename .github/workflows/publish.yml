@@ -44,6 +44,7 @@ jobs:
             yum install -y cmake ninja-build || apt-get update && apt-get install -y cmake ninja-build
           CIBW_BEFORE_BUILD_MACOS: |
             brew install cmake ninja
+          CIBW_BUILD_VERBOSITY: 1
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: pytest {project}/python/tests -v
 
