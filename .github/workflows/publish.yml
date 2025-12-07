@@ -28,18 +28,7 @@ jobs:
       - name: Set package version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          python - <<'PY'
-            import os, re
-            from pathlib import Path
-            version = os.environ["VERSION"]
-            path = Path("pyproject.toml")
-            text = path.read_text()
-            new_text = re.sub(r'(?m)^(version\s*=\s*")[^"]+("\s*$)', rf"\1{version}\2", text, count=1)
-            if text == new_text:
-                raise SystemExit("version key not found in pyproject.toml")
-            path.write_text(new_text)
-            print(f"version set to {version}")
-          PY
+          python -c "import os,re,pathlib; ver=os.environ['VERSION']; p=pathlib.Path('pyproject.toml'); txt=p.read_text(); new=re.sub(r'(?m)^(version\\s*=\\s*\"[^\"]+\"\\s*$)', lambda m: f\"version = \"{ver}\"\" if 'version' in m.group(0) else m.group(0), txt, count=1); assert new!=txt, 'version key not found in pyproject.toml'; p.write_text(new); print(f'version set to {ver}')"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -107,18 +96,7 @@ jobs:
       - name: Set package version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          python - <<'PY'
-            import os, re
-            from pathlib import Path
-            version = os.environ["VERSION"]
-            path = Path("pyproject.toml")
-            text = path.read_text()
-            new_text = re.sub(r'(?m)^(version\s*=\s*")[^"]+("\s*$)', rf"\1{version}\2", text, count=1)
-            if text == new_text:
-                raise SystemExit("version key not found in pyproject.toml")
-            path.write_text(new_text)
-            print(f"version set to {version}")
-          PY
+          python -c "import os,re,pathlib; ver=os.environ['VERSION']; p=pathlib.Path('pyproject.toml'); txt=p.read_text(); new=re.sub(r'(?m)^(version\\s*=\\s*\"[^\"]+\"\\s*$)', lambda m: f\"version = \"{ver}\"\" if 'version' in m.group(0) else m.group(0), txt, count=1); assert new!=txt, 'version key not found in pyproject.toml'; p.write_text(new); print(f'version set to {ver}')"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -141,9 +119,6 @@ jobs:
     name: Publish to PyPI
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/pulsim
     permissions:
       id-token: write
 
