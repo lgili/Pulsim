@@ -3,9 +3,11 @@
 import json
 import pytest
 from unittest.mock import MagicMock, patch
-from typing import List
 
 import numpy as np
+
+# Skip all tests in this module if grpc is not installed
+pytest.importorskip("grpc")
 
 
 class TestSimulationOptions:

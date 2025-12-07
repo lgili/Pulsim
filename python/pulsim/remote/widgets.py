@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
-    from .client import PulsimClient, WaveformStream, AsyncWaveformStream
+    from .client import PulsimClient
 
 # Check for optional dependencies
 _HAS_IPYWIDGETS = False
@@ -25,17 +25,15 @@ except ImportError:
 
 try:
     import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation
     _HAS_MATPLOTLIB = True
 except ImportError:
     pass
 
 try:
     import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
     _HAS_PLOTLY = True
 except ImportError:
-    pass
+    go = None  # type: ignore[assignment]
 
 
 def _check_dependencies(plotly: bool = False) -> None:

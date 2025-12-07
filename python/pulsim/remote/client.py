@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncIterator,
-    Callable,
     Dict,
     Iterator,
     List,
@@ -19,6 +17,10 @@ from typing import (
     Tuple,
     Union,
 )
+
+if TYPE_CHECKING:
+    import pandas as pd
+    import xarray as xr
 
 import grpc
 import numpy as np

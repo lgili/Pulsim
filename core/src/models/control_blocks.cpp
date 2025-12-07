@@ -387,7 +387,7 @@ Real LeadLagCompensator::process(Real input, Real dt) {
 
 void LeadLagCompensator::reset() {
     output_ = 0.0;
-    state_ = 0.0;
+    prev_output_ = 0.0;
     prev_input_ = 0.0;
     first_call_ = true;
 }

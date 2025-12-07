@@ -597,21 +597,23 @@ MOSFETOpPoint MOSFETBSIM3::evaluate(Real vgs, Real vds, Real vbs, Real temp) con
         }
 
         // Numerical derivatives for gm and gds
+        // Need to recompute vdsat for perturbed vgs to get correct gm
         Real delta = 1e-6;
         Real ids_base = std::abs(op.ids);
 
-        // Use correct function based on region
-        if (op.region == MOSRegion::LINEAR) {
-            Real ids_gm = compute_ids_linear(vgs_eff + delta, vds_eff, vth_eff, op.vdsat, temp);
-            Real ids_gds = compute_ids_linear(vgs_eff, vds_eff + delta, vth_eff, op.vdsat, temp);
-            op.gm = (ids_gm - ids_base) / delta;
-            op.gds = (ids_gds - ids_base) / delta;
-        } else {
-            Real ids_gm = compute_ids_sat(vgs_eff + delta, vds_eff, vth_eff, op.vdsat, temp);
-            Real ids_gds = compute_ids_sat(vgs_eff, vds_eff + delta, vth_eff, op.vdsat, temp);
-            op.gm = (ids_gm - ids_base) / delta;
-            op.gds = (ids_gds - ids_base) / delta;
-        }
+        // For gm: perturb vgs and recompute vdsat
+        Real vdsat_gm = compute_vdsat(vgs_eff + delta, vth_eff, vbs_eff, temp);
+        Real ids_gm = (vds_eff < vdsat_gm)
+            ? compute_ids_linear(vgs_eff + delta, vds_eff, vth_eff, vdsat_gm, temp)
+            : compute_ids_sat(vgs_eff + delta, vds_eff, vth_eff, vdsat_gm, temp);
+
+        // For gds: keep original vdsat, only perturb vds
+        Real ids_gds = (op.region == MOSRegion::LINEAR)
+            ? compute_ids_linear(vgs_eff, vds_eff + delta, vth_eff, op.vdsat, temp)
+            : compute_ids_sat(vgs_eff, vds_eff + delta, vth_eff, op.vdsat, temp);
+
+        op.gm = (ids_gm - ids_base) / delta;
+        op.gds = (ids_gds - ids_base) / delta;
     }
 
     // Body transconductance
