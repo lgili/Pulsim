@@ -1,9 +1,9 @@
-#include "spicelab/thermal.hpp"
+#include "pulsim/thermal.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
-namespace spicelab {
+namespace pulsim {
 
 void ThermalSimulator::add_model(const ThermalModel& model) {
     models_.push_back(model);
@@ -233,4 +233,4 @@ ThermalModel create_mosfet_thermal(
     return model;
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

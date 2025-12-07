@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
-#include "spicelab/api/grpc/server_config.hpp"
-#include "spicelab/api/grpc/session_manager.hpp"
-#include "spicelab/api/grpc/simulator.grpc.pb.h"
-#include "spicelab/api/grpc/simulator.pb.h"
+#include "pulsim/api/grpc/server_config.hpp"
+#include "pulsim/api/grpc/session_manager.hpp"
+#include "pulsim/api/grpc/simulator.grpc.pb.h"
+#include "pulsim/api/grpc/simulator.pb.h"
 
 #include <grpcpp/grpcpp.h>
 #include <google/protobuf/wrappers.pb.h>
@@ -15,15 +15,15 @@
 #include <stdexcept>
 #include <thread>
 
-using namespace spicelab::api::v1;
+using namespace pulsim::api::v1;
 
 // Forward declaration of server builder (defined in server.cpp)
-namespace spicelab::api::grpc {
+namespace pulsim::api::grpc {
 std::pair<std::unique_ptr<::grpc::Server>, std::unique_ptr<SimulatorService::Service>>
 build_server(SessionManager& manager, const ServerConfig& config);
 }
 
-using namespace spicelab::api::grpc;
+using namespace pulsim::api::grpc;
 
 namespace {
 

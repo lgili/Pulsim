@@ -1,5 +1,5 @@
 * RL Step Response - ngspice benchmark
-* Matches SpiceLab rl_step.json
+* Matches Pulsim rl_step.json
 
 V1 in 0 PULSE(0 10 0 1n 1n 10m 20m)
 R1 in out 100

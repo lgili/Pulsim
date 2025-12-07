@@ -1,6 +1,6 @@
-# SpiceLab Device Model Reference
+# Pulsim Device Model Reference
 
-This document provides detailed information about all device models supported by SpiceLab, including their equations, parameters, and usage guidelines.
+This document provides detailed information about all device models supported by Pulsim, including their equations, parameters, and usage guidelines.
 
 ## Table of Contents
 
@@ -42,7 +42,7 @@ n- [ -G   +G  ]
 **Symbol:** C
 **Equation:** I = C × dV/dt
 
-SpiceLab uses the companion model approach for time integration.
+Pulsim uses the companion model approach for time integration.
 
 **Backward Euler Companion Model:**
 ```
@@ -432,7 +432,7 @@ o----------------------o    o---------------------o
 
 ### Foster Network
 
-SpiceLab uses the Foster RC network representation for thermal modeling:
+Pulsim uses the Foster RC network representation for thermal modeling:
 
 ```
        R_th1        R_th2        R_th3
@@ -484,7 +484,7 @@ where α_vf ≈ 2 mV/°C
 
 ## Device Library
 
-SpiceLab includes a library of pre-defined device models based on manufacturer datasheets.
+Pulsim includes a library of pre-defined device models based on manufacturer datasheets.
 
 ### MOSFETs
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Benchmark SpiceLab against ngspice
+Benchmark Pulsim against ngspice
 
 This script compares simulation performance and accuracy between
-SpiceLab and ngspice for various circuit types.
+Pulsim and ngspice for various circuit types.
 
 Requirements:
 - ngspice installed (brew install ngspice / apt install ngspice)
-- SpiceLab CLI built
+- Pulsim CLI built
 
 Usage:
     python benchmark_ngspice.py [--verbose] [--output-dir DIR]
@@ -29,27 +29,27 @@ import csv
 class BenchmarkResult:
     """Results from a single benchmark run"""
     circuit_name: str
-    spicelab_time: float
+    pulsim_time: float
     ngspice_time: float
-    spicelab_steps: int
+    pulsim_steps: int
     ngspice_steps: int
     accuracy_error: float  # RMS error between solutions
-    speedup: float  # ngspice_time / spicelab_time
+    speedup: float  # ngspice_time / pulsim_time
 
 
-def find_spicelab_cli() -> Optional[Path]:
-    """Find the SpiceLab CLI executable"""
+def find_pulsim_cli() -> Optional[Path]:
+    """Find the Pulsim CLI executable"""
     # Check common build directories
     script_dir = Path(__file__).parent.parent
     candidates = [
-        script_dir / "build" / "cli" / "spicelab",
-        script_dir / "build" / "Release" / "cli" / "spicelab",
-        script_dir / "build" / "Debug" / "cli" / "spicelab",
-        Path("spicelab"),  # In PATH
+        script_dir / "build" / "cli" / "pulsim",
+        script_dir / "build" / "Release" / "cli" / "pulsim",
+        script_dir / "build" / "Debug" / "cli" / "pulsim",
+        Path("pulsim"),  # In PATH
     ]
     for path in candidates:
-        if path.exists() or (path.name == "spicelab" and subprocess.run(
-            ["which", "spicelab"], capture_output=True).returncode == 0):
+        if path.exists() or (path.name == "pulsim" and subprocess.run(
+            ["which", "pulsim"], capture_output=True).returncode == 0):
             return path
     return None
 
@@ -64,7 +64,7 @@ def check_ngspice() -> bool:
 
 
 def generate_spice_netlist(circuit_json: dict, output_path: Path) -> None:
-    """Convert SpiceLab JSON format to SPICE netlist"""
+    """Convert Pulsim JSON format to SPICE netlist"""
     lines = [f"* {circuit_json.get('name', 'Benchmark Circuit')}"]
 
     # Add components
@@ -116,8 +116,8 @@ def generate_spice_netlist(circuit_json: dict, output_path: Path) -> None:
         f.write("\n".join(lines))
 
 
-def run_spicelab(cli_path: Path, circuit_path: Path, output_path: Path) -> Tuple[float, int]:
-    """Run SpiceLab simulation and return (time, steps)"""
+def run_pulsim(cli_path: Path, circuit_path: Path, output_path: Path) -> Tuple[float, int]:
+    """Run Pulsim simulation and return (time, steps)"""
     start = time.perf_counter()
     result = subprocess.run(
         [str(cli_path), "run", str(circuit_path), "-o", str(output_path)],
@@ -126,7 +126,7 @@ def run_spicelab(cli_path: Path, circuit_path: Path, output_path: Path) -> Tuple
     elapsed = time.perf_counter() - start
 
     if result.returncode != 0:
-        raise RuntimeError(f"SpiceLab failed: {result.stderr}")
+        raise RuntimeError(f"Pulsim failed: {result.stderr}")
 
     # Count steps from output
     steps = 0
@@ -236,7 +236,7 @@ def create_benchmark_circuits() -> list:
     return circuits
 
 
-def run_benchmarks(spicelab_cli: Path, output_dir: Path, verbose: bool) -> list:
+def run_benchmarks(pulsim_cli: Path, output_dir: Path, verbose: bool) -> list:
     """Run all benchmarks and return results"""
     results = []
     circuits = create_benchmark_circuits()
@@ -248,18 +248,18 @@ def run_benchmarks(spicelab_cli: Path, output_dir: Path, verbose: bool) -> list:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
 
-            # Save SpiceLab JSON
+            # Save Pulsim JSON
             json_path = tmppath / "circuit.json"
             with open(json_path, "w") as f:
                 json.dump(circuit, f)
 
-            # Run SpiceLab
-            sl_output = tmppath / "spicelab_out.csv"
+            # Run Pulsim
+            sl_output = tmppath / "pulsim_out.csv"
             try:
-                sl_time, sl_steps = run_spicelab(spicelab_cli, json_path, sl_output)
+                sl_time, sl_steps = run_pulsim(pulsim_cli, json_path, sl_output)
             except Exception as e:
                 if verbose:
-                    print(f"  SpiceLab failed: {e}")
+                    print(f"  Pulsim failed: {e}")
                 continue
 
             # Generate and run ngspice
@@ -279,9 +279,9 @@ def run_benchmarks(spicelab_cli: Path, output_dir: Path, verbose: bool) -> list:
 
             result = BenchmarkResult(
                 circuit_name=circuit["name"],
-                spicelab_time=sl_time,
+                pulsim_time=sl_time,
                 ngspice_time=ng_time,
-                spicelab_steps=sl_steps,
+                pulsim_steps=sl_steps,
                 ngspice_steps=ng_steps,
                 accuracy_error=0.0,  # TODO: implement accuracy comparison
                 speedup=speedup
@@ -289,7 +289,7 @@ def run_benchmarks(spicelab_cli: Path, output_dir: Path, verbose: bool) -> list:
             results.append(result)
 
             if verbose:
-                print(f"  SpiceLab: {sl_time:.3f}s ({sl_steps} steps)")
+                print(f"  Pulsim: {sl_time:.3f}s ({sl_steps} steps)")
                 print(f"  ngspice:  {ng_time:.3f}s ({ng_steps} steps)")
                 print(f"  Speedup:  {speedup:.2f}x")
 
@@ -302,20 +302,20 @@ def save_results(results: list, output_dir: Path) -> None:
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "Circuit", "SpiceLab Time (s)", "ngspice Time (s)",
-            "SpiceLab Steps", "ngspice Steps", "Speedup"
+            "Circuit", "Pulsim Time (s)", "ngspice Time (s)",
+            "Pulsim Steps", "ngspice Steps", "Speedup"
         ])
         for r in results:
             writer.writerow([
-                r.circuit_name, f"{r.spicelab_time:.4f}",
-                f"{r.ngspice_time:.4f}", r.spicelab_steps,
+                r.circuit_name, f"{r.pulsim_time:.4f}",
+                f"{r.ngspice_time:.4f}", r.pulsim_steps,
                 r.ngspice_steps, f"{r.speedup:.2f}"
             ])
     print(f"\nResults saved to: {output_path}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark SpiceLab against ngspice")
+    parser = argparse.ArgumentParser(description="Benchmark Pulsim against ngspice")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Print detailed output")
     parser.add_argument("--output-dir", "-o", type=Path, default=Path("."),
@@ -323,32 +323,32 @@ def main():
     args = parser.parse_args()
 
     # Check prerequisites
-    spicelab_cli = find_spicelab_cli()
-    if not spicelab_cli:
-        print("Error: SpiceLab CLI not found. Build the project first.")
+    pulsim_cli = find_pulsim_cli()
+    if not pulsim_cli:
+        print("Error: Pulsim CLI not found. Build the project first.")
         return 1
 
     if not check_ngspice():
         print("Warning: ngspice not found. Install with: brew install ngspice")
-        print("Continuing with SpiceLab-only benchmarks...")
+        print("Continuing with Pulsim-only benchmarks...")
 
-    print(f"SpiceLab CLI: {spicelab_cli}")
+    print(f"Pulsim CLI: {pulsim_cli}")
     print(f"ngspice available: {check_ngspice()}")
 
     # Create output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # Run benchmarks
-    results = run_benchmarks(spicelab_cli, args.output_dir, args.verbose)
+    results = run_benchmarks(pulsim_cli, args.output_dir, args.verbose)
 
     if results:
         save_results(results, args.output_dir)
 
         # Print summary
         print("\n=== Benchmark Summary ===")
-        total_sl = sum(r.spicelab_time for r in results)
+        total_sl = sum(r.pulsim_time for r in results)
         total_ng = sum(r.ngspice_time for r in results if r.ngspice_time > 0)
-        print(f"Total SpiceLab time: {total_sl:.3f}s")
+        print(f"Total Pulsim time: {total_sl:.3f}s")
         if total_ng > 0:
             print(f"Total ngspice time:  {total_ng:.3f}s")
             print(f"Average speedup:     {total_ng/total_sl:.2f}x")

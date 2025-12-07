@@ -1,9 +1,9 @@
-#include "spicelab/mna.hpp"
+#include "pulsim/mna.hpp"
 #include <cmath>
 #include <stdexcept>
 #include <iostream>
 
-namespace spicelab {
+namespace pulsim {
 
 MNAAssembler::MNAAssembler(const Circuit& circuit)
     : circuit_(circuit) {
@@ -1465,4 +1465,4 @@ void MNAAssembler::evaluate_sources(Vector& b, Real time) {
     }
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

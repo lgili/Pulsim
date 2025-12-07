@@ -1,5 +1,5 @@
-#include "spicelab/parser/spice_parser.hpp"
-#include "spicelab/parser.hpp"
+#include "pulsim/parser/spice_parser.hpp"
+#include "pulsim/parser.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -7,7 +7,7 @@
 #include <regex>
 #include <sstream>
 
-namespace spicelab::parser {
+namespace pulsim::parser {
 
 // =============================================================================
 // Helper Functions
@@ -594,7 +594,7 @@ SpiceWaveform SpiceParser::parse_waveform(const std::string& type,
 }
 
 // =============================================================================
-// Conversion to SpiceLab Circuit
+// Conversion to Pulsim Circuit
 // =============================================================================
 
 std::pair<Circuit, SimulationOptions> SpiceParser::to_circuit(const SpiceNetlist& netlist) {
@@ -868,4 +868,4 @@ std::pair<Circuit, SimulationOptions> load_netlist(const std::filesystem::path& 
     }
 }
 
-}  // namespace spicelab::parser
+}  // namespace pulsim::parser

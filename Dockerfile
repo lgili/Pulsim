@@ -1,6 +1,6 @@
-# SpiceLab Multi-stage Dockerfile
-# Build: docker build -t spicelab:latest .
-# Run:   docker run -p 50051:50051 -p 9090:9090 spicelab:latest
+# Pulsim Multi-stage Dockerfile
+# Build: docker build -t pulsim:latest .
+# Run:   docker run -p 50051:50051 -p 9090:9090 pulsim:latest
 
 # =============================================================================
 # Stage 1: Build dependencies
@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
-# Stage 2: Build SpiceLab
+# Stage 2: Build Pulsim
 # =============================================================================
 FROM deps AS builder
 
@@ -32,11 +32,11 @@ COPY . .
 RUN mkdir -p build && cd build && \
     cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
-        -DSPICELAB_BUILD_GRPC=ON \
-        -DSPICELAB_BUILD_TESTS=OFF \
-        -DSPICELAB_BUILD_EXAMPLES=OFF && \
+        -DPULSIM_BUILD_GRPC=ON \
+        -DPULSIM_BUILD_TESTS=OFF \
+        -DPULSIM_BUILD_EXAMPLES=OFF && \
     cmake --build . --parallel $(nproc) && \
-    cmake --install . --prefix /opt/spicelab
+    cmake --install . --prefix /opt/pulsim
 
 # =============================================================================
 # Stage 3: Runtime image
@@ -51,26 +51,26 @@ RUN apt-get update && apt-get install -y \
     zlib1g \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -u 1000 -s /bin/false spicelab
+    && useradd -r -u 1000 -s /bin/false pulsim
 
 # Copy built binaries
-COPY --from=builder /opt/spicelab /opt/spicelab
+COPY --from=builder /opt/pulsim /opt/pulsim
 
 # Add to PATH
-ENV PATH="/opt/spicelab/bin:${PATH}"
+ENV PATH="/opt/pulsim/bin:${PATH}"
 
 # Create directories
-RUN mkdir -p /data /config && chown -R spicelab:spicelab /data /config
+RUN mkdir -p /data /config && chown -R pulsim:pulsim /data /config
 
 # Switch to non-root user
-USER spicelab
+USER pulsim
 
 # Default configuration
-ENV SPICELAB_LISTEN_ADDRESS="0.0.0.0:50051"
-ENV SPICELAB_METRICS_PORT="9090"
-ENV SPICELAB_WORKERS="0"
-ENV SPICELAB_MAX_SESSIONS="64"
-ENV SPICELAB_LOG_LEVEL="info"
+ENV PULSIM_LISTEN_ADDRESS="0.0.0.0:50051"
+ENV PULSIM_METRICS_PORT="9090"
+ENV PULSIM_WORKERS="0"
+ENV PULSIM_MAX_SESSIONS="64"
+ENV PULSIM_LOG_LEVEL="info"
 
 # Expose ports
 EXPOSE 50051/tcp
@@ -81,5 +81,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:9090/health || exit 1
 
 # Default command
-ENTRYPOINT ["spicelab_grpc_server"]
+ENTRYPOINT ["pulsim_grpc_server"]
 CMD ["--listen", "0.0.0.0:50051", "--metrics-port", "9090"]

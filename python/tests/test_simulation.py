@@ -2,7 +2,7 @@
 
 import pytest
 import math
-import spicelab as sl
+import pulsim as sl
 
 
 class TestSimulationOptions:

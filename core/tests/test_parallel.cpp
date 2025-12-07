@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include "spicelab/parallel.hpp"
-#include "spicelab/circuit.hpp"
-#include "spicelab/simulation.hpp"
+#include "pulsim/parallel.hpp"
+#include "pulsim/circuit.hpp"
+#include "pulsim/simulation.hpp"
 #include <chrono>
 #include <atomic>
 
-using namespace spicelab;
+using namespace pulsim;
 using Catch::Matchers::WithinRel;
 using Catch::Matchers::WithinAbs;
 

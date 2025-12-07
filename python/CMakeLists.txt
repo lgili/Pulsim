@@ -11,33 +11,33 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pybind11)
 
 # Create the Python module
-pybind11_add_module(_spicelab
+pybind11_add_module(_pulsim
     bindings.cpp
 )
 
-target_link_libraries(_spicelab
+target_link_libraries(_pulsim
     PRIVATE
-        spicelab::core
+        pulsim::core
 )
 
 # Set the output name to match Python conventions
-set_target_properties(_spicelab PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/spicelab"
+set_target_properties(_pulsim PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim"
 )
 
 # Copy Python wrapper module
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/spicelab/__init__.py
-    ${CMAKE_BINARY_DIR}/python/spicelab/__init__.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.py
+    ${CMAKE_BINARY_DIR}/python/pulsim/__init__.py
     COPYONLY
 )
 
 # Install targets
-install(TARGETS _spicelab
-    LIBRARY DESTINATION spicelab
+install(TARGETS _pulsim
+    LIBRARY DESTINATION pulsim
 )
 
-install(DIRECTORY spicelab/
+install(DIRECTORY pulsim/
     DESTINATION .
     FILES_MATCHING PATTERN "*.py"
 )

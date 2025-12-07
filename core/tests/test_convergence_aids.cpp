@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include "spicelab/convergence_aids.hpp"
-#include "spicelab/circuit.hpp"
-#include "spicelab/mna.hpp"
+#include "pulsim/convergence_aids.hpp"
+#include "pulsim/circuit.hpp"
+#include "pulsim/mna.hpp"
 #include <cmath>
 
-using namespace spicelab;
+using namespace pulsim;
 using Catch::Matchers::WithinRel;
 using Catch::Matchers::WithinAbs;
 

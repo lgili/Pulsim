@@ -1,16 +1,16 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: spicelab
-  namespace: spicelab
+  name: pulsim
+  namespace: pulsim
   labels:
-    app.kubernetes.io/name: spicelab
+    app.kubernetes.io/name: pulsim
     app.kubernetes.io/component: server
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: spicelab
+    name: pulsim
   minReplicas: 2
   maxReplicas: 10
   metrics:

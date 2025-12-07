@@ -1,6 +1,6 @@
-# SpiceLab Netlist Format Reference
+# Pulsim Netlist Format Reference
 
-SpiceLab uses JSON as its primary netlist format. This document describes the complete schema and all supported component types.
+Pulsim uses JSON as its primary netlist format. This document describes the complete schema and all supported component types.
 
 ## Table of Contents
 
@@ -14,7 +14,7 @@ SpiceLab uses JSON as its primary netlist format. This document describes the co
 
 ## Netlist Structure
 
-A SpiceLab netlist is a JSON object with the following top-level structure:
+A Pulsim netlist is a JSON object with the following top-level structure:
 
 ```json
 {

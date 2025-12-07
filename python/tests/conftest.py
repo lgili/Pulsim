@@ -1,4 +1,4 @@
-"""Pytest configuration and fixtures for SpiceLab tests."""
+"""Pytest configuration and fixtures for Pulsim tests."""
 
 import pytest
 import sys
@@ -19,7 +19,7 @@ for path in build_paths:
 @pytest.fixture
 def simple_rc_circuit():
     """Create a simple RC circuit for testing."""
-    import spicelab as sl
+    import pulsim as sl
 
     circuit = sl.Circuit()
     circuit.add_voltage_source("V1", "in", "0", 5.0)
@@ -31,7 +31,7 @@ def simple_rc_circuit():
 @pytest.fixture
 def buck_converter_circuit():
     """Create a buck converter circuit for testing."""
-    import spicelab as sl
+    import pulsim as sl
 
     circuit = sl.Circuit()
 
@@ -66,7 +66,7 @@ def buck_converter_circuit():
 @pytest.fixture
 def simulation_options():
     """Default simulation options for testing."""
-    import spicelab as sl
+    import pulsim as sl
 
     opts = sl.SimulationOptions()
     opts.tstart = 0.0

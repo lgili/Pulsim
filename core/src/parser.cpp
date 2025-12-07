@@ -1,10 +1,10 @@
-#include "spicelab/parser.hpp"
+#include "pulsim/parser.hpp"
 #include <fstream>
 #include <sstream>
 #include <cctype>
 #include <cmath>
 
-namespace spicelab {
+namespace pulsim {
 
 using json = nlohmann::json;
 
@@ -391,4 +391,4 @@ ParseResult<SimulationOptions> NetlistParser::parse_simulation_options(const std
     return parse_options(buffer.str());
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

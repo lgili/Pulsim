@@ -1,9 +1,9 @@
-#include "spicelab/models/magnetic_core.hpp"
+#include "pulsim/models/magnetic_core.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
-namespace spicelab::models {
+namespace pulsim::models {
 
 // Physical constants
 constexpr Real MU0 = 4.0 * M_PI * 1e-7;  // Vacuum permeability (H/m)
@@ -473,4 +473,4 @@ TransformerOpPoint SaturableTransformer::evaluate(Real v1, Real i1, Real i2,
     return op;
 }
 
-}  // namespace spicelab::models
+}  // namespace pulsim::models

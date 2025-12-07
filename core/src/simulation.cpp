@@ -1,10 +1,10 @@
-#include "spicelab/simulation.hpp"
+#include "pulsim/simulation.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
 
-namespace spicelab {
+namespace pulsim {
 
 // =============================================================================
 // SwitchingLossTable implementation
@@ -811,4 +811,4 @@ SimulationResult simulate(const Circuit& circuit, const SimulationOptions& optio
     return sim.run_transient();
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

@@ -1,10 +1,10 @@
-# SpiceLab C++ API Reference {#mainpage}
+# Pulsim C++ API Reference {#mainpage}
 
-Welcome to the SpiceLab C++ API documentation. SpiceLab is a high-performance circuit simulator optimized for power electronics applications.
+Welcome to the Pulsim C++ API documentation. Pulsim is a high-performance circuit simulator optimized for power electronics applications.
 
 ## Overview
 
-SpiceLab provides a complete simulation engine for transient, DC, and AC circuit analysis with:
+Pulsim provides a complete simulation engine for transient, DC, and AC circuit analysis with:
 
 - **Fast sparse matrix solvers** using Eigen and KLU
 - **Accurate device models** for MOSFETs, IGBTs, diodes, and transformers
@@ -14,42 +14,42 @@ SpiceLab provides a complete simulation engine for transient, DC, and AC circuit
 
 ## Architecture
 
-The SpiceLab library is organized into the following main namespaces:
+The Pulsim library is organized into the following main namespaces:
 
-### Core Library (`spicelab`)
+### Core Library (`pulsim`)
 
-- @ref spicelab::Circuit - Circuit representation and component management
-- @ref spicelab::Simulator - Main simulation engine
-- @ref spicelab::MNA - Modified Nodal Analysis matrix assembly
-- @ref spicelab::Solver - Linear and nonlinear solvers
+- @ref pulsim::Circuit - Circuit representation and component management
+- @ref pulsim::Simulator - Main simulation engine
+- @ref pulsim::MNA - Modified Nodal Analysis matrix assembly
+- @ref pulsim::Solver - Linear and nonlinear solvers
 
-### Device Models (`spicelab::devices`)
+### Device Models (`pulsim::devices`)
 
-- @ref spicelab::devices::Resistor
-- @ref spicelab::devices::Capacitor
-- @ref spicelab::devices::Inductor
-- @ref spicelab::devices::VoltageSource
-- @ref spicelab::devices::Diode
-- @ref spicelab::devices::MOSFET
-- @ref spicelab::devices::IGBT
-- @ref spicelab::devices::Transformer
+- @ref pulsim::devices::Resistor
+- @ref pulsim::devices::Capacitor
+- @ref pulsim::devices::Inductor
+- @ref pulsim::devices::VoltageSource
+- @ref pulsim::devices::Diode
+- @ref pulsim::devices::MOSFET
+- @ref pulsim::devices::IGBT
+- @ref pulsim::devices::Transformer
 
-### gRPC API (`spicelab::api::grpc`)
+### gRPC API (`pulsim::api::grpc`)
 
-- @ref spicelab::api::grpc::SimulatorServer - gRPC server implementation
-- @ref spicelab::api::grpc::SessionManager - Session management
-- @ref spicelab::api::grpc::JobQueue - Job queue for async simulation
-- @ref spicelab::api::grpc::MetricsServer - Prometheus metrics
+- @ref pulsim::api::grpc::SimulatorServer - gRPC server implementation
+- @ref pulsim::api::grpc::SessionManager - Session management
+- @ref pulsim::api::grpc::JobQueue - Job queue for async simulation
+- @ref pulsim::api::grpc::MetricsServer - Prometheus metrics
 
 ## Quick Start
 
 ### Basic Simulation
 
 ```cpp
-#include <spicelab/circuit.hpp>
-#include <spicelab/simulation.hpp>
+#include <pulsim/circuit.hpp>
+#include <pulsim/simulation.hpp>
 
-using namespace spicelab;
+using namespace pulsim;
 
 int main() {
     // Create circuit
@@ -80,12 +80,12 @@ int main() {
 ### Loading from JSON
 
 ```cpp
-#include <spicelab/parser.hpp>
-#include <spicelab/simulation.hpp>
+#include <pulsim/parser.hpp>
+#include <pulsim/simulation.hpp>
 
 int main() {
     // Parse netlist
-    auto [circuit, options] = spicelab::parse_netlist("circuit.json");
+    auto [circuit, options] = pulsim::parse_netlist("circuit.json");
 
     // Run simulation
     Simulator sim(circuit, options);
@@ -98,15 +98,15 @@ int main() {
 ### Using the gRPC Server
 
 ```cpp
-#include <spicelab/api/grpc/server.hpp>
+#include <pulsim/api/grpc/server.hpp>
 
 int main() {
-    spicelab::api::grpc::ServerConfig config;
+    pulsim::api::grpc::ServerConfig config;
     config.listen_address = "0.0.0.0:50051";
     config.max_sessions = 64;
     config.num_workers = 8;
 
-    spicelab::api::grpc::SimulatorServer server(config);
+    pulsim::api::grpc::SimulatorServer server(config);
     server.start();
     server.wait();
 
@@ -134,10 +134,10 @@ cmake --build . --parallel
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SPICELAB_BUILD_TESTS` | ON | Build unit tests |
-| `SPICELAB_BUILD_PYTHON` | OFF | Build Python bindings |
-| `SPICELAB_BUILD_GRPC` | OFF | Build gRPC API |
-| `SPICELAB_BUILD_EXAMPLES` | OFF | Build examples |
+| `PULSIM_BUILD_TESTS` | ON | Build unit tests |
+| `PULSIM_BUILD_PYTHON` | OFF | Build Python bindings |
+| `PULSIM_BUILD_GRPC` | OFF | Build gRPC API |
+| `PULSIM_BUILD_EXAMPLES` | OFF | Build examples |
 
 ## Module Documentation
 

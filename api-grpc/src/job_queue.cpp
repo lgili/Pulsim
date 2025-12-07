@@ -1,12 +1,12 @@
-#include "spicelab/api/grpc/job_queue.hpp"
-#include "spicelab/api/grpc/metrics.hpp"
+#include "pulsim/api/grpc/job_queue.hpp"
+#include "pulsim/api/grpc/metrics.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
 #include <random>
 #include <sstream>
 
-namespace spicelab::api::grpc {
+namespace pulsim::api::grpc {
 
 // =============================================================================
 // QuotaManager Implementation
@@ -30,7 +30,7 @@ bool QuotaManager::can_submit(const std::string& user_id, std::string& reason) {
     if (quota.current_running >= quota.max_concurrent_jobs) {
         reason = "Maximum concurrent jobs limit reached (" +
                  std::to_string(quota.max_concurrent_jobs) + ")";
-        SPICELAB_METRICS.quota_exceeded_total().inc();
+        PULSIM_METRICS.quota_exceeded_total().inc();
         return false;
     }
 
@@ -38,7 +38,7 @@ bool QuotaManager::can_submit(const std::string& user_id, std::string& reason) {
     if (quota.current_queued >= quota.max_queued_jobs) {
         reason = "Maximum queued jobs limit reached (" +
                  std::to_string(quota.max_queued_jobs) + ")";
-        SPICELAB_METRICS.quota_exceeded_total().inc();
+        PULSIM_METRICS.quota_exceeded_total().inc();
         return false;
     }
 
@@ -51,7 +51,7 @@ bool QuotaManager::can_submit(const std::string& user_id, std::string& reason) {
     if (quota.jobs_this_hour >= quota.max_jobs_per_hour) {
         reason = "Hourly job limit reached (" +
                  std::to_string(quota.max_jobs_per_hour) + ")";
-        SPICELAB_METRICS.quota_exceeded_total().inc();
+        PULSIM_METRICS.quota_exceeded_total().inc();
         return false;
     }
 
@@ -63,7 +63,7 @@ bool QuotaManager::can_submit(const std::string& user_id, std::string& reason) {
     if (quota.jobs_today >= quota.max_jobs_per_day) {
         reason = "Daily job limit reached (" +
                  std::to_string(quota.max_jobs_per_day) + ")";
-        SPICELAB_METRICS.quota_exceeded_total().inc();
+        PULSIM_METRICS.quota_exceeded_total().inc();
         return false;
     }
 
@@ -176,7 +176,7 @@ std::string MemoryJobQueue::submit(SimulationJob job) {
     }
 
     job_available_.notify_one();
-    SPICELAB_METRICS.jobs_pending().inc();
+    PULSIM_METRICS.jobs_pending().inc();
 
     return job_id;
 }
@@ -196,8 +196,8 @@ std::optional<SimulationJob> MemoryJobQueue::dequeue(const std::chrono::millisec
     status_[job.job_id] = JobStatus::Running;
     running_[job.job_id] = "";  // Worker ID set later
 
-    SPICELAB_METRICS.jobs_pending().dec();
-    SPICELAB_METRICS.jobs_running().inc();
+    PULSIM_METRICS.jobs_pending().dec();
+    PULSIM_METRICS.jobs_running().inc();
 
     return job;
 }
@@ -238,20 +238,20 @@ void MemoryJobQueue::set_result(const std::string& job_id, const JobResult& resu
     status_[job_id] = result.status;
     running_.erase(job_id);
 
-    SPICELAB_METRICS.jobs_running().dec();
+    PULSIM_METRICS.jobs_running().dec();
 
     switch (result.status) {
         case JobStatus::Completed:
-            SPICELAB_METRICS.jobs_completed().inc();
+            PULSIM_METRICS.jobs_completed().inc();
             break;
         case JobStatus::Failed:
-            SPICELAB_METRICS.jobs_failed().inc();
+            PULSIM_METRICS.jobs_failed().inc();
             break;
         case JobStatus::Cancelled:
-            SPICELAB_METRICS.jobs_cancelled().inc();
+            PULSIM_METRICS.jobs_cancelled().inc();
             break;
         case JobStatus::Timeout:
-            SPICELAB_METRICS.jobs_timeout().inc();
+            PULSIM_METRICS.jobs_timeout().inc();
             break;
         default:
             break;
@@ -271,8 +271,8 @@ bool MemoryJobQueue::cancel(const std::string& job_id) {
         result.completed_at = std::chrono::system_clock::now();
         results_[job_id] = result;
 
-        SPICELAB_METRICS.jobs_pending().dec();
-        SPICELAB_METRICS.jobs_cancelled().inc();
+        PULSIM_METRICS.jobs_pending().dec();
+        PULSIM_METRICS.jobs_cancelled().inc();
         return true;
     }
     return false;
@@ -386,7 +386,7 @@ void WorkerPool::start() {
         workers_.emplace_back(&WorkerPool::worker_loop, this, i);
     }
 
-    SPICELAB_METRICS.workers_idle().set(static_cast<double>(config_.num_workers));
+    PULSIM_METRICS.workers_idle().set(static_cast<double>(config_.num_workers));
 }
 
 void WorkerPool::stop() {
@@ -403,8 +403,8 @@ void WorkerPool::stop() {
     workers_.clear();
     worker_stats_.clear();
 
-    SPICELAB_METRICS.workers_active().set(0);
-    SPICELAB_METRICS.workers_idle().set(0);
+    PULSIM_METRICS.workers_active().set(0);
+    PULSIM_METRICS.workers_idle().set(0);
 }
 
 std::string WorkerPool::generate_worker_id(size_t index) {
@@ -437,8 +437,8 @@ void WorkerPool::worker_loop(size_t worker_index) {
         }
 
         ++active_count_;
-        SPICELAB_METRICS.workers_active().inc();
-        SPICELAB_METRICS.workers_idle().dec();
+        PULSIM_METRICS.workers_active().inc();
+        PULSIM_METRICS.workers_idle().dec();
 
         // Move from queued to running for quota tracking
         quotas_.get_quota(job.user_id).current_queued--;
@@ -450,8 +450,8 @@ void WorkerPool::worker_loop(size_t worker_index) {
         quotas_.release(job.user_id, true);
 
         --active_count_;
-        SPICELAB_METRICS.workers_active().dec();
-        SPICELAB_METRICS.workers_idle().inc();
+        PULSIM_METRICS.workers_active().dec();
+        PULSIM_METRICS.workers_idle().inc();
 
         {
             std::lock_guard<std::mutex> lock(stats_mutex_);
@@ -466,7 +466,7 @@ void WorkerPool::execute_job(SimulationJob& job, WorkerStats& stats) {
     result.worker_id = stats.worker_id;
     result.started_at = std::chrono::system_clock::now();
 
-    auto timer = SPICELAB_METRICS.simulation_duration().start_timer();
+    auto timer = PULSIM_METRICS.simulation_duration().start_timer();
 
     try {
         // Check timeout
@@ -490,12 +490,12 @@ void WorkerPool::execute_job(SimulationJob& job, WorkerStats& stats) {
         result.timesteps = result.simulation.total_steps;
         result.newton_iterations = result.simulation.newton_iterations_total;
 
-        SPICELAB_METRICS.simulations_total().inc();
-        SPICELAB_METRICS.simulation_timesteps().observe(static_cast<double>(result.timesteps));
-        SPICELAB_METRICS.newton_iterations().observe(static_cast<double>(result.newton_iterations));
+        PULSIM_METRICS.simulations_total().inc();
+        PULSIM_METRICS.simulation_timesteps().observe(static_cast<double>(result.timesteps));
+        PULSIM_METRICS.newton_iterations().observe(static_cast<double>(result.newton_iterations));
 
         if (result.status == JobStatus::Failed) {
-            SPICELAB_METRICS.simulations_failed().inc();
+            PULSIM_METRICS.simulations_failed().inc();
             stats.jobs_failed++;
         } else {
             stats.jobs_completed++;
@@ -504,7 +504,7 @@ void WorkerPool::execute_job(SimulationJob& job, WorkerStats& stats) {
     } catch (const std::exception& e) {
         result.status = JobStatus::Failed;
         result.error_message = e.what();
-        SPICELAB_METRICS.simulations_failed().inc();
+        PULSIM_METRICS.simulations_failed().inc();
         stats.jobs_failed++;
     }
 
@@ -531,7 +531,7 @@ std::unique_ptr<IJobQueue> create_job_queue(const JobQueueConfig& config) {
         case QueueBackend::Memory:
             return std::make_unique<MemoryJobQueue>();
 
-#ifdef SPICELAB_WITH_REDIS
+#ifdef PULSIM_WITH_REDIS
         case QueueBackend::Redis:
             return std::make_unique<RedisJobQueue>(config.redis);
 #endif
@@ -541,4 +541,4 @@ std::unique_ptr<IJobQueue> create_job_queue(const JobQueueConfig& config) {
     }
 }
 
-}  // namespace spicelab::api::grpc
+}  // namespace pulsim::api::grpc

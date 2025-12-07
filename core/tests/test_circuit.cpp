@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
-#include "spicelab/circuit.hpp"
+#include "pulsim/circuit.hpp"
 
-using namespace spicelab;
+using namespace pulsim;
 
 TEST_CASE("Circuit construction", "[circuit]") {
     Circuit circuit;

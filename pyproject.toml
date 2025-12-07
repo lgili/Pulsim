@@ -3,14 +3,14 @@ requires = ["scikit-build-core>=0.8", "pybind11>=2.12"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "spicelab"
+name = "pulsim"
 version = "0.1.0"
 description = "High-performance circuit simulator for power electronics"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 authors = [
-    {name = "SpiceLab Authors", email = "spicelab@example.com"}
+    {name = "Pulsim Authors", email = "pulsim@example.com"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -58,23 +58,23 @@ docs = [
     "sphinx-rtd-theme>=1.0",
 ]
 all = [
-    "spicelab[grpc,jupyter,data,dev]",
+    "pulsim[grpc,jupyter,data,dev]",
 ]
 
 [project.urls]
-Homepage = "https://github.com/spicelab/spicelab-core"
-Documentation = "https://spicelab.readthedocs.io"
-Repository = "https://github.com/spicelab/spicelab-core"
-Issues = "https://github.com/spicelab/spicelab-core/issues"
+Homepage = "https://github.com/pulsim/pulsim-core"
+Documentation = "https://pulsim.readthedocs.io"
+Repository = "https://github.com/pulsim/pulsim-core"
+Issues = "https://github.com/pulsim/pulsim-core/issues"
 
 [tool.scikit-build]
 cmake.args = [
-    "-DSPICELAB_BUILD_TESTS=OFF",
-    "-DSPICELAB_BUILD_CLI=OFF",
-    "-DSPICELAB_BUILD_PYTHON=ON",
-    "-DSPICELAB_BUILD_GRPC=OFF",
+    "-DPULSIM_BUILD_TESTS=OFF",
+    "-DPULSIM_BUILD_CLI=OFF",
+    "-DPULSIM_BUILD_PYTHON=ON",
+    "-DPULSIM_BUILD_GRPC=OFF",
 ]
-wheel.packages = ["python/spicelab"]
+wheel.packages = ["python/pulsim"]
 editable.mode = "redirect"
 editable.rebuild = true
 build-dir = "build/{wheel_tag}"
@@ -91,7 +91,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 
 [tool.coverage.run]
-source = ["spicelab"]
+source = ["pulsim"]
 branch = true
 
 [tool.coverage.report]

@@ -1,8 +1,8 @@
-#include "spicelab/api/grpc/server_config.hpp"
-#include "spicelab/api/grpc/session_manager.hpp"
-#include "spicelab/api/grpc/simulator.grpc.pb.h"
-#include "spicelab/api/grpc/simulator.pb.h"
-#include "spicelab/parser.hpp"
+#include "pulsim/api/grpc/server_config.hpp"
+#include "pulsim/api/grpc/session_manager.hpp"
+#include "pulsim/api/grpc/simulator.grpc.pb.h"
+#include "pulsim/api/grpc/simulator.pb.h"
+#include "pulsim/parser.hpp"
 
 #include <grpcpp/grpcpp.h>
 #include <google/protobuf/timestamp.pb.h>
@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace spicelab::api::grpc {
+namespace pulsim::api::grpc {
 namespace {
 
 ::google::protobuf::Timestamp to_timestamp(const std::chrono::system_clock::time_point& tp) {
@@ -25,8 +25,8 @@ namespace {
     return ts;
 }
 
-spicelab::SimulationOptions merge_options(spicelab::SimulationOptions base,
-                                          const ::spicelab::api::v1::SimulationOptions& req) {
+pulsim::SimulationOptions merge_options(pulsim::SimulationOptions base,
+                                          const ::pulsim::api::v1::SimulationOptions& req) {
     if (req.has_tstart()) base.tstart = req.tstart().value();
     if (req.has_tstop()) base.tstop = req.tstop().value();
     if (req.has_dt()) base.dt = req.dt().value();
@@ -41,11 +41,11 @@ spicelab::SimulationOptions merge_options(spicelab::SimulationOptions base,
     return base;
 }
 
-void fill_session_descriptor(const SessionInfo& info, ::spicelab::api::v1::SessionDescriptor* out) {
+void fill_session_descriptor(const SessionInfo& info, ::pulsim::api::v1::SessionDescriptor* out) {
     out->set_session_id(info.session_id);
     out->set_model_id(info.model_id);
     out->set_name(info.name);
-    out->set_status(static_cast<::spicelab::api::v1::SessionStatus>(static_cast<int>(info.state)));
+    out->set_status(static_cast<::pulsim::api::v1::SessionStatus>(static_cast<int>(info.state)));
     *out->mutable_created_at() = to_timestamp(info.created_at);
     *out->mutable_updated_at() = to_timestamp(info.updated_at);
     for (const auto& s : info.active_signals) {
@@ -55,7 +55,7 @@ void fill_session_descriptor(const SessionInfo& info, ::spicelab::api::v1::Sessi
     out->set_owner(info.owner);
 }
 
-void fill_metadata(const ResultSnapshot& snapshot, ::spicelab::api::v1::ResultMetadata* out) {
+void fill_metadata(const ResultSnapshot& snapshot, ::pulsim::api::v1::ResultMetadata* out) {
     if (!snapshot.result.time.empty()) {
         out->set_start_time(snapshot.result.time.front());
         out->set_end_time(snapshot.result.time.back());
@@ -64,17 +64,17 @@ void fill_metadata(const ResultSnapshot& snapshot, ::spicelab::api::v1::ResultMe
     for (const auto& s : snapshot.result.signal_names) {
         out->add_signals(s);
     }
-    out->set_status(static_cast<::spicelab::api::v1::SessionStatus>(static_cast<int>(snapshot.final_state)));
+    out->set_status(static_cast<::pulsim::api::v1::SessionStatus>(static_cast<int>(snapshot.final_state)));
     out->set_error_message(snapshot.error_message);
 }
 
-class SimulatorServiceImpl final : public ::spicelab::api::v1::SimulatorService::Service {
+class SimulatorServiceImpl final : public ::pulsim::api::v1::SimulatorService::Service {
 public:
     explicit SimulatorServiceImpl(SessionManager& mgr, const ServerConfig& cfg)
         : mgr_(mgr), cfg_(cfg), start_time_(std::chrono::steady_clock::now()) {}
 
-    ::grpc::Status HealthCheck(::grpc::ServerContext*, const ::spicelab::api::v1::HealthCheckRequest*, ::spicelab::api::v1::HealthCheckResponse* resp) override {
-        resp->set_status(::spicelab::api::v1::HEALTH_STATUS_OK);
+    ::grpc::Status HealthCheck(::grpc::ServerContext*, const ::pulsim::api::v1::HealthCheckRequest*, ::pulsim::api::v1::HealthCheckResponse* resp) override {
+        resp->set_status(::pulsim::api::v1::HEALTH_STATUS_OK);
         resp->set_version(cfg_.version);
         auto uptime = std::chrono::steady_clock::now() - start_time_;
         resp->mutable_uptime()->set_seconds(std::chrono::duration_cast<std::chrono::seconds>(uptime).count());
@@ -84,18 +84,18 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status CreateSession(::grpc::ServerContext*, const ::spicelab::api::v1::CreateSessionRequest* req, ::spicelab::api::v1::CreateSessionResponse* resp) override {
+    ::grpc::Status CreateSession(::grpc::ServerContext*, const ::pulsim::api::v1::CreateSessionRequest* req, ::pulsim::api::v1::CreateSessionResponse* resp) override {
         if (!req->has_inline_model()) {
             return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "inline_model required");
         }
 
         const auto& model = req->inline_model();
-        auto parse = spicelab::NetlistParser::parse_string(model.model_json());
+        auto parse = pulsim::NetlistParser::parse_string(model.model_json());
         if (!parse) {
             return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, parse.error().to_string());
         }
-        spicelab::Circuit circuit = *parse;
-        spicelab::SimulationOptions options = merge_options(spicelab::SimulationOptions{}, req->options());
+        pulsim::Circuit circuit = *parse;
+        pulsim::SimulationOptions options = merge_options(pulsim::SimulationOptions{}, req->options());
         std::vector<std::string> signals(options.output_signals.begin(), options.output_signals.end());
 
         auto session_id = mgr_.create_session(model.name(), "", std::nullopt, std::move(circuit), options, signals);
@@ -107,14 +107,14 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status ListSessions(::grpc::ServerContext*, const ::spicelab::api::v1::ListSessionsRequest*, ::spicelab::api::v1::ListSessionsResponse* resp) override {
+    ::grpc::Status ListSessions(::grpc::ServerContext*, const ::pulsim::api::v1::ListSessionsRequest*, ::pulsim::api::v1::ListSessionsResponse* resp) override {
         for (const auto& info : mgr_.list_sessions()) {
             fill_session_descriptor(info, resp->add_sessions());
         }
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status GetSession(::grpc::ServerContext*, const ::spicelab::api::v1::GetSessionRequest* req, ::spicelab::api::v1::GetSessionResponse* resp) override {
+    ::grpc::Status GetSession(::grpc::ServerContext*, const ::pulsim::api::v1::GetSessionRequest* req, ::pulsim::api::v1::GetSessionResponse* resp) override {
         auto info = mgr_.get_session(req->session_id());
         if (!info) {
             return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "session not found");
@@ -123,7 +123,7 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status StartSimulation(::grpc::ServerContext*, const ::spicelab::api::v1::StartSimulationRequest* req, ::spicelab::api::v1::StartSimulationResponse* resp) override {
+    ::grpc::Status StartSimulation(::grpc::ServerContext*, const ::pulsim::api::v1::StartSimulationRequest* req, ::pulsim::api::v1::StartSimulationResponse* resp) override {
         auto base_opts = mgr_.get_options(req->session_id());
         if (!base_opts) {
             return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "session not found");
@@ -138,7 +138,7 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status PauseSimulation(::grpc::ServerContext*, const ::spicelab::api::v1::PauseSimulationRequest* req, ::spicelab::api::v1::PauseSimulationResponse* resp) override {
+    ::grpc::Status PauseSimulation(::grpc::ServerContext*, const ::pulsim::api::v1::PauseSimulationRequest* req, ::pulsim::api::v1::PauseSimulationResponse* resp) override {
         if (!mgr_.pause_session(req->session_id())) {
             return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "session not found");
         }
@@ -148,7 +148,7 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status ResumeSimulation(::grpc::ServerContext*, const ::spicelab::api::v1::ResumeSimulationRequest* req, ::spicelab::api::v1::ResumeSimulationResponse* resp) override {
+    ::grpc::Status ResumeSimulation(::grpc::ServerContext*, const ::pulsim::api::v1::ResumeSimulationRequest* req, ::pulsim::api::v1::ResumeSimulationResponse* resp) override {
         if (!mgr_.resume_session(req->session_id())) {
             return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "session not found");
         }
@@ -158,7 +158,7 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status StopSimulation(::grpc::ServerContext*, const ::spicelab::api::v1::StopSimulationRequest* req, ::spicelab::api::v1::StopSimulationResponse* resp) override {
+    ::grpc::Status StopSimulation(::grpc::ServerContext*, const ::pulsim::api::v1::StopSimulationRequest* req, ::pulsim::api::v1::StopSimulationResponse* resp) override {
         if (!mgr_.stop_session(req->session_id())) {
             return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "session not found");
         }
@@ -168,7 +168,7 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status StreamWaveforms(::grpc::ServerContext*, const ::spicelab::api::v1::StreamWaveformsRequest* req, ::grpc::ServerWriter<::spicelab::api::v1::WaveformStreamResponse>* writer) override {
+    ::grpc::Status StreamWaveforms(::grpc::ServerContext*, const ::pulsim::api::v1::StreamWaveformsRequest* req, ::grpc::ServerWriter<::pulsim::api::v1::WaveformStreamResponse>* writer) override {
         auto subscriber = mgr_.attach_stream(req->session_id(), {req->signals().begin(), req->signals().end()}, req->decimation(), req->has_start_time() ? std::make_optional(req->start_time().value()) : std::nullopt);
         if (!subscriber) {
             return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "session not found or signals invalid");
@@ -176,7 +176,7 @@ public:
 
         WaveformSubscriber::Event event;
         while (subscriber->next_event(event)) {
-            ::spicelab::api::v1::WaveformStreamResponse resp;
+            ::pulsim::api::v1::WaveformStreamResponse resp;
             switch (event.type) {
                 case WaveformSubscriber::Event::Type::Header: {
                     auto* h = resp.mutable_header();
@@ -195,7 +195,7 @@ public:
                 }
                 case WaveformSubscriber::Event::Type::Complete: {
                     auto* c = resp.mutable_complete();
-                    c->set_final_status(static_cast<::spicelab::api::v1::SessionStatus>(static_cast<int>(event.complete.final_state)));
+                    c->set_final_status(static_cast<::pulsim::api::v1::SessionStatus>(static_cast<int>(event.complete.final_state)));
                     c->set_error_message(event.complete.error_message);
                     writer->Write(resp);
                     return ::grpc::Status::OK;
@@ -208,7 +208,7 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status GetResult(::grpc::ServerContext*, const ::spicelab::api::v1::GetResultRequest* req, ::spicelab::api::v1::GetResultResponse* resp) override {
+    ::grpc::Status GetResult(::grpc::ServerContext*, const ::pulsim::api::v1::GetResultRequest* req, ::pulsim::api::v1::GetResultResponse* resp) override {
         auto snapshot = mgr_.get_result(req->session_id());
         if (!snapshot) {
             return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "result not ready");
@@ -217,35 +217,35 @@ public:
         return ::grpc::Status::OK;
     }
 
-    ::grpc::Status DownloadResult(::grpc::ServerContext*, const ::spicelab::api::v1::DownloadResultRequest*, ::grpc::ServerWriter<::spicelab::api::v1::DownloadResultResponse>*) override {
+    ::grpc::Status DownloadResult(::grpc::ServerContext*, const ::pulsim::api::v1::DownloadResultRequest*, ::grpc::ServerWriter<::pulsim::api::v1::DownloadResultResponse>*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "DownloadResult not implemented");
     }
 
-    ::grpc::Status UploadModel(::grpc::ServerContext*, const ::spicelab::api::v1::UploadModelRequest*, ::spicelab::api::v1::UploadModelResponse*) override {
+    ::grpc::Status UploadModel(::grpc::ServerContext*, const ::pulsim::api::v1::UploadModelRequest*, ::pulsim::api::v1::UploadModelResponse*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "Model storage not implemented");
     }
 
-    ::grpc::Status ListModels(::grpc::ServerContext*, const ::spicelab::api::v1::ListModelsRequest*, ::spicelab::api::v1::ListModelsResponse*) override {
+    ::grpc::Status ListModels(::grpc::ServerContext*, const ::pulsim::api::v1::ListModelsRequest*, ::pulsim::api::v1::ListModelsResponse*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "Model storage not implemented");
     }
 
-    ::grpc::Status GetModel(::grpc::ServerContext*, const ::spicelab::api::v1::GetModelRequest*, ::spicelab::api::v1::GetModelResponse*) override {
+    ::grpc::Status GetModel(::grpc::ServerContext*, const ::pulsim::api::v1::GetModelRequest*, ::pulsim::api::v1::GetModelResponse*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "Model storage not implemented");
     }
 
-    ::grpc::Status DeleteModel(::grpc::ServerContext*, const ::spicelab::api::v1::DeleteModelRequest*, ::spicelab::api::v1::DeleteModelResponse*) override {
+    ::grpc::Status DeleteModel(::grpc::ServerContext*, const ::pulsim::api::v1::DeleteModelRequest*, ::pulsim::api::v1::DeleteModelResponse*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "Model storage not implemented");
     }
 
-    ::grpc::Status CreateSweep(::grpc::ServerContext*, const ::spicelab::api::v1::CreateSweepRequest*, ::spicelab::api::v1::CreateSweepResponse*) override {
+    ::grpc::Status CreateSweep(::grpc::ServerContext*, const ::pulsim::api::v1::CreateSweepRequest*, ::pulsim::api::v1::CreateSweepResponse*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "Sweeps not implemented");
     }
 
-    ::grpc::Status RunSweep(::grpc::ServerContext*, const ::spicelab::api::v1::RunSweepRequest*, ::spicelab::api::v1::RunSweepResponse*) override {
+    ::grpc::Status RunSweep(::grpc::ServerContext*, const ::pulsim::api::v1::RunSweepRequest*, ::pulsim::api::v1::RunSweepResponse*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "Sweeps not implemented");
     }
 
-    ::grpc::Status GetSweepResults(::grpc::ServerContext*, const ::spicelab::api::v1::GetSweepResultsRequest*, ::spicelab::api::v1::GetSweepResultsResponse*) override {
+    ::grpc::Status GetSweepResults(::grpc::ServerContext*, const ::pulsim::api::v1::GetSweepResultsRequest*, ::pulsim::api::v1::GetSweepResultsResponse*) override {
         return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "Sweeps not implemented");
     }
 
@@ -257,7 +257,7 @@ private:
 
 }  // namespace
 
-std::pair<std::unique_ptr<::grpc::Server>, std::unique_ptr<::spicelab::api::v1::SimulatorService::Service>>
+std::pair<std::unique_ptr<::grpc::Server>, std::unique_ptr<::pulsim::api::v1::SimulatorService::Service>>
 build_server(SessionManager& manager, const ServerConfig& config) {
     ::grpc::ServerBuilder builder;
     builder.AddListeningPort(config.listen_address, ::grpc::InsecureServerCredentials());
@@ -268,4 +268,4 @@ build_server(SessionManager& manager, const ServerConfig& config) {
     return {std::unique_ptr<::grpc::Server>(server.release()), std::move(service)};
 }
 
-}  // namespace spicelab::api::grpc
+}  // namespace pulsim::api::grpc

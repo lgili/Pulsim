@@ -1,8 +1,8 @@
-#include "spicelab/convergence_aids.hpp"
+#include "pulsim/convergence_aids.hpp"
 #include <cmath>
 #include <iostream>
 
-namespace spicelab {
+namespace pulsim {
 
 // =============================================================================
 // Gmin Stepping Implementation
@@ -260,4 +260,4 @@ NewtonResult PseudoTransientContinuation::solve(SystemFunc system_func,
     return solve(system_func, cap_func, x0);
 }
 
-}  // namespace spicelab
+}  // namespace pulsim

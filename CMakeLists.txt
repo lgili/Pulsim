@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(spicelab VERSION 0.1.0 LANGUAGES CXX)
+project(pulsim VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,12 +7,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
-option(SPICELAB_BUILD_TESTS "Build tests" ON)
-option(SPICELAB_BUILD_CLI "Build CLI application" ON)
-option(SPICELAB_BUILD_PYTHON "Build Python bindings" OFF)
-option(SPICELAB_BUILD_GRPC "Build gRPC API server" OFF)
-option(SPICELAB_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
-option(SPICELAB_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
+option(PULSIM_BUILD_TESTS "Build tests" ON)
+option(PULSIM_BUILD_CLI "Build CLI application" ON)
+option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
+option(PULSIM_BUILD_GRPC "Build gRPC API server" OFF)
+option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
+option(PULSIM_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
 
 # Prevent Eigen from enabling its own test targets when pulled via FetchContent.
 # We want to build the project's tests but avoid running large third-party test
@@ -20,15 +20,15 @@ option(SPICELAB_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
 set(EIGEN_BUILD_TESTS OFF CACHE BOOL "Disable Eigen tests in dependencies" FORCE)
 set(EIGEN_BUILD_TESTING OFF CACHE BOOL "Disable Eigen testing in dependencies" FORCE)
 
-# Control BUILD_TESTING based on SPICELAB_BUILD_TESTS. When tests are
+# Control BUILD_TESTING based on PULSIM_BUILD_TESTS. When tests are
 # explicitly enabled, force ENABLE CTest and allow test discovery. When
 # disabled, turn off testing for the project and common dependency test
 # flags to avoid target-name collisions in FetchContent dependencies.
-if(SPICELAB_BUILD_TESTS)
-    message(STATUS "SPICELAB_BUILD_TESTS=ON -> enabling CTest/BUID_TESTING")
+if(PULSIM_BUILD_TESTS)
+    message(STATUS "PULSIM_BUILD_TESTS=ON -> enabling CTest/BUID_TESTING")
     set(BUILD_TESTING ON CACHE BOOL "Enable CTest and dependency tests" FORCE)
 else()
-    message(STATUS "SPICELAB_BUILD_TESTS=OFF -> disabling dependency tests (BUILD_TESTING/EIGEN_* )")
+    message(STATUS "PULSIM_BUILD_TESTS=OFF -> disabling dependency tests (BUILD_TESTING/EIGEN_* )")
     # Prevent fetched projects from enabling their own testing targets
     set(BUILD_TESTING OFF CACHE BOOL "Disable building tests in dependencies" FORCE)
     # Eigen-specific guards (try both variable names used across versions)
@@ -50,8 +50,8 @@ endif()
 
 # Sanitizers for Debug builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MSVC)
-    option(SPICELAB_SANITIZERS "Enable sanitizers" OFF)
-    if(SPICELAB_SANITIZERS)
+    option(PULSIM_SANITIZERS "Enable sanitizers" OFF)
+    if(PULSIM_SANITIZERS)
         add_compile_options(-fsanitize=address,undefined)
         add_link_options(-fsanitize=address,undefined)
     endif()
@@ -79,7 +79,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(json)
 
 # Catch2 for testing
-if(SPICELAB_BUILD_TESTS)
+if(PULSIM_BUILD_TESTS)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -93,7 +93,7 @@ if(SPICELAB_BUILD_TESTS)
 endif()
 
 # SUNDIALS - Advanced ODE/DAE solvers (IDA, CVODE, ARKODE)
-if(SPICELAB_USE_SUNDIALS)
+if(PULSIM_USE_SUNDIALS)
     # First try to find system-installed SUNDIALS
     find_package(SUNDIALS CONFIG QUIET)
     if(NOT SUNDIALS_FOUND)
@@ -118,17 +118,17 @@ if(SPICELAB_USE_SUNDIALS)
         set(EXAMPLES_INSTALL OFF CACHE BOOL "Don't install examples" FORCE)
         FetchContent_MakeAvailable(sundials)
     endif()
-    add_compile_definitions(SPICELAB_HAS_SUNDIALS)
+    add_compile_definitions(PULSIM_HAS_SUNDIALS)
     message(STATUS "SUNDIALS support enabled")
 endif()
 
 # SuiteSparse KLU - Fast sparse LU for circuit matrices
-if(SPICELAB_USE_SUITESPARSE)
+if(PULSIM_USE_SUITESPARSE)
     # Try to find system-installed SuiteSparse
     find_package(SuiteSparse CONFIG QUIET)
     if(SuiteSparse_FOUND)
         message(STATUS "Found system SuiteSparse")
-        add_compile_definitions(SPICELAB_HAS_KLU)
+        add_compile_definitions(PULSIM_HAS_KLU)
     else()
         # Try pkg-config
         find_package(PkgConfig QUIET)
@@ -136,7 +136,7 @@ if(SPICELAB_USE_SUITESPARSE)
             pkg_check_modules(KLU QUIET klu)
             if(KLU_FOUND)
                 message(STATUS "Found KLU via pkg-config")
-                add_compile_definitions(SPICELAB_HAS_KLU)
+                add_compile_definitions(PULSIM_HAS_KLU)
             else()
                 message(WARNING "SuiteSparse/KLU not found. Install with: brew install suite-sparse (macOS) or apt install libsuitesparse-dev (Linux)")
             endif()
@@ -150,47 +150,47 @@ endif()
 add_subdirectory(core)
 
 # gRPC API server (must come before CLI to provide grpc_proto target)
-if(SPICELAB_BUILD_GRPC)
+if(PULSIM_BUILD_GRPC)
     add_subdirectory(api-grpc)
 endif()
 
 # CLI application
-if(SPICELAB_BUILD_CLI)
+if(PULSIM_BUILD_CLI)
     add_subdirectory(cli)
 endif()
 
 # If tests are enabled, ensure the CLI executable is built before running integration
-# tests that invoke it. `spicelab_tests` lives in the `core` subdirectory.
-if(SPICELAB_BUILD_TESTS AND SPICELAB_BUILD_CLI)
-    if(TARGET spicelab AND TARGET spicelab_tests)
-        add_dependencies(spicelab_tests spicelab)
+# tests that invoke it. `pulsim_tests` lives in the `core` subdirectory.
+if(PULSIM_BUILD_TESTS AND PULSIM_BUILD_CLI)
+    if(TARGET pulsim AND TARGET pulsim_tests)
+        add_dependencies(pulsim_tests pulsim)
     endif()
 endif()
 
 # Python bindings
-if(SPICELAB_BUILD_PYTHON)
+if(PULSIM_BUILD_PYTHON)
     add_subdirectory(python)
 endif()
 
 # Custom targets for running examples (only when CLI is built)
-if(SPICELAB_BUILD_CLI)
+if(PULSIM_BUILD_CLI)
     add_custom_target(run_buck
-        COMMAND $<TARGET_FILE:spicelab> -v run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o buck_result.csv
-        DEPENDS spicelab
+        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o buck_result.csv
+        DEPENDS pulsim
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running buck converter simulation..."
     )
 
     add_custom_target(run_rc
-        COMMAND $<TARGET_FILE:spicelab> -v run ${CMAKE_SOURCE_DIR}/examples/rc_circuit.json -o rc_result.csv
-        DEPENDS spicelab
+        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/rc_circuit.json -o rc_result.csv
+        DEPENDS pulsim
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running RC circuit simulation..."
     )
 
     add_custom_target(run_rlc
-        COMMAND $<TARGET_FILE:spicelab> -v run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o rlc_result.csv
-        DEPENDS spicelab
+        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o rlc_result.csv
+        DEPENDS pulsim
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running RLC circuit simulation..."
     )

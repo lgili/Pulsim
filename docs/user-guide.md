@@ -1,6 +1,6 @@
-# SpiceLab User Guide
+# Pulsim User Guide
 
-SpiceLab is a high-performance circuit simulator optimized for power electronics applications. It provides fast transient simulation with accurate switching device models, thermal modeling, and loss calculation.
+Pulsim is a high-performance circuit simulator optimized for power electronics applications. It provides fast transient simulation with accurate switching device models, thermal modeling, and loss calculation.
 
 ## Table of Contents
 
@@ -40,16 +40,16 @@ SpiceLab is a high-performance circuit simulator optimized for power electronics
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/spicelab-core.git
-cd spicelab-core
+git clone https://github.com/your-org/pulsim-core.git
+cd pulsim-core
 
 # Create build directory
 mkdir build && cd build
 
 # Configure with CMake
 cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DSPICELAB_BUILD_PYTHON=ON \
-         -DSPICELAB_BUILD_GRPC=ON
+         -DPULSIM_BUILD_PYTHON=ON \
+         -DPULSIM_BUILD_GRPC=ON
 
 # Build
 cmake --build . --parallel
@@ -65,17 +65,17 @@ sudo cmake --install .
 pip install ./python
 
 # Or install pre-built wheel (when available)
-pip install spicelab
+pip install pulsim
 ```
 
 ### Docker
 
 ```bash
 # Pull image
-docker pull spicelab:latest
+docker pull pulsim:latest
 
 # Run gRPC server
-docker run -p 50051:50051 -p 9090:9090 spicelab:latest
+docker run -p 50051:50051 -p 9090:9090 pulsim:latest
 ```
 
 ---
@@ -106,14 +106,14 @@ Create a file `rc_circuit.json`:
 
 **CLI:**
 ```bash
-spicelab run rc_circuit.json -o results.csv
+pulsim run rc_circuit.json -o results.csv
 ```
 
 **Python:**
 ```python
-import spicelab
+import pulsim
 
-result = spicelab.simulate("rc_circuit.json")
+result = pulsim.simulate("rc_circuit.json")
 print(result.time)
 print(result.voltages["out"])
 ```
@@ -145,7 +145,7 @@ time,V(in),V(out),I(V1),I(R1)
 ### Run Command
 
 ```bash
-spicelab run <netlist> [options]
+pulsim run <netlist> [options]
 
 Options:
   -o, --output <file>     Output file (default: stdout)
@@ -162,19 +162,19 @@ Options:
 
 ```bash
 # Basic simulation with CSV output
-spicelab run buck_converter.json -o results.csv
+pulsim run buck_converter.json -o results.csv
 
 # JSON output with custom tolerances
-spicelab run circuit.json -f json --abstol 1e-14 --reltol 1e-4
+pulsim run circuit.json -f json --abstol 1e-14 --reltol 1e-4
 
 # HDF5 output for large simulations
-spicelab run large_circuit.json -f hdf5 -o results.h5
+pulsim run large_circuit.json -f hdf5 -o results.h5
 ```
 
 ### Sweep Command
 
 ```bash
-spicelab sweep <netlist> --param <name>=<start>:<stop>:<steps> [options]
+pulsim sweep <netlist> --param <name>=<start>:<stop>:<steps> [options]
 
 Options:
   -j, --jobs <n>          Parallel jobs (default: CPU count)
@@ -186,13 +186,13 @@ Options:
 
 ```bash
 # Sweep load resistance from 10 to 100 ohms in 10 steps
-spicelab sweep buck.json --param R_load=10:100:10 -j 8 -o sweep_results/
+pulsim sweep buck.json --param R_load=10:100:10 -j 8 -o sweep_results/
 ```
 
 ### Serve Command
 
 ```bash
-spicelab serve [options]
+pulsim serve [options]
 
 Options:
   --listen <addr>         Listen address (default: 0.0.0.0:50051)
@@ -205,13 +205,13 @@ Options:
 
 ```bash
 # List all available device models
-spicelab info --list
+pulsim info --list
 
 # Show details for a specific model
-spicelab info MOSFET
+pulsim info MOSFET
 
 # Show netlist format documentation
-spicelab info --format
+pulsim info --format
 ```
 
 ---
@@ -221,11 +221,11 @@ spicelab info --format
 ### Basic Usage
 
 ```python
-import spicelab
+import pulsim
 import numpy as np
 
 # Load and simulate
-result = spicelab.simulate("circuit.json")
+result = pulsim.simulate("circuit.json")
 
 # Access results
 time = result.time                    # numpy array
@@ -240,10 +240,10 @@ print(f"Newton iterations: {result.newton_iterations_total}")
 ### Building Circuits Programmatically
 
 ```python
-import spicelab
+import pulsim
 
 # Create circuit
-circuit = spicelab.Circuit("Buck Converter")
+circuit = pulsim.Circuit("Buck Converter")
 
 # Add components
 circuit.add_voltage_source("Vin", "in", "0", 12.0)
@@ -257,7 +257,7 @@ circuit.add_resistor("R_load", "out", "0", 10.0)
 circuit.add_pwm("PWM1", frequency=100e3, duty_cycle=0.5)
 
 # Configure simulation
-options = spicelab.SimulationOptions(
+options = pulsim.SimulationOptions(
     stop_time=1e-3,
     timestep=1e-8,
     abstol=1e-12,
@@ -265,7 +265,7 @@ options = spicelab.SimulationOptions(
 )
 
 # Run simulation
-result = spicelab.simulate(circuit, options)
+result = pulsim.simulate(circuit, options)
 ```
 
 ### Plotting Results
@@ -273,7 +273,7 @@ result = spicelab.simulate(circuit, options)
 ```python
 import matplotlib.pyplot as plt
 
-result = spicelab.simulate("buck.json")
+result = pulsim.simulate("buck.json")
 
 fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
@@ -300,7 +300,7 @@ plt.savefig("buck_waveforms.png")
 ### Loss Analysis
 
 ```python
-result = spicelab.simulate("inverter.json")
+result = pulsim.simulate("inverter.json")
 
 # Get loss breakdown
 losses = result.losses
@@ -325,7 +325,7 @@ print(f"Efficiency: {efficiency:.1f}%")
 
 ```python
 # Circuit with thermal model
-circuit = spicelab.Circuit("MOSFET with Thermal")
+circuit = pulsim.Circuit("MOSFET with Thermal")
 
 # MOSFET with thermal coupling
 circuit.add_mosfet("M1", "drain", "gate", "source", "0",
@@ -343,7 +343,7 @@ circuit.add_thermal_network("Tj_M1", "Tc",
 circuit.add_thermal_resistor("Rth_cs", "Tc", "Ta", 0.5)  # Case to sink
 circuit.add_thermal_resistor("Rth_sa", "Ta", "0", 1.0)   # Sink to ambient
 
-result = spicelab.simulate(circuit, options)
+result = pulsim.simulate(circuit, options)
 
 # Plot junction temperature
 plt.plot(result.time, result.temperatures["Tj_M1"])
@@ -354,13 +354,13 @@ plt.ylabel("Junction Temperature (°C)")
 ### Parameter Sweeps
 
 ```python
-import spicelab
+import pulsim
 from concurrent.futures import ProcessPoolExecutor
 
 def run_with_duty(duty):
-    circuit = spicelab.load("buck.json")
+    circuit = pulsim.load("buck.json")
     circuit.set_parameter("PWM1.duty_cycle", duty)
-    result = spicelab.simulate(circuit)
+    result = pulsim.simulate(circuit)
     v_out_avg = np.mean(result.voltages["out"][-1000:])
     return duty, v_out_avg
 
@@ -384,10 +384,10 @@ plt.ylabel("Average Output Voltage (V)")
 
 **Python:**
 ```python
-from spicelab.client import SpiceLabClient
+from pulsim.client import PulsimClient
 
 # Connect to server
-client = SpiceLabClient("localhost:50051")
+client = PulsimClient("localhost:50051")
 
 # Create session
 session = client.create_session()
@@ -407,16 +407,16 @@ session.close()
 **Using grpcurl:**
 ```bash
 # Create session
-grpcurl -d '{}' localhost:50051 spicelab.Simulator/CreateSession
+grpcurl -d '{}' localhost:50051 pulsim.Simulator/CreateSession
 
 # Run simulation
 grpcurl -d '{
   "session_id": "abc123",
   "netlist_json": "{...}"
-}' localhost:50051 spicelab.Simulator/StartSimulation
+}' localhost:50051 pulsim.Simulator/StartSimulation
 
 # Get results
-grpcurl -d '{"session_id": "abc123"}' localhost:50051 spicelab.Simulator/GetResult
+grpcurl -d '{"session_id": "abc123"}' localhost:50051 pulsim.Simulator/GetResult
 ```
 
 ### Streaming Waveforms
@@ -570,9 +570,9 @@ async for waveform in session.stream_waveforms("simulation.json"):
 
 ### Getting Help
 
-- Documentation: https://spicelab.dev/docs
-- GitHub Issues: https://github.com/your-org/spicelab-core/issues
-- Discord: https://discord.gg/spicelab
+- Documentation: https://pulsim.dev/docs
+- GitHub Issues: https://github.com/your-org/pulsim-core/issues
+- Discord: https://discord.gg/pulsim
 
 ---
 

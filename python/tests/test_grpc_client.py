@@ -1,4 +1,4 @@
-"""Tests for the SpiceLab gRPC Python client."""
+"""Tests for the Pulsim gRPC Python client."""
 
 import json
 import pytest
@@ -13,7 +13,7 @@ class TestSimulationOptions:
 
     def test_default_options(self):
         """Test default options creation."""
-        from spicelab.remote.client import SimulationOptions
+        from pulsim.remote.client import SimulationOptions
 
         opts = SimulationOptions()
         assert opts.tstart is None
@@ -23,7 +23,7 @@ class TestSimulationOptions:
 
     def test_options_with_values(self):
         """Test options with custom values."""
-        from spicelab.remote.client import SimulationOptions
+        from pulsim.remote.client import SimulationOptions
 
         opts = SimulationOptions(
             tstart=0.0,
@@ -43,8 +43,8 @@ class TestSimulationOptions:
 
     def test_to_proto(self):
         """Test conversion to protobuf message."""
-        from spicelab.remote.client import SimulationOptions
-        from spicelab.remote import simulator_pb2 as pb
+        from pulsim.remote.client import SimulationOptions
+        from pulsim.remote import simulator_pb2 as pb
 
         opts = SimulationOptions(
             tstop=0.01,
@@ -65,7 +65,7 @@ class TestSession:
 
     def test_session_creation(self):
         """Test session creation."""
-        from spicelab.remote.client import Session, SessionStatus
+        from pulsim.remote.client import Session, SessionStatus
 
         session = Session(
             session_id="test-123",
@@ -81,8 +81,8 @@ class TestSession:
 
     def test_from_proto(self):
         """Test creation from protobuf message."""
-        from spicelab.remote.client import Session, SessionStatus
-        from spicelab.remote import simulator_pb2 as pb
+        from pulsim.remote.client import Session, SessionStatus
+        from pulsim.remote import simulator_pb2 as pb
 
         proto = pb.SessionDescriptor(
             session_id="proto-456",
@@ -104,7 +104,7 @@ class TestSessionStatus:
 
     def test_status_values(self):
         """Test status enum values."""
-        from spicelab.remote.client import SessionStatus
+        from pulsim.remote.client import SessionStatus
 
         assert SessionStatus.CREATED == 1
         assert SessionStatus.READY == 3
@@ -118,7 +118,7 @@ class TestHealthStatus:
 
     def test_health_values(self):
         """Test health enum values."""
-        from spicelab.remote.client import HealthStatus
+        from pulsim.remote.client import HealthStatus
 
         assert HealthStatus.OK == 1
         assert HealthStatus.DEGRADED == 2
@@ -130,7 +130,7 @@ class TestWaveformSample:
 
     def test_sample_creation(self):
         """Test sample creation."""
-        from spicelab.remote.client import WaveformSample
+        from pulsim.remote.client import WaveformSample
 
         sample = WaveformSample(
             time=0.001,
@@ -147,7 +147,7 @@ class TestWaveformStream:
 
     def _create_mock_responses(self):
         """Create mock response iterator."""
-        from spicelab.remote import simulator_pb2 as pb
+        from pulsim.remote import simulator_pb2 as pb
 
         # Header
         header_resp = pb.WaveformStreamResponse()
@@ -173,7 +173,7 @@ class TestWaveformStream:
 
     def test_iterate_samples(self):
         """Test iterating over samples."""
-        from spicelab.remote.client import WaveformStream
+        from pulsim.remote.client import WaveformStream
 
         responses = self._create_mock_responses()
         stream = WaveformStream(iter(responses), ["V(out)", "I(R1)"])
@@ -187,7 +187,7 @@ class TestWaveformStream:
 
     def test_header_property(self):
         """Test header property."""
-        from spicelab.remote.client import WaveformStream
+        from pulsim.remote.client import WaveformStream
 
         responses = self._create_mock_responses()
         stream = WaveformStream(iter(responses), [])
@@ -201,7 +201,7 @@ class TestWaveformStream:
 
     def test_collect(self):
         """Test collecting all samples."""
-        from spicelab.remote.client import WaveformStream
+        from pulsim.remote.client import WaveformStream
 
         responses = self._create_mock_responses()
         stream = WaveformStream(iter(responses), ["V(out)", "I(R1)"])
@@ -215,7 +215,7 @@ class TestWaveformStream:
 
     def test_is_complete(self):
         """Test completion detection."""
-        from spicelab.remote.client import WaveformStream, SessionStatus
+        from pulsim.remote.client import WaveformStream, SessionStatus
 
         responses = self._create_mock_responses()
         stream = WaveformStream(iter(responses), [])
@@ -231,7 +231,7 @@ class TestWaveformStream:
     def test_to_dataframe(self):
         """Test DataFrame conversion."""
         pytest.importorskip("pandas")
-        from spicelab.remote.client import WaveformStream
+        from pulsim.remote.client import WaveformStream
 
         responses = self._create_mock_responses()
         stream = WaveformStream(iter(responses), ["V(out)", "I(R1)"])
@@ -246,7 +246,7 @@ class TestWaveformStream:
     def test_to_xarray(self):
         """Test xarray conversion."""
         pytest.importorskip("xarray")
-        from spicelab.remote.client import WaveformStream
+        from pulsim.remote.client import WaveformStream
 
         responses = self._create_mock_responses()
         stream = WaveformStream(iter(responses), ["V(out)", "I(R1)"])
@@ -258,14 +258,14 @@ class TestWaveformStream:
         assert "I(R1)" in ds.data_vars
 
 
-class TestSpiceLabClient:
-    """Tests for SpiceLabClient."""
+class TestPulsimClient:
+    """Tests for PulsimClient."""
 
     def test_client_creation(self):
         """Test client instantiation."""
-        from spicelab.remote.client import SpiceLabClient
+        from pulsim.remote.client import PulsimClient
 
-        client = SpiceLabClient("localhost:50051")
+        client = PulsimClient("localhost:50051")
 
         assert client._address == "localhost:50051"
         assert client._timeout == 30.0
@@ -273,9 +273,9 @@ class TestSpiceLabClient:
 
     def test_client_with_options(self):
         """Test client with custom options."""
-        from spicelab.remote.client import SpiceLabClient
+        from pulsim.remote.client import PulsimClient
 
-        client = SpiceLabClient(
+        client = PulsimClient(
             address="server:50052",
             secure=True,
             timeout=60.0,
@@ -287,13 +287,13 @@ class TestSpiceLabClient:
 
     def test_connect(self):
         """Test connection establishment."""
-        from spicelab.remote.client import SpiceLabClient
+        from pulsim.remote.client import PulsimClient
 
-        with patch("spicelab.remote.client.grpc") as mock_grpc:
+        with patch("pulsim.remote.client.grpc") as mock_grpc:
             mock_channel = MagicMock()
             mock_grpc.insecure_channel.return_value = mock_channel
 
-            client = SpiceLabClient("localhost:50051")
+            client = PulsimClient("localhost:50051")
             client.connect()
 
             mock_grpc.insecure_channel.assert_called_once_with("localhost:50051")
@@ -301,21 +301,21 @@ class TestSpiceLabClient:
 
     def test_context_manager(self):
         """Test context manager usage."""
-        from spicelab.remote.client import SpiceLabClient
+        from pulsim.remote.client import PulsimClient
 
-        with patch("spicelab.remote.client.grpc") as mock_grpc:
+        with patch("pulsim.remote.client.grpc") as mock_grpc:
             mock_channel = MagicMock()
             mock_grpc.insecure_channel.return_value = mock_channel
 
-            with SpiceLabClient("localhost:50051") as client:
+            with PulsimClient("localhost:50051") as client:
                 assert client._channel is not None
 
             mock_channel.close.assert_called_once()
 
     def test_health_check(self):
         """Test health check call."""
-        from spicelab.remote.client import SpiceLabClient, HealthStatus
-        from spicelab.remote import simulator_pb2 as pb
+        from pulsim.remote.client import PulsimClient, HealthStatus
+        from pulsim.remote import simulator_pb2 as pb
 
         mock_stub = MagicMock()
         mock_response = pb.HealthCheckResponse(
@@ -327,7 +327,7 @@ class TestSpiceLabClient:
         )
         mock_stub.HealthCheck.return_value = mock_response
 
-        client = SpiceLabClient("localhost:50051")
+        client = PulsimClient("localhost:50051")
         client._stub = mock_stub
 
         result = client.health_check()
@@ -340,8 +340,8 @@ class TestSpiceLabClient:
 
     def test_create_session_with_dict(self):
         """Test session creation with dict netlist."""
-        from spicelab.remote.client import SpiceLabClient, SimulationOptions
-        from spicelab.remote import simulator_pb2 as pb
+        from pulsim.remote.client import PulsimClient, SimulationOptions
+        from pulsim.remote import simulator_pb2 as pb
 
         mock_stub = MagicMock()
         mock_response = pb.CreateSessionResponse()
@@ -350,7 +350,7 @@ class TestSpiceLabClient:
         mock_response.session.status = pb.SESSION_STATUS_READY
         mock_stub.CreateSession.return_value = mock_response
 
-        client = SpiceLabClient("localhost:50051")
+        client = PulsimClient("localhost:50051")
         client._stub = mock_stub
 
         netlist = {
@@ -379,8 +379,8 @@ class TestSpiceLabClient:
 
     def test_start_simulation(self):
         """Test starting simulation."""
-        from spicelab.remote.client import SpiceLabClient, SessionStatus
-        from spicelab.remote import simulator_pb2 as pb
+        from pulsim.remote.client import PulsimClient, SessionStatus
+        from pulsim.remote import simulator_pb2 as pb
 
         mock_stub = MagicMock()
         mock_response = pb.StartSimulationResponse()
@@ -388,7 +388,7 @@ class TestSpiceLabClient:
         mock_response.session.status = pb.SESSION_STATUS_RUNNING
         mock_stub.StartSimulation.return_value = mock_response
 
-        client = SpiceLabClient("localhost:50051")
+        client = PulsimClient("localhost:50051")
         client._stub = mock_stub
 
         session = client.start_simulation("test-123")
@@ -397,8 +397,8 @@ class TestSpiceLabClient:
 
     def test_list_sessions(self):
         """Test listing sessions."""
-        from spicelab.remote.client import SpiceLabClient
-        from spicelab.remote import simulator_pb2 as pb
+        from pulsim.remote.client import PulsimClient
+        from pulsim.remote import simulator_pb2 as pb
 
         mock_stub = MagicMock()
         mock_response = pb.ListSessionsResponse()
@@ -415,7 +415,7 @@ class TestSpiceLabClient:
 
         mock_stub.ListSessions.return_value = mock_response
 
-        client = SpiceLabClient("localhost:50051")
+        client = PulsimClient("localhost:50051")
         client._stub = mock_stub
 
         sessions = client.list_sessions()
@@ -430,7 +430,7 @@ class TestDataConversion:
 
     def test_numpy_array_conversion(self):
         """Test conversion to numpy arrays."""
-        from spicelab.remote.client import WaveformSample
+        from pulsim.remote.client import WaveformSample
 
         samples = [
             WaveformSample(time=0.0, values={"V": 1.0, "I": 0.001}),

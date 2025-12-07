@@ -1,8 +1,8 @@
-SpiceLab Python API Documentation
+Pulsim Python API Documentation
 ==================================
 
-SpiceLab is a high-performance circuit simulator for power electronics applications.
-This documentation covers the Python API for SpiceLab.
+Pulsim is a high-performance circuit simulator for power electronics applications.
+This documentation covers the Python API for Pulsim.
 
 .. toctree::
    :maxdepth: 2
@@ -41,20 +41,20 @@ This documentation covers the Python API for SpiceLab.
 Quick Start
 -----------
 
-Install SpiceLab:
+Install Pulsim:
 
 .. code-block:: bash
 
-   pip install spicelab
+   pip install pulsim
 
 Run a simple simulation:
 
 .. code-block:: python
 
-   import spicelab
+   import pulsim
 
    # Simulate from JSON netlist
-   result = spicelab.simulate("circuit.json")
+   result = pulsim.simulate("circuit.json")
 
    # Access results
    print(result.time)
@@ -64,22 +64,22 @@ Or build circuits programmatically:
 
 .. code-block:: python
 
-   import spicelab
+   import pulsim
 
    # Create circuit
-   circuit = spicelab.Circuit("RC Filter")
+   circuit = pulsim.Circuit("RC Filter")
    circuit.add_voltage_source("V1", "in", "0", 5.0)
    circuit.add_resistor("R1", "in", "out", 1000)
    circuit.add_capacitor("C1", "out", "0", 1e-6)
 
    # Configure simulation
-   options = spicelab.SimulationOptions(
+   options = pulsim.SimulationOptions(
        stop_time=0.01,
        timestep=1e-6
    )
 
    # Run simulation
-   result = spicelab.simulate(circuit, options)
+   result = pulsim.simulate(circuit, options)
 
 
 Features
