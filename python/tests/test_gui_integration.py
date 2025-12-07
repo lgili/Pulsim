@@ -10,9 +10,6 @@ Tests all features added for GUI integration:
 - Enhanced SimulationResult
 """
 
-import pytest
-import threading
-import time
 import pulsim as sl
 
 
@@ -859,7 +856,6 @@ class TestSwitchEvents:
         opts.adaptive_timestep = False
 
         sim = sl.Simulator(circuit, opts)
-        config = sl.ProgressCallbackConfig()
         result = sim.run_transient_with_progress(
             callback=None,
             event_callback=None,
