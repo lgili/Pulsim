@@ -1,4 +1,32 @@
 # Python bindings using pybind11
+
+# If provided via environment (cibuildwheel), hint CMake with explicit Python paths
+if(NOT DEFINED Python3_EXECUTABLE AND DEFINED ENV{Python3_EXECUTABLE})
+    set(Python3_EXECUTABLE "$ENV{Python3_EXECUTABLE}")
+endif()
+if(NOT DEFINED Python3_ROOT_DIR AND DEFINED ENV{Python3_ROOT_DIR})
+    set(Python3_ROOT_DIR "$ENV{Python3_ROOT_DIR}")
+endif()
+
+# Derive libpython path from the interpreter when possible to help FindPython locate Development/Embed components
+if(DEFINED Python3_EXECUTABLE)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; import sys; libdir=sysconfig.get_config_var('LIBDIR') or ''; soname=sysconfig.get_config_var('INSTSONAME') or ''; print(libdir); print(soname)"
+        OUTPUT_VARIABLE PY_LIBINFO
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(REGEX MATCHALL "[^\n]+" PY_LIBINFO_LIST "${PY_LIBINFO}")
+    list(LENGTH PY_LIBINFO_LIST PY_LIBINFO_LEN)
+    if(PY_LIBINFO_LEN GREATER 1)
+        list(GET PY_LIBINFO_LIST 0 PY_LIBDIR)
+        list(GET PY_LIBINFO_LIST 1 PY_LIBSONAME)
+        if(PY_LIBDIR AND PY_LIBSONAME)
+            set(Python3_LIBRARY "${PY_LIBDIR}/${PY_LIBSONAME}" CACHE FILEPATH "")
+            set(Python3_LIBRARIES "${Python3_LIBRARY}" CACHE FILEPATH "")
+        endif()
+    endif()
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
 # On macOS prefer the Xcode clang and libc++ to ensure ABI compatibility
