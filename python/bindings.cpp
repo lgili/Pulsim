@@ -650,6 +650,10 @@ PYBIND11_MODULE(_pulsim, m) {
                                        const std::string& nneg, Real value) {
             c.add_voltage_source(name, npos, nneg, DCWaveform{value});
         }, py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("value"))
+        .def("add_voltage_source", [](Circuit& c, const std::string& name, const std::string& npos,
+                                       const std::string& nneg, const PWMWaveform& pwm) {
+            c.add_voltage_source(name, npos, nneg, pwm);
+        }, py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("pwm"))
         .def("add_current_source", [](Circuit& c, const std::string& name, const std::string& npos,
                                        const std::string& nneg, Real value) {
             c.add_current_source(name, npos, nneg, DCWaveform{value});
