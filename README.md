@@ -121,15 +121,201 @@ pulsim-core/
 
 Pulsim includes Python bindings for scripting and GUI integration.
 
-### Installation
+### Installation via pip
 
 ```bash
+pip install pulsim
+```
+
+Since Pulsim is a C++ library with Python bindings, you need a C++ compiler and build tools to install from source (pip will compile the package).
+
+#### Prerequisites
+
+<details>
+<summary><strong>macOS</strong></summary>
+
+Install Xcode Command Line Tools and CMake:
+
+```bash
+# Install Xcode Command Line Tools (includes clang compiler)
+xcode-select --install
+
+# Install CMake and Ninja via Homebrew
+brew install cmake ninja
+```
+
+**Requirements:**
+- macOS 11.0 (Big Sur) or later
+- Xcode Command Line Tools (clang 13+)
+- CMake 3.18+
+- Python 3.10-3.13
+
+</details>
+
+<details>
+<summary><strong>Windows</strong></summary>
+
+**Step 1: Install Visual Studio Build Tools**
+
+Download and install from: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+
+During installation, select:
+- **"Desktop development with C++"** workload
+- Make sure these components are checked:
+  - MSVC v143 (or newer) - C++ Build Tools
+  - Windows 10/11 SDK
+  - C++ CMake tools for Windows
+
+Or via command line:
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+**Step 2: Install CMake**
+
+```powershell
+winget install Kitware.CMake
+```
+
+Or download from: https://cmake.org/download/
+
+**Step 3: Install from pip (use Developer Command Prompt)**
+
+> **IMPORTANT**: On Windows, you MUST use the **"Developer Command Prompt for VS 2022"** or **"x64 Native Tools Command Prompt"** to ensure the compiler is in PATH.
+
+```powershell
+# Open "Developer Command Prompt for VS 2022" from Start Menu
+# Then run:
+pip install pulsim
+```
+
+If you get compiler errors, try:
+```powershell
+# Ensure you're in Developer Command Prompt, then:
+set CC=cl
+set CXX=cl
+pip install pulsim --no-cache-dir
+```
+
+**Alternative: Install via conda (easier)**
+
+```powershell
+# Conda includes a compiler, so no Build Tools needed
+conda create -n pulsim python=3.11
+conda activate pulsim
+conda install -c conda-forge cmake ninja
+pip install pulsim
+```
+
+**Requirements:**
+- Windows 10/11
+- Visual Studio 2022 Build Tools with C++ workload (MSVC 14.3+)
+- CMake 3.20+
+- Python 3.10-3.13
+
+**Common Windows Errors:**
+
+| Error | Solution |
+|-------|----------|
+| `error: Microsoft Visual C++ 14.0 or greater is required` | Install Visual Studio Build Tools with C++ workload |
+| `CMake Error: CMAKE_CXX_COMPILER not found` | Use Developer Command Prompt, not regular PowerShell |
+| `fatal error C1083: Cannot open include file` | Reinstall Build Tools with Windows SDK |
+| `LNK1104: cannot open file 'python3x.lib'` | Use matching Python architecture (x64) |
+
+</details>
+
+<details>
+<summary><strong>Linux (Ubuntu/Debian)</strong></summary>
+
+```bash
+# Install build essentials and CMake
+sudo apt-get update
+sudo apt-get install -y build-essential cmake ninja-build
+
+# For older Ubuntu versions, you may need a newer CMake:
+# sudo apt-get install -y software-properties-common
+# sudo add-apt-repository ppa:kitware/ppa
+# sudo apt-get update
+# sudo apt-get install -y cmake
+```
+
+**Requirements:**
+- GCC 10+ or Clang 13+ (C++20 support required)
+- CMake 3.18+
+- Python 3.10-3.13
+
+</details>
+
+<details>
+<summary><strong>Linux (Fedora/RHEL)</strong></summary>
+
+```bash
+# Install build tools
+sudo dnf install -y gcc-c++ cmake ninja-build
+```
+
+</details>
+
+<details>
+<summary><strong>Linux (Arch)</strong></summary>
+
+```bash
+# Install build tools
+sudo pacman -S base-devel cmake ninja
+```
+
+</details>
+
+#### Verify Installation
+
+After installing prerequisites, verify your setup:
+
+```bash
+# Check C++ compiler
+c++ --version   # or g++ --version / clang++ --version
+
+# Check CMake
+cmake --version  # Should be 3.18+
+
+# Check Python
+python --version  # Should be 3.10-3.13
+```
+
+#### Install Pulsim
+
+```bash
+# Install from PyPI
+pip install pulsim
+
+# Or install with optional dependencies
+pip install pulsim[jupyter]  # For Jupyter notebook support
+pip install pulsim[dev]      # For development/testing
+```
+
+#### Troubleshooting
+
+| Error | Solution |
+|-------|----------|
+| `CMake not found` | Install CMake and ensure it's in your PATH |
+| `No C++ compiler found` | Install build tools (see platform-specific instructions above) |
+| `C++20 features not supported` | Upgrade your compiler (GCC 10+, Clang 13+, MSVC 14.2+) |
+| `Python.h not found` | Install Python development headers: `apt install python3-dev` (Linux) |
+
+### Building from Source
+
+If you want to build from source instead of pip:
+
+```bash
+# Clone the repository
+git clone https://github.com/pulsim/pulsim-core.git
+cd pulsim-core
+
 # Build with Python bindings
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 
-# Install (or add build/python to PYTHONPATH)
-pip install build/python
+# Install in development mode
+pip install -e .
 ```
 
 ### Basic Usage
