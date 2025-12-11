@@ -64,6 +64,9 @@ public:
     SwitchState* find_switch_state(const std::string& name);
     const SwitchState* find_switch_state(const std::string& name) const;
 
+    // Get next event time for PWM/pulsed sources (returns infinity if none)
+    Real next_source_event_time(Real current_time) const;
+
 private:
     // Stamp functions for each component type
     void stamp_resistor(std::vector<Triplet>& triplets, Vector& b,

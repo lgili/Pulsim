@@ -50,11 +50,15 @@ jobs:
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
           CIBW_ENVIRONMENT_MACOS: >-
             MACOSX_DEPLOYMENT_TARGET=11.0
+          CIBW_BEFORE_ALL_LINUX: |
+            yum install -y cmake3 ninja-build || apt-get update && apt-get install -y cmake ninja-build || true
           CIBW_BEFORE_BUILD_LINUX: |
             python -m pip install --upgrade pip setuptools wheel
-            python -m pip install cmake ninja
+            python -m pip install cmake ninja scikit-build-core pybind11
           CIBW_BEFORE_BUILD_MACOS: |
             brew install cmake ninja
+            python -m pip install --upgrade pip setuptools wheel
+            python -m pip install scikit-build-core pybind11
           CIBW_BUILD_VERBOSITY: 1
           CIBW_TEST_REQUIRES: pytest numpy
           CIBW_TEST_COMMAND: >-

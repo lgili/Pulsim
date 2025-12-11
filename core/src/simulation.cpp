@@ -136,7 +136,7 @@ NewtonResult Simulator::dc_operating_point() {
 
 void Simulator::build_system(const Vector& x, Vector& f, SparseMatrix& J,
                              Real time, Real dt, const Vector& x_prev) {
-    // Assemble transient system with companion models
+    // Assemble transient system with companion models (Backward Euler)
     Vector b;
     assembler_.assemble_transient(J, b, x_prev, dt);
 
@@ -156,13 +156,42 @@ void Simulator::build_system(const Vector& x, Vector& f, SparseMatrix& J,
     f = J * x - b;
 }
 
-NewtonResult Simulator::step(Real time, Real dt, const Vector& x_prev) {
-    auto system_func = [this, time, dt, &x_prev](const Vector& x, Vector& f, SparseMatrix& J) {
-        build_system(x, f, J, time, dt, x_prev);
-    };
+void Simulator::build_system_with_method(const Vector& x, Vector& f, SparseMatrix& J,
+                                         Real time, Real dt, const DynamicHistory& history) {
+    // Assemble transient system with specified integration method
+    Vector b;
+    assembler_.assemble_transient(J, b, history, dt, options_.integration_method);
 
-    // Use previous solution as initial guess
-    return newton_solver_.solve(x_prev, system_func);
+    // Update source values for current time
+    assembler_.evaluate_sources(b, time);
+
+    // Add nonlinear contributions if any
+    if (assembler_.has_nonlinear()) {
+        SparseMatrix J_nl;
+        Vector f_nl;
+        assembler_.assemble_nonlinear(J_nl, f_nl, x);
+        J += J_nl;
+        b += f_nl;
+    }
+
+    // f(x) = J*x - b
+    f = J * x - b;
+}
+
+NewtonResult Simulator::step(Real time, Real dt, const Vector& x_prev) {
+    // Choose system function based on integration method
+    if (options_.integration_method == IntegrationMethod::BackwardEuler) {
+        auto system_func = [this, time, dt, &x_prev](const Vector& x, Vector& f, SparseMatrix& J) {
+            build_system(x, f, J, time, dt, x_prev);
+        };
+        return newton_solver_.solve(x_prev, system_func);
+    } else {
+        // Use multi-step method with history
+        auto system_func = [this, time, dt](const Vector& x, Vector& f, SparseMatrix& J) {
+            build_system_with_method(x, f, J, time, dt, history_);
+        };
+        return newton_solver_.solve(history_.x_prev, system_func);
+    }
 }
 
 SimulationResult Simulator::run_transient() {
@@ -191,8 +220,46 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
     // Get initial state
     Vector x;
     if (options_.use_ic) {
-        // Use specified initial conditions (zeros for now)
+        // Apply specified initial conditions from component parameters
         x = Vector::Zero(n);
+
+        // Apply capacitor initial voltages
+        for (const auto& comp : circuit_.components()) {
+            if (comp.type() == ComponentType::Capacitor) {
+                const auto& params = std::get<CapacitorParams>(comp.params());
+                if (params.initial_voltage != 0.0) {
+                    // Get node indices
+                    Index n1 = circuit_.node_index(comp.nodes()[0]);
+                    Index n2 = circuit_.node_index(comp.nodes()[1]);
+                    // Set the voltage at the positive node (relative to negative)
+                    // For grounded capacitor, this sets the node voltage directly
+                    if (n1 >= 0 && n2 < 0) {
+                        // Positive node to ground
+                        x(n1) = params.initial_voltage;
+                    } else if (n1 < 0 && n2 >= 0) {
+                        // Ground to negative node (reverse polarity)
+                        x(n2) = -params.initial_voltage;
+                    } else if (n1 >= 0 && n2 >= 0) {
+                        // Floating capacitor - set positive node, negative stays at 0
+                        x(n1) = params.initial_voltage;
+                    }
+                }
+            }
+        }
+
+        // Apply inductor initial currents
+        Index branch_idx = circuit_.node_count();
+        for (const auto& comp : circuit_.components()) {
+            if (comp.type() == ComponentType::VoltageSource) {
+                branch_idx++;  // Skip voltage source branch
+            } else if (comp.type() == ComponentType::Inductor) {
+                const auto& params = std::get<InductorParams>(comp.params());
+                if (params.initial_current != 0.0 && branch_idx < n) {
+                    x(branch_idx) = params.initial_current;
+                }
+                branch_idx++;
+            }
+        }
     } else {
         // Compute DC operating point
         auto dc_result = dc_operating_point();
@@ -207,6 +274,12 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
 
     // Initialize switch states based on initial solution
     assembler_.update_switch_states(x, options_.tstart);
+
+    // Initialize history for multi-step methods
+    history_.x_prev = x;
+    history_.x_prev2 = x;
+    history_.dt_prev = options_.dt;
+    history_.has_prev2 = false;
 
     // Store initial state
     Real time = options_.tstart;
@@ -243,6 +316,19 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
         // Don't overshoot tstop
         if (time + dt > options_.tstop) {
             dt = options_.tstop - time;
+            // If remaining time is tiny, just stop (avoid numerical issues with very small dt)
+            if (dt < options_.dtmin * 0.1) {
+                break;  // Close enough to tstop
+            }
+        }
+
+        // Don't overshoot next source event (PWM edges, etc.)
+        Real next_event = assembler_.next_source_event_time(time);
+        if (next_event < time + dt) {
+            dt = next_event - time;
+            if (dt < options_.dtmin) {
+                dt = options_.dtmin;  // Ensure minimum timestep
+            }
         }
 
         Real next_time = time + dt;
@@ -362,7 +448,19 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
         // Track diode states for reverse recovery detection
         update_diode_states(step_result.x, x, dt);
 
-        // Update state
+        // Update history for multi-step methods
+        // At this point: x = x_{n-1} (current), step_result.x = x_n (new)
+        // After this step, for the NEXT step (n+1), we need:
+        //   x_prev = x_n (the solution we just computed)
+        //   x_prev2 = x_{n-1} (the old x)
+        if (options_.integration_method != IntegrationMethod::BackwardEuler) {
+            history_.x_prev2 = x;  // x_{n-2} for next step = current x_{n-1}
+            history_.dt_prev = dt;
+            history_.has_prev2 = true;
+        }
+        history_.x_prev = step_result.x;  // x_{n-1} for next step = new solution x_n
+
+        // Update state to new solution
         x = step_result.x;
         time = next_time;
         step_count++;
@@ -387,14 +485,64 @@ SimulationResult Simulator::run_transient(SimulationCallback callback, EventCall
             callback(time, x);
         }
 
-        // Adaptive timestep: increase if converged quickly
-        if (step_result.iterations < 5 && dt < options_.dtmax) {
-            dt = std::min(dt * 1.2, options_.dtmax);
+        // Adaptive timestep control
+        if (options_.adaptive_timestep) {
+            // LTE-based timestep control using step-doubling error estimation
+            // Take a half-step from x to get x_half, then another half-step to get x_double
+            // Compare x_double with step_result.x to estimate error
+            Real dt_half = dt * 0.5;
+            auto half_step1 = step(time + dt_half, dt_half, x);
+
+            if (half_step1.status == SolverStatus::Success) {
+                auto half_step2 = step(next_time, dt_half, half_step1.x);
+
+                if (half_step2.status == SolverStatus::Success) {
+                    // Estimate error as difference between single-step and double-step
+                    // For Backward Euler, error ≈ (x_double - x_single) / 3
+                    Vector error_vec = (half_step2.x - step_result.x) / 3.0;
+
+                    // Compute weighted error norm
+                    Real error_norm = 0.0;
+                    for (Index i = 0; i < error_vec.size(); ++i) {
+                        Real scale = options_.lte_atol + options_.lte_rtol * std::abs(step_result.x(i));
+                        error_norm += (error_vec(i) / scale) * (error_vec(i) / scale);
+                    }
+                    error_norm = std::sqrt(error_norm / error_vec.size());
+
+                    // Adjust timestep based on error
+                    // For first-order method: dt_new = dt * (tol / err)^(1/2) * safety
+                    const Real safety = 0.9;
+                    const Real min_factor = 0.2;
+                    const Real max_factor = 2.0;
+
+                    Real factor = 1.0;
+                    if (error_norm > 1e-10) {
+                        factor = safety * std::pow(1.0 / error_norm, 0.5);
+                        factor = std::max(min_factor, std::min(max_factor, factor));
+                    } else {
+                        factor = max_factor;  // Error is tiny, can safely increase
+                    }
+
+                    dt = std::max(options_.dtmin, std::min(options_.dtmax, dt * factor));
+
+                    // Use the more accurate double-step result if error is acceptable
+                    if (error_norm < 1.0) {
+                        step_result.x = half_step2.x;  // Use more accurate solution
+                    }
+                }
+            }
         }
+        // When adaptive_timestep is false, keep dt constant (don't adjust)
     }
 
     result.total_steps = step_count;
-    result.final_status = SolverStatus::Success;
+    // Only set success if we didn't already set a failure status
+    if (result.final_status != SolverStatus::MaxIterationsReached &&
+        result.final_status != SolverStatus::SingularMatrix &&
+        result.final_status != SolverStatus::NumericalError &&
+        result.error_message.empty()) {
+        result.final_status = SolverStatus::Success;
+    }
 
     auto end_time = std::chrono::high_resolution_clock::now();
     result.total_time_seconds = std::chrono::duration<double>(end_time - start_time).count();
@@ -451,7 +599,40 @@ SimulationResult Simulator::run_transient_with_progress(
     // Get initial state
     Vector x;
     if (options_.use_ic) {
+        // Apply specified initial conditions from component parameters
         x = Vector::Zero(n);
+
+        // Apply capacitor initial voltages
+        for (const auto& comp : circuit_.components()) {
+            if (comp.type() == ComponentType::Capacitor) {
+                const auto& params = std::get<CapacitorParams>(comp.params());
+                if (params.initial_voltage != 0.0) {
+                    Index n1 = circuit_.node_index(comp.nodes()[0]);
+                    Index n2 = circuit_.node_index(comp.nodes()[1]);
+                    if (n1 >= 0 && n2 < 0) {
+                        x(n1) = params.initial_voltage;
+                    } else if (n1 < 0 && n2 >= 0) {
+                        x(n2) = -params.initial_voltage;
+                    } else if (n1 >= 0 && n2 >= 0) {
+                        x(n1) = params.initial_voltage;
+                    }
+                }
+            }
+        }
+
+        // Apply inductor initial currents
+        Index branch_idx = circuit_.node_count();
+        for (const auto& comp : circuit_.components()) {
+            if (comp.type() == ComponentType::VoltageSource) {
+                branch_idx++;
+            } else if (comp.type() == ComponentType::Inductor) {
+                const auto& params = std::get<InductorParams>(comp.params());
+                if (params.initial_current != 0.0 && branch_idx < n) {
+                    x(branch_idx) = params.initial_current;
+                }
+                branch_idx++;
+            }
+        }
     } else {
         auto dc_result = dc_operating_point();
         if (dc_result.status != SolverStatus::Success) {
@@ -465,6 +646,12 @@ SimulationResult Simulator::run_transient_with_progress(
 
     // Initialize switch states
     assembler_.update_switch_states(x, options_.tstart);
+
+    // Initialize history for multi-step methods
+    history_.x_prev = x;
+    history_.x_prev2 = x;
+    history_.dt_prev = options_.dt;
+    history_.has_prev2 = false;
 
     // Store initial state
     Real time = options_.tstart;
@@ -505,6 +692,19 @@ SimulationResult Simulator::run_transient_with_progress(
         // Don't overshoot tstop
         if (time + dt > options_.tstop) {
             dt = options_.tstop - time;
+            // If remaining time is tiny, just stop (avoid numerical issues with very small dt)
+            if (dt < options_.dtmin * 0.1) {
+                break;  // Close enough to tstop
+            }
+        }
+
+        // Don't overshoot next source event (PWM edges, etc.)
+        Real next_event = assembler_.next_source_event_time(time);
+        if (next_event < time + dt) {
+            dt = next_event - time;
+            if (dt < options_.dtmin) {
+                dt = options_.dtmin;  // Ensure minimum timestep
+            }
         }
 
         Real next_time = time + dt;
@@ -614,6 +814,16 @@ SimulationResult Simulator::run_transient_with_progress(
         accumulate_conduction_losses(step_result.x, dt);
         update_diode_states(step_result.x, x, dt);
 
+        // Update history for multi-step methods
+        // x_prev for next step should be the NEW solution (step_result.x)
+        // x_prev2 for next step should be the current x
+        if (options_.integration_method != IntegrationMethod::BackwardEuler) {
+            history_.x_prev2 = x;  // x_{n-2} for next step = current x_{n-1}
+            history_.dt_prev = dt;
+            history_.has_prev2 = true;
+        }
+        history_.x_prev = step_result.x;  // x_{n-1} for next step = new solution x_n
+
         x = step_result.x;
         time = next_time;
         step_count++;
@@ -669,10 +879,47 @@ SimulationResult Simulator::run_transient_with_progress(
             }
         }
 
-        // Adaptive timestep
-        if (step_result.iterations < 5 && dt < options_.dtmax) {
-            dt = std::min(dt * 1.2, options_.dtmax);
+        // Adaptive timestep control
+        if (options_.adaptive_timestep) {
+            // LTE-based timestep control using step-doubling error estimation
+            Real dt_half = dt * 0.5;
+            auto half_step1 = step(time + dt_half, dt_half, x);
+
+            if (half_step1.status == SolverStatus::Success) {
+                auto half_step2 = step(next_time, dt_half, half_step1.x);
+
+                if (half_step2.status == SolverStatus::Success) {
+                    // Error estimate for Backward Euler
+                    Vector error_vec = (half_step2.x - step_result.x) / 3.0;
+
+                    Real error_norm = 0.0;
+                    for (Index i = 0; i < error_vec.size(); ++i) {
+                        Real scale = options_.lte_atol + options_.lte_rtol * std::abs(step_result.x(i));
+                        error_norm += (error_vec(i) / scale) * (error_vec(i) / scale);
+                    }
+                    error_norm = std::sqrt(error_norm / error_vec.size());
+
+                    const Real safety = 0.9;
+                    const Real min_factor = 0.2;
+                    const Real max_factor = 2.0;
+
+                    Real factor = 1.0;
+                    if (error_norm > 1e-10) {
+                        factor = safety * std::pow(1.0 / error_norm, 0.5);
+                        factor = std::max(min_factor, std::min(max_factor, factor));
+                    } else {
+                        factor = max_factor;
+                    }
+
+                    dt = std::max(options_.dtmin, std::min(options_.dtmax, dt * factor));
+
+                    if (error_norm < 1.0) {
+                        step_result.x = half_step2.x;
+                    }
+                }
+            }
         }
+        // When adaptive_timestep is false, keep dt constant (don't adjust)
     }
 
     result.total_steps = step_count;

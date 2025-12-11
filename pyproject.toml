@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.8", "pybind11>=2.12"]
+requires = ["scikit-build-core>=0.5", "pybind11>=2.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -8,7 +8,7 @@ version = "0.1.11"
 description = "High-performance circuit simulator for power electronics"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [
     {name = "Pulsim Authors", email = "pulsim@example.com"}
 ]
@@ -19,8 +19,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
