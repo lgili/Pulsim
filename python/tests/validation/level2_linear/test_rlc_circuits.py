@@ -260,7 +260,7 @@ class TestRLCUnderdamped:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)
@@ -308,7 +308,7 @@ class TestRLCUnderdamped:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         v_out = np.array(result.node_voltages["V(out)"])
@@ -367,7 +367,7 @@ class TestRLCCriticallyDamped:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         v_out = np.array(result.node_voltages["V(out)"])
@@ -415,7 +415,7 @@ class TestRLCOverdamped:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         v_out = np.array(result.node_voltages["V(out)"])
@@ -462,7 +462,7 @@ class TestRLCDampingTransitions:
         opts.dt = opts.tstop / 1000
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)

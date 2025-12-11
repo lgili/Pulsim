@@ -303,7 +303,7 @@ class TestExponentialDiode:
             circuit.add_resistor("R1", "in", "out", R)
 
             diode_params = sl.DiodeParams()
-            diode_params.is_sat = Is
+            diode_params.is_ = Is
             diode_params.n = n
             diode_params.ideal = False
             circuit.add_diode("D1", "out", "0", diode_params)

@@ -172,7 +172,7 @@ class TestRLStepResponse:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)
@@ -203,7 +203,7 @@ class TestRLStepResponse:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         i_L = np.array(result.branch_currents["I(L1)"])
@@ -271,7 +271,7 @@ class TestRLCurrentDecay:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         i_L = np.array(result.branch_currents["I(L1)"])
@@ -309,7 +309,7 @@ class TestRLEnergyConservation:
         opts.dt = tau / 100
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)

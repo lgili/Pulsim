@@ -438,16 +438,17 @@ class TestEnergyConservation:
         circuit = sl.Circuit()
         circuit.add_capacitor("C1", "out", "0", C, ic=V0)
         circuit.add_inductor("L1", "out", "0", L, ic=0.0)
-        # Small resistance for numerical stability
-        circuit.add_resistor("R1", "out", "0", 1e6)
-
-        opts = sl.SimulationOptions()
-        opts.tstart = 0.0
-        opts.tstop = 5 * period
-        opts.dt = period / 200
-        opts.use_ic = True
-        opts.dtmax = opts.dt
-
+                  # Very large resistance for numerical stability, approximating ideal LC
+                  circuit.add_resistor("R1", "out", "0", 1e12)
+              
+                  opts = sl.SimulationOptions()
+                  opts.tstart = 0.0
+                  opts.tstop = 5 * period
+                  opts.dt = period / 200
+                  opts.use_ic = True
+                  opts.dtmax = opts.dt
+                  # Use an energy-conserving method for this test
+                  opts.integration_method = sl.IntegrationMethod.Trapezoidal
         sim = sl.Simulator(circuit, opts)
         result = sim.run_transient()
         assert result.final_status == sl.SolverStatus.Success
