@@ -7,15 +7,17 @@ on:
 
 jobs:
   build-wheels:
-    name: Build wheels on ${{ matrix.os }}
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-14]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-14]
         include:
           - os: ubuntu-latest
             arch: x86_64
+          - os: windows-latest
+            arch: AMD64
           - os: macos-latest
             arch: x86_64
           - os: macos-14
@@ -31,11 +33,11 @@ jobs:
           python-version: '3.11'
 
       - name: Update version from tag
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          echo "Setting version to $VERSION"
-          sed -i.bak "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-          rm -f pyproject.toml.bak
+          export VERSION_TAG=${GITHUB_REF_NAME#v}
+          echo "Setting version to $VERSION_TAG"
+          python -c "import os, re; version = os.environ['VERSION_TAG']; f = 'pyproject.toml'; c = open(f).read(); open(f, 'w').write(re.sub(r'^version\s*=\s*.*', f'version = \"{version}\"', c, count=1, flags=re.M))"
           grep "^version" pyproject.toml
 
       - name: Install cibuildwheel
@@ -46,12 +48,16 @@ jobs:
         env:
           CIBW_BUILD: cp310-* cp311-* cp312-* cp313-*
           CIBW_SKIP: "*-musllinux_* *-win32 *-manylinux_i686"
-          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          CIBW_ARCHS_WINDOWS: ${{ matrix.arch }}
           CIBW_ENVIRONMENT_MACOS: >-
             MACOSX_DEPLOYMENT_TARGET=11.0
           CIBW_BEFORE_ALL_LINUX: |
             yum install -y cmake3 ninja-build || apt-get update && apt-get install -y cmake ninja-build || true
+          CIBW_BEFORE_BUILD_WINDOWS: |
+            python -m pip install --upgrade pip setuptools wheel
+            python -m pip install cmake ninja scikit-build-core pybind11
           CIBW_BEFORE_BUILD_LINUX: |
             python -m pip install --upgrade pip setuptools wheel
             python -m pip install cmake ninja scikit-build-core pybind11
@@ -60,7 +66,7 @@ jobs:
             python -m pip install --upgrade pip setuptools wheel
             python -m pip install scikit-build-core pybind11
           CIBW_BUILD_VERBOSITY: 1
-          CIBW_TEST_REQUIRES: pytest numpy
+          CIBW_TEST_REQUIRES: pytest numpy scipy
           CIBW_TEST_COMMAND: >-
             cp -r {project}/python/tests /tmp/pulsim_tests &&
             cd /tmp &&
@@ -85,10 +91,11 @@ jobs:
           python-version: '3.11'
 
       - name: Update version from tag
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          echo "Setting version to $VERSION"
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          export VERSION_TAG=${GITHUB_REF_NAME#v}
+          echo "Setting version to $VERSION_TAG"
+          python -c "import os, re; version = os.environ['VERSION_TAG']; f = 'pyproject.toml'; c = open(f).read(); open(f, 'w').write(re.sub(r'^version\s*=\s*.*', f'version = \"{version}\"', c, count=1, flags=re.M))"
           grep "^version" pyproject.toml
 
       - name: Install build
