@@ -102,7 +102,7 @@
 - [x] 3.1.4 Add per-variable convergence checking
 - [x] 3.1.5 Implement convergence history tracking
 - [x] 3.1.6 Unit tests for DC OP edge cases
-- [ ] 3.1.7 Add deterministic ordering for assembly/solves to ensure repeatability
+- [x] 3.1.7 Add deterministic ordering for assembly/solves to ensure repeatability
 
 ### 3.2 Fix Trapezoidal Integration
 - [x] 3.2.1 Add `i_prev` to capacitor companion model
@@ -117,9 +117,9 @@
 - [x] 3.3.1 Implement BDF1 (Backward Euler) with correct formulation
 - [x] 3.3.2 Implement BDF2 with proper coefficients
 - [x] 3.3.3 Implement BDF3-5 for higher accuracy
-- [ ] 3.3.4 Add automatic order selection based on error
+- [x] 3.3.4 Add automatic order selection based on error
 - [x] 3.3.5 Implement startup sequence (BDF1 -> BDF2 -> target)
-- [ ] 3.3.6 Add order reduction on convergence failure
+- [x] 3.3.6 Add order reduction on convergence failure
 
 ### 3.4 Local Truncation Error Estimation
 - [x] 3.4.1 Implement LTE for Trapezoidal method
@@ -127,7 +127,7 @@
 - [x] 3.4.3 Add per-state-variable error tracking
 - [x] 3.4.4 Implement error-based timestep prediction
 - [x] 3.4.5 Add safety factor configuration
-- [ ] 3.4.6 Add logging hook to export LTE metrics for debugging (guarded, off by default)
+- [x] 3.4.6 Add logging hook to export LTE metrics for debugging (guarded, off by default)
 
 ### 3.5 Adaptive Timestep Controller
 - [x] 3.5.1 Implement PI controller for timestep

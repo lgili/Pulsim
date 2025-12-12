@@ -886,4 +886,303 @@ private:
     int rejections_;
 };
 
+// =============================================================================
+// 3.3.4 & 3.3.6: Automatic BDF Order Selection and Reduction
+// =============================================================================
+
+/// Configuration for BDF order control
+struct BDFOrderConfig {
+    int min_order = 1;              // Minimum BDF order
+    int max_order = 5;              // Maximum BDF order
+    int initial_order = 1;          // Starting order (for startup)
+    Real order_increase_threshold = 0.5;  // Increase order if error < threshold * tol
+    Real order_decrease_threshold = 2.0;  // Decrease order if error > threshold * tol
+    int steps_before_increase = 3;  // Steps at current order before considering increase
+    bool enable_auto_order = true;  // Enable automatic order selection
+
+    [[nodiscard]] static constexpr BDFOrderConfig defaults() {
+        return BDFOrderConfig{};
+    }
+};
+
+/// Result of BDF order decision
+struct BDFOrderDecision {
+    int new_order = 2;
+    int prev_order = 2;
+    bool order_changed = false;
+    bool order_increased = false;
+    bool order_decreased = false;
+    Real error_ratio = 0.0;
+    std::string reason;
+};
+
+/// BDF Order Controller for automatic order selection (3.3.4) and reduction (3.3.6)
+class BDFOrderController {
+public:
+    explicit BDFOrderController(const BDFOrderConfig& config = {})
+        : config_(config)
+        , current_order_(config.initial_order)
+        , steps_at_order_(0)
+        , convergence_failures_(0) {}
+
+    /// Select optimal BDF order based on error estimate (3.3.4)
+    /// @param lte Local truncation error
+    /// @param tolerance Error tolerance
+    /// @return Decision about BDF order
+    [[nodiscard]] BDFOrderDecision select_order(Real lte, Real tolerance) {
+        BDFOrderDecision result;
+        result.prev_order = current_order_;
+        result.new_order = current_order_;
+        result.error_ratio = lte / tolerance;
+
+        if (!config_.enable_auto_order) {
+            return result;
+        }
+
+        ++steps_at_order_;
+        convergence_failures_ = 0;  // Reset on successful step
+
+        // Check for order increase
+        if (current_order_ < config_.max_order &&
+            steps_at_order_ >= config_.steps_before_increase &&
+            result.error_ratio < config_.order_increase_threshold) {
+
+            result.new_order = current_order_ + 1;
+            result.order_changed = true;
+            result.order_increased = true;
+            result.reason = "Error low, increasing order for efficiency";
+            current_order_ = result.new_order;
+            steps_at_order_ = 0;
+        }
+        // Check for order decrease
+        else if (current_order_ > config_.min_order &&
+                 result.error_ratio > config_.order_decrease_threshold) {
+
+            result.new_order = current_order_ - 1;
+            result.order_changed = true;
+            result.order_decreased = true;
+            result.reason = "Error high, decreasing order for stability";
+            current_order_ = result.new_order;
+            steps_at_order_ = 0;
+        }
+
+        return result;
+    }
+
+    /// Reduce order on convergence failure (3.3.6)
+    /// Call this when Newton iteration fails to converge
+    /// @return New order after reduction, or -1 if cannot reduce further
+    [[nodiscard]] BDFOrderDecision reduce_on_failure() {
+        BDFOrderDecision result;
+        result.prev_order = current_order_;
+        result.error_ratio = -1.0;  // Indicates failure, not error-based
+
+        ++convergence_failures_;
+
+        if (current_order_ > config_.min_order) {
+            result.new_order = current_order_ - 1;
+            result.order_changed = true;
+            result.order_decreased = true;
+            result.reason = "Convergence failure, reducing order";
+            current_order_ = result.new_order;
+            steps_at_order_ = 0;
+        } else {
+            result.new_order = current_order_;
+            result.reason = "At minimum order, cannot reduce further";
+        }
+
+        return result;
+    }
+
+    /// Check if too many consecutive failures
+    [[nodiscard]] bool should_abort() const {
+        return convergence_failures_ > 3;  // Abort after 3 consecutive failures at min order
+    }
+
+    /// Reset to initial state (for new simulation or restart)
+    void reset() {
+        current_order_ = config_.initial_order;
+        steps_at_order_ = 0;
+        convergence_failures_ = 0;
+    }
+
+    /// Force specific order (for startup sequence)
+    void set_order(int order) {
+        current_order_ = std::clamp(order, config_.min_order, config_.max_order);
+        steps_at_order_ = 0;
+    }
+
+    /// Get BDF coefficients for current order
+    [[nodiscard]] BDFCoeffs current_coeffs() const {
+        return BDFCoeffs::for_order(current_order_);
+    }
+
+    [[nodiscard]] int current_order() const { return current_order_; }
+    [[nodiscard]] int steps_at_current_order() const { return steps_at_order_; }
+    [[nodiscard]] int convergence_failures() const { return convergence_failures_; }
+    [[nodiscard]] const BDFOrderConfig& config() const { return config_; }
+    void set_config(const BDFOrderConfig& cfg) { config_ = cfg; }
+
+    /// Check if enough history is available for current order
+    [[nodiscard]] bool has_sufficient_history(std::size_t history_count) const {
+        return static_cast<int>(history_count) >= current_order_;
+    }
+
+    /// Get required history depth for current order
+    [[nodiscard]] int required_history() const {
+        return current_order_;
+    }
+
+private:
+    BDFOrderConfig config_;
+    int current_order_;
+    int steps_at_order_;
+    int convergence_failures_;
+};
+
+// =============================================================================
+// 3.4.6: LTE Logging Hook for Debugging
+// =============================================================================
+
+/// LTE log entry
+struct LTELogEntry {
+    Real time = 0.0;              // Simulation time
+    Real dt = 0.0;                // Timestep used
+    Real lte = 0.0;               // Local truncation error
+    Real lte_ratio = 0.0;         // LTE / tolerance
+    int bdf_order = 2;            // BDF order used
+    bool step_accepted = true;    // Whether step was accepted
+    int element_id = -1;          // Element ID (if per-element)
+    std::string element_type;     // "capacitor", "inductor", etc.
+
+    [[nodiscard]] std::string to_csv() const {
+        return std::to_string(time) + "," +
+               std::to_string(dt) + "," +
+               std::to_string(lte) + "," +
+               std::to_string(lte_ratio) + "," +
+               std::to_string(bdf_order) + "," +
+               (step_accepted ? "1" : "0") + "," +
+               std::to_string(element_id) + "," +
+               element_type;
+    }
+
+    [[nodiscard]] static std::string csv_header() {
+        return "time,dt,lte,lte_ratio,bdf_order,accepted,element_id,element_type";
+    }
+};
+
+/// LTE Logger callback type
+using LTELogCallback = std::function<void(const LTELogEntry&)>;
+
+/// LTE Logger for debugging integration methods (3.4.6)
+/// Disabled by default, enable with set_enabled(true)
+class LTELogger {
+public:
+    LTELogger() = default;
+
+    /// Enable/disable logging
+    void set_enabled(bool enabled) { enabled_ = enabled; }
+    [[nodiscard]] bool is_enabled() const { return enabled_; }
+
+    /// Set callback for log entries
+    void set_callback(LTELogCallback callback) {
+        callback_ = std::move(callback);
+    }
+
+    /// Log an LTE entry (no-op if disabled)
+    void log(const LTELogEntry& entry) {
+        if (!enabled_) return;
+
+        // Store in buffer
+        if (buffer_.size() < max_buffer_size_) {
+            buffer_.push_back(entry);
+        }
+
+        // Call callback if set
+        if (callback_) {
+            callback_(entry);
+        }
+
+        // Update statistics
+        ++total_entries_;
+        if (!entry.step_accepted) ++rejected_steps_;
+        max_lte_ = std::max(max_lte_, entry.lte);
+        sum_lte_ += entry.lte;
+    }
+
+    /// Convenience method to log from simulation state
+    void log(Real time, Real dt, Real lte, Real tolerance, int order, bool accepted,
+             int element_id = -1, const std::string& element_type = "") {
+        if (!enabled_) return;
+
+        LTELogEntry entry;
+        entry.time = time;
+        entry.dt = dt;
+        entry.lte = lte;
+        entry.lte_ratio = lte / tolerance;
+        entry.bdf_order = order;
+        entry.step_accepted = accepted;
+        entry.element_id = element_id;
+        entry.element_type = element_type;
+
+        log(entry);
+    }
+
+    /// Get buffered entries
+    [[nodiscard]] const std::vector<LTELogEntry>& buffer() const { return buffer_; }
+
+    /// Clear buffer
+    void clear_buffer() { buffer_.clear(); }
+
+    /// Export buffer to CSV string
+    [[nodiscard]] std::string to_csv() const {
+        std::string result = LTELogEntry::csv_header() + "\n";
+        for (const auto& entry : buffer_) {
+            result += entry.to_csv() + "\n";
+        }
+        return result;
+    }
+
+    /// Get statistics
+    [[nodiscard]] std::size_t total_entries() const { return total_entries_; }
+    [[nodiscard]] std::size_t rejected_steps() const { return rejected_steps_; }
+    [[nodiscard]] Real max_lte() const { return max_lte_; }
+    [[nodiscard]] Real average_lte() const {
+        return total_entries_ > 0 ? sum_lte_ / static_cast<Real>(total_entries_) : 0.0;
+    }
+    [[nodiscard]] Real rejection_rate() const {
+        return total_entries_ > 0 ? static_cast<Real>(rejected_steps_) / total_entries_ : 0.0;
+    }
+
+    /// Reset all statistics and buffer
+    void reset() {
+        buffer_.clear();
+        total_entries_ = 0;
+        rejected_steps_ = 0;
+        max_lte_ = 0.0;
+        sum_lte_ = 0.0;
+    }
+
+    /// Set maximum buffer size
+    void set_max_buffer_size(std::size_t size) { max_buffer_size_ = size; }
+
+private:
+    bool enabled_ = false;
+    LTELogCallback callback_;
+    std::vector<LTELogEntry> buffer_;
+    std::size_t max_buffer_size_ = 10000;
+
+    // Statistics
+    std::size_t total_entries_ = 0;
+    std::size_t rejected_steps_ = 0;
+    Real max_lte_ = 0.0;
+    Real sum_lte_ = 0.0;
+};
+
+/// Global LTE logger instance (opt-in, disabled by default)
+inline LTELogger& global_lte_logger() {
+    static LTELogger instance;
+    return instance;
+}
+
 } // namespace pulsim::v2

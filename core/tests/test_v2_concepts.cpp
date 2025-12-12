@@ -3257,3 +3257,315 @@ static_assert(validate_circuit_topology<Resistor, VoltageSource>().is_valid);
 static_assert(validate_circuit_topology<Resistor, Capacitor, VoltageSource>().has_voltage_reference);
 
 } // namespace static_tests
+
+// =============================================================================
+// Phase 3 Remaining Tasks Tests (3.1.7, 3.3.4, 3.3.6, 3.4.6)
+// =============================================================================
+
+TEST_CASE("v2 BDF order controller", "[v2][integration][bdf][order]") {
+    using namespace pulsim::v2;
+
+    SECTION("Initial order") {
+        BDFOrderController ctrl;
+        REQUIRE(ctrl.current_order() == 1);  // Default initial order
+        REQUIRE(ctrl.steps_at_current_order() == 0);
+    }
+
+    SECTION("Order increase on low error (3.3.4)") {
+        BDFOrderConfig cfg;
+        cfg.initial_order = 2;
+        cfg.steps_before_increase = 3;  // Need 3 steps before increasing
+        cfg.order_increase_threshold = 0.5;
+        BDFOrderController ctrl(cfg);
+
+        Real tolerance = 1e-4;
+        Real low_error = tolerance * 0.3;  // Below increase threshold
+
+        // Step 1
+        auto decision = ctrl.select_order(low_error, tolerance);
+        REQUIRE(decision.new_order == 2);  // Not enough steps yet
+
+        // Step 2
+        decision = ctrl.select_order(low_error, tolerance);
+        REQUIRE(decision.new_order == 2);  // Not enough steps yet
+
+        // Step 3 - should increase (steps_at_order_ == 3 >= steps_before_increase)
+        decision = ctrl.select_order(low_error, tolerance);
+        REQUIRE(decision.order_increased == true);
+        REQUIRE(decision.new_order == 3);
+        REQUIRE(ctrl.current_order() == 3);
+    }
+
+    SECTION("Order decrease on high error (3.3.4)") {
+        BDFOrderConfig cfg;
+        cfg.initial_order = 3;
+        cfg.order_decrease_threshold = 2.0;
+        BDFOrderController ctrl(cfg);
+
+        Real tolerance = 1e-4;
+        Real high_error = tolerance * 3.0;  // Above decrease threshold
+
+        auto decision = ctrl.select_order(high_error, tolerance);
+
+        REQUIRE(decision.order_decreased == true);
+        REQUIRE(decision.new_order == 2);
+        REQUIRE(ctrl.current_order() == 2);
+    }
+
+    SECTION("Order reduction on convergence failure (3.3.6)") {
+        BDFOrderConfig cfg;
+        cfg.initial_order = 3;
+        cfg.min_order = 1;
+        BDFOrderController ctrl(cfg);
+
+        // First failure
+        auto decision = ctrl.reduce_on_failure();
+        REQUIRE(decision.order_decreased == true);
+        REQUIRE(decision.new_order == 2);
+        REQUIRE(ctrl.convergence_failures() == 1);
+
+        // Second failure
+        decision = ctrl.reduce_on_failure();
+        REQUIRE(decision.new_order == 1);
+        REQUIRE(ctrl.convergence_failures() == 2);
+
+        // At minimum - cannot reduce further
+        decision = ctrl.reduce_on_failure();
+        REQUIRE(decision.order_decreased == false);
+        REQUIRE(decision.new_order == 1);
+        REQUIRE(ctrl.convergence_failures() == 3);
+    }
+
+    SECTION("Abort after multiple failures at min order") {
+        BDFOrderConfig cfg;
+        cfg.initial_order = 1;
+        cfg.min_order = 1;
+        BDFOrderController ctrl(cfg);
+
+        // Multiple failures at min order
+        ctrl.reduce_on_failure();
+        REQUIRE(!ctrl.should_abort());
+        ctrl.reduce_on_failure();
+        REQUIRE(!ctrl.should_abort());
+        ctrl.reduce_on_failure();
+        REQUIRE(!ctrl.should_abort());
+        ctrl.reduce_on_failure();
+        REQUIRE(ctrl.should_abort());  // > 3 failures
+    }
+
+    SECTION("Get BDF coefficients") {
+        BDFOrderConfig cfg;
+        cfg.initial_order = 2;
+        BDFOrderController ctrl(cfg);
+
+        auto coeffs = ctrl.current_coeffs();
+        REQUIRE(coeffs.order == 2);
+        REQUIRE(coeffs.alpha[0] == Catch::Approx(3.0/2.0));
+    }
+
+    SECTION("History requirement check") {
+        BDFOrderConfig cfg;
+        cfg.initial_order = 3;
+        BDFOrderController ctrl(cfg);
+
+        REQUIRE(ctrl.required_history() == 3);
+        REQUIRE(ctrl.has_sufficient_history(3) == true);
+        REQUIRE(ctrl.has_sufficient_history(2) == false);
+    }
+}
+
+TEST_CASE("v2 LTE logger", "[v2][integration][lte][logging]") {
+    using namespace pulsim::v2;
+
+    SECTION("Disabled by default") {
+        LTELogger logger;
+        REQUIRE(logger.is_enabled() == false);
+
+        // Logging when disabled should be no-op
+        logger.log(0.0, 1e-9, 1e-6, 1e-4, 2, true);
+        REQUIRE(logger.buffer().empty());
+        REQUIRE(logger.total_entries() == 0);
+    }
+
+    SECTION("Enable and log entries") {
+        LTELogger logger;
+        logger.set_enabled(true);
+
+        logger.log(0.001, 1e-9, 1e-6, 1e-4, 2, true, 0, "capacitor");
+        logger.log(0.002, 1e-9, 2e-5, 1e-4, 2, false, 1, "inductor");
+
+        REQUIRE(logger.total_entries() == 2);
+        REQUIRE(logger.rejected_steps() == 1);
+        REQUIRE(logger.buffer().size() == 2);
+    }
+
+    SECTION("Statistics") {
+        LTELogger logger;
+        logger.set_enabled(true);
+
+        logger.log(0.0, 1e-9, 1e-6, 1e-4, 2, true);
+        logger.log(0.0, 1e-9, 3e-6, 1e-4, 2, true);
+        logger.log(0.0, 1e-9, 5e-6, 1e-4, 2, false);
+
+        REQUIRE(logger.max_lte() == Catch::Approx(5e-6));
+        REQUIRE(logger.average_lte() == Catch::Approx(3e-6));
+        REQUIRE(logger.rejection_rate() == Catch::Approx(1.0/3.0));
+    }
+
+    SECTION("CSV export") {
+        LTELogger logger;
+        logger.set_enabled(true);
+
+        logger.log(0.001, 1e-9, 1e-6, 1e-4, 2, true);
+
+        std::string csv = logger.to_csv();
+        REQUIRE(csv.find("time,dt,lte") != std::string::npos);
+        REQUIRE(csv.find("0.001") != std::string::npos);
+    }
+
+    SECTION("Callback") {
+        LTELogger logger;
+        logger.set_enabled(true);
+
+        int callback_count = 0;
+        logger.set_callback([&](const LTELogEntry&) {
+            ++callback_count;
+        });
+
+        logger.log(0.0, 1e-9, 1e-6, 1e-4, 2, true);
+        logger.log(0.0, 1e-9, 2e-6, 1e-4, 2, true);
+
+        REQUIRE(callback_count == 2);
+    }
+
+    SECTION("Reset") {
+        LTELogger logger;
+        logger.set_enabled(true);
+
+        logger.log(0.0, 1e-9, 1e-6, 1e-4, 2, true);
+        logger.log(0.0, 1e-9, 2e-6, 1e-4, 2, false);
+
+        logger.reset();
+
+        REQUIRE(logger.buffer().empty());
+        REQUIRE(logger.total_entries() == 0);
+        REQUIRE(logger.rejected_steps() == 0);
+        REQUIRE(logger.max_lte() == 0.0);
+    }
+
+    SECTION("Global logger") {
+        auto& global = global_lte_logger();
+        REQUIRE(global.is_enabled() == false);  // Disabled by default
+    }
+}
+
+TEST_CASE("v2 Deterministic ordering", "[v2][solver][deterministic]") {
+    using namespace pulsim::v2;
+
+    SECTION("DeviceOrderKey comparison") {
+        DeviceOrderKey a{"resistor", "R1", 0};
+        DeviceOrderKey b{"resistor", "R2", 0};
+        DeviceOrderKey c{"capacitor", "C1", 0};
+
+        REQUIRE(c < a);  // capacitor < resistor
+        REQUIRE(a < b);  // R1 < R2
+        REQUIRE(a == a);
+    }
+
+    SECTION("Natural node ordering") {
+        auto order = DeterministicNodeOrder::natural(5);
+
+        REQUIRE(order.node_order.size() == 5);
+        REQUIRE(order.inverse_order.size() == 5);
+
+        for (Index i = 0; i < 5; ++i) {
+            REQUIRE(order.node_order[i] == i);
+            REQUIRE(order.inverse_order[i] == i);
+        }
+    }
+
+    SECTION("Vector permutation") {
+        DeterministicNodeOrder order;
+        order.node_order = {2, 0, 1};
+        order.inverse_order = {1, 2, 0};
+
+        Vector v(3);
+        v << 10.0, 20.0, 30.0;
+
+        Vector permuted = order.permute(v);
+        REQUIRE(permuted[0] == 30.0);  // node_order[0] = 2
+        REQUIRE(permuted[1] == 10.0);  // node_order[1] = 0
+        REQUIRE(permuted[2] == 20.0);  // node_order[2] = 1
+
+        Vector unpermuted = order.unpermute(permuted);
+        REQUIRE(unpermuted[0] == Catch::Approx(v[0]));
+        REQUIRE(unpermuted[1] == Catch::Approx(v[1]));
+        REQUIRE(unpermuted[2] == Catch::Approx(v[2]));
+    }
+
+    SECTION("DeterministicAssemblyOrder") {
+        DeterministicAssemblyOrder assembly;
+
+        assembly.register_device({"resistor", "R2", 0});
+        assembly.register_device({"capacitor", "C1", 0});
+        assembly.register_device({"resistor", "R1", 0});
+
+        REQUIRE(assembly.size() == 3);
+        REQUIRE(!assembly.is_sorted());
+
+        assembly.sort();
+
+        REQUIRE(assembly.is_sorted());
+
+        const auto& devices = assembly.devices();
+        REQUIRE(devices[0].type_name == "capacitor");
+        REQUIRE(devices[1].name == "R1");
+        REQUIRE(devices[2].name == "R2");
+    }
+
+    SECTION("DeterministicTriplet sorting") {
+        std::vector<DeterministicTriplet> triplets = {
+            {1, 2, 5.0},
+            {0, 0, 1.0},
+            {1, 0, 3.0},
+            {0, 1, 2.0},
+            {0, 0, 0.5}  // Duplicate position
+        };
+
+        auto matrix = build_matrix_deterministic(2, 3, triplets);
+
+        REQUIRE(matrix.rows() == 2);
+        REQUIRE(matrix.cols() == 3);
+        REQUIRE(matrix.coeff(0, 0) == Catch::Approx(1.5));  // 1.0 + 0.5 combined
+        REQUIRE(matrix.coeff(0, 1) == Catch::Approx(2.0));
+        REQUIRE(matrix.coeff(1, 0) == Catch::Approx(3.0));
+        REQUIRE(matrix.coeff(1, 2) == Catch::Approx(5.0));
+    }
+
+    SECTION("RCM ordering") {
+        // Create a simple sparse matrix
+        SparseMatrix A(4, 4);
+        std::vector<Eigen::Triplet<Real>> triplets = {
+            {0, 0, 1.0}, {0, 1, 1.0},
+            {1, 0, 1.0}, {1, 1, 1.0}, {1, 2, 1.0},
+            {2, 1, 1.0}, {2, 2, 1.0}, {2, 3, 1.0},
+            {3, 2, 1.0}, {3, 3, 1.0}
+        };
+        A.setFromTriplets(triplets.begin(), triplets.end());
+
+        auto order = DeterministicNodeOrder::rcm(A);
+
+        REQUIRE(order.node_order.size() == 4);
+        REQUIRE(order.inverse_order.size() == 4);
+
+        // Verify it's a valid permutation
+        std::vector<bool> seen(4, false);
+        for (Index i = 0; i < 4; ++i) {
+            REQUIRE(order.node_order[i] < 4);
+            seen[order.node_order[i]] = true;
+        }
+        for (bool s : seen) {
+            REQUIRE(s == true);
+        }
+    }
+}

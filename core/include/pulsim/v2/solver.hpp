@@ -612,10 +612,27 @@ void sort_for_determinism(Container& items, KeyFunc key_func) {
     });
 }
 
+/// Device ordering key for deterministic assembly
+struct DeviceOrderKey {
+    std::string type_name;  // Device type (resistor, capacitor, etc.)
+    std::string name;       // Instance name
+    Index id = 0;           // Numeric ID
+
+    [[nodiscard]] bool operator<(const DeviceOrderKey& other) const {
+        if (type_name != other.type_name) return type_name < other.type_name;
+        if (name != other.name) return name < other.name;
+        return id < other.id;
+    }
+
+    [[nodiscard]] bool operator==(const DeviceOrderKey& other) const {
+        return type_name == other.type_name && name == other.name && id == other.id;
+    }
+};
+
 /// Node ordering for deterministic assembly
 struct DeterministicNodeOrder {
-    std::vector<Index> node_order;
-    std::vector<Index> inverse_order;
+    std::vector<Index> node_order;      // Maps internal index -> external index
+    std::vector<Index> inverse_order;   // Maps external index -> internal index
 
     void set_order(Index n) {
         node_order.resize(n);
@@ -626,22 +643,225 @@ struct DeterministicNodeOrder {
         }
     }
 
+    /// Apply permutation to a vector
+    [[nodiscard]] Vector permute(const Vector& v) const {
+        Vector result(v.size());
+        for (std::size_t i = 0; i < node_order.size(); ++i) {
+            result[i] = v[node_order[i]];
+        }
+        return result;
+    }
+
+    /// Apply inverse permutation to a vector
+    [[nodiscard]] Vector unpermute(const Vector& v) const {
+        Vector result(v.size());
+        for (std::size_t i = 0; i < inverse_order.size(); ++i) {
+            result[i] = v[inverse_order[i]];
+        }
+        return result;
+    }
+
     /// Natural ordering (identity)
-    static DeterministicNodeOrder natural(Index n) {
+    [[nodiscard]] static DeterministicNodeOrder natural(Index n) {
         DeterministicNodeOrder order;
         order.set_order(n);
         return order;
     }
 
-    /// Reverse Cuthill-McKee ordering (for bandwidth reduction)
-    /// Note: Actual RCM implementation would analyze graph structure
-    static DeterministicNodeOrder rcm(const SparseMatrix& /*A*/) {
-        // Placeholder: return natural order
-        // Full RCM would require graph analysis
+    /// Sorted ordering by node name/ID
+    template<typename NodeContainer, typename KeyFunc>
+    [[nodiscard]] static DeterministicNodeOrder sorted(const NodeContainer& nodes, KeyFunc key_func) {
         DeterministicNodeOrder order;
+        Index n = static_cast<Index>(nodes.size());
+        order.node_order.resize(n);
+        order.inverse_order.resize(n);
+
+        // Create index pairs
+        std::vector<std::pair<decltype(key_func(nodes[0])), Index>> pairs;
+        pairs.reserve(n);
+        for (Index i = 0; i < n; ++i) {
+            pairs.emplace_back(key_func(nodes[i]), i);
+        }
+
+        // Sort by key
+        std::sort(pairs.begin(), pairs.end());
+
+        // Build ordering
+        for (Index i = 0; i < n; ++i) {
+            order.node_order[i] = pairs[i].second;
+            order.inverse_order[pairs[i].second] = i;
+        }
+
+        return order;
+    }
+
+    /// Reverse Cuthill-McKee ordering (for bandwidth reduction)
+    [[nodiscard]] static DeterministicNodeOrder rcm(const SparseMatrix& A) {
+        Index n = A.rows();
+        DeterministicNodeOrder order;
+        order.node_order.resize(n);
+        order.inverse_order.resize(n);
+
+        // Build adjacency information
+        std::vector<std::vector<Index>> adj(n);
+        for (int k = 0; k < A.outerSize(); ++k) {
+            for (SparseMatrix::InnerIterator it(A, k); it; ++it) {
+                if (it.row() != it.col()) {
+                    adj[it.row()].push_back(it.col());
+                }
+            }
+        }
+
+        // Sort adjacencies for determinism
+        for (auto& a : adj) {
+            std::sort(a.begin(), a.end());
+        }
+
+        // Find starting node (minimum degree)
+        Index start = 0;
+        std::size_t min_degree = adj[0].size();
+        for (Index i = 1; i < n; ++i) {
+            if (adj[i].size() < min_degree) {
+                min_degree = adj[i].size();
+                start = i;
+            }
+        }
+
+        // BFS for Cuthill-McKee
+        std::vector<bool> visited(n, false);
+        std::vector<Index> result;
+        result.reserve(n);
+
+        std::vector<Index> queue;
+        queue.push_back(start);
+        visited[start] = true;
+
+        while (!queue.empty()) {
+            // Sort queue by degree for determinism
+            std::sort(queue.begin(), queue.end(), [&adj](Index a, Index b) {
+                return adj[a].size() < adj[b].size();
+            });
+
+            Index current = queue.front();
+            queue.erase(queue.begin());
+            result.push_back(current);
+
+            // Add unvisited neighbors
+            for (Index neighbor : adj[current]) {
+                if (!visited[neighbor]) {
+                    visited[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+
+        // Handle disconnected components
+        for (Index i = 0; i < n; ++i) {
+            if (!visited[i]) {
+                result.push_back(i);
+            }
+        }
+
+        // Reverse for RCM
+        std::reverse(result.begin(), result.end());
+
+        // Build ordering
+        for (Index i = 0; i < n; ++i) {
+            order.node_order[i] = result[i];
+            order.inverse_order[result[i]] = i;
+        }
+
         return order;
     }
 };
+
+/// Assembly order tracker for deterministic matrix construction
+class DeterministicAssemblyOrder {
+public:
+    DeterministicAssemblyOrder() = default;
+
+    /// Register a device for assembly
+    void register_device(const DeviceOrderKey& key) {
+        devices_.push_back(key);
+        sorted_ = false;
+    }
+
+    /// Sort devices for deterministic iteration
+    void sort() {
+        if (!sorted_) {
+            std::sort(devices_.begin(), devices_.end());
+            sorted_ = true;
+        }
+    }
+
+    /// Get sorted device order
+    [[nodiscard]] const std::vector<DeviceOrderKey>& devices() const {
+        return devices_;
+    }
+
+    /// Clear all registered devices
+    void clear() {
+        devices_.clear();
+        sorted_ = false;
+    }
+
+    /// Check if sorted
+    [[nodiscard]] bool is_sorted() const { return sorted_; }
+
+    /// Get device count
+    [[nodiscard]] std::size_t size() const { return devices_.size(); }
+
+    /// Iterator support
+    [[nodiscard]] auto begin() const { return devices_.begin(); }
+    [[nodiscard]] auto end() const { return devices_.end(); }
+
+private:
+    std::vector<DeviceOrderKey> devices_;
+    bool sorted_ = false;
+};
+
+/// Triplet ordering for deterministic sparse matrix construction
+struct DeterministicTriplet {
+    Index row;
+    Index col;
+    Real value;
+
+    [[nodiscard]] bool operator<(const DeterministicTriplet& other) const {
+        if (row != other.row) return row < other.row;
+        return col < other.col;
+    }
+};
+
+/// Build sparse matrix from triplets in deterministic order
+[[nodiscard]] inline SparseMatrix build_matrix_deterministic(
+    Index rows, Index cols,
+    std::vector<DeterministicTriplet>& triplets) {
+
+    // Sort triplets by (row, col) for deterministic assembly
+    std::sort(triplets.begin(), triplets.end());
+
+    // Combine duplicates (same row, col)
+    std::vector<Eigen::Triplet<Real>> eigen_triplets;
+    eigen_triplets.reserve(triplets.size());
+
+    for (std::size_t i = 0; i < triplets.size(); ) {
+        Index r = triplets[i].row;
+        Index c = triplets[i].col;
+        Real sum = 0.0;
+
+        // Sum all values at same (row, col)
+        while (i < triplets.size() && triplets[i].row == r && triplets[i].col == c) {
+            sum += triplets[i].value;
+            ++i;
+        }
+
+        eigen_triplets.emplace_back(r, c, sum);
+    }
+
+    SparseMatrix result(rows, cols);
+    result.setFromTriplets(eigen_triplets.begin(), eigen_triplets.end());
+    return result;
+}
 
 // =============================================================================
 // Static Assertions
