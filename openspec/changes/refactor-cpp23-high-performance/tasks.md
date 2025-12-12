@@ -265,10 +265,10 @@
 
 ### 7.2 Documentation
 - [x] 7.2.1 Document new API in docstrings (pybind11 docstrings added)
-- [ ] 7.2.2 Create migration guide from v1 to v2
-- [ ] 7.2.3 Update Jupyter notebook examples
-- [ ] 7.2.4 Add performance tuning guide
-- [ ] 7.2.5 Document deterministic/repro flags and logging hooks
+- [x] 7.2.2 Create migration guide from v1 to v2 (docs/migration-v1-to-v2.md)
+- [x] 7.2.3 Update Jupyter notebook examples (examples/notebooks/14_v2_api.ipynb)
+- [x] 7.2.4 Add performance tuning guide (docs/performance-tuning.md)
+- [x] 7.2.5 Document deterministic/repro flags and logging hooks (docs/determinism.md)
 
 ## Phase 8: Cleanup & Release
 
