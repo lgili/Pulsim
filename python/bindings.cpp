@@ -971,6 +971,180 @@ void init_v2_module(py::module_& v2) {
     "Run transient with zero initial state");
 
     // =========================================================================
+    // Robust Transient Simulation with Convergence Aids
+    // =========================================================================
+
+    // Robust transient with Gmin fallback and timestep refinement
+    v2.def("run_transient_robust", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
+                                       const Vector& x0, const NewtonOptions& newton_opts,
+                                       bool use_gmin_fallback, const GminConfig& gmin_config,
+                                       int max_dt_reductions, Real dt_reduction_factor) {
+        std::vector<Real> times;
+        std::vector<Vector> states;
+        bool success = true;
+        std::string message = "Transient completed";
+        int gmin_fallback_count = 0;
+        int dt_reduction_count = 0;
+
+        // Set timestep for dynamic elements
+        Real current_dt = dt;
+        circuit.set_timestep(current_dt);
+
+        // Configure Newton solver
+        NewtonOptions opts = newton_opts;
+        opts.num_nodes = circuit.num_nodes();
+        opts.num_branches = circuit.num_branches();
+        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
+
+        // System function
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        // Initial state
+        Vector x = x0;
+
+        // Set initial time
+        circuit.set_current_time(t_start);
+        circuit.update_history(x, true);
+
+        // Store initial state
+        times.push_back(t_start);
+        states.push_back(x);
+
+        Real t = t_start;
+        int step = 0;
+        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1; // Allow for refinement
+
+        while (t < t_stop && step < max_steps) {
+            // Advance time
+            Real t_next = t + current_dt;
+            circuit.set_current_time(t_next);
+
+            // Try normal Newton solve first
+            auto result = solver.solve(x, system_func);
+
+            if (!result.success() && use_gmin_fallback) {
+                // Fallback 1: Try Gmin stepping
+                GminStepping gmin_stepper(gmin_config);
+
+                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
+                    Real current_gmin = gmin_stepper.current_gmin();
+                    Index num_nodes = circuit.num_nodes();
+
+                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
+                        circuit.assemble_jacobian(J, f, x_inner);
+                        // Add Gmin to node diagonals only
+                        for (Index i = 0; i < num_nodes; ++i) {
+                            J.coeffRef(i, i) += current_gmin;
+                        }
+                    };
+                    return solver.solve(x_start, modified_func);
+                };
+
+                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
+
+                if (result.success()) {
+                    gmin_fallback_count++;
+                }
+            }
+
+            if (!result.success() && max_dt_reductions > 0) {
+                // Fallback 2: Try with smaller timestep
+                int reductions = 0;
+                Real temp_dt = current_dt;
+                Vector x_sub = x;
+                Real t_sub = t;
+                bool sub_success = true;
+
+                while (!result.success() && reductions < max_dt_reductions) {
+                    temp_dt *= dt_reduction_factor;
+                    circuit.set_timestep(temp_dt);
+                    reductions++;
+
+                    // Try sub-stepping from t to t_next
+                    x_sub = x;
+                    t_sub = t;
+                    sub_success = true;
+
+                    while (t_sub < t_next - temp_dt * 0.5) {
+                        t_sub += temp_dt;
+                        circuit.set_current_time(t_sub);
+                        result = solver.solve(x_sub, system_func);
+
+                        if (!result.success()) {
+                            sub_success = false;
+                            break;
+                        }
+                        x_sub = result.solution;
+                        circuit.update_history(x_sub);
+                    }
+
+                    if (sub_success) {
+                        result.solution = x_sub;
+                        result.status = SolverStatus::Success;
+                        dt_reduction_count++;
+                        break;
+                    }
+                }
+
+                // Restore original timestep
+                circuit.set_timestep(current_dt);
+            }
+
+            if (!result.success()) {
+                success = false;
+                message = "Newton failed at t=" + std::to_string(t_next) +
+                          " after Gmin fallback and " + std::to_string(max_dt_reductions) +
+                          " timestep reductions. Error: " + result.error_message;
+                break;
+            }
+
+            // Update solution
+            x = result.solution;
+            circuit.update_history(x);
+
+            // Store state
+            t = t_next;
+            step++;
+            times.push_back(t);
+            states.push_back(x);
+        }
+
+        if (success) {
+            message = "Transient completed. Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
+                      ", timestep reductions: " + std::to_string(dt_reduction_count);
+        }
+
+        return std::make_tuple(times, states, success, message);
+    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+       py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
+       py::arg("use_gmin_fallback") = true, py::arg("gmin_config") = GminConfig(),
+       py::arg("max_dt_reductions") = 3, py::arg("dt_reduction_factor") = 0.5,
+    R"doc(
+    Run transient simulation with convergence aids.
+
+    When Newton fails at a timestep, this function tries:
+    1. Gmin stepping (adds small conductances to help convergence)
+    2. Timestep reduction (uses smaller substeps)
+
+    Args:
+        circuit: Circuit object with devices
+        t_start: Start time (s)
+        t_stop: Stop time (s)
+        dt: Base timestep (s)
+        x0: Initial state vector
+        newton_options: Newton solver options
+        use_gmin_fallback: Enable Gmin stepping fallback (default True)
+        gmin_config: Gmin stepping configuration
+        max_dt_reductions: Max number of timestep reductions to try (default 3)
+        dt_reduction_factor: Factor to reduce dt each attempt (default 0.5)
+
+    Returns:
+        Tuple of (times, states, success, message)
+    )doc");
+
+    // =========================================================================
     // Validation Framework (Phase 6 exposed)
     // =========================================================================
 
