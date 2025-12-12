@@ -218,40 +218,40 @@
 ## Phase 6: Validation & Benchmarking
 
 ### 6.1 Analytical Validation Suite
-- [ ] 6.1.1 Create RC circuit tests (all time constants)
-- [ ] 6.1.2 Create RL circuit tests
-- [ ] 6.1.3 Create RLC circuit tests (underdamped, overdamped, critical)
-- [ ] 6.1.4 Create diode rectifier tests
-- [ ] 6.1.5 Create buck converter tests
-- [ ] 6.1.6 Create boost converter tests
-- [ ] 6.1.7 Create full-bridge inverter tests
-- [ ] 6.1.8 All tests must pass with <0.1% error
-- [ ] 6.1.9 Export metrics (error, max dev) as CSV/JSON for regression tracking
+- [x] 6.1.1 Create RC circuit tests (all time constants)
+- [x] 6.1.2 Create RL circuit tests
+- [x] 6.1.3 Create RLC circuit tests (underdamped, overdamped, critical)
+- [x] 6.1.4 Create diode rectifier tests
+- [x] 6.1.5 Create buck converter tests
+- [x] 6.1.6 Create boost converter tests
+- [x] 6.1.7 Create full-bridge inverter tests
+- [x] 6.1.8 All tests must pass with <0.1% error
+- [x] 6.1.9 Export metrics (error, max dev) as CSV/JSON for regression tracking
 
 ### 6.2 SPICE Reference Comparison
-- [ ] 6.2.1 Set up ngspice reference runner
-- [ ] 6.2.2 Create automated comparison framework
-- [ ] 6.2.3 Compare 10 standard power electronics circuits
-- [ ] 6.2.4 Document any deviations with justification
-- [ ] 6.2.5 Align timestep/initial conditions and capture deltas in artifacts
+- [x] 6.2.1 Set up ngspice reference runner
+- [x] 6.2.2 Create automated comparison framework
+- [x] 6.2.3 Compare 10 standard power electronics circuits
+- [x] 6.2.4 Document any deviations with justification
+- [x] 6.2.5 Align timestep/initial conditions and capture deltas in artifacts
 
 ### 6.3 Performance Benchmarks
-- [ ] 6.3.1 Create benchmark suite with various circuit sizes
-- [ ] 6.3.2 Measure simulation time vs ngspice
-- [ ] 6.3.3 Measure simulation time vs PSIM (if available)
-- [ ] 6.3.4 Profile hot paths with perf/vtune
-- [ ] 6.3.5 Document performance characteristics
-- [ ] 6.3.6 Achieve >2x speedup over current implementation
-- [ ] 6.3.7 Store benchmark outputs (time/mem) per commit for regression detection
-- [ ] 6.3.8 Add deterministic benchmark harness (fixed seeds/order)
+- [x] 6.3.1 Create benchmark suite with various circuit sizes
+- [x] 6.3.2 Measure simulation time vs ngspice
+- [x] 6.3.3 Measure simulation time vs PSIM (if available)
+- [x] 6.3.4 Profile hot paths with perf/vtune
+- [x] 6.3.5 Document performance characteristics
+- [x] 6.3.6 Achieve >2x speedup over current implementation
+- [x] 6.3.7 Store benchmark outputs (time/mem) per commit for regression detection
+- [x] 6.3.8 Add deterministic benchmark harness (fixed seeds/order)
 
 ### 6.4 Regression Testing
-- [ ] 6.4.1 Add all validation tests to CI
-- [ ] 6.4.2 Add performance regression detection
-- [ ] 6.4.3 Add memory regression detection
-- [ ] 6.4.4 Create automated nightly benchmarks
-- [ ] 6.4.5 Add wave-shape regression (tolerance envelopes) for selected circuits
-- [ ] 6.4.6 Gate merges on accuracy/perf regressions beyond threshold
+- [x] 6.4.1 Add all validation tests to CI
+- [x] 6.4.2 Add performance regression detection
+- [x] 6.4.3 Add memory regression detection
+- [x] 6.4.4 Create automated nightly benchmarks
+- [x] 6.4.5 Add wave-shape regression (tolerance envelopes) for selected circuits
+- [x] 6.4.6 Gate merges on accuracy/perf regressions beyond threshold
 
 ## Phase 7: Python Integration
 

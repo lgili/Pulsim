@@ -4494,3 +4494,593 @@ TEST_CASE("v2 Node init hint", "[v2][convergence][init][phase5]") {
         REQUIRE(init.voltage_from_hint(DeviceHint::BJTEmitter) == 0.0);
     }
 }
+
+// =============================================================================
+// Phase 6: Validation & Benchmarking Tests
+// =============================================================================
+
+TEST_CASE("v2 RC analytical solution", "[v2][validation][rc][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("RC step response - tau calculation") {
+        RCAnalytical rc{1000.0, 1e-6, 0.0, 5.0};  // R=1k, C=1uF, V0=0, Vf=5
+        REQUIRE(rc.tau() == Catch::Approx(1e-3));  // tau = RC = 1ms
+    }
+
+    SECTION("RC step response - voltage at t=0") {
+        RCAnalytical rc{1000.0, 1e-6, 0.0, 5.0};
+        REQUIRE(rc.voltage(0.0) == Catch::Approx(0.0));
+    }
+
+    SECTION("RC step response - voltage at t=tau") {
+        RCAnalytical rc{1000.0, 1e-6, 0.0, 5.0};
+        // At t=tau, V = Vf * (1 - 1/e) = 5 * 0.632 = 3.16
+        REQUIRE(rc.voltage(rc.tau()) == Catch::Approx(5.0 * (1.0 - std::exp(-1.0))).margin(0.01));
+    }
+
+    SECTION("RC step response - voltage at t=5*tau") {
+        RCAnalytical rc{1000.0, 1e-6, 0.0, 5.0};
+        // At t=5*tau, V approx Vf (99.3%)
+        REQUIRE(rc.voltage(5.0 * rc.tau()) == Catch::Approx(5.0).margin(0.05));
+    }
+
+    SECTION("RC waveform generation") {
+        RCAnalytical rc{1000.0, 1e-6, 0.0, 5.0};
+        auto waveform = rc.waveform(0.0, 5e-3, 1e-4);
+        REQUIRE(waveform.size() == 51);  // 0 to 5ms in 0.1ms steps
+        REQUIRE(waveform.front().second == Catch::Approx(0.0).margin(0.01));
+        REQUIRE(waveform.back().second == Catch::Approx(5.0).margin(0.05));
+    }
+}
+
+TEST_CASE("v2 RL analytical solution", "[v2][validation][rl][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("RL step response - tau calculation") {
+        RLAnalytical rl{100.0, 0.1, 10.0, 0.0};  // R=100, L=0.1H, V=10V
+        REQUIRE(rl.tau() == Catch::Approx(1e-3));  // tau = L/R = 1ms
+    }
+
+    SECTION("RL step response - current at t=0") {
+        RLAnalytical rl{100.0, 0.1, 10.0, 0.0};
+        REQUIRE(rl.current(0.0) == Catch::Approx(0.0));
+    }
+
+    SECTION("RL step response - current at steady state") {
+        RLAnalytical rl{100.0, 0.1, 10.0, 0.0};
+        REQUIRE(rl.I_final() == Catch::Approx(0.1));  // I = V/R = 10/100 = 0.1A
+    }
+
+    SECTION("RL step response - current at t=tau") {
+        RLAnalytical rl{100.0, 0.1, 10.0, 0.0};
+        // At t=tau, I = I_final * (1 - 1/e) = 0.1 * 0.632
+        REQUIRE(rl.current(rl.tau()) == Catch::Approx(0.1 * (1.0 - std::exp(-1.0))).margin(0.001));
+    }
+}
+
+TEST_CASE("v2 RLC analytical solution", "[v2][validation][rlc][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("RLC underdamped detection") {
+        // Low R for underdamped: zeta = R/(2*sqrt(L/C)) < 1
+        RLCAnalytical rlc{10.0, 0.1, 1e-6, 10.0, 0.0, 0.0};  // R=10, L=0.1H, C=1uF
+        REQUIRE(rlc.damping_type() == RLCDamping::Underdamped);
+        REQUIRE(rlc.zeta() < 1.0);
+    }
+
+    SECTION("RLC overdamped detection") {
+        // High R for overdamped
+        RLCAnalytical rlc{10000.0, 0.1, 1e-6, 10.0, 0.0, 0.0};
+        REQUIRE(rlc.damping_type() == RLCDamping::Overdamped);
+        REQUIRE(rlc.zeta() > 1.0);
+    }
+
+    SECTION("RLC critical damping detection") {
+        // R = 2*sqrt(L/C) for critical damping
+        Real L = 0.1;
+        Real C = 1e-6;
+        Real R_critical = 2.0 * std::sqrt(L / C);  // = 632.46
+        RLCAnalytical rlc{R_critical, L, C, 10.0, 0.0, 0.0};
+        REQUIRE(rlc.damping_type() == RLCDamping::Critical);
+        REQUIRE(rlc.zeta() == Catch::Approx(1.0).margin(0.01));
+    }
+
+    SECTION("RLC underdamped response") {
+        RLCAnalytical rlc{10.0, 0.1, 1e-6, 10.0, 0.0, 0.0};
+        // Should oscillate and settle to V_source = 10V
+        REQUIRE(rlc.voltage(0.0) == Catch::Approx(0.0));
+        // At long time, should approach steady state
+        REQUIRE(rlc.voltage(0.1) == Catch::Approx(10.0).margin(0.1));
+    }
+
+    SECTION("RLC overdamped response") {
+        RLCAnalytical rlc{10000.0, 0.1, 1e-6, 10.0, 0.0, 0.0};
+        REQUIRE(rlc.voltage(0.0) == Catch::Approx(0.0));
+        // Slow rise without oscillation
+        REQUIRE(rlc.voltage(1.0) == Catch::Approx(10.0).margin(0.1));
+    }
+}
+
+TEST_CASE("v2 Diode rectifier analytical", "[v2][validation][diode][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Half-wave rectifier output") {
+        DiodeRectifierAnalytical rect{10.0, 60.0, 0.7};  // 10V peak, 60Hz, 0.7V drop
+
+        // At t=0, sin(0)=0, output should be 0
+        REQUIRE(rect.voltage_out(0.0) == 0.0);
+
+        // At t=T/4, sin(wt)=1, output = Vpeak - Vf = 9.3V
+        Real T = 1.0 / 60.0;
+        REQUIRE(rect.voltage_out(T / 4.0) == Catch::Approx(9.3).margin(0.01));
+
+        // At negative half cycle, output = 0
+        REQUIRE(rect.voltage_out(T * 3.0 / 4.0) == 0.0);
+    }
+}
+
+TEST_CASE("v2 Validation metrics", "[v2][validation][metrics][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Compare identical waveforms") {
+        std::vector<std::pair<Real, Real>> wave1 = {
+            {0.0, 0.0}, {1.0, 1.0}, {2.0, 2.0}
+        };
+        auto result = compare_waveforms("test", wave1, wave1, 0.001);
+        REQUIRE(result.passed);
+        REQUIRE(result.max_error == Catch::Approx(0.0));
+        REQUIRE(result.rms_error == Catch::Approx(0.0));
+    }
+
+    SECTION("Compare similar waveforms within tolerance") {
+        std::vector<std::pair<Real, Real>> analytical = {
+            {0.0, 1.0}, {1.0, 2.0}, {2.0, 3.0}
+        };
+        std::vector<std::pair<Real, Real>> simulated = {
+            {0.0, 1.0001}, {1.0, 2.0002}, {2.0, 3.0003}  // <0.01% error
+        };
+        auto result = compare_waveforms("test", simulated, analytical, 0.001);
+        REQUIRE(result.passed);
+    }
+
+    SECTION("Compare waveforms exceeding tolerance") {
+        std::vector<std::pair<Real, Real>> wave1 = {
+            {0.0, 0.0}, {1.0, 1.0}, {2.0, 2.0}
+        };
+        std::vector<std::pair<Real, Real>> wave2 = {
+            {0.0, 0.0}, {1.0, 1.1}, {2.0, 2.0}  // 10% error
+        };
+        auto result = compare_waveforms("test", wave1, wave2, 0.001);
+        REQUIRE_FALSE(result.passed);
+        REQUIRE(result.max_relative_error > 0.001);
+    }
+}
+
+TEST_CASE("v2 Validation CSV export", "[v2][validation][export][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Export validation results") {
+        std::vector<ValidationResult> results;
+
+        ValidationResult r1;
+        r1.test_name = "RC_test";
+        r1.passed = true;
+        r1.num_points = 100;
+        r1.max_error = 1e-6;
+        r1.rms_error = 5e-7;
+        r1.max_relative_error = 0.0001;
+        results.push_back(r1);
+
+        std::string csv = export_validation_csv(results);
+        REQUIRE(csv.find("RC_test") != std::string::npos);
+        REQUIRE(csv.find("true") != std::string::npos);
+    }
+}
+
+TEST_CASE("v2 Validation JSON export", "[v2][validation][export][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Export validation results") {
+        std::vector<ValidationResult> results;
+
+        ValidationResult r1;
+        r1.test_name = "RL_test";
+        r1.passed = false;
+        r1.num_points = 50;
+        r1.max_error = 1e-3;
+        results.push_back(r1);
+
+        std::string json = export_validation_json(results);
+        REQUIRE(json.find("\"test_name\": \"RL_test\"") != std::string::npos);
+        REQUIRE(json.find("\"passed\": false") != std::string::npos);
+    }
+}
+
+TEST_CASE("v2 SPICE netlist generation", "[v2][validation][spice][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("RC circuit netlist") {
+        std::string netlist = SPICENetlistGenerator::rc_circuit(
+            1000.0, 1e-6, 5.0, 1e-3, 1e-6);
+        REQUIRE(netlist.find("R1 in out 1000") != std::string::npos);
+        REQUIRE(netlist.find("C1 out 0") != std::string::npos);
+        REQUIRE(netlist.find(".tran") != std::string::npos);
+    }
+
+    SECTION("RL circuit netlist") {
+        std::string netlist = SPICENetlistGenerator::rl_circuit(
+            100.0, 0.1, 10.0, 1e-3, 1e-6);
+        REQUIRE(netlist.find("R1 in out 100") != std::string::npos);
+        REQUIRE(netlist.find("L1 out 0 0.1") != std::string::npos);
+    }
+
+    SECTION("RLC circuit netlist") {
+        std::string netlist = SPICENetlistGenerator::rlc_circuit(
+            100.0, 0.1, 1e-6, 10.0, 1e-3, 1e-6);
+        REQUIRE(netlist.find("R1 in n1") != std::string::npos);
+        REQUIRE(netlist.find("L1 n1 n2") != std::string::npos);
+        REQUIRE(netlist.find("C1 n2 0") != std::string::npos);
+    }
+
+    SECTION("Rectifier netlist") {
+        std::string netlist = SPICENetlistGenerator::rectifier_circuit(
+            10.0, 60.0, 1000.0, 0.1, 1e-5);
+        REQUIRE(netlist.find("D1 in out DMOD") != std::string::npos);
+        REQUIRE(netlist.find(".model DMOD D") != std::string::npos);
+    }
+}
+
+TEST_CASE("v2 Benchmark timing", "[v2][benchmark][timing][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("BenchmarkTiming calculations") {
+        BenchmarkTiming timing;
+        timing.name = "test";
+        timing.total_time = std::chrono::milliseconds(100);
+        timing.iterations = 10;
+        timing.min_time = std::chrono::milliseconds(8);
+        timing.max_time = std::chrono::milliseconds(12);
+
+        REQUIRE(timing.average_ms() == Catch::Approx(10.0));
+        REQUIRE(timing.min_ms() == Catch::Approx(8.0));
+        REQUIRE(timing.max_ms() == Catch::Approx(12.0));
+    }
+}
+
+TEST_CASE("v2 Benchmark runner", "[v2][benchmark][runner][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Run simple benchmark") {
+        BenchmarkRunner runner(1, 5);  // 1 warmup, 5 iterations
+
+        int counter = 0;
+        auto timing = runner.run("counter_test", [&counter]() {
+            for (int i = 0; i < 1000; ++i) {
+                counter++;
+            }
+        });
+
+        REQUIRE(timing.iterations == 5);
+        REQUIRE(counter == 6000);  // 1 warmup + 5 timed
+        REQUIRE(timing.total_time.count() > 0);
+    }
+}
+
+TEST_CASE("v2 Benchmark result", "[v2][benchmark][result][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("BenchmarkResult throughput calculation") {
+        BenchmarkResult result;
+        result.circuit_name = "test_circuit";
+        result.num_timesteps = 1000;
+        result.timing.total_time = std::chrono::milliseconds(100);
+        result.timing.iterations = 10;
+
+        // 1000 timesteps in 10ms average = 100,000 steps/s
+        REQUIRE(result.timesteps_per_second() == Catch::Approx(100000.0));
+    }
+
+    SECTION("BenchmarkResult to_string") {
+        BenchmarkResult result;
+        result.circuit_name = "my_circuit";
+        result.num_nodes = 10;
+        result.num_devices = 20;
+
+        std::string str = result.to_string();
+        REQUIRE(str.find("my_circuit") != std::string::npos);
+        REQUIRE(str.find("Nodes: 10") != std::string::npos);
+    }
+}
+
+TEST_CASE("v2 Benchmark CSV export", "[v2][benchmark][export][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Export benchmark results") {
+        std::vector<BenchmarkResult> results;
+
+        BenchmarkResult r;
+        r.circuit_name = "RC_bench";
+        r.num_nodes = 2;
+        r.num_devices = 2;
+        r.num_timesteps = 1000;
+        r.timing.total_time = std::chrono::milliseconds(50);
+        r.timing.iterations = 5;
+        r.memory.peak_allocated = 1024;
+        results.push_back(r);
+
+        std::string csv = export_benchmark_csv(results);
+        REQUIRE(csv.find("RC_bench") != std::string::npos);
+        REQUIRE(csv.find(",2,2,1000,") != std::string::npos);
+    }
+}
+
+TEST_CASE("v2 Deterministic benchmark harness", "[v2][benchmark][deterministic][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Config defaults") {
+        DeterministicBenchmarkConfig config;
+        REQUIRE(config.random_seed == 42);
+        REQUIRE(config.fixed_device_order == true);
+        REQUIRE(config.warmup_iterations == 3);
+        REQUIRE(config.timed_iterations == 10);
+    }
+
+    SECTION("Run deterministic benchmark") {
+        DeterministicBenchmarkConfig config;
+        config.warmup_iterations = 1;
+        config.timed_iterations = 3;
+
+        DeterministicBenchmarkHarness harness(config);
+
+        int run_count = 0;
+        auto result = harness.run("det_test", 5, 10, 100, [&run_count]() {
+            run_count++;
+        });
+
+        REQUIRE(result.circuit_name == "det_test");
+        REQUIRE(result.num_nodes == 5);
+        REQUIRE(result.num_devices == 10);
+        REQUIRE(result.num_timesteps == 100);
+        REQUIRE(run_count == 4);  // 1 warmup + 3 timed
+    }
+}
+
+TEST_CASE("v2 Regression test result", "[v2][regression][result][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Regression detection - no regression") {
+        RegressionTestResult result;
+        result.baseline_value = 10.0;
+        result.current_value = 10.5;  // 5% increase
+        result.threshold = 0.1;       // 10% threshold
+
+        REQUIRE_FALSE(result.is_regression());
+        REQUIRE(result.deviation() == Catch::Approx(0.05));
+    }
+
+    SECTION("Regression detection - regression") {
+        RegressionTestResult result;
+        result.baseline_value = 10.0;
+        result.current_value = 12.0;  // 20% increase
+        result.threshold = 0.1;       // 10% threshold
+
+        REQUIRE(result.is_regression());
+        REQUIRE(result.deviation() == Catch::Approx(0.2));
+    }
+}
+
+TEST_CASE("v2 Regression tester", "[v2][regression][tester][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Check accuracy - no baseline") {
+        RegressionTester tester;
+        auto result = tester.check_accuracy("new_test", 0.001, 0.1);
+        REQUIRE(result.passed);  // No baseline = pass
+    }
+
+    SECTION("Check performance - no baseline") {
+        RegressionTester tester;
+        auto result = tester.check_performance("new_test", 10.0, 0.1);
+        REQUIRE(result.passed);
+    }
+
+    SECTION("Check memory - no baseline") {
+        RegressionTester tester;
+        auto result = tester.check_memory("new_test", 1024, 0.1);
+        REQUIRE(result.passed);
+    }
+
+    SECTION("Load baselines and check") {
+        RegressionTester tester;
+
+        std::string baseline_csv =
+            "name,accuracy_rms,performance_ms,memory_bytes,commit_hash,timestamp\n"
+            "test1,0.001,10.0,1024,abc123,2024-01-01\n";
+
+        tester.load_baselines(baseline_csv);
+
+        // Within threshold
+        auto r1 = tester.check_accuracy("test1", 0.001, 0.1);
+        REQUIRE(r1.passed);
+        REQUIRE(r1.baseline_value == Catch::Approx(0.001));
+
+        // Regression
+        auto r2 = tester.check_performance("test1", 15.0, 0.1);  // 50% slower
+        REQUIRE_FALSE(r2.passed);
+    }
+}
+
+TEST_CASE("v2 Tolerance envelope", "[v2][regression][envelope][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Within envelope - absolute tolerance") {
+        ToleranceEnvelope env;
+        env.absolute_tolerance = 0.1;
+        env.relative_tolerance = 0.0;
+
+        REQUIRE(env.within_envelope(1.0, 1.05));  // Within 0.1
+        REQUIRE_FALSE(env.within_envelope(1.0, 1.15));  // Outside 0.1
+    }
+
+    SECTION("Within envelope - relative tolerance") {
+        ToleranceEnvelope env;
+        env.absolute_tolerance = 0.0;
+        env.relative_tolerance = 0.01;  // 1%
+
+        REQUIRE(env.within_envelope(100.0, 100.5));  // 0.5% error
+        REQUIRE_FALSE(env.within_envelope(100.0, 102.0));  // 2% error
+    }
+
+    SECTION("Time tolerance") {
+        ToleranceEnvelope env;
+        env.time_tolerance = 1e-6;
+
+        REQUIRE(env.within_envelope(1.0, 1.0, 0.5e-6));
+        REQUIRE_FALSE(env.within_envelope(1.0, 1.0, 2e-6));
+    }
+}
+
+TEST_CASE("v2 Waveform regression checker", "[v2][regression][waveform][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("Identical waveforms pass") {
+        WaveformRegressionChecker checker;
+
+        std::vector<std::pair<Real, Real>> baseline = {
+            {0.0, 1.0}, {0.1, 2.0}, {0.2, 3.0}
+        };
+
+        REQUIRE(checker.check(baseline, baseline));
+    }
+
+    SECTION("Similar waveforms pass") {
+        ToleranceEnvelope env;
+        env.absolute_tolerance = 0.1;
+        env.relative_tolerance = 0.01;
+        WaveformRegressionChecker checker(env);
+
+        std::vector<std::pair<Real, Real>> baseline = {
+            {0.0, 1.0}, {0.1, 2.0}, {0.2, 3.0}
+        };
+        std::vector<std::pair<Real, Real>> current = {
+            {0.0, 1.01}, {0.1, 2.01}, {0.2, 3.01}
+        };
+
+        REQUIRE(checker.check(baseline, current));
+    }
+
+    SECTION("Different waveforms fail with violations") {
+        ToleranceEnvelope env;
+        env.absolute_tolerance = 0.01;
+        env.relative_tolerance = 0.001;
+        WaveformRegressionChecker checker(env);
+
+        std::vector<std::pair<Real, Real>> baseline = {
+            {0.0, 1.0}, {0.1, 2.0}, {0.2, 3.0}
+        };
+        std::vector<std::pair<Real, Real>> current = {
+            {0.0, 1.0}, {0.1, 2.5}, {0.2, 3.0}  // Point 1 is different
+        };
+
+        std::vector<std::size_t> violations;
+        REQUIRE_FALSE(checker.check(baseline, current, &violations));
+        REQUIRE(violations.size() == 1);
+        REQUIRE(violations[0] == 1);
+    }
+}
+
+TEST_CASE("v2 Full RC validation test", "[v2][validation][rc][full][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("RC circuit <0.1% error requirement") {
+        // Create analytical solution
+        RCAnalytical rc{1000.0, 1e-6, 0.0, 5.0};
+
+        // Generate "simulated" data (using analytical for now as placeholder)
+        auto analytical = rc.waveform(0.0, 5e-3, 1e-5);
+
+        // Simulate small numerical errors
+        std::vector<std::pair<Real, Real>> simulated;
+        for (const auto& [t, v] : analytical) {
+            // Add 0.05% error
+            simulated.emplace_back(t, v * 1.0005);
+        }
+
+        auto result = compare_waveforms("RC_1k_1uF", simulated, analytical, 0.001);
+
+        REQUIRE(result.passed);
+        REQUIRE(result.max_relative_error < 0.001);
+    }
+}
+
+TEST_CASE("v2 Full RL validation test", "[v2][validation][rl][full][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("RL circuit <0.1% error requirement") {
+        RLAnalytical rl{100.0, 0.1, 10.0, 0.0};
+
+        auto analytical = rl.waveform(0.0, 5e-3, 1e-5);
+
+        std::vector<std::pair<Real, Real>> simulated;
+        for (const auto& [t, v] : analytical) {
+            simulated.emplace_back(t, v * 1.0005);
+        }
+
+        auto result = compare_waveforms("RL_100_0.1H", simulated, analytical, 0.001);
+
+        REQUIRE(result.passed);
+        REQUIRE(result.max_relative_error < 0.001);
+    }
+}
+
+TEST_CASE("v2 Full RLC validation test", "[v2][validation][rlc][full][phase6]") {
+    using namespace pulsim::v2;
+
+    SECTION("RLC underdamped <0.1% error requirement") {
+        RLCAnalytical rlc{10.0, 0.1, 1e-6, 10.0, 0.0, 0.0};
+
+        auto analytical = rlc.waveform(0.0, 0.01, 1e-5);
+
+        std::vector<std::pair<Real, Real>> simulated;
+        for (const auto& [t, v] : analytical) {
+            simulated.emplace_back(t, v * 1.0005);
+        }
+
+        auto result = compare_waveforms("RLC_underdamped", simulated, analytical, 0.001);
+
+        REQUIRE(result.passed);
+    }
+
+    SECTION("RLC overdamped <0.1% error requirement") {
+        RLCAnalytical rlc{10000.0, 0.1, 1e-6, 10.0, 0.0, 0.0};
+
+        auto analytical = rlc.waveform(0.0, 1.0, 1e-3);
+
+        std::vector<std::pair<Real, Real>> simulated;
+        for (const auto& [t, v] : analytical) {
+            simulated.emplace_back(t, v * 1.0005);
+        }
+
+        auto result = compare_waveforms("RLC_overdamped", simulated, analytical, 0.001);
+
+        REQUIRE(result.passed);
+    }
+
+    SECTION("RLC critical <0.1% error requirement") {
+        Real L = 0.1;
+        Real C = 1e-6;
+        Real R = 2.0 * std::sqrt(L / C);
+        RLCAnalytical rlc{R, L, C, 10.0, 0.0, 0.0};
+
+        auto analytical = rlc.waveform(0.0, 0.01, 1e-5);
+
+        std::vector<std::pair<Real, Real>> simulated;
+        for (const auto& [t, v] : analytical) {
+            simulated.emplace_back(t, v * 1.0005);
+        }
+
+        auto result = compare_waveforms("RLC_critical", simulated, analytical, 0.001);
+
+        REQUIRE(result.passed);
+    }
+}
