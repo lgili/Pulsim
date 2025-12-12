@@ -1,82 +1,95 @@
-# Plano: Framework de Validação SPICE para Pulsim
+# Plano: Framework de Validação para PulsimCore v2
 
-**Decisões do Usuário:**
-- **SPICE Runner**: Ambos (PySpice quando disponível, fallback para subprocess)
-- **Prioridade**: Circuitos básicos (RC/RL/RLC com solução analítica primeiro)
+**Status:** Atualizado para nova API Python (Circuit, solve_dc, run_transient)
 
 ## Objetivo
-Criar uma suíte de testes automatizada que valide os resultados do Pulsim contra:
+Criar uma suíte de testes automatizada que valide os resultados do PulsimCore contra:
 1. **Soluções analíticas** (onde existem)
 2. **NgSpice** (via PySpice) como referência gold-standard
 3. **Tolerâncias definidas** para cada tipo de circuito
+
+## Nova API Python
+
+```python
+import pulsim as ps
+
+# Criar circuito
+ckt = ps.Circuit()
+gnd = ps.Circuit.ground()
+n1 = ckt.add_node("n1")
+n2 = ckt.add_node("n2")
+
+# Adicionar componentes
+ckt.add_voltage_source("V1", n1, gnd, 5.0)
+ckt.add_resistor("R1", n1, n2, 1000.0)
+ckt.add_capacitor("C1", n2, gnd, 1e-6)
+
+# DC Operating Point
+dc_result = ps.dc_operating_point(ckt)
+print(dc_result.newton_result.solution)
+
+# Transient
+times, states, success, msg = ps.run_transient(ckt, 0.0, 5e-3, 10e-6)
+```
 
 ## Estrutura Proposta
 
 ```
 python/tests/validation/
 ├── __init__.py
+├── conftest.py              # Fixtures pytest
 ├── framework/
 │   ├── __init__.py
-│   ├── base.py              # Classes base para testes de validação
+│   ├── base.py              # Classes base para testes
 │   ├── spice_runner.py      # Interface com PySpice/NgSpice
-│   ├── comparator.py        # Comparação de resultados com métricas
-│   ├── analytical.py        # Soluções analíticas conhecidas
+│   ├── comparator.py        # Comparação de resultados
 │   └── reporters.py         # Geração de relatórios
-├── level1_components/       # Nível 1: Componentes básicos isolados
-│   ├── test_resistor.py
-│   ├── test_capacitor.py
-│   ├── test_inductor.py
-│   ├── test_voltage_source.py
-│   └── test_current_source.py
-├── level2_linear/           # Nível 2: Circuitos lineares simples
+├── level1_linear/           # Nível 1: Circuitos lineares (com solução analítica)
 │   ├── test_rc_circuits.py
 │   ├── test_rl_circuits.py
-│   ├── test_rlc_circuits.py
-│   └── test_voltage_divider.py
+│   └── test_rlc_circuits.py
+├── level2_dc_analysis/      # Nível 2: Análise DC
+│   ├── test_resistor_networks.py
+│   └── test_voltage_dividers.py
 ├── level3_nonlinear/        # Nível 3: Componentes não-lineares
 │   ├── test_diode.py
 │   ├── test_switch.py
-│   ├── test_mosfet.py
-│   └── test_igbt.py
+│   └── test_mosfet.py
 ├── level4_converters/       # Nível 4: Conversores de potência
 │   ├── test_buck_converter.py
-│   ├── test_boost_converter.py
-│   ├── test_half_bridge.py
-│   └── test_full_bridge.py
-└── level5_complex/          # Nível 5: Circuitos complexos
-    ├── test_transformer.py
-    ├── test_coupled_inductors.py
-    └── test_multi_stage.py
+│   └── test_boost_converter.py
+└── reports/                 # Relatórios gerados
 ```
 
 ## Framework Base (framework/base.py)
 
 ```python
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Callable
+from typing import Optional, List, Callable
 from enum import Enum
 import numpy as np
+import pulsim as ps
 
 class ValidationLevel(Enum):
-    COMPONENT = 1      # Componente isolado
-    LINEAR = 2         # Circuitos lineares
+    LINEAR = 1         # Circuitos lineares com solução analítica
+    DC_ANALYSIS = 2    # Análise DC
     NONLINEAR = 3      # Componentes não-lineares
     CONVERTER = 4      # Conversores de potência
-    COMPLEX = 5        # Circuitos complexos
 
 @dataclass
 class ValidationResult:
     """Resultado de um teste de validação"""
     test_name: str
     passed: bool
-    pulsim_result: np.ndarray
-    reference_result: np.ndarray  # Analítico ou NgSpice
+    pulsim_times: np.ndarray
+    pulsim_values: np.ndarray
+    reference_times: np.ndarray
+    reference_values: np.ndarray
     max_error: float
     rms_error: float
-    max_error_threshold: float
-    rms_error_threshold: float
-    execution_time_pulsim: float
-    execution_time_reference: float
+    max_relative_error: float
+    tolerance: float
+    execution_time_ms: float
     notes: str = ""
 
 @dataclass
@@ -85,21 +98,14 @@ class CircuitDefinition:
     name: str
     description: str
     level: ValidationLevel
-    # Definição do circuito para Pulsim
-    pulsim_circuit: Callable  # Função que retorna Circuit
-    # Netlist SPICE equivalente
-    spice_netlist: str
-    # Parâmetros de simulação
-    tstart: float = 0.0
-    tstop: float = 1e-3
+    build_circuit: Callable[[], ps.Circuit]  # Função que retorna Circuit
+    spice_netlist: Optional[str] = None      # Netlist SPICE equivalente
+    analytical_solution: Optional[Callable] = None  # Solução analítica
+    t_start: float = 0.0
+    t_stop: float = 1e-3
     dt: float = 1e-6
-    # Nós para comparação
-    compare_nodes: List[str] = None
-    # Tolerâncias
-    max_error_tolerance: float = 1e-3  # 0.1%
-    rms_error_tolerance: float = 1e-4  # 0.01%
-    # Solução analítica (se disponível)
-    analytical_solution: Optional[Callable] = None
+    compare_nodes: List[int] = None  # Índices dos nós para comparar
+    tolerance: float = 0.01          # 1% default
 
 class ValidationTest:
     """Classe base para testes de validação"""
@@ -107,220 +113,185 @@ class ValidationTest:
     def __init__(self, circuit_def: CircuitDefinition):
         self.circuit_def = circuit_def
 
-    def run_pulsim(self) -> tuple:
-        """Executa simulação no Pulsim"""
-        import pulsim as sl
-        circuit = self.circuit_def.pulsim_circuit()
-        opts = sl.SimulationOptions()
-        opts.tstart = self.circuit_def.tstart
-        opts.tstop = self.circuit_def.tstop
-        opts.dt = self.circuit_def.dt
-        # ... configurações
+    def run_pulsim_dc(self) -> ps.DCAnalysisResult:
+        """Executa análise DC no Pulsim"""
+        circuit = self.circuit_def.build_circuit()
+        return ps.dc_operating_point(circuit)
 
-    def run_ngspice(self) -> tuple:
-        """Executa simulação no NgSpice via PySpice"""
-        # Usa PySpice para rodar NgSpice
+    def run_pulsim_transient(self) -> tuple:
+        """Executa simulação transiente no Pulsim"""
+        circuit = self.circuit_def.build_circuit()
 
-    def run_analytical(self, time: np.ndarray) -> np.ndarray:
+        # DC inicial
+        dc_result = ps.dc_operating_point(circuit)
+        if not dc_result.success:
+            raise RuntimeError(f"DC failed: {dc_result.message}")
+
+        # Transiente
+        times, states, success, msg = ps.run_transient(
+            circuit,
+            self.circuit_def.t_start,
+            self.circuit_def.t_stop,
+            self.circuit_def.dt,
+            dc_result.newton_result.solution
+        )
+
+        if not success:
+            raise RuntimeError(f"Transient failed: {msg}")
+
+        return np.array(times), np.array([s for s in states])
+
+    def run_analytical(self, times: np.ndarray) -> np.ndarray:
         """Calcula solução analítica"""
         if self.circuit_def.analytical_solution:
-            return self.circuit_def.analytical_solution(time)
+            return self.circuit_def.analytical_solution(times)
         return None
 
-    def compare(self, result1, result2) -> ValidationResult:
-        """Compara dois resultados"""
-        # Interpolação para mesmos pontos de tempo
-        # Cálculo de erro max e RMS
+    def compare(self, pulsim_times, pulsim_values, ref_times, ref_values) -> ValidationResult:
+        """Compara resultados Pulsim vs referência"""
+        from scipy import interpolate
 
-    def validate(self) -> ValidationResult:
-        """Executa validação completa"""
-        # 1. Roda Pulsim
-        # 2. Roda NgSpice (ou analítico)
-        # 3. Compara resultados
-        # 4. Retorna ValidationResult
+        # Interpolar referência para mesmos tempos do Pulsim
+        if len(ref_times) != len(pulsim_times):
+            f = interpolate.interp1d(ref_times, ref_values, kind='linear',
+                                     fill_value='extrapolate')
+            ref_interpolated = f(pulsim_times)
+        else:
+            ref_interpolated = ref_values
+
+        # Calcular erros
+        errors = np.abs(pulsim_values - ref_interpolated)
+        max_error = np.max(errors)
+        rms_error = np.sqrt(np.mean(errors**2))
+        max_ref = np.max(np.abs(ref_interpolated))
+        max_rel_error = max_error / max_ref if max_ref > 0 else max_error
+
+        passed = max_rel_error <= self.circuit_def.tolerance
+
+        return ValidationResult(
+            test_name=self.circuit_def.name,
+            passed=passed,
+            pulsim_times=pulsim_times,
+            pulsim_values=pulsim_values,
+            reference_times=ref_times,
+            reference_values=ref_interpolated,
+            max_error=max_error,
+            rms_error=rms_error,
+            max_relative_error=max_rel_error,
+            tolerance=self.circuit_def.tolerance,
+            execution_time_ms=0.0,
+            notes=""
+        )
+
+    def validate_with_analytical(self) -> ValidationResult:
+        """Valida contra solução analítica"""
+        import time
+
+        start = time.perf_counter()
+        times, states = self.run_pulsim_transient()
+        exec_time = (time.perf_counter() - start) * 1000
+
+        # Extrair nó de interesse
+        node_idx = self.circuit_def.compare_nodes[0] if self.circuit_def.compare_nodes else 1
+        pulsim_values = np.array([s[node_idx] for s in states])
+
+        # Solução analítica
+        ref_values = self.run_analytical(times)
+
+        result = self.compare(times, pulsim_values, times, ref_values)
+        result.execution_time_ms = exec_time
+        return result
 ```
 
-## Casos de Teste por Nível
+## Casos de Teste Prioritários (Fase 1)
 
-### Nível 1: Componentes Básicos
+### Nível 1: Circuitos Lineares com Solução Analítica
 
-| Teste | Descrição | Validação |
-|-------|-----------|-----------|
-| R_ohms_law | V=IR para vários valores | Analítico |
-| R_series | Resistores em série | Analítico |
-| R_parallel | Resistores em paralelo | Analítico |
-| C_charging | Capacitor carregando via R | Analítico: V(t)=V0(1-e^(-t/RC)) |
-| C_initial_condition | Capacitor com IC | Analítico |
-| L_step_response | Indutor com step | Analítico: I(t)=V/R(1-e^(-Rt/L)) |
-| L_initial_condition | Indutor com IC | Analítico |
-| V_dc | Fonte DC | Direto |
-| V_pulse | Fonte Pulse | Verificação de bordas |
-| V_sine | Fonte Senoidal | Analítico |
-| I_dc | Fonte de corrente DC | Lei de Ohm |
+| Teste | Circuito | Solução Analítica | Tolerância |
+|-------|----------|-------------------|------------|
+| RC_step | V -> R -> C -> GND | V(t) = Vf*(1 - e^(-t/τ)), τ=RC | 1% |
+| RC_discharge | C(V0) -> R -> GND | V(t) = V0*e^(-t/τ) | 1% |
+| RL_step | V -> R -> L -> GND | I(t) = (V/R)*(1 - e^(-t/τ)), τ=L/R | 1% |
+| RLC_under | V -> R -> L -> C -> GND (ζ<1) | Oscilação amortecida | 2% |
+| RLC_critical | V -> R -> L -> C -> GND (ζ=1) | Amortecimento crítico | 2% |
+| RLC_over | V -> R -> L -> C -> GND (ζ>1) | Superamortecido | 2% |
 
-### Nível 2: Circuitos Lineares
+### Nível 2: Análise DC
 
-| Teste | Descrição | Validação |
-|-------|-----------|-----------|
-| RC_lowpass | Filtro passa-baixa RC | Analítico + NgSpice |
-| RC_highpass | Filtro passa-alta RC | Analítico + NgSpice |
-| RL_lowpass | Filtro passa-baixa RL | Analítico + NgSpice |
-| RLC_series | RLC série (sub/sobre/crítico) | Analítico + NgSpice |
-| RLC_parallel | RLC paralelo | Analítico + NgSpice |
-| Voltage_divider | Divisor de tensão | Analítico |
-| RC_ladder_5 | Ladder 5 estágios | NgSpice |
-| RC_ladder_10 | Ladder 10 estágios | NgSpice |
+| Teste | Circuito | Validação | Tolerância |
+|-------|----------|-----------|------------|
+| Resistor_divider | V -> R1 -> R2 -> GND | V2 = V*R2/(R1+R2) | 0.01% |
+| Series_resistors | V -> R1 -> R2 -> R3 -> GND | Lei de Ohm | 0.01% |
+| Parallel_resistors | V -> R1||R2 -> GND | 1/Req = 1/R1 + 1/R2 | 0.01% |
 
-### Nível 3: Componentes Não-Lineares
+### Nível 3: Não-Lineares
 
-| Teste | Descrição | Validação |
-|-------|-----------|-----------|
-| Diode_forward | Diodo em polarização direta | NgSpice |
-| Diode_reverse | Diodo em reverso | NgSpice |
-| Diode_rectifier | Retificador meia-onda | NgSpice |
-| Diode_fullwave | Retificador onda completa | NgSpice |
-| Switch_basic | Chave básica ON/OFF | NgSpice |
-| Switch_pwm | Chave com PWM | NgSpice |
-| MOSFET_dc | MOSFET ponto de operação DC | NgSpice |
-| MOSFET_switching | MOSFET chaveando | NgSpice |
-| MOSFET_with_Cgs | MOSFET com capacitâncias | NgSpice |
-
-### Nível 4: Conversores de Potência
-
-| Teste | Descrição | Validação |
-|-------|-----------|-----------|
-| Buck_ideal | Buck com switch ideal | NgSpice + Analítico Vout=D*Vin |
-| Buck_real | Buck com Ron/diode | NgSpice |
-| Buck_efficiency | Verificar eficiência | Cálculo de perdas |
-| Boost_ideal | Boost ideal | NgSpice |
-| Boost_real | Boost real | NgSpice |
-| HalfBridge_RL | Meia-ponte com carga RL | NgSpice |
-| FullBridge_RL | Ponte completa | NgSpice |
-
-### Nível 5: Circuitos Complexos
-
-| Teste | Descrição | Validação |
-|-------|-----------|-----------|
-| Transformer_ideal | Transformador ideal | Analítico: V2=V1*N2/N1 |
-| Transformer_leakage | Com indutância de dispersão | NgSpice |
-| CoupledInductors | Indutores acoplados | NgSpice |
-| Flyback | Conversor flyback | NgSpice |
-| LLC_resonant | Conversor LLC | NgSpice |
-
-## Métricas de Validação
-
-Para cada teste, calcular:
-
-1. **Erro Máximo Absoluto**: max|Pulsim - Referência|
-2. **Erro RMS**: sqrt(mean((Pulsim - Referência)²))
-3. **Erro Máximo Relativo**: max|Pulsim - Referência| / max|Referência|
-4. **Correlação**: Coeficiente de correlação de Pearson
-5. **Tempo de Execução**: Comparação Pulsim vs NgSpice
+| Teste | Circuito | Validação | Tolerância |
+|-------|----------|-----------|------------|
+| Diode_forward | V -> R -> D -> GND | V_R ≈ V - Vf | 5% |
+| Switch_on | V -> R -> SW(closed) -> GND | I = V/R | 1% |
+| Switch_off | V -> R -> SW(open) -> GND | I ≈ 0 | 1% |
 
 ## Critérios de Aprovação
 
-| Nível | Max Error | RMS Error | Notas |
-|-------|-----------|-----------|-------|
-| 1 | < 0.01% | < 0.001% | Componentes são simples |
-| 2 | < 0.1% | < 0.01% | Circuitos lineares |
-| 3 | < 1% | < 0.1% | Não-linearidades |
-| 4 | < 5% | < 1% | Transientes complexos |
-| 5 | < 10% | < 2% | Circuitos muito complexos |
+| Nível | Max Rel Error | RMS Error | Descrição |
+|-------|---------------|-----------|-----------|
+| 1 | < 1% | < 0.1% | Circuitos lineares simples |
+| 2 | < 0.01% | < 0.001% | DC (solução exata) |
+| 3 | < 5% | < 1% | Não-lineares |
+| 4 | < 10% | < 2% | Conversores (complexos) |
 
-## Implementação em Fases (PRIORIDADE ATUALIZADA)
+## Implementação - Checklist
 
-### Fase 1: Framework Base + Circuitos Lineares Básicos
-**Prioridade: ALTA - Começar aqui**
+### Fase 1: Framework + Circuitos Lineares (PRIORIDADE)
+- [ ] Criar estrutura de diretórios
+- [ ] Implementar `framework/base.py`
+- [ ] Implementar `framework/comparator.py`
+- [ ] Testes RC (step, discharge)
+- [ ] Testes RL (step)
+- [ ] Testes RLC (under/critical/over damped)
+- [ ] Validar contra soluções analíticas do pulsim (RCAnalytical, RLAnalytical, RLCAnalytical)
 
-1. **Estrutura do Framework**
-   - [ ] Criar diretórios `python/tests/validation/`
-   - [ ] Implementar `framework/base.py` (ValidationTest, ValidationResult)
-   - [ ] Implementar `framework/spice_runner.py` (PySpice + subprocess fallback)
-   - [ ] Implementar `framework/comparator.py` (métricas de erro)
-   - [ ] Implementar `framework/analytical.py` (soluções RC/RL/RLC)
+### Fase 2: DC Analysis
+- [ ] Testes divisor de tensão
+- [ ] Testes resistores série/paralelo
+- [ ] Verificar Newton solver accuracy
 
-2. **Testes RC (com solução analítica)**
-   - [ ] RC step response: V(t) = V0(1 - e^(-t/RC))
-   - [ ] RC discharge: V(t) = V0 * e^(-t/RC)
-   - [ ] RC lowpass filter frequency response
-   - [ ] RC highpass filter
+### Fase 3: Não-Lineares
+- [ ] Testes diodo
+- [ ] Testes switch
+- [ ] Verificar convergence aids
 
-3. **Testes RL (com solução analítica)**
-   - [ ] RL step response: I(t) = (V0/R)(1 - e^(-Rt/L))
-   - [ ] RL current decay
-   - [ ] Inductor voltage spike at switch-off
+### Fase 4: Integração NgSpice (Opcional)
+- [ ] Implementar `framework/spice_runner.py`
+- [ ] Comparação Pulsim vs NgSpice
+- [ ] Relatórios comparativos
 
-4. **Testes RLC (com solução analítica)**
-   - [ ] RLC underdamped (oscilação)
-   - [ ] RLC critically damped
-   - [ ] RLC overdamped
-   - [ ] RLC resonance
-
-### Fase 2: Componentes Básicos + Fontes
-- [ ] Resistor: Lei de Ohm, série, paralelo
-- [ ] Capacitor: IC, charging curves
-- [ ] Inductor: IC, current continuity
-- [ ] Fontes: DC, Pulse (bordas), Sine, PWL
-
-### Fase 3: Componentes Não-Lineares
-- [ ] Diodo ideal vs Shockley model
-- [ ] Switch ON/OFF transitions
-- [ ] MOSFET DC operating point
-- [ ] MOSFET switching with gate capacitance
-
-### Fase 4: Conversores de Potência
-- [ ] Buck converter (ideal)
-- [ ] Buck converter (com perdas)
-- [ ] Boost converter
-- [ ] Half-bridge, Full-bridge
-
-### Fase 5: Circuitos Complexos
-- [ ] Transformer
-- [ ] Flyback converter
-- [ ] Multi-stage circuits
-
-## Execução dos Testes
+## Execução
 
 ```bash
 # Rodar todos os testes de validação
-pytest python/tests/validation/ -v --tb=short
+pytest python/tests/validation/ -v
 
-# Rodar apenas um nível
-pytest python/tests/validation/level1_components/ -v
+# Rodar apenas nível 1 (lineares)
+pytest python/tests/validation/level1_linear/ -v
 
-# Rodar com relatório detalhado
-pytest python/tests/validation/ --validation-report=report.html
+# Com cobertura
+pytest python/tests/validation/ -v --cov=pulsim
 
-# Rodar comparação completa com NgSpice
-pytest python/tests/validation/ --with-ngspice -v
+# Gerar relatório
+pytest python/tests/validation/ -v --html=validation_report.html
 ```
-
-## Relatório de Validação
-
-Gerar relatório HTML/Markdown com:
-- Lista de todos os testes executados
-- Status PASS/FAIL
-- Métricas de erro
-- Gráficos comparativos (Pulsim vs NgSpice vs Analítico)
-- Tempo de execução
-- Resumo por nível
 
 ## Dependências
 
 ```
-# requirements-validation.txt
-pyspice>=1.5
+# requirements-validation.txt (mínimo)
 numpy>=1.20
 scipy>=1.7
-matplotlib>=3.5
 pytest>=7.0
 pytest-html>=3.1
+
+# Opcional para comparação NgSpice
+pyspice>=1.5
 ```
-
-## Notas de Implementação
-
-1. **PySpice requer NgSpice instalado**: `brew install ngspice` ou `apt install ngspice`
-2. **Interpolação**: Para comparar resultados com timesteps diferentes, usar interpolação linear
-3. **Warm-up**: Ignorar primeiros pontos onde há transitórios de inicialização
-4. **Steady-state**: Para conversores, comparar apenas região de steady-state
-5. **Tolerâncias ajustáveis**: Permitir override de tolerâncias por teste específico

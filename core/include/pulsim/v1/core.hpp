@@ -24,6 +24,7 @@
 #include "pulsim/v1/high_performance.hpp"
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/validation.hpp"
+#include "pulsim/v1/runtime_circuit.hpp"
 
 // Convenience namespace alias
 namespace pulsim2 = pulsim::v1;

@@ -13,10 +13,10 @@
 #include <pybind11/functional.h>
 #include <pybind11/chrono.h>
 
-#include "pulsim/v1/core.hpp"
+#include "pulsim/v2/core.hpp"
 
 namespace py = pybind11;
-using namespace pulsim::v1;
+using namespace pulsim::v2;
 
 // =============================================================================
 // Helper: Convert std::expected to Python (raise exception on error)
@@ -155,146 +155,6 @@ void init_v2_module(py::module_& v2) {
         .def("name", &CurrentSource::name);
 
     // =========================================================================
-    // Nonlinear Devices
-    // =========================================================================
-
-    py::class_<IdealDiode>(v2, "IdealDiode", "Ideal diode with on/off conductance")
-        .def(py::init<Real, Real, std::string>(),
-             py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9, py::arg("name") = "")
-        .def("is_conducting", &IdealDiode::is_conducting)
-        .def("name", &IdealDiode::name);
-
-    py::class_<IdealSwitch>(v2, "IdealSwitch", "Controllable ideal switch")
-        .def(py::init<Real, Real, bool, std::string>(),
-             py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
-             py::arg("closed") = false, py::arg("name") = "")
-        .def("close", &IdealSwitch::close)
-        .def("open", &IdealSwitch::open)
-        .def("set_state", &IdealSwitch::set_state)
-        .def("is_closed", &IdealSwitch::is_closed)
-        .def("name", &IdealSwitch::name);
-
-    // MOSFET parameters
-    py::class_<MOSFET::Params>(v2, "MOSFETParams", "MOSFET Level 1 parameters")
-        .def(py::init<>())
-        .def_readwrite("vth", &MOSFET::Params::vth, "Threshold voltage (V)")
-        .def_readwrite("kp", &MOSFET::Params::kp, "Transconductance (A/V^2)")
-        .def_readwrite("lambda_", &MOSFET::Params::lambda, "Channel-length modulation (1/V)")
-        .def_readwrite("g_off", &MOSFET::Params::g_off, "Off-state conductance")
-        .def_readwrite("is_nmos", &MOSFET::Params::is_nmos, "True for NMOS, False for PMOS");
-
-    py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
-        .def(py::init<std::string>(), py::arg("name") = "")
-        .def(py::init<MOSFET::Params, std::string>(),
-             py::arg("params"), py::arg("name") = "")
-        .def(py::init<Real, Real, bool, std::string>(),
-             py::arg("vth"), py::arg("kp"), py::arg("is_nmos") = true, py::arg("name") = "")
-        .def("params", &MOSFET::params, py::return_value_policy::reference_internal)
-        .def("name", &MOSFET::name);
-
-    // IGBT parameters
-    py::class_<IGBT::Params>(v2, "IGBTParams", "IGBT parameters")
-        .def(py::init<>())
-        .def_readwrite("vth", &IGBT::Params::vth, "Gate threshold voltage (V)")
-        .def_readwrite("g_on", &IGBT::Params::g_on, "On-state conductance (S)")
-        .def_readwrite("g_off", &IGBT::Params::g_off, "Off-state conductance (S)")
-        .def_readwrite("v_ce_sat", &IGBT::Params::v_ce_sat, "Collector-emitter saturation (V)");
-
-    py::class_<IGBT>(v2, "IGBT", "Simplified IGBT power device model")
-        .def(py::init<std::string>(), py::arg("name") = "")
-        .def(py::init<IGBT::Params, std::string>(),
-             py::arg("params"), py::arg("name") = "")
-        .def(py::init<Real, Real, std::string>(),
-             py::arg("vth"), py::arg("g_on") = 1e4, py::arg("name") = "")
-        .def("is_conducting", &IGBT::is_conducting)
-        .def("params", &IGBT::params, py::return_value_policy::reference_internal)
-        .def("name", &IGBT::name);
-
-    // =========================================================================
-    // Runtime Circuit Builder (Phase 3)
-    // =========================================================================
-
-    py::class_<Circuit>(v2, "Circuit", "Runtime circuit builder for simulation")
-        .def(py::init<>())
-        // Node management
-        .def("add_node", &Circuit::add_node, py::arg("name"),
-             "Add a named node and return its index")
-        .def("get_node", &Circuit::get_node, py::arg("name"),
-             "Get node index by name (-1 for ground)")
-        .def_static("ground", &Circuit::ground,
-             "Get ground node index")
-        .def("num_nodes", &Circuit::num_nodes,
-             "Number of non-ground nodes")
-        .def("num_branches", &Circuit::num_branches,
-             "Number of branch currents (for VS, inductors)")
-        .def("system_size", &Circuit::system_size,
-             "Total system size (nodes + branches)")
-        .def("node_name", &Circuit::node_name, py::arg("index"),
-             "Get node name by index")
-        .def("node_names", &Circuit::node_names,
-             "Get all node names")
-        // Device addition
-        .def("add_resistor", &Circuit::add_resistor,
-             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
-             "Add resistor between nodes n1 and n2")
-        .def("add_capacitor", &Circuit::add_capacitor,
-             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("C"),
-             py::arg("ic") = 0.0,
-             "Add capacitor between nodes n1 and n2")
-        .def("add_inductor", &Circuit::add_inductor,
-             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("L"),
-             py::arg("ic") = 0.0,
-             "Add inductor between nodes n1 and n2")
-        .def("add_voltage_source", &Circuit::add_voltage_source,
-             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("V"),
-             "Add voltage source from npos to nneg")
-        .def("add_current_source", &Circuit::add_current_source,
-             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("I"),
-             "Add current source from npos to nneg")
-        .def("add_diode", &Circuit::add_diode,
-             py::arg("name"), py::arg("anode"), py::arg("cathode"),
-             py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9,
-             "Add ideal diode from anode to cathode")
-        .def("add_switch", &Circuit::add_switch,
-             py::arg("name"), py::arg("n1"), py::arg("n2"),
-             py::arg("closed") = false, py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
-             "Add controllable switch between n1 and n2")
-        .def("add_mosfet", &Circuit::add_mosfet,
-             py::arg("name"), py::arg("gate"), py::arg("drain"), py::arg("source"),
-             py::arg("params") = MOSFET::Params{},
-             "Add MOSFET with gate, drain, source nodes")
-        .def("add_igbt", &Circuit::add_igbt,
-             py::arg("name"), py::arg("gate"), py::arg("collector"), py::arg("emitter"),
-             py::arg("params") = IGBT::Params{},
-             "Add IGBT with gate, collector, emitter nodes")
-        // State
-        .def("num_devices", &Circuit::num_devices,
-             "Number of devices in circuit")
-        .def("set_switch_state", &Circuit::set_switch_state,
-             py::arg("name"), py::arg("closed"),
-             "Set switch state by name")
-        .def("set_timestep", &Circuit::set_timestep, py::arg("dt"),
-             "Set timestep for dynamic elements")
-        .def("timestep", &Circuit::timestep,
-             "Get current timestep")
-        .def("has_nonlinear", &Circuit::has_nonlinear,
-             "Check if circuit has nonlinear devices")
-        // Matrix assembly
-        .def("assemble_dc", [](const Circuit& ckt) {
-            SparseMatrix G;
-            Vector b;
-            ckt.assemble_dc(G, b);
-            // Convert sparse to dense for easier Python use
-            return std::make_tuple(Eigen::MatrixXd(G), b);
-        }, "Assemble G matrix and b vector for DC analysis")
-        .def("assemble_jacobian", [](const Circuit& ckt, const Vector& x) {
-            SparseMatrix J;
-            Vector f;
-            ckt.assemble_jacobian(J, f, x);
-            return std::make_tuple(Eigen::MatrixXd(J), f);
-        }, py::arg("x"), "Assemble Jacobian J and residual f for Newton iteration");
-
-    // =========================================================================
     // Solver Configuration (7.1.3)
     // =========================================================================
 
@@ -320,60 +180,6 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("num_branches", &NewtonOptions::num_branches)
         .def_readwrite("tolerances", &NewtonOptions::tolerances);
 
-    // =========================================================================
-    // Convergence History & Monitoring
-    // =========================================================================
-
-    py::class_<IterationRecord>(v2, "IterationRecord", "Single Newton iteration record")
-        .def(py::init<>())
-        .def_readonly("iteration", &IterationRecord::iteration)
-        .def_readonly("residual_norm", &IterationRecord::residual_norm)
-        .def_readonly("max_voltage_error", &IterationRecord::max_voltage_error)
-        .def_readonly("max_current_error", &IterationRecord::max_current_error)
-        .def_readonly("step_norm", &IterationRecord::step_norm)
-        .def_readonly("damping", &IterationRecord::damping)
-        .def_readonly("converged", &IterationRecord::converged);
-
-    py::class_<ConvergenceHistory>(v2, "ConvergenceHistory", "Complete convergence history")
-        .def(py::init<>())
-        .def("size", &ConvergenceHistory::size)
-        .def("empty", &ConvergenceHistory::empty)
-        .def("__len__", &ConvergenceHistory::size)
-        .def("__getitem__", [](const ConvergenceHistory& h, std::size_t i) {
-            if (i >= h.size()) throw py::index_error();
-            return h[i];
-        })
-        .def("last", &ConvergenceHistory::last)
-        .def("final_status", &ConvergenceHistory::final_status)
-        .def("is_stalling", &ConvergenceHistory::is_stalling,
-             py::arg("window") = 5, py::arg("threshold") = 0.9)
-        .def("is_diverging", &ConvergenceHistory::is_diverging, py::arg("window") = 3)
-        .def("convergence_rate", &ConvergenceHistory::convergence_rate);
-
-    py::class_<VariableConvergence>(v2, "VariableConvergence", "Per-variable convergence status")
-        .def(py::init<>())
-        .def_readonly("index", &VariableConvergence::index)
-        .def_readonly("value", &VariableConvergence::value)
-        .def_readonly("delta", &VariableConvergence::delta)
-        .def_readonly("tolerance", &VariableConvergence::tolerance)
-        .def_readonly("normalized_error", &VariableConvergence::normalized_error)
-        .def_readonly("converged", &VariableConvergence::converged)
-        .def_readonly("is_voltage", &VariableConvergence::is_voltage);
-
-    py::class_<PerVariableConvergence>(v2, "PerVariableConvergence", "Per-variable convergence tracker")
-        .def(py::init<>())
-        .def("size", &PerVariableConvergence::size)
-        .def("empty", &PerVariableConvergence::empty)
-        .def("__len__", &PerVariableConvergence::size)
-        .def("__getitem__", [](const PerVariableConvergence& p, std::size_t i) {
-            if (i >= p.size()) throw py::index_error();
-            return p[i];
-        })
-        .def("all_converged", &PerVariableConvergence::all_converged)
-        .def("worst", &PerVariableConvergence::worst)
-        .def("max_error", &PerVariableConvergence::max_error)
-        .def("non_converged_count", &PerVariableConvergence::non_converged_count);
-
     py::class_<NewtonResult>(v2, "NewtonResult", "Newton solver result")
         .def(py::init<>())
         .def_readonly("solution", &NewtonResult::solution)
@@ -381,74 +187,8 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("iterations", &NewtonResult::iterations)
         .def_readonly("final_residual", &NewtonResult::final_residual)
         .def_readonly("final_weighted_error", &NewtonResult::final_weighted_error)
-        .def_readonly("history", &NewtonResult::history)
-        .def_readonly("variable_convergence", &NewtonResult::variable_convergence)
         .def_readonly("error_message", &NewtonResult::error_message)
         .def("success", &NewtonResult::success);
-
-    // =========================================================================
-    // Newton Solver Execution (Phase 4)
-    // =========================================================================
-
-    // Solve circuit using Newton-Raphson
-    v2.def("solve_dc", [](Circuit& circuit, const Vector& x0, const NewtonOptions& opts) {
-        // Configure options with circuit info
-        NewtonOptions cfg = opts;
-        cfg.num_nodes = circuit.num_nodes();
-        cfg.num_branches = circuit.num_branches();
-
-        // Create solver
-        NewtonRaphsonSolver<SparseLUPolicy> solver(cfg);
-
-        // System function for Newton
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        return solver.solve(x0, system_func);
-    }, py::arg("circuit"), py::arg("x0"), py::arg("options") = NewtonOptions(),
-    R"doc(
-    Solve circuit DC operating point using Newton-Raphson.
-
-    Args:
-        circuit: Circuit object with devices
-        x0: Initial guess vector (size = num_nodes + num_branches)
-        options: Newton solver options
-
-    Returns:
-        NewtonResult with solution and convergence info
-    )doc");
-
-    // Convenience function with automatic initial guess
-    v2.def("solve_dc", [](Circuit& circuit, const NewtonOptions& opts) {
-        // Create zero initial guess
-        Vector x0 = Vector::Zero(circuit.system_size());
-
-        // Configure options with circuit info
-        NewtonOptions cfg = opts;
-        cfg.num_nodes = circuit.num_nodes();
-        cfg.num_branches = circuit.num_branches();
-
-        // Create solver
-        NewtonRaphsonSolver<SparseLUPolicy> solver(cfg);
-
-        // System function for Newton
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        return solver.solve(x0, system_func);
-    }, py::arg("circuit"), py::arg("options") = NewtonOptions(),
-    R"doc(
-    Solve circuit DC operating point using Newton-Raphson with zero initial guess.
-
-    Args:
-        circuit: Circuit object with devices
-        options: Newton solver options
-
-    Returns:
-        NewtonResult with solution and convergence info
-    )doc");
 
     // =========================================================================
     // Convergence Aids (Phase 5 exposed)
@@ -521,199 +261,6 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("message", &DCAnalysisResult::message);
 
     // =========================================================================
-    // DC Analysis Function (Phase 5)
-    // =========================================================================
-
-    // High-level DC analysis with automatic strategy selection
-    v2.def("dc_operating_point", [](Circuit& circuit, const DCConvergenceConfig& config) {
-        // For DC analysis, use very large timestep so inductor 2L/dt -> 0 (short circuit)
-        // and capacitor 2C/dt -> 0 (open circuit)
-        circuit.set_timestep(1e6);  // 1 million seconds -> effectively DC
-
-        // Create system function
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        // Initial guess
-        Vector x0 = Vector::Zero(circuit.system_size());
-
-        // Create and run DC solver
-        DCConvergenceSolver<SparseLUPolicy> solver(config);
-        return solver.solve(x0, circuit.num_nodes(), circuit.num_branches(),
-                           system_func, nullptr);
-    }, py::arg("circuit"), py::arg("config") = DCConvergenceConfig(),
-    R"doc(
-    Compute DC operating point with automatic convergence aids.
-
-    This function tries multiple strategies to find the DC solution:
-    - Direct Newton solve
-    - Gmin stepping
-    - Pseudo-transient continuation
-    - Random restarts
-
-    Args:
-        circuit: Circuit object with devices
-        config: DC convergence configuration (strategy, tolerances, etc.)
-
-    Returns:
-        DCAnalysisResult with solution and convergence info
-    )doc");
-
-    // =========================================================================
-    // Transient Simulation (Phase 6)
-    // =========================================================================
-
-    // Transient simulation result structure
-    py::class_<std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>>(v2, "TransientResult",
-        "Transient simulation result")
-        .def_property_readonly("time", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
-            return std::get<0>(r);
-        })
-        .def_property_readonly("states", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
-            return std::get<1>(r);
-        })
-        .def_property_readonly("success", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
-            return std::get<2>(r);
-        })
-        .def_property_readonly("message", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
-            return std::get<3>(r);
-        });
-
-    // Transient simulation function
-    v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
-                                const Vector& x0, const NewtonOptions& newton_opts) {
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-
-        // Set timestep for dynamic elements
-        circuit.set_timestep(dt);
-
-        // Configure Newton solver
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        // System function
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        // Initial state
-        Vector x = x0;
-
-        // Initialize dynamic element history from initial condition (e.g., DC op point)
-        // Use initialize=true to set i_prev=0 for capacitors (DC steady state)
-        circuit.update_history(x, true);
-
-        // Store initial state
-        times.push_back(t_start);
-        states.push_back(x);
-
-        // Time stepping
-        Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt) + 1;
-
-        while (t < t_stop && step < max_steps) {
-            // Solve at current time
-            auto result = solver.solve(x, system_func);
-
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t) + ": " + result.error_message;
-                break;
-            }
-
-            // Update solution
-            x = result.solution;
-
-            // Update dynamic element history
-            circuit.update_history(x);
-
-            // Advance time
-            t += dt;
-            step++;
-
-            // Store state
-            times.push_back(t);
-            states.push_back(x);
-        }
-
-        return std::make_tuple(times, states, success, message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-       py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
-    R"doc(
-    Run transient simulation with fixed timestep.
-
-    Args:
-        circuit: Circuit object with devices
-        t_start: Start time (s)
-        t_stop: Stop time (s)
-        dt: Fixed timestep (s)
-        x0: Initial state vector (e.g., from DC operating point)
-        newton_options: Newton solver options
-
-    Returns:
-        Tuple of (times, states, success, message)
-    )doc");
-
-    // Convenience function with zero initial state
-    v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
-                                const NewtonOptions& newton_opts) {
-        Vector x0 = Vector::Zero(circuit.system_size());
-        // Forward to the full version using py::cpp_function
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-
-        circuit.set_timestep(dt);
-
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        Vector x = x0;
-
-        // Initialize dynamic element history (zero IC case)
-        circuit.update_history(x, true);
-        times.push_back(t_start);
-        states.push_back(x);
-
-        Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt) + 1;
-
-        while (t < t_stop && step < max_steps) {
-            auto result = solver.solve(x, system_func);
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t) + ": " + result.error_message;
-                break;
-            }
-            x = result.solution;
-            circuit.update_history(x);  // Normal update after each step
-            t += dt;
-            step++;
-            times.push_back(t);
-            states.push_back(x);
-        }
-
-        return std::make_tuple(times, states, success, message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-       py::arg("newton_options") = NewtonOptions(),
-    "Run transient with zero initial state");
-
-    // =========================================================================
     // Validation Framework (Phase 6 exposed)
     // =========================================================================
 
@@ -744,9 +291,7 @@ void init_v2_module(py::module_& v2) {
         .def("omega_0", &RLCAnalytical::omega_0)
         .def("zeta", &RLCAnalytical::zeta)
         .def("alpha", &RLCAnalytical::alpha)
-           .def("damping_type", &RLCAnalytical::damping_type)
-           // Backwards-compatible alias expected by tests
-           .def("damping", &RLCAnalytical::damping_type)
+        .def("damping_type", &RLCAnalytical::damping_type)
         .def("voltage", &RLCAnalytical::voltage, py::arg("t"))
         .def("current", &RLCAnalytical::current, py::arg("t"))
         .def("waveform", &RLCAnalytical::waveform,
@@ -884,7 +429,7 @@ void init_v2_module(py::module_& v2) {
 // Module Registration
 // =============================================================================
 
-PYBIND11_MODULE(_pulsim, m) {
-    m.doc() = "PulsimCore High-Performance Circuit Simulation (C++ extension)";
+PYBIND11_MODULE(_pulsim_v2, m) {
+    m.doc() = "PulsimCore v2 High-Performance API (C++ extension)";
     init_v2_module(m);
 }

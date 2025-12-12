@@ -381,5 +381,204 @@ class TestUtilities:
         assert "Success" in s or "success" in s.lower()
 
 
+class TestCircuit:
+    """Test Circuit builder class."""
+
+    def test_circuit_creation(self):
+        """Test circuit creation."""
+        ckt = ps.Circuit()
+        assert ckt.num_nodes() == 0
+        assert ckt.num_devices() == 0
+
+    def test_add_nodes(self):
+        """Test node addition."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        n2 = ckt.add_node("n2")
+        assert gnd == -1
+        assert n1 == 0
+        assert n2 == 1
+        assert ckt.num_nodes() == 2
+
+    def test_add_resistor(self):
+        """Test resistor addition."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        ckt.add_resistor("R1", n1, gnd, 1000.0)
+        assert ckt.num_devices() == 1
+
+    def test_add_capacitor(self):
+        """Test capacitor addition."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        ckt.add_capacitor("C1", n1, gnd, 1e-6, 0.0)
+        assert ckt.num_devices() == 1
+
+    def test_voltage_source_branch(self):
+        """Test voltage source creates branch."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        ckt.add_voltage_source("V1", n1, gnd, 5.0)
+        assert ckt.num_branches() == 1
+        assert ckt.system_size() == 2  # 1 node + 1 branch
+
+    def test_assemble_dc(self):
+        """Test DC matrix assembly."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        ckt.add_voltage_source("V1", n1, gnd, 5.0)
+        ckt.add_resistor("R1", n1, gnd, 1000.0)
+
+        G, b = ckt.assemble_dc()
+        assert G.shape == (2, 2)
+        assert b.shape == (2,)
+        assert b[1] == 5.0  # VS voltage
+
+
+class TestDCSolver:
+    """Test DC solver functionality."""
+
+    def test_solve_dc_resistor_divider(self):
+        """Test DC solve with resistor divider."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        n2 = ckt.add_node("n2")
+
+        ckt.add_voltage_source("V1", n1, gnd, 10.0)
+        ckt.add_resistor("R1", n1, n2, 1000.0)
+        ckt.add_resistor("R2", n2, gnd, 1000.0)
+
+        result = ps.solve_dc(ckt)
+        assert result.success()
+        assert abs(result.solution[0] - 10.0) < 0.01  # n1 = 10V
+        assert abs(result.solution[1] - 5.0) < 0.01   # n2 = 5V
+
+    def test_dc_operating_point_linear(self):
+        """Test dc_operating_point with linear circuit."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+
+        ckt.add_voltage_source("V1", n1, gnd, 5.0)
+        ckt.add_resistor("R1", n1, gnd, 1000.0)
+
+        result = ps.dc_operating_point(ckt)
+        assert result.success
+        assert result.strategy_used == ps.DCStrategy.Direct
+        assert abs(result.newton_result.solution[0] - 5.0) < 0.01
+
+    def test_dc_operating_point_diode(self):
+        """Test dc_operating_point with diode."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        n2 = ckt.add_node("n2")
+
+        ckt.add_voltage_source("V1", n1, gnd, 5.0)
+        ckt.add_resistor("R1", n1, n2, 1000.0)
+        ckt.add_diode("D1", n2, gnd)
+
+        config = ps.DCConvergenceConfig()
+        config.strategy = ps.DCStrategy.Auto
+        result = ps.dc_operating_point(ckt, config)
+        assert result.success
+        # n2 should be near 0V (diode forward)
+        assert result.newton_result.solution[1] < 0.1
+
+
+class TestTransient:
+    """Test transient simulation."""
+
+    def test_rc_transient(self):
+        """Test RC circuit transient response."""
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        n2 = ckt.add_node("n2")
+
+        ckt.add_voltage_source("V1", n1, gnd, 5.0)
+        ckt.add_resistor("R1", n1, n2, 1000.0)
+        ckt.add_capacitor("C1", n2, gnd, 1e-6, 0.0)
+
+        # Run transient for 5*tau
+        tau = 1e-3  # 1ms
+        times, states, success, msg = ps.run_transient(ckt, 0.0, 5*tau, tau/100)
+
+        assert success
+        assert len(times) > 0
+        assert len(states) == len(times)
+
+        # Check at t=tau: V should be ~63.2% of final
+        idx_tau = int(tau / (tau/100))
+        v_cap = states[idx_tau][1]
+        expected = 5.0 * (1 - math.exp(-1))
+        assert abs(v_cap - expected) < 0.1
+
+    def test_transient_with_initial_state(self):
+        """Test transient with DC initial state."""
+        import numpy as np
+
+        ckt = ps.Circuit()
+        gnd = ps.Circuit.ground()
+        n1 = ckt.add_node("n1")
+        n2 = ckt.add_node("n2")
+
+        ckt.add_voltage_source("V1", n1, gnd, 5.0)
+        ckt.add_resistor("R1", n1, n2, 1000.0)
+        ckt.add_resistor("R2", n2, gnd, 1000.0)
+
+        # Get DC solution first
+        dc_result = ps.solve_dc(ckt)
+        assert dc_result.success()
+
+        # Run short transient from DC state
+        times, states, success, msg = ps.run_transient(
+            ckt, 0.0, 1e-6, 1e-7, dc_result.solution)
+
+        assert success
+        # State should stay at DC: n1=5V, n2=2.5V (resistor divider)
+        assert abs(states[-1][1] - 2.5) < 0.01
+
+
+class TestNonlinearDevices:
+    """Test nonlinear device bindings."""
+
+    def test_ideal_diode(self):
+        """Test IdealDiode creation."""
+        d = ps.IdealDiode(1e3, 1e-9, "D1")
+        assert d.name() == "D1"
+
+    def test_ideal_switch(self):
+        """Test IdealSwitch creation and control."""
+        sw = ps.IdealSwitch(1e6, 1e-12, False, "S1")
+        assert not sw.is_closed()
+        sw.close()
+        assert sw.is_closed()
+        sw.open()
+        assert not sw.is_closed()
+
+    def test_mosfet(self):
+        """Test MOSFET creation."""
+        params = ps.MOSFETParams()
+        params.vth = 2.0
+        params.kp = 0.01
+        m = ps.MOSFET(params, "M1")
+        assert m.name() == "M1"
+        assert m.params().vth == 2.0
+
+    def test_igbt(self):
+        """Test IGBT creation."""
+        params = ps.IGBTParams()
+        params.vth = 5.0
+        igbt = ps.IGBT(params, "Q1")
+        assert igbt.name() == "Q1"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

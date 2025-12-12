@@ -14,17 +14,41 @@ from ._pulsim import (
     DeviceHint,
     SIMDLevel,
 
-    # Device Classes
+    # Device Classes - Linear
     Resistor,
     Capacitor,
     Inductor,
     VoltageSource,
     CurrentSource,
 
+    # Device Classes - Nonlinear
+    IdealDiode,
+    IdealSwitch,
+    MOSFETParams,
+    MOSFET,
+    IGBTParams,
+    IGBT,
+
+    # Circuit Builder
+    Circuit,
+
+    # DC Solver
+    solve_dc,
+    dc_operating_point,
+
+    # Transient Simulation
+    run_transient,
+
     # Solver Configuration
     Tolerances,
     NewtonOptions,
     NewtonResult,
+
+    # Convergence Monitoring
+    IterationRecord,
+    ConvergenceHistory,
+    VariableConvergence,
+    PerVariableConvergence,
 
     # Convergence Aids
     GminConfig,
@@ -74,17 +98,41 @@ __all__ = [
     "DeviceHint",
     "SIMDLevel",
 
-    # Device Classes
+    # Device Classes - Linear
     "Resistor",
     "Capacitor",
     "Inductor",
     "VoltageSource",
     "CurrentSource",
 
+    # Device Classes - Nonlinear
+    "IdealDiode",
+    "IdealSwitch",
+    "MOSFETParams",
+    "MOSFET",
+    "IGBTParams",
+    "IGBT",
+
+    # Circuit Builder
+    "Circuit",
+
+    # DC Solver
+    "solve_dc",
+    "dc_operating_point",
+
+    # Transient Simulation
+    "run_transient",
+
     # Solver Configuration
     "Tolerances",
     "NewtonOptions",
     "NewtonResult",
+
+    # Convergence Monitoring
+    "IterationRecord",
+    "ConvergenceHistory",
+    "VariableConvergence",
+    "PerVariableConvergence",
 
     # Convergence Aids
     "GminConfig",
