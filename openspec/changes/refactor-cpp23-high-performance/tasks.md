@@ -188,32 +188,32 @@
 ## Phase 5: Advanced Convergence Aids
 
 ### 5.1 Gmin Stepping
-- [ ] 5.1.1 Implement exponential Gmin schedule
-- [ ] 5.1.2 Add Gmin to ground for all nodes
-- [ ] 5.1.3 Implement automatic Gmin reduction
-- [ ] 5.1.4 Add Gmin stepping as fallback strategy
-- [ ] 5.1.5 Log/trace Gmin ramp parameters for debugging (optional)
+- [x] 5.1.1 Implement exponential Gmin schedule
+- [x] 5.1.2 Add Gmin to ground for all nodes
+- [x] 5.1.3 Implement automatic Gmin reduction
+- [x] 5.1.4 Add Gmin stepping as fallback strategy
+- [x] 5.1.5 Log/trace Gmin ramp parameters for debugging (optional)
 
 ### 5.2 Source Stepping
-- [ ] 5.2.1 Implement source scaling from 0 to 1
-- [ ] 5.2.2 Add continuation parameter tracking
-- [ ] 5.2.3 Implement adaptive step size for continuation
-- [ ] 5.2.4 Add source stepping as primary DC strategy
-- [ ] 5.2.5 Define abort/rollback criteria and reporting for failed continuation
+- [x] 5.2.1 Implement source scaling from 0 to 1
+- [x] 5.2.2 Add continuation parameter tracking
+- [x] 5.2.3 Implement adaptive step size for continuation
+- [x] 5.2.4 Add source stepping as primary DC strategy
+- [x] 5.2.5 Define abort/rollback criteria and reporting for failed continuation
 
 ### 5.3 Pseudo-Transient Continuation
-- [ ] 5.3.1 Implement pseudo-timestep for DC analysis
-- [ ] 5.3.2 Add capacitor-to-ground for DC convergence
-- [ ] 5.3.3 Implement automatic pseudo-dt adjustment
-- [ ] 5.3.4 Integrate with Newton solver
-- [ ] 5.3.5 Add safety clamps for pseudo-dt growth/shrink and logging hooks
+- [x] 5.3.1 Implement pseudo-timestep for DC analysis
+- [x] 5.3.2 Add capacitor-to-ground for DC convergence
+- [x] 5.3.3 Implement automatic pseudo-dt adjustment
+- [x] 5.3.4 Integrate with Newton solver
+- [x] 5.3.5 Add safety clamps for pseudo-dt growth/shrink and logging hooks
 
 ### 5.4 Robust Initialization
-- [ ] 5.4.1 Implement node voltage initialization heuristics
-- [ ] 5.4.2 Add device-specific initial guess
-- [ ] 5.4.3 Implement warm start from previous solution
-- [ ] 5.4.4 Add randomized restart on convergence failure
-- [ ] 5.4.5 Allow deterministic seeding for randomized restarts
+- [x] 5.4.1 Implement node voltage initialization heuristics
+- [x] 5.4.2 Add device-specific initial guess
+- [x] 5.4.3 Implement warm start from previous solution
+- [x] 5.4.4 Add randomized restart on convergence failure
+- [x] 5.4.5 Allow deterministic seeding for randomized restarts
 
 ## Phase 6: Validation & Benchmarking
 

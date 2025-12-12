@@ -4054,3 +4054,443 @@ TEST_CASE("v2 Memory tracker", "[v2][memory][tracking][phase4]") {
         REQUIRE(stats.deallocation_count == 1);
     }
 }
+
+// =============================================================================
+// Phase 5: Advanced Convergence Aids Tests
+// =============================================================================
+
+TEST_CASE("v2 Gmin stepping config", "[v2][convergence][gmin][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default config") {
+        GminConfig config;
+        REQUIRE(config.initial_gmin == 1e-2);
+        REQUIRE(config.final_gmin == 1e-12);
+        REQUIRE(config.reduction_factor == 10.0);
+    }
+
+    SECTION("Required steps calculation") {
+        GminConfig config;
+        config.initial_gmin = 1e-2;
+        config.final_gmin = 1e-12;
+        config.reduction_factor = 10.0;
+
+        // log10(1e-2 / 1e-12) = 10 steps
+        REQUIRE(config.required_steps() == 10);
+    }
+}
+
+TEST_CASE("v2 Gmin stepping execution", "[v2][convergence][gmin][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Gmin stepping with simple circuit") {
+        GminConfig config;
+        config.initial_gmin = 1e-3;
+        config.final_gmin = 1e-9;
+        config.reduction_factor = 10.0;
+        config.enable_logging = true;
+
+        GminStepping gmin(config);
+
+        // Simple system: R = 1k to ground, V = 5V source
+        // G * V = I  =>  (1/R + Gmin) * V = V/R
+        auto solve_func = [&](const Vector& x0) -> NewtonResult {
+            NewtonResult result;
+            result.solution = x0;
+            Real R = 1000.0;
+            Real Vsource = 5.0;
+
+            // Simple iteration: V = Vsource * (1/R) / (1/R + Gmin)
+            Real G = 1.0 / R;
+            Real total_G = G + gmin.current_gmin();
+            result.solution[0] = Vsource * G / total_G;
+
+            result.status = SolverStatus::Success;
+            result.iterations = 1;
+            result.final_residual = 1e-12;
+            return result;
+        };
+
+        Vector x0 = Vector::Zero(1);
+        NewtonResult result = gmin.execute(x0, 1, solve_func);
+
+        REQUIRE(result.success());
+        REQUIRE(gmin.log().size() > 0);
+    }
+
+    SECTION("Gmin log export") {
+        GminConfig config;
+        config.enable_logging = true;
+        GminStepping gmin(config);
+
+        // Add some log entries manually for testing
+        gmin.reset();
+
+        std::string csv = gmin.log_to_csv();
+        REQUIRE(csv.find("step,gmin") != std::string::npos);
+    }
+}
+
+TEST_CASE("v2 Source stepping config", "[v2][convergence][source][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default config") {
+        SourceSteppingConfig config;
+        REQUIRE(config.initial_scale == 0.0);
+        REQUIRE(config.final_scale == 1.0);
+        REQUIRE(config.initial_step == 0.25);
+    }
+}
+
+TEST_CASE("v2 Source stepping execution", "[v2][convergence][source][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Simple source stepping") {
+        SourceSteppingConfig config;
+        config.initial_scale = 0.0;
+        config.final_scale = 1.0;
+        config.initial_step = 0.5;
+        config.enable_logging = true;
+
+        SourceStepping source(config);
+
+        // Simple linear system that always converges
+        auto solve_func = [](const Vector& x0, Real scale) -> NewtonResult {
+            NewtonResult result;
+            result.solution = x0;
+            result.solution[0] = scale * 5.0;  // V = scale * Vsource
+            result.status = SolverStatus::Success;
+            result.iterations = 2;
+            result.final_residual = 1e-10;
+            return result;
+        };
+
+        Vector x0 = Vector::Zero(1);
+        SourceSteppingResult result = source.execute(x0, solve_func);
+
+        REQUIRE(result.success);
+        REQUIRE(result.final_result.solution[0] == Catch::Approx(5.0));
+    }
+
+    SECTION("Adaptive step reduction") {
+        SourceSteppingConfig config;
+        config.initial_scale = 0.0;
+        config.final_scale = 1.0;
+        config.initial_step = 0.5;
+        config.max_failures = 10;
+
+        SourceStepping source(config);
+
+        int call_count = 0;
+        auto solve_func = [&call_count](const Vector& x0, Real scale) -> NewtonResult {
+            NewtonResult result;
+            result.solution = x0;
+            result.solution[0] = scale * 5.0;
+            ++call_count;
+
+            // Fail on large steps initially
+            if (scale > 0.3 && call_count < 5) {
+                result.status = SolverStatus::MaxIterationsReached;
+            } else {
+                result.status = SolverStatus::Success;
+            }
+            result.iterations = 3;
+            result.final_residual = result.success() ? 1e-10 : 1.0;
+            return result;
+        };
+
+        Vector x0 = Vector::Zero(1);
+        SourceSteppingResult result = source.execute(x0, solve_func);
+
+        REQUIRE(result.success);
+        REQUIRE(result.total_steps > 2);  // Had to take more steps due to failures
+    }
+}
+
+TEST_CASE("v2 Pseudo-transient config", "[v2][convergence][ptc][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default config") {
+        PseudoTransientConfig config;
+        REQUIRE(config.initial_dt == 1e-9);
+        REQUIRE(config.max_dt == 1e3);
+        REQUIRE(config.min_dt == 1e-15);
+    }
+}
+
+TEST_CASE("v2 Pseudo-transient execution", "[v2][convergence][ptc][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Simple pseudo-transient") {
+        PseudoTransientConfig config;
+        config.initial_dt = 1e-6;
+        config.convergence_threshold = 1e-8;
+        config.enable_logging = true;
+        config.max_iterations = 50;
+
+        PseudoTransientContinuation ptc(config);
+
+        int iter = 0;
+        auto solve_func = [&iter](const Vector& x0, Real pseudo_dt) -> NewtonResult {
+            NewtonResult result;
+            result.solution = x0;
+
+            // Simulate converging to steady state
+            Real target = 5.0;
+            Real rate = 0.3;
+            result.solution[0] = target - (target - x0[0]) * std::exp(-rate * (iter + 1));
+            ++iter;
+
+            result.status = SolverStatus::Success;
+            result.iterations = 2;
+            result.final_residual = std::abs(target - result.solution[0]) * 1e-6;
+            return result;
+        };
+
+        Vector x0 = Vector::Zero(1);
+        PseudoTransientResult result = ptc.execute(x0, 1, solve_func);
+
+        REQUIRE(result.success);
+        REQUIRE(result.solution[0] == Catch::Approx(5.0).margin(0.1));
+    }
+}
+
+TEST_CASE("v2 Robust initialization config", "[v2][convergence][init][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default config") {
+        InitializationConfig config;
+        REQUIRE(config.default_voltage == 0.0);
+        REQUIRE(config.supply_voltage == 12.0);
+        REQUIRE(config.diode_forward == 0.7);
+    }
+}
+
+TEST_CASE("v2 Robust initialization", "[v2][convergence][init][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Generate initial guess") {
+        InitializationConfig config;
+        config.default_voltage = 0.0;
+        config.use_zero_init = false;
+
+        RobustInitialization init(config);
+
+        Vector x0 = init.generate_initial_guess(3, 1);
+
+        REQUIRE(x0.size() == 4);
+        REQUIRE(x0[0] == 0.0);  // Default voltage
+        REQUIRE(x0[3] == 0.0);  // Branch current
+    }
+
+    SECTION("Device hints") {
+        InitializationConfig config;
+        config.supply_voltage = 12.0;
+        config.diode_forward = 0.7;
+
+        RobustInitialization init(config);
+
+        // Add hints
+        init.add_hint({0, DeviceHint::SupplyPositive, 0.0, false});
+        init.add_hint({1, DeviceHint::DiodeAnode, 0.0, false});
+        init.add_hint({2, DeviceHint::Ground, 0.0, false});
+
+        Vector x0 = init.generate_initial_guess(3, 0);
+
+        REQUIRE(x0[0] == Catch::Approx(12.0));  // Supply
+        REQUIRE(x0[1] == Catch::Approx(0.7));   // Diode forward
+        REQUIRE(x0[2] == Catch::Approx(0.0));   // Ground
+    }
+
+    SECTION("Warm start") {
+        InitializationConfig config;
+        config.use_warm_start = true;
+
+        RobustInitialization init(config);
+
+        Vector prev(3);
+        prev << 1.0, 2.0, 3.0;
+
+        Vector x0 = init.warm_start(prev, 3, 0);
+
+        REQUIRE(x0[0] == Catch::Approx(1.0));
+        REQUIRE(x0[1] == Catch::Approx(2.0));
+        REQUIRE(x0[2] == Catch::Approx(3.0));
+    }
+
+    SECTION("Random initialization determinism") {
+        InitializationConfig config;
+        config.random_seed = 12345;
+        config.random_voltage_range = 10.0;
+
+        RobustInitialization init1(config);
+        RobustInitialization init2(config);
+
+        Vector x1 = init1.random_initial_guess(3, 0);
+        Vector x2 = init2.random_initial_guess(3, 0);
+
+        // Same seed should produce same results
+        REQUIRE(x1[0] == Catch::Approx(x2[0]));
+        REQUIRE(x1[1] == Catch::Approx(x2[1]));
+        REQUIRE(x1[2] == Catch::Approx(x2[2]));
+    }
+}
+
+TEST_CASE("v2 DC convergence solver", "[v2][convergence][dc][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Direct solve success") {
+        DCConvergenceConfig config;
+        config.strategy = DCStrategy::Direct;
+
+        DCConvergenceSolver<SparseLUPolicy> solver(config);
+
+        // Simple 2-node resistor network
+        // Node 0: Vsource = 5V
+        // Node 1: R1 to node 0, R2 to ground
+        auto system_func = [](const Vector& x, Vector& f, SparseMatrix& J) {
+            Real R1 = 1000.0, R2 = 2000.0;
+            Real Vsource = 5.0;
+            Real G1 = 1.0 / R1, G2 = 1.0 / R2;
+
+            // Node 0: voltage source (fixed)
+            f[0] = x[0] - Vsource;
+
+            // Node 1: KCL
+            f[1] = G1 * (x[1] - x[0]) + G2 * x[1];
+
+            // Jacobian
+            J.setZero();
+            J.insert(0, 0) = 1.0;
+            J.insert(1, 0) = -G1;
+            J.insert(1, 1) = G1 + G2;
+            J.makeCompressed();
+        };
+
+        Vector x0 = Vector::Zero(2);
+        auto result = solver.solve(x0, 2, 0, system_func);
+
+        REQUIRE(result.success);
+        REQUIRE(result.newton_result.solution[0] == Catch::Approx(5.0));
+        // V1 = Vsource * R2 / (R1 + R2) = 5 * 2000 / 3000 = 3.33V
+        REQUIRE(result.newton_result.solution[1] == Catch::Approx(10.0/3.0).margin(0.01));
+    }
+
+    SECTION("Auto strategy selection") {
+        DCConvergenceConfig config;
+        config.strategy = DCStrategy::Auto;
+
+        DCConvergenceSolver<SparseLUPolicy> solver(config);
+
+        // Same simple system
+        auto system_func = [](const Vector& x, Vector& f, SparseMatrix& J) {
+            Real R = 1000.0;
+            Real Vsource = 5.0;
+            Real G = 1.0 / R;
+
+            f[0] = x[0] - Vsource;
+            f[1] = G * (x[1] - x[0]) + G * x[1];
+
+            J.setZero();
+            J.insert(0, 0) = 1.0;
+            J.insert(1, 0) = -G;
+            J.insert(1, 1) = 2.0 * G;
+            J.makeCompressed();
+        };
+
+        Vector x0 = Vector::Zero(2);
+        auto result = solver.solve(x0, 2, 0, system_func);
+
+        REQUIRE(result.success);
+        REQUIRE(result.strategy_used == DCStrategy::Direct);  // Should succeed on first try
+    }
+}
+
+TEST_CASE("v2 Gmin log entry", "[v2][convergence][gmin][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Log entry fields") {
+        GminLogEntry entry;
+        entry.step = 5;
+        entry.gmin = 1e-6;
+        entry.converged = true;
+        entry.newton_iterations = 3;
+        entry.final_residual = 1e-10;
+
+        REQUIRE(entry.step == 5);
+        REQUIRE(entry.gmin == 1e-6);
+        REQUIRE(entry.converged == true);
+    }
+}
+
+TEST_CASE("v2 Source step log entry", "[v2][convergence][source][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Log entry fields") {
+        SourceStepLogEntry entry;
+        entry.step = 3;
+        entry.scale = 0.75;
+        entry.step_size = 0.25;
+        entry.converged = true;
+        entry.newton_iterations = 4;
+        entry.final_residual = 1e-9;
+
+        REQUIRE(entry.step == 3);
+        REQUIRE(entry.scale == 0.75);
+        REQUIRE(entry.step_size == 0.25);
+    }
+}
+
+TEST_CASE("v2 Pseudo-transient log entry", "[v2][convergence][ptc][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Log entry fields") {
+        PseudoTransientLogEntry entry;
+        entry.iteration = 10;
+        entry.pseudo_dt = 1e-3;
+        entry.residual_norm = 1e-8;
+        entry.newton_converged = true;
+        entry.newton_iterations = 2;
+
+        REQUIRE(entry.iteration == 10);
+        REQUIRE(entry.pseudo_dt == 1e-3);
+        REQUIRE(entry.newton_converged == true);
+    }
+}
+
+TEST_CASE("v2 Node init hint", "[v2][convergence][init][phase5]") {
+    using namespace pulsim::v2;
+
+    SECTION("Hint with explicit voltage") {
+        NodeInitHint hint;
+        hint.node_index = 5;
+        hint.hint = DeviceHint::None;
+        hint.hint_voltage = 3.3;
+        hint.has_explicit_hint = true;
+
+        REQUIRE(hint.node_index == 5);
+        REQUIRE(hint.hint_voltage == 3.3);
+        REQUIRE(hint.has_explicit_hint == true);
+    }
+
+    SECTION("All device hints") {
+        InitializationConfig config;
+        config.supply_voltage = 12.0;
+        config.diode_forward = 0.7;
+        config.mosfet_threshold = 2.0;
+
+        RobustInitialization init(config);
+
+        REQUIRE(init.voltage_from_hint(DeviceHint::Ground) == 0.0);
+        REQUIRE(init.voltage_from_hint(DeviceHint::SupplyPositive) == 12.0);
+        REQUIRE(init.voltage_from_hint(DeviceHint::SupplyNegative) == -12.0);
+        REQUIRE(init.voltage_from_hint(DeviceHint::DiodeAnode) == 0.7);
+        REQUIRE(init.voltage_from_hint(DeviceHint::DiodeCathode) == 0.0);
+        REQUIRE(init.voltage_from_hint(DeviceHint::MOSFETGate) == 3.0);  // 2.0 * 1.5
+        REQUIRE(init.voltage_from_hint(DeviceHint::MOSFETDrain) == 6.0);  // 12 * 0.5
+        REQUIRE(init.voltage_from_hint(DeviceHint::MOSFETSource) == 0.0);
+        REQUIRE(init.voltage_from_hint(DeviceHint::BJTBase) == 0.7);
+        REQUIRE(init.voltage_from_hint(DeviceHint::BJTCollector) == 6.0);
+        REQUIRE(init.voltage_from_hint(DeviceHint::BJTEmitter) == 0.0);
+    }
+}

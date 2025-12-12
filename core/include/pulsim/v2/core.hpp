@@ -22,6 +22,7 @@
 #include "pulsim/v2/solver.hpp"
 #include "pulsim/v2/integration.hpp"
 #include "pulsim/v2/high_performance.hpp"
+#include "pulsim/v2/convergence_aids.hpp"
 
 // Convenience namespace alias
 namespace pulsim2 = pulsim::v2;
