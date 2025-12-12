@@ -14,8 +14,11 @@
 #include "pulsim/v2/concepts.hpp"
 #include "pulsim/v2/type_traits.hpp"
 #include "pulsim/v2/constexpr_utils.hpp"
+#include "pulsim/v2/numeric_types.hpp"
 #include "pulsim/v2/device_base.hpp"
 #include "pulsim/v2/cpp23_features.hpp"
+#include "pulsim/v2/expression_templates.hpp"
+#include "pulsim/v2/circuit_graph.hpp"
 
 // Convenience namespace alias
 namespace pulsim2 = pulsim::v2;

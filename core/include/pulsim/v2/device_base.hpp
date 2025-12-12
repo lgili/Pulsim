@@ -12,6 +12,7 @@
 
 #include "pulsim/v2/concepts.hpp"
 #include "pulsim/v2/type_traits.hpp"
+#include "pulsim/v2/numeric_types.hpp"
 #include "pulsim/v2/cpp23_features.hpp"
 #include <Eigen/Sparse>
 #include <span>
@@ -20,12 +21,16 @@
 namespace pulsim::v2 {
 
 // =============================================================================
-// Type Aliases
+// Type Aliases for Device Implementations
 // =============================================================================
+// Use the configurable types from numeric_types.hpp with default settings
 
-using Real = double;
-using Index = std::int32_t;
-using SparseMatrix = Eigen::SparseMatrix<Real, Eigen::ColMajor>;
+// Scalar is alias to Real (double by default) for device implementations
+using Scalar = Real;
+using NodeIndex = Index;
+
+// Matrix types for MNA system
+using SparseMatrix = Eigen::SparseMatrix<Scalar, Eigen::ColMajor>;
 using Vector = Eigen::VectorXd;
 
 // =============================================================================
@@ -34,16 +39,17 @@ using Vector = Eigen::VectorXd;
 
 /// CRTP base class for all devices
 /// Derived classes must implement:
-///   - stamp_impl(Matrix& G, Vector& b, std::span<const Index> nodes)
+///   - stamp_impl(Matrix& G, Vector& b, std::span<const NodeIndex> nodes)
 ///   - static constexpr auto jacobian_pattern_impl()
 template<typename Derived>
 class DeviceBase {
 public:
-    using Scalar = Real;
+    using ScalarType = Scalar;
+    using Scalar = ScalarType;  // Alias for CRTP inheritance
 
     /// Stamp the device into the MNA matrix (static dispatch)
     template<SparseMatrixLike Matrix, VectorLike Vec>
-    void stamp(Matrix& G, Vec& b, std::span<const Index> nodes) {
+    void stamp(Matrix& G, Vec& b, std::span<const NodeIndex> nodes) {
         derived().stamp_impl(G, b, nodes);
     }
 
@@ -94,7 +100,7 @@ public:
 
     /// Stamp the Jacobian contribution for Newton iteration
     template<SparseMatrixLike Matrix, VectorLike Vec>
-    void stamp_jacobian(Matrix& J, Vec& f, const Vec& x, std::span<const Index> nodes) {
+    void stamp_jacobian(Matrix& J, Vec& f, const Vec& x, std::span<const NodeIndex> nodes) {
         this->derived().stamp_jacobian_impl(J, f, x, nodes);
     }
 
@@ -142,20 +148,20 @@ public:
 
     /// Parameter structure for Resistor
     struct Params {
-        Real resistance = 1000.0;
+        Scalar resistance = 1000.0;
     };
 
-    explicit Resistor(Real resistance, std::string name = "")
+    explicit Resistor(Scalar resistance, std::string name = "")
         : Base(std::move(name)), resistance_(resistance) {}
 
     /// Stamp implementation (called via CRTP)
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2) return;
 
-        const Index n_plus = nodes[0];
-        const Index n_minus = nodes[1];
-        const Real g = 1.0 / resistance_;
+        const NodeIndex n_plus = nodes[0];
+        const NodeIndex n_minus = nodes[1];
+        const Scalar g = 1.0 / resistance_;
 
         // Stamp conductance matrix
         if (n_plus >= 0) {
@@ -183,11 +189,11 @@ public:
         }};
     }
 
-    [[nodiscard]] Real resistance() const { return resistance_; }
-    void set_resistance(Real r) { resistance_ = r; }
+    [[nodiscard]] Scalar resistance() const { return resistance_; }
+    void set_resistance(Scalar r) { resistance_ = r; }
 
 private:
-    Real resistance_;
+    Scalar resistance_;
 };
 
 // Specialization of device_traits for Resistor
@@ -215,11 +221,11 @@ public:
 
     /// Parameter structure for Capacitor
     struct Params {
-        Real capacitance = 1e-6;
-        Real initial_voltage = 0.0;
+        Scalar capacitance = 1e-6;
+        Scalar initial_voltage = 0.0;
     };
 
-    explicit Capacitor(Real capacitance, Real initial_voltage = 0.0, std::string name = "")
+    explicit Capacitor(Scalar capacitance, Scalar initial_voltage = 0.0, std::string name = "")
         : Base(std::move(name))
         , capacitance_(capacitance)
         , v_prev_(initial_voltage)
@@ -228,17 +234,17 @@ public:
     /// Stamp implementation using Trapezoidal companion model
     /// Correct formula: I_eq = (2C/dt) * V_n - (2C/dt) * V_{n-1} - I_{n-1}
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& b, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& b, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2) return;
 
-        const Index n_plus = nodes[0];
-        const Index n_minus = nodes[1];
+        const NodeIndex n_plus = nodes[0];
+        const NodeIndex n_minus = nodes[1];
 
         // Trapezoidal: G_eq = 2C/dt
-        const Real g_eq = 2.0 * capacitance_ / dt_;
+        const Scalar g_eq = 2.0 * capacitance_ / dt_;
 
         // Equivalent current source: I_eq = G_eq * V_{n-1} + I_{n-1}
-        const Real i_eq = g_eq * v_prev_ + i_prev_;
+        const Scalar i_eq = g_eq * v_prev_ + i_prev_;
 
         // Stamp conductance
         if (n_plus >= 0) {
@@ -272,7 +278,7 @@ public:
     }
 
     /// Set current state (called by solver after each Newton iteration)
-    void set_current_state(Real v, Real i) {
+    void set_current_state(Scalar v, Scalar i) {
         v_current_ = v;
         i_current_ = i;
     }
@@ -286,16 +292,16 @@ public:
         }};
     }
 
-    [[nodiscard]] Real capacitance() const { return capacitance_; }
-    [[nodiscard]] Real voltage_prev() const { return v_prev_; }
-    [[nodiscard]] Real current_prev() const { return i_prev_; }
+    [[nodiscard]] Scalar capacitance() const { return capacitance_; }
+    [[nodiscard]] Scalar voltage_prev() const { return v_prev_; }
+    [[nodiscard]] Scalar current_prev() const { return i_prev_; }
 
 private:
-    Real capacitance_;
-    Real v_prev_;      // Voltage at previous timestep
-    Real i_prev_;      // Current at previous timestep (CRITICAL for Trapezoidal!)
-    Real v_current_ = 0.0;  // Current voltage (set by solver)
-    Real i_current_ = 0.0;  // Current current (set by solver)
+    Scalar capacitance_;
+    Scalar v_prev_;      // Voltage at previous timestep
+    Scalar i_prev_;      // Current at previous timestep (CRITICAL for Trapezoidal!)
+    Scalar v_current_ = 0.0;  // Current voltage (set by solver)
+    Scalar i_current_ = 0.0;  // Current current (set by solver)
 };
 
 template<>
@@ -321,11 +327,11 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::Inductor);
 
     struct Params {
-        Real inductance = 1e-3;
-        Real initial_current = 0.0;
+        Scalar inductance = 1e-3;
+        Scalar initial_current = 0.0;
     };
 
-    explicit Inductor(Real inductance, Real initial_current = 0.0, std::string name = "")
+    explicit Inductor(Scalar inductance, Scalar initial_current = 0.0, std::string name = "")
         : Base(std::move(name))
         , inductance_(inductance)
         , i_prev_(initial_current)
@@ -336,17 +342,17 @@ public:
     /// Trapezoidal: V_n = (2L/dt) * I_n - (2L/dt) * I_{n-1} - V_{n-1}
     /// Companion model is a resistor R_eq = 2L/dt in series with voltage V_eq
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& b, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& b, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2) return;
 
-        const Index n_plus = nodes[0];
-        const Index n_minus = nodes[1];
+        const NodeIndex n_plus = nodes[0];
+        const NodeIndex n_minus = nodes[1];
 
         // Trapezoidal: R_eq = 2L/dt (conductance g_eq = dt/(2L))
-        const Real g_eq = dt_ / (2.0 * inductance_);
+        const Scalar g_eq = dt_ / (2.0 * inductance_);
 
         // Equivalent voltage: V_eq = (2L/dt) * I_{n-1} + V_{n-1}
-        const Real v_eq = (2.0 * inductance_ / dt_) * i_prev_ + v_prev_;
+        const Scalar v_eq = (2.0 * inductance_ / dt_) * i_prev_ + v_prev_;
 
         // Stamp conductance
         if (n_plus >= 0) {
@@ -363,7 +369,7 @@ public:
         }
 
         // Stamp equivalent current source (from V_eq through g_eq)
-        const Real i_eq = g_eq * v_eq;
+        const Scalar i_eq = g_eq * v_eq;
         if (n_plus >= 0) {
             b[n_plus] += i_eq;
         }
@@ -377,7 +383,7 @@ public:
         v_prev_ = v_current_;
     }
 
-    void set_current_state(Real v, Real i) {
+    void set_current_state(Scalar v, Scalar i) {
         v_current_ = v;
         i_current_ = i;
     }
@@ -391,16 +397,16 @@ public:
         }};
     }
 
-    [[nodiscard]] Real inductance() const { return inductance_; }
-    [[nodiscard]] Real current_prev() const { return i_prev_; }
-    [[nodiscard]] Real voltage_prev() const { return v_prev_; }
+    [[nodiscard]] Scalar inductance() const { return inductance_; }
+    [[nodiscard]] Scalar current_prev() const { return i_prev_; }
+    [[nodiscard]] Scalar voltage_prev() const { return v_prev_; }
 
 private:
-    Real inductance_;
-    Real i_prev_;
-    Real v_prev_;
-    Real i_current_ = 0.0;
-    Real v_current_ = 0.0;
+    Scalar inductance_;
+    Scalar i_prev_;
+    Scalar v_prev_;
+    Scalar i_current_ = 0.0;
+    Scalar v_current_ = 0.0;
 };
 
 template<>
@@ -426,25 +432,25 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::VoltageSource);
 
     struct Params {
-        Real voltage = 0.0;
+        Scalar voltage = 0.0;
     };
 
-    explicit VoltageSource(Real voltage, std::string name = "")
+    explicit VoltageSource(Scalar voltage, std::string name = "")
         : Base(std::move(name)), voltage_(voltage), branch_index_(-1) {}
 
     /// Set the branch index (MNA requires extra row/col for voltage sources)
-    void set_branch_index(Index idx) { branch_index_ = idx; }
-    [[nodiscard]] Index branch_index() const { return branch_index_; }
+    void set_branch_index(NodeIndex idx) { branch_index_ = idx; }
+    [[nodiscard]] NodeIndex branch_index() const { return branch_index_; }
 
     /// Stamp implementation
     /// MNA formulation: adds equation V+ - V- = V_source
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& b, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& b, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2 || branch_index_ < 0) return;
 
-        const Index n_plus = nodes[0];
-        const Index n_minus = nodes[1];
-        const Index br = branch_index_;
+        const NodeIndex n_plus = nodes[0];
+        const NodeIndex n_minus = nodes[1];
+        const NodeIndex br = branch_index_;
 
         // Stamp the MNA extension for voltage source
         // Row br: V+ - V- = V_source
@@ -473,12 +479,12 @@ public:
         }};
     }
 
-    [[nodiscard]] Real voltage() const { return voltage_; }
-    void set_voltage(Real v) { voltage_ = v; }
+    [[nodiscard]] Scalar voltage() const { return voltage_; }
+    void set_voltage(Scalar v) { voltage_ = v; }
 
 private:
-    Real voltage_;
-    Index branch_index_;
+    Scalar voltage_;
+    NodeIndex branch_index_;
 };
 
 template<>
@@ -504,19 +510,19 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::CurrentSource);
 
     struct Params {
-        Real current = 0.0;
+        Scalar current = 0.0;
     };
 
-    explicit CurrentSource(Real current, std::string name = "")
+    explicit CurrentSource(Scalar current, std::string name = "")
         : Base(std::move(name)), current_(current) {}
 
     /// Stamp implementation - current source only affects RHS
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& /*G*/, Vec& b, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& /*G*/, Vec& b, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2) return;
 
-        const Index n_plus = nodes[0];
-        const Index n_minus = nodes[1];
+        const NodeIndex n_plus = nodes[0];
+        const NodeIndex n_minus = nodes[1];
 
         // Current flows from n+ to n- (conventional)
         // KCL: current entering n+ is positive
@@ -533,11 +539,11 @@ public:
         return StaticSparsityPattern<0>{{}};
     }
 
-    [[nodiscard]] Real current() const { return current_; }
-    void set_current(Real i) { current_ = i; }
+    [[nodiscard]] Scalar current() const { return current_; }
+    void set_current(Scalar i) { current_ = i; }
 
 private:
-    Real current_;
+    Scalar current_;
 };
 
 template<>
@@ -563,30 +569,30 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::Diode);
 
     struct Params {
-        Real g_on = 1e3;     // On-state conductance (1/R_on)
-        Real g_off = 1e-9;   // Off-state conductance (leakage)
-        Real v_threshold = 0.0;  // Threshold voltage (0 for ideal)
+        Scalar g_on = 1e3;     // On-state conductance (1/R_on)
+        Scalar g_off = 1e-9;   // Off-state conductance (leakage)
+        Scalar v_threshold = 0.0;  // Threshold voltage (0 for ideal)
     };
 
-    explicit IdealDiode(Real g_on = 1e3, Real g_off = 1e-9, std::string name = "")
+    explicit IdealDiode(Scalar g_on = 1e3, Scalar g_off = 1e-9, std::string name = "")
         : Base(std::move(name)), g_on_(g_on), g_off_(g_off), is_on_(false) {}
 
     /// Stamp Jacobian for Newton iteration
     template<typename Matrix, typename Vec>
-    void stamp_jacobian_impl(Matrix& J, Vec& f, const Vec& x, std::span<const Index> nodes) {
+    void stamp_jacobian_impl(Matrix& J, Vec& f, const Vec& x, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2) return;
 
-        const Index n_plus = nodes[0];   // Anode
-        const Index n_minus = nodes[1];  // Cathode
+        const NodeIndex n_plus = nodes[0];   // Anode
+        const NodeIndex n_minus = nodes[1];  // Cathode
 
         // Get voltage across diode
-        Real v_anode = (n_plus >= 0) ? x[n_plus] : 0.0;
-        Real v_cathode = (n_minus >= 0) ? x[n_minus] : 0.0;
-        Real v_diode = v_anode - v_cathode;
+        Scalar v_anode = (n_plus >= 0) ? x[n_plus] : 0.0;
+        Scalar v_cathode = (n_minus >= 0) ? x[n_minus] : 0.0;
+        Scalar v_diode = v_anode - v_cathode;
 
         // Determine state
         is_on_ = (v_diode > 0.0);
-        Real g = is_on_ ? g_on_ : g_off_;
+        Scalar g = is_on_ ? g_on_ : g_off_;
 
         // Stamp conductance
         if (n_plus >= 0) {
@@ -603,7 +609,7 @@ public:
         }
 
         // Compute current (for residual)
-        Real i_diode = g * v_diode;
+        Scalar i_diode = g * v_diode;
 
         // Update residual (KCL contribution)
         if (n_plus >= 0) {
@@ -616,12 +622,12 @@ public:
 
     /// Regular stamp for linear-like behavior
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2) return;
 
-        const Index n_plus = nodes[0];
-        const Index n_minus = nodes[1];
-        Real g = is_on_ ? g_on_ : g_off_;
+        const NodeIndex n_plus = nodes[0];
+        const NodeIndex n_minus = nodes[1];
+        Scalar g = is_on_ ? g_on_ : g_off_;
 
         if (n_plus >= 0) {
             G.coeffRef(n_plus, n_plus) += g;
@@ -649,8 +655,8 @@ public:
     [[nodiscard]] bool is_conducting() const { return is_on_; }
 
 private:
-    Real g_on_;
-    Real g_off_;
+    Scalar g_on_;
+    Scalar g_off_;
     mutable bool is_on_;
 };
 
@@ -677,21 +683,21 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::Switch);
 
     struct Params {
-        Real g_on = 1e6;     // On-state conductance
-        Real g_off = 1e-12;  // Off-state conductance
+        Scalar g_on = 1e6;     // On-state conductance
+        Scalar g_off = 1e-12;  // Off-state conductance
         bool initial_state = false;
     };
 
-    explicit IdealSwitch(Real g_on = 1e6, Real g_off = 1e-12, bool closed = false, std::string name = "")
+    explicit IdealSwitch(Scalar g_on = 1e6, Scalar g_off = 1e-12, bool closed = false, std::string name = "")
         : Base(std::move(name)), g_on_(g_on), g_off_(g_off), is_closed_(closed) {}
 
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 2) return;
 
-        const Index n_plus = nodes[0];
-        const Index n_minus = nodes[1];
-        Real g = is_closed_ ? g_on_ : g_off_;
+        const NodeIndex n_plus = nodes[0];
+        const NodeIndex n_minus = nodes[1];
+        Scalar g = is_closed_ ? g_on_ : g_off_;
 
         if (n_plus >= 0) {
             G.coeffRef(n_plus, n_plus) += g;
@@ -722,8 +728,8 @@ public:
     [[nodiscard]] bool is_closed() const { return is_closed_; }
 
 private:
-    Real g_on_;
-    Real g_off_;
+    Scalar g_on_;
+    Scalar g_off_;
     bool is_closed_;
 };
 
@@ -752,10 +758,10 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::MOSFET);
 
     struct Params {
-        Real vth = 2.0;           // Threshold voltage (V)
-        Real kp = 0.1;            // Transconductance parameter (A/V^2)
-        Real lambda = 0.01;       // Channel-length modulation (1/V)
-        Real g_off = 1e-12;       // Off-state conductance
+        Scalar vth = 2.0;           // Threshold voltage (V)
+        Scalar kp = 0.1;            // Transconductance parameter (A/V^2)
+        Scalar lambda = 0.01;       // Channel-length modulation (1/V)
+        Scalar g_off = 1e-12;       // Off-state conductance
         bool is_nmos = true;      // NMOS if true, PMOS if false
     };
 
@@ -765,37 +771,37 @@ public:
     explicit MOSFET(Params params, std::string name)
         : Base(std::move(name)), params_(params) {}
 
-    explicit MOSFET(Real vth, Real kp, bool is_nmos = true, std::string name = "")
+    explicit MOSFET(Scalar vth, Scalar kp, bool is_nmos = true, std::string name = "")
         : Base(std::move(name))
         , params_{vth, kp, 0.01, 1e-12, is_nmos} {}
 
     /// Stamp Jacobian for Newton iteration
     /// Implements Level 1 MOSFET equations
     template<typename Matrix, typename Vec>
-    void stamp_jacobian_impl(Matrix& J, Vec& f, const Vec& x, std::span<const Index> nodes) {
+    void stamp_jacobian_impl(Matrix& J, Vec& f, const Vec& x, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 3) return;
 
-        const Index n_gate = nodes[0];
-        const Index n_drain = nodes[1];
-        const Index n_source = nodes[2];
+        const NodeIndex n_gate = nodes[0];
+        const NodeIndex n_drain = nodes[1];
+        const NodeIndex n_source = nodes[2];
 
         // Get terminal voltages
-        Real vg = (n_gate >= 0) ? x[n_gate] : 0.0;
-        Real vd = (n_drain >= 0) ? x[n_drain] : 0.0;
-        Real vs = (n_source >= 0) ? x[n_source] : 0.0;
+        Scalar vg = (n_gate >= 0) ? x[n_gate] : 0.0;
+        Scalar vd = (n_drain >= 0) ? x[n_drain] : 0.0;
+        Scalar vs = (n_source >= 0) ? x[n_source] : 0.0;
 
         // For PMOS, negate voltages
-        Real sign = params_.is_nmos ? 1.0 : -1.0;
-        Real vgs = sign * (vg - vs);
-        Real vds = sign * (vd - vs);
+        Scalar sign = params_.is_nmos ? 1.0 : -1.0;
+        Scalar vgs = sign * (vg - vs);
+        Scalar vds = sign * (vd - vs);
 
-        Real id = 0.0;      // Drain current
-        Real gm = 0.0;      // Transconductance dId/dVgs
-        Real gds = 0.0;     // Output conductance dId/dVds
+        Scalar id = 0.0;      // Drain current
+        Scalar gm = 0.0;      // Transconductance dId/dVgs
+        Scalar gds = 0.0;     // Output conductance dId/dVds
 
-        Real vth = params_.vth;
-        Real kp = params_.kp;
-        Real lambda = params_.lambda;
+        Scalar vth = params_.vth;
+        Scalar kp = params_.kp;
+        Scalar lambda = params_.lambda;
 
         if (vgs <= vth) {
             // Cutoff region
@@ -803,13 +809,13 @@ public:
             gds = params_.g_off;
         } else if (vds < vgs - vth) {
             // Linear (triode) region
-            Real vov = vgs - vth;
+            Scalar vov = vgs - vth;
             id = kp * (vov * vds - 0.5 * vds * vds) * (1.0 + lambda * vds);
             gm = kp * vds * (1.0 + lambda * vds);
             gds = kp * (vov - vds) * (1.0 + lambda * vds) + kp * (vov * vds - 0.5 * vds * vds) * lambda;
         } else {
             // Saturation region
-            Real vov = vgs - vth;
+            Scalar vov = vgs - vth;
             id = 0.5 * kp * vov * vov * (1.0 + lambda * vds);
             gm = kp * vov * (1.0 + lambda * vds);
             gds = 0.5 * kp * vov * vov * lambda;
@@ -820,7 +826,7 @@ public:
 
         // Stamp Jacobian (Norton equivalent)
         // I_eq = id - gm * vgs - gds * vds
-        Real i_eq = id - gm * vgs - gds * vds;
+        Scalar i_eq = id - gm * vgs - gds * vds;
 
         // Conductance stamps: drain-source path
         if (n_drain >= 0) {
@@ -842,11 +848,11 @@ public:
     }
 
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const NodeIndex> nodes) {
         // For initial guess, stamp small conductance
         if (nodes.size() < 3) return;
-        const Index n_drain = nodes[1];
-        const Index n_source = nodes[2];
+        const NodeIndex n_drain = nodes[1];
+        const NodeIndex n_source = nodes[2];
 
         if (n_drain >= 0) {
             G.coeffRef(n_drain, n_drain) += params_.g_off;
@@ -898,10 +904,10 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::IGBT);
 
     struct Params {
-        Real vth = 5.0;           // Gate threshold voltage (V)
-        Real g_on = 1e4;          // On-state conductance (S)
-        Real g_off = 1e-12;       // Off-state conductance (S)
-        Real v_ce_sat = 1.5;      // Collector-emitter saturation voltage (V)
+        Scalar vth = 5.0;           // Gate threshold voltage (V)
+        Scalar g_on = 1e4;          // On-state conductance (S)
+        Scalar g_off = 1e-12;       // Off-state conductance (S)
+        Scalar v_ce_sat = 1.5;      // Collector-emitter saturation voltage (V)
     };
 
     explicit IGBT(std::string name = "")
@@ -910,33 +916,33 @@ public:
     explicit IGBT(Params params, std::string name)
         : Base(std::move(name)), params_(params), is_on_(false) {}
 
-    explicit IGBT(Real vth, Real g_on = 1e4, std::string name = "")
+    explicit IGBT(Scalar vth, Scalar g_on = 1e4, std::string name = "")
         : Base(std::move(name))
         , params_{vth, g_on, 1e-12, 1.5}
         , is_on_(false) {}
 
     /// Stamp Jacobian for Newton iteration
     template<typename Matrix, typename Vec>
-    void stamp_jacobian_impl(Matrix& J, Vec& f, const Vec& x, std::span<const Index> nodes) {
+    void stamp_jacobian_impl(Matrix& J, Vec& f, const Vec& x, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 3) return;
 
-        const Index n_gate = nodes[0];
-        const Index n_collector = nodes[1];
-        const Index n_emitter = nodes[2];
+        const NodeIndex n_gate = nodes[0];
+        const NodeIndex n_collector = nodes[1];
+        const NodeIndex n_emitter = nodes[2];
 
-        Real vg = (n_gate >= 0) ? x[n_gate] : 0.0;
-        Real vc = (n_collector >= 0) ? x[n_collector] : 0.0;
-        Real ve = (n_emitter >= 0) ? x[n_emitter] : 0.0;
+        Scalar vg = (n_gate >= 0) ? x[n_gate] : 0.0;
+        Scalar vc = (n_collector >= 0) ? x[n_collector] : 0.0;
+        Scalar ve = (n_emitter >= 0) ? x[n_emitter] : 0.0;
 
-        Real vge = vg - ve;
-        Real vce = vc - ve;
+        Scalar vge = vg - ve;
+        Scalar vce = vc - ve;
 
         // Determine state
         is_on_ = (vge > params_.vth) && (vce > 0);
-        Real g = is_on_ ? params_.g_on : params_.g_off;
+        Scalar g = is_on_ ? params_.g_on : params_.g_off;
 
         // Model as voltage-controlled conductance with saturation
-        Real ic = g * vce;
+        Scalar ic = g * vce;
         if (is_on_ && vce > params_.v_ce_sat) {
             // Add forward voltage drop
             ic = g * (vce - params_.v_ce_sat) + params_.g_on * params_.v_ce_sat;
@@ -958,12 +964,12 @@ public:
     }
 
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& /*b*/, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 3) return;
-        const Index n_collector = nodes[1];
-        const Index n_emitter = nodes[2];
+        const NodeIndex n_collector = nodes[1];
+        const NodeIndex n_emitter = nodes[2];
 
-        Real g = is_on_ ? params_.g_on : params_.g_off;
+        Scalar g = is_on_ ? params_.g_on : params_.g_off;
 
         if (n_collector >= 0) {
             G.coeffRef(n_collector, n_collector) += g;
@@ -1016,11 +1022,11 @@ public:
     static constexpr int device_type = static_cast<int>(DeviceType::Transformer);
 
     struct Params {
-        Real turns_ratio = 1.0;   // N:1 (primary:secondary)
-        Real magnetizing_inductance = 1e-3;  // Lm (H), large for ideal
+        Scalar turns_ratio = 1.0;   // N:1 (primary:secondary)
+        Scalar magnetizing_inductance = 1e-3;  // Lm (H), large for ideal
     };
 
-    explicit Transformer(Real turns_ratio, std::string name = "")
+    explicit Transformer(Scalar turns_ratio, std::string name = "")
         : Base(std::move(name))
         , turns_ratio_(turns_ratio)
         , branch_index_p_(-1)
@@ -1035,17 +1041,17 @@ public:
     /// Stamp implementation using coupled inductors formulation
     /// V1 = N * V2, I2 = -N * I1
     template<typename Matrix, typename Vec>
-    void stamp_impl(Matrix& G, Vec& b, std::span<const Index> nodes) {
+    void stamp_impl(Matrix& G, Vec& b, std::span<const NodeIndex> nodes) {
         if (nodes.size() < 4 || branch_index_p_ < 0 || branch_index_s_ < 0) return;
 
-        const Index np_plus = nodes[0];   // Primary +
-        const Index np_minus = nodes[1];  // Primary -
-        const Index ns_plus = nodes[2];   // Secondary +
-        const Index ns_minus = nodes[3];  // Secondary -
-        const Index br_p = branch_index_p_;
-        const Index br_s = branch_index_s_;
+        const NodeIndex np_plus = nodes[0];   // Primary +
+        const NodeIndex np_minus = nodes[1];  // Primary -
+        const NodeIndex ns_plus = nodes[2];   // Secondary +
+        const NodeIndex ns_minus = nodes[3];  // Secondary -
+        const NodeIndex br_p = branch_index_p_;
+        const NodeIndex br_s = branch_index_s_;
 
-        Real n = turns_ratio_;
+        Scalar n = turns_ratio_;
 
         // Ideal transformer equations:
         // V1 - N*V2 = 0  (voltage relation)
@@ -1098,10 +1104,10 @@ public:
         }};
     }
 
-    [[nodiscard]] Real turns_ratio() const { return turns_ratio_; }
+    [[nodiscard]] Scalar turns_ratio() const { return turns_ratio_; }
 
 private:
-    Real turns_ratio_;
+    Scalar turns_ratio_;
     Index branch_index_p_;
     Index branch_index_s_;
 };

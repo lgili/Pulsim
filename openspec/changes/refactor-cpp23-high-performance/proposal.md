@@ -54,6 +54,11 @@ A ground-up refactoring using C++23 with template metaprogramming will deliver a
 - Performance benchmarks vs PSIM/PLECS
 - Automated regression testing
 
+### Cross-Cutting: Reliability & Compatibility
+- Deterministic execution guarantees on x86-64/arm64 with fixed seeds and ordered reductions
+- Observability: machine-readable artifacts for accuracy/perf/memory regressions stored per run
+- Backward-compat shim for v1 API/CLI/Python routed through v2 core
+
 ## Impact
 
 ### Affected Capabilities (Complete Rewrite)
@@ -86,3 +91,5 @@ A ground-up refactoring using C++23 with template metaprogramming will deliver a
 2. **Performance**: 2-5x speedup over current implementation
 3. **Robustness**: Zero convergence failures on standard test circuits
 4. **Compilation**: Full build < 30 seconds with modules
+5. **Determinism**: Repeatable results across runs on the same hardware class (x86-64/arm64) with fixed seeds
+6. **Compatibility**: v1 API/CLI/Python flows operate via v2 core without breaking changes during transition

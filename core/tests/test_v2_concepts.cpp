@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "pulsim/v2/core.hpp"
+#include "pulsim/v2/compat.hpp"
 
 using namespace pulsim::v2;
 using Catch::Approx;
@@ -1191,3 +1192,1149 @@ TEST_CASE("v2 Unit conversions", "[v2][cpp23][constexpr]") {
         REQUIRE(units::period_to_freq(0.001) == Approx(1000.0));
     }
 }
+
+// =============================================================================
+// Tests for Numeric Types (Phase 2.1)
+// =============================================================================
+
+TEST_CASE("v2 Real type configuration", "[v2][numeric][real]") {
+    using namespace pulsim::v2;
+
+    SECTION("Precision selection") {
+        static_assert(std::is_same_v<RealT<Precision::Double>, double>);
+        static_assert(std::is_same_v<RealT<Precision::Single>, float>);
+        static_assert(std::is_same_v<RealD, double>);
+        static_assert(std::is_same_v<RealS, float>);
+        static_assert(std::is_same_v<Real, double>);  // Default alias
+    }
+
+    SECTION("RealTraits") {
+        static_assert(RealTraits<double>::default_abstol == 1e-9);
+        static_assert(RealTraits<float>::default_abstol == 1e-6f);
+        static_assert(RealTraits<double>::default_reltol == 1e-3);
+
+        REQUIRE(RealTraits<double>::epsilon > 0);
+        REQUIRE(RealTraits<double>::digits == 53);  // IEEE 754 double
+    }
+
+    SECTION("RealType concept") {
+        static_assert(RealType<double>);
+        static_assert(RealType<float>);
+        static_assert(!RealType<int>);
+    }
+}
+
+TEST_CASE("v2 Index type configuration", "[v2][numeric][index]") {
+    using namespace pulsim::v2;
+
+    SECTION("Index width selection") {
+        static_assert(std::is_same_v<IndexT<IndexWidth::Narrow>, std::int32_t>);
+        static_assert(std::is_same_v<IndexT<IndexWidth::Wide>, std::int64_t>);
+        static_assert(sizeof(Index32) == 4);
+        static_assert(sizeof(Index64) == 8);
+        static_assert(std::is_same_v<Index, std::int32_t>);  // Default alias
+    }
+
+    SECTION("Ground node constant") {
+        static_assert(ground_node_v<Index32> == -1);
+        static_assert(ground_node_v<Index64> == -1);
+        REQUIRE(ground_node == -1);  // Default constant
+    }
+
+    SECTION("IndexType concept") {
+        static_assert(IndexType<int>);
+        static_assert(IndexType<std::int64_t>);
+        static_assert(!IndexType<unsigned int>);
+    }
+}
+
+TEST_CASE("v2 StaticVector", "[v2][numeric][vector]") {
+    using namespace pulsim::v2;
+
+    SECTION("Construction") {
+        StaticVector<double, 3> v1;  // Default: zeros
+        REQUIRE(v1[0] == 0.0);
+        REQUIRE(v1[1] == 0.0);
+        REQUIRE(v1[2] == 0.0);
+
+        StaticVector<double, 3> v2(5.0);  // Fill
+        REQUIRE(v2[0] == 5.0);
+        REQUIRE(v2[1] == 5.0);
+
+        StaticVector<int, 3> v3{1, 2, 3};  // Initializer list
+        REQUIRE(v3[0] == 1);
+        REQUIRE(v3[1] == 2);
+        REQUIRE(v3[2] == 3);
+
+        Vec3d v4(1.0, 2.0, 3.0);  // Variadic
+        REQUIRE(v4[0] == 1.0);
+        REQUIRE(v4[2] == 3.0);
+    }
+
+    SECTION("Element access") {
+        Vec3d v{1.0, 2.0, 3.0};
+        REQUIRE(v[0] == 1.0);
+        REQUIRE(v.front() == 1.0);
+        REQUIRE(v.back() == 3.0);
+        REQUIRE(v.size() == 3);
+    }
+
+    SECTION("Arithmetic operations") {
+        Vec3d a{1.0, 2.0, 3.0};
+        Vec3d b{4.0, 5.0, 6.0};
+
+        auto sum = a + b;
+        REQUIRE(sum[0] == 5.0);
+        REQUIRE(sum[1] == 7.0);
+        REQUIRE(sum[2] == 9.0);
+
+        auto diff = b - a;
+        REQUIRE(diff[0] == 3.0);
+
+        auto scaled = a * 2.0;
+        REQUIRE(scaled[0] == 2.0);
+        REQUIRE(scaled[2] == 6.0);
+
+        auto neg = -a;
+        REQUIRE(neg[0] == -1.0);
+    }
+
+    SECTION("Vector operations") {
+        Vec3d a{1.0, 2.0, 3.0};
+        Vec3d b{4.0, 5.0, 6.0};
+
+        // Dot product: 1*4 + 2*5 + 3*6 = 32
+        REQUIRE(a.dot(b) == 32.0);
+
+        // Squared norm: 1 + 4 + 9 = 14
+        REQUIRE(a.squared_norm() == 14.0);
+
+        // Norm
+        REQUIRE(a.norm() == Approx(std::sqrt(14.0)));
+
+        // Sum
+        REQUIRE(a.sum() == 6.0);
+
+        // Min/Max
+        REQUIRE(a.min_element() == 1.0);
+        REQUIRE(a.max_element() == 3.0);
+
+        Vec3d c{-5.0, 3.0, -2.0};
+        REQUIRE(c.max_abs() == 5.0);
+    }
+
+    SECTION("Constexpr operations") {
+        constexpr Vec3<int> v{1, 2, 3};
+        static_assert(v[0] == 1);
+        static_assert(v.size() == 3);
+        static_assert((v + Vec3<int>{1, 1, 1})[0] == 2);
+        static_assert(v.dot(Vec3<int>{1, 1, 1}) == 6);
+    }
+
+    SECTION("Iteration") {
+        Vec3d v{1.0, 2.0, 3.0};
+        double sum = 0;
+        for (double x : v) sum += x;
+        REQUIRE(sum == 6.0);
+    }
+}
+
+TEST_CASE("v2 StaticMatrix", "[v2][numeric][matrix]") {
+    using namespace pulsim::v2;
+
+    SECTION("Construction") {
+        Mat2d m1;  // Default: zeros
+        REQUIRE(m1(0, 0) == 0.0);
+
+        Mat2d m2(1.0);  // Fill with 1
+        REQUIRE(m2(0, 0) == 1.0);
+        REQUIRE(m2(1, 1) == 1.0);
+
+        Mat2d m3{{1.0, 2.0}, {3.0, 4.0}};  // Initializer list
+        REQUIRE(m3(0, 0) == 1.0);
+        REQUIRE(m3(0, 1) == 2.0);
+        REQUIRE(m3(1, 0) == 3.0);
+        REQUIRE(m3(1, 1) == 4.0);
+    }
+
+    SECTION("Identity matrix") {
+        auto I = Mat3d::identity();
+        REQUIRE(I(0, 0) == 1.0);
+        REQUIRE(I(1, 1) == 1.0);
+        REQUIRE(I(2, 2) == 1.0);
+        REQUIRE(I(0, 1) == 0.0);
+        REQUIRE(I(1, 0) == 0.0);
+    }
+
+    SECTION("Row and column access") {
+        Mat2d m{{1.0, 2.0}, {3.0, 4.0}};
+        auto r0 = m.row(0);
+        REQUIRE(r0[0] == 1.0);
+        REQUIRE(r0[1] == 2.0);
+
+        auto c1 = m.col(1);
+        REQUIRE(c1[0] == 2.0);
+        REQUIRE(c1[1] == 4.0);
+    }
+
+    SECTION("Arithmetic operations") {
+        Mat2d a{{1.0, 2.0}, {3.0, 4.0}};
+        Mat2d b{{5.0, 6.0}, {7.0, 8.0}};
+
+        auto sum = a + b;
+        REQUIRE(sum(0, 0) == 6.0);
+        REQUIRE(sum(1, 1) == 12.0);
+
+        auto scaled = a * 2.0;
+        REQUIRE(scaled(0, 0) == 2.0);
+        REQUIRE(scaled(1, 1) == 8.0);
+    }
+
+    SECTION("Matrix-vector multiplication") {
+        Mat2d m{{1.0, 2.0}, {3.0, 4.0}};
+        Vec2d v{1.0, 1.0};
+
+        auto result = m * v;
+        REQUIRE(result[0] == 3.0);   // 1*1 + 2*1
+        REQUIRE(result[1] == 7.0);   // 3*1 + 4*1
+    }
+
+    SECTION("Matrix-matrix multiplication") {
+        Mat2d a{{1.0, 2.0}, {3.0, 4.0}};
+        Mat2d b{{5.0, 6.0}, {7.0, 8.0}};
+
+        auto c = a * b;
+        REQUIRE(c(0, 0) == 19.0);  // 1*5 + 2*7
+        REQUIRE(c(0, 1) == 22.0);  // 1*6 + 2*8
+        REQUIRE(c(1, 0) == 43.0);  // 3*5 + 4*7
+        REQUIRE(c(1, 1) == 50.0);  // 3*6 + 4*8
+    }
+
+    SECTION("Transpose") {
+        Mat2d m{{1.0, 2.0}, {3.0, 4.0}};
+        auto t = m.transpose();
+        REQUIRE(t(0, 0) == 1.0);
+        REQUIRE(t(0, 1) == 3.0);
+        REQUIRE(t(1, 0) == 2.0);
+        REQUIRE(t(1, 1) == 4.0);
+    }
+
+    SECTION("Determinant and inverse") {
+        Mat2d m{{4.0, 7.0}, {2.0, 6.0}};
+        REQUIRE(m.determinant() == Approx(10.0));  // 4*6 - 7*2
+
+        auto inv = m.inverse();
+        auto identity = m * inv;
+        REQUIRE(identity(0, 0) == Approx(1.0).margin(1e-10));
+        REQUIRE(identity(0, 1) == Approx(0.0).margin(1e-10));
+        REQUIRE(identity(1, 0) == Approx(0.0).margin(1e-10));
+        REQUIRE(identity(1, 1) == Approx(1.0).margin(1e-10));
+    }
+
+    SECTION("Trace") {
+        Mat3d m{{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}, {7.0, 8.0, 9.0}};
+        REQUIRE(m.trace() == 15.0);  // 1 + 5 + 9
+    }
+
+    SECTION("Constexpr operations") {
+        constexpr Mat2<int> m{{1, 2}, {3, 4}};
+        static_assert(m(0, 0) == 1);
+        static_assert(m(1, 1) == 4);
+        static_assert(Mat2<int>::identity()(0, 0) == 1);
+    }
+}
+
+TEST_CASE("v2 SparsityPattern", "[v2][numeric][sparsity]") {
+    using namespace pulsim::v2;
+
+    SECTION("Construction") {
+        SparsityPattern<10> p;
+        REQUIRE(p.size() == 0);
+        REQUIRE(p.empty());
+
+        p.add(0, 0);
+        p.add(0, 1);
+        p.add(1, 0);
+        p.add(1, 1);
+        REQUIRE(p.size() == 4);
+        REQUIRE(!p.empty());
+    }
+
+    SECTION("Predefined patterns") {
+        auto p2x2 = make_2x2_pattern();
+        REQUIRE(p2x2.size() == 4);
+        REQUIRE(p2x2.contains(0, 0));
+        REQUIRE(p2x2.contains(1, 1));
+
+        auto p3x3 = make_3x3_pattern();
+        REQUIRE(p3x3.size() == 9);
+    }
+
+    SECTION("Contains check") {
+        SparsityPattern<10> p{{PatternEntry{0, 0}, PatternEntry{1, 1}}};
+        REQUIRE(p.contains(0, 0));
+        REQUIRE(p.contains(1, 1));
+        REQUIRE(!p.contains(0, 1));
+    }
+
+    SECTION("Merge patterns") {
+        SparsityPattern<4> p1{{PatternEntry{0, 0}, PatternEntry{0, 1}}};
+        SparsityPattern<4> p2{{PatternEntry{1, 0}, PatternEntry{1, 1}}};
+
+        auto merged = p1.merge(p2);
+        REQUIRE(merged.size() == 4);
+        REQUIRE(merged.contains(0, 0));
+        REQUIRE(merged.contains(1, 1));
+    }
+
+    SECTION("Max indices") {
+        SparsityPattern<4> p{{PatternEntry{0, 0}, PatternEntry{2, 3}}};
+        auto [max_r, max_c] = p.max_indices();
+        REQUIRE(max_r == 2);
+        REQUIRE(max_c == 3);
+    }
+
+    SECTION("Iteration") {
+        auto p = make_2x2_pattern();
+        int count = 0;
+        for (const auto& entry : p) {
+            REQUIRE(entry.valid());
+            ++count;
+        }
+        REQUIRE(count == 4);
+    }
+}
+
+TEST_CASE("v2 Units and dimensional analysis", "[v2][numeric][units]") {
+    using namespace pulsim::v2;
+    using namespace pulsim::v2::literals;
+
+    SECTION("Quantity creation") {
+        Voltage<> v(5.0);
+        REQUIRE(v.value() == 5.0);
+
+        Current<> i(2.0);
+        REQUIRE(i.value() == 2.0);
+    }
+
+    SECTION("User-defined literals") {
+        auto v = 5.0_V;
+        REQUIRE(v.value() == 5.0);
+
+        auto v_mV = 100.0_mV;
+        REQUIRE(v_mV.value() == Approx(0.1));
+
+        auto i = 1.0_A;
+        REQUIRE(i.value() == 1.0);
+
+        auto i_mA = 500.0_mA;
+        REQUIRE(i_mA.value() == Approx(0.5));
+
+        auto c = 100.0_uF;
+        REQUIRE(c.value() == Approx(100e-6));
+
+        auto l = 10.0_mH;
+        REQUIRE(l.value() == Approx(10e-3));
+
+        auto t = 1.0_ms;
+        REQUIRE(t.value() == Approx(1e-3));
+
+        auto f = 1.0_kHz;
+        REQUIRE(f.value() == Approx(1e3));
+    }
+
+    SECTION("Same-dimension arithmetic") {
+        auto v1 = 5.0_V;
+        auto v2 = 3.0_V;
+
+        auto sum = v1 + v2;
+        REQUIRE(sum.value() == 8.0);
+
+        auto diff = v1 - v2;
+        REQUIRE(diff.value() == 2.0);
+
+        auto neg = -v1;
+        REQUIRE(neg.value() == -5.0);
+
+        auto scaled = v1 * 2.0;
+        REQUIRE(scaled.value() == 10.0);
+    }
+
+    SECTION("Dimensional analysis: V = I * R") {
+        Current<> i(2.0);
+        Resistance<> r(100.0);
+
+        auto v = i * r;  // Should be Voltage
+        static_assert(std::is_same_v<decltype(v), Voltage<>>);
+        REQUIRE(v.value() == 200.0);
+    }
+
+    SECTION("Dimensional analysis: P = V * I") {
+        Voltage<> v(10.0);
+        Current<> i(2.0);
+
+        auto p = v * i;  // Should be Power
+        static_assert(std::is_same_v<decltype(p), Power<>>);
+        REQUIRE(p.value() == 20.0);
+    }
+
+    SECTION("Dimensional analysis: R = V / I") {
+        Voltage<> v(10.0);
+        Current<> i(2.0);
+
+        auto r = v / i;  // Should be Resistance
+        static_assert(std::is_same_v<decltype(r), Resistance<>>);
+        REQUIRE(r.value() == 5.0);
+    }
+
+    SECTION("Comparison") {
+        auto v1 = 5.0_V;
+        auto v2 = 3.0_V;
+        auto v3 = 5.0_V;
+
+        REQUIRE(v1 > v2);
+        REQUIRE(v2 < v1);
+        REQUIRE(v1 == v3);
+        REQUIRE(v1 >= v3);
+        REQUIRE(v2 <= v1);
+    }
+}
+
+// =============================================================================
+// Tests for Normalization/Scaling Helpers (Phase 2.1.7)
+// =============================================================================
+
+TEST_CASE("v2 ScalingFactors", "[v2][numeric][scaling]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default scaling") {
+        ScalingFactors<> sf;
+        REQUIRE(sf.voltage_scale == 1.0);
+        REQUIRE(sf.current_scale == 1.0);
+        REQUIRE(sf.time_scale == 1.0);
+        REQUIRE(sf.conductance_scale == 1.0);
+    }
+
+    SECTION("Custom scaling") {
+        ScalingFactors<> sf(100.0, 10.0, 1e-6);
+        REQUIRE(sf.voltage_scale == 100.0);
+        REQUIRE(sf.current_scale == 10.0);
+        REQUIRE(sf.time_scale == 1e-6);
+        REQUIRE(sf.conductance_scale == Approx(0.1));  // 10/100
+    }
+
+    SECTION("Preset scaling factors") {
+        auto pe = ScalingFactors<>::power_electronics();
+        REQUIRE(pe.voltage_scale == 100.0);
+        REQUIRE(pe.current_scale == 1.0);
+
+        auto sig = ScalingFactors<>::signal_level();
+        REQUIRE(sig.voltage_scale == 1.0);
+        REQUIRE(sig.current_scale == 1e-3);
+
+        auto hp = ScalingFactors<>::high_power();
+        REQUIRE(hp.voltage_scale == 1000.0);
+        REQUIRE(hp.current_scale == 100.0);
+    }
+
+    SECTION("From circuit characteristics") {
+        auto sf = ScalingFactors<>::from_circuit(400.0, 50.0, 1e-6);
+        REQUIRE(sf.voltage_scale == 400.0);
+        REQUIRE(sf.current_scale == 50.0);
+        REQUIRE(sf.time_scale == 1e-6);
+    }
+}
+
+TEST_CASE("v2 VariableNormalizer", "[v2][numeric][scaling]") {
+    using namespace pulsim::v2;
+
+    SECTION("Identity normalization") {
+        VariableNormalizer<> norm;
+        REQUIRE_FALSE(norm.is_active());
+        REQUIRE(norm.normalize_voltage(100.0) == 100.0);
+        REQUIRE(norm.denormalize_voltage(100.0) == 100.0);
+    }
+
+    SECTION("Voltage/current normalization") {
+        ScalingFactors<> sf(100.0, 10.0, 1e-6);
+        VariableNormalizer<> norm(sf);
+
+        REQUIRE(norm.is_active());
+
+        // Normalize
+        REQUIRE(norm.normalize_voltage(200.0) == Approx(2.0));   // 200/100
+        REQUIRE(norm.normalize_current(5.0) == Approx(0.5));     // 5/10
+
+        // Denormalize
+        REQUIRE(norm.denormalize_voltage(2.0) == Approx(200.0));
+        REQUIRE(norm.denormalize_current(0.5) == Approx(5.0));
+    }
+
+    SECTION("Conductance/resistance normalization") {
+        ScalingFactors<> sf(100.0, 10.0, 1e-6);
+        VariableNormalizer<> norm(sf);
+
+        // G = I/V, so G_base = 10/100 = 0.1 S
+        REQUIRE(norm.normalize_conductance(0.05) == Approx(0.5));   // 0.05/0.1
+        REQUIRE(norm.normalize_resistance(200.0) == Approx(20.0));   // 200*0.1
+
+        REQUIRE(norm.denormalize_conductance(0.5) == Approx(0.05));
+        REQUIRE(norm.denormalize_resistance(20.0) == Approx(200.0));
+    }
+
+    SECTION("Capacitance/inductance normalization") {
+        ScalingFactors<> sf(100.0, 10.0, 1e-6);  // V=100, I=10, t=1μs
+        VariableNormalizer<> norm(sf);
+
+        // C_norm = C * V / (I * t) = C * 100 / (10 * 1e-6) = C * 1e7
+        double c_phys = 100e-6;  // 100μF
+        double c_norm = norm.normalize_capacitance(c_phys);
+        REQUIRE(c_norm == Approx(100e-6 * 100.0 / (10.0 * 1e-6)));
+
+        // L_norm = L * I / (V * t) = L * 10 / (100 * 1e-6) = L * 1e5
+        double l_phys = 10e-3;  // 10mH
+        double l_norm = norm.normalize_inductance(l_phys);
+        REQUIRE(l_norm == Approx(10e-3 * 10.0 / (100.0 * 1e-6)));
+    }
+}
+
+TEST_CASE("v2 WeightedNorm", "[v2][numeric][scaling]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default tolerances") {
+        WeightedNorm<> wnorm;
+        auto tol = wnorm.tolerances();
+        REQUIRE(tol.abstol_v == 1e-9);
+        REQUIRE(tol.reltol_v == 1e-3);
+        REQUIRE(tol.abstol_i == 1e-12);
+        REQUIRE(tol.reltol_i == 1e-3);
+    }
+
+    SECTION("Convergence check") {
+        WeightedNorm<>::Tolerances tol{1e-6, 1e-3, 1e-9, 1e-3};
+        WeightedNorm<> wnorm(tol);
+
+        // Simple 3-node, 1-branch system
+        Eigen::VectorXd delta(4);
+        Eigen::VectorXd solution(4);
+
+        // Solution: V1=10V, V2=5V, V3=3V, I1=0.1A
+        solution << 10.0, 5.0, 3.0, 0.1;
+
+        // Small delta - should converge
+        delta << 1e-9, 1e-9, 1e-9, 1e-12;
+        REQUIRE(wnorm.has_converged(delta, solution, 3, 1));
+
+        // Large delta - should not converge
+        delta << 0.1, 0.1, 0.1, 0.001;
+        REQUIRE_FALSE(wnorm.has_converged(delta, solution, 3, 1));
+    }
+}
+
+TEST_CASE("v2 PerUnitSystem", "[v2][numeric][scaling]") {
+    using namespace pulsim::v2;
+
+    SECTION("Base quantity calculations") {
+        PerUnitSystem<>::BaseQuantities base{1000.0, 400.0, 50.0};  // 1kVA, 400V, 50Hz
+
+        REQUIRE(base.I_base() == Approx(2.5));     // 1000/400
+        REQUIRE(base.Z_base() == Approx(160.0));   // 400²/1000
+        REQUIRE(base.Y_base() == Approx(0.00625)); // 1000/400²
+    }
+
+    SECTION("Per-unit conversions") {
+        PerUnitSystem<>::BaseQuantities base{1000.0, 400.0, 50.0};
+        PerUnitSystem<> pu(base);
+
+        // Voltage: 800V should be 2 p.u.
+        REQUIRE(pu.to_pu_voltage(800.0) == Approx(2.0));
+        REQUIRE(pu.from_pu_voltage(2.0) == Approx(800.0));
+
+        // Current: 5A should be 2 p.u.
+        REQUIRE(pu.to_pu_current(5.0) == Approx(2.0));
+        REQUIRE(pu.from_pu_current(2.0) == Approx(5.0));
+
+        // Power: 2000W should be 2 p.u.
+        REQUIRE(pu.to_pu_power(2000.0) == Approx(2.0));
+        REQUIRE(pu.from_pu_power(2.0) == Approx(2000.0));
+
+        // Impedance: 320Ω should be 2 p.u.
+        REQUIRE(pu.to_pu_impedance(320.0) == Approx(2.0));
+        REQUIRE(pu.from_pu_impedance(2.0) == Approx(320.0));
+    }
+}
+
+// =============================================================================
+// Tests for Backward Compatibility Shim (Phase 1.3.6/1.3.7)
+// =============================================================================
+
+TEST_CASE("v2 Compat header", "[v2][compat]") {
+    using namespace pulsim::compat;
+
+    SECTION("Type aliases") {
+        static_assert(std::is_same_v<Real, double>);
+        static_assert(std::is_same_v<Index, std::int32_t>);
+        REQUIRE(ground == -1);
+    }
+
+    SECTION("Device type mapping") {
+        // Check that compat devices are v2 devices
+        static_assert(std::is_same_v<Resistor, pulsim::v2::Resistor>);
+        static_assert(std::is_same_v<Capacitor, pulsim::v2::Capacitor>);
+        static_assert(std::is_same_v<Inductor, pulsim::v2::Inductor>);
+    }
+
+    SECTION("Version detection") {
+        // PULSIM_USE_V2 is 0 by default
+        REQUIRE_FALSE(is_v2_enabled());
+        REQUIRE(std::string(api_version_string()) == "v1");
+        REQUIRE(std::string(version_string()) == "2.0.0");
+    }
+}
+
+TEST_CASE("v2 Migration helpers", "[v2][compat][migration]") {
+    using namespace pulsim::migration;
+    using namespace pulsim::v2;
+
+    SECTION("Component to device type mapping") {
+        REQUIRE(component_to_device_type(0) == DeviceType::Resistor);
+        REQUIRE(component_to_device_type(1) == DeviceType::Capacitor);
+        REQUIRE(component_to_device_type(2) == DeviceType::Inductor);
+        REQUIRE(component_to_device_type(3) == DeviceType::VoltageSource);
+        REQUIRE(component_to_device_type(4) == DeviceType::CurrentSource);
+        REQUIRE(component_to_device_type(9) == DeviceType::Diode);
+        REQUIRE(component_to_device_type(10) == DeviceType::Switch);
+        REQUIRE(component_to_device_type(11) == DeviceType::MOSFET);
+        REQUIRE(component_to_device_type(12) == DeviceType::IGBT);
+        REQUIRE(component_to_device_type(13) == DeviceType::Transformer);
+        REQUIRE(component_to_device_type(99) == DeviceType::Unknown);
+    }
+
+    SECTION("Device support check") {
+        REQUIRE(is_device_supported_v2(DeviceType::Resistor));
+        REQUIRE(is_device_supported_v2(DeviceType::MOSFET));
+        REQUIRE_FALSE(is_device_supported_v2(DeviceType::Unknown));
+    }
+}
+
+// =============================================================================
+// Tests for Expression Templates (Phase 2.4)
+// =============================================================================
+
+TEST_CASE("v2 Expression templates - basic operations", "[v2][expression]") {
+    using namespace pulsim::v2;
+
+    SECTION("Vector addition expression") {
+        StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+        StaticVector<double, 4> b{5.0, 6.0, 7.0, 8.0};
+
+        auto expr = a + b;
+        REQUIRE(expr[0] == 6.0);
+        REQUIRE(expr[1] == 8.0);
+        REQUIRE(expr[2] == 10.0);
+        REQUIRE(expr[3] == 12.0);
+        REQUIRE(expr.size() == 4);
+    }
+
+    SECTION("Vector subtraction expression") {
+        StaticVector<double, 4> a{10.0, 20.0, 30.0, 40.0};
+        StaticVector<double, 4> b{1.0, 2.0, 3.0, 4.0};
+
+        auto expr = a - b;
+        REQUIRE(expr[0] == 9.0);
+        REQUIRE(expr[1] == 18.0);
+        REQUIRE(expr[2] == 27.0);
+        REQUIRE(expr[3] == 36.0);
+    }
+
+    SECTION("Scalar multiplication expression") {
+        StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+
+        auto expr1 = 2.0 * a;
+        REQUIRE(expr1[0] == 2.0);
+        REQUIRE(expr1[3] == 8.0);
+
+        auto expr2 = a * 3.0;
+        REQUIRE(expr2[0] == 3.0);
+        REQUIRE(expr2[3] == 12.0);
+    }
+
+    SECTION("Scalar division expression") {
+        StaticVector<double, 4> a{10.0, 20.0, 30.0, 40.0};
+
+        auto expr = a / 10.0;
+        REQUIRE(expr[0] == 1.0);
+        REQUIRE(expr[3] == 4.0);
+    }
+
+    SECTION("Negation expression") {
+        StaticVector<double, 4> a{1.0, -2.0, 3.0, -4.0};
+
+        auto expr = -a;
+        REQUIRE(expr[0] == -1.0);
+        REQUIRE(expr[1] == 2.0);
+        REQUIRE(expr[2] == -3.0);
+        REQUIRE(expr[3] == 4.0);
+    }
+}
+
+TEST_CASE("v2 Expression templates - nested expressions", "[v2][expression]") {
+    using namespace pulsim::v2;
+
+    SECTION("Chained addition") {
+        StaticVector<double, 3> a{1.0, 2.0, 3.0};
+        StaticVector<double, 3> b{4.0, 5.0, 6.0};
+        StaticVector<double, 3> c{7.0, 8.0, 9.0};
+
+        auto expr = a + b + c;
+        REQUIRE(expr[0] == 12.0);
+        REQUIRE(expr[1] == 15.0);
+        REQUIRE(expr[2] == 18.0);
+    }
+
+    SECTION("Mixed operations") {
+        StaticVector<double, 3> a{1.0, 2.0, 3.0};
+        StaticVector<double, 3> b{1.0, 1.0, 1.0};
+
+        // 2 * (a + b)
+        auto expr = 2.0 * (a + b);
+        REQUIRE(expr[0] == 4.0);
+        REQUIRE(expr[1] == 6.0);
+        REQUIRE(expr[2] == 8.0);
+    }
+
+    SECTION("Complex expression") {
+        StaticVector<double, 3> a{1.0, 2.0, 3.0};
+        StaticVector<double, 3> b{4.0, 5.0, 6.0};
+
+        // (a + b) - 2.0 * a
+        auto expr = (a + b) - (2.0 * a);
+        REQUIRE(expr[0] == Approx(3.0));  // (1+4) - 2*1 = 3
+        REQUIRE(expr[1] == Approx(3.0));  // (2+5) - 2*2 = 3
+        REQUIRE(expr[2] == Approx(3.0));  // (3+6) - 2*3 = 3
+    }
+}
+
+TEST_CASE("v2 Expression templates - lazy evaluation", "[v2][expression]") {
+    using namespace pulsim::v2;
+
+    SECTION("eval function") {
+        StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+        StaticVector<double, 4> b{5.0, 6.0, 7.0, 8.0};
+
+        auto expr = a + b;
+        auto result = eval<decltype(expr), 4>(expr);
+
+        REQUIRE(result[0] == 6.0);
+        REQUIRE(result[3] == 12.0);
+    }
+
+    SECTION("eval_to function") {
+        StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+        StaticVector<double, 4> b{5.0, 6.0, 7.0, 8.0};
+        StaticVector<double, 4> result;
+
+        auto expr = a + b;
+        eval_to(expr, result);
+
+        REQUIRE(result[0] == 6.0);
+        REQUIRE(result[3] == 12.0);
+    }
+
+    SECTION("Expression sum") {
+        StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+        StaticVector<double, 4> b{1.0, 1.0, 1.0, 1.0};
+
+        auto expr = a + b;
+        REQUIRE(expr.sum() == 14.0);  // (1+1) + (2+1) + (3+1) + (4+1)
+    }
+
+    SECTION("Expression dot product") {
+        StaticVector<double, 3> a{1.0, 2.0, 3.0};
+        StaticVector<double, 3> b{1.0, 1.0, 1.0};
+        StaticVector<double, 3> c{4.0, 5.0, 6.0};
+
+        auto expr = a + b;  // {2, 3, 4}
+        REQUIRE(expr.dot(c) == 47.0);  // 2*4 + 3*5 + 4*6 = 47
+    }
+
+    SECTION("Expression norms") {
+        StaticVector<double, 3> a{3.0, 0.0, 4.0};
+        StaticVector<double, 3> b{0.0, 0.0, 0.0};
+
+        auto expr = a + b;
+        REQUIRE(expr.squared_norm() == 25.0);  // 9 + 0 + 16
+        REQUIRE(expr.norm() == Approx(5.0));
+    }
+}
+
+TEST_CASE("v2 Expression templates - VectorRef", "[v2][expression]") {
+    using namespace pulsim::v2;
+
+    SECTION("VectorRef from raw array") {
+        double data[] = {1.0, 2.0, 3.0, 4.0};
+        VectorRef<double> ref(data, 4);
+
+        REQUIRE(ref.size() == 4);
+        REQUIRE(ref[0] == 1.0);
+        REQUIRE(ref[3] == 4.0);
+    }
+
+    SECTION("VectorRef from StaticVector") {
+        StaticVector<double, 4> vec{1.0, 2.0, 3.0, 4.0};
+        VectorRef ref(vec);
+
+        REQUIRE(ref.size() == 4);
+        REQUIRE(ref[0] == 1.0);
+    }
+
+    SECTION("VectorRef in expressions") {
+        StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+        double b_data[] = {5.0, 6.0, 7.0, 8.0};
+        VectorRef<double> b(b_data, 4);
+
+        auto expr = a + b;
+        REQUIRE(expr[0] == 6.0);
+        REQUIRE(expr[3] == 12.0);
+    }
+}
+
+TEST_CASE("v2 Expression templates - constexpr", "[v2][expression]") {
+    using namespace pulsim::v2;
+
+    SECTION("Constexpr expression evaluation") {
+        constexpr StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+        constexpr StaticVector<double, 4> b{5.0, 6.0, 7.0, 8.0};
+
+        // Expression can be evaluated at compile time
+        static_assert((a + b)[0] == 6.0);
+        static_assert((a + b)[3] == 12.0);
+        static_assert((2.0 * a)[0] == 2.0);
+        static_assert((a - b)[0] == -4.0);
+    }
+}
+
+// =============================================================================
+// Tests for Compile-Time Circuit Analysis (Phase 2.5)
+// =============================================================================
+
+TEST_CASE("v2 Circuit device traits", "[v2][circuit][traits]") {
+    using namespace pulsim::v2;
+
+    SECTION("Terminal counts") {
+        REQUIRE(circuit_device_traits<Resistor>::terminal_count == 2);
+        REQUIRE(circuit_device_traits<Capacitor>::terminal_count == 2);
+        REQUIRE(circuit_device_traits<Inductor>::terminal_count == 2);
+        REQUIRE(circuit_device_traits<VoltageSource>::terminal_count == 2);
+        REQUIRE(circuit_device_traits<MOSFET>::terminal_count == 3);
+        REQUIRE(circuit_device_traits<Transformer>::terminal_count == 4);
+    }
+
+    SECTION("Branch counts") {
+        REQUIRE(circuit_device_traits<Resistor>::branch_count == 0);
+        REQUIRE(circuit_device_traits<Capacitor>::branch_count == 0);
+        REQUIRE(circuit_device_traits<Inductor>::branch_count == 1);
+        REQUIRE(circuit_device_traits<VoltageSource>::branch_count == 1);
+        REQUIRE(circuit_device_traits<CurrentSource>::branch_count == 0);
+        REQUIRE(circuit_device_traits<Transformer>::branch_count == 2);
+    }
+
+    SECTION("Linear/nonlinear classification") {
+        REQUIRE(circuit_device_traits<Resistor>::is_linear == true);
+        REQUIRE(circuit_device_traits<Capacitor>::is_linear == true);
+        REQUIRE(circuit_device_traits<Inductor>::is_linear == true);
+        REQUIRE(circuit_device_traits<VoltageSource>::is_linear == true);
+        REQUIRE(circuit_device_traits<IdealDiode>::is_linear == false);
+        REQUIRE(circuit_device_traits<MOSFET>::is_linear == false);
+    }
+
+    SECTION("History requirements") {
+        REQUIRE(circuit_device_traits<Resistor>::needs_history == false);
+        REQUIRE(circuit_device_traits<Capacitor>::needs_history == true);
+        REQUIRE(circuit_device_traits<Inductor>::needs_history == true);
+        REQUIRE(circuit_device_traits<VoltageSource>::needs_history == false);
+    }
+
+    SECTION("Switching classification") {
+        REQUIRE(circuit_device_traits<Resistor>::is_switching == false);
+        REQUIRE(circuit_device_traits<IdealSwitch>::is_switching == true);
+        REQUIRE(circuit_device_traits<IdealDiode>::is_switching == true);
+        REQUIRE(circuit_device_traits<MOSFET>::is_switching == true);
+        REQUIRE(circuit_device_traits<IGBT>::is_switching == true);
+    }
+}
+
+TEST_CASE("v2 Compile-time counting utilities", "[v2][circuit][counting]") {
+    using namespace pulsim::v2;
+
+    SECTION("Node counting") {
+        static_assert(count_max_nodes_v<Resistor> == 2);
+        static_assert(count_max_nodes_v<Resistor, Capacitor> == 4);
+        static_assert(count_max_nodes_v<Resistor, Capacitor, VoltageSource> == 6);
+        static_assert(count_max_nodes_v<MOSFET> == 3);
+    }
+
+    SECTION("Branch counting") {
+        static_assert(count_branches_v<Resistor> == 0);
+        static_assert(count_branches_v<VoltageSource> == 1);
+        static_assert(count_branches_v<Inductor> == 1);
+        static_assert(count_branches_v<Resistor, VoltageSource> == 1);
+        static_assert(count_branches_v<VoltageSource, Inductor> == 2);
+        static_assert(count_branches_v<Transformer> == 2);
+    }
+
+    SECTION("Linear device counting") {
+        static_assert(count_linear_devices_v<Resistor> == 1);
+        static_assert(count_linear_devices_v<Resistor, Capacitor> == 2);
+        static_assert(count_linear_devices_v<Resistor, IdealDiode> == 1);
+        static_assert(count_nonlinear_devices_v<Resistor, IdealDiode> == 1);
+    }
+}
+
+TEST_CASE("v2 Circuit type queries", "[v2][circuit][queries]") {
+    using namespace pulsim::v2;
+
+    SECTION("Linear circuit check") {
+        static_assert(is_linear_circuit<Resistor, Capacitor, VoltageSource>());
+        static_assert(is_linear_circuit<Resistor, Inductor>());
+        static_assert(!is_linear_circuit<Resistor, IdealDiode>());
+        static_assert(!is_linear_circuit<Resistor, MOSFET>());
+    }
+
+    SECTION("Reactive elements check") {
+        static_assert(!has_reactive_elements<Resistor, VoltageSource>());
+        static_assert(has_reactive_elements<Resistor, Capacitor>());
+        static_assert(has_reactive_elements<Resistor, Inductor>());
+        static_assert(has_reactive_elements<Capacitor, Inductor>());
+    }
+
+    SECTION("Switching elements check") {
+        static_assert(!has_switching_elements<Resistor, Capacitor>());
+        static_assert(has_switching_elements<Resistor, IdealSwitch>());
+        static_assert(has_switching_elements<IdealDiode, Resistor>());
+        static_assert(has_switching_elements<MOSFET, Resistor>());
+    }
+}
+
+TEST_CASE("v2 Topology validation", "[v2][circuit][validation]") {
+    using namespace pulsim::v2;
+
+    SECTION("RC circuit validation") {
+        constexpr auto val = validate_circuit_topology<Resistor, Capacitor, VoltageSource>();
+        REQUIRE(val.is_valid);
+        REQUIRE(val.has_voltage_reference);
+        REQUIRE(val.node_count == 6);  // Max nodes
+        REQUIRE(val.branch_count == 1);  // VoltageSource branch
+    }
+
+    SECTION("RLC circuit validation") {
+        constexpr auto val = validate_circuit_topology<Resistor, Inductor, Capacitor, VoltageSource>();
+        REQUIRE(val.is_valid);
+        REQUIRE(val.branch_count == 2);  // VoltageSource + Inductor branches
+    }
+
+    SECTION("Circuit with no voltage source") {
+        constexpr auto val = validate_circuit_topology<Resistor, Capacitor>();
+        REQUIRE(val.is_valid);  // Still valid, just no voltage reference
+        REQUIRE_FALSE(val.has_voltage_reference);
+    }
+}
+
+TEST_CASE("v2 CircuitGraph basic usage", "[v2][circuit][graph]") {
+    using namespace pulsim::v2;
+
+    SECTION("RC circuit graph creation") {
+        Resistor r(1000.0);
+        Capacitor c(1e-6, 0.0);
+        VoltageSource vs(10.0);
+
+        auto circuit = make_circuit(r, c, vs);
+
+        REQUIRE(circuit.device_type_count == 3);
+        REQUIRE(circuit.total_branches == 1);  // Only VoltageSource has branch
+        REQUIRE(circuit.all_linear == true);
+        REQUIRE(circuit.needs_history == true);  // Capacitor needs history
+        REQUIRE(circuit.has_switching == false);
+        REQUIRE(circuit.is_valid());
+    }
+
+    SECTION("Circuit with nonlinear device") {
+        Resistor r(1000.0);
+        IdealDiode d(1e3, 1e-9);
+        VoltageSource vs(10.0);
+
+        auto circuit = make_circuit(r, d, vs);
+
+        REQUIRE(circuit.all_linear == false);
+        REQUIRE(circuit.has_switching == true);
+    }
+
+    SECTION("Circuit with MOSFET") {
+        Resistor r(1000.0);
+        MOSFET m(2.0, 0.1, true);
+        VoltageSource vdd(12.0);
+        VoltageSource vgs(5.0);
+
+        auto circuit = make_circuit(r, m, vdd, vgs);
+
+        REQUIRE(circuit.device_type_count == 4);
+        REQUIRE(circuit.total_branches == 2);  // Two voltage sources
+        REQUIRE(circuit.all_linear == false);
+        REQUIRE(circuit.has_switching == true);
+    }
+}
+
+TEST_CASE("v2 CircuitGraph compile-time properties", "[v2][circuit][graph]") {
+    using namespace pulsim::v2;
+
+    SECTION("Static assertions on circuit properties") {
+        // These are evaluated at compile time
+        using RCCircuit = CircuitGraph<Resistor, Capacitor, VoltageSource>;
+        static_assert(RCCircuit::device_type_count == 3);
+        static_assert(RCCircuit::total_branches == 1);
+        static_assert(RCCircuit::all_linear == true);
+        static_assert(RCCircuit::needs_history == true);
+        static_assert(RCCircuit::has_switching == false);
+
+        using DiodeCircuit = CircuitGraph<Resistor, IdealDiode, VoltageSource>;
+        static_assert(DiodeCircuit::all_linear == false);
+        static_assert(DiodeCircuit::has_switching == true);
+
+        using InductorCircuit = CircuitGraph<Resistor, Inductor, VoltageSource>;
+        static_assert(InductorCircuit::total_branches == 2);  // VSource + Inductor
+        static_assert(InductorCircuit::needs_history == true);
+    }
+}
+
+TEST_CASE("v2 CircuitGraph sparsity pattern", "[v2][circuit][sparsity]") {
+    using namespace pulsim::v2;
+
+    SECTION("Circuit type-level sparsity") {
+        // The sparsity pattern at type level gives capacity, not actual used entries
+        using RVCircuit = CircuitGraph<Resistor, VoltageSource>;
+        static_assert(RVCircuit::max_jacobian_nnz > 0);
+
+        using RCVCircuit = CircuitGraph<Resistor, Capacitor, VoltageSource>;
+        static_assert(RCVCircuit::max_jacobian_nnz > 0);
+    }
+}
+
+TEST_CASE("v2 NodeCollector", "[v2][circuit][nodes]") {
+    using namespace pulsim::v2;
+
+    SECTION("Collect unique nodes") {
+        NodeCollector<Resistor, Capacitor, VoltageSource> collector;
+
+        // Add nodes manually (simulating device node collection)
+        collector.add_node(0);
+        collector.add_node(1);
+        collector.add_node(0);  // Duplicate
+        collector.add_node(2);
+
+        REQUIRE(collector.node_count == 3);
+        REQUIRE(collector.has_node(0));
+        REQUIRE(collector.has_node(1));
+        REQUIRE(collector.has_node(2));
+        REQUIRE(!collector.has_node(3));
+    }
+
+    SECTION("Ground node not collected") {
+        NodeCollector<Resistor> collector;
+
+        collector.add_node(-1);  // Ground
+        collector.add_node(0);
+
+        REQUIRE(collector.node_count == 1);
+        REQUIRE(!collector.has_node(-1));
+        REQUIRE(collector.has_node(0));
+    }
+
+    SECTION("Node index lookup") {
+        NodeCollector<Resistor, Capacitor> collector;
+
+        collector.add_node(5);
+        collector.add_node(10);
+        collector.add_node(15);
+
+        REQUIRE(collector.node_index(5) == 0);
+        REQUIRE(collector.node_index(10) == 1);
+        REQUIRE(collector.node_index(15) == 2);
+    }
+}
+
+TEST_CASE("v2 StaticSparsityBuilder", "[v2][circuit][sparsity]") {
+    using namespace pulsim::v2;
+
+    SECTION("Conductance stamp pattern") {
+        StaticSparsityBuilder<4, 2> builder;
+
+        // Add conductance stamp between nodes 0 and 1
+        builder.add_conductance(0, 1);
+
+        const auto& pattern = builder.pattern();
+        REQUIRE(pattern.contains(0, 0));
+        REQUIRE(pattern.contains(0, 1));
+        REQUIRE(pattern.contains(1, 0));
+        REQUIRE(pattern.contains(1, 1));
+    }
+
+    SECTION("Voltage source stamp pattern") {
+        StaticSparsityBuilder<4, 2> builder;
+
+        // Add voltage source between node 0 and ground, branch index 4
+        builder.add_voltage_source(0, -1, 4);
+
+        const auto& pattern = builder.pattern();
+        REQUIRE(pattern.contains(0, 4));
+        REQUIRE(pattern.contains(4, 0));
+    }
+
+    SECTION("Inductor stamp pattern") {
+        StaticSparsityBuilder<4, 2> builder;
+
+        // Add inductor between nodes 0 and 1, branch index 4
+        builder.add_inductor(0, 1, 4);
+
+        const auto& pattern = builder.pattern();
+        REQUIRE(pattern.contains(0, 4));
+        REQUIRE(pattern.contains(4, 0));
+        REQUIRE(pattern.contains(1, 4));
+        REQUIRE(pattern.contains(4, 1));
+        REQUIRE(pattern.contains(4, 4));  // Companion resistance
+    }
+}
+
+// =============================================================================
+// Static assertions for Phase 2.4 and 2.5 (compile-time verification)
+// =============================================================================
+
+namespace static_tests {
+using namespace pulsim::v2;
+
+// Expression templates compile-time tests
+static_assert([]() constexpr {
+    StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+    StaticVector<double, 4> b{5.0, 6.0, 7.0, 8.0};
+    auto expr = a + b;
+    return expr[0] == 6.0 && expr[3] == 12.0;
+}());
+
+static_assert([]() constexpr {
+    StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
+    auto expr = 2.0 * a;
+    return expr[0] == 2.0 && expr[3] == 8.0;
+}());
+
+// Circuit graph compile-time tests
+static_assert(count_max_nodes_v<Resistor, Capacitor> == 4);
+static_assert(count_branches_v<VoltageSource, Inductor> == 2);
+static_assert(is_linear_circuit<Resistor, Capacitor>());
+static_assert(!is_linear_circuit<Resistor, IdealDiode>());
+static_assert(has_reactive_elements<Capacitor>());
+static_assert(!has_switching_elements<Resistor>());
+
+// Validation static tests
+static_assert(validate_circuit_topology<Resistor, VoltageSource>().is_valid);
+static_assert(validate_circuit_topology<Resistor, Capacitor, VoltageSource>().has_voltage_reference);
+
+} // namespace static_tests

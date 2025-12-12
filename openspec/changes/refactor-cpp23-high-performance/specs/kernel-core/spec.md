@@ -155,6 +155,39 @@ The new implementation SHALL demonstrate measurable performance improvement.
 - **WHEN** running benchmark suite
 - **THEN** peak memory usage SHALL not exceed 1.5x the circuit data size
 
+### Requirement: Deterministic Execution
+The solver SHALL produce repeatable results under fixed configuration on supported CPU targets.
+
+#### Scenario: Repeatable runs
+- **WHEN** the solver is executed twice with identical inputs, seeds, and hardware class (x86-64, arm64)
+- **THEN** the waveforms and results SHALL be bitwise-identical or within machine epsilon differences caused by deterministic ordering
+
+#### Scenario: Fixed ordering
+- **WHEN** parallel execution is enabled
+- **THEN** reduction and assembly SHALL use a deterministic order or a deterministic reduction policy
+
+### Requirement: Observability and Regression Instrumentation
+The system SHALL provide metrics and artifacts to detect regressions in accuracy, performance, and memory.
+
+#### Scenario: Accuracy artifacts
+- **WHEN** validation suites run
+- **THEN** the max/mean error vs analytical or SPICE reference SHALL be emitted as machine-readable artifacts (CSV/JSON)
+
+#### Scenario: Performance artifacts
+- **WHEN** benchmarks run
+- **THEN** runtime and peak memory metrics SHALL be emitted and stored for regression detection
+
+### Requirement: Compatibility Layer
+The system SHALL maintain a backward-compatible interface for v1 during the transition.
+
+#### Scenario: v1 API shim
+- **WHEN** using the v1 API or CLI entry points
+- **THEN** simulations SHALL run using the v2 core without breaking existing user code
+
+#### Scenario: Python compatibility
+- **WHEN** importing the Python package with v1-style calls
+- **THEN** the compatibility layer SHALL route to the new engine and preserve behavior within documented tolerances
+
 ## MODIFIED Requirements
 
 ### Requirement: Device Model Interface

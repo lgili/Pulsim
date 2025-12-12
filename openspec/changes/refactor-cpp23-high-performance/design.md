@@ -261,6 +261,14 @@ NewtonResult solve(SystemFunction f, Vector x0) {
 - **Mitigation**: Python API compatibility layer, deprecation warnings
 - **Monitoring**: Integration tests
 
+### Risk 5: Non-determinism and regressions
+- **Mitigation**: Deterministic assembly/reduction order, fixed seeds for randomized restarts, policy toggle for deterministic reductions, regression artifacts (accuracy/perf/mem) stored per run
+- **Monitoring**: CI gates on accuracy/perf/memory regressions; reproducible benchmark harness with fixed seeds
+
+### Risk 6: Compatibility drift between v1 and v2
+- **Mitigation**: v1 shim header and Python bridge, dual-path smoke tests (CLI/Python), documented tolerances; feature flag to select engine
+- **Monitoring**: CI smoke jobs exercising v1 interfaces routed through v2 core
+
 ## Migration Plan
 
 ### Phase 1 (Foundation)
