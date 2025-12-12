@@ -1,12 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 project(pulsim VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+# =============================================================================
+# C++ Standard Configuration
+# =============================================================================
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Options
+# =============================================================================
+# Build Options
+# =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
 option(PULSIM_BUILD_CLI "Build CLI application" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
@@ -14,12 +19,72 @@ option(PULSIM_BUILD_GRPC "Build gRPC API server" OFF)
 option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
 option(PULSIM_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
 
+# =============================================================================
+# Compiler Detection and Verification
+# =============================================================================
+# Verify Clang version for C++23 support (recommended: 17+)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
+        message(WARNING
+            "Clang ${CMAKE_CXX_COMPILER_VERSION} detected. "
+            "Version 17+ is recommended for full C++23 support.\n"
+            "Consider using the Clang toolchain: cmake -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-clang.cmake ..."
+        )
+    else()
+        message(STATUS "Clang ${CMAKE_CXX_COMPILER_VERSION} - C++23 support OK")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
+        message(WARNING
+            "GCC ${CMAKE_CXX_COMPILER_VERSION} detected. "
+            "Version 13+ is recommended for full C++23 support.\n"
+            "Consider using Clang 17+: cmake -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-clang.cmake ..."
+        )
+    else()
+        message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} - C++23 support OK")
+    endif()
+elseif(MSVC)
+    if(MSVC_VERSION LESS 1937)
+        message(WARNING
+            "MSVC ${MSVC_VERSION} detected. "
+            "Visual Studio 2022 17.7+ is recommended for full C++23 support."
+        )
+    else()
+        message(STATUS "MSVC ${MSVC_VERSION} - C++23 support OK")
+    endif()
+endif()
+
+message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "C++ Standard: C++${CMAKE_CXX_STANDARD}")
+
 # Note: We use FetchContent_Populate for Eigen (header-only) to avoid
 # processing its CMakeLists.txt which includes many test targets.
 # Other dependencies have their test options disabled via cache variables.
 
-# Compiler warnings
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+# =============================================================================
+# Compiler Warnings and Flags
+# =============================================================================
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Clang-specific flags (preferred compiler)
+    add_compile_options(
+        -Wall -Wextra -Wpedantic -Werror=return-type
+        -Wno-c++98-compat -Wno-c++98-compat-pedantic
+    )
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-g -O0 -fno-omit-frame-pointer)
+    else()
+        add_compile_options(-O3 -DNDEBUG)
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # GCC flags
+    add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-g -O0)
+    else()
+        add_compile_options(-O3 -DNDEBUG)
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    # AppleClang (Xcode) flags
     add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-g -O0)

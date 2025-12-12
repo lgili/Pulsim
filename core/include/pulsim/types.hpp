@@ -95,8 +95,8 @@ struct SimulationOptions {
     Real dtmin = 1e-15;
     Real dtmax = 1e-3;
 
-    // Solver tolerances
-    Real abstol = 1e-12;
+    // Solver tolerances (1e-9 matches typical SPICE defaults)
+    Real abstol = 1e-9;
     Real reltol = 1e-3;
     int max_newton_iterations = 50;
     Real damping_factor = 1.0;

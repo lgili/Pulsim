@@ -121,9 +121,13 @@ private:
     // Single timestep of transient simulation
     NewtonResult step(Real time, Real dt, const Vector& x_prev);
 
-    // Build system function for Newton solver
+    // Build system function for Newton solver (Backward Euler)
     void build_system(const Vector& x, Vector& f, SparseMatrix& J,
                      Real time, Real dt, const Vector& x_prev);
+
+    // Build system function with integration method support
+    void build_system_with_method(const Vector& x, Vector& f, SparseMatrix& J,
+                                  Real time, Real dt, const DynamicHistory& history);
 
     // Detect and handle switch events using bisection
     bool find_event_time(Real t_start, Real t_end, const Vector& x_start,
@@ -163,6 +167,9 @@ private:
         bool was_conducting = false;
     };
     std::unordered_map<std::string, DiodeState> diode_states_;
+
+    // Dynamic element history for multi-step methods
+    DynamicHistory history_;
 };
 
 // Convenience function for quick simulation

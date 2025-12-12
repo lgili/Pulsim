@@ -195,7 +195,7 @@ public:
 
         Options()
             : max_iterations(50)
-            , abstol(1e-12)
+            , abstol(1e-9)  // 1e-9 matches typical SPICE defaults
             , reltol(1e-3)
             , damping(1.0)
             , auto_damping(true)

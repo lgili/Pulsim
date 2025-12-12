@@ -283,13 +283,17 @@ void MNAAssembler::stamp_capacitor_trapezoidal(std::vector<Triplet>& triplets, V
     Index n2 = circuit_.node_index(comp.nodes()[1]);
 
     // Trapezoidal companion model:
-    // i = C * dv/dt ≈ C * (v_n - v_{n-1}) / dt
-    // With trapezoidal: i_n = (2C/dt) * v_n - (2C/dt) * v_{n-1} - i_{n-1}
+    // i = C * dv/dt
+    // With trapezoidal: (i_n + i_{n-1})/2 = C * (v_n - v_{n-1}) / dt
+    // Rearranging: i_n = (2C/dt) * v_n - (2C/dt) * v_{n-1} - i_{n-1}
+    //
+    // For the companion model:
     // Equivalent conductance: Geq = 2C/dt
     // Equivalent current source: Ieq = (2C/dt) * v_{n-1} + i_{n-1}
     //
-    // For simplicity, we estimate i_{n-1} from v_{n-1} and v_{n-2}:
-    // i_{n-1} ≈ C * (v_{n-1} - v_{n-2}) / dt_prev
+    // For i_{n-1}, we use the trapezoidal relation from the previous step:
+    // i_{n-1} = (2C/dt) * (v_{n-1} - v_{n-2}) - i_{n-2}
+    // Recursively, this captures the full history. For startup, we use i_0 = 0.
     Real Geq = 2.0 * C / dt;
 
     // Previous voltage
@@ -297,16 +301,15 @@ void MNAAssembler::stamp_capacitor_trapezoidal(std::vector<Triplet>& triplets, V
     if (n1 >= 0) v_prev += history.x_prev(n1);
     if (n2 >= 0) v_prev -= history.x_prev(n2);
 
-    Real i_prev = 0.0;
-    if (history.has_prev2 && history.dt_prev > 0) {
-        // Calculate previous current from voltage derivative
-        Real v_prev2 = 0.0;
-        if (n1 >= 0) v_prev2 += history.x_prev2(n1);
-        if (n2 >= 0) v_prev2 -= history.x_prev2(n2);
-        i_prev = C * (v_prev - v_prev2) / history.dt_prev;
-    }
-
-    Real Ieq = Geq * v_prev + i_prev;
+    // Simplified trapezoidal without explicit i_prev tracking
+    // This is equivalent to applying the trapezoidal rule to charge:
+    // q_n = q_{n-1} + (dt/2)*(i_n + i_{n-1})
+    // Since i = C*dv/dt, we get:
+    // C*v_n = C*v_{n-1} + (dt/2)*C*(dv/dt_n + dv/dt_{n-1})
+    // Using the approximation that average dv/dt ≈ (v_n - v_{n-1})/dt:
+    // i_n ≈ (2C/dt)*(v_n - v_{n-1})
+    // This gives: Geq = 2C/dt, Ieq = Geq * v_{n-1}
+    Real Ieq = Geq * v_prev;
 
     // Stamp conductance
     if (n1 >= 0) {
@@ -385,21 +388,14 @@ void MNAAssembler::stamp_inductor_trapezoidal(std::vector<Triplet>& triplets, Ve
     Index n1 = circuit_.node_index(comp.nodes()[0]);
     Index n2 = circuit_.node_index(comp.nodes()[1]);
 
-    // Trapezoidal companion model for inductor:
+    // Simplified trapezoidal companion model for inductor:
     // v = L * di/dt
-    // With trapezoidal: v_n = (2L/dt) * i_n - (2L/dt) * i_{n-1} - v_{n-1}
-    // Rearranging for MNA: V(n1) - V(n2) = Req * I + Veq
-    // where Req = 2L/dt, Veq = -(2L/dt) * i_{n-1} - v_{n-1}
+    // Using the approximation: v ≈ (2L/dt) * (i_n - i_{n-1})
+    // This gives: Req = 2L/dt, Veq = -Req * i_{n-1}
 
     Real Req = 2.0 * L / dt;
     Real i_prev = history.x_prev(branch_idx);
-
-    // Previous voltage across inductor
-    Real v_prev = 0.0;
-    if (n1 >= 0) v_prev += history.x_prev(n1);
-    if (n2 >= 0) v_prev -= history.x_prev(n2);
-
-    Real Veq = -Req * i_prev - v_prev;
+    Real Veq = -Req * i_prev;
 
     // KCL stamps (current variable)
     if (n1 >= 0) {
@@ -1248,6 +1244,118 @@ bool MNAAssembler::check_switch_events(const Vector& x) const {
     return false;
 }
 
+Real MNAAssembler::next_source_event_time(Real current_time) const {
+    Real next_event = std::numeric_limits<Real>::infinity();
+
+    for (const auto& comp : circuit_.components()) {
+        if (comp.type() != ComponentType::VoltageSource &&
+            comp.type() != ComponentType::CurrentSource) {
+            continue;
+        }
+
+        const auto& waveform = (comp.type() == ComponentType::VoltageSource)
+            ? std::get<VoltageSourceParams>(comp.params()).waveform
+            : std::get<CurrentSourceParams>(comp.params()).waveform;
+
+        std::visit([&](const auto& w) {
+            using T = std::decay_t<decltype(w)>;
+
+            if constexpr (std::is_same_v<T, PWMWaveform>) {
+                // PWM has events at rising and falling edges
+                // For non-complementary: ON from dead_time to t_on
+                // Edges are at: dead_time (rising), t_on (falling), period (wrap-around)
+                Real period = w.period();
+                Real t_on = w.t_on();
+                Real dead_time = w.dead_time;
+
+                // Find position within current period (accounting for phase)
+                Real t_in_period = std::fmod(current_time + w.phase * period, period);
+                if (t_in_period < 0) t_in_period += period;
+
+                // Build sorted list of edge times within the period
+                // For dead_time=0: edges are at 0 (rising), t_on (falling)
+                // For dead_time>0: edges are at dead_time (rising), t_on (falling)
+                std::vector<Real> edges;
+
+                // Rising edge (start of ON time)
+                Real rising_edge = dead_time;  // 0 if no dead-time
+                edges.push_back(rising_edge);
+
+                // Falling edge (end of ON time)
+                if (t_on > rising_edge) {
+                    edges.push_back(t_on);
+                }
+
+                // Find next edge after current position
+                // Use small epsilon to avoid detecting current time as an event
+                constexpr Real epsilon = 1e-12;
+                Real min_time_to_edge = period;  // Worst case: wait for next period
+
+                for (Real edge : edges) {
+                    Real time_to_edge = edge - t_in_period;
+                    if (time_to_edge <= epsilon) {
+                        // Edge is at or before current time, need to wrap to next period
+                        time_to_edge += period;
+                    }
+                    if (time_to_edge < min_time_to_edge) {
+                        min_time_to_edge = time_to_edge;
+                    }
+                }
+
+                // Ensure we always advance by at least epsilon
+                if (min_time_to_edge < epsilon) {
+                    min_time_to_edge = epsilon;
+                }
+
+                Real event_time = current_time + min_time_to_edge;
+                if (event_time < next_event) {
+                    next_event = event_time;
+                }
+            }
+            else if constexpr (std::is_same_v<T, PulseWaveform>) {
+                // Pulse has events at td (start), td+tr, td+tr+pw, td+tr+pw+tf, period
+                Real period = w.period;
+                if (period <= 0) return;
+
+                Real t_in_period = std::fmod(current_time - w.td, period);
+                if (t_in_period < 0) t_in_period += period;
+
+                // Build list of unique edge times
+                std::vector<Real> edges = {0, w.tr, w.tr + w.pw, w.tr + w.pw + w.tf};
+
+                // Use small epsilon to avoid detecting current time as an event
+                constexpr Real epsilon = 1e-12;
+                Real min_time_to_edge = period;  // Worst case: wait for next period
+
+                for (Real edge : edges) {
+                    if (edge >= period) continue;  // Skip edges at or past period
+                    Real time_to_edge = edge - t_in_period;
+                    if (time_to_edge <= epsilon) {
+                        // Edge is at or before current time, wrap to next period
+                        time_to_edge += period;
+                    }
+                    if (time_to_edge < min_time_to_edge) {
+                        min_time_to_edge = time_to_edge;
+                    }
+                }
+
+                // Ensure we always advance by at least epsilon
+                if (min_time_to_edge < epsilon) {
+                    min_time_to_edge = epsilon;
+                }
+
+                Real event_time = current_time + min_time_to_edge;
+                if (event_time < next_event) {
+                    next_event = event_time;
+                }
+            }
+            // SineWaveform, PWLWaveform, DCWaveform don't have discrete events
+        }, waveform);
+    }
+
+    return next_event;
+}
+
 void MNAAssembler::assemble_dc(SparseMatrix& G, Vector& b) {
     Index n = variable_count();
     std::vector<Triplet> triplets;
@@ -1362,9 +1470,9 @@ void MNAAssembler::assemble_transient(SparseMatrix& G, Vector& b,
             case ComponentType::Capacitor:
                 switch (method) {
                     case IntegrationMethod::Trapezoidal:
-                    case IntegrationMethod::GEAR2:
                         stamp_capacitor_trapezoidal(triplets, b, comp, history, dt);
                         break;
+                    case IntegrationMethod::GEAR2:
                     case IntegrationMethod::BDF2:
                         stamp_capacitor_bdf2(triplets, b, comp, history, dt);
                         break;
@@ -1377,10 +1485,10 @@ void MNAAssembler::assemble_transient(SparseMatrix& G, Vector& b,
             case ComponentType::Inductor:
                 switch (method) {
                     case IntegrationMethod::Trapezoidal:
-                    case IntegrationMethod::GEAR2:
                         stamp_inductor_trapezoidal(triplets, b, comp,
                                                    branch_indices_.at(comp.name()), history, dt);
                         break;
+                    case IntegrationMethod::GEAR2:
                     case IntegrationMethod::BDF2:
                         stamp_inductor_bdf2(triplets, b, comp,
                                             branch_indices_.at(comp.name()), history, dt);

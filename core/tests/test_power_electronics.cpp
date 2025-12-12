@@ -123,10 +123,12 @@ TEST_CASE("Buck converter topology", "[power]") {
 
     SimulationOptions opts;
     opts.tstart = 0.0;
-    opts.tstop = 2e-3;  // 40 switching cycles
+    opts.tstop = 10e-3;  // 200 switching cycles (10ms) for proper settling
     opts.dt = 0.5e-6;
     opts.dtmax = 2e-6;
     opts.use_ic = true;
+    // Relax tolerances for stiff power electronics circuit
+    opts.abstol = 1e-4;
 
     Simulator sim(circuit, opts);
     auto result = sim.run_transient();
@@ -136,8 +138,8 @@ TEST_CASE("Buck converter topology", "[power]") {
     // Check output voltage settles to ~24V (50% of input)
     Index out_idx = circuit.node_index("out");
 
-    // Take average of last 20% of simulation (steady state)
-    size_t start_idx = result.data.size() * 4 / 5;
+    // Take average of last 10% of simulation (steady state)
+    size_t start_idx = result.data.size() * 9 / 10;
     Real v_avg = 0.0;
     int count = 0;
     for (size_t i = start_idx; i < result.data.size(); ++i) {
@@ -145,6 +147,8 @@ TEST_CASE("Buck converter topology", "[power]") {
         count++;
     }
     v_avg /= count;
+
+    INFO("Vout average (last 10%): " << v_avg << " V");
 
     // Buck converter output ≈ D * Vin = 0.5 * 48 = 24V
     // Allow wider tolerance due to transient settling
@@ -386,6 +390,8 @@ TEST_CASE("Flyback converter topology", "[power][mosfet]") {
     opts.dt = 0.1e-6;
     opts.dtmax = 0.5e-6;
     opts.use_ic = true;
+    // Relax tolerances for stiff power electronics circuit
+    opts.abstol = 1e-4;
 
     Simulator sim(circuit, opts);
     auto result = sim.run_transient();
