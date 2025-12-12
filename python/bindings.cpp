@@ -14,6 +14,7 @@
 #include <pybind11/chrono.h>
 
 #include "pulsim/v1/core.hpp"
+#include "pulsim/v1/control.hpp"
 
 namespace py = pybind11;
 using namespace pulsim::v1;
@@ -211,6 +212,205 @@ void init_v2_module(py::module_& v2) {
         .def("name", &IGBT::name);
 
     // =========================================================================
+    // Time-Varying Sources
+    // =========================================================================
+
+    py::class_<PWMParams>(v2, "PWMParams", "PWM voltage source parameters")
+        .def(py::init<>())
+        .def_readwrite("v_high", &PWMParams::v_high, "High voltage level (V)")
+        .def_readwrite("v_low", &PWMParams::v_low, "Low voltage level (V)")
+        .def_readwrite("frequency", &PWMParams::frequency, "Switching frequency (Hz)")
+        .def_readwrite("duty", &PWMParams::duty, "Duty cycle (0-1)")
+        .def_readwrite("phase", &PWMParams::phase, "Initial phase (rad)")
+        .def_readwrite("dead_time", &PWMParams::dead_time, "Dead time (s)")
+        .def_readwrite("rise_time", &PWMParams::rise_time, "Rise time (s)")
+        .def_readwrite("fall_time", &PWMParams::fall_time, "Fall time (s)");
+
+    py::class_<SineParams>(v2, "SineParams", "Sine voltage source parameters")
+        .def(py::init<>())
+        .def_readwrite("amplitude", &SineParams::amplitude, "Peak amplitude (V)")
+        .def_readwrite("offset", &SineParams::offset, "DC offset (V)")
+        .def_readwrite("frequency", &SineParams::frequency, "Frequency (Hz)")
+        .def_readwrite("phase", &SineParams::phase, "Initial phase (rad)");
+
+    py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
+        .def(py::init<>())
+        .def_readwrite("v_min", &RampParams::v_min, "Minimum voltage")
+        .def_readwrite("v_max", &RampParams::v_max, "Maximum voltage")
+        .def_readwrite("frequency", &RampParams::frequency, "Frequency (Hz)")
+        .def_readwrite("phase", &RampParams::phase, "Initial phase (rad)")
+        .def_readwrite("triangle", &RampParams::triangle, "Triangle (true) or sawtooth (false)");
+
+    py::class_<PulseParams>(v2, "PulseParams", "Pulse voltage source parameters")
+        .def(py::init<>())
+        .def_readwrite("v_initial", &PulseParams::v_initial, "Initial voltage")
+        .def_readwrite("v_pulse", &PulseParams::v_pulse, "Pulse voltage")
+        .def_readwrite("t_delay", &PulseParams::t_delay, "Delay before pulse (s)")
+        .def_readwrite("t_rise", &PulseParams::t_rise, "Rise time (s)")
+        .def_readwrite("t_fall", &PulseParams::t_fall, "Fall time (s)")
+        .def_readwrite("t_width", &PulseParams::t_width, "Pulse width (s)")
+        .def_readwrite("period", &PulseParams::period, "Period (0 = single pulse) (s)");
+
+    py::class_<PWMVoltageSource>(v2, "PWMVoltageSource", "PWM voltage source")
+        .def(py::init<const PWMParams&, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def(py::init<Real, Real, Real, Real, std::string>(),
+             py::arg("v_high"), py::arg("v_low"), py::arg("frequency"), py::arg("duty"),
+             py::arg("name") = "")
+        .def("params", py::overload_cast<>(&PWMVoltageSource::params, py::const_),
+             py::return_value_policy::reference_internal)
+        .def("frequency", &PWMVoltageSource::frequency)
+        .def("period", &PWMVoltageSource::period)
+        .def("set_duty", &PWMVoltageSource::set_duty, py::arg("duty"))
+        .def("set_duty_callback", &PWMVoltageSource::set_duty_callback, py::arg("callback"))
+        .def("clear_duty_callback", &PWMVoltageSource::clear_duty_callback)
+        .def("duty_at", &PWMVoltageSource::duty_at, py::arg("t"))
+        .def("voltage_at", &PWMVoltageSource::voltage_at, py::arg("t"))
+        .def("state_at", &PWMVoltageSource::state_at, py::arg("t"));
+
+    py::class_<SineVoltageSource>(v2, "SineVoltageSource", "Sinusoidal voltage source")
+        .def(py::init<const SineParams&, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def(py::init<Real, Real, Real, std::string>(),
+             py::arg("amplitude"), py::arg("frequency"), py::arg("offset") = 0.0,
+             py::arg("name") = "")
+        .def("params", &SineVoltageSource::params,
+             py::return_value_policy::reference_internal)
+        .def("voltage_at", &SineVoltageSource::voltage_at, py::arg("t"));
+
+    py::class_<PulseVoltageSource>(v2, "PulseVoltageSource", "Pulse voltage source")
+        .def(py::init<const PulseParams&, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def("params", &PulseVoltageSource::params,
+             py::return_value_policy::reference_internal)
+        .def("voltage_at", &PulseVoltageSource::voltage_at, py::arg("t"));
+
+    py::class_<RampGenerator>(v2, "RampGenerator", "Ramp/triangle waveform generator")
+        .def(py::init<const RampParams&>(),
+             py::arg("params") = RampParams{})
+        .def(py::init<Real, Real, Real, bool>(),
+             py::arg("frequency"), py::arg("v_min") = 0.0, py::arg("v_max") = 1.0,
+             py::arg("triangle") = false)
+        .def("params", py::overload_cast<>(&RampGenerator::params, py::const_),
+             py::return_value_policy::reference_internal)
+        .def("frequency", &RampGenerator::frequency)
+        .def("period", &RampGenerator::period)
+        .def("value_at", &RampGenerator::value_at, py::arg("t"));
+
+    // =========================================================================
+    // Control Blocks
+    // =========================================================================
+
+    py::class_<PIController>(v2, "PIController", "PI controller with anti-windup")
+        .def(py::init<Real, Real, Real, Real>(),
+             py::arg("Kp"), py::arg("Ki"),
+             py::arg("output_min") = 0.0, py::arg("output_max") = 1.0)
+        .def("Kp", &PIController::Kp)
+        .def("Ki", &PIController::Ki)
+        .def("output_min", &PIController::output_min)
+        .def("output_max", &PIController::output_max)
+        .def("set_Kp", &PIController::set_Kp, py::arg("kp"))
+        .def("set_Ki", &PIController::set_Ki, py::arg("ki"))
+        .def("set_output_limits", &PIController::set_output_limits,
+             py::arg("min"), py::arg("max"))
+        .def("integral", &PIController::integral)
+        .def("last_output", &PIController::last_output)
+        .def("update", py::overload_cast<Real, Real>(&PIController::update),
+             py::arg("error"), py::arg("t"))
+        .def("update", py::overload_cast<Real, Real, Real>(&PIController::update),
+             py::arg("reference"), py::arg("feedback"), py::arg("t"))
+        .def("reset", &PIController::reset)
+        .def("set_integral", &PIController::set_integral, py::arg("value"));
+
+    py::class_<PIDController>(v2, "PIDController", "PID controller with anti-windup")
+        .def(py::init<Real, Real, Real, Real, Real, Real>(),
+             py::arg("Kp"), py::arg("Ki"), py::arg("Kd"),
+             py::arg("output_min") = 0.0, py::arg("output_max") = 1.0,
+             py::arg("derivative_filter") = 0.1)
+        .def("Kp", &PIDController::Kp)
+        .def("Ki", &PIDController::Ki)
+        .def("Kd", &PIDController::Kd)
+        .def("set_gains", &PIDController::set_gains,
+             py::arg("kp"), py::arg("ki"), py::arg("kd"))
+        .def("set_output_limits", &PIDController::set_output_limits,
+             py::arg("min"), py::arg("max"))
+        .def("set_derivative_filter", &PIDController::set_derivative_filter, py::arg("alpha"))
+        .def("integral", &PIDController::integral)
+        .def("last_output", &PIDController::last_output)
+        .def("update", py::overload_cast<Real, Real>(&PIDController::update),
+             py::arg("error"), py::arg("t"))
+        .def("update", py::overload_cast<Real, Real, Real>(&PIDController::update),
+             py::arg("reference"), py::arg("feedback"), py::arg("t"))
+        .def("reset", &PIDController::reset);
+
+    py::class_<Comparator>(v2, "Comparator", "Comparator with optional hysteresis")
+        .def(py::init<Real>(), py::arg("hysteresis") = 0.0)
+        .def("hysteresis", &Comparator::hysteresis)
+        .def("set_hysteresis", &Comparator::set_hysteresis, py::arg("h"))
+        .def("compare", &Comparator::compare,
+             py::arg("input"), py::arg("reference"))
+        .def("output", &Comparator::output,
+             py::arg("input"), py::arg("reference"),
+             py::arg("v_high") = 1.0, py::arg("v_low") = 0.0)
+        .def("state", &Comparator::state)
+        .def("reset", &Comparator::reset);
+
+    py::class_<SampleHold>(v2, "SampleHold", "Sample-and-hold block")
+        .def(py::init<Real>(), py::arg("sample_period"))
+        .def("period", &SampleHold::period)
+        .def("frequency", &SampleHold::frequency)
+        .def("set_period", &SampleHold::set_period, py::arg("T"))
+        .def("value", &SampleHold::value)
+        .def("last_sample_time", &SampleHold::last_sample_time)
+        .def("update", &SampleHold::update, py::arg("input"), py::arg("t"))
+        .def("sample_now", &SampleHold::sample_now, py::arg("input"), py::arg("t"))
+        .def("reset", &SampleHold::reset);
+
+    py::class_<RateLimiter>(v2, "RateLimiter", "Limits rate of change of a signal")
+        .def(py::init<Real, Real>(),
+             py::arg("rising_rate"), py::arg("falling_rate"))
+        .def(py::init<Real>(), py::arg("rate"))
+        .def("rising_rate", &RateLimiter::rising_rate)
+        .def("falling_rate", &RateLimiter::falling_rate)
+        .def("set_rates", &RateLimiter::set_rates,
+             py::arg("rising"), py::arg("falling"))
+        .def("value", &RateLimiter::value)
+        .def("update", &RateLimiter::update, py::arg("input"), py::arg("t"))
+        .def("reset", &RateLimiter::reset, py::arg("initial") = 0.0);
+
+    py::class_<MovingAverageFilter>(v2, "MovingAverageFilter", "Exponential moving average filter")
+        .def(py::init<Real>(), py::arg("time_constant"))
+        .def("time_constant", &MovingAverageFilter::time_constant)
+        .def("set_time_constant", &MovingAverageFilter::set_time_constant, py::arg("tau"))
+        .def("value", &MovingAverageFilter::value)
+        .def("update", &MovingAverageFilter::update, py::arg("input"), py::arg("t"))
+        .def("reset", &MovingAverageFilter::reset, py::arg("initial") = 0.0);
+
+    py::class_<HysteresisController>(v2, "HysteresisController", "Bang-bang controller with hysteresis")
+        .def(py::init<Real, Real, Real, Real>(),
+             py::arg("setpoint"), py::arg("band"),
+             py::arg("output_high") = 1.0, py::arg("output_low") = 0.0)
+        .def("setpoint", &HysteresisController::setpoint)
+        .def("band", &HysteresisController::band)
+        .def("set_setpoint", &HysteresisController::set_setpoint, py::arg("sp"))
+        .def("set_band", &HysteresisController::set_band, py::arg("b"))
+        .def("state", &HysteresisController::state)
+        .def("output", &HysteresisController::output)
+        .def("update", &HysteresisController::update, py::arg("feedback"))
+        .def("reset", &HysteresisController::reset);
+
+    py::class_<LookupTable1D>(v2, "LookupTable1D", "1D lookup table with linear interpolation")
+        .def(py::init<>())
+        .def(py::init<std::vector<Real>, std::vector<Real>>(),
+             py::arg("x"), py::arg("y"))
+        .def("x_data", &LookupTable1D::x_data)
+        .def("y_data", &LookupTable1D::y_data)
+        .def("size", &LookupTable1D::size)
+        .def("empty", &LookupTable1D::empty)
+        .def("__call__", &LookupTable1D::operator(), py::arg("x"))
+        .def("interpolate", &LookupTable1D::interpolate, py::arg("x"));
+
+    // =========================================================================
     // Runtime Circuit Builder (Phase 3)
     // =========================================================================
 
@@ -267,6 +467,53 @@ void init_v2_module(py::module_& v2) {
              py::arg("name"), py::arg("gate"), py::arg("collector"), py::arg("emitter"),
              py::arg("params") = IGBT::Params{},
              "Add IGBT with gate, collector, emitter nodes")
+        // Time-varying sources
+        .def("add_pwm_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, const PWMParams&>(
+                 &Circuit::add_pwm_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add PWM voltage source from npos to nneg")
+        .def("add_pwm_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, Real, Real, Real, Real>(
+                 &Circuit::add_pwm_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"),
+             py::arg("v_high"), py::arg("v_low"), py::arg("frequency"), py::arg("duty"),
+             "Add PWM voltage source with simple parameters")
+        .def("add_sine_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, const SineParams&>(
+                 &Circuit::add_sine_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add sinusoidal voltage source")
+        .def("add_sine_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, Real, Real, Real>(
+                 &Circuit::add_sine_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"),
+             py::arg("amplitude"), py::arg("frequency"), py::arg("offset") = 0.0,
+             "Add sinusoidal voltage source with simple parameters")
+        .def("add_pulse_voltage_source", &Circuit::add_pulse_voltage_source,
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add pulse voltage source")
+        // PWM control
+        .def("set_pwm_duty", &Circuit::set_pwm_duty,
+             py::arg("name"), py::arg("duty"),
+             "Set fixed duty cycle for PWM source")
+        .def("set_pwm_duty_callback", &Circuit::set_pwm_duty_callback,
+             py::arg("name"), py::arg("callback"),
+             "Set duty cycle callback for PWM source")
+        .def("clear_pwm_duty_callback", &Circuit::clear_pwm_duty_callback,
+             py::arg("name"),
+             "Clear duty callback, use fixed duty")
+        .def("get_pwm_state", &Circuit::get_pwm_state,
+             py::arg("name"),
+             "Get PWM state (ON/OFF) at current time")
+        // Time management
+        .def("set_current_time", &Circuit::set_current_time,
+             py::arg("t"),
+             "Set current simulation time")
+        .def("current_time", &Circuit::current_time,
+             "Get current simulation time")
+        .def("has_time_varying", &Circuit::has_time_varying,
+             "Check if circuit has time-varying sources")
         // State
         .def("num_devices", &Circuit::num_devices,
              "Number of devices in circuit")
@@ -605,6 +852,9 @@ void init_v2_module(py::module_& v2) {
         // Initial state
         Vector x = x0;
 
+        // Set initial time for time-varying sources
+        circuit.set_current_time(t_start);
+
         // Initialize dynamic element history from initial condition (e.g., DC op point)
         // Use initialize=true to set i_prev=0 for capacitors (DC steady state)
         circuit.update_history(x, true);
@@ -619,6 +869,10 @@ void init_v2_module(py::module_& v2) {
         const int max_steps = static_cast<int>((t_stop - t_start) / dt) + 1;
 
         while (t < t_stop && step < max_steps) {
+            // Advance time first (for time-varying sources)
+            t += dt;
+            circuit.set_current_time(t);
+
             // Solve at current time
             auto result = solver.solve(x, system_func);
 
@@ -634,11 +888,8 @@ void init_v2_module(py::module_& v2) {
             // Update dynamic element history
             circuit.update_history(x);
 
-            // Advance time
-            t += dt;
-            step++;
-
             // Store state
+            step++;
             times.push_back(t);
             states.push_back(x);
         }
@@ -684,6 +935,9 @@ void init_v2_module(py::module_& v2) {
 
         Vector x = x0;
 
+        // Set initial time for time-varying sources
+        circuit.set_current_time(t_start);
+
         // Initialize dynamic element history (zero IC case)
         circuit.update_history(x, true);
         times.push_back(t_start);
@@ -694,6 +948,10 @@ void init_v2_module(py::module_& v2) {
         const int max_steps = static_cast<int>((t_stop - t_start) / dt) + 1;
 
         while (t < t_stop && step < max_steps) {
+            // Advance time first (for time-varying sources)
+            t += dt;
+            circuit.set_current_time(t);
+
             auto result = solver.solve(x, system_func);
             if (!result.success()) {
                 success = false;
@@ -702,7 +960,6 @@ void init_v2_module(py::module_& v2) {
             }
             x = result.solution;
             circuit.update_history(x);  // Normal update after each step
-            t += dt;
             step++;
             times.push_back(t);
             states.push_back(x);
@@ -875,6 +1132,402 @@ void init_v2_module(py::module_& v2) {
     v2.def("solver_status_to_string", &to_string,
            py::arg("status"),
            "Convert SolverStatus to string");
+
+    // =========================================================================
+    // Thermal Simulation Module
+    // =========================================================================
+
+    py::class_<FosterStage>(v2, "FosterStage",
+        "Single stage of a Foster thermal network (parallel RC)")
+        .def(py::init<Real, Real>(), py::arg("Rth"), py::arg("tau"))
+        .def_readwrite("Rth", &FosterStage::Rth, "Thermal resistance (K/W)")
+        .def_readwrite("tau", &FosterStage::tau, "Time constant (s)")
+        .def("Cth", &FosterStage::Cth, "Compute thermal capacitance from Rth and tau")
+        .def("Zth", &FosterStage::Zth, py::arg("t"),
+             "Thermal impedance at time t for step power")
+        .def("delta_T", &FosterStage::delta_T, py::arg("P"), py::arg("t"),
+             "Temperature rise for constant power P at time t");
+
+    py::class_<FosterNetwork>(v2, "FosterNetwork",
+        R"doc(Foster thermal network representation.
+
+        Total: Zth(t) = sum_i { Rth_i * (1 - exp(-t/tau_i)) }
+
+        Typical use: datasheet provides (Rth_i, tau_i) pairs from Zth curve fitting.
+
+        Example:
+            # Create from Rth and tau lists
+            network = FosterNetwork([0.5, 1.0, 2.0], [0.001, 0.01, 0.1], "MOSFET")
+
+            # Or from stages
+            stages = [FosterStage(0.5, 0.001), FosterStage(1.0, 0.01)]
+            network = FosterNetwork(stages, "IGBT")
+        )doc")
+        .def(py::init<>())
+        .def(py::init<std::vector<FosterStage>, std::string>(),
+             py::arg("stages"), py::arg("name") = "")
+        .def(py::init<const std::vector<Real>&, const std::vector<Real>&, const std::string&>(),
+             py::arg("Rth_values"), py::arg("tau_values"), py::arg("name") = "",
+             "Create from Rth and tau vectors")
+        .def("add_stage", &FosterNetwork::add_stage,
+             py::arg("Rth"), py::arg("tau"), "Add a stage")
+        .def("num_stages", &FosterNetwork::num_stages, "Number of stages")
+        .def("stage", &FosterNetwork::stage, py::arg("i"),
+             "Get stage by index", py::return_value_policy::reference_internal)
+        .def("total_Rth", &FosterNetwork::total_Rth,
+             "Total thermal resistance (steady-state)")
+        .def("Zth", &FosterNetwork::Zth, py::arg("t"),
+             "Thermal impedance at time t")
+        .def("delta_T", &FosterNetwork::delta_T, py::arg("P"), py::arg("t"),
+             "Temperature rise for constant power P at time t")
+        .def("delta_T_ss", &FosterNetwork::delta_T_ss, py::arg("P"),
+             "Steady-state temperature rise for power P")
+        .def("Zth_curve", &FosterNetwork::Zth_curve,
+             py::arg("t_start"), py::arg("t_end"), py::arg("num_points"),
+             "Generate Zth(t) curve")
+        .def("name", &FosterNetwork::name)
+        .def("stages", &FosterNetwork::stages, "Get all stages");
+
+    py::class_<CauerStage>(v2, "CauerStage",
+        "Single stage of a Cauer thermal network (series R, shunt C)")
+        .def(py::init<Real, Real>(), py::arg("Rth"), py::arg("Cth"))
+        .def_readwrite("Rth", &CauerStage::Rth, "Thermal resistance (K/W)")
+        .def_readwrite("Cth", &CauerStage::Cth, "Thermal capacitance (J/K)")
+        .def("tau", &CauerStage::tau, "Time constant of this layer");
+
+    py::class_<CauerNetwork>(v2, "CauerNetwork",
+        R"doc(Cauer thermal network representation (ladder network).
+
+        Physically meaningful: each stage represents a thermal layer
+        (e.g., junction-to-case, case-to-heatsink, heatsink-to-ambient).
+        )doc")
+        .def(py::init<>())
+        .def(py::init<std::vector<CauerStage>, std::string>(),
+             py::arg("stages"), py::arg("name") = "")
+        .def(py::init<const std::vector<Real>&, const std::vector<Real>&, const std::string&>(),
+             py::arg("Rth_values"), py::arg("Cth_values"), py::arg("name") = "",
+             "Create from Rth and Cth vectors")
+        .def("add_stage", &CauerNetwork::add_stage,
+             py::arg("Rth"), py::arg("Cth"), "Add a stage (layer)")
+        .def("num_stages", &CauerNetwork::num_stages, "Number of stages")
+        .def("stage", &CauerNetwork::stage, py::arg("i"),
+             "Get stage by index (0 = junction side)",
+             py::return_value_policy::reference_internal)
+        .def("total_Rth", &CauerNetwork::total_Rth,
+             "Total thermal resistance (steady-state)")
+        .def("total_Cth", &CauerNetwork::total_Cth,
+             "Total thermal capacitance")
+        .def("delta_T_ss", &CauerNetwork::delta_T_ss, py::arg("P"),
+             "Steady-state temperature rise for power P")
+        .def("name", &CauerNetwork::name)
+        .def("stages", &CauerNetwork::stages, "Get all stages");
+
+    py::class_<ThermalSimulator>(v2, "ThermalSimulator",
+        R"doc(Thermal simulator using Foster network model.
+
+        Simulates junction temperature transients given power loss waveform.
+
+        Example:
+            # Create thermal network
+            network = FosterNetwork([0.5, 1.0], [0.001, 0.1], "MOSFET")
+
+            # Create simulator with 25C ambient
+            sim = ThermalSimulator(network, 25.0)
+
+            # Step with 100W for 1ms
+            sim.step(100.0, 0.001)
+            print(f"Tj = {sim.Tj()}C")
+
+            # Or simulate power waveform
+            times = [0.0, 0.001, 0.002, 0.003]
+            powers = [0.0, 100.0, 100.0, 0.0]
+            temps = sim.simulate(times, powers)
+        )doc")
+        .def(py::init<const FosterNetwork&, Real>(),
+             py::arg("network"), py::arg("T_ambient") = 25.0,
+             "Create simulator with Foster network and ambient temperature")
+        .def("reset", &ThermalSimulator::reset, "Reset to ambient temperature")
+        .def("set_ambient", &ThermalSimulator::set_ambient, py::arg("T_amb"),
+             "Set ambient temperature")
+        .def("ambient", &ThermalSimulator::ambient, "Get ambient temperature")
+        .def("junction_temperature", &ThermalSimulator::junction_temperature,
+             "Get current junction temperature")
+        .def("Tj", &ThermalSimulator::Tj, "Alias for junction_temperature")
+        .def("time", &ThermalSimulator::time, "Get current simulation time")
+        .def("network", &ThermalSimulator::network, "Get thermal network",
+             py::return_value_policy::reference_internal)
+        .def("step", &ThermalSimulator::step, py::arg("power"), py::arg("dt"),
+             "Step simulation with constant power for duration dt")
+        .def("steady_state_temperature", &ThermalSimulator::steady_state_temperature,
+             py::arg("power"), "Compute steady-state temperature for given power")
+        .def("simulate", &ThermalSimulator::simulate,
+             py::arg("times"), py::arg("powers"),
+             "Run simulation for power waveform, returns temperature waveform")
+        .def("Zth_curve", &ThermalSimulator::Zth_curve,
+             py::arg("t_end"), py::arg("num_points"), py::arg("P_step") = 1.0,
+             "Compute Zth(t) step response curve")
+        .def("stage_temperatures", &ThermalSimulator::stage_temperatures,
+             "Get per-stage temperature rises");
+
+    py::class_<ThermalLimitMonitor>(v2, "ThermalLimitMonitor",
+        "Monitors junction temperature against limits")
+        .def(py::init<Real, Real>(),
+             py::arg("T_warning") = 125.0, py::arg("T_max") = 150.0,
+             "Create monitor with temperature limits")
+        .def("check", &ThermalLimitMonitor::check, py::arg("Tj"),
+             "Check temperature and return status: 0=OK, 1=warning, 2=exceeded")
+        .def("is_ok", &ThermalLimitMonitor::is_ok, py::arg("Tj"),
+             "Check if temperature is OK")
+        .def("is_warning", &ThermalLimitMonitor::is_warning, py::arg("Tj"),
+             "Check if in warning zone")
+        .def("is_exceeded", &ThermalLimitMonitor::is_exceeded, py::arg("Tj"),
+             "Check if maximum exceeded")
+        .def("T_warning", &ThermalLimitMonitor::T_warning, "Get warning threshold")
+        .def("T_max", &ThermalLimitMonitor::T_max, "Get maximum threshold")
+        .def("set_limits", &ThermalLimitMonitor::set_limits,
+             py::arg("T_warn"), py::arg("T_max"), "Set thresholds");
+
+    py::class_<ThermalResult>(v2, "ThermalResult", "Result of thermal simulation")
+        .def(py::init<>())
+        .def_readwrite("times", &ThermalResult::times, "Time points")
+        .def_readwrite("temperatures", &ThermalResult::temperatures, "Junction temperatures")
+        .def_readwrite("powers", &ThermalResult::powers, "Power loss at each time")
+        .def_readwrite("T_max", &ThermalResult::T_max, "Peak temperature")
+        .def_readwrite("T_avg", &ThermalResult::T_avg, "Average temperature")
+        .def_readwrite("t_max", &ThermalResult::t_max, "Time of peak temperature")
+        .def_readwrite("exceeded_limit", &ThermalResult::exceeded_limit,
+             "True if T_max was exceeded")
+        .def_readwrite("message", &ThermalResult::message)
+        .def("compute_stats", &ThermalResult::compute_stats,
+             "Compute statistics from waveforms");
+
+    // Factory functions for thermal networks
+    v2.def("create_mosfet_thermal_model", &create_mosfet_thermal_model,
+           py::arg("Rth_jc"), py::arg("Rth_cs"), py::arg("Rth_sa"),
+           py::arg("name") = "",
+           R"doc(Create a typical 3-stage Foster network for MOSFET.
+
+           Args:
+               Rth_jc: Junction-to-case thermal resistance (K/W)
+               Rth_cs: Case-to-sink thermal resistance (K/W)
+               Rth_sa: Sink-to-ambient thermal resistance (K/W)
+               name: Optional name for the network
+           )doc");
+
+    v2.def("create_from_datasheet_4param", &create_from_datasheet_4param,
+           py::arg("R1"), py::arg("tau1"),
+           py::arg("R2"), py::arg("tau2"),
+           py::arg("R3"), py::arg("tau3"),
+           py::arg("R4"), py::arg("tau4"),
+           py::arg("name") = "",
+           "Create Foster network from 4-parameter datasheet model");
+
+    v2.def("create_simple_thermal_model", &create_simple_thermal_model,
+           py::arg("Rth_ja"), py::arg("tau") = 1.0, py::arg("name") = "",
+           "Create simple single-stage thermal model");
+
+    // =========================================================================
+    // Power Loss Calculation Module
+    // =========================================================================
+
+    py::class_<MOSFETLossParams>(v2, "MOSFETLossParams",
+        "MOSFET loss model parameters for conduction and switching losses")
+        .def(py::init<>())
+        .def_readwrite("Rds_on", &MOSFETLossParams::Rds_on,
+             "On-state resistance at 25C (Ω)")
+        .def_readwrite("Rds_on_tc", &MOSFETLossParams::Rds_on_tc,
+             "Temperature coefficient (Ω/K)")
+        .def_readwrite("Qg", &MOSFETLossParams::Qg,
+             "Total gate charge (C)")
+        .def_readwrite("Eon_25C", &MOSFETLossParams::Eon_25C,
+             "Turn-on energy at 25C (J)")
+        .def_readwrite("Eoff_25C", &MOSFETLossParams::Eoff_25C,
+             "Turn-off energy at 25C (J)")
+        .def_readwrite("I_ref", &MOSFETLossParams::I_ref,
+             "Reference current for Esw (A)")
+        .def_readwrite("V_ref", &MOSFETLossParams::V_ref,
+             "Reference voltage for Esw (V)")
+        .def_readwrite("T_ref", &MOSFETLossParams::T_ref,
+             "Reference temperature (C)")
+        .def_readwrite("Esw_tc", &MOSFETLossParams::Esw_tc,
+             "Switching energy temp coefficient (1/K)")
+        .def("Rds_on_at_T", &MOSFETLossParams::Rds_on_at_T, py::arg("T"),
+             "Calculate Rds_on at temperature T");
+
+    py::class_<IGBTLossParams>(v2, "IGBTLossParams",
+        "IGBT loss model parameters")
+        .def(py::init<>())
+        .def_readwrite("Vce_sat", &IGBTLossParams::Vce_sat,
+             "Collector-emitter saturation voltage (V)")
+        .def_readwrite("Rce", &IGBTLossParams::Rce,
+             "Collector-emitter resistance (Ω)")
+        .def_readwrite("Vce_tc", &IGBTLossParams::Vce_tc,
+             "Vce temperature coefficient (V/K)")
+        .def_readwrite("Eon_25C", &IGBTLossParams::Eon_25C,
+             "Turn-on energy at 25C (J)")
+        .def_readwrite("Eoff_25C", &IGBTLossParams::Eoff_25C,
+             "Turn-off energy at 25C (J)")
+        .def_readwrite("I_ref", &IGBTLossParams::I_ref,
+             "Reference current (A)")
+        .def_readwrite("V_ref", &IGBTLossParams::V_ref,
+             "Reference voltage (V)")
+        .def_readwrite("T_ref", &IGBTLossParams::T_ref,
+             "Reference temperature (C)")
+        .def_readwrite("Esw_tc", &IGBTLossParams::Esw_tc,
+             "Switching energy temp coefficient (1/K)")
+        .def("Vce_sat_at_T", &IGBTLossParams::Vce_sat_at_T, py::arg("T"),
+             "Calculate Vce_sat at temperature T");
+
+    py::class_<DiodeLossParams>(v2, "DiodeLossParams",
+        "Diode loss model parameters")
+        .def(py::init<>())
+        .def_readwrite("Vf", &DiodeLossParams::Vf,
+             "Forward voltage at 25C (V)")
+        .def_readwrite("Rd", &DiodeLossParams::Rd,
+             "Dynamic resistance (Ω)")
+        .def_readwrite("Vf_tc", &DiodeLossParams::Vf_tc,
+             "Vf temperature coefficient (V/K)")
+        .def_readwrite("Qrr", &DiodeLossParams::Qrr,
+             "Reverse recovery charge (C)")
+        .def_readwrite("trr", &DiodeLossParams::trr,
+             "Reverse recovery time (s)")
+        .def_readwrite("Irr_factor", &DiodeLossParams::Irr_factor,
+             "Irr as fraction of If")
+        .def_readwrite("Err_factor", &DiodeLossParams::Err_factor,
+             "Err factor")
+        .def_readwrite("T_ref", &DiodeLossParams::T_ref,
+             "Reference temperature (C)")
+        .def("Vf_at_T", &DiodeLossParams::Vf_at_T, py::arg("T"),
+             "Calculate Vf at temperature T")
+        .def("Err", &DiodeLossParams::Err,
+             py::arg("If"), py::arg("Vr"), py::arg("T"),
+             "Calculate reverse recovery energy");
+
+    // Conduction loss functions
+    py::class_<ConductionLoss>(v2, "ConductionLoss",
+        "Static methods for conduction loss calculation")
+        .def_static("resistor", &ConductionLoss::resistor,
+             py::arg("I"), py::arg("R"),
+             "Resistor conduction loss: P = I² * R")
+        .def_static("mosfet", &ConductionLoss::mosfet,
+             py::arg("I"), py::arg("params"), py::arg("T"),
+             "MOSFET conduction loss: P = I² * Rds_on(T)")
+        .def_static("igbt", &ConductionLoss::igbt,
+             py::arg("I"), py::arg("params"), py::arg("T"),
+             "IGBT conduction loss: P = Vce_sat * I + Rce * I²")
+        .def_static("diode", &ConductionLoss::diode,
+             py::arg("I"), py::arg("params"), py::arg("T"),
+             "Diode conduction loss: P = Vf * I + Rd * I²");
+
+    // Switching loss functions
+    py::class_<SwitchingLoss>(v2, "SwitchingLoss",
+        "Static methods for switching loss calculation")
+        .def_static("mosfet_Eon", &SwitchingLoss::mosfet_Eon,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "MOSFET turn-on energy")
+        .def_static("mosfet_Eoff", &SwitchingLoss::mosfet_Eoff,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "MOSFET turn-off energy")
+        .def_static("mosfet_total", &SwitchingLoss::mosfet_total,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "MOSFET total switching energy per cycle")
+        .def_static("mosfet_power", &SwitchingLoss::mosfet_power,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
+             "MOSFET switching power at frequency f_sw")
+        .def_static("igbt_Eon", &SwitchingLoss::igbt_Eon,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "IGBT turn-on energy")
+        .def_static("igbt_Eoff", &SwitchingLoss::igbt_Eoff,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "IGBT turn-off energy")
+        .def_static("igbt_total", &SwitchingLoss::igbt_total,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "IGBT total switching energy per cycle")
+        .def_static("igbt_power", &SwitchingLoss::igbt_power,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
+             "IGBT switching power at frequency f_sw")
+        .def_static("diode_Err", &SwitchingLoss::diode_Err,
+             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("params"),
+             "Diode reverse recovery energy")
+        .def_static("diode_power", &SwitchingLoss::diode_power,
+             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
+             "Diode reverse recovery power at frequency f_sw");
+
+    py::class_<LossBreakdown>(v2, "LossBreakdown",
+        "Breakdown of losses by type")
+        .def(py::init<>())
+        .def_readwrite("conduction", &LossBreakdown::conduction, "Conduction loss (W)")
+        .def_readwrite("turn_on", &LossBreakdown::turn_on, "Turn-on switching loss (W)")
+        .def_readwrite("turn_off", &LossBreakdown::turn_off, "Turn-off switching loss (W)")
+        .def_readwrite("reverse_recovery", &LossBreakdown::reverse_recovery,
+             "Diode reverse recovery loss (W)")
+        .def("total", &LossBreakdown::total, "Total loss")
+        .def("switching", &LossBreakdown::switching, "Total switching loss");
+
+    py::class_<LossAccumulator>(v2, "LossAccumulator",
+        "Accumulates losses over time for a device")
+        .def(py::init<>())
+        .def("reset", &LossAccumulator::reset, "Reset accumulated energy")
+        .def("add_sample", &LossAccumulator::add_sample,
+             py::arg("P_cond"), py::arg("dt"),
+             "Add instantaneous power sample")
+        .def("add_switching_event", &LossAccumulator::add_switching_event,
+             py::arg("E_sw"), "Add switching event energy")
+        .def("total_energy", &LossAccumulator::total_energy,
+             "Get total accumulated energy (J)")
+        .def("conduction_energy", &LossAccumulator::conduction_energy,
+             "Get conduction energy (J)")
+        .def("switching_energy", &LossAccumulator::switching_energy,
+             "Get switching energy (J)")
+        .def("average_power", &LossAccumulator::average_power,
+             "Get average power (W)")
+        .def("average_conduction_power", &LossAccumulator::average_conduction_power,
+             "Get average conduction power (W)")
+        .def("average_switching_power", &LossAccumulator::average_switching_power,
+             "Get average switching power (W)")
+        .def("duration", &LossAccumulator::duration, "Get simulation duration")
+        .def("num_samples", &LossAccumulator::num_samples, "Get number of samples");
+
+    py::class_<EfficiencyCalculator>(v2, "EfficiencyCalculator",
+        "Calculate converter efficiency")
+        .def_static("from_power", &EfficiencyCalculator::from_power,
+             py::arg("P_in"), py::arg("P_out"),
+             "Calculate efficiency from input/output power")
+        .def_static("from_losses", &EfficiencyCalculator::from_losses,
+             py::arg("P_out"), py::arg("P_loss"),
+             "Calculate efficiency from output power and losses")
+        .def_static("losses_from_efficiency", &EfficiencyCalculator::losses_from_efficiency,
+             py::arg("eta"), py::arg("P_out"),
+             "Calculate losses from efficiency and output power")
+        .def_static("input_power", &EfficiencyCalculator::input_power,
+             py::arg("eta"), py::arg("P_out"),
+             "Calculate input power from efficiency and output power");
+
+    py::class_<LossResult>(v2, "LossResult", "Complete loss analysis result")
+        .def(py::init<>())
+        .def_readwrite("device_name", &LossResult::device_name)
+        .def_readwrite("breakdown", &LossResult::breakdown)
+        .def_readwrite("total_energy", &LossResult::total_energy)
+        .def_readwrite("average_power", &LossResult::average_power)
+        .def_readwrite("peak_power", &LossResult::peak_power)
+        .def_readwrite("rms_current", &LossResult::rms_current)
+        .def_readwrite("avg_current", &LossResult::avg_current)
+        .def_readwrite("efficiency_contribution", &LossResult::efficiency_contribution)
+        .def_readwrite("power_waveform", &LossResult::power_waveform)
+        .def_readwrite("times", &LossResult::times)
+        .def("compute_stats", &LossResult::compute_stats);
+
+    py::class_<SystemLossSummary>(v2, "SystemLossSummary",
+        "System-wide loss summary")
+        .def(py::init<>())
+        .def_readwrite("device_losses", &SystemLossSummary::device_losses)
+        .def_readwrite("total_loss", &SystemLossSummary::total_loss)
+        .def_readwrite("total_conduction", &SystemLossSummary::total_conduction)
+        .def_readwrite("total_switching", &SystemLossSummary::total_switching)
+        .def_readwrite("input_power", &SystemLossSummary::input_power)
+        .def_readwrite("output_power", &SystemLossSummary::output_power)
+        .def_readwrite("efficiency", &SystemLossSummary::efficiency)
+        .def("compute_totals", &SystemLossSummary::compute_totals);
 
     // Version info
     v2.attr("__version__") = "2.0.0";

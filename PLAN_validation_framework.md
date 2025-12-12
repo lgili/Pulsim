@@ -1,6 +1,14 @@
 # Plano: Framework de Validação para PulsimCore v2
 
-**Status:** Atualizado para nova API Python (Circuit, solve_dc, run_transient)
+**Status:** ✅ IMPLEMENTADO - 71 testes passando
+
+| Nível | Categoria | Testes |
+|-------|-----------|--------|
+| 1 | Circuitos Lineares (RC, RL, RLC) | 19 |
+| 2 | Análise DC | 11 |
+| 3 | Não-Lineares (Diodo, Switch, MOSFET) | 21 |
+| 4 | Conversores (Buck, Boost) | 20 |
+| **Total** | | **71** |
 
 ## Objetivo
 Criar uma suíte de testes automatizada que valide os resultados do PulsimCore contra:
@@ -44,20 +52,19 @@ python/tests/validation/
 │   ├── spice_runner.py      # Interface com PySpice/NgSpice
 │   ├── comparator.py        # Comparação de resultados
 │   └── reporters.py         # Geração de relatórios
-├── level1_linear/           # Nível 1: Circuitos lineares (com solução analítica)
-│   ├── test_rc_circuits.py
-│   ├── test_rl_circuits.py
-│   └── test_rlc_circuits.py
-├── level2_dc_analysis/      # Nível 2: Análise DC
-│   ├── test_resistor_networks.py
-│   └── test_voltage_dividers.py
-├── level3_nonlinear/        # Nível 3: Componentes não-lineares
-│   ├── test_diode.py
-│   ├── test_switch.py
-│   └── test_mosfet.py
-├── level4_converters/       # Nível 4: Conversores de potência
-│   ├── test_buck_converter.py
-│   └── test_boost_converter.py
+├── level1_linear/           # Nível 1: Circuitos lineares ✅
+│   ├── test_rc_circuits.py  # 6 testes
+│   ├── test_rl_circuits.py  # 5 testes
+│   └── test_rlc_circuits.py # 8 testes
+├── level2_dc_analysis/      # Nível 2: Análise DC ✅
+│   └── test_resistor_networks.py  # 11 testes
+├── level3_nonlinear/        # Nível 3: Componentes não-lineares ✅
+│   ├── test_diode.py        # 6 testes
+│   ├── test_switch.py       # 7 testes
+│   └── test_mosfet.py       # 8 testes
+├── level4_converters/       # Nível 4: Conversores de potência ✅
+│   ├── test_buck_converter.py   # 9 testes
+│   └── test_boost_converter.py  # 11 testes
 └── reports/                 # Relatórios gerados
 ```
 
@@ -243,26 +250,32 @@ class ValidationTest:
 
 ## Implementação - Checklist
 
-### Fase 1: Framework + Circuitos Lineares (PRIORIDADE)
-- [ ] Criar estrutura de diretórios
-- [ ] Implementar `framework/base.py`
-- [ ] Implementar `framework/comparator.py`
-- [ ] Testes RC (step, discharge)
-- [ ] Testes RL (step)
-- [ ] Testes RLC (under/critical/over damped)
-- [ ] Validar contra soluções analíticas do pulsim (RCAnalytical, RLAnalytical, RLCAnalytical)
+### Fase 1: Framework + Circuitos Lineares ✅ COMPLETO
+- [x] Criar estrutura de diretórios
+- [x] Implementar `framework/base.py`
+- [x] Implementar `framework/comparator.py`
+- [x] Testes RC (step, discharge) - 6 testes
+- [x] Testes RL (step) - 5 testes
+- [x] Testes RLC (under/critical/over damped) - 8 testes
+- [x] Validar contra soluções analíticas do pulsim (RCAnalytical, RLAnalytical, RLCAnalytical)
 
-### Fase 2: DC Analysis
-- [ ] Testes divisor de tensão
-- [ ] Testes resistores série/paralelo
-- [ ] Verificar Newton solver accuracy
+### Fase 2: DC Analysis ✅ COMPLETO
+- [x] Testes divisor de tensão
+- [x] Testes resistores série/paralelo
+- [x] Verificar Newton solver accuracy
+- Total: 11 testes
 
-### Fase 3: Não-Lineares
-- [ ] Testes diodo
-- [ ] Testes switch
-- [ ] Verificar convergence aids
+### Fase 3: Não-Lineares ✅ COMPLETO
+- [x] Testes diodo - 6 testes
+- [x] Testes switch - 7 testes
+- [x] Testes MOSFET - 8 testes
+- [x] Verificar convergence aids
 
-### Fase 4: Integração NgSpice (Opcional)
+### Fase 4: Conversores de Potência ✅ COMPLETO
+- [x] Testes Buck converter - 9 testes
+- [x] Testes Boost converter - 11 testes
+
+### Fase 5: Integração NgSpice (Opcional - Não Implementado)
 - [ ] Implementar `framework/spice_runner.py`
 - [ ] Comparação Pulsim vs NgSpice
 - [ ] Relatórios comparativos

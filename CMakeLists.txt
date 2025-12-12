@@ -1,4 +1,26 @@
 cmake_minimum_required(VERSION 3.20)
+
+# =============================================================================
+# macOS: Force AppleClang for Python bindings (ABI compatibility)
+# =============================================================================
+# When building Python bindings on macOS, we MUST use AppleClang to avoid
+# libc++ ABI mismatches. Homebrew's Clang uses a different libc++ version
+# than the Python interpreter, causing "symbol not found" errors at runtime.
+if(APPLE AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED CMAKE_CXX_COMPILER)
+    # Check if we're building Python bindings (scikit-build-core sets this)
+    if(SKBUILD OR PULSIM_BUILD_PYTHON)
+        # Force AppleClang for Python ABI compatibility
+        find_program(APPLE_CLANG "/usr/bin/clang")
+        find_program(APPLE_CLANGXX "/usr/bin/clang++")
+
+        if(APPLE_CLANG AND APPLE_CLANGXX)
+            set(CMAKE_C_COMPILER "${APPLE_CLANG}" CACHE FILEPATH "C compiler" FORCE)
+            set(CMAKE_CXX_COMPILER "${APPLE_CLANGXX}" CACHE FILEPATH "C++ compiler" FORCE)
+            message(STATUS "macOS Python bindings: Using AppleClang for ABI compatibility")
+        endif()
+    endif()
+endif()
+
 project(pulsim VERSION 0.1.0 LANGUAGES CXX)
 
 # =============================================================================
@@ -105,8 +127,20 @@ endif()
 # =============================================================================
 # Compiler Detection and Verification
 # =============================================================================
-# Verify Clang version for C++23 support (recommended: 17+)
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+# Verify compiler version for C++23 support
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    # AppleClang versioning: 15.0+ has good C++23 support (ships with Xcode 15+)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "15.0")
+        message(WARNING
+            "AppleClang ${CMAKE_CXX_COMPILER_VERSION} detected. "
+            "Version 15+ (Xcode 15+) is recommended for C++23 support.\n"
+            "Update Xcode via: xcode-select --install"
+        )
+    else()
+        message(STATUS "AppleClang ${CMAKE_CXX_COMPILER_VERSION} - C++23 support OK")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # LLVM Clang: 17+ for full C++23
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
         message(WARNING
             "Clang ${CMAKE_CXX_COMPILER_VERSION} detected. "
@@ -147,8 +181,19 @@ message(STATUS "C++ Standard: C++${CMAKE_CXX_STANDARD}")
 # =============================================================================
 # Compiler Warnings and Flags
 # =============================================================================
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Clang-specific flags (preferred compiler)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    # AppleClang (Xcode) - required for Python bindings on macOS
+    add_compile_options(
+        -Wall -Wextra -Wpedantic -Werror=return-type
+        -Wno-c++98-compat -Wno-c++98-compat-pedantic
+    )
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-g -O0 -fno-omit-frame-pointer)
+    else()
+        add_compile_options(-O3 -DNDEBUG)
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # LLVM Clang (Homebrew, etc.) - NOT for Python bindings on macOS
     add_compile_options(
         -Wall -Wextra -Wpedantic -Werror=return-type
         -Wno-c++98-compat -Wno-c++98-compat-pedantic
@@ -160,14 +205,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # GCC flags
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(-g -O0)
-    else()
-        add_compile_options(-O3 -DNDEBUG)
-    endif()
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    # AppleClang (Xcode) flags
     add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-g -O0)

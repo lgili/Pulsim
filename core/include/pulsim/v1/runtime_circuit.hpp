@@ -10,6 +10,7 @@
 
 #include "pulsim/v1/device_base.hpp"
 #include "pulsim/v1/solver.hpp"
+#include "pulsim/v1/sources.hpp"
 #include <variant>
 #include <unordered_map>
 #include <memory>
@@ -33,7 +34,10 @@ using DeviceVariant = std::variant<
     IdealDiode,
     IdealSwitch,
     MOSFET,
-    IGBT
+    IGBT,
+    PWMVoltageSource,
+    SineVoltageSource,
+    PulseVoltageSource
 >;
 
 // =============================================================================
@@ -171,6 +175,137 @@ public:
 
     /// Number of devices
     [[nodiscard]] std::size_t num_devices() const { return devices_.size(); }
+
+    // =========================================================================
+    // Time-Varying Sources
+    // =========================================================================
+
+    void add_pwm_voltage_source(const std::string& name, Index npos, Index nneg,
+                                 const PWMParams& params) {
+        Index br = num_nodes() + num_branches_;
+        auto pwm = PWMVoltageSource(params, name);
+        pwm.set_branch_index(br);
+        devices_.emplace_back(std::move(pwm));
+        connections_.push_back({name, {npos, nneg}, br});
+        num_branches_++;
+    }
+
+    void add_pwm_voltage_source(const std::string& name, Index npos, Index nneg,
+                                 Real v_high, Real v_low, Real frequency, Real duty) {
+        PWMParams params;
+        params.v_high = v_high;
+        params.v_low = v_low;
+        params.frequency = frequency;
+        params.duty = duty;
+        add_pwm_voltage_source(name, npos, nneg, params);
+    }
+
+    void add_sine_voltage_source(const std::string& name, Index npos, Index nneg,
+                                  const SineParams& params) {
+        Index br = num_nodes() + num_branches_;
+        auto sine = SineVoltageSource(params, name);
+        sine.set_branch_index(br);
+        devices_.emplace_back(std::move(sine));
+        connections_.push_back({name, {npos, nneg}, br});
+        num_branches_++;
+    }
+
+    void add_sine_voltage_source(const std::string& name, Index npos, Index nneg,
+                                  Real amplitude, Real frequency, Real offset = 0.0) {
+        SineParams params;
+        params.amplitude = amplitude;
+        params.frequency = frequency;
+        params.offset = offset;
+        add_sine_voltage_source(name, npos, nneg, params);
+    }
+
+    void add_pulse_voltage_source(const std::string& name, Index npos, Index nneg,
+                                   const PulseParams& params) {
+        Index br = num_nodes() + num_branches_;
+        auto pulse = PulseVoltageSource(params, name);
+        pulse.set_branch_index(br);
+        devices_.emplace_back(std::move(pulse));
+        connections_.push_back({name, {npos, nneg}, br});
+        num_branches_++;
+    }
+
+    // =========================================================================
+    // PWM Duty Control
+    // =========================================================================
+
+    /// Set fixed duty cycle for a PWM source
+    void set_pwm_duty(const std::string& name, Real duty) {
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            if (connections_[i].name == name) {
+                if (auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
+                    pwm->set_duty(duty);
+                    return;
+                }
+            }
+        }
+        throw std::runtime_error("PWM source not found: " + name);
+    }
+
+    /// Set duty callback for a PWM source
+    void set_pwm_duty_callback(const std::string& name,
+                                std::function<Real(Real)> callback) {
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            if (connections_[i].name == name) {
+                if (auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
+                    pwm->set_duty_callback(std::move(callback));
+                    return;
+                }
+            }
+        }
+        throw std::runtime_error("PWM source not found: " + name);
+    }
+
+    /// Clear duty callback (use fixed duty)
+    void clear_pwm_duty_callback(const std::string& name) {
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            if (connections_[i].name == name) {
+                if (auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
+                    pwm->clear_duty_callback();
+                    return;
+                }
+            }
+        }
+        throw std::runtime_error("PWM source not found: " + name);
+    }
+
+    /// Get PWM state (ON/OFF) at current time
+    [[nodiscard]] bool get_pwm_state(const std::string& name) const {
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            if (connections_[i].name == name) {
+                if (const auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
+                    return pwm->state_at(current_time_);
+                }
+            }
+        }
+        throw std::runtime_error("PWM source not found: " + name);
+    }
+
+    // =========================================================================
+    // Time Management
+    // =========================================================================
+
+    /// Set current simulation time (called by transient solver)
+    void set_current_time(Real t) { current_time_ = t; }
+
+    /// Get current simulation time
+    [[nodiscard]] Real current_time() const { return current_time_; }
+
+    /// Check if circuit has time-varying sources
+    [[nodiscard]] bool has_time_varying() const {
+        for (const auto& dev : devices_) {
+            if (std::holds_alternative<PWMVoltageSource>(dev) ||
+                std::holds_alternative<SineVoltageSource>(dev) ||
+                std::holds_alternative<PulseVoltageSource>(dev)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     // =========================================================================
     // Set Switch States
@@ -337,6 +472,7 @@ private:
     std::vector<std::string> node_names_;
     Index num_branches_ = 0;
     Real timestep_ = 1e-6;
+    Real current_time_ = 0.0;
     inline static const std::string ground_name_ = "0";
 
     // =========================================================================
@@ -379,6 +515,18 @@ private:
             // Initial: off-state conductance
             auto params = dev.params();
             stamp_resistor(1.0 / params.g_off, {conn.nodes[1], conn.nodes[2]}, triplets);
+        }
+        else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+            // DC: use voltage at t=0
+            stamp_voltage_source(dev.voltage_at(0.0), conn.nodes, conn.branch_index, triplets, b);
+        }
+        else if constexpr (std::is_same_v<T, SineVoltageSource>) {
+            // DC: use offset (average value)
+            stamp_voltage_source(dev.params().offset, conn.nodes, conn.branch_index, triplets, b);
+        }
+        else if constexpr (std::is_same_v<T, PulseVoltageSource>) {
+            // DC: use initial voltage
+            stamp_voltage_source(dev.params().v_initial, conn.nodes, conn.branch_index, triplets, b);
         }
     }
 
@@ -508,6 +656,35 @@ private:
         }
         else if constexpr (std::is_same_v<T, IGBT>) {
             stamp_igbt_jacobian(dev, conn.nodes, triplets, f, x);
+        }
+        else if constexpr (std::is_same_v<T, PWMVoltageSource> ||
+                           std::is_same_v<T, SineVoltageSource> ||
+                           std::is_same_v<T, PulseVoltageSource>) {
+            // Time-varying voltage source
+            Index npos = conn.nodes[0];
+            Index nneg = conn.nodes[1];
+            Index br = conn.branch_index;
+            Real v_src = dev.voltage_at(current_time_);
+
+            // Stamp MNA extension (same as regular voltage source)
+            if (npos >= 0) {
+                triplets.emplace_back(npos, br, 1.0);
+                triplets.emplace_back(br, npos, 1.0);
+            }
+            if (nneg >= 0) {
+                triplets.emplace_back(nneg, br, -1.0);
+                triplets.emplace_back(br, nneg, -1.0);
+            }
+
+            // Residual
+            Real vpos = (npos >= 0) ? x[npos] : 0.0;
+            Real vneg = (nneg >= 0) ? x[nneg] : 0.0;
+            f[br] += (vpos - vneg - v_src);
+
+            // KCL contribution from branch current
+            Real i_br = x[br];
+            if (npos >= 0) f[npos] += i_br;
+            if (nneg >= 0) f[nneg] -= i_br;
         }
     }
 

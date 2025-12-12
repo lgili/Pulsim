@@ -25,6 +25,10 @@
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/validation.hpp"
 #include "pulsim/v1/runtime_circuit.hpp"
+#include "pulsim/v1/thermal.hpp"
+#include "pulsim/v1/losses.hpp"
+#include "pulsim/v1/sources.hpp"
+#include "pulsim/v1/control.hpp"
 
 // Convenience namespace alias
 namespace pulsim2 = pulsim::v1;

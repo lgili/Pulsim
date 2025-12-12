@@ -29,6 +29,26 @@ from ._pulsim import (
     IGBTParams,
     IGBT,
 
+    # Time-Varying Sources
+    PWMParams,
+    PWMVoltageSource,
+    SineParams,
+    SineVoltageSource,
+    RampParams,
+    RampGenerator,
+    PulseParams,
+    PulseVoltageSource,
+
+    # Control Blocks
+    PIController,
+    PIDController,
+    Comparator,
+    SampleHold,
+    RateLimiter,
+    MovingAverageFilter,
+    HysteresisController,
+    LookupTable1D,
+
     # Circuit Builder
     Circuit,
 
@@ -84,6 +104,40 @@ from ._pulsim import (
     detect_simd_level,
     simd_vector_width,
     solver_status_to_string,
+
+    # Thermal Simulation
+    FosterStage,
+    FosterNetwork,
+    CauerStage,
+    CauerNetwork,
+    ThermalSimulator,
+    ThermalLimitMonitor,
+    ThermalResult,
+    create_mosfet_thermal_model,
+    create_from_datasheet_4param,
+    create_simple_thermal_model,
+
+    # Power Loss Calculation
+    MOSFETLossParams,
+    IGBTLossParams,
+    DiodeLossParams,
+    ConductionLoss,
+    SwitchingLoss,
+    LossBreakdown,
+    LossAccumulator,
+    EfficiencyCalculator,
+    LossResult,
+    SystemLossSummary,
+)
+
+# Netlist Parser (Pure Python)
+from .netlist import (
+    parse_netlist,
+    parse_netlist_verbose,
+    parse_value,
+    NetlistParseError,
+    NetlistWarning,
+    ParsedNetlist,
 )
 
 __all__ = [
@@ -112,6 +166,26 @@ __all__ = [
     "MOSFET",
     "IGBTParams",
     "IGBT",
+
+    # Time-Varying Sources
+    "PWMParams",
+    "PWMVoltageSource",
+    "SineParams",
+    "SineVoltageSource",
+    "RampParams",
+    "RampGenerator",
+    "PulseParams",
+    "PulseVoltageSource",
+
+    # Control Blocks
+    "PIController",
+    "PIDController",
+    "Comparator",
+    "SampleHold",
+    "RateLimiter",
+    "MovingAverageFilter",
+    "HysteresisController",
+    "LookupTable1D",
 
     # Circuit Builder
     "Circuit",
@@ -168,4 +242,36 @@ __all__ = [
     "detect_simd_level",
     "simd_vector_width",
     "solver_status_to_string",
+
+    # Thermal Simulation
+    "FosterStage",
+    "FosterNetwork",
+    "CauerStage",
+    "CauerNetwork",
+    "ThermalSimulator",
+    "ThermalLimitMonitor",
+    "ThermalResult",
+    "create_mosfet_thermal_model",
+    "create_from_datasheet_4param",
+    "create_simple_thermal_model",
+
+    # Power Loss Calculation
+    "MOSFETLossParams",
+    "IGBTLossParams",
+    "DiodeLossParams",
+    "ConductionLoss",
+    "SwitchingLoss",
+    "LossBreakdown",
+    "LossAccumulator",
+    "EfficiencyCalculator",
+    "LossResult",
+    "SystemLossSummary",
+
+    # Netlist Parser
+    "parse_netlist",
+    "parse_netlist_verbose",
+    "parse_value",
+    "NetlistParseError",
+    "NetlistWarning",
+    "ParsedNetlist",
 ]
