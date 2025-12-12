@@ -126,6 +126,19 @@ NewtonResult NewtonSolver::solve(const Vector& x0, SystemFunction system_func) {
         }
     }
 
+    // Final residual evaluation after the last Newton step
+    // The solution may have converged on the last iteration but wasn't checked
+    system_func(result.x, f, J);
+    Real final_f_norm = f.norm();
+    result.final_residual = final_f_norm;
+    result.iterations = options_.max_iterations;
+
+    // Check if we actually converged on the last step
+    if (final_f_norm < options_.abstol) {
+        result.status = SolverStatus::Success;
+        return result;
+    }
+
     result.status = SolverStatus::MaxIterationsReached;
     result.error_message = "Newton iteration did not converge after " +
                           std::to_string(options_.max_iterations) + " iterations. " +

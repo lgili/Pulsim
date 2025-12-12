@@ -100,7 +100,7 @@ class RLCircuitDefinitions:
             compare_nodes={"I(L1)": "i(l1)"},  # Inductor current
             circuit_params={"V0": V0, "R": R, "L": L, "I_initial": 0.0},
             analytical_solution=AnalyticalSolutions.rl_step_response,
-            pulsim_options={"use_ic": True, "dtmax": dt},  # Fixed timestep
+            pulsim_options={"use_ic": True, "dtmax": dt, "dtmin": dt / 10},  # Fixed timestep
         )
 
     @staticmethod
@@ -132,7 +132,7 @@ class RLCircuitDefinitions:
             compare_nodes={"I(L1)": "i(l1)"},
             circuit_params={"I0": I0, "R": R, "L": L},
             analytical_solution=AnalyticalSolutions.rl_current_decay,
-            pulsim_options={"use_ic": True, "dtmax": dt},  # Fixed timestep
+            pulsim_options={"use_ic": True, "dtmax": dt, "dtmin": dt / 10},  # Fixed timestep
         )
 
 
@@ -176,7 +176,10 @@ class TestRLStepResponse:
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)
-        i_L = np.array(result.branch_currents["I(L1)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        i_L = signal_data["I(L1)"]
 
         # At t = τ, current should be I_final * (1 - 1/e) ≈ 0.632 * I_final
         V0 = circuit_def.circuit_params["V0"]
@@ -206,7 +209,10 @@ class TestRLStepResponse:
         result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
-        i_L = np.array(result.branch_currents["I(L1)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        i_L = signal_data["I(L1)"]
         V0 = circuit_def.circuit_params["V0"]
         R = circuit_def.circuit_params["R"]
         I_final_expected = V0 / R
@@ -274,7 +280,10 @@ class TestRLCurrentDecay:
         result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
-        i_L = np.array(result.branch_currents["I(L1)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        i_L = signal_data["I(L1)"]
         I0 = circuit_def.circuit_params["I0"]
 
         # After 5τ, current should be < 1% of initial
@@ -313,7 +322,10 @@ class TestRLEnergyConservation:
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)
-        i_L = np.array(result.branch_currents["I(L1)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        i_L = signal_data["I(L1)"]
 
         # Final inductor current and energy
         I_final = i_L[-1]

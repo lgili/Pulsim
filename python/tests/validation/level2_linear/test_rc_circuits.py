@@ -95,7 +95,7 @@ class RCCircuitDefinitions:
             compare_nodes={"V(out)": "out"},
             circuit_params={"V0": V0, "R": R, "C": C, "V_initial": 0.0},
             analytical_solution=AnalyticalSolutions.rc_step_response,
-            pulsim_options={"use_ic": True, "dtmax": dt},  # Fixed timestep
+            pulsim_options={"use_ic": True, "dtmax": dt, "dtmin": dt / 10},  # Fixed timestep
         )
 
     @staticmethod
@@ -127,7 +127,7 @@ class RCCircuitDefinitions:
             compare_nodes={"V(out)": "out"},
             circuit_params={"V0": V0, "R": R, "C": C},
             analytical_solution=AnalyticalSolutions.rc_discharge,
-            pulsim_options={"use_ic": True, "dtmax": dt},  # Fixed timestep
+            pulsim_options={"use_ic": True, "dtmax": dt, "dtmin": dt / 10},  # Fixed timestep
         )
 
 
@@ -173,7 +173,10 @@ class TestRCStepResponse:
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)
-        v_out = np.array(result.node_voltages["V(out)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        v_out = signal_data["V(out)"]
 
         # At t = τ, voltage should be V0 * (1 - 1/e) ≈ 0.632 * V0
         V0 = circuit_def.circuit_params["V0"]
@@ -244,7 +247,10 @@ class TestRCDischarge:
         result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
-        v_out = np.array(result.node_voltages["V(out)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        v_out = signal_data["V(out)"]
         V0 = circuit_def.circuit_params["V0"]
 
         # After 5τ, voltage should be < 1% of initial

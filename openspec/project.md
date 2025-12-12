@@ -13,11 +13,13 @@ Pulsim is a high-performance circuit simulator focused on power electronics. It 
 ## Tech Stack
 
 ### Kernel (core/)
-- **Language**: C++20
+- **Language**: C++23 (migrating from C++20)
+- **Compiler**: Clang 17+ (primary), GCC 14+ (secondary)
 - **Build**: CMake 3.20+
 - **Linear Algebra**: Eigen 3.4+, SuiteSparse (KLU/UMFPACK)
 - **ODE/DAE Solvers**: SUNDIALS (CVODE/IDA/ARKODE)
 - **Testing**: Catch2 or Google Test
+- **Optimization**: LTO, PGO, SIMD (AVX2/AVX-512, NEON)
 
 ### API Layer (api/)
 - **Protocol**: gRPC with Protobuf
