@@ -11,8 +11,8 @@
 // - 4.5: Cache-friendly SoA data layouts
 // =============================================================================
 
-#include "pulsim/v2/numeric_types.hpp"
-#include "pulsim/v2/solver.hpp"
+#include "pulsim/v1/numeric_types.hpp"
+#include "pulsim/v1/solver.hpp"
 #include <Eigen/SparseLU>
 #include <memory>
 #include <new>
@@ -20,7 +20,7 @@
 #include <cstring>
 #include <bit>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // 4.1.4-4.1.6: Enhanced SparseLU with Caching and Reuse Detection
@@ -993,4 +993,4 @@ struct InductorSoA {
 static_assert(LinearSolverPolicy<EnhancedSparseLUPolicy>);
 static_assert(LinearSolverPolicy<KLUPolicy>);
 
-} // namespace pulsim::v2
+} // namespace pulsim::v1

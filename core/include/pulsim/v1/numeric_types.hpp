@@ -21,7 +21,7 @@
 #include <algorithm>
 #include <initializer_list>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Expression Marker (for constraining expression templates)
@@ -1196,4 +1196,4 @@ inline constexpr PerUnitSystem<double>::BaseQuantities power_electronics_base{
     50.0     // 50Hz
 };
 
-}  // namespace pulsim::v2
+}  // namespace pulsim::v1

@@ -13,10 +13,10 @@
 #include <pybind11/functional.h>
 #include <pybind11/chrono.h>
 
-#include "pulsim/v2/core.hpp"
+#include "pulsim/v1/core.hpp"
 
 namespace py = pybind11;
-using namespace pulsim::v2;
+using namespace pulsim::v1;
 
 // =============================================================================
 // Helper: Convert std::expected to Python (raise exception on error)

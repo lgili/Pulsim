@@ -10,8 +10,8 @@
 // - 5.4: Robust Initialization - intelligent initial guesses
 // =============================================================================
 
-#include "pulsim/v2/numeric_types.hpp"
-#include "pulsim/v2/solver.hpp"
+#include "pulsim/v1/numeric_types.hpp"
+#include "pulsim/v1/solver.hpp"
 #include <vector>
 #include <functional>
 #include <optional>
@@ -20,7 +20,7 @@
 #include <string>
 #include <algorithm>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // 5.1: Gmin Stepping
@@ -901,4 +901,4 @@ private:
     }
 };
 
-} // namespace pulsim::v2
+} // namespace pulsim::v1

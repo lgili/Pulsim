@@ -17,9 +17,9 @@ High-performance circuit simulator focused on power electronics.
 - **Python bindings** for scripting and GUI integration
 - **GUI integration API** with pause/resume/stop, progress callbacks, and validation
 
-### v2 High-Performance API (New)
+### High-Performance API
 
-PulsimCore v2 provides 2x+ performance improvement through:
+PulsimCore provides 2x+ performance improvement through:
 - **CRTP device architecture** with compile-time dispatch
 - **SIMD vectorization** with runtime detection
 - **Cache-friendly SoA layouts** for device data
@@ -369,43 +369,43 @@ result = sim.run_transient()
 print(f"Simulated {result.num_points()} points in {result.total_time_seconds:.2f}s")
 ```
 
-### High-Performance API (v2)
+### High-Performance API
 
 ```python
-import pulsim.v2 as v2
+import pulsim
 
 # Create standalone device objects
-r = v2.Resistor(1000.0, "R1")
-c = v2.Capacitor(1e-6, 0.0, "C1")
+r = pulsim.Resistor(1000.0, "R1")
+c = pulsim.Capacitor(1e-6, 0.0, "C1")
 
 # Configure solver with advanced options
-tols = v2.Tolerances.defaults()
+tols = pulsim.Tolerances.defaults()
 tols.voltage_abstol = 1e-9
 
-opts = v2.NewtonOptions()
+opts = pulsim.NewtonOptions()
 opts.max_iterations = 50
 opts.auto_damping = True
 opts.tolerances = tols
 
 # DC convergence with automatic strategy
-dc_config = v2.DCConvergenceConfig()
-dc_config.strategy = v2.DCStrategy.Auto
+dc_config = pulsim.DCConvergenceConfig()
+dc_config.strategy = pulsim.DCStrategy.Auto
 
 # Adaptive timestep with PI controller
-ts_config = v2.TimestepConfig.defaults()
+ts_config = pulsim.TimestepConfig.defaults()
 ts_config.dt_min = 1e-12
 ts_config.dt_max = 1e-6
 
 # Validate against analytical solution
-rc = v2.RCAnalytical(1000, 1e-6, 0.0, 5.0)
+rc = pulsim.RCAnalytical(1000, 1e-6, 0.0, 5.0)
 print(f"Time constant: {rc.tau() * 1e3:.3f} ms")
 print(f"V(tau): {rc.voltage(rc.tau()):.3f} V")
 
 # Check SIMD optimization
-print(f"SIMD: {v2.detect_simd_level()}, width: {v2.simd_vector_width()} doubles")
+print(f"SIMD: {pulsim.detect_simd_level()}, width: {pulsim.simd_vector_width()} doubles")
 ```
 
-See [v2 API Notebook](examples/notebooks/14_v2_api.ipynb) for more examples.
+See [API Reference Notebook](examples/notebooks/14_api_reference.ipynb) for more examples.
 
 ### GUI Integration
 
@@ -471,10 +471,9 @@ See `examples/gui_integration_example.py` for more examples.
 
 ## Documentation
 
-- [Migration Guide](docs/migration-v1-to-v2.md) - Transitioning from v1 to v2 API
 - [Performance Tuning](docs/performance-tuning.md) - SIMD, solver, and memory optimization
 - [Determinism Guide](docs/determinism.md) - Reproducibility and debugging
-- [v2 API Notebook](examples/notebooks/14_v2_api.ipynb) - Interactive examples
+- [API Reference Notebook](examples/notebooks/14_api_reference.ipynb) - Interactive examples
 
 ## Roadmap
 
@@ -482,7 +481,7 @@ See `examples/gui_integration_example.py` for more examples.
 - [x] MVP-1: Power electronics (switches, events, losses)
 - [x] MVP-2: Advanced devices (MOSFETs, transformers)
 - [x] MVP-2b: GUI integration API (validation, progress, metadata)
-- [x] v2.0: High-performance C++23 refactor
+- [x] v1.0: High-performance C++23 refactor
   - [x] CRTP device architecture with 2x+ performance
   - [x] SIMD optimization (AVX2/AVX512/NEON)
   - [x] BDF1-5 integration with auto order control

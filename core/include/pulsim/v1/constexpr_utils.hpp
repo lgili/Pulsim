@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Constexpr Math Utilities
@@ -398,4 +398,4 @@ namespace detail {
     static_assert(approx_equal(csqrt(4.0), 2.0), "csqrt test failed");
 }
 
-}  // namespace pulsim::v2
+}  // namespace pulsim::v1

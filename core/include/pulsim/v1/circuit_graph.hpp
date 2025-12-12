@@ -11,8 +11,8 @@
 // - Zero-overhead abstraction through template metaprogramming
 // =============================================================================
 
-#include "pulsim/v2/numeric_types.hpp"
-#include "pulsim/v2/device_base.hpp"
+#include "pulsim/v1/numeric_types.hpp"
+#include "pulsim/v1/device_base.hpp"
 #include <array>
 #include <tuple>
 #include <type_traits>
@@ -20,7 +20,7 @@
 #include <algorithm>
 #include <bitset>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Device Traits for Compile-Time Analysis
@@ -467,4 +467,4 @@ static_assert(count_branches_v<VoltageSource, Inductor> == 2);
 
 } // namespace detail
 
-} // namespace pulsim::v2
+} // namespace pulsim::v1

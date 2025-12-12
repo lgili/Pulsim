@@ -14,7 +14,7 @@
 // - Support for mixed scalar types
 // =============================================================================
 
-#include "pulsim/v2/numeric_types.hpp"
+#include "pulsim/v1/numeric_types.hpp"
 #include <cstddef>
 #include <type_traits>
 #include <concepts>
@@ -48,7 +48,7 @@
 #include <Eigen/Core>
 #endif
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // 2.4.1: Expression Base Template
@@ -851,4 +851,4 @@ static_assert(expr_depth_v<AddExpr<StaticVector<double, 4>, StaticVector<double,
 
 } // namespace detail
 
-} // namespace pulsim::v2
+} // namespace pulsim::v1

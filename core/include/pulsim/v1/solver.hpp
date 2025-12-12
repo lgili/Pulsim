@@ -11,7 +11,7 @@
 // - Policy-based design for linear solvers
 // =============================================================================
 
-#include "pulsim/v2/numeric_types.hpp"
+#include "pulsim/v1/numeric_types.hpp"
 #include <Eigen/SparseLU>
 #include <vector>
 #include <array>
@@ -20,7 +20,7 @@
 #include <span>
 #include <expected>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Solver Status and Result Types
@@ -869,4 +869,4 @@ struct DeterministicTriplet {
 
 static_assert(LinearSolverPolicy<SparseLUPolicy>);
 
-} // namespace pulsim::v2
+} // namespace pulsim::v1

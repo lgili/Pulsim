@@ -1,17 +1,16 @@
 // =============================================================================
-// Test: C++23 v2 API Concepts and CRTP Devices
+// Test: C++23 API Concepts and CRTP Devices
 // =============================================================================
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
-#include "pulsim/v2/core.hpp"
-#include "pulsim/v2/compat.hpp"
+#include "pulsim/v1/core.hpp"
 
-using namespace pulsim::v2;
+using namespace pulsim::v1;
 using Catch::Approx;
 
-TEST_CASE("v2 concepts compilation", "[v2][concepts]") {
+TEST_CASE("API concepts compilation", "[concepts]") {
     SECTION("Device traits for Resistor") {
         REQUIRE(device_traits<Resistor>::type == DeviceType::Resistor);
         REQUIRE(device_traits<Resistor>::num_pins == 2);
@@ -34,7 +33,7 @@ TEST_CASE("v2 concepts compilation", "[v2][concepts]") {
     }
 }
 
-TEST_CASE("v2 CRTP Resistor", "[v2][crtp][resistor]") {
+TEST_CASE("API CRTP Resistor", "[api][crtp][resistor]") {
     SECTION("Resistor creation") {
         Resistor r(1000.0, "R1");
         REQUIRE(r.resistance() == 1000.0);
@@ -82,7 +81,7 @@ TEST_CASE("v2 CRTP Resistor", "[v2][crtp][resistor]") {
     }
 }
 
-TEST_CASE("v2 CRTP Capacitor", "[v2][crtp][capacitor]") {
+TEST_CASE("API CRTP Capacitor", "[api][crtp][capacitor]") {
     SECTION("Capacitor creation") {
         Capacitor c(1e-6, 0.0, "C1");
         REQUIRE(c.capacitance() == 1e-6);
@@ -131,7 +130,7 @@ TEST_CASE("v2 CRTP Capacitor", "[v2][crtp][capacitor]") {
     }
 }
 
-TEST_CASE("v2 Jacobian sparsity pattern", "[v2][sparsity]") {
+TEST_CASE("API Jacobian sparsity pattern", "[api][sparsity]") {
     SECTION("Resistor pattern") {
         auto pattern = Resistor::jacobian_pattern();
         REQUIRE(pattern.size() == 4);
@@ -143,7 +142,7 @@ TEST_CASE("v2 Jacobian sparsity pattern", "[v2][sparsity]") {
     }
 }
 
-TEST_CASE("v2 Result type (std::expected)", "[v2][expected]") {
+TEST_CASE("API Result type (std::expected)", "[api][expected]") {
     SECTION("Success result") {
         Result<int> result = 42;
         REQUIRE(result.has_value());
@@ -157,7 +156,7 @@ TEST_CASE("v2 Result type (std::expected)", "[v2][expected]") {
     }
 }
 
-TEST_CASE("v2 Integration method traits", "[v2][integration]") {
+TEST_CASE("API Integration method traits", "[api][integration]") {
     SECTION("Backward Euler") {
         REQUIRE(method_traits<MethodType::BackwardEuler>::order == 1);
         REQUIRE(method_traits<MethodType::BackwardEuler>::is_A_stable == true);
@@ -181,7 +180,7 @@ TEST_CASE("v2 Integration method traits", "[v2][integration]") {
 // Tests for Inductor CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP Inductor", "[v2][crtp][inductor]") {
+TEST_CASE("API CRTP Inductor", "[api][crtp][inductor]") {
     SECTION("Inductor creation") {
         Inductor l(1e-3, 0.0, "L1");
         REQUIRE(l.inductance() == 1e-3);
@@ -249,7 +248,7 @@ TEST_CASE("v2 CRTP Inductor", "[v2][crtp][inductor]") {
 // Tests for VoltageSource CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP VoltageSource", "[v2][crtp][vsource]") {
+TEST_CASE("API CRTP VoltageSource", "[api][crtp][vsource]") {
     SECTION("VoltageSource creation") {
         VoltageSource vs(12.0, "V1");
         REQUIRE(vs.voltage() == 12.0);
@@ -319,7 +318,7 @@ TEST_CASE("v2 CRTP VoltageSource", "[v2][crtp][vsource]") {
 // Tests for CurrentSource CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP CurrentSource", "[v2][crtp][isource]") {
+TEST_CASE("API CRTP CurrentSource", "[api][crtp][isource]") {
     SECTION("CurrentSource creation") {
         CurrentSource is(0.1, "I1");
         REQUIRE(is.current() == 0.1);
@@ -380,7 +379,7 @@ TEST_CASE("v2 CRTP CurrentSource", "[v2][crtp][isource]") {
 // Tests for IdealDiode CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP IdealDiode", "[v2][crtp][diode]") {
+TEST_CASE("API CRTP IdealDiode", "[api][crtp][diode]") {
     SECTION("IdealDiode creation") {
         IdealDiode d(1e3, 1e-9, "D1");
         REQUIRE(d.name() == "D1");
@@ -453,7 +452,7 @@ TEST_CASE("v2 CRTP IdealDiode", "[v2][crtp][diode]") {
 // Tests for IdealSwitch CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP IdealSwitch", "[v2][crtp][switch]") {
+TEST_CASE("API CRTP IdealSwitch", "[api][crtp][switch]") {
     SECTION("IdealSwitch creation") {
         IdealSwitch sw(1e6, 1e-12, true, "S1");
         REQUIRE(sw.name() == "S1");
@@ -530,7 +529,7 @@ TEST_CASE("v2 CRTP IdealSwitch", "[v2][crtp][switch]") {
 // Tests for MOSFET CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP MOSFET", "[v2][crtp][mosfet]") {
+TEST_CASE("API CRTP MOSFET", "[api][crtp][mosfet]") {
     SECTION("MOSFET creation") {
         MOSFET m(2.0, 0.1, true, "M1");
         REQUIRE(m.name() == "M1");
@@ -603,7 +602,7 @@ TEST_CASE("v2 CRTP MOSFET", "[v2][crtp][mosfet]") {
 // Tests for IGBT CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP IGBT", "[v2][crtp][igbt]") {
+TEST_CASE("API CRTP IGBT", "[api][crtp][igbt]") {
     SECTION("IGBT creation") {
         IGBT ig(5.0, 1e4, "Q1");
         REQUIRE(ig.name() == "Q1");
@@ -673,7 +672,7 @@ TEST_CASE("v2 CRTP IGBT", "[v2][crtp][igbt]") {
 // Tests for Transformer CRTP device
 // =============================================================================
 
-TEST_CASE("v2 CRTP Transformer", "[v2][crtp][transformer]") {
+TEST_CASE("API CRTP Transformer", "[api][crtp][transformer]") {
     SECTION("Transformer creation") {
         Transformer tr(2.0, "T1");  // 2:1 turns ratio
         REQUIRE(tr.name() == "T1");
@@ -721,7 +720,7 @@ TEST_CASE("v2 CRTP Transformer", "[v2][crtp][transformer]") {
 // Complete device suite static assertions
 // =============================================================================
 
-TEST_CASE("v2 CRTP static assertions", "[v2][crtp][static]") {
+TEST_CASE("API CRTP static assertions", "[api][crtp][static]") {
     // These are compile-time checks, but we verify the concepts are satisfied
     SECTION("All devices satisfy StampableDevice concept") {
         REQUIRE(StampableDevice<Resistor>);
@@ -780,7 +779,7 @@ TEST_CASE("v2 CRTP static assertions", "[v2][crtp][static]") {
 // Tests for C++23 Advanced Features (1.2.3, 1.2.4, 1.2.7)
 // =============================================================================
 
-TEST_CASE("v2 StateBuffer (mdspan-like)", "[v2][cpp23][mdspan]") {
+TEST_CASE("API StateBuffer (mdspan-like)", "[api][cpp23][mdspan]") {
     SECTION("Fixed-size StateBuffer creation") {
         // 3 state variables, 3 history depth (current + 2 previous)
         StateBuffer<double, 3, 3> buffer;
@@ -842,7 +841,7 @@ TEST_CASE("v2 StateBuffer (mdspan-like)", "[v2][cpp23][mdspan]") {
 }
 
 #if PULSIM_HAS_MDSPAN
-TEST_CASE("v2 DynamicStateBuffer", "[v2][cpp23][mdspan]") {
+TEST_CASE("API DynamicStateBuffer", "[api][cpp23][mdspan]") {
     SECTION("Dynamic buffer creation") {
         DynamicStateBuffer<double> buffer(10, 3);
 
@@ -861,7 +860,7 @@ TEST_CASE("v2 DynamicStateBuffer", "[v2][cpp23][mdspan]") {
 }
 #endif
 
-TEST_CASE("v2 Device Metadata (reflection prep)", "[v2][cpp23][reflection]") {
+TEST_CASE("API Device Metadata (reflection prep)", "[api][cpp23][reflection]") {
     SECTION("DeviceMetadata structure") {
         DeviceMetadata meta{
             .name = "TestDevice",
@@ -893,7 +892,7 @@ TEST_CASE("v2 Device Metadata (reflection prep)", "[v2][cpp23][reflection]") {
     }
 }
 
-TEST_CASE("v2 FixedString (compile-time string)", "[v2][cpp23][reflection]") {
+TEST_CASE("API FixedString (compile-time string)", "[api][cpp23][reflection]") {
     SECTION("FixedString creation and conversion") {
         constexpr FixedString str("Hello");
 
@@ -907,7 +906,7 @@ TEST_CASE("v2 FixedString (compile-time string)", "[v2][cpp23][reflection]") {
     }
 }
 
-TEST_CASE("v2 Type name utilities", "[v2][cpp23][reflection]") {
+TEST_CASE("API Type name utilities", "[api][cpp23][reflection]") {
     SECTION("Built-in type names") {
         REQUIRE(type_name<double>() == "double");
         REQUIRE(type_name<float>() == "float");
@@ -921,7 +920,7 @@ TEST_CASE("v2 Type name utilities", "[v2][cpp23][reflection]") {
 // =============================================================================
 // Note: All devices are registered in device_base.hpp using PULSIM_REGISTER_DEVICE
 
-TEST_CASE("v2 Device registration (reflection prep)", "[v2][cpp23][reflection]") {
+TEST_CASE("API Device registration (reflection prep)", "[api][cpp23][reflection]") {
     SECTION("Passive device metadata") {
         constexpr auto r_meta = get_device_metadata<Resistor>();
         REQUIRE(r_meta.name == "Resistor");
@@ -993,8 +992,8 @@ TEST_CASE("v2 Device registration (reflection prep)", "[v2][cpp23][reflection]")
 // Tests for Constexpr Utilities (1.3.5)
 // =============================================================================
 
-TEST_CASE("v2 Constexpr math utilities", "[v2][cpp23][constexpr]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Constexpr math utilities", "[api][cpp23][constexpr]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic math functions") {
         // These are evaluated at compile time!
@@ -1061,8 +1060,8 @@ TEST_CASE("v2 Constexpr math utilities", "[v2][cpp23][constexpr]") {
     }
 }
 
-TEST_CASE("v2 Physical constants", "[v2][cpp23][constexpr]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Physical constants", "[api][cpp23][constexpr]") {
+    using namespace pulsim::v1;
 
     SECTION("Constants are constexpr") {
         static_assert(constants::k_B > 0);
@@ -1081,8 +1080,8 @@ TEST_CASE("v2 Physical constants", "[v2][cpp23][constexpr]") {
     }
 }
 
-TEST_CASE("v2 Constexpr array utilities", "[v2][cpp23][constexpr]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Constexpr array utilities", "[api][cpp23][constexpr]") {
+    using namespace pulsim::v1;
 
     SECTION("make_filled_array") {
         constexpr auto arr = make_filled_array<double, 5>(3.14);
@@ -1156,8 +1155,8 @@ TEST_CASE("v2 Constexpr array utilities", "[v2][cpp23][constexpr]") {
     }
 }
 
-TEST_CASE("v2 Lookup tables", "[v2][cpp23][constexpr]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Lookup tables", "[api][cpp23][constexpr]") {
+    using namespace pulsim::v1;
 
     SECTION("LUT generation and interpolation") {
         // Create a lookup table for x^2 from 0 to 10
@@ -1173,8 +1172,8 @@ TEST_CASE("v2 Lookup tables", "[v2][cpp23][constexpr]") {
     }
 }
 
-TEST_CASE("v2 Unit conversions", "[v2][cpp23][constexpr]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Unit conversions", "[api][cpp23][constexpr]") {
+    using namespace pulsim::v1;
 
     SECTION("SI prefixes") {
         static_assert(units::nano == 1e-9);
@@ -1197,8 +1196,8 @@ TEST_CASE("v2 Unit conversions", "[v2][cpp23][constexpr]") {
 // Tests for Numeric Types (Phase 2.1)
 // =============================================================================
 
-TEST_CASE("v2 Real type configuration", "[v2][numeric][real]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Real type configuration", "[api][numeric][real]") {
+    using namespace pulsim::v1;
 
     SECTION("Precision selection") {
         static_assert(std::is_same_v<RealT<Precision::Double>, double>);
@@ -1224,8 +1223,8 @@ TEST_CASE("v2 Real type configuration", "[v2][numeric][real]") {
     }
 }
 
-TEST_CASE("v2 Index type configuration", "[v2][numeric][index]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Index type configuration", "[api][numeric][index]") {
+    using namespace pulsim::v1;
 
     SECTION("Index width selection") {
         static_assert(std::is_same_v<IndexT<IndexWidth::Narrow>, std::int32_t>);
@@ -1248,8 +1247,8 @@ TEST_CASE("v2 Index type configuration", "[v2][numeric][index]") {
     }
 }
 
-TEST_CASE("v2 StaticVector", "[v2][numeric][vector]") {
-    using namespace pulsim::v2;
+TEST_CASE("API StaticVector", "[api][numeric][vector]") {
+    using namespace pulsim::v1;
 
     SECTION("Construction") {
         StaticVector<double, 3> v1;  // Default: zeros
@@ -1339,8 +1338,8 @@ TEST_CASE("v2 StaticVector", "[v2][numeric][vector]") {
     }
 }
 
-TEST_CASE("v2 StaticMatrix", "[v2][numeric][matrix]") {
-    using namespace pulsim::v2;
+TEST_CASE("API StaticMatrix", "[api][numeric][matrix]") {
+    using namespace pulsim::v1;
 
     SECTION("Construction") {
         Mat2d m1;  // Default: zeros
@@ -1444,8 +1443,8 @@ TEST_CASE("v2 StaticMatrix", "[v2][numeric][matrix]") {
     }
 }
 
-TEST_CASE("v2 SparsityPattern", "[v2][numeric][sparsity]") {
-    using namespace pulsim::v2;
+TEST_CASE("API SparsityPattern", "[api][numeric][sparsity]") {
+    using namespace pulsim::v1;
 
     SECTION("Construction") {
         SparsityPattern<10> p;
@@ -1505,9 +1504,9 @@ TEST_CASE("v2 SparsityPattern", "[v2][numeric][sparsity]") {
     }
 }
 
-TEST_CASE("v2 Units and dimensional analysis", "[v2][numeric][units]") {
-    using namespace pulsim::v2;
-    using namespace pulsim::v2::literals;
+TEST_CASE("API Units and dimensional analysis", "[api][numeric][units]") {
+    using namespace pulsim::v1;
+    using namespace pulsim::v1::literals;
 
     SECTION("Quantity creation") {
         Voltage<> v(5.0);
@@ -1604,8 +1603,8 @@ TEST_CASE("v2 Units and dimensional analysis", "[v2][numeric][units]") {
 // Tests for Normalization/Scaling Helpers (Phase 2.1.7)
 // =============================================================================
 
-TEST_CASE("v2 ScalingFactors", "[v2][numeric][scaling]") {
-    using namespace pulsim::v2;
+TEST_CASE("API ScalingFactors", "[api][numeric][scaling]") {
+    using namespace pulsim::v1;
 
     SECTION("Default scaling") {
         ScalingFactors<> sf;
@@ -1645,8 +1644,8 @@ TEST_CASE("v2 ScalingFactors", "[v2][numeric][scaling]") {
     }
 }
 
-TEST_CASE("v2 VariableNormalizer", "[v2][numeric][scaling]") {
-    using namespace pulsim::v2;
+TEST_CASE("API VariableNormalizer", "[api][numeric][scaling]") {
+    using namespace pulsim::v1;
 
     SECTION("Identity normalization") {
         VariableNormalizer<> norm;
@@ -1698,8 +1697,8 @@ TEST_CASE("v2 VariableNormalizer", "[v2][numeric][scaling]") {
     }
 }
 
-TEST_CASE("v2 WeightedNorm", "[v2][numeric][scaling]") {
-    using namespace pulsim::v2;
+TEST_CASE("API WeightedNorm", "[api][numeric][scaling]") {
+    using namespace pulsim::v1;
 
     SECTION("Default tolerances") {
         WeightedNorm<> wnorm;
@@ -1731,8 +1730,8 @@ TEST_CASE("v2 WeightedNorm", "[v2][numeric][scaling]") {
     }
 }
 
-TEST_CASE("v2 PerUnitSystem", "[v2][numeric][scaling]") {
-    using namespace pulsim::v2;
+TEST_CASE("API PerUnitSystem", "[api][numeric][scaling]") {
+    using namespace pulsim::v1;
 
     SECTION("Base quantity calculations") {
         PerUnitSystem<>::BaseQuantities base{1000.0, 400.0, 50.0};  // 1kVA, 400V, 50Hz
@@ -1765,64 +1764,11 @@ TEST_CASE("v2 PerUnitSystem", "[v2][numeric][scaling]") {
 }
 
 // =============================================================================
-// Tests for Backward Compatibility Shim (Phase 1.3.6/1.3.7)
-// =============================================================================
-
-TEST_CASE("v2 Compat header", "[v2][compat]") {
-    using namespace pulsim::compat;
-
-    SECTION("Type aliases") {
-        static_assert(std::is_same_v<Real, double>);
-        static_assert(std::is_same_v<Index, std::int32_t>);
-        REQUIRE(ground == -1);
-    }
-
-    SECTION("Device type mapping") {
-        // Check that compat devices are v2 devices
-        static_assert(std::is_same_v<Resistor, pulsim::v2::Resistor>);
-        static_assert(std::is_same_v<Capacitor, pulsim::v2::Capacitor>);
-        static_assert(std::is_same_v<Inductor, pulsim::v2::Inductor>);
-    }
-
-    SECTION("Version detection") {
-        // PULSIM_USE_V2 is 0 by default
-        REQUIRE_FALSE(is_v2_enabled());
-        REQUIRE(std::string(api_version_string()) == "v1");
-        REQUIRE(std::string(version_string()) == "2.0.0");
-    }
-}
-
-TEST_CASE("v2 Migration helpers", "[v2][compat][migration]") {
-    using namespace pulsim::migration;
-    using namespace pulsim::v2;
-
-    SECTION("Component to device type mapping") {
-        REQUIRE(component_to_device_type(0) == DeviceType::Resistor);
-        REQUIRE(component_to_device_type(1) == DeviceType::Capacitor);
-        REQUIRE(component_to_device_type(2) == DeviceType::Inductor);
-        REQUIRE(component_to_device_type(3) == DeviceType::VoltageSource);
-        REQUIRE(component_to_device_type(4) == DeviceType::CurrentSource);
-        REQUIRE(component_to_device_type(9) == DeviceType::Diode);
-        REQUIRE(component_to_device_type(10) == DeviceType::Switch);
-        REQUIRE(component_to_device_type(11) == DeviceType::MOSFET);
-        REQUIRE(component_to_device_type(12) == DeviceType::IGBT);
-        REQUIRE(component_to_device_type(13) == DeviceType::Transformer);
-        REQUIRE(component_to_device_type(99) == DeviceType::Unknown);
-    }
-
-    SECTION("Device support check") {
-        REQUIRE(is_device_supported_v2(DeviceType::Resistor));
-        REQUIRE(is_device_supported_v2(DeviceType::MOSFET));
-        REQUIRE_FALSE(is_device_supported_v2(DeviceType::Unknown));
-    }
-}
-
-// =============================================================================
 // Tests for Expression Templates (Phase 2.4)
 // =============================================================================
 
-TEST_CASE("v2 Expression templates - basic operations", "[v2][expression]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Expression templates - basic operations", "[api][expression]") {
+    using namespace pulsim::v1;
 
     SECTION("Vector addition expression") {
         StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
@@ -1878,8 +1824,8 @@ TEST_CASE("v2 Expression templates - basic operations", "[v2][expression]") {
     }
 }
 
-TEST_CASE("v2 Expression templates - nested expressions", "[v2][expression]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Expression templates - nested expressions", "[api][expression]") {
+    using namespace pulsim::v1;
 
     SECTION("Chained addition") {
         StaticVector<double, 3> a{1.0, 2.0, 3.0};
@@ -1915,8 +1861,8 @@ TEST_CASE("v2 Expression templates - nested expressions", "[v2][expression]") {
     }
 }
 
-TEST_CASE("v2 Expression templates - lazy evaluation", "[v2][expression]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Expression templates - lazy evaluation", "[api][expression]") {
+    using namespace pulsim::v1;
 
     SECTION("eval function") {
         StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
@@ -1968,8 +1914,8 @@ TEST_CASE("v2 Expression templates - lazy evaluation", "[v2][expression]") {
     }
 }
 
-TEST_CASE("v2 Expression templates - VectorRef", "[v2][expression]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Expression templates - VectorRef", "[api][expression]") {
+    using namespace pulsim::v1;
 
     SECTION("VectorRef from raw array") {
         double data[] = {1.0, 2.0, 3.0, 4.0};
@@ -1999,8 +1945,8 @@ TEST_CASE("v2 Expression templates - VectorRef", "[v2][expression]") {
     }
 }
 
-TEST_CASE("v2 Expression templates - constexpr", "[v2][expression]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Expression templates - constexpr", "[api][expression]") {
+    using namespace pulsim::v1;
 
     SECTION("Constexpr expression evaluation") {
         constexpr StaticVector<double, 4> a{1.0, 2.0, 3.0, 4.0};
@@ -2018,8 +1964,8 @@ TEST_CASE("v2 Expression templates - constexpr", "[v2][expression]") {
 // Tests for Compile-Time Circuit Analysis (Phase 2.5)
 // =============================================================================
 
-TEST_CASE("v2 Circuit device traits", "[v2][circuit][traits]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Circuit device traits", "[api][circuit][traits]") {
+    using namespace pulsim::v1;
 
     SECTION("Terminal counts") {
         REQUIRE(circuit_device_traits<Resistor>::terminal_count == 2);
@@ -2064,8 +2010,8 @@ TEST_CASE("v2 Circuit device traits", "[v2][circuit][traits]") {
     }
 }
 
-TEST_CASE("v2 Compile-time counting utilities", "[v2][circuit][counting]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Compile-time counting utilities", "[api][circuit][counting]") {
+    using namespace pulsim::v1;
 
     SECTION("Node counting") {
         static_assert(count_max_nodes_v<Resistor> == 2);
@@ -2091,8 +2037,8 @@ TEST_CASE("v2 Compile-time counting utilities", "[v2][circuit][counting]") {
     }
 }
 
-TEST_CASE("v2 Circuit type queries", "[v2][circuit][queries]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Circuit type queries", "[api][circuit][queries]") {
+    using namespace pulsim::v1;
 
     SECTION("Linear circuit check") {
         static_assert(is_linear_circuit<Resistor, Capacitor, VoltageSource>());
@@ -2116,8 +2062,8 @@ TEST_CASE("v2 Circuit type queries", "[v2][circuit][queries]") {
     }
 }
 
-TEST_CASE("v2 Topology validation", "[v2][circuit][validation]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Topology validation", "[api][circuit][validation]") {
+    using namespace pulsim::v1;
 
     SECTION("RC circuit validation") {
         constexpr auto val = validate_circuit_topology<Resistor, Capacitor, VoltageSource>();
@@ -2140,8 +2086,8 @@ TEST_CASE("v2 Topology validation", "[v2][circuit][validation]") {
     }
 }
 
-TEST_CASE("v2 CircuitGraph basic usage", "[v2][circuit][graph]") {
-    using namespace pulsim::v2;
+TEST_CASE("API CircuitGraph basic usage", "[api][circuit][graph]") {
+    using namespace pulsim::v1;
 
     SECTION("RC circuit graph creation") {
         Resistor r(1000.0);
@@ -2184,8 +2130,8 @@ TEST_CASE("v2 CircuitGraph basic usage", "[v2][circuit][graph]") {
     }
 }
 
-TEST_CASE("v2 CircuitGraph compile-time properties", "[v2][circuit][graph]") {
-    using namespace pulsim::v2;
+TEST_CASE("API CircuitGraph compile-time properties", "[api][circuit][graph]") {
+    using namespace pulsim::v1;
 
     SECTION("Static assertions on circuit properties") {
         // These are evaluated at compile time
@@ -2206,8 +2152,8 @@ TEST_CASE("v2 CircuitGraph compile-time properties", "[v2][circuit][graph]") {
     }
 }
 
-TEST_CASE("v2 CircuitGraph sparsity pattern", "[v2][circuit][sparsity]") {
-    using namespace pulsim::v2;
+TEST_CASE("API CircuitGraph sparsity pattern", "[api][circuit][sparsity]") {
+    using namespace pulsim::v1;
 
     SECTION("Circuit type-level sparsity") {
         // The sparsity pattern at type level gives capacity, not actual used entries
@@ -2219,8 +2165,8 @@ TEST_CASE("v2 CircuitGraph sparsity pattern", "[v2][circuit][sparsity]") {
     }
 }
 
-TEST_CASE("v2 NodeCollector", "[v2][circuit][nodes]") {
-    using namespace pulsim::v2;
+TEST_CASE("API NodeCollector", "[api][circuit][nodes]") {
+    using namespace pulsim::v1;
 
     SECTION("Collect unique nodes") {
         NodeCollector<Resistor, Capacitor, VoltageSource> collector;
@@ -2262,8 +2208,8 @@ TEST_CASE("v2 NodeCollector", "[v2][circuit][nodes]") {
     }
 }
 
-TEST_CASE("v2 StaticSparsityBuilder", "[v2][circuit][sparsity]") {
-    using namespace pulsim::v2;
+TEST_CASE("API StaticSparsityBuilder", "[api][circuit][sparsity]") {
+    using namespace pulsim::v1;
 
     SECTION("Conductance stamp pattern") {
         StaticSparsityBuilder<4, 2> builder;
@@ -2308,8 +2254,8 @@ TEST_CASE("v2 StaticSparsityBuilder", "[v2][circuit][sparsity]") {
 // Tests for Newton Solver (Phase 3.1)
 // =============================================================================
 
-TEST_CASE("v2 Convergence checker", "[v2][solver][convergence]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Convergence checker", "[api][solver][convergence]") {
+    using namespace pulsim::v1;
 
     SECTION("Default tolerances") {
         ConvergenceChecker checker;
@@ -2381,8 +2327,8 @@ TEST_CASE("v2 Convergence checker", "[v2][solver][convergence]") {
     }
 }
 
-TEST_CASE("v2 Convergence history", "[v2][solver][history]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Convergence history", "[api][solver][history]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic history tracking") {
         ConvergenceHistory history;
@@ -2446,8 +2392,8 @@ TEST_CASE("v2 Convergence history", "[v2][solver][history]") {
     }
 }
 
-TEST_CASE("v2 Per-variable convergence", "[v2][solver][per-var]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Per-variable convergence", "[api][solver][per-var]") {
+    using namespace pulsim::v1;
 
     SECTION("Voltage variable") {
         auto v = VariableConvergence::voltage(0, 5.0, 1e-10, 1e-9, 1e-3);
@@ -2484,8 +2430,8 @@ TEST_CASE("v2 Per-variable convergence", "[v2][solver][per-var]") {
     }
 }
 
-TEST_CASE("v2 SparseLU policy", "[v2][solver][linear]") {
-    using namespace pulsim::v2;
+TEST_CASE("API SparseLU policy", "[api][solver][linear]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic solve") {
         SparseLUPolicy solver;
@@ -2519,8 +2465,8 @@ TEST_CASE("v2 SparseLU policy", "[v2][solver][linear]") {
     }
 }
 
-TEST_CASE("v2 Newton solver - simple system", "[v2][solver][newton]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Newton solver - simple system", "[api][solver][newton]") {
+    using namespace pulsim::v1;
 
     SECTION("Solve x^2 = 4 (find x = 2)") {
         NewtonOptions opts;
@@ -2591,8 +2537,8 @@ TEST_CASE("v2 Newton solver - simple system", "[v2][solver][newton]") {
     }
 }
 
-TEST_CASE("v2 Newton solver - with weighted norm", "[v2][solver][newton][weighted]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Newton solver - with weighted norm", "[api][solver][newton][weighted]") {
+    using namespace pulsim::v1;
 
     SECTION("Resistive voltage divider DC OP") {
         // Simple 2-resistor divider: Vs=10V, R1=R2=1k -> V_mid = 5V
@@ -2655,8 +2601,8 @@ TEST_CASE("v2 Newton solver - with weighted norm", "[v2][solver][newton][weighte
     }
 }
 
-TEST_CASE("v2 Newton solver - edge cases", "[v2][solver][newton][edge]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Newton solver - edge cases", "[api][solver][newton][edge]") {
+    using namespace pulsim::v1;
 
     SECTION("Max iterations reached") {
         NewtonOptions opts;
@@ -2720,8 +2666,8 @@ TEST_CASE("v2 Newton solver - edge cases", "[v2][solver][newton][edge]") {
     }
 }
 
-TEST_CASE("v2 Deterministic node order", "[v2][solver][deterministic]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Deterministic node order", "[api][solver][deterministic]") {
+    using namespace pulsim::v1;
 
     SECTION("Natural ordering") {
         auto order = DeterministicNodeOrder::natural(5);
@@ -2752,8 +2698,8 @@ TEST_CASE("v2 Deterministic node order", "[v2][solver][deterministic]") {
 // Tests for Integration Methods (Phase 3.2-3.4)
 // =============================================================================
 
-TEST_CASE("v2 Trapezoidal coefficients", "[v2][integration][trapezoidal]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Trapezoidal coefficients", "[api][integration][trapezoidal]") {
+    using namespace pulsim::v1;
 
     SECTION("Capacitor companion model") {
         Real C = 1e-6;   // 1 uF
@@ -2800,8 +2746,8 @@ TEST_CASE("v2 Trapezoidal coefficients", "[v2][integration][trapezoidal]") {
     }
 }
 
-TEST_CASE("v2 BDF coefficients", "[v2][integration][bdf]") {
-    using namespace pulsim::v2;
+TEST_CASE("API BDF coefficients", "[api][integration][bdf]") {
+    using namespace pulsim::v1;
 
     SECTION("BDF1 (Backward Euler)") {
         auto bdf1 = BDFCoeffs::bdf1();
@@ -2835,8 +2781,8 @@ TEST_CASE("v2 BDF coefficients", "[v2][integration][bdf]") {
     }
 }
 
-TEST_CASE("v2 State history", "[v2][integration][history]") {
-    using namespace pulsim::v2;
+TEST_CASE("API State history", "[api][integration][history]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic operations") {
         StateHistory<6> hist;
@@ -2879,8 +2825,8 @@ TEST_CASE("v2 State history", "[v2][integration][history]") {
     }
 }
 
-TEST_CASE("v2 Numeric guards", "[v2][integration][guards]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Numeric guards", "[api][integration][guards]") {
+    using namespace pulsim::v1;
 
     SECTION("Voltage clamping") {
         REQUIRE(NumericGuard::clamp_voltage(1e12) == NumericGuard::max_voltage);
@@ -2906,8 +2852,8 @@ TEST_CASE("v2 Numeric guards", "[v2][integration][guards]") {
     }
 }
 
-TEST_CASE("v2 Integration factory", "[v2][integration][factory]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Integration factory", "[api][integration][factory]") {
+    using namespace pulsim::v1;
 
     SECTION("Trapezoidal capacitor") {
         Real C = 1e-6;
@@ -2939,8 +2885,8 @@ TEST_CASE("v2 Integration factory", "[v2][integration][factory]") {
     }
 }
 
-TEST_CASE("v2 LTE estimation", "[v2][integration][lte]") {
-    using namespace pulsim::v2;
+TEST_CASE("API LTE estimation", "[api][integration][lte]") {
+    using namespace pulsim::v1;
 
     SECTION("Trapezoidal LTE") {
         Real y_trap = 10.0;
@@ -2964,8 +2910,8 @@ TEST_CASE("v2 LTE estimation", "[v2][integration][lte]") {
     }
 }
 
-TEST_CASE("v2 Analytical RC validation", "[v2][integration][analytical]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Analytical RC validation", "[api][integration][analytical]") {
+    using namespace pulsim::v1;
 
     SECTION("RC step response") {
         Real R = 1000.0;  // 1 kOhm
@@ -3003,8 +2949,8 @@ TEST_CASE("v2 Analytical RC validation", "[v2][integration][analytical]") {
     }
 }
 
-TEST_CASE("v2 Timestep config", "[v2][integration][timestep]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Timestep config", "[api][integration][timestep]") {
+    using namespace pulsim::v1;
 
     SECTION("Default config") {
         auto cfg = TimestepConfig::defaults();
@@ -3026,8 +2972,8 @@ TEST_CASE("v2 Timestep config", "[v2][integration][timestep]") {
     }
 }
 
-TEST_CASE("v2 Timestep history", "[v2][integration][timestep]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Timestep history", "[api][integration][timestep]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic operations") {
         TimestepHistory hist;
@@ -3073,8 +3019,8 @@ TEST_CASE("v2 Timestep history", "[v2][integration][timestep]") {
     }
 }
 
-TEST_CASE("v2 PI timestep controller", "[v2][integration][timestep][pi]") {
-    using namespace pulsim::v2;
+TEST_CASE("API PI timestep controller", "[api][integration][timestep][pi]") {
+    using namespace pulsim::v1;
 
     SECTION("Accept good step") {
         PITimestepController ctrl;
@@ -3152,8 +3098,8 @@ TEST_CASE("v2 PI timestep controller", "[v2][integration][timestep][pi]") {
     }
 }
 
-TEST_CASE("v2 Basic timestep controller", "[v2][integration][timestep][basic]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Basic timestep controller", "[api][integration][timestep][basic]") {
+    using namespace pulsim::v1;
 
     SECTION("Accept and grow") {
         BasicTimestepController ctrl;
@@ -3177,8 +3123,8 @@ TEST_CASE("v2 Basic timestep controller", "[v2][integration][timestep][basic]") 
     }
 }
 
-TEST_CASE("v2 Trapezoidal RC simulation", "[v2][integration][simulation]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Trapezoidal RC simulation", "[api][integration][simulation]") {
+    using namespace pulsim::v1;
 
     // Simulate simple RC circuit: R=1k, C=1uF, V=10V
     // Using Trapezoidal method and compare with analytical solution
@@ -3228,7 +3174,7 @@ TEST_CASE("v2 Trapezoidal RC simulation", "[v2][integration][simulation]") {
 // =============================================================================
 
 namespace static_tests {
-using namespace pulsim::v2;
+using namespace pulsim::v1;
 
 // Expression templates compile-time tests
 static_assert([]() constexpr {
@@ -3262,8 +3208,8 @@ static_assert(validate_circuit_topology<Resistor, Capacitor, VoltageSource>().ha
 // Phase 3 Remaining Tasks Tests (3.1.7, 3.3.4, 3.3.6, 3.4.6)
 // =============================================================================
 
-TEST_CASE("v2 BDF order controller", "[v2][integration][bdf][order]") {
-    using namespace pulsim::v2;
+TEST_CASE("API BDF order controller", "[api][integration][bdf][order]") {
+    using namespace pulsim::v1;
 
     SECTION("Initial order") {
         BDFOrderController ctrl;
@@ -3374,8 +3320,8 @@ TEST_CASE("v2 BDF order controller", "[v2][integration][bdf][order]") {
     }
 }
 
-TEST_CASE("v2 LTE logger", "[v2][integration][lte][logging]") {
-    using namespace pulsim::v2;
+TEST_CASE("API LTE logger", "[api][integration][lte][logging]") {
+    using namespace pulsim::v1;
 
     SECTION("Disabled by default") {
         LTELogger logger;
@@ -3459,8 +3405,8 @@ TEST_CASE("v2 LTE logger", "[v2][integration][lte][logging]") {
     }
 }
 
-TEST_CASE("v2 Deterministic ordering", "[v2][solver][deterministic]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Deterministic ordering", "[api][solver][deterministic]") {
+    using namespace pulsim::v1;
 
     SECTION("DeviceOrderKey comparison") {
         DeviceOrderKey a{"resistor", "R1", 0};
@@ -3574,8 +3520,8 @@ TEST_CASE("v2 Deterministic ordering", "[v2][solver][deterministic]") {
 // Phase 4: High-Performance Components Tests
 // =============================================================================
 
-TEST_CASE("v2 Enhanced SparseLU policy", "[v2][solver][linear][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Enhanced SparseLU policy", "[api][solver][linear][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic solve") {
         EnhancedSparseLUPolicy solver;
@@ -3639,8 +3585,8 @@ TEST_CASE("v2 Enhanced SparseLU policy", "[v2][solver][linear][phase4]") {
     }
 }
 
-TEST_CASE("v2 KLU policy stub", "[v2][solver][linear][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API KLU policy stub", "[api][solver][linear][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Fallback to SparseLU") {
         KLUPolicy solver;
@@ -3668,8 +3614,8 @@ TEST_CASE("v2 KLU policy stub", "[v2][solver][linear][phase4]") {
     }
 }
 
-TEST_CASE("v2 Armijo line search", "[v2][solver][linesearch][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Armijo line search", "[api][solver][linesearch][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Descent direction") {
         ArmijoLineSearch ls;
@@ -3718,8 +3664,8 @@ TEST_CASE("v2 Armijo line search", "[v2][solver][linesearch][phase4]") {
     }
 }
 
-TEST_CASE("v2 Trust region method", "[v2][solver][trustregion][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Trust region method", "[api][solver][trustregion][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Step within radius") {
         TrustRegionMethod tr;
@@ -3776,8 +3722,8 @@ TEST_CASE("v2 Trust region method", "[v2][solver][trustregion][phase4]") {
     }
 }
 
-TEST_CASE("v2 Arena allocator", "[v2][memory][arena][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Arena allocator", "[api][memory][arena][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic allocation") {
         ArenaAllocator arena(1024);
@@ -3853,8 +3799,8 @@ TEST_CASE("v2 Arena allocator", "[v2][memory][arena][phase4]") {
     }
 }
 
-TEST_CASE("v2 Simulation memory pool", "[v2][memory][pool][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Simulation memory pool", "[api][memory][pool][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Workspace vector reuse") {
         SimulationMemoryPool pool;
@@ -3893,8 +3839,8 @@ TEST_CASE("v2 Simulation memory pool", "[v2][memory][pool][phase4]") {
     }
 }
 
-TEST_CASE("v2 SIMD detection", "[v2][simd][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API SIMD detection", "[api][simd][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Compile-time detection") {
         SIMDLevel level = detect_simd_level();
@@ -3920,8 +3866,8 @@ TEST_CASE("v2 SIMD detection", "[v2][simd][phase4]") {
     }
 }
 
-TEST_CASE("v2 Aligned array", "[v2][memory][soa][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Aligned array", "[api][memory][soa][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Basic operations") {
         AlignedArray<Real> arr(100);
@@ -3980,8 +3926,8 @@ TEST_CASE("v2 Aligned array", "[v2][memory][soa][phase4]") {
     }
 }
 
-TEST_CASE("v2 SoA device layouts", "[v2][memory][soa][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API SoA device layouts", "[api][memory][soa][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Resistor SoA") {
         ResistorSoA resistors;
@@ -4025,8 +3971,8 @@ TEST_CASE("v2 SoA device layouts", "[v2][memory][soa][phase4]") {
     }
 }
 
-TEST_CASE("v2 Memory tracker", "[v2][memory][tracking][phase4]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Memory tracker", "[api][memory][tracking][phase4]") {
+    using namespace pulsim::v1;
 
     SECTION("Track allocations") {
         auto& tracker = MemoryTracker::instance();
@@ -4059,8 +4005,8 @@ TEST_CASE("v2 Memory tracker", "[v2][memory][tracking][phase4]") {
 // Phase 5: Advanced Convergence Aids Tests
 // =============================================================================
 
-TEST_CASE("v2 Gmin stepping config", "[v2][convergence][gmin][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Gmin stepping config", "[api][convergence][gmin][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Default config") {
         GminConfig config;
@@ -4080,8 +4026,8 @@ TEST_CASE("v2 Gmin stepping config", "[v2][convergence][gmin][phase5]") {
     }
 }
 
-TEST_CASE("v2 Gmin stepping execution", "[v2][convergence][gmin][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Gmin stepping execution", "[api][convergence][gmin][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Gmin stepping with simple circuit") {
         GminConfig config;
@@ -4131,8 +4077,8 @@ TEST_CASE("v2 Gmin stepping execution", "[v2][convergence][gmin][phase5]") {
     }
 }
 
-TEST_CASE("v2 Source stepping config", "[v2][convergence][source][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Source stepping config", "[api][convergence][source][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Default config") {
         SourceSteppingConfig config;
@@ -4142,8 +4088,8 @@ TEST_CASE("v2 Source stepping config", "[v2][convergence][source][phase5]") {
     }
 }
 
-TEST_CASE("v2 Source stepping execution", "[v2][convergence][source][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Source stepping execution", "[api][convergence][source][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Simple source stepping") {
         SourceSteppingConfig config;
@@ -4207,8 +4153,8 @@ TEST_CASE("v2 Source stepping execution", "[v2][convergence][source][phase5]") {
     }
 }
 
-TEST_CASE("v2 Pseudo-transient config", "[v2][convergence][ptc][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Pseudo-transient config", "[api][convergence][ptc][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Default config") {
         PseudoTransientConfig config;
@@ -4218,8 +4164,8 @@ TEST_CASE("v2 Pseudo-transient config", "[v2][convergence][ptc][phase5]") {
     }
 }
 
-TEST_CASE("v2 Pseudo-transient execution", "[v2][convergence][ptc][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Pseudo-transient execution", "[api][convergence][ptc][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Simple pseudo-transient") {
         PseudoTransientConfig config;
@@ -4255,8 +4201,8 @@ TEST_CASE("v2 Pseudo-transient execution", "[v2][convergence][ptc][phase5]") {
     }
 }
 
-TEST_CASE("v2 Robust initialization config", "[v2][convergence][init][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Robust initialization config", "[api][convergence][init][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Default config") {
         InitializationConfig config;
@@ -4266,8 +4212,8 @@ TEST_CASE("v2 Robust initialization config", "[v2][convergence][init][phase5]") 
     }
 }
 
-TEST_CASE("v2 Robust initialization", "[v2][convergence][init][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Robust initialization", "[api][convergence][init][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Generate initial guess") {
         InitializationConfig config;
@@ -4336,8 +4282,8 @@ TEST_CASE("v2 Robust initialization", "[v2][convergence][init][phase5]") {
     }
 }
 
-TEST_CASE("v2 DC convergence solver", "[v2][convergence][dc][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API DC convergence solver", "[api][convergence][dc][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Direct solve success") {
         DCConvergenceConfig config;
@@ -4406,8 +4352,8 @@ TEST_CASE("v2 DC convergence solver", "[v2][convergence][dc][phase5]") {
     }
 }
 
-TEST_CASE("v2 Gmin log entry", "[v2][convergence][gmin][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Gmin log entry", "[api][convergence][gmin][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Log entry fields") {
         GminLogEntry entry;
@@ -4423,8 +4369,8 @@ TEST_CASE("v2 Gmin log entry", "[v2][convergence][gmin][phase5]") {
     }
 }
 
-TEST_CASE("v2 Source step log entry", "[v2][convergence][source][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Source step log entry", "[api][convergence][source][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Log entry fields") {
         SourceStepLogEntry entry;
@@ -4441,8 +4387,8 @@ TEST_CASE("v2 Source step log entry", "[v2][convergence][source][phase5]") {
     }
 }
 
-TEST_CASE("v2 Pseudo-transient log entry", "[v2][convergence][ptc][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Pseudo-transient log entry", "[api][convergence][ptc][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Log entry fields") {
         PseudoTransientLogEntry entry;
@@ -4458,8 +4404,8 @@ TEST_CASE("v2 Pseudo-transient log entry", "[v2][convergence][ptc][phase5]") {
     }
 }
 
-TEST_CASE("v2 Node init hint", "[v2][convergence][init][phase5]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Node init hint", "[api][convergence][init][phase5]") {
+    using namespace pulsim::v1;
 
     SECTION("Hint with explicit voltage") {
         NodeInitHint hint;
@@ -4499,8 +4445,8 @@ TEST_CASE("v2 Node init hint", "[v2][convergence][init][phase5]") {
 // Phase 6: Validation & Benchmarking Tests
 // =============================================================================
 
-TEST_CASE("v2 RC analytical solution", "[v2][validation][rc][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API RC analytical solution", "[api][validation][rc][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("RC step response - tau calculation") {
         RCAnalytical rc{1000.0, 1e-6, 0.0, 5.0};  // R=1k, C=1uF, V0=0, Vf=5
@@ -4533,8 +4479,8 @@ TEST_CASE("v2 RC analytical solution", "[v2][validation][rc][phase6]") {
     }
 }
 
-TEST_CASE("v2 RL analytical solution", "[v2][validation][rl][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API RL analytical solution", "[api][validation][rl][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("RL step response - tau calculation") {
         RLAnalytical rl{100.0, 0.1, 10.0, 0.0};  // R=100, L=0.1H, V=10V
@@ -4558,8 +4504,8 @@ TEST_CASE("v2 RL analytical solution", "[v2][validation][rl][phase6]") {
     }
 }
 
-TEST_CASE("v2 RLC analytical solution", "[v2][validation][rlc][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API RLC analytical solution", "[api][validation][rlc][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("RLC underdamped detection") {
         // Low R for underdamped: zeta = R/(2*sqrt(L/C)) < 1
@@ -4601,8 +4547,8 @@ TEST_CASE("v2 RLC analytical solution", "[v2][validation][rlc][phase6]") {
     }
 }
 
-TEST_CASE("v2 Diode rectifier analytical", "[v2][validation][diode][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Diode rectifier analytical", "[api][validation][diode][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Half-wave rectifier output") {
         DiodeRectifierAnalytical rect{10.0, 60.0, 0.7};  // 10V peak, 60Hz, 0.7V drop
@@ -4619,8 +4565,8 @@ TEST_CASE("v2 Diode rectifier analytical", "[v2][validation][diode][phase6]") {
     }
 }
 
-TEST_CASE("v2 Validation metrics", "[v2][validation][metrics][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Validation metrics", "[api][validation][metrics][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Compare identical waveforms") {
         std::vector<std::pair<Real, Real>> wave1 = {
@@ -4656,8 +4602,8 @@ TEST_CASE("v2 Validation metrics", "[v2][validation][metrics][phase6]") {
     }
 }
 
-TEST_CASE("v2 Validation CSV export", "[v2][validation][export][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Validation CSV export", "[api][validation][export][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Export validation results") {
         std::vector<ValidationResult> results;
@@ -4677,8 +4623,8 @@ TEST_CASE("v2 Validation CSV export", "[v2][validation][export][phase6]") {
     }
 }
 
-TEST_CASE("v2 Validation JSON export", "[v2][validation][export][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Validation JSON export", "[api][validation][export][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Export validation results") {
         std::vector<ValidationResult> results;
@@ -4696,8 +4642,8 @@ TEST_CASE("v2 Validation JSON export", "[v2][validation][export][phase6]") {
     }
 }
 
-TEST_CASE("v2 SPICE netlist generation", "[v2][validation][spice][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API SPICE netlist generation", "[api][validation][spice][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("RC circuit netlist") {
         std::string netlist = SPICENetlistGenerator::rc_circuit(
@@ -4730,8 +4676,8 @@ TEST_CASE("v2 SPICE netlist generation", "[v2][validation][spice][phase6]") {
     }
 }
 
-TEST_CASE("v2 Benchmark timing", "[v2][benchmark][timing][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Benchmark timing", "[api][benchmark][timing][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("BenchmarkTiming calculations") {
         BenchmarkTiming timing;
@@ -4747,8 +4693,8 @@ TEST_CASE("v2 Benchmark timing", "[v2][benchmark][timing][phase6]") {
     }
 }
 
-TEST_CASE("v2 Benchmark runner", "[v2][benchmark][runner][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Benchmark runner", "[api][benchmark][runner][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Run simple benchmark") {
         BenchmarkRunner runner(1, 5);  // 1 warmup, 5 iterations
@@ -4766,8 +4712,8 @@ TEST_CASE("v2 Benchmark runner", "[v2][benchmark][runner][phase6]") {
     }
 }
 
-TEST_CASE("v2 Benchmark result", "[v2][benchmark][result][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Benchmark result", "[api][benchmark][result][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("BenchmarkResult throughput calculation") {
         BenchmarkResult result;
@@ -4792,8 +4738,8 @@ TEST_CASE("v2 Benchmark result", "[v2][benchmark][result][phase6]") {
     }
 }
 
-TEST_CASE("v2 Benchmark CSV export", "[v2][benchmark][export][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Benchmark CSV export", "[api][benchmark][export][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Export benchmark results") {
         std::vector<BenchmarkResult> results;
@@ -4814,8 +4760,8 @@ TEST_CASE("v2 Benchmark CSV export", "[v2][benchmark][export][phase6]") {
     }
 }
 
-TEST_CASE("v2 Deterministic benchmark harness", "[v2][benchmark][deterministic][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Deterministic benchmark harness", "[api][benchmark][deterministic][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Config defaults") {
         DeterministicBenchmarkConfig config;
@@ -4845,8 +4791,8 @@ TEST_CASE("v2 Deterministic benchmark harness", "[v2][benchmark][deterministic][
     }
 }
 
-TEST_CASE("v2 Regression test result", "[v2][regression][result][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Regression test result", "[api][regression][result][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Regression detection - no regression") {
         RegressionTestResult result;
@@ -4869,8 +4815,8 @@ TEST_CASE("v2 Regression test result", "[v2][regression][result][phase6]") {
     }
 }
 
-TEST_CASE("v2 Regression tester", "[v2][regression][tester][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Regression tester", "[api][regression][tester][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Check accuracy - no baseline") {
         RegressionTester tester;
@@ -4910,8 +4856,8 @@ TEST_CASE("v2 Regression tester", "[v2][regression][tester][phase6]") {
     }
 }
 
-TEST_CASE("v2 Tolerance envelope", "[v2][regression][envelope][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Tolerance envelope", "[api][regression][envelope][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Within envelope - absolute tolerance") {
         ToleranceEnvelope env;
@@ -4940,8 +4886,8 @@ TEST_CASE("v2 Tolerance envelope", "[v2][regression][envelope][phase6]") {
     }
 }
 
-TEST_CASE("v2 Waveform regression checker", "[v2][regression][waveform][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Waveform regression checker", "[api][regression][waveform][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("Identical waveforms pass") {
         WaveformRegressionChecker checker;
@@ -4989,8 +4935,8 @@ TEST_CASE("v2 Waveform regression checker", "[v2][regression][waveform][phase6]"
     }
 }
 
-TEST_CASE("v2 Full RC validation test", "[v2][validation][rc][full][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Full RC validation test", "[api][validation][rc][full][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("RC circuit <0.1% error requirement") {
         // Create analytical solution
@@ -5013,8 +4959,8 @@ TEST_CASE("v2 Full RC validation test", "[v2][validation][rc][full][phase6]") {
     }
 }
 
-TEST_CASE("v2 Full RL validation test", "[v2][validation][rl][full][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Full RL validation test", "[api][validation][rl][full][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("RL circuit <0.1% error requirement") {
         RLAnalytical rl{100.0, 0.1, 10.0, 0.0};
@@ -5033,8 +4979,8 @@ TEST_CASE("v2 Full RL validation test", "[v2][validation][rl][full][phase6]") {
     }
 }
 
-TEST_CASE("v2 Full RLC validation test", "[v2][validation][rlc][full][phase6]") {
-    using namespace pulsim::v2;
+TEST_CASE("API Full RLC validation test", "[api][validation][rlc][full][phase6]") {
+    using namespace pulsim::v1;
 
     SECTION("RLC underdamped <0.1% error requirement") {
         RLCAnalytical rlc{10.0, 0.1, 1e-6, 10.0, 0.0, 0.0};

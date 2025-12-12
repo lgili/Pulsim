@@ -11,8 +11,8 @@ PulsimCore automatically detects and uses the best available SIMD instruction se
 ```python
 import pulsim.v2 as v2
 
-level = v2.detect_simd_level()
-width = v2.simd_vector_width()
+level = v1.detect_simd_level()
+width = v1.simd_vector_width()
 
 print(f"SIMD: {level}, Vector width: {width} doubles")
 ```
@@ -41,7 +41,7 @@ alignas(64) double matrix_data[N];  // 64-byte alignment for AVX512
 Enable symbolic reuse for repeated solves with the same matrix pattern:
 
 ```python
-cfg = v2.LinearSolverConfig()
+cfg = v1.LinearSolverConfig()
 cfg.reuse_symbolic = True  # Reuse symbolic factorization
 cfg.detect_pattern_change = True  # Auto-detect pattern changes
 ```
@@ -53,7 +53,7 @@ This provides 2-3x speedup for transient simulations where the matrix structure 
 Adjust pivot tolerance based on circuit characteristics:
 
 ```python
-cfg = v2.LinearSolverConfig()
+cfg = v1.LinearSolverConfig()
 
 # For well-conditioned circuits (resistive)
 cfg.pivot_tolerance = 1e-13
@@ -69,7 +69,7 @@ Lower tolerance = more accurate but slower. Higher tolerance = faster but may fa
 ### Iteration Limits
 
 ```python
-opts = v2.NewtonOptions()
+opts = v1.NewtonOptions()
 opts.max_iterations = 50  # Default: 50
 
 # For simple circuits
@@ -82,7 +82,7 @@ opts.max_iterations = 100
 ### Damping Strategy
 
 ```python
-opts = v2.NewtonOptions()
+opts = v1.NewtonOptions()
 opts.initial_damping = 1.0  # Full Newton step
 opts.min_damping = 0.1      # Minimum damping factor
 opts.auto_damping = True    # Enable automatic damping adjustment
@@ -95,7 +95,7 @@ opts.auto_damping = True    # Enable automatic damping adjustment
 ### Per-Variable Convergence
 
 ```python
-opts = v2.NewtonOptions()
+opts = v1.NewtonOptions()
 opts.check_per_variable = True  # Check each variable separately
 ```
 
@@ -106,7 +106,7 @@ Useful for mixed-domain simulations where voltage and current scales differ sign
 ### Default Tolerances
 
 ```python
-tols = v2.Tolerances.defaults()
+tols = v1.Tolerances.defaults()
 # voltage_abstol = 1e-6 V
 # current_abstol = 1e-12 A
 # residual_tol = 1e-9
@@ -116,13 +116,13 @@ tols = v2.Tolerances.defaults()
 
 ```python
 # High accuracy (slower)
-tols = v2.Tolerances()
+tols = v1.Tolerances()
 tols.voltage_abstol = 1e-9
 tols.current_abstol = 1e-15
 tols.residual_tol = 1e-12
 
 # Fast simulation (less accurate)
-tols = v2.Tolerances()
+tols = v1.Tolerances()
 tols.voltage_abstol = 1e-3
 tols.current_abstol = 1e-9
 tols.residual_tol = 1e-6
@@ -135,7 +135,7 @@ tols.residual_tol = 1e-6
 The adaptive timestep uses a PI controller:
 
 ```python
-cfg = v2.TimestepConfig()
+cfg = v1.TimestepConfig()
 cfg.k_p = 0.075  # Proportional gain
 cfg.k_i = 0.175  # Integral gain
 cfg.safety_factor = 0.9
@@ -149,19 +149,19 @@ cfg.safety_factor = 0.9
 
 ```python
 # Default: balanced accuracy and speed
-cfg = v2.TimestepConfig.defaults()
+cfg = v1.TimestepConfig.defaults()
 
 # Conservative: smaller steps, better accuracy
-cfg = v2.TimestepConfig.conservative()
+cfg = v1.TimestepConfig.conservative()
 
 # Aggressive: larger steps, faster simulation
-cfg = v2.TimestepConfig.aggressive()
+cfg = v1.TimestepConfig.aggressive()
 ```
 
 ### Manual Limits
 
 ```python
-cfg = v2.TimestepConfig()
+cfg = v1.TimestepConfig()
 cfg.dt_min = 1e-15  # Minimum timestep
 cfg.dt_max = 1e-6   # Maximum timestep
 cfg.dt_initial = 1e-9  # Starting timestep
@@ -170,7 +170,7 @@ cfg.dt_initial = 1e-9  # Starting timestep
 ## BDF Order Control
 
 ```python
-bdf = v2.BDFOrderConfig()
+bdf = v1.BDFOrderConfig()
 bdf.min_order = 1  # BDF1 (backward Euler)
 bdf.max_order = 2  # BDF2
 bdf.initial_order = 1
@@ -185,22 +185,22 @@ bdf.enable_auto_order = True
 ### Strategy Selection
 
 ```python
-dc_cfg = v2.DCConvergenceConfig()
+dc_cfg = v1.DCConvergenceConfig()
 
 # Let solver choose best strategy
-dc_cfg.strategy = v2.DCStrategy.Auto
+dc_cfg.strategy = v1.DCStrategy.Auto
 
 # Or specify explicitly
-dc_cfg.strategy = v2.DCStrategy.GminStepping  # Add shunt conductance
-dc_cfg.strategy = v2.DCStrategy.SourceStepping  # Scale sources 0->1
-dc_cfg.strategy = v2.DCStrategy.PseudoTransient  # Fake timestep
-dc_cfg.strategy = v2.DCStrategy.Direct  # No aids (fastest if it works)
+dc_cfg.strategy = v1.DCStrategy.GminStepping  # Add shunt conductance
+dc_cfg.strategy = v1.DCStrategy.SourceStepping  # Scale sources 0->1
+dc_cfg.strategy = v1.DCStrategy.PseudoTransient  # Fake timestep
+dc_cfg.strategy = v1.DCStrategy.Direct  # No aids (fastest if it works)
 ```
 
 ### Gmin Stepping Tuning
 
 ```python
-gmin = v2.GminConfig()
+gmin = v1.GminConfig()
 gmin.initial_gmin = 1e-3  # Start with large conductance
 gmin.final_gmin = 1e-12   # Target conductance
 gmin.reduction_factor = 10.0  # Reduce by 10x each step
@@ -211,7 +211,7 @@ Required steps = log10(initial/final) / log10(reduction_factor)
 ### Source Stepping Tuning
 
 ```python
-src = v2.SourceSteppingConfig()
+src = v1.SourceSteppingConfig()
 src.initial_scale = 0.0  # Start with zero sources
 src.final_scale = 1.0    # End with full sources
 src.initial_step = 0.1   # First step size
@@ -225,7 +225,7 @@ src.min_step = 0.01      # Minimum step size
 ```python
 import time
 
-timing = v2.BenchmarkTiming()
+timing = v1.BenchmarkTiming()
 timing.name = "my_circuit"
 
 start = time.perf_counter()
@@ -242,10 +242,10 @@ print(f"Time per step: {elapsed/num_timesteps*1000:.3f} ms")
 results = [result1, result2, result3]
 
 # CSV for spreadsheets
-csv = v2.export_benchmark_csv(results)
+csv = v1.export_benchmark_csv(results)
 
 # JSON for automation
-json_str = v2.export_benchmark_json(results)
+json_str = v1.export_benchmark_json(results)
 ```
 
 ## Best Practices Summary

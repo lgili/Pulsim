@@ -10,13 +10,13 @@
 // - State history management for reactive elements
 // =============================================================================
 
-#include "pulsim/v2/numeric_types.hpp"
+#include "pulsim/v1/numeric_types.hpp"
 #include <cmath>
 #include <array>
 #include <algorithm>
 #include <limits>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Integration Method Types
@@ -1185,4 +1185,4 @@ inline LTELogger& global_lte_logger() {
     return instance;
 }
 
-} // namespace pulsim::v2
+} // namespace pulsim::v1

@@ -15,7 +15,7 @@
 #include <expected>
 #include <span>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Basic Type Concepts
@@ -219,4 +219,4 @@ concept CircuitTopology = requires(C circuit) {
     { circuit.num_devices() } -> std::convertible_to<std::size_t>;
 };
 
-}  // namespace pulsim::v2
+}  // namespace pulsim::v1

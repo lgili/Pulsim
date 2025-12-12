@@ -25,7 +25,7 @@ add_library(pulsim::core ALIAS pulsim_core)
 if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_tests
         tests/test_main.cpp
-        tests/test_v2_concepts.cpp
+        tests/test_concepts.cpp
     )
 
     target_link_libraries(pulsim_tests

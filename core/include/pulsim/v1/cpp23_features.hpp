@@ -23,7 +23,7 @@
     #define PULSIM_HAS_MDSPAN 0
 #endif
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // 1.2.3: std::mdspan for Multidimensional State Arrays
@@ -366,4 +366,4 @@ template<> constexpr std::string_view type_name<float>() { return "float"; }
 template<> constexpr std::string_view type_name<int>() { return "int"; }
 template<> constexpr std::string_view type_name<bool>() { return "bool"; }
 
-}  // namespace pulsim::v2
+}  // namespace pulsim::v1

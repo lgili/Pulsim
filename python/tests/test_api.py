@@ -42,13 +42,13 @@ for mod in list(sys.modules.keys()):
 # Now import pulsim and v2
 try:
     import pulsim
-    v2 = pulsim.v2
+    v2 = pulsim
 except (ImportError, AttributeError):
     v2 = None
 
 # If v2 is still None, skip all tests
 if v2 is None:
-    pytest.skip("v2 API not available", allow_module_level=True)
+    pytest.skip("API not available", allow_module_level=True)
 
 
 class TestDevices:

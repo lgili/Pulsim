@@ -1,6 +1,6 @@
 """PulsimCore - High-performance circuit simulator for power electronics.
 
-This is the v2 API with C++23 features and SIMD optimization.
+This is the API with C++23 features and SIMD optimization.
 """
 
 __version__ = "2.0.0"
@@ -40,7 +40,7 @@ from ._pulsim import (
     RLCAnalytical,
 
     # Validation Framework
-    ValidationResult_v2 as ValidationResult,
+    ValidationResult_v1 as ValidationResult,
     compare_waveforms,
     export_validation_csv,
     export_validation_json,

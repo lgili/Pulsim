@@ -10,7 +10,7 @@
 // - 6.4: Regression testing infrastructure
 // =============================================================================
 
-#include "pulsim/v2/numeric_types.hpp"
+#include "pulsim/v1/numeric_types.hpp"
 #include <vector>
 #include <string>
 #include <functional>
@@ -22,7 +22,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // 6.1: Analytical Solutions for Validation
@@ -862,4 +862,4 @@ private:
     ToleranceEnvelope envelope_;
 };
 
-} // namespace pulsim::v2
+} // namespace pulsim::v1

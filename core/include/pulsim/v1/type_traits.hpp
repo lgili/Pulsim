@@ -13,7 +13,7 @@
 #include <cstddef>
 #include <array>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Device Type Enumeration
@@ -260,4 +260,4 @@ struct any_dynamic<TypeList<Head, Tail>> {
 template<typename TL>
 inline constexpr bool any_dynamic_v = any_dynamic<TL>::value;
 
-}  // namespace pulsim::v2
+}  // namespace pulsim::v1

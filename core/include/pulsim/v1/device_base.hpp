@@ -10,15 +10,15 @@
 // - Inlining of stamp() calls for maximum performance
 // =============================================================================
 
-#include "pulsim/v2/concepts.hpp"
-#include "pulsim/v2/type_traits.hpp"
-#include "pulsim/v2/numeric_types.hpp"
-#include "pulsim/v2/cpp23_features.hpp"
+#include "pulsim/v1/concepts.hpp"
+#include "pulsim/v1/type_traits.hpp"
+#include "pulsim/v1/numeric_types.hpp"
+#include "pulsim/v1/cpp23_features.hpp"
 #include <Eigen/Sparse>
 #include <span>
 #include <array>
 
-namespace pulsim::v2 {
+namespace pulsim::v1 {
 
 // =============================================================================
 // Type Aliases for Device Implementations
@@ -1201,4 +1201,4 @@ PULSIM_REGISTER_PARAMS(Transformer,
     PULSIM_PARAM("turns_ratio", "", 1.0, 0.001, 1000.0)
 );
 
-}  // namespace pulsim::v2
+}  // namespace pulsim::v1

@@ -11,19 +11,19 @@
 // - Advanced C++23 features (mdspan, deducing this, reflection prep)
 // =============================================================================
 
-#include "pulsim/v2/concepts.hpp"
-#include "pulsim/v2/type_traits.hpp"
-#include "pulsim/v2/constexpr_utils.hpp"
-#include "pulsim/v2/numeric_types.hpp"
-#include "pulsim/v2/device_base.hpp"
-#include "pulsim/v2/cpp23_features.hpp"
-#include "pulsim/v2/expression_templates.hpp"
-#include "pulsim/v2/circuit_graph.hpp"
-#include "pulsim/v2/solver.hpp"
-#include "pulsim/v2/integration.hpp"
-#include "pulsim/v2/high_performance.hpp"
-#include "pulsim/v2/convergence_aids.hpp"
-#include "pulsim/v2/validation.hpp"
+#include "pulsim/v1/concepts.hpp"
+#include "pulsim/v1/type_traits.hpp"
+#include "pulsim/v1/constexpr_utils.hpp"
+#include "pulsim/v1/numeric_types.hpp"
+#include "pulsim/v1/device_base.hpp"
+#include "pulsim/v1/cpp23_features.hpp"
+#include "pulsim/v1/expression_templates.hpp"
+#include "pulsim/v1/circuit_graph.hpp"
+#include "pulsim/v1/solver.hpp"
+#include "pulsim/v1/integration.hpp"
+#include "pulsim/v1/high_performance.hpp"
+#include "pulsim/v1/convergence_aids.hpp"
+#include "pulsim/v1/validation.hpp"
 
 // Convenience namespace alias
-namespace pulsim2 = pulsim::v2;
+namespace pulsim2 = pulsim::v1;
