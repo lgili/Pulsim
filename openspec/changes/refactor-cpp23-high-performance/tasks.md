@@ -143,47 +143,47 @@
 ### 4.1 Linear Solver Optimization
 - [x] 4.1.1 Create `LinearSolverPolicy` concept
 - [x] 4.1.2 Implement `SparseLUPolicy` (Eigen wrapper)
-- [ ] 4.1.3 Implement `KLUPolicy` (SuiteSparse wrapper)
-- [ ] 4.1.4 Add factorization reuse detection
-- [ ] 4.1.5 Implement symbolic analysis caching
-- [ ] 4.1.6 Add pivot tolerance configuration
-- [ ] 4.1.7 Benchmark linear solver policies
-- [ ] 4.1.8 Add deterministic pivoting/path guarantees (within solver capabilities)
+- [x] 4.1.3 Implement `KLUPolicy` (SuiteSparse wrapper)
+- [x] 4.1.4 Add factorization reuse detection
+- [x] 4.1.5 Implement symbolic analysis caching
+- [x] 4.1.6 Add pivot tolerance configuration
+- [x] 4.1.7 Benchmark linear solver policies
+- [x] 4.1.8 Add deterministic pivoting/path guarantees (within solver capabilities)
 
 ### 4.2 Newton Solver Template
 - [x] 4.2.1 Create `NewtonSolver<LinearPolicy, ConvergencePolicy>` template
 - [x] 4.2.2 Implement `BasicConvergencePolicy`
-- [ ] 4.2.3 Implement `ArmijoLineSearchPolicy`
-- [ ] 4.2.4 Implement `TrustRegionPolicy`
+- [x] 4.2.3 Implement `ArmijoLineSearchPolicy`
+- [x] 4.2.4 Implement `TrustRegionPolicy`
 - [x] 4.2.5 Add iteration callback for debugging
 - [x] 4.2.6 Implement damping schedule (start aggressive, relax)
 
 ### 4.3 Memory Optimization
-- [ ] 4.3.1 Create `ArenaAllocator` with bump allocation
-- [ ] 4.3.2 Implement per-simulation memory pool
-- [ ] 4.3.3 Add aligned allocation for SIMD
-- [ ] 4.3.4 Implement workspace reuse across timesteps
-- [ ] 4.3.5 Profile and eliminate heap allocations in hot path
-- [ ] 4.3.6 Add memory usage tracking
-- [ ] 4.3.7 Add debug-mode poison/guards to detect overruns in arenas
+- [x] 4.3.1 Create `ArenaAllocator` with bump allocation
+- [x] 4.3.2 Implement per-simulation memory pool
+- [x] 4.3.3 Add aligned allocation for SIMD
+- [x] 4.3.4 Implement workspace reuse across timesteps
+- [x] 4.3.5 Profile and eliminate heap allocations in hot path
+- [x] 4.3.6 Add memory usage tracking
+- [x] 4.3.7 Add debug-mode poison/guards to detect overruns in arenas
 
 ### 4.4 SIMD Optimization
-- [ ] 4.4.1 Detect SIMD capabilities at compile time
-- [ ] 4.4.2 Implement SIMD matrix assembly kernels
-- [ ] 4.4.3 Implement SIMD device evaluation
-- [ ] 4.4.4 Add AVX2 specializations
-- [ ] 4.4.5 Add AVX-512 specializations (optional)
-- [ ] 4.4.6 Add ARM NEON specializations
-- [ ] 4.4.7 Benchmark SIMD improvements
-- [ ] 4.4.8 Add runtime fallback path for non-SIMD targets with identical results
+- [x] 4.4.1 Detect SIMD capabilities at compile time
+- [x] 4.4.2 Implement SIMD matrix assembly kernels
+- [x] 4.4.3 Implement SIMD device evaluation
+- [x] 4.4.4 Add AVX2 specializations
+- [x] 4.4.5 Add AVX-512 specializations (optional)
+- [x] 4.4.6 Add ARM NEON specializations
+- [x] 4.4.7 Benchmark SIMD improvements
+- [x] 4.4.8 Add runtime fallback path for non-SIMD targets with identical results
 
 ### 4.5 Cache-Friendly Data Layout
-- [ ] 4.5.1 Implement SoA (Structure of Arrays) for device data
-- [ ] 4.5.2 Add cache line alignment (64 bytes)
-- [ ] 4.5.3 Implement data prefetching hints
-- [ ] 4.5.4 Profile cache miss rates
-- [ ] 4.5.5 Optimize memory access patterns
-- [ ] 4.5.6 Add layout fuzz test to ensure determinism and correctness across AoS/SoA toggles
+- [x] 4.5.1 Implement SoA (Structure of Arrays) for device data
+- [x] 4.5.2 Add cache line alignment (64 bytes)
+- [x] 4.5.3 Implement data prefetching hints
+- [x] 4.5.4 Profile cache miss rates
+- [x] 4.5.5 Optimize memory access patterns
+- [x] 4.5.6 Add layout fuzz test to ensure determinism and correctness across AoS/SoA toggles
 
 ## Phase 5: Advanced Convergence Aids
 

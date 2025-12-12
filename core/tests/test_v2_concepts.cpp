@@ -3569,3 +3569,488 @@ TEST_CASE("v2 Deterministic ordering", "[v2][solver][deterministic]") {
         }
     }
 }
+
+// =============================================================================
+// Phase 4: High-Performance Components Tests
+// =============================================================================
+
+TEST_CASE("v2 Enhanced SparseLU policy", "[v2][solver][linear][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Basic solve") {
+        EnhancedSparseLUPolicy solver;
+
+        // Create simple 3x3 SPD matrix
+        SparseMatrix A(3, 3);
+        std::vector<Eigen::Triplet<Real>> triplets = {
+            {0, 0, 4.0}, {0, 1, 1.0},
+            {1, 0, 1.0}, {1, 1, 3.0}, {1, 2, 1.0},
+            {2, 1, 1.0}, {2, 2, 2.0}
+        };
+        A.setFromTriplets(triplets.begin(), triplets.end());
+
+        Vector b(3);
+        b << 1.0, 2.0, 3.0;
+
+        REQUIRE(solver.analyze(A) == true);
+        REQUIRE(solver.factorize(A) == true);
+
+        auto result = solver.solve(b);
+        REQUIRE(result.has_value());
+
+        // Verify Ax = b
+        Vector residual = A * (*result) - b;
+        REQUIRE(residual.norm() < 1e-10);
+    }
+
+    SECTION("Pattern reuse detection (4.1.4, 4.1.5)") {
+        LinearSolverConfig cfg;
+        cfg.reuse_symbolic = true;
+        cfg.detect_pattern_change = true;
+        EnhancedSparseLUPolicy solver(cfg);
+
+        SparseMatrix A(2, 2);
+        std::vector<Eigen::Triplet<Real>> triplets = {{0, 0, 2.0}, {1, 1, 3.0}};
+        A.setFromTriplets(triplets.begin(), triplets.end());
+
+        // First factorization
+        solver.factorize(A);
+        REQUIRE(solver.factorize_count() == 1);
+
+        // Same pattern, different values - should reuse symbolic
+        A.coeffRef(0, 0) = 5.0;
+        solver.factorize(A);
+        REQUIRE(solver.factorize_count() == 2);
+        REQUIRE(solver.is_analyzed() == true);
+    }
+
+    SECTION("Reset") {
+        EnhancedSparseLUPolicy solver;
+
+        SparseMatrix A(2, 2);
+        A.setIdentity();
+
+        solver.factorize(A);
+        REQUIRE(solver.is_analyzed() == true);
+
+        solver.reset();
+        REQUIRE(solver.is_analyzed() == false);
+        REQUIRE(solver.factorize_count() == 0);
+    }
+}
+
+TEST_CASE("v2 KLU policy stub", "[v2][solver][linear][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Fallback to SparseLU") {
+        KLUPolicy solver;
+
+        // KLU should fall back to SparseLU when not available
+        SparseMatrix A(2, 2);
+        A.setIdentity();
+
+        Vector b(2);
+        b << 1.0, 2.0;
+
+        REQUIRE(solver.analyze(A) == true);
+        REQUIRE(solver.factorize(A) == true);
+
+        auto result = solver.solve(b);
+        REQUIRE(result.has_value());
+        REQUIRE((*result)[0] == Catch::Approx(1.0));
+        REQUIRE((*result)[1] == Catch::Approx(2.0));
+    }
+
+    SECTION("Availability check") {
+        // On most systems without SuiteSparse, this will be false
+        bool available = KLUPolicy::is_available();
+        (void)available;  // Just check it compiles
+    }
+}
+
+TEST_CASE("v2 Armijo line search", "[v2][solver][linesearch][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Descent direction") {
+        ArmijoLineSearch ls;
+
+        Vector x(2);
+        x << 1.0, 1.0;
+
+        Vector dx(2);
+        dx << -1.0, -1.0;  // Descent direction
+
+        Vector grad(2);
+        grad << 2.0, 2.0;  // Gradient pointing up
+
+        // Quadratic function f(x) = x^2 + y^2
+        auto f = [](const Vector& v) { return v.squaredNorm(); };
+
+        Real f_x = f(x);
+        Real alpha = ls.search(x, dx, f_x, grad, f);
+
+        REQUIRE(alpha > 0.0);
+        REQUIRE(alpha <= 1.0);
+
+        // Verify decrease
+        Vector x_new = x + alpha * dx;
+        REQUIRE(f(x_new) < f_x);
+    }
+
+    SECTION("Residual-based search") {
+        ArmijoLineSearch ls;
+
+        Vector x(2);
+        x << 2.0, 2.0;
+
+        Vector dx(2);
+        dx << -1.0, -1.0;
+
+        auto residual = [](const Vector& v) { return v.norm(); };
+
+        Real r0 = residual(x);
+        Real alpha = ls.search_residual(x, dx, r0, residual);
+
+        REQUIRE(alpha > 0.0);
+
+        Vector x_new = x + alpha * dx;
+        REQUIRE(residual(x_new) < r0);
+    }
+}
+
+TEST_CASE("v2 Trust region method", "[v2][solver][trustregion][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Step within radius") {
+        TrustRegionMethod tr;
+        tr.set_radius(10.0);
+
+        Vector grad(2);
+        grad << 1.0, 1.0;
+
+        Vector newton_step(2);
+        newton_step << -2.0, -2.0;  // Norm ~= 2.83 < 10
+
+        Vector step = tr.compute_step(grad, newton_step);
+
+        // Should use full Newton step
+        REQUIRE(step[0] == Catch::Approx(newton_step[0]));
+        REQUIRE(step[1] == Catch::Approx(newton_step[1]));
+    }
+
+    SECTION("Step outside radius") {
+        TrustRegionMethod tr;
+        tr.set_radius(1.0);
+
+        Vector grad(2);
+        grad << 1.0, 1.0;
+
+        Vector newton_step(2);
+        newton_step << -10.0, -10.0;  // Norm ~= 14.14 > 1
+
+        Vector step = tr.compute_step(grad, newton_step);
+
+        // Step should be constrained to radius
+        REQUIRE(step.norm() <= 1.0 + 1e-10);
+    }
+
+    SECTION("Update radius") {
+        TrustRegionConfig cfg;
+        cfg.initial_radius = 1.0;
+        cfg.eta1 = 0.25;
+        cfg.eta2 = 0.75;
+        TrustRegionMethod tr(cfg);
+
+        Vector step(2);
+        step << 0.5, 0.5;
+
+        // Good step: actual reduction close to predicted
+        auto result = tr.update(10.0, 5.0, 5.0, step);  // ratio = 1.0
+        REQUIRE(result.accepted == true);
+        REQUIRE(result.ratio == Catch::Approx(1.0));
+
+        // Poor step: actual reduction much less than predicted
+        result = tr.update(10.0, 9.5, 5.0, step);  // ratio = 0.1
+        REQUIRE(result.accepted == false);
+        REQUIRE(tr.radius() < cfg.initial_radius);  // Radius shrunk
+    }
+}
+
+TEST_CASE("v2 Arena allocator", "[v2][memory][arena][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Basic allocation") {
+        ArenaAllocator arena(1024);
+
+        void* ptr1 = arena.allocate(100);
+        REQUIRE(ptr1 != nullptr);
+
+        void* ptr2 = arena.allocate(200);
+        REQUIRE(ptr2 != nullptr);
+        REQUIRE(ptr2 != ptr1);
+
+        REQUIRE(arena.total_allocated() >= 300);
+    }
+
+    SECTION("Aligned allocation") {
+        ArenaAllocator arena(4096);
+
+        void* ptr = arena.allocate(64, 64);  // 64-byte alignment
+        REQUIRE(reinterpret_cast<std::uintptr_t>(ptr) % 64 == 0);
+    }
+
+    SECTION("Array allocation") {
+        ArenaAllocator arena(4096);
+
+        Real* arr = arena.allocate_array<Real>(100);
+        REQUIRE(arr != nullptr);
+
+        // Write to array
+        for (int i = 0; i < 100; ++i) {
+            arr[i] = static_cast<Real>(i);
+        }
+
+        REQUIRE(arr[50] == Catch::Approx(50.0));
+    }
+
+    SECTION("Create object") {
+        ArenaAllocator arena(1024);
+
+        struct TestStruct {
+            int a;
+            double b;
+            TestStruct(int x, double y) : a(x), b(y) {}
+        };
+
+        TestStruct* obj = arena.create<TestStruct>(42, 3.14);
+        REQUIRE(obj->a == 42);
+        REQUIRE(obj->b == Catch::Approx(3.14));
+    }
+
+    SECTION("Reset") {
+        ArenaAllocator arena(1024);
+
+        arena.allocate(500);
+        REQUIRE(arena.total_allocated() == 500);
+
+        arena.reset();
+        REQUIRE(arena.total_allocated() == 0);
+
+        // Can allocate again
+        void* ptr = arena.allocate(100);
+        REQUIRE(ptr != nullptr);
+    }
+
+    SECTION("Multiple blocks") {
+        ArenaAllocator arena(100);  // Small initial size
+
+        // Allocate more than one block
+        arena.allocate(50);
+        arena.allocate(50);
+        arena.allocate(50);  // Should trigger new block
+
+        REQUIRE(arena.block_count() >= 2);
+    }
+}
+
+TEST_CASE("v2 Simulation memory pool", "[v2][memory][pool][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Workspace vector reuse") {
+        SimulationMemoryPool pool;
+
+        Vector& v1 = pool.get_workspace_vector(100, 0);
+        v1.setZero();
+
+        Vector& v2 = pool.get_workspace_vector(100, 0);
+
+        // Should be same vector
+        REQUIRE(&v1 == &v2);
+
+        // Different size = different vector
+        Vector& v3 = pool.get_workspace_vector(200, 0);
+        REQUIRE(&v1 != &v3);
+    }
+
+    SECTION("Workspace matrix reuse") {
+        SimulationMemoryPool pool;
+
+        SparseMatrix& m1 = pool.get_workspace_matrix(10, 10, 0);
+        SparseMatrix& m2 = pool.get_workspace_matrix(10, 10, 0);
+
+        REQUIRE(&m1 == &m2);
+    }
+
+    SECTION("Statistics") {
+        SimulationMemoryPool pool;
+
+        pool.get_workspace_vector(100);
+        pool.get_workspace_vector(200);
+        pool.get_workspace_matrix(10, 10);
+
+        REQUIRE(pool.vector_count() == 2);
+        REQUIRE(pool.matrix_count() == 1);
+    }
+}
+
+TEST_CASE("v2 SIMD detection", "[v2][simd][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Compile-time detection") {
+        SIMDLevel level = detect_simd_level();
+
+        // Should be at least None
+        REQUIRE(level >= SIMDLevel::None);
+
+        // Name should be valid
+        const char* name = simd_level_name(level);
+        REQUIRE(name != nullptr);
+        REQUIRE(std::strlen(name) > 0);
+    }
+
+    SECTION("Vector width") {
+        std::size_t width = simd_vector_width();
+        REQUIRE(width >= 1);
+        REQUIRE(width <= 8);  // Max for AVX-512
+    }
+
+    SECTION("Compile-time constants") {
+        REQUIRE(current_simd_level >= SIMDLevel::None);
+        REQUIRE(simd_width >= 1);
+    }
+}
+
+TEST_CASE("v2 Aligned array", "[v2][memory][soa][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Basic operations") {
+        AlignedArray<Real> arr(100);
+
+        REQUIRE(arr.size() == 100);
+        REQUIRE(arr.data() != nullptr);
+
+        arr[0] = 1.0;
+        arr[99] = 99.0;
+
+        REQUIRE(arr[0] == Catch::Approx(1.0));
+        REQUIRE(arr[99] == Catch::Approx(99.0));
+    }
+
+    SECTION("Cache line alignment") {
+        AlignedArray<Real, 64> arr(100);
+
+        // Data should be 64-byte aligned
+        REQUIRE(reinterpret_cast<std::uintptr_t>(arr.data()) % 64 == 0);
+    }
+
+    SECTION("Resize") {
+        AlignedArray<Real> arr(10);
+        arr[5] = 5.0;
+
+        arr.resize(100);
+
+        REQUIRE(arr.size() == 100);
+        REQUIRE(arr[5] == Catch::Approx(5.0));  // Original data preserved
+    }
+
+    SECTION("Move semantics") {
+        AlignedArray<Real> arr1(100);
+        arr1[0] = 42.0;
+
+        AlignedArray<Real> arr2 = std::move(arr1);
+
+        REQUIRE(arr2.size() == 100);
+        REQUIRE(arr2[0] == Catch::Approx(42.0));
+        REQUIRE(arr1.size() == 0);
+        REQUIRE(arr1.data() == nullptr);
+    }
+
+    SECTION("Iterator") {
+        AlignedArray<Real> arr(5);
+        for (std::size_t i = 0; i < 5; ++i) {
+            arr[i] = static_cast<Real>(i);
+        }
+
+        Real sum = 0.0;
+        for (Real v : arr) {
+            sum += v;
+        }
+
+        REQUIRE(sum == Catch::Approx(10.0));  // 0+1+2+3+4
+    }
+}
+
+TEST_CASE("v2 SoA device layouts", "[v2][memory][soa][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Resistor SoA") {
+        ResistorSoA resistors;
+        resistors.resize(10);
+
+        REQUIRE(resistors.size() == 10);
+
+        resistors.resistance[0] = 1000.0;
+        resistors.node_pos[0] = 1;
+        resistors.node_neg[0] = 0;
+
+        REQUIRE(resistors.resistance[0] == Catch::Approx(1000.0));
+        REQUIRE(resistors.node_pos[0] == 1);
+        REQUIRE(resistors.node_neg[0] == 0);
+    }
+
+    SECTION("Capacitor SoA") {
+        CapacitorSoA capacitors;
+        capacitors.resize(5);
+
+        REQUIRE(capacitors.size() == 5);
+
+        capacitors.capacitance[0] = 1e-6;
+        capacitors.voltage[0] = 5.0;
+        capacitors.voltage_prev[0] = 4.5;
+
+        REQUIRE(capacitors.capacitance[0] == Catch::Approx(1e-6));
+    }
+
+    SECTION("Inductor SoA") {
+        InductorSoA inductors;
+        inductors.resize(3);
+
+        REQUIRE(inductors.size() == 3);
+
+        inductors.inductance[0] = 1e-3;
+        inductors.current[0] = 0.5;
+        inductors.branch_index[0] = 0;
+
+        REQUIRE(inductors.inductance[0] == Catch::Approx(1e-3));
+    }
+}
+
+TEST_CASE("v2 Memory tracker", "[v2][memory][tracking][phase4]") {
+    using namespace pulsim::v2;
+
+    SECTION("Track allocations") {
+        auto& tracker = MemoryTracker::instance();
+        tracker.reset();
+
+        tracker.record_allocation(1000);
+        tracker.record_allocation(500);
+
+        auto stats = tracker.stats();
+        REQUIRE(stats.current_allocated == 1500);
+        REQUIRE(stats.peak_allocated == 1500);
+        REQUIRE(stats.allocation_count == 2);
+    }
+
+    SECTION("Track deallocations") {
+        auto& tracker = MemoryTracker::instance();
+        tracker.reset();
+
+        tracker.record_allocation(1000);
+        tracker.record_deallocation(400);
+
+        auto stats = tracker.stats();
+        REQUIRE(stats.current_allocated == 600);
+        REQUIRE(stats.peak_allocated == 1000);
+        REQUIRE(stats.deallocation_count == 1);
+    }
+}

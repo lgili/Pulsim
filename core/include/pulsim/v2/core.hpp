@@ -21,6 +21,7 @@
 #include "pulsim/v2/circuit_graph.hpp"
 #include "pulsim/v2/solver.hpp"
 #include "pulsim/v2/integration.hpp"
+#include "pulsim/v2/high_performance.hpp"
 
 // Convenience namespace alias
 namespace pulsim2 = pulsim::v2;
