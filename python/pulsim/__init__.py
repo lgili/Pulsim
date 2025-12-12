@@ -58,6 +58,7 @@ from ._pulsim import (
 
     # Transient Simulation
     run_transient,
+    run_transient_robust,
 
     # Solver Configuration
     Tolerances,
@@ -196,6 +197,7 @@ __all__ = [
 
     # Transient Simulation
     "run_transient",
+    "run_transient_robust",
 
     # Solver Configuration
     "Tolerances",
