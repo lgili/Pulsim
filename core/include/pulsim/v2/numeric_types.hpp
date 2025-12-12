@@ -24,6 +24,13 @@
 namespace pulsim::v2 {
 
 // =============================================================================
+// Expression Marker (for constraining expression templates)
+// =============================================================================
+
+/// Marker type for our expression templates - ensures operators don't catch Eigen types
+struct ExpressionMarker {};
+
+// =============================================================================
 // 2.1.1: Real Type Configuration
 // =============================================================================
 
@@ -134,7 +141,7 @@ inline constexpr Index ground_node = Index{-1};
 /// Optimized for SIMD operations and cache efficiency
 template<typename T, std::size_t N>
     requires (N > 0)
-class StaticVector {
+class StaticVector : public ExpressionMarker {
 public:
     using value_type = T;
     using size_type = std::size_t;

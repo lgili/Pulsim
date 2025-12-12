@@ -19,6 +19,8 @@
 #include "pulsim/v2/cpp23_features.hpp"
 #include "pulsim/v2/expression_templates.hpp"
 #include "pulsim/v2/circuit_graph.hpp"
+#include "pulsim/v2/solver.hpp"
+#include "pulsim/v2/integration.hpp"
 
 // Convenience namespace alias
 namespace pulsim2 = pulsim::v2;

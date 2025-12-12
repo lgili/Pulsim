@@ -62,12 +62,14 @@ struct DivOp {};
 struct ScaleOp {};
 struct NegateOp {};
 
-/// Concept for expression-like types
+// ExpressionMarker is defined in numeric_types.hpp
+
+/// Concept for expression-like types (only our custom types, not Eigen)
 template<typename T>
 concept ExpressionLike = requires(const T& expr, std::size_t i) {
     { expr.size() } -> std::convertible_to<std::size_t>;
     { expr[i] } -> std::convertible_to<typename T::value_type>;
-};
+} && std::derived_from<T, ExpressionMarker>;
 
 /// Concept for scalar types usable in expressions
 template<typename T>
@@ -75,7 +77,7 @@ concept ScalarValue = std::is_arithmetic_v<T>;
 
 /// Base class for all expressions using CRTP
 template<typename Derived, typename T>
-class ExpressionBase {
+class ExpressionBase : public ExpressionMarker {
 public:
     using value_type = T;
 

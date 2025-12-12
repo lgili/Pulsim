@@ -2305,6 +2305,925 @@ TEST_CASE("v2 StaticSparsityBuilder", "[v2][circuit][sparsity]") {
 }
 
 // =============================================================================
+// Tests for Newton Solver (Phase 3.1)
+// =============================================================================
+
+TEST_CASE("v2 Convergence checker", "[v2][solver][convergence]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default tolerances") {
+        ConvergenceChecker checker;
+        auto tol = checker.tolerances();
+
+        REQUIRE(tol.voltage_abstol == Catch::Approx(1e-9));
+        REQUIRE(tol.voltage_reltol == Catch::Approx(1e-3));
+        REQUIRE(tol.current_abstol == Catch::Approx(1e-12));
+        REQUIRE(tol.current_reltol == Catch::Approx(1e-3));
+        REQUIRE(tol.residual_tol == Catch::Approx(1e-9));
+    }
+
+    SECTION("Weighted norm - small voltage change") {
+        ConvergenceChecker checker;
+
+        // 2 voltage nodes, 1 current branch
+        Vector solution(3);
+        solution << 5.0, 3.0, 0.001;  // 5V, 3V, 1mA
+
+        Vector delta(3);
+        delta << 1e-10, 1e-10, 1e-15;  // Tiny changes
+
+        Real error = checker.check_weighted_norm(delta, solution, 2, 1);
+        REQUIRE(error < 1.0);  // Should converge
+    }
+
+    SECTION("Weighted norm - large voltage change") {
+        ConvergenceChecker checker;
+
+        Vector solution(3);
+        solution << 5.0, 3.0, 0.001;
+
+        Vector delta(3);
+        delta << 1.0, 0.5, 0.0;  // Large voltage changes
+
+        Real error = checker.check_weighted_norm(delta, solution, 2, 1);
+        REQUIRE(error > 1.0);  // Should not converge
+    }
+
+    SECTION("Per-variable convergence") {
+        ConvergenceChecker checker;
+
+        Vector solution(3);
+        solution << 5.0, 3.0, 0.001;
+
+        Vector delta(3);
+        delta << 1e-10, 1.0, 1e-15;  // Only second voltage is far
+
+        auto conv = checker.check_per_variable(delta, solution, 2, 1);
+
+        REQUIRE(conv.size() == 3);
+        REQUIRE(conv[0].converged == true);   // First voltage OK
+        REQUIRE(conv[1].converged == false);  // Second voltage NOT OK
+        REQUIRE(conv[2].converged == true);   // Current OK
+        REQUIRE(conv.non_converged_count() == 1);
+        REQUIRE(conv.worst()->index == 1);
+    }
+
+    SECTION("Residual check") {
+        ConvergenceChecker checker;
+
+        Vector f_small(3);
+        f_small << 1e-12, 1e-11, 1e-10;
+        REQUIRE(checker.check_residual(f_small) == true);
+
+        Vector f_large(3);
+        f_large << 1e-3, 0.0, 0.0;
+        REQUIRE(checker.check_residual(f_large) == false);
+    }
+}
+
+TEST_CASE("v2 Convergence history", "[v2][solver][history]") {
+    using namespace pulsim::v2;
+
+    SECTION("Basic history tracking") {
+        ConvergenceHistory history;
+
+        REQUIRE(history.empty());
+
+        IterationRecord r1{0, 1.0, 0.1, 0.01, 0.5, 1.0, false};
+        IterationRecord r2{1, 0.5, 0.05, 0.005, 0.25, 1.0, false};
+        IterationRecord r3{2, 0.1, 0.01, 0.001, 0.05, 1.0, true};
+
+        history.add_record(r1);
+        history.add_record(r2);
+        history.add_record(r3);
+
+        REQUIRE(history.size() == 3);
+        REQUIRE(history[0].iteration == 0);
+        REQUIRE(history.last().iteration == 2);
+        REQUIRE(history.last().converged == true);
+    }
+
+    SECTION("Stall detection") {
+        ConvergenceHistory history;
+
+        // Add records where residual barely decreases
+        for (int i = 0; i < 10; ++i) {
+            IterationRecord r{i, 1.0 - i * 0.001, 0.0, 0.0, 0.0, 1.0, false};
+            history.add_record(r);
+        }
+
+        // Check stall over last 5 iterations with 90% threshold
+        REQUIRE(history.is_stalling(5, 0.9) == true);
+    }
+
+    SECTION("Divergence detection") {
+        ConvergenceHistory history;
+
+        // Add increasing residuals
+        for (int i = 0; i < 5; ++i) {
+            IterationRecord r{i, std::pow(2.0, i), 0.0, 0.0, 0.0, 1.0, false};
+            history.add_record(r);
+        }
+
+        REQUIRE(history.is_diverging(3) == true);
+    }
+
+    SECTION("Convergence rate") {
+        ConvergenceHistory history;
+
+        // Quadratic convergence: residual reduces by factor of 10 each iteration
+        IterationRecord r1{0, 1.0, 0.0, 0.0, 0.0, 1.0, false};
+        IterationRecord r2{1, 0.1, 0.0, 0.0, 0.0, 1.0, false};
+        IterationRecord r3{2, 0.01, 0.0, 0.0, 0.0, 1.0, true};
+
+        history.add_record(r1);
+        history.add_record(r2);
+        history.add_record(r3);
+
+        // Rate should be around 0.1 (10x reduction per iteration)
+        Real rate = history.convergence_rate();
+        REQUIRE(rate == Catch::Approx(0.1).margin(0.01));
+    }
+}
+
+TEST_CASE("v2 Per-variable convergence", "[v2][solver][per-var]") {
+    using namespace pulsim::v2;
+
+    SECTION("Voltage variable") {
+        auto v = VariableConvergence::voltage(0, 5.0, 1e-10, 1e-9, 1e-3);
+
+        REQUIRE(v.index == 0);
+        REQUIRE(v.is_voltage == true);
+        REQUIRE(v.converged == true);
+    }
+
+    SECTION("Current variable") {
+        auto c = VariableConvergence::current(2, 0.001, 1e-15, 1e-12, 1e-3);
+
+        REQUIRE(c.index == 2);
+        REQUIRE(c.is_voltage == false);
+        REQUIRE(c.converged == true);
+    }
+
+    SECTION("All converged check") {
+        PerVariableConvergence conv;
+        conv.add(VariableConvergence::voltage(0, 5.0, 1e-10, 1e-9, 1e-3));
+        conv.add(VariableConvergence::voltage(1, 3.0, 1e-10, 1e-9, 1e-3));
+
+        REQUIRE(conv.all_converged() == true);
+    }
+
+    SECTION("Worst variable") {
+        PerVariableConvergence conv;
+        conv.add(VariableConvergence::voltage(0, 5.0, 1e-10, 1e-9, 1e-3));  // Small error
+        conv.add(VariableConvergence::voltage(1, 3.0, 0.5, 1e-9, 1e-3));    // Large error
+
+        auto worst = conv.worst();
+        REQUIRE(worst != nullptr);
+        REQUIRE(worst->index == 1);
+    }
+}
+
+TEST_CASE("v2 SparseLU policy", "[v2][solver][linear]") {
+    using namespace pulsim::v2;
+
+    SECTION("Basic solve") {
+        SparseLUPolicy solver;
+
+        // Simple 2x2 system: [2 1; 1 3] * x = [1; 2]
+        SparseMatrix A(2, 2);
+        std::vector<Eigen::Triplet<double>> triplets;
+        triplets.emplace_back(0, 0, 2.0);
+        triplets.emplace_back(0, 1, 1.0);
+        triplets.emplace_back(1, 0, 1.0);
+        triplets.emplace_back(1, 1, 3.0);
+        A.setFromTriplets(triplets.begin(), triplets.end());
+
+        Vector b(2);
+        b << 1.0, 2.0;
+
+        REQUIRE(solver.factorize(A) == true);
+        REQUIRE(solver.is_singular() == false);
+
+        auto result = solver.solve(b);
+        REQUIRE(result.has_value());
+
+        // Solution: x = [1/5, 3/5]
+        Vector x = *result;
+        REQUIRE(x[0] == Catch::Approx(0.2).margin(1e-10));
+        REQUIRE(x[1] == Catch::Approx(0.6).margin(1e-10));
+    }
+
+    SECTION("Concept check") {
+        static_assert(LinearSolverPolicy<SparseLUPolicy>);
+    }
+}
+
+TEST_CASE("v2 Newton solver - simple system", "[v2][solver][newton]") {
+    using namespace pulsim::v2;
+
+    SECTION("Solve x^2 = 4 (find x = 2)") {
+        NewtonOptions opts;
+        opts.max_iterations = 20;
+        opts.num_nodes = 0;  // Don't use weighted norm
+        opts.num_branches = 0;
+
+        NewtonRaphsonSolver<> solver(opts);
+
+        // System: f(x) = x^2 - 4 = 0, J = 2x
+        auto system = [](const Vector& x, Vector& f, SparseMatrix& J) {
+            f.resize(1);
+            f[0] = x[0] * x[0] - 4.0;
+
+            J.resize(1, 1);
+            std::vector<Eigen::Triplet<double>> triplets;
+            triplets.emplace_back(0, 0, 2.0 * x[0]);
+            J.setFromTriplets(triplets.begin(), triplets.end());
+        };
+
+        Vector x0(1);
+        x0[0] = 3.0;  // Start near solution
+
+        auto result = solver.solve(x0, system);
+
+        REQUIRE(result.success() == true);
+        REQUIRE(result.solution[0] == Catch::Approx(2.0).margin(1e-8));
+        REQUIRE(result.iterations < 10);
+    }
+
+    SECTION("Solve 2D system: x^2 + y^2 = 5, x*y = 2") {
+        NewtonOptions opts;
+        opts.max_iterations = 50;
+        opts.num_nodes = 0;
+        opts.num_branches = 0;
+        opts.tolerances.residual_tol = 1e-6;  // Slightly looser tolerance
+
+        NewtonRaphsonSolver<> solver(opts);
+
+        // f1 = x^2 + y^2 - 5, f2 = x*y - 2
+        // Solutions: (1,2), (2,1), (-1,-2), (-2,-1)
+        auto system = [](const Vector& x, Vector& f, SparseMatrix& J) {
+            f.resize(2);
+            f[0] = x[0] * x[0] + x[1] * x[1] - 5.0;
+            f[1] = x[0] * x[1] - 2.0;
+
+            J.resize(2, 2);
+            std::vector<Eigen::Triplet<double>> triplets;
+            triplets.emplace_back(0, 0, 2.0 * x[0]);  // df1/dx
+            triplets.emplace_back(0, 1, 2.0 * x[1]);  // df1/dy
+            triplets.emplace_back(1, 0, x[1]);        // df2/dx
+            triplets.emplace_back(1, 1, x[0]);        // df2/dy
+            J.setFromTriplets(triplets.begin(), triplets.end());
+        };
+
+        Vector x0(2);
+        x0 << 1.2, 1.8;  // Closer to (1,2) solution
+
+        auto result = solver.solve(x0, system);
+
+        REQUIRE(result.success() == true);
+        // Should converge to one of (1,2) or (2,1)
+        Real x2_plus_y2 = result.solution[0] * result.solution[0] +
+                          result.solution[1] * result.solution[1];
+        Real xy = result.solution[0] * result.solution[1];
+        REQUIRE(x2_plus_y2 == Catch::Approx(5.0).margin(1e-6));
+        REQUIRE(xy == Catch::Approx(2.0).margin(1e-6));
+    }
+}
+
+TEST_CASE("v2 Newton solver - with weighted norm", "[v2][solver][newton][weighted]") {
+    using namespace pulsim::v2;
+
+    SECTION("Resistive voltage divider DC OP") {
+        // Simple 2-resistor divider: Vs=10V, R1=R2=1k -> V_mid = 5V
+        NewtonOptions opts;
+        opts.max_iterations = 50;
+        opts.num_nodes = 2;    // 2 voltage nodes
+        opts.num_branches = 1; // 1 current branch (voltage source)
+        opts.tolerances.voltage_abstol = 1e-9;
+        opts.tolerances.voltage_reltol = 1e-3;
+
+        NewtonRaphsonSolver<> solver(opts);
+
+        const double Vs = 10.0;
+        const double R1 = 1000.0;
+        const double R2 = 1000.0;
+
+        // Variables: [V1, V2, I_vs]
+        // V1 is voltage source positive
+        // V2 is middle node (between R1 and R2)
+        // Ground is reference
+        //
+        // Equations:
+        // KCL at V1: (V1-V2)/R1 + I_vs = 0
+        // KCL at V2: (V2-V1)/R1 + V2/R2 = 0
+        // Voltage source: V1 = Vs
+
+        auto system = [&](const Vector& x, Vector& f, SparseMatrix& J) {
+            double V1 = x[0];
+            double V2 = x[1];
+            double Ivs = x[2];
+
+            f.resize(3);
+            f[0] = (V1 - V2) / R1 + Ivs;
+            f[1] = (V2 - V1) / R1 + V2 / R2;
+            f[2] = V1 - Vs;
+
+            J.resize(3, 3);
+            std::vector<Eigen::Triplet<double>> triplets;
+            // df0/dV1, df0/dV2, df0/dI
+            triplets.emplace_back(0, 0, 1.0 / R1);
+            triplets.emplace_back(0, 1, -1.0 / R1);
+            triplets.emplace_back(0, 2, 1.0);
+            // df1/dV1, df1/dV2
+            triplets.emplace_back(1, 0, -1.0 / R1);
+            triplets.emplace_back(1, 1, 1.0 / R1 + 1.0 / R2);
+            // df2/dV1
+            triplets.emplace_back(2, 0, 1.0);
+            J.setFromTriplets(triplets.begin(), triplets.end());
+        };
+
+        Vector x0(3);
+        x0 << 0.0, 0.0, 0.0;  // Start from zero
+
+        auto result = solver.solve(x0, system);
+
+        REQUIRE(result.success() == true);
+        REQUIRE(result.solution[0] == Catch::Approx(10.0).margin(1e-6));  // V1 = 10V
+        REQUIRE(result.solution[1] == Catch::Approx(5.0).margin(1e-6));   // V2 = 5V
+        REQUIRE(result.solution[2] == Catch::Approx(-0.005).margin(1e-8)); // I = -5mA
+    }
+}
+
+TEST_CASE("v2 Newton solver - edge cases", "[v2][solver][newton][edge]") {
+    using namespace pulsim::v2;
+
+    SECTION("Max iterations reached") {
+        NewtonOptions opts;
+        opts.max_iterations = 2;  // Too few iterations
+        opts.auto_damping = false;
+
+        NewtonRaphsonSolver<> solver(opts);
+
+        // Hard problem that won't converge in 2 iterations
+        auto system = [](const Vector& x, Vector& f, SparseMatrix& J) {
+            f.resize(1);
+            f[0] = std::exp(x[0]) - 100.0;  // x = ln(100) ≈ 4.6
+
+            J.resize(1, 1);
+            std::vector<Eigen::Triplet<double>> triplets;
+            triplets.emplace_back(0, 0, std::exp(x[0]));
+            J.setFromTriplets(triplets.begin(), triplets.end());
+        };
+
+        Vector x0(1);
+        x0[0] = 0.0;  // Far from solution
+
+        auto result = solver.solve(x0, system);
+
+        REQUIRE(result.success() == false);
+        REQUIRE(result.status == SolverStatus::MaxIterationsReached);
+        REQUIRE(result.iterations == 2);
+    }
+
+    SECTION("History tracking") {
+        NewtonOptions opts;
+        opts.max_iterations = 20;
+        opts.track_history = true;
+
+        NewtonRaphsonSolver<> solver(opts);
+
+        auto system = [](const Vector& x, Vector& f, SparseMatrix& J) {
+            f.resize(1);
+            f[0] = x[0] * x[0] - 4.0;
+
+            J.resize(1, 1);
+            std::vector<Eigen::Triplet<double>> triplets;
+            triplets.emplace_back(0, 0, 2.0 * x[0]);
+            J.setFromTriplets(triplets.begin(), triplets.end());
+        };
+
+        Vector x0(1);
+        x0[0] = 3.0;
+
+        auto result = solver.solve(x0, system);
+
+        REQUIRE(result.success() == true);
+        REQUIRE(result.history.size() > 0);
+        REQUIRE(result.history.size() <= static_cast<std::size_t>(result.iterations + 1));
+
+        // Residual should decrease
+        if (result.history.size() >= 2) {
+            REQUIRE(result.history.last().residual_norm <
+                    result.history[0].residual_norm);
+        }
+    }
+}
+
+TEST_CASE("v2 Deterministic node order", "[v2][solver][deterministic]") {
+    using namespace pulsim::v2;
+
+    SECTION("Natural ordering") {
+        auto order = DeterministicNodeOrder::natural(5);
+
+        REQUIRE(order.node_order.size() == 5);
+        REQUIRE(order.inverse_order.size() == 5);
+
+        for (Index i = 0; i < 5; ++i) {
+            REQUIRE(order.node_order[i] == i);
+            REQUIRE(order.inverse_order[i] == i);
+        }
+    }
+
+    SECTION("Sort for determinism") {
+        std::vector<std::pair<int, std::string>> items = {
+            {3, "c"}, {1, "a"}, {2, "b"}
+        };
+
+        sort_for_determinism(items, [](const auto& p) { return p.first; });
+
+        REQUIRE(items[0].first == 1);
+        REQUIRE(items[1].first == 2);
+        REQUIRE(items[2].first == 3);
+    }
+}
+
+// =============================================================================
+// Tests for Integration Methods (Phase 3.2-3.4)
+// =============================================================================
+
+TEST_CASE("v2 Trapezoidal coefficients", "[v2][integration][trapezoidal]") {
+    using namespace pulsim::v2;
+
+    SECTION("Capacitor companion model") {
+        Real C = 1e-6;   // 1 uF
+        Real dt = 1e-6;  // 1 us
+        Real v_prev = 5.0;
+        Real i_prev = 0.001;  // 1 mA
+
+        auto [g_eq, i_eq] = TrapezoidalCoeffs::capacitor(C, dt, v_prev, i_prev);
+
+        // G_eq = 2C/dt = 2 * 1e-6 / 1e-6 = 2 S
+        REQUIRE(g_eq == Catch::Approx(2.0).margin(1e-10));
+
+        // I_eq = G_eq * v_prev + i_prev = 2 * 5 + 0.001 = 10.001
+        REQUIRE(i_eq == Catch::Approx(10.001).margin(1e-10));
+    }
+
+    SECTION("Inductor companion model") {
+        Real L = 1e-3;   // 1 mH
+        Real dt = 1e-6;  // 1 us
+        Real i_prev = 0.1;  // 100 mA
+        Real v_prev = 10.0; // 10 V
+
+        auto [g_eq, i_eq] = TrapezoidalCoeffs::inductor(L, dt, i_prev, v_prev);
+
+        // G_eq = dt / (2L) = 1e-6 / (2 * 1e-3) = 0.0005 S
+        REQUIRE(g_eq == Catch::Approx(0.0005).margin(1e-12));
+
+        // V_eq = (2L/dt) * i_prev + v_prev = 2000 * 0.1 + 10 = 210 V
+        // I_eq = G_eq * V_eq = 0.0005 * 210 = 0.105 A
+        REQUIRE(i_eq == Catch::Approx(0.105).margin(1e-10));
+    }
+
+    SECTION("Current calculation") {
+        Real C = 1e-6;
+        Real dt = 1e-6;
+        Real v_n = 6.0;
+        Real v_prev = 5.0;
+        Real i_prev = 0.0;
+
+        Real i_n = TrapezoidalCoeffs::capacitor_current(C, dt, v_n, v_prev, i_prev);
+
+        // i_n = (2C/dt)(v_n - v_prev) - i_prev = 2 * 1 - 0 = 2 A
+        REQUIRE(i_n == Catch::Approx(2.0).margin(1e-10));
+    }
+}
+
+TEST_CASE("v2 BDF coefficients", "[v2][integration][bdf]") {
+    using namespace pulsim::v2;
+
+    SECTION("BDF1 (Backward Euler)") {
+        auto bdf1 = BDFCoeffs::bdf1();
+
+        REQUIRE(bdf1.order == 1);
+        REQUIRE(bdf1.alpha[0] == Catch::Approx(1.0));
+        REQUIRE(bdf1.alpha[1] == Catch::Approx(-1.0));
+    }
+
+    SECTION("BDF2") {
+        auto bdf2 = BDFCoeffs::bdf2();
+
+        REQUIRE(bdf2.order == 2);
+        REQUIRE(bdf2.alpha[0] == Catch::Approx(1.5));
+        REQUIRE(bdf2.alpha[1] == Catch::Approx(-2.0));
+        REQUIRE(bdf2.alpha[2] == Catch::Approx(0.5));
+    }
+
+    SECTION("Method order lookup") {
+        REQUIRE(method_order(Integrator::BDF1) == 1);
+        REQUIRE(method_order(Integrator::BDF2) == 2);
+        REQUIRE(method_order(Integrator::BDF3) == 3);
+        REQUIRE(method_order(Integrator::Trapezoidal) == 2);
+    }
+
+    SECTION("Startup requirement") {
+        REQUIRE(requires_startup(Integrator::BDF1) == false);
+        REQUIRE(requires_startup(Integrator::Trapezoidal) == false);
+        REQUIRE(requires_startup(Integrator::BDF2) == true);
+        REQUIRE(requires_startup(Integrator::BDF3) == true);
+    }
+}
+
+TEST_CASE("v2 State history", "[v2][integration][history]") {
+    using namespace pulsim::v2;
+
+    SECTION("Basic operations") {
+        StateHistory<6> hist;
+
+        REQUIRE(hist.count() == 0);
+
+        hist.push(1.0);
+        hist.push(2.0);
+        hist.push(3.0);
+
+        REQUIRE(hist.count() == 3);
+        REQUIRE(hist[0] == 3.0);  // Most recent
+        REQUIRE(hist[1] == 2.0);
+        REQUIRE(hist[2] == 1.0);  // Oldest
+    }
+
+    SECTION("Overflow handling") {
+        StateHistory<3> hist;
+
+        hist.push(1.0);
+        hist.push(2.0);
+        hist.push(3.0);
+        hist.push(4.0);  // Should shift out 1.0
+
+        REQUIRE(hist.count() == 3);
+        REQUIRE(hist[0] == 4.0);
+        REQUIRE(hist[1] == 3.0);
+        REQUIRE(hist[2] == 2.0);
+    }
+
+    SECTION("Span access") {
+        StateHistory<6> hist;
+        hist.push(1.0);
+        hist.push(2.0);
+
+        auto span = hist.span();
+        REQUIRE(span.size() == 2);
+        REQUIRE(span[0] == 2.0);
+        REQUIRE(span[1] == 1.0);
+    }
+}
+
+TEST_CASE("v2 Numeric guards", "[v2][integration][guards]") {
+    using namespace pulsim::v2;
+
+    SECTION("Voltage clamping") {
+        REQUIRE(NumericGuard::clamp_voltage(1e12) == NumericGuard::max_voltage);
+        REQUIRE(NumericGuard::clamp_voltage(-1e12) == -NumericGuard::max_voltage);
+        REQUIRE(NumericGuard::clamp_voltage(5.0) == 5.0);
+    }
+
+    SECTION("Conductance clamping") {
+        REQUIRE(NumericGuard::clamp_conductance(1e20) == NumericGuard::max_conductance);
+        REQUIRE(NumericGuard::clamp_conductance(1e-20) == NumericGuard::min_conductance);
+        REQUIRE(NumericGuard::clamp_conductance(0.001) == 0.001);
+    }
+
+    SECTION("Valid check") {
+        REQUIRE(NumericGuard::is_valid(5.0) == true);
+        REQUIRE(NumericGuard::is_valid(std::numeric_limits<Real>::infinity()) == false);
+        REQUIRE(NumericGuard::is_valid(std::nan("")) == false);
+    }
+
+    SECTION("Safe divide") {
+        REQUIRE(NumericGuard::safe_divide(10.0, 2.0) == Catch::Approx(5.0));
+        REQUIRE(NumericGuard::safe_divide(10.0, 1e-50) > 1e20);  // Returns large value
+    }
+}
+
+TEST_CASE("v2 Integration factory", "[v2][integration][factory]") {
+    using namespace pulsim::v2;
+
+    SECTION("Trapezoidal capacitor") {
+        Real C = 1e-6;
+        Real dt = 1e-6;
+        std::array<Real, 1> v_hist = {5.0};
+        std::array<Real, 1> i_hist = {0.001};
+
+        auto coeffs = IntegrationCoeffs::capacitor(
+            Integrator::Trapezoidal, C, dt,
+            std::span<const Real>(v_hist),
+            std::span<const Real>(i_hist));
+
+        REQUIRE(coeffs.g_eq == Catch::Approx(2.0).margin(1e-10));
+    }
+
+    SECTION("BDF1 capacitor") {
+        Real C = 1e-6;
+        Real dt = 1e-6;
+        std::array<Real, 1> v_hist = {5.0};
+        std::array<Real, 1> i_hist = {0.001};
+
+        auto coeffs = IntegrationCoeffs::capacitor(
+            Integrator::BDF1, C, dt,
+            std::span<const Real>(v_hist),
+            std::span<const Real>(i_hist));
+
+        // BDF1: G_eq = alpha[0] * C / dt = 1.0 * 1e-6 / 1e-6 = 1 S
+        REQUIRE(coeffs.g_eq == Catch::Approx(1.0).margin(1e-10));
+    }
+}
+
+TEST_CASE("v2 LTE estimation", "[v2][integration][lte]") {
+    using namespace pulsim::v2;
+
+    SECTION("Trapezoidal LTE") {
+        Real y_trap = 10.0;
+        Real y_be = 9.7;
+        Real dt = 1e-6;
+
+        Real lte = LTEEstimator::trapezoidal_lte(y_trap, y_be, dt);
+
+        // LTE ~ |y_trap - y_be| / 3 = 0.3 / 3 = 0.1
+        REQUIRE(lte == Catch::Approx(0.1).margin(1e-10));
+    }
+
+    SECTION("General LTE") {
+        Real y_high = 10.0;
+        Real y_low = 9.5;
+
+        Real lte = LTEEstimator::general_lte(y_high, y_low, 1);
+
+        // scale = 1/(2^1 - 1) = 1
+        REQUIRE(lte == Catch::Approx(0.5).margin(1e-10));
+    }
+}
+
+TEST_CASE("v2 Analytical RC validation", "[v2][integration][analytical]") {
+    using namespace pulsim::v2;
+
+    SECTION("RC step response") {
+        Real R = 1000.0;  // 1 kOhm
+        Real C = 1e-6;    // 1 uF
+        Real V_source = 10.0;
+        Real tau = R * C;  // 1 ms
+
+        // At t = 0
+        Real v0 = analytical::rc_step_response(0.0, R, C, V_source, 0.0);
+        REQUIRE(v0 == Catch::Approx(0.0).margin(1e-10));
+
+        // At t = tau, v = V * (1 - 1/e) ≈ 6.321
+        Real v_tau = analytical::rc_step_response(tau, R, C, V_source, 0.0);
+        REQUIRE(v_tau == Catch::Approx(V_source * (1.0 - std::exp(-1.0))).margin(1e-6));
+
+        // At t = 5*tau, v ≈ V (within 1%)
+        Real v_5tau = analytical::rc_step_response(5 * tau, R, C, V_source, 0.0);
+        REQUIRE(v_5tau == Catch::Approx(V_source).margin(0.1));
+    }
+
+    SECTION("RL step response") {
+        Real R = 1000.0;
+        Real L = 1.0;  // 1 H
+        Real V_source = 10.0;
+        Real tau = L / R;
+        Real I_final = V_source / R;
+
+        // At t = 0
+        Real i0 = analytical::rl_step_response(0.0, R, L, V_source, 0.0);
+        REQUIRE(i0 == Catch::Approx(0.0).margin(1e-10));
+
+        // At t = tau
+        Real i_tau = analytical::rl_step_response(tau, R, L, V_source, 0.0);
+        REQUIRE(i_tau == Catch::Approx(I_final * (1.0 - std::exp(-1.0))).margin(1e-6));
+    }
+}
+
+TEST_CASE("v2 Timestep config", "[v2][integration][timestep]") {
+    using namespace pulsim::v2;
+
+    SECTION("Default config") {
+        auto cfg = TimestepConfig::defaults();
+        REQUIRE(cfg.dt_min == Catch::Approx(1e-15));
+        REQUIRE(cfg.dt_max == Catch::Approx(1e-3));
+        REQUIRE(cfg.safety_factor == Catch::Approx(0.9));
+    }
+
+    SECTION("Conservative config") {
+        auto cfg = TimestepConfig::conservative();
+        REQUIRE(cfg.safety_factor < 0.9);
+        REQUIRE(cfg.growth_factor < 2.0);
+    }
+
+    SECTION("Aggressive config") {
+        auto cfg = TimestepConfig::aggressive();
+        REQUIRE(cfg.safety_factor > 0.9);
+        REQUIRE(cfg.growth_factor > 2.0);
+    }
+}
+
+TEST_CASE("v2 Timestep history", "[v2][integration][timestep]") {
+    using namespace pulsim::v2;
+
+    SECTION("Basic operations") {
+        TimestepHistory hist;
+
+        REQUIRE(hist.count() == 0);
+
+        hist.push(1e-6);
+        hist.push(2e-6);
+        hist.push(3e-6);
+
+        REQUIRE(hist.count() == 3);
+        REQUIRE(hist[0] == Catch::Approx(3e-6));  // Most recent
+        REQUIRE(hist[2] == Catch::Approx(1e-6));  // Oldest
+    }
+
+    SECTION("Average calculation") {
+        TimestepHistory hist;
+        hist.push(1e-6);
+        hist.push(2e-6);
+        hist.push(3e-6);
+
+        REQUIRE(hist.average() == Catch::Approx(2e-6));
+    }
+
+    SECTION("Oscillation detection") {
+        TimestepHistory hist;
+
+        // Non-oscillating: monotonic increase
+        hist.push(1e-6);
+        hist.push(2e-6);
+        hist.push(3e-6);
+        REQUIRE(hist.is_oscillating() == false);
+
+        hist.clear();
+
+        // Oscillating: up-down-up pattern
+        hist.push(1e-6);
+        hist.push(3e-6);
+        hist.push(1e-6);
+        hist.push(3e-6);
+        hist.push(1e-6);
+        REQUIRE(hist.is_oscillating() == true);
+    }
+}
+
+TEST_CASE("v2 PI timestep controller", "[v2][integration][timestep][pi]") {
+    using namespace pulsim::v2;
+
+    SECTION("Accept good step") {
+        PITimestepController ctrl;
+
+        // LTE is 10% of tolerance - should accept and grow
+        Real lte = 0.1 * ctrl.config().error_tolerance;
+        auto decision = ctrl.compute(lte);
+
+        REQUIRE(decision.accepted == true);
+        REQUIRE(decision.dt_new > ctrl.current_dt());  // Should grow
+        REQUIRE(decision.rejections == 0);
+    }
+
+    SECTION("Reject bad step") {
+        PITimestepController ctrl;
+        Real initial_dt = ctrl.current_dt();
+
+        // LTE is 200% of tolerance - should reject
+        Real lte = 2.0 * ctrl.config().error_tolerance;
+        auto decision = ctrl.compute(lte);
+
+        REQUIRE(decision.accepted == false);
+        REQUIRE(decision.dt_new < initial_dt);  // Should shrink from initial
+        REQUIRE(decision.rejections == 1);
+    }
+
+    SECTION("Enforce dt limits") {
+        TimestepConfig cfg;
+        cfg.dt_min = 1e-9;
+        cfg.dt_max = 1e-6;
+        cfg.dt_initial = 1e-7;
+        PITimestepController ctrl(cfg);
+
+        // Very large error - should shrink to minimum
+        Real lte = 1e6 * cfg.error_tolerance;
+        auto decision = ctrl.compute(lte);
+
+        // After several rejections, should hit minimum
+        for (int i = 0; i < 20; ++i) {
+            decision = ctrl.compute(lte);
+        }
+
+        REQUIRE(decision.at_minimum == true);
+        REQUIRE(decision.dt_new == Catch::Approx(cfg.dt_min));
+    }
+
+    SECTION("Event adjustment") {
+        PITimestepController ctrl;
+
+        // Event close - should adjust to hit it
+        Real dt = 1e-6;
+        Real time_to_event = 1.2e-6;  // Within 1.5x
+
+        Real adjusted = ctrl.adjust_for_event(time_to_event, dt);
+        REQUIRE(adjusted == Catch::Approx(time_to_event));
+
+        // Event far - no adjustment
+        time_to_event = 10e-6;
+        adjusted = ctrl.adjust_for_event(time_to_event, dt);
+        REQUIRE(adjusted == Catch::Approx(dt));
+    }
+
+    SECTION("Reset") {
+        PITimestepController ctrl;
+
+        // Make some changes
+        ctrl.accept(5e-7);
+        ctrl.compute(ctrl.config().error_tolerance * 2);
+
+        // Reset
+        ctrl.reset();
+
+        REQUIRE(ctrl.current_dt() == Catch::Approx(ctrl.config().dt_initial));
+        REQUIRE(ctrl.rejections() == 0);
+    }
+}
+
+TEST_CASE("v2 Basic timestep controller", "[v2][integration][timestep][basic]") {
+    using namespace pulsim::v2;
+
+    SECTION("Accept and grow") {
+        BasicTimestepController ctrl;
+
+        Real lte = 0.1 * ctrl.current_dt();  // Small error
+        auto decision = ctrl.compute(lte);
+
+        REQUIRE(decision.accepted == true);
+    }
+
+    SECTION("Reject and shrink") {
+        TimestepConfig cfg;
+        cfg.error_tolerance = 1e-6;
+        BasicTimestepController ctrl(cfg);
+
+        Real lte = 1e-3;  // Large error
+        auto decision = ctrl.compute(lte);
+
+        REQUIRE(decision.accepted == false);
+        REQUIRE(decision.dt_new < ctrl.current_dt());
+    }
+}
+
+TEST_CASE("v2 Trapezoidal RC simulation", "[v2][integration][simulation]") {
+    using namespace pulsim::v2;
+
+    // Simulate simple RC circuit: R=1k, C=1uF, V=10V
+    // Using Trapezoidal method and compare with analytical solution
+    // tau = RC = 1ms
+
+    Real R = 1000.0;
+    Real C = 1e-6;
+    Real V_source = 10.0;
+    Real tau = R * C;  // 1 ms
+    Real dt = tau / 100;  // 10 us per step (100 steps per tau)
+    int num_steps = 500;  // 5 tau total (essentially complete charging)
+
+    Real v_cap = 0.0;
+    Real i_cap = 0.0;
+    Real t = 0.0;
+
+    // Simulate using Trapezoidal companion model
+    for (int step = 0; step < num_steps; ++step) {
+        // Calculate companion model
+        auto [g_eq, i_eq] = TrapezoidalCoeffs::capacitor(C, dt, v_cap, i_cap);
+
+        // Solve: V_source = V_cap + R * I_cap
+        // I_cap = G_eq * V_cap - I_eq (from companion)
+        // Combined: V_source = V_cap + R * (G_eq * V_cap - I_eq)
+        // V_cap * (1 + R * G_eq) = V_source + R * I_eq
+
+        Real v_new = (V_source + R * i_eq) / (1.0 + R * g_eq);
+        Real i_new = g_eq * v_new - i_eq;
+
+        // Update for next step
+        v_cap = v_new;
+        i_cap = i_new;
+        t += dt;
+    }
+
+    // Compare with analytical at t = 5*tau (should be ~99.3% charged)
+    Real v_analytical = analytical::rc_step_response(t, R, C, V_source, 0.0);
+
+    // Should be within 0.1% of analytical (task 3.2.6)
+    // Trapezoidal with 100 steps/tau should be very accurate
+    Real error_percent = std::abs(v_cap - v_analytical) / v_analytical * 100.0;
+    REQUIRE(error_percent < 0.1);
+}
+
+// =============================================================================
 // Static assertions for Phase 2.4 and 2.5 (compile-time verification)
 // =============================================================================
 

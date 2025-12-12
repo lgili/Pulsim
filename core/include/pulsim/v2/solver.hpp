@@ -1,0 +1,652 @@
+#pragma once
+
+// =============================================================================
+// PulsimCore v2 - High-Performance Newton Solver with Numerical Robustness
+// =============================================================================
+// This header provides the v2 Newton solver with:
+// - Weighted norm for mixed voltage/current convergence (3.1.3)
+// - Per-variable convergence checking (3.1.4)
+// - Convergence history tracking (3.1.5)
+// - Deterministic ordering guarantees (3.1.7)
+// - Policy-based design for linear solvers
+// =============================================================================
+
+#include "pulsim/v2/numeric_types.hpp"
+#include <Eigen/SparseLU>
+#include <vector>
+#include <array>
+#include <functional>
+#include <optional>
+#include <span>
+#include <expected>
+
+namespace pulsim::v2 {
+
+// =============================================================================
+// Solver Status and Result Types
+// =============================================================================
+
+enum class SolverStatus {
+    Success,
+    MaxIterationsReached,
+    SingularMatrix,
+    NumericalError,
+    ConvergenceStall,
+    Diverging
+};
+
+/// Convert status to string
+[[nodiscard]] constexpr const char* to_string(SolverStatus status) noexcept {
+    switch (status) {
+        case SolverStatus::Success: return "Success";
+        case SolverStatus::MaxIterationsReached: return "MaxIterationsReached";
+        case SolverStatus::SingularMatrix: return "SingularMatrix";
+        case SolverStatus::NumericalError: return "NumericalError";
+        case SolverStatus::ConvergenceStall: return "ConvergenceStall";
+        case SolverStatus::Diverging: return "Diverging";
+        default: return "Unknown";
+    }
+}
+
+// =============================================================================
+// 3.1.5: Convergence History Tracking
+// =============================================================================
+
+/// Single iteration record for convergence analysis
+struct IterationRecord {
+    int iteration = 0;
+    Real residual_norm = 0.0;
+    Real max_voltage_error = 0.0;
+    Real max_current_error = 0.0;
+    Real step_norm = 0.0;
+    Real damping = 1.0;
+    bool converged = false;
+};
+
+/// Complete convergence history
+class ConvergenceHistory {
+public:
+    static constexpr std::size_t max_history = 100;
+
+    ConvergenceHistory() = default;
+
+    void clear() {
+        records_.clear();
+        final_status_ = SolverStatus::Success;
+    }
+
+    void add_record(const IterationRecord& record) {
+        if (records_.size() < max_history) {
+            records_.push_back(record);
+        }
+    }
+
+    void set_final_status(SolverStatus status) {
+        final_status_ = status;
+    }
+
+    [[nodiscard]] std::size_t size() const { return records_.size(); }
+    [[nodiscard]] bool empty() const { return records_.empty(); }
+
+    [[nodiscard]] const IterationRecord& operator[](std::size_t i) const {
+        return records_[i];
+    }
+
+    [[nodiscard]] const IterationRecord& last() const {
+        return records_.back();
+    }
+
+    [[nodiscard]] SolverStatus final_status() const { return final_status_; }
+
+    [[nodiscard]] auto begin() const { return records_.begin(); }
+    [[nodiscard]] auto end() const { return records_.end(); }
+
+    /// Check for convergence stall (residual not decreasing)
+    [[nodiscard]] bool is_stalling(std::size_t window = 5, Real threshold = 0.9) const {
+        if (records_.size() < window) return false;
+
+        Real first_res = records_[records_.size() - window].residual_norm;
+        Real last_res = records_.back().residual_norm;
+
+        return last_res > threshold * first_res;
+    }
+
+    /// Check for divergence
+    [[nodiscard]] bool is_diverging(std::size_t window = 3) const {
+        if (records_.size() < window) return false;
+
+        for (std::size_t i = records_.size() - window + 1; i < records_.size(); ++i) {
+            if (records_[i].residual_norm <= records_[i-1].residual_norm) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Get convergence rate (average reduction per iteration)
+    [[nodiscard]] Real convergence_rate() const {
+        if (records_.size() < 2) return 0.0;
+
+        Real first = records_.front().residual_norm;
+        Real last = records_.back().residual_norm;
+
+        if (first <= 0 || last <= 0) return 0.0;
+
+        return std::pow(last / first, 1.0 / static_cast<Real>(records_.size() - 1));
+    }
+
+private:
+    std::vector<IterationRecord> records_;
+    SolverStatus final_status_ = SolverStatus::Success;
+};
+
+// =============================================================================
+// 3.1.4: Per-Variable Convergence Status
+// =============================================================================
+
+/// Convergence status for each variable
+struct VariableConvergence {
+    Index index = 0;
+    Real value = 0.0;
+    Real delta = 0.0;
+    Real tolerance = 0.0;
+    Real normalized_error = 0.0;  // |delta| / tolerance
+    bool converged = false;
+    bool is_voltage = true;  // true = voltage, false = current
+
+    [[nodiscard]] static VariableConvergence voltage(Index idx, Real val, Real delta,
+                                                      Real abstol, Real reltol) {
+        Real tol = abstol + reltol * std::abs(val);
+        Real err = std::abs(delta) / tol;
+        return {idx, val, delta, tol, err, err <= 1.0, true};
+    }
+
+    [[nodiscard]] static VariableConvergence current(Index idx, Real val, Real delta,
+                                                      Real abstol, Real reltol) {
+        Real tol = abstol + reltol * std::abs(val);
+        Real err = std::abs(delta) / tol;
+        return {idx, val, delta, tol, err, err <= 1.0, false};
+    }
+};
+
+/// Per-variable convergence tracker
+class PerVariableConvergence {
+public:
+    PerVariableConvergence() = default;
+
+    void clear() { vars_.clear(); }
+
+    void add(const VariableConvergence& v) {
+        vars_.push_back(v);
+    }
+
+    [[nodiscard]] std::size_t size() const { return vars_.size(); }
+    [[nodiscard]] bool empty() const { return vars_.empty(); }
+
+    [[nodiscard]] const VariableConvergence& operator[](std::size_t i) const {
+        return vars_[i];
+    }
+
+    [[nodiscard]] auto begin() const { return vars_.begin(); }
+    [[nodiscard]] auto end() const { return vars_.end(); }
+
+    /// Check if all variables converged
+    [[nodiscard]] bool all_converged() const {
+        for (const auto& v : vars_) {
+            if (!v.converged) return false;
+        }
+        return true;
+    }
+
+    /// Get the worst (highest normalized error) variable
+    [[nodiscard]] const VariableConvergence* worst() const {
+        if (vars_.empty()) return nullptr;
+
+        const VariableConvergence* w = &vars_[0];
+        for (const auto& v : vars_) {
+            if (v.normalized_error > w->normalized_error) {
+                w = &v;
+            }
+        }
+        return w;
+    }
+
+    /// Get maximum normalized error
+    [[nodiscard]] Real max_error() const {
+        Real m = 0.0;
+        for (const auto& v : vars_) {
+            if (v.normalized_error > m) m = v.normalized_error;
+        }
+        return m;
+    }
+
+    /// Count of non-converged variables
+    [[nodiscard]] std::size_t non_converged_count() const {
+        std::size_t count = 0;
+        for (const auto& v : vars_) {
+            if (!v.converged) ++count;
+        }
+        return count;
+    }
+
+private:
+    std::vector<VariableConvergence> vars_;
+};
+
+// =============================================================================
+// 3.1.3: Weighted Norm Convergence Checker
+// =============================================================================
+
+/// Convergence checker with weighted norms for mixed voltage/current
+class ConvergenceChecker {
+public:
+    /// Tolerance configuration
+    struct Tolerances {
+        Real voltage_abstol = 1e-9;    // Absolute tolerance for voltages (V)
+        Real voltage_reltol = 1e-3;    // Relative tolerance for voltages
+        Real current_abstol = 1e-12;   // Absolute tolerance for currents (A)
+        Real current_reltol = 1e-3;    // Relative tolerance for currents
+        Real residual_tol = 1e-9;      // Residual tolerance for F(x)
+
+        static constexpr Tolerances defaults() {
+            return Tolerances{1e-9, 1e-3, 1e-12, 1e-3, 1e-9};
+        }
+    };
+
+    ConvergenceChecker() : tol_(Tolerances::defaults()) {}
+    explicit ConvergenceChecker(const Tolerances& tol) : tol_(tol) {}
+
+    /// Check convergence using weighted infinity norm
+    /// Returns the maximum normalized error (converged if <= 1.0)
+    [[nodiscard]] Real check_weighted_norm(
+        const Vector& delta,
+        const Vector& solution,
+        Index num_nodes,
+        Index num_branches) const {
+
+        Real max_error = 0.0;
+
+        // Check voltage nodes
+        for (Index i = 0; i < num_nodes; ++i) {
+            Real tol = tol_.voltage_abstol + tol_.voltage_reltol * std::abs(solution[i]);
+            Real err = std::abs(delta[i]) / tol;
+            max_error = std::max(max_error, err);
+        }
+
+        // Check current branches
+        for (Index i = num_nodes; i < num_nodes + num_branches; ++i) {
+            Real tol = tol_.current_abstol + tol_.current_reltol * std::abs(solution[i]);
+            Real err = std::abs(delta[i]) / tol;
+            max_error = std::max(max_error, err);
+        }
+
+        return max_error;
+    }
+
+    /// Check per-variable convergence
+    [[nodiscard]] PerVariableConvergence check_per_variable(
+        const Vector& delta,
+        const Vector& solution,
+        Index num_nodes,
+        Index num_branches) const {
+
+        PerVariableConvergence result;
+
+        // Check voltage nodes
+        for (Index i = 0; i < num_nodes; ++i) {
+            result.add(VariableConvergence::voltage(
+                i, solution[i], delta[i],
+                tol_.voltage_abstol, tol_.voltage_reltol));
+        }
+
+        // Check current branches
+        for (Index i = num_nodes; i < num_nodes + num_branches; ++i) {
+            result.add(VariableConvergence::current(
+                i, solution[i], delta[i],
+                tol_.current_abstol, tol_.current_reltol));
+        }
+
+        return result;
+    }
+
+    /// Check if residual is small enough
+    [[nodiscard]] bool check_residual(const Vector& f) const {
+        return f.lpNorm<Eigen::Infinity>() < tol_.residual_tol;
+    }
+
+    /// Combined convergence check
+    [[nodiscard]] bool has_converged(
+        const Vector& delta,
+        const Vector& solution,
+        const Vector& residual,
+        Index num_nodes,
+        Index num_branches) const {
+
+        Real weighted_error = check_weighted_norm(delta, solution, num_nodes, num_branches);
+        return weighted_error <= 1.0 && check_residual(residual);
+    }
+
+    [[nodiscard]] const Tolerances& tolerances() const { return tol_; }
+    void set_tolerances(const Tolerances& tol) { tol_ = tol; }
+
+private:
+    Tolerances tol_;
+};
+
+// =============================================================================
+// Linear Solver Policy Concept
+// =============================================================================
+
+template<typename T>
+concept LinearSolverPolicy = requires(T solver, const SparseMatrix& A, const Vector& b) {
+    { solver.analyze(A) } -> std::same_as<bool>;
+    { solver.factorize(A) } -> std::same_as<bool>;
+    { solver.solve(b) } -> std::same_as<std::expected<Vector, std::string>>;
+    { solver.is_singular() } -> std::same_as<bool>;
+};
+
+// =============================================================================
+// SparseLU Linear Solver Policy
+// =============================================================================
+
+class SparseLUPolicy {
+public:
+    SparseLUPolicy() = default;
+
+    bool analyze(const SparseMatrix& A) {
+        solver_.analyzePattern(A);
+        analyzed_ = true;
+        return true;
+    }
+
+    bool factorize(const SparseMatrix& A) {
+        if (!analyzed_) analyze(A);
+        solver_.factorize(A);
+        singular_ = (solver_.info() != Eigen::Success);
+        factorized_ = !singular_;
+        return factorized_;
+    }
+
+    [[nodiscard]] std::expected<Vector, std::string> solve(const Vector& b) {
+        if (!factorized_) {
+            return std::unexpected("Matrix not factorized");
+        }
+
+        Vector x = solver_.solve(b);
+
+        if (solver_.info() != Eigen::Success) {
+            return std::unexpected("Linear solve failed");
+        }
+
+        return x;
+    }
+
+    [[nodiscard]] bool is_singular() const { return singular_; }
+
+private:
+    Eigen::SparseLU<SparseMatrix> solver_;
+    bool analyzed_ = false;
+    bool factorized_ = false;
+    bool singular_ = false;
+};
+
+// =============================================================================
+// Newton Solver Result
+// =============================================================================
+
+struct NewtonResult {
+    Vector solution;
+    SolverStatus status = SolverStatus::NumericalError;
+    int iterations = 0;
+    Real final_residual = 0.0;
+    Real final_weighted_error = 0.0;
+    ConvergenceHistory history;
+    PerVariableConvergence variable_convergence;
+    std::string error_message;
+
+    [[nodiscard]] bool success() const {
+        return status == SolverStatus::Success;
+    }
+};
+
+// =============================================================================
+// Newton Solver Options
+// =============================================================================
+
+struct NewtonOptions {
+    int max_iterations = 50;
+    Real initial_damping = 1.0;
+    Real min_damping = 0.01;
+    bool auto_damping = true;
+    bool track_history = true;
+    bool check_per_variable = true;
+    Index num_nodes = 0;      // For weighted norm
+    Index num_branches = 0;   // For weighted norm
+    ConvergenceChecker::Tolerances tolerances;
+};
+
+// =============================================================================
+// Newton-Raphson Solver with Weighted Norms and History Tracking
+// =============================================================================
+
+template<LinearSolverPolicy LinearPolicy = SparseLUPolicy>
+class NewtonRaphsonSolver {
+public:
+    using SystemFunction = std::function<void(const Vector& x, Vector& f, SparseMatrix& J)>;
+
+    explicit NewtonRaphsonSolver(const NewtonOptions& opts = {})
+        : options_(opts), convergence_checker_(opts.tolerances) {}
+
+    /// Solve F(x) = 0 with weighted norm convergence
+    [[nodiscard]] NewtonResult solve(const Vector& x0, SystemFunction system_func) {
+        NewtonResult result;
+        result.solution = x0;
+        result.history.clear();
+
+        const Index n = x0.size();
+        Vector f(n);
+        SparseMatrix J(n, n);
+        Vector dx(n);
+
+        Real damping = options_.initial_damping;
+        Real prev_residual = std::numeric_limits<Real>::max();
+
+        for (int iter = 0; iter < options_.max_iterations; ++iter) {
+            // Evaluate system
+            system_func(result.solution, f, J);
+
+            // Compute residual norm
+            Real f_norm = f.norm();
+            result.final_residual = f_norm;
+
+            // Record iteration
+            if (options_.track_history) {
+                IterationRecord record;
+                record.iteration = iter;
+                record.residual_norm = f_norm;
+                record.damping = damping;
+                result.history.add_record(record);
+            }
+
+            // Check for divergence
+            if (f_norm > 1e6 * prev_residual && iter > 3) {
+                result.status = SolverStatus::Diverging;
+                result.error_message = "Newton iteration diverging";
+                result.history.set_final_status(result.status);
+                return result;
+            }
+            prev_residual = f_norm;
+
+            // Solve J * dx = -f
+            if (!linear_solver_.factorize(J)) {
+                result.status = SolverStatus::SingularMatrix;
+                result.error_message = "Jacobian is singular";
+                result.iterations = iter + 1;
+                result.history.set_final_status(result.status);
+                return result;
+            }
+
+            auto solve_result = linear_solver_.solve(-f);
+            if (!solve_result) {
+                result.status = SolverStatus::NumericalError;
+                result.error_message = solve_result.error();
+                result.iterations = iter + 1;
+                result.history.set_final_status(result.status);
+                return result;
+            }
+            dx = *solve_result;
+
+            // Apply update with damping
+            if (options_.auto_damping) {
+                damping = line_search(result.solution, dx, f_norm, system_func, damping);
+            }
+            result.solution += dx * damping;
+
+            // Check convergence with weighted norm
+            if (options_.num_nodes > 0 || options_.num_branches > 0) {
+                Real weighted_error = convergence_checker_.check_weighted_norm(
+                    dx, result.solution, options_.num_nodes, options_.num_branches);
+                result.final_weighted_error = weighted_error;
+
+                // Per-variable convergence check
+                if (options_.check_per_variable) {
+                    result.variable_convergence = convergence_checker_.check_per_variable(
+                        dx, result.solution, options_.num_nodes, options_.num_branches);
+                }
+
+                if (weighted_error <= 1.0 && convergence_checker_.check_residual(f)) {
+                    result.status = SolverStatus::Success;
+                    result.iterations = iter + 1;
+                    result.history.set_final_status(result.status);
+                    return result;
+                }
+            } else {
+                // Fall back to simple norm
+                if (f_norm < convergence_checker_.tolerances().residual_tol) {
+                    result.status = SolverStatus::Success;
+                    result.iterations = iter + 1;
+                    result.history.set_final_status(result.status);
+                    return result;
+                }
+            }
+
+            // Check for stall
+            if (options_.track_history && result.history.is_stalling()) {
+                result.status = SolverStatus::ConvergenceStall;
+                result.error_message = "Convergence stalled";
+                result.iterations = iter + 1;
+                result.history.set_final_status(result.status);
+                return result;
+            }
+        }
+
+        // Final check
+        system_func(result.solution, f, J);
+        result.final_residual = f.norm();
+        result.iterations = options_.max_iterations;
+
+        if (result.final_residual < convergence_checker_.tolerances().residual_tol) {
+            result.status = SolverStatus::Success;
+        } else {
+            result.status = SolverStatus::MaxIterationsReached;
+            result.error_message = "Max iterations reached";
+        }
+
+        result.history.set_final_status(result.status);
+        return result;
+    }
+
+    [[nodiscard]] const NewtonOptions& options() const { return options_; }
+    void set_options(const NewtonOptions& opts) {
+        options_ = opts;
+        convergence_checker_.set_tolerances(opts.tolerances);
+    }
+
+    [[nodiscard]] const ConvergenceChecker& convergence_checker() const {
+        return convergence_checker_;
+    }
+
+private:
+    NewtonOptions options_;
+    LinearPolicy linear_solver_;
+    ConvergenceChecker convergence_checker_;
+
+    /// Simple backtracking line search
+    Real line_search(const Vector& x, const Vector& dx, Real f_norm,
+                     SystemFunction& system_func, Real initial_damping) {
+        Real damping = initial_damping;
+        const Index n = x.size();
+        Vector x_new(n);
+        Vector f_new(n);
+        SparseMatrix J_dummy(n, n);
+
+        x_new = x + dx * damping;
+        system_func(x_new, f_new, J_dummy);
+        Real f_new_norm = f_new.norm();
+
+        // Reduce damping while residual increases
+        int max_backtracks = 10;
+        int bt = 0;
+        while (f_new_norm > f_norm && damping > options_.min_damping && bt < max_backtracks) {
+            damping *= 0.5;
+            x_new = x + dx * damping;
+            system_func(x_new, f_new, J_dummy);
+            f_new_norm = f_new.norm();
+            ++bt;
+        }
+
+        // Gradually restore damping
+        return std::min(damping * 1.5, options_.initial_damping);
+    }
+};
+
+// =============================================================================
+// 3.1.7: Deterministic Ordering Utilities
+// =============================================================================
+
+/// Ensure deterministic iteration order for device/node assembly
+template<typename Container, typename KeyFunc>
+void sort_for_determinism(Container& items, KeyFunc key_func) {
+    std::sort(items.begin(), items.end(), [&](const auto& a, const auto& b) {
+        return key_func(a) < key_func(b);
+    });
+}
+
+/// Node ordering for deterministic assembly
+struct DeterministicNodeOrder {
+    std::vector<Index> node_order;
+    std::vector<Index> inverse_order;
+
+    void set_order(Index n) {
+        node_order.resize(n);
+        inverse_order.resize(n);
+        for (Index i = 0; i < n; ++i) {
+            node_order[i] = i;
+            inverse_order[i] = i;
+        }
+    }
+
+    /// Natural ordering (identity)
+    static DeterministicNodeOrder natural(Index n) {
+        DeterministicNodeOrder order;
+        order.set_order(n);
+        return order;
+    }
+
+    /// Reverse Cuthill-McKee ordering (for bandwidth reduction)
+    /// Note: Actual RCM implementation would analyze graph structure
+    static DeterministicNodeOrder rcm(const SparseMatrix& /*A*/) {
+        // Placeholder: return natural order
+        // Full RCM would require graph analysis
+        DeterministicNodeOrder order;
+        return order;
+    }
+};
+
+// =============================================================================
+// Static Assertions
+// =============================================================================
+
+static_assert(LinearSolverPolicy<SparseLUPolicy>);
+
+} // namespace pulsim::v2
