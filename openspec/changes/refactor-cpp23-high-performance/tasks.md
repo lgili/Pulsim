@@ -98,51 +98,51 @@
 ### 3.1 Fix DC Operating Point Convergence
 - [x] 3.1.1 Add residual evaluation after final Newton step (solver.cpp)
 - [x] 3.1.2 Update default abstol to 1e-9 (SPICE standard) (types.hpp, solver.hpp, advanced_solver.hpp)
-- [ ] 3.1.3 Implement weighted norm for mixed voltage/current
-- [ ] 3.1.4 Add per-variable convergence checking
-- [ ] 3.1.5 Implement convergence history tracking
-- [ ] 3.1.6 Unit tests for DC OP edge cases
+- [x] 3.1.3 Implement weighted norm for mixed voltage/current
+- [x] 3.1.4 Add per-variable convergence checking
+- [x] 3.1.5 Implement convergence history tracking
+- [x] 3.1.6 Unit tests for DC OP edge cases
 - [ ] 3.1.7 Add deterministic ordering for assembly/solves to ensure repeatability
 
 ### 3.2 Fix Trapezoidal Integration
-- [ ] 3.2.1 Add `i_prev` to capacitor companion model
-- [ ] 3.2.2 Add `v_prev` to inductor companion model
-- [ ] 3.2.3 Implement correct Trapezoidal coefficients
-- [ ] 3.2.4 Add state history storage for reactive elements
-- [ ] 3.2.5 Validate against analytical RC/RL/RLC solutions
-- [ ] 3.2.6 Achieve <0.1% error on standard test circuits
-- [ ] 3.2.7 Add clamps/limits to prevent overflow/underflow in reactive updates
+- [x] 3.2.1 Add `i_prev` to capacitor companion model
+- [x] 3.2.2 Add `v_prev` to inductor companion model
+- [x] 3.2.3 Implement correct Trapezoidal coefficients
+- [x] 3.2.4 Add state history storage for reactive elements
+- [x] 3.2.5 Validate against analytical RC/RL/RLC solutions
+- [x] 3.2.6 Achieve <0.1% error on standard test circuits
+- [x] 3.2.7 Add clamps/limits to prevent overflow/underflow in reactive updates
 
 ### 3.3 BDF Methods Implementation
-- [ ] 3.3.1 Implement BDF1 (Backward Euler) with correct formulation
-- [ ] 3.3.2 Implement BDF2 with proper coefficients
-- [ ] 3.3.3 Implement BDF3-5 for higher accuracy
+- [x] 3.3.1 Implement BDF1 (Backward Euler) with correct formulation
+- [x] 3.3.2 Implement BDF2 with proper coefficients
+- [x] 3.3.3 Implement BDF3-5 for higher accuracy
 - [ ] 3.3.4 Add automatic order selection based on error
-- [ ] 3.3.5 Implement startup sequence (BDF1 -> BDF2 -> target)
+- [x] 3.3.5 Implement startup sequence (BDF1 -> BDF2 -> target)
 - [ ] 3.3.6 Add order reduction on convergence failure
 
 ### 3.4 Local Truncation Error Estimation
-- [ ] 3.4.1 Implement LTE for Trapezoidal method
-- [ ] 3.4.2 Implement LTE for BDF methods
-- [ ] 3.4.3 Add per-state-variable error tracking
-- [ ] 3.4.4 Implement error-based timestep prediction
-- [ ] 3.4.5 Add safety factor configuration
+- [x] 3.4.1 Implement LTE for Trapezoidal method
+- [x] 3.4.2 Implement LTE for BDF methods
+- [x] 3.4.3 Add per-state-variable error tracking
+- [x] 3.4.4 Implement error-based timestep prediction
+- [x] 3.4.5 Add safety factor configuration
 - [ ] 3.4.6 Add logging hook to export LTE metrics for debugging (guarded, off by default)
 
 ### 3.5 Adaptive Timestep Controller
-- [ ] 3.5.1 Implement PI controller for timestep
-- [ ] 3.5.2 Add dtmin/dtmax enforcement
-- [ ] 3.5.3 Implement step rejection with halving
-- [ ] 3.5.4 Add event-aware timestep adjustment
-- [ ] 3.5.5 Implement timestep history for stability
-- [ ] 3.5.6 Unit tests for adaptive stepping
-- [ ] 3.5.7 Add configurables for controller gains and safety factors with documented defaults
+- [x] 3.5.1 Implement PI controller for timestep
+- [x] 3.5.2 Add dtmin/dtmax enforcement
+- [x] 3.5.3 Implement step rejection with halving
+- [x] 3.5.4 Add event-aware timestep adjustment
+- [x] 3.5.5 Implement timestep history for stability
+- [x] 3.5.6 Unit tests for adaptive stepping
+- [x] 3.5.7 Add configurables for controller gains and safety factors with documented defaults
 
 ## Phase 4: High-Performance Solvers
 
 ### 4.1 Linear Solver Optimization
-- [ ] 4.1.1 Create `LinearSolverPolicy` concept
-- [ ] 4.1.2 Implement `SparseLUPolicy` (Eigen wrapper)
+- [x] 4.1.1 Create `LinearSolverPolicy` concept
+- [x] 4.1.2 Implement `SparseLUPolicy` (Eigen wrapper)
 - [ ] 4.1.3 Implement `KLUPolicy` (SuiteSparse wrapper)
 - [ ] 4.1.4 Add factorization reuse detection
 - [ ] 4.1.5 Implement symbolic analysis caching
@@ -151,12 +151,12 @@
 - [ ] 4.1.8 Add deterministic pivoting/path guarantees (within solver capabilities)
 
 ### 4.2 Newton Solver Template
-- [ ] 4.2.1 Create `NewtonSolver<LinearPolicy, ConvergencePolicy>` template
-- [ ] 4.2.2 Implement `BasicConvergencePolicy`
+- [x] 4.2.1 Create `NewtonSolver<LinearPolicy, ConvergencePolicy>` template
+- [x] 4.2.2 Implement `BasicConvergencePolicy`
 - [ ] 4.2.3 Implement `ArmijoLineSearchPolicy`
 - [ ] 4.2.4 Implement `TrustRegionPolicy`
-- [ ] 4.2.5 Add iteration callback for debugging
-- [ ] 4.2.6 Implement damping schedule (start aggressive, relax)
+- [x] 4.2.5 Add iteration callback for debugging
+- [x] 4.2.6 Implement damping schedule (start aggressive, relax)
 
 ### 4.3 Memory Optimization
 - [ ] 4.3.1 Create `ArenaAllocator` with bump allocation
