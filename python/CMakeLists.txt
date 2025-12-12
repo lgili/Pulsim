@@ -63,7 +63,7 @@ if(NOT pybind11_FOUND)
     FetchContent_MakeAvailable(pybind11)
 endif()
 
-# Create the Python module (v1 API)
+# Create the Python module (high-performance API)
 pybind11_add_module(_pulsim
     bindings.cpp
 )
@@ -78,21 +78,6 @@ set_target_properties(_pulsim PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim"
 )
 
-# Create the v2 Python module (high-performance API)
-pybind11_add_module(_pulsim_v2
-    bindings_v2.cpp
-)
-
-target_link_libraries(_pulsim_v2
-    PRIVATE
-        pulsim::core
-)
-
-# Set output directory for v2 module
-set_target_properties(_pulsim_v2 PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim"
-)
-
 # Copy Python wrapper module
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.py
@@ -101,7 +86,7 @@ configure_file(
 )
 
 # Install targets
-install(TARGETS _pulsim _pulsim_v2
+install(TARGETS _pulsim
     LIBRARY DESTINATION pulsim
 )
 

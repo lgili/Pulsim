@@ -6,21 +6,36 @@ High-performance circuit simulator focused on power electronics.
 
 ## Features
 
-- **High-performance C++20 kernel** with sparse matrix solvers
+- **High-performance C++23 kernel** with SIMD optimization (AVX2/AVX512/NEON)
 - **Modified Nodal Analysis (MNA)** for circuit formulation
-- **Multiple integration methods** (Backward Euler, Trapezoidal, BDF2, GEAR2)
-- **Newton-Raphson** nonlinear solver with damping and adaptive timestep
+- **Multiple integration methods** (BDF1-5, Trapezoidal) with automatic order control
+- **Newton-Raphson** nonlinear solver with damping, line search, and trust region
+- **Advanced convergence aids** (Gmin stepping, source stepping, pseudo-transient)
+- **Adaptive timestep control** with PI controller and LTE estimation
 - **JSON netlist format** with schematic position storage
 - **CLI tool** for batch simulation
 - **Python bindings** for scripting and GUI integration
 - **GUI integration API** with pause/resume/stop, progress callbacks, and validation
 
+### v2 High-Performance API (New)
+
+PulsimCore v2 provides 2x+ performance improvement through:
+- **CRTP device architecture** with compile-time dispatch
+- **SIMD vectorization** with runtime detection
+- **Cache-friendly SoA layouts** for device data
+- **Arena allocation** for zero-allocation hot paths
+- **Analytical validation** against RC/RL/RLC solutions
+
+See [Migration Guide](docs/migration-v1-to-v2.md) for transitioning from v1.
+
 ## Quick Start
 
 ### Build
 
+**Requirements:** C++23 compiler (Clang 17+, GCC 13+, MSVC 19.36+), CMake 3.20+
+
 ```bash
-# Configure
+# Configure (Release with optimizations)
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 
 # Build
@@ -28,6 +43,14 @@ cmake --build build -j
 
 # Run tests
 ctest --test-dir build --output-on-failure
+```
+
+For maximum performance with Clang:
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DPULSIM_ENABLE_LTO=ON \
+    -DPULSIM_ENABLE_PGO=ON
 ```
 
 ### Usage
@@ -145,9 +168,9 @@ brew install cmake ninja
 ```
 
 **Requirements:**
-- macOS 11.0 (Big Sur) or later
-- Xcode Command Line Tools (clang 13+)
-- CMake 3.18+
+- macOS 12.0 (Monterey) or later
+- Xcode Command Line Tools (clang 15+) or Homebrew LLVM 17+
+- CMake 3.20+
 - Python 3.10-3.13
 
 </details>
@@ -209,7 +232,7 @@ pip install pulsim
 
 **Requirements:**
 - Windows 10/11
-- Visual Studio 2022 Build Tools with C++ workload (MSVC 14.3+)
+- Visual Studio 2022 Build Tools 17.6+ with C++ workload (MSVC 19.36+ for C++23)
 - CMake 3.20+
 - Python 3.10-3.13
 
@@ -240,8 +263,8 @@ sudo apt-get install -y build-essential cmake ninja-build
 ```
 
 **Requirements:**
-- GCC 10+ or Clang 13+ (C++20 support required)
-- CMake 3.18+
+- GCC 13+ or Clang 17+ (C++23 support required)
+- CMake 3.20+
 - Python 3.10-3.13
 
 </details>
@@ -298,7 +321,7 @@ pip install pulsim[dev]      # For development/testing
 |-------|----------|
 | `CMake not found` | Install CMake and ensure it's in your PATH |
 | `No C++ compiler found` | Install build tools (see platform-specific instructions above) |
-| `C++20 features not supported` | Upgrade your compiler (GCC 10+, Clang 13+, MSVC 14.2+) |
+| `C++23 features not supported` | Upgrade your compiler (GCC 13+, Clang 17+, MSVC 19.36+) |
 | `Python.h not found` | Install Python development headers: `apt install python3-dev` (Linux) |
 
 ### Building from Source
@@ -318,7 +341,7 @@ cmake --build build -j
 pip install -e .
 ```
 
-### Basic Usage
+### Basic Usage (v1 API)
 
 ```python
 import pulsim
@@ -345,6 +368,44 @@ result = sim.run_transient()
 
 print(f"Simulated {result.num_points()} points in {result.total_time_seconds:.2f}s")
 ```
+
+### High-Performance API (v2)
+
+```python
+import pulsim.v2 as v2
+
+# Create standalone device objects
+r = v2.Resistor(1000.0, "R1")
+c = v2.Capacitor(1e-6, 0.0, "C1")
+
+# Configure solver with advanced options
+tols = v2.Tolerances.defaults()
+tols.voltage_abstol = 1e-9
+
+opts = v2.NewtonOptions()
+opts.max_iterations = 50
+opts.auto_damping = True
+opts.tolerances = tols
+
+# DC convergence with automatic strategy
+dc_config = v2.DCConvergenceConfig()
+dc_config.strategy = v2.DCStrategy.Auto
+
+# Adaptive timestep with PI controller
+ts_config = v2.TimestepConfig.defaults()
+ts_config.dt_min = 1e-12
+ts_config.dt_max = 1e-6
+
+# Validate against analytical solution
+rc = v2.RCAnalytical(1000, 1e-6, 0.0, 5.0)
+print(f"Time constant: {rc.tau() * 1e3:.3f} ms")
+print(f"V(tau): {rc.voltage(rc.tau()):.3f} V")
+
+# Check SIMD optimization
+print(f"SIMD: {v2.detect_simd_level()}, width: {v2.simd_vector_width()} doubles")
+```
+
+See [v2 API Notebook](examples/notebooks/14_v2_api.ipynb) for more examples.
 
 ### GUI Integration
 
@@ -408,13 +469,26 @@ pos = loaded.get_position("R1")  # Returns the saved position
 
 See `examples/gui_integration_example.py` for more examples.
 
+## Documentation
+
+- [Migration Guide](docs/migration-v1-to-v2.md) - Transitioning from v1 to v2 API
+- [Performance Tuning](docs/performance-tuning.md) - SIMD, solver, and memory optimization
+- [Determinism Guide](docs/determinism.md) - Reproducibility and debugging
+- [v2 API Notebook](examples/notebooks/14_v2_api.ipynb) - Interactive examples
+
 ## Roadmap
 
 - [x] MVP-0: Basic kernel (R, L, C, sources, transient)
 - [x] MVP-1: Power electronics (switches, events, losses)
 - [x] MVP-2: Advanced devices (MOSFETs, transformers)
 - [x] MVP-2b: GUI integration API (validation, progress, metadata)
-- [ ] MVP-3: Performance (SUNDIALS, parallel)
+- [x] v2.0: High-performance C++23 refactor
+  - [x] CRTP device architecture with 2x+ performance
+  - [x] SIMD optimization (AVX2/AVX512/NEON)
+  - [x] BDF1-5 integration with auto order control
+  - [x] Advanced convergence aids (Gmin, source stepping, pseudo-transient)
+  - [x] Analytical validation framework
+  - [x] Python bindings with type hints
 
 ## License
 

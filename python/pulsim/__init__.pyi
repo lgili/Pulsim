@@ -1,4 +1,4 @@
-"""Type stubs for PulsimCore v2 High-Performance API."""
+"""Type stubs for PulsimCore High-Performance API."""
 
 from typing import List, Optional
 from enum import Enum

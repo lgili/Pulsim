@@ -13,9 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Build Options
 # =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
-option(PULSIM_BUILD_CLI "Build CLI application" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
-option(PULSIM_BUILD_GRPC "Build gRPC API server" OFF)
 option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
 option(PULSIM_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
 
@@ -293,54 +291,12 @@ if(PULSIM_USE_SUITESPARSE)
     endif()
 endif()
 
-# Core library
+# Core library (v2 header-only)
 add_subdirectory(core)
-
-# gRPC API server (must come before CLI to provide grpc_proto target)
-if(PULSIM_BUILD_GRPC)
-    add_subdirectory(api-grpc)
-endif()
-
-# CLI application
-if(PULSIM_BUILD_CLI)
-    add_subdirectory(cli)
-endif()
-
-# If tests are enabled, ensure the CLI executable is built before running integration
-# tests that invoke it. `pulsim_tests` lives in the `core` subdirectory.
-if(PULSIM_BUILD_TESTS AND PULSIM_BUILD_CLI)
-    if(TARGET pulsim AND TARGET pulsim_tests)
-        add_dependencies(pulsim_tests pulsim)
-    endif()
-endif()
 
 # Python bindings
 if(PULSIM_BUILD_PYTHON)
     add_subdirectory(python)
-endif()
-
-# Custom targets for running examples (only when CLI is built)
-if(PULSIM_BUILD_CLI)
-    add_custom_target(run_buck
-        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o buck_result.csv
-        DEPENDS pulsim
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running buck converter simulation..."
-    )
-
-    add_custom_target(run_rc
-        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/rc_circuit.json -o rc_result.csv
-        DEPENDS pulsim
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running RC circuit simulation..."
-    )
-
-    add_custom_target(run_rlc
-        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o rlc_result.csv
-        DEPENDS pulsim
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running RLC circuit simulation..."
-    )
 endif()
 
 # =============================================================================
@@ -355,47 +311,9 @@ if(PULSIM_BUILD_BENCHMARKS)
         COMMAND ${CMAKE_COMMAND} -E echo "Cleaning build..."
         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
         COMMAND ${CMAKE_COMMAND} -E echo "Timing full rebuild..."
-        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_core -- -j1
+        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_tests -- -j1
         COMMENT "Measuring compile time (single-threaded for consistency)"
     )
-
-    # Runtime benchmark target - runs typical power electronics simulations
-    if(PULSIM_BUILD_CLI)
-        add_custom_target(benchmark_runtime
-            COMMAND ${CMAKE_COMMAND} -E echo "=== Runtime Benchmark ==="
-            COMMAND ${CMAKE_COMMAND} -E echo "Buck converter (1000 steps)..."
-            COMMAND ${CMAKE_COMMAND} -E time $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o /dev/null
-            COMMAND ${CMAKE_COMMAND} -E echo "RLC circuit (1000 steps)..."
-            COMMAND ${CMAKE_COMMAND} -E time $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o /dev/null
-            DEPENDS pulsim
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Running runtime benchmarks..."
-        )
-
-        # Combined benchmark for PGO profiling
-        add_custom_target(benchmark_pgo_training
-            COMMAND ${CMAKE_COMMAND} -E echo "=== PGO Training Workload ==="
-            COMMAND $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o /dev/null
-            COMMAND $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/rc_circuit.json -o /dev/null
-            COMMAND $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o /dev/null
-            DEPENDS pulsim
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Running PGO training workload..."
-        )
-    endif()
-
-    # Memory benchmark using valgrind (if available)
-    find_program(VALGRIND_EXECUTABLE valgrind)
-    if(VALGRIND_EXECUTABLE AND PULSIM_BUILD_CLI)
-        add_custom_target(benchmark_memory
-            COMMAND ${CMAKE_COMMAND} -E echo "=== Memory Benchmark (Valgrind) ==="
-            COMMAND ${VALGRIND_EXECUTABLE} --tool=massif --massif-out-file=massif.out $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o /dev/null
-            COMMAND ms_print massif.out | head -50
-            DEPENDS pulsim
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Profiling memory usage..."
-        )
-    endif()
 endif()
 
 # =============================================================================
@@ -414,7 +332,7 @@ endif()
 # Build Configuration Summary
 # =============================================================================
 message(STATUS "")
-message(STATUS "=== PulsimCore Build Configuration ===")
+message(STATUS "=== PulsimCore v2 Build Configuration ===")
 message(STATUS "  Build type:        ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard:      C++${CMAKE_CXX_STANDARD}")
 message(STATUS "  Compiler:          ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
@@ -424,8 +342,7 @@ message(STATUS "  PGO Generate:      ${PULSIM_ENABLE_PGO_GENERATE}")
 message(STATUS "  PGO Use:           ${PULSIM_ENABLE_PGO_USE}")
 message(STATUS "  Native opts:       ${PULSIM_ENABLE_NATIVE}")
 message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
-message(STATUS "  Build CLI:         ${PULSIM_BUILD_CLI}")
 message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
 message(STATUS "  SUNDIALS:          ${PULSIM_USE_SUNDIALS}")
 message(STATUS "  SuiteSparse:       ${PULSIM_USE_SUITESPARSE}")
-message(STATUS "=======================================")
+message(STATUS "=========================================")
