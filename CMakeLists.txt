@@ -20,6 +20,91 @@ option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
 option(PULSIM_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
 
 # =============================================================================
+# Performance Optimization Options
+# =============================================================================
+option(PULSIM_ENABLE_LTO "Enable Link-Time Optimization for Release builds" ON)
+option(PULSIM_ENABLE_NATIVE "Enable native architecture optimizations" OFF)
+option(PULSIM_ENABLE_PGO_GENERATE "Enable PGO instrumentation (generate profile)" OFF)
+option(PULSIM_ENABLE_PGO_USE "Enable PGO optimization (use profile)" OFF)
+set(PULSIM_PGO_PROFILE_DIR "${CMAKE_BINARY_DIR}/pgo-profiles" CACHE PATH "Directory for PGO profile data")
+
+# LTO (Link-Time Optimization) - significant performance improvement
+if(PULSIM_ENABLE_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
+    if(LTO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+        message(STATUS "LTO: Enabled (interprocedural optimization)")
+    else()
+        message(WARNING "LTO: Not supported - ${LTO_ERROR}")
+    endif()
+endif()
+
+# PGO (Profile-Guided Optimization) - requires two-pass build
+# Pass 1: cmake -DPULSIM_ENABLE_PGO_GENERATE=ON .. && make && ./run_benchmarks
+# Pass 2: cmake -DPULSIM_ENABLE_PGO_USE=ON .. && make
+if(PULSIM_ENABLE_PGO_GENERATE AND PULSIM_ENABLE_PGO_USE)
+    message(FATAL_ERROR "Cannot enable both PGO_GENERATE and PGO_USE simultaneously")
+endif()
+
+if(PULSIM_ENABLE_PGO_GENERATE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(-fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
+        add_link_options(-fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
+        message(STATUS "PGO: Instrumentation enabled (profiles -> ${PULSIM_PGO_PROFILE_DIR})")
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fprofile-generate -fprofile-dir=${PULSIM_PGO_PROFILE_DIR})
+        add_link_options(-fprofile-generate)
+        message(STATUS "PGO: Instrumentation enabled (GCC, profiles -> ${PULSIM_PGO_PROFILE_DIR})")
+    elseif(MSVC)
+        add_compile_options(/GL)
+        add_link_options(/LTCG /GENPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
+        message(STATUS "PGO: Instrumentation enabled (MSVC)")
+    endif()
+endif()
+
+if(PULSIM_ENABLE_PGO_USE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Merge profiles first: llvm-profdata merge -output=merged.profdata ${PULSIM_PGO_PROFILE_DIR}/*.profraw
+        set(PULSIM_PGO_MERGED_PROFILE "${PULSIM_PGO_PROFILE_DIR}/merged.profdata" CACHE FILEPATH "Merged PGO profile")
+        if(EXISTS "${PULSIM_PGO_MERGED_PROFILE}")
+            add_compile_options(-fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
+            add_link_options(-fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
+            message(STATUS "PGO: Using profile ${PULSIM_PGO_MERGED_PROFILE}")
+        else()
+            message(WARNING "PGO: Profile not found at ${PULSIM_PGO_MERGED_PROFILE}. Run 'llvm-profdata merge' first.")
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fprofile-use -fprofile-dir=${PULSIM_PGO_PROFILE_DIR} -fprofile-correction)
+        add_link_options(-fprofile-use)
+        message(STATUS "PGO: Using profiles from ${PULSIM_PGO_PROFILE_DIR}")
+    elseif(MSVC)
+        add_compile_options(/GL)
+        add_link_options(/LTCG /USEPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
+        message(STATUS "PGO: Using MSVC profile")
+    endif()
+endif()
+
+# Native architecture optimizations (use with caution for distribution)
+if(PULSIM_ENABLE_NATIVE AND NOT MSVC)
+    add_compile_options(-march=native -mtune=native)
+    message(STATUS "Native optimizations: Enabled (-march=native)")
+endif()
+
+# =============================================================================
+# Ninja Generator Optimization
+# =============================================================================
+# Recommend Ninja for faster parallel builds:
+#   cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+if(CMAKE_GENERATOR STREQUAL "Ninja")
+    message(STATUS "Build system: Ninja (parallel compilation optimized)")
+    # Ninja handles parallelism automatically - no additional configuration needed
+elseif(CMAKE_GENERATOR MATCHES "Makefiles")
+    message(STATUS "Build system: Make (use -jN for parallel builds, or switch to Ninja)")
+    message(STATUS "Tip: For faster builds, use: cmake -G Ninja ...")
+endif()
+
+# =============================================================================
 # Compiler Detection and Verification
 # =============================================================================
 # Verify Clang version for C++23 support (recommended: 17+)
@@ -257,3 +342,90 @@ if(PULSIM_BUILD_CLI)
         COMMENT "Running RLC circuit simulation..."
     )
 endif()
+
+# =============================================================================
+# Benchmark Targets
+# =============================================================================
+option(PULSIM_BUILD_BENCHMARKS "Build benchmark targets" OFF)
+
+if(PULSIM_BUILD_BENCHMARKS)
+    # Compile-time benchmark: measure template instantiation time
+    add_custom_target(benchmark_compile_time
+        COMMAND ${CMAKE_COMMAND} -E echo "=== Compile-Time Benchmark ==="
+        COMMAND ${CMAKE_COMMAND} -E echo "Cleaning build..."
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
+        COMMAND ${CMAKE_COMMAND} -E echo "Timing full rebuild..."
+        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_core -- -j1
+        COMMENT "Measuring compile time (single-threaded for consistency)"
+    )
+
+    # Runtime benchmark target - runs typical power electronics simulations
+    if(PULSIM_BUILD_CLI)
+        add_custom_target(benchmark_runtime
+            COMMAND ${CMAKE_COMMAND} -E echo "=== Runtime Benchmark ==="
+            COMMAND ${CMAKE_COMMAND} -E echo "Buck converter (1000 steps)..."
+            COMMAND ${CMAKE_COMMAND} -E time $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o /dev/null
+            COMMAND ${CMAKE_COMMAND} -E echo "RLC circuit (1000 steps)..."
+            COMMAND ${CMAKE_COMMAND} -E time $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o /dev/null
+            DEPENDS pulsim
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running runtime benchmarks..."
+        )
+
+        # Combined benchmark for PGO profiling
+        add_custom_target(benchmark_pgo_training
+            COMMAND ${CMAKE_COMMAND} -E echo "=== PGO Training Workload ==="
+            COMMAND $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o /dev/null
+            COMMAND $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/rc_circuit.json -o /dev/null
+            COMMAND $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o /dev/null
+            DEPENDS pulsim
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running PGO training workload..."
+        )
+    endif()
+
+    # Memory benchmark using valgrind (if available)
+    find_program(VALGRIND_EXECUTABLE valgrind)
+    if(VALGRIND_EXECUTABLE AND PULSIM_BUILD_CLI)
+        add_custom_target(benchmark_memory
+            COMMAND ${CMAKE_COMMAND} -E echo "=== Memory Benchmark (Valgrind) ==="
+            COMMAND ${VALGRIND_EXECUTABLE} --tool=massif --massif-out-file=massif.out $<TARGET_FILE:pulsim> run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o /dev/null
+            COMMAND ms_print massif.out | head -50
+            DEPENDS pulsim
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Profiling memory usage..."
+        )
+    endif()
+endif()
+
+# =============================================================================
+# PGO Workflow Helper Targets
+# =============================================================================
+if(PULSIM_ENABLE_PGO_GENERATE)
+    add_custom_target(pgo_merge_profiles
+        COMMAND ${CMAKE_COMMAND} -E echo "Merging PGO profiles..."
+        COMMAND llvm-profdata merge -output=${PULSIM_PGO_PROFILE_DIR}/merged.profdata ${PULSIM_PGO_PROFILE_DIR}/*.profraw
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Merging LLVM PGO profiles (run after training workload)"
+    )
+endif()
+
+# =============================================================================
+# Build Configuration Summary
+# =============================================================================
+message(STATUS "")
+message(STATUS "=== PulsimCore Build Configuration ===")
+message(STATUS "  Build type:        ${CMAKE_BUILD_TYPE}")
+message(STATUS "  C++ Standard:      C++${CMAKE_CXX_STANDARD}")
+message(STATUS "  Compiler:          ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "  Generator:         ${CMAKE_GENERATOR}")
+message(STATUS "  LTO:               ${PULSIM_ENABLE_LTO}")
+message(STATUS "  PGO Generate:      ${PULSIM_ENABLE_PGO_GENERATE}")
+message(STATUS "  PGO Use:           ${PULSIM_ENABLE_PGO_USE}")
+message(STATUS "  Native opts:       ${PULSIM_ENABLE_NATIVE}")
+message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
+message(STATUS "  Build CLI:         ${PULSIM_BUILD_CLI}")
+message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
+message(STATUS "  SUNDIALS:          ${PULSIM_USE_SUNDIALS}")
+message(STATUS "  SuiteSparse:       ${PULSIM_USE_SUITESPARSE}")
+message(STATUS "=======================================")

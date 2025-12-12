@@ -81,6 +81,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_control_blocks.cpp
         tests/test_metadata.cpp
         tests/test_validation.cpp
+        tests/test_v2_concepts.cpp
     )
 
     target_link_libraries(pulsim_tests
