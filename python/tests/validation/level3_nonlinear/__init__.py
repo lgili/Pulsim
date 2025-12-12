@@ -1,1 +1,1 @@
-"""Level 3 Nonlinear Validation Tests."""
+"""Level 3: Nonlinear component validation tests."""

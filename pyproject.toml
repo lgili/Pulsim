@@ -84,6 +84,16 @@ Python3_EXECUTABLE = "{python}"
 Python3_FIND_IMPLEMENTATIONS = "CPython"
 Python3_FIND_STRATEGY = "LOCATION"
 
+# =============================================================================
+# macOS: Force AppleClang for Python ABI compatibility
+# =============================================================================
+# Homebrew's Clang uses a different libc++ than Python, causing runtime errors.
+# We must use AppleClang (/usr/bin/clang++) which matches Python's ABI.
+[[tool.scikit-build.overrides]]
+if.platform-system = "darwin"
+cmake.define.CMAKE_C_COMPILER = "/usr/bin/clang"
+cmake.define.CMAKE_CXX_COMPILER = "/usr/bin/clang++"
+
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]
 python_files = ["test_*.py"]
