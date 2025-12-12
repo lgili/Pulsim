@@ -44,50 +44,10 @@ set(Python3_FIND_UNVERSIONED_NAMES "FIRST")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
 
-# On macOS prefer the Xcode clang and libc++ to ensure ABI compatibility
+# On macOS, add visibility and stdlib flags but don't change compiler
+# (changing compiler mid-configure causes CMake to reconfigure and lose options)
 if(APPLE)
-    find_program(XCRUN_EXECUTABLE xcrun)
-    if(XCRUN_EXECUTABLE)
-        execute_process(COMMAND xcrun --find clang OUTPUT_VARIABLE XCODE_CLANG OUTPUT_STRIP_TRAILING_WHITESPACE)
-        execute_process(COMMAND xcrun --find clang++ OUTPUT_VARIABLE XCODE_CLANGPP OUTPUT_STRIP_TRAILING_WHITESPACE)
-        execute_process(COMMAND xcrun --sdk macosx --show-sdk-path OUTPUT_VARIABLE XCODE_SYSROOT OUTPUT_STRIP_TRAILING_WHITESPACE)
-        if(XCODE_CLANG)
-            set(CMAKE_C_COMPILER "${XCODE_CLANG}")
-        endif()
-        if(XCODE_CLANGPP)
-            set(CMAKE_CXX_COMPILER "${XCODE_CLANGPP}")
-        endif()
-        if(XCODE_SYSROOT)
-            set(CMAKE_OSX_SYSROOT "${XCODE_SYSROOT}")
-            add_compile_options("-isysroot" "${XCODE_SYSROOT}")
-            set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
-        endif()
-    endif()
-    # Use Homebrew LLVM's libc++ which includes __hash_memory
-    set(LLVM_PREFIX "/opt/homebrew/opt/llvm")
-    if(EXISTS "${LLVM_PREFIX}")
-        set(CMAKE_C_COMPILER "${LLVM_PREFIX}/bin/clang")
-        set(CMAKE_CXX_COMPILER "${LLVM_PREFIX}/bin/clang++")
-        # Force use of Homebrew libc++ with explicit paths
-        add_compile_options(
-            -nostdinc++
-            -isystem "${LLVM_PREFIX}/include/c++/v1"
-            -fvisibility=hidden
-            -fvisibility-inlines-hidden
-        )
-        # Link explicitly with Homebrew's libc++ and set rpath
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -nostdlib++ -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lc++ -lc++abi")
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -nostdlib++ -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lc++ -lc++abi")
-        set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -nostdlib++ -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lc++ -lc++abi")
-    else()
-        # Fallback for systems without Homebrew LLVM
-        add_compile_definitions(
-            _LIBCPP_ABI_VERSION=1
-            _LIBCPP_DISABLE_AVAILABILITY
-        )
-        add_compile_options(-stdlib=libc++ -fvisibility=hidden -fvisibility-inlines-hidden)
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
-    endif()
+    add_compile_options(-fvisibility=hidden -fvisibility-inlines-hidden)
 endif()
 
 # Prefer pybind11 provided by the build environment (e.g., installed via pip)
@@ -103,7 +63,7 @@ if(NOT pybind11_FOUND)
     FetchContent_MakeAvailable(pybind11)
 endif()
 
-# Create the Python module
+# Create the Python module (v1 API)
 pybind11_add_module(_pulsim
     bindings.cpp
 )
@@ -118,6 +78,21 @@ set_target_properties(_pulsim PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim"
 )
 
+# Create the v2 Python module (high-performance API)
+pybind11_add_module(_pulsim_v2
+    bindings_v2.cpp
+)
+
+target_link_libraries(_pulsim_v2
+    PRIVATE
+        pulsim::core
+)
+
+# Set output directory for v2 module
+set_target_properties(_pulsim_v2 PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim"
+)
+
 # Copy Python wrapper module
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.py
@@ -126,7 +101,7 @@ configure_file(
 )
 
 # Install targets
-install(TARGETS _pulsim
+install(TARGETS _pulsim _pulsim_v2
     LIBRARY DESTINATION pulsim
 )
 

@@ -2,6 +2,14 @@
 
 __version__ = "0.1.0"
 
+# v2 API (high-performance, C++23)
+# Import as: from pulsim import v2
+# or: import pulsim.v2 as pv2
+try:
+    from . import _pulsim_v2 as v2
+except ImportError:
+    v2 = None  # v2 not available (build without v2 support)
+
 from ._pulsim import (
     # Enums
     ComponentType,
@@ -162,6 +170,9 @@ __all__ = [
 
     # Device Library
     "devices",
+
+    # v2 High-Performance API
+    "v2",
 
     # Version
     "__version__",

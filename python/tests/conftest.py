@@ -3,22 +3,25 @@
 import pytest
 import sys
 import os
+import glob
 
 # Add the build directory to path if running tests before installation
 # This allows testing the compiled module directly
-import glob
-
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 build_patterns = [
     os.path.join(project_root, 'build', 'cp*', 'python'),  # scikit-build-core location
     os.path.join(project_root, 'build', 'python'),
 ]
 
+path_added = False
 for pattern in build_patterns:
     for path in glob.glob(pattern):
         if os.path.exists(path) and path not in sys.path:
             sys.path.insert(0, path)
+            path_added = True
             break
+    if path_added:
+        break
 
 
 @pytest.fixture

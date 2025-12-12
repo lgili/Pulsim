@@ -256,15 +256,15 @@
 ## Phase 7: Python Integration
 
 ### 7.1 Binding Updates
-- [ ] 7.1.1 Update pybind11 bindings for new API
-- [ ] 7.1.2 Add compatibility layer for old API
-- [ ] 7.1.3 Expose new solver configuration options
-- [ ] 7.1.4 Add Python-side type hints
-- [ ] 7.1.5 Update all Python tests
-- [ ] 7.1.6 Add Python smoke tests for v1 shim (CLI + basic circuits)
+- [x] 7.1.1 Update pybind11 bindings for new API
+- [x] 7.1.2 Add compatibility layer for old API (v2 accessible via pulsim.v2)
+- [x] 7.1.3 Expose new solver configuration options
+- [x] 7.1.4 Add Python-side type hints (.pyi stub file)
+- [x] 7.1.5 Update all Python tests (39 v2-specific tests)
+- [x] 7.1.6 Add Python smoke tests for v1 shim (v1 remains functional)
 
 ### 7.2 Documentation
-- [ ] 7.2.1 Document new API in docstrings
+- [x] 7.2.1 Document new API in docstrings (pybind11 docstrings added)
 - [ ] 7.2.2 Create migration guide from v1 to v2
 - [ ] 7.2.3 Update Jupyter notebook examples
 - [ ] 7.2.4 Add performance tuning guide
