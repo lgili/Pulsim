@@ -25,63 +25,45 @@ for pattern in build_patterns:
 
 
 @pytest.fixture
-def simple_rc_circuit():
-    """Create a simple RC circuit for testing."""
-    import pulsim as sl
-
-    circuit = sl.Circuit()
-    circuit.add_voltage_source("V1", "in", "0", 5.0)
-    circuit.add_resistor("R1", "in", "out", 1000.0)
-    circuit.add_capacitor("C1", "out", "0", 1e-6, ic=0.0)
-    return circuit
+def default_tolerances():
+    """Default solver tolerances."""
+    import pulsim as ps
+    return ps.Tolerances.defaults()
 
 
 @pytest.fixture
-def buck_converter_circuit():
-    """Create a buck converter circuit for testing."""
-    import pulsim as sl
-
-    circuit = sl.Circuit()
-
-    # Input voltage source
-    circuit.add_voltage_source("Vdc", "vcc", "0", 48.0)
-
-    # PWM control signal
-    circuit.add_voltage_source("Vctrl", "ctrl", "0", 5.0)
-
-    # High-side switch
-    sw_params = sl.SwitchParams()
-    sw_params.ron = 0.01
-    sw_params.roff = 1e9
-    sw_params.vth = 2.5
-    circuit.add_switch("S1", "vcc", "sw", "ctrl", "0", sw_params)
-
-    # Freewheeling diode
-    diode_params = sl.DiodeParams()
-    diode_params.ideal = True
-    circuit.add_diode("D1", "0", "sw", diode_params)
-
-    # LC filter
-    circuit.add_inductor("L1", "sw", "out", 100e-6)
-    circuit.add_capacitor("C1", "out", "0", 100e-6)
-
-    # Load
-    circuit.add_resistor("Rload", "out", "0", 10.0)
-
-    return circuit
-
-
-@pytest.fixture
-def simulation_options():
-    """Default simulation options for testing."""
-    import pulsim as sl
-
-    opts = sl.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = 1e-3
-    opts.dt = 1e-6
-    opts.dtmax = 10e-6
-    opts.abstol = 1e-12
-    opts.reltol = 1e-3
-    opts.use_ic = True
+def newton_options():
+    """Default Newton solver options."""
+    import pulsim as ps
+    opts = ps.NewtonOptions()
+    opts.max_iterations = 50
+    opts.auto_damping = True
     return opts
+
+
+@pytest.fixture
+def timestep_config():
+    """Default timestep configuration."""
+    import pulsim as ps
+    return ps.TimestepConfig.defaults()
+
+
+@pytest.fixture
+def rc_analytical():
+    """RC circuit analytical solution (1k, 1uF, 0V to 5V step)."""
+    import pulsim as ps
+    return ps.RCAnalytical(1000.0, 1e-6, 0.0, 5.0)
+
+
+@pytest.fixture
+def rl_analytical():
+    """RL circuit analytical solution (1k, 1mH, 10V source)."""
+    import pulsim as ps
+    return ps.RLAnalytical(1000.0, 1e-3, 10.0, 0.0)
+
+
+@pytest.fixture
+def rlc_underdamped():
+    """Underdamped RLC circuit analytical solution."""
+    import pulsim as ps
+    return ps.RLCAnalytical(10.0, 1e-3, 1e-6, 10.0, 0.0, 0.0)

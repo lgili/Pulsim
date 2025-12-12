@@ -40,7 +40,7 @@ from ._pulsim import (
     RLCAnalytical,
 
     # Validation Framework
-    ValidationResult_v1 as ValidationResult,
+    ValidationResult_v2 as ValidationResult,
     compare_waveforms,
     export_validation_csv,
     export_validation_json,
