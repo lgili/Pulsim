@@ -12,12 +12,6 @@ import pytest
 import numpy as np
 import pulsim as sl
 
-from ..framework.base import (
-    ValidationLevel,
-    CircuitDefinition,
-    ValidationTest,
-)
-from ..framework.comparator import ResultComparator
 
 
 # =============================================================================
@@ -109,7 +103,7 @@ class TestHalfWaveRectifier:
         V_peak = 10.0
         freq = 1000.0  # 1 kHz
         R_load = 1000.0
-        period = 1.0 / freq
+        1.0 / freq
 
         circuit = sl.Circuit()
 

@@ -11,8 +11,6 @@ import pytest
 import numpy as np
 import pulsim as sl
 
-from ..framework.base import ValidationLevel
-from ..framework.comparator import ResultComparator
 
 
 # =============================================================================
@@ -154,7 +152,7 @@ class TestBasicSwitch:
 
         v_out_above = signal_data2["V(out)"][-1]
 
-        print(f"\nThreshold test:")
+        print("\nThreshold test:")
         print(f"  V_ctrl = {V_th - 0.1}V (below): V_out = {v_out_below:.4f}V")
         print(f"  V_ctrl = {V_th + 0.1}V (above): V_out = {v_out_above:.4f}V")
 
@@ -204,7 +202,7 @@ class TestSwitchInductiveLoad:
         data_matrix = np.array(result.data)
         signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
 
-        time = np.array(result.time)
+        np.array(result.time)
         i_L = signal_data["I(L1)"]
 
         # Final current should be V_in / R
@@ -212,7 +210,7 @@ class TestSwitchInductiveLoad:
         I_final = i_L[-1]
         relative_error = abs(I_final - I_final_expected) / I_final_expected
 
-        print(f"\nSwitch + RL:")
+        print("\nSwitch + RL:")
         print(f"  I_final = {I_final:.4f}A (expected {I_final_expected:.4f}A)")
         print(f"  Relative error: {relative_error:.4%}")
 

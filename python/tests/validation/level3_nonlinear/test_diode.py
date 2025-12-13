@@ -5,7 +5,6 @@ Tolerance: 5% maximum relative error.
 """
 
 import pytest
-import numpy as np
 import pulsim as ps
 
 
@@ -213,7 +212,7 @@ class TestDiodeParameters:
 
         # With very high g_on, forward drop should be minimal
         diode_drop = V_SOURCE - v_out
-        expected_drop = V_SOURCE / (1 + G_ON * R)  # Approximate
+        V_SOURCE / (1 + G_ON * R)  # Approximate
 
         print(f"\nDiode drop with g_on={G_ON}: {diode_drop:.6f}V")
 

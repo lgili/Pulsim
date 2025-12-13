@@ -1,6 +1,6 @@
 """Type stubs for PulsimCore High-Performance API."""
 
-from typing import List, Optional
+from typing import List
 from enum import Enum
 
 __version__: str

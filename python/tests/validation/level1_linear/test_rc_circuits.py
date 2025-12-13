@@ -87,7 +87,7 @@ class TestRCStepResponse:
         max_error = np.max(np.abs(v_sim - v_analytical))
         max_rel_error = max_error / V_SOURCE
 
-        print(f"\nRC Step Response Accuracy:")
+        print("\nRC Step Response Accuracy:")
         print(f"  Max absolute error: {max_error:.6f}V")
         print(f"  Max relative error: {max_rel_error*100:.4f}%")
 
@@ -162,7 +162,7 @@ class TestRCDischarge:
         max_error = np.max(np.abs(v_sim - v_analytical))
         max_rel_error = max_error / V_SOURCE
 
-        print(f"\nRC Discharge Accuracy:")
+        print("\nRC Discharge Accuracy:")
         print(f"  Max absolute error: {max_error:.6f}V")
         print(f"  Max relative error: {max_rel_error*100:.4f}%")
 

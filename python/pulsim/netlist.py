@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ._pulsim import Circuit, MOSFETParams, IGBTParams
 
@@ -117,7 +117,7 @@ def parse_value(value_str: str, line_number: Optional[int] = None) -> float:
     value_str = value_str.strip().lower()
 
     if not value_str:
-        raise NetlistParseError(f"Empty value", line_number=line_number)
+        raise NetlistParseError("Empty value", line_number=line_number)
 
     # Handle scientific notation first (before checking suffixes)
     # Pattern: optional sign, digits, optional decimal, 'e' or 'E', optional sign, digits
@@ -238,7 +238,7 @@ class _NetlistParser:
                     continue
                 elif stripped:
                     # First non-empty line that's not a comment - could be title or device
-                    if not stripped.startswith('.') and not stripped[0].upper() in 'RCLVIDSQM':
+                    if not stripped.startswith('.') and stripped[0].upper() not in 'RCLVIDSQM':
                         self.title = stripped
                         continue
 

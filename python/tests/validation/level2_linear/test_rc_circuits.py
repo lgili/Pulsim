@@ -14,7 +14,6 @@ from ..framework.base import (
     ValidationTest,
 )
 from ..framework.analytical import AnalyticalSolutions
-from ..framework.comparator import ResultComparator
 
 
 # =============================================================================
@@ -269,7 +268,7 @@ class TestRCFrequencyResponse:
         """Test RC lowpass filter at cutoff frequency."""
         R = 1000.0  # 1kΩ
         C = 1e-6    # 1µF
-        f_cutoff = 1.0 / (2 * np.pi * R * C)  # ~159 Hz
+        1.0 / (2 * np.pi * R * C)  # ~159 Hz
 
         # Test at cutoff frequency - should attenuate to 1/√2 = 0.707
         # TODO: Implement sinusoidal source test when source types are available
@@ -281,7 +280,7 @@ class TestRCFrequencyResponse:
         C = 1e-6
         f_cutoff = 1.0 / (2 * np.pi * R * C)
 
-        freq = f_cutoff * freq_ratio
+        f_cutoff * freq_ratio
 
         # Expected attenuation: 1 / sqrt(1 + (f/fc)^2)
         expected_gain = 1.0 / np.sqrt(1 + freq_ratio**2)

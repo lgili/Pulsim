@@ -88,7 +88,7 @@ class TestBoostConverterDC:
         v_sw = dc_result.newton_result.solution[1]
         v_out = dc_result.newton_result.solution[2]
 
-        print(f"\nBoost DC (switch open):")
+        print("\nBoost DC (switch open):")
         print(f"  V_in = {v_in:.4f}V")
         print(f"  V_sw = {v_sw:.4f}V")
         print(f"  V_out = {v_out:.4f}V")
@@ -128,7 +128,7 @@ class TestBoostConverterDC:
         v_sw = dc_result.newton_result.solution[1]
         v_out = dc_result.newton_result.solution[2]
 
-        print(f"\nBoost DC (switch closed):")
+        print("\nBoost DC (switch closed):")
         print(f"  V_sw = {v_sw:.4f}V")
         print(f"  V_out = {v_out:.4f}V")
 
@@ -164,7 +164,7 @@ class TestBoostConverterTransient:
         times = np.array(times)
         v_out = np.array([s[2] for s in states])
 
-        print(f"\nBoost Startup Transient:")
+        print("\nBoost Startup Transient:")
         print(f"  V_out(0) = {v_out[0]:.4f}V")
         print(f"  V_out(max) = {np.max(v_out):.4f}V")
         print(f"  V_out(final) = {v_out[-1]:.4f}V")
@@ -204,7 +204,7 @@ class TestBoostConverterTransient:
         # V_sw should stay near 0 (switch closed)
         v_sw = np.array([s[1] for s in states])
 
-        print(f"\nInductor Energy Storage:")
+        print("\nInductor Energy Storage:")
         print(f"  V_sw(0) = {v_sw[0]:.6f}V")
         print(f"  V_sw(final) = {v_sw[-1]:.6f}V")
         print(f"  Expected I_L(final) = {V_IN * t_stop / L_VALUE:.4f} A")
@@ -237,7 +237,7 @@ class TestBoostConverterComponents:
         v_sw = dc_result.newton_result.solution[1]
         v_out = dc_result.newton_result.solution[2]
 
-        print(f"\nDiode Conduction Test (switch open):")
+        print("\nDiode Conduction Test (switch open):")
         print(f"  V_sw = {v_sw:.4f}V")
         print(f"  V_out = {v_out:.4f}V")
         print(f"  V_diode = V_out - V_sw = {v_out - v_sw:.4f}V")
@@ -269,7 +269,7 @@ class TestBoostConverterComponents:
         # Output ripple should be limited by capacitor
         ripple = np.max(v_out) - np.min(v_out)
 
-        print(f"\nOutput Capacitor Filter:")
+        print("\nOutput Capacitor Filter:")
         print(f"  V_out(min) = {np.min(v_out):.4f}V")
         print(f"  V_out(max) = {np.max(v_out):.4f}V")
         print(f"  Ripple = {ripple:.4f}V")
@@ -285,7 +285,7 @@ class TestBoostConverterTheory:
         """Verify D = 1 - Vin/Vout relationship."""
         D = 1 - V_IN / V_OUT
 
-        print(f"\nDuty Cycle Calculation:")
+        print("\nDuty Cycle Calculation:")
         print(f"  V_in = {V_IN}V")
         print(f"  V_out (target) = {V_OUT}V")
         print(f"  D = 1 - V_in/V_out = {D:.4f} ({D*100:.1f}%)")
@@ -298,7 +298,7 @@ class TestBoostConverterTheory:
         D = DUTY_CYCLE
         gain = 1 / (1 - D)
 
-        print(f"\nVoltage Gain:")
+        print("\nVoltage Gain:")
         print(f"  D = {D:.4f}")
         print(f"  Gain = 1/(1-D) = {gain:.4f}")
         print(f"  V_out = V_in * Gain = {V_IN * gain:.4f}V")
@@ -317,7 +317,7 @@ class TestBoostConverterTheory:
 
         ripple_percent = (delta_I_L / I_L_avg) * 100
 
-        print(f"\nInductor Current Ripple:")
+        print("\nInductor Current Ripple:")
         print(f"  I_L (avg) = {I_L_avg:.4f} A")
         print(f"  ΔI_L = {delta_I_L*1000:.4f} mA")
         print(f"  Ripple = {ripple_percent:.1f}%")
@@ -333,7 +333,7 @@ class TestBoostConverterTheory:
 
         ripple_percent = (delta_V_out / V_OUT) * 100
 
-        print(f"\nOutput Voltage Ripple:")
+        print("\nOutput Voltage Ripple:")
         print(f"  V_out (avg) = {V_OUT}V")
         print(f"  ΔV_out = {delta_V_out*1000:.4f} mV")
         print(f"  Ripple = {ripple_percent:.4f}%")
@@ -348,7 +348,7 @@ class TestBoostConverterTheory:
         delta_I_L = V_IN * D * T_SW / L_VALUE
         I_L_avg = I_OUT / (1 - D)
 
-        print(f"\nCCM/DCM Boundary:")
+        print("\nCCM/DCM Boundary:")
         print(f"  I_L (avg) = {I_L_avg:.4f} A")
         print(f"  ΔI_L / 2 = {delta_I_L/2:.4f} A")
         print(f"  Mode: {'CCM' if I_L_avg > delta_I_L/2 else 'DCM'}")

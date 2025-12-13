@@ -14,7 +14,6 @@ from ..framework.base import (
     ValidationTest,
 )
 from ..framework.analytical import AnalyticalSolutions
-from ..framework.comparator import ResultComparator
 
 
 # =============================================================================
@@ -321,7 +320,7 @@ class TestRLEnergyConservation:
         result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
-        time = np.array(result.time)
+        np.array(result.time)
         signal_names = result.signal_names
         data_matrix = np.array(result.data)
         signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
