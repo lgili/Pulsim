@@ -77,6 +77,7 @@ private:
 class AdvancedLinearSolver {
 public:
     enum class Backend {
+        Auto,            // Auto-detect: use KLU if available, else Eigen
         EigenSparseLU,   // Default Eigen SparseLU
         KLU,             // SuiteSparse KLU (circuit-optimized)
     };
@@ -87,12 +88,37 @@ public:
         Real refactor_threshold;
         int max_reuses;
 
+        // Condition number monitoring
+        bool monitor_condition;          // Enable condition number estimation
+        Real condition_warning_threshold; // Log warning if rcond < this
+        Real condition_refactor_threshold; // Force refactorization if rcond < this
+
         Options()
-            : backend(Backend::EigenSparseLU)
+            : backend(Backend::Auto)  // Changed default to Auto
             , reuse_factorization(true)
             , refactor_threshold(0.1)
-            , max_reuses(100) {}
+            , max_reuses(100)
+            , monitor_condition(true)
+            , condition_warning_threshold(1e-12)
+            , condition_refactor_threshold(1e-14) {}
     };
+
+    /// Check if KLU backend is available at compile time
+    [[nodiscard]] static constexpr bool klu_available() noexcept {
+#ifdef PULSIM_HAS_KLU
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    /// Get the actual backend being used (resolves Auto)
+    [[nodiscard]] Backend effective_backend() const noexcept {
+        if (options_.backend == Backend::Auto) {
+            return klu_available() ? Backend::KLU : Backend::EigenSparseLU;
+        }
+        return options_.backend;
+    }
 
     explicit AdvancedLinearSolver(const Options& opts = Options());
     ~AdvancedLinearSolver();
@@ -118,8 +144,21 @@ public:
 
     // Statistics
     int factorization_count() const { return factorization_count_; }
+    int symbolic_count() const { return symbolic_count_; }
     int reuse_count() const { return reuse_count_; }
     bool is_singular() const { return is_singular_; }
+
+    /// Get estimated reciprocal condition number (1/cond)
+    /// Returns 1.0 if not available, 0.0 if singular
+    Real rcond() const { return rcond_; }
+
+    /// Check if matrix is ill-conditioned (rcond below warning threshold)
+    bool is_ill_conditioned() const {
+        return options_.monitor_condition && rcond_ < options_.condition_warning_threshold;
+    }
+
+    /// Check if sparsity structure has changed
+    bool structure_changed(const SparseMatrix& A_new) const;
 
     const Options& options() const { return options_; }
     void set_options(const Options& opts) { options_ = opts; }
@@ -130,10 +169,16 @@ private:
     bool factorized_ = false;
     bool is_singular_ = false;
     int factorization_count_ = 0;
+    int symbolic_count_ = 0;
     int reuse_count_ = 0;
+    Real rcond_ = 1.0;  // Reciprocal condition number estimate
 
     // Previous matrix for change detection
     SparseMatrix A_prev_;
+
+    // Stored sparsity pattern for structure comparison
+    std::vector<Index> stored_outer_index_;
+    std::vector<Index> stored_inner_index_;
 
     // Eigen backend
     Eigen::SparseLU<SparseMatrix> eigen_solver_;
@@ -150,6 +195,7 @@ private:
     void cleanup_klu();
     bool factorize_klu(const SparseMatrix& A);
     LinearSolveResult solve_klu(const Vector& b);
+    Real estimate_rcond_klu();  // Estimate condition using KLU
 #endif
 };
 

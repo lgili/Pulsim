@@ -11,10 +11,20 @@
 // =============================================================================
 
 #include "pulsim/v1/numeric_types.hpp"
+#include <Eigen/Dense>
 #include <cmath>
 #include <array>
 #include <algorithm>
 #include <limits>
+#include <span>
+#include <functional>
+#include <vector>
+
+// Type aliases used in this header
+namespace pulsim::v1 {
+using Vector = Eigen::VectorXd;
+using Matrix = Eigen::MatrixXd;
+} // namespace pulsim::v1
 
 namespace pulsim::v1 {
 
@@ -887,6 +897,278 @@ private:
 };
 
 // =============================================================================
+// Task 7: Advanced Timestep Controller with Newton Feedback and Smoothing
+// =============================================================================
+
+/// Extended configuration for advanced timestep controller
+struct AdvancedTimestepConfig : TimestepConfig {
+    // Newton iteration feedback (7.1)
+    int target_newton_iterations = 5;    // Target Newton iterations per step
+    int min_newton_iterations = 2;       // Minimum acceptable iterations
+    int max_newton_iterations = 15;      // Maximum before timestep reduction
+    Real newton_feedback_gain = 0.3;     // Gain for Newton-based adjustment
+
+    // Rate-of-change limiting (7.3)
+    Real max_growth_rate = 2.0;          // Max ratio dt_new/dt_old
+    Real max_shrink_rate = 0.25;         // Min ratio dt_new/dt_old (1/4)
+    bool enable_smoothing = true;        // Enable rate-of-change limiting
+
+    // Combined control weights
+    Real lte_weight = 0.7;               // Weight for LTE-based control
+    Real newton_weight = 0.3;            // Weight for Newton-based control
+
+    [[nodiscard]] static constexpr AdvancedTimestepConfig defaults() {
+        return AdvancedTimestepConfig{};
+    }
+
+    [[nodiscard]] static constexpr AdvancedTimestepConfig for_switching() {
+        AdvancedTimestepConfig cfg;
+        cfg.dt_min = 1e-12;              // Very small for switching transients
+        cfg.dt_max = 1e-5;               // Cap for PWM periods
+        cfg.target_newton_iterations = 4;
+        cfg.max_growth_rate = 1.5;       // More conservative growth
+        cfg.safety_factor = 0.85;
+        return cfg;
+    }
+
+    [[nodiscard]] static constexpr AdvancedTimestepConfig for_power_electronics() {
+        AdvancedTimestepConfig cfg;
+        cfg.dt_min = 1e-10;
+        cfg.dt_max = 1e-4;
+        cfg.target_newton_iterations = 5;
+        cfg.newton_feedback_gain = 0.4;
+        cfg.error_tolerance = 1e-3;
+        return cfg;
+    }
+};
+
+/// Extended timestep decision with Newton info
+struct AdvancedTimestepDecision : TimestepDecision {
+    int newton_iterations = 0;           // Actual Newton iterations used
+    Real lte_factor = 1.0;               // Timestep factor from LTE
+    Real newton_factor = 1.0;            // Timestep factor from Newton iterations
+    Real smoothing_factor = 1.0;         // Factor applied for rate limiting
+    bool smoothing_active = false;       // Whether smoothing limited the change
+};
+
+/// Advanced Timestep Controller combining LTE and Newton iteration feedback (Task 7)
+/// Features:
+/// - PI control for LTE-based adjustment
+/// - Newton iteration feedback for convergence-aware control
+/// - Rate-of-change limiting for smooth transitions
+/// - Anti-oscillation detection and damping
+class AdvancedTimestepController {
+public:
+    explicit AdvancedTimestepController(const AdvancedTimestepConfig& config = {})
+        : config_(config)
+        , dt_current_(config.dt_initial)
+        , dt_previous_(config.dt_initial)
+        , error_prev_(0.0)
+        , rejections_(0) {}
+
+    /// Compute new timestep based on LTE only (7.2 partial)
+    [[nodiscard]] AdvancedTimestepDecision compute(Real lte, int order = 2) {
+        return compute_combined(lte, config_.target_newton_iterations, order);
+    }
+
+    /// Compute new timestep combining LTE and Newton iterations (7.2)
+    /// @param lte Local truncation error estimate
+    /// @param newton_iters Actual Newton iterations used in last step
+    /// @param order Integration method order
+    [[nodiscard]] AdvancedTimestepDecision compute_combined(
+        Real lte, int newton_iters, int order = 2) {
+
+        AdvancedTimestepDecision result;
+        result.newton_iterations = newton_iters;
+
+        // Normalize error by tolerance
+        Real error_ratio = lte / config_.error_tolerance;
+        result.error_ratio = error_ratio;
+
+        // Check if step should be accepted
+        result.accepted = (error_ratio <= 1.0) &&
+                          (newton_iters <= config_.max_newton_iterations);
+
+        if (result.accepted) {
+            rejections_ = 0;
+
+            // === LTE-based factor (PI controller) ===
+            Real exp_i = config_.k_i / (order + 1.0);
+            Real exp_p = config_.k_p / (order + 1.0);
+
+            Real lte_factor = config_.safety_factor;
+            if (error_ratio > 1e-10) {
+                lte_factor *= std::pow(1.0 / error_ratio, exp_i);
+                if (error_prev_ > 1e-10) {
+                    lte_factor *= std::pow(error_prev_ / error_ratio, exp_p);
+                }
+            } else {
+                lte_factor = config_.growth_factor;
+            }
+            lte_factor = std::clamp(lte_factor, config_.shrink_factor, config_.growth_factor);
+            result.lte_factor = lte_factor;
+
+            // === Newton iteration-based factor ===
+            Real newton_factor = compute_newton_factor(newton_iters);
+            result.newton_factor = newton_factor;
+
+            // === Combined factor with configurable weights ===
+            Real combined_factor = config_.lte_weight * lte_factor +
+                                   config_.newton_weight * newton_factor;
+
+            // === Apply rate-of-change limiting (7.3) ===
+            Real dt_proposed = dt_current_ * combined_factor;
+            Real dt_smoothed = apply_smoothing(dt_proposed, result);
+
+            result.dt_new = dt_smoothed;
+
+            // Update history
+            error_prev_ = error_ratio;
+            history_.push(dt_current_);
+
+            // Anti-oscillation: if oscillating, be more conservative
+            if (history_.is_oscillating()) {
+                result.dt_new = std::min(result.dt_new, history_.average());
+                result.smoothing_active = true;
+            }
+        } else {
+            // Step rejected
+            ++rejections_;
+            result.rejections = rejections_;
+
+            // Halve timestep on rejection
+            result.dt_new = dt_current_ * config_.shrink_factor;
+
+            // More aggressive shrink if multiple rejections or Newton failed
+            if (rejections_ > 3 || newton_iters >= config_.max_newton_iterations) {
+                result.dt_new *= config_.shrink_factor;
+            }
+
+            result.lte_factor = config_.shrink_factor;
+            result.newton_factor = config_.shrink_factor;
+        }
+
+        // Enforce dt limits
+        result.dt_new = std::clamp(result.dt_new, config_.dt_min, config_.dt_max);
+        result.at_minimum = (result.dt_new <= config_.dt_min * 1.001);
+        result.at_maximum = (result.dt_new >= config_.dt_max * 0.999);
+
+        // Track for smoothing
+        if (!result.accepted) {
+            dt_current_ = result.dt_new;
+        }
+
+        return result;
+    }
+
+    /// Suggest next timestep (7.2) - convenience wrapper
+    [[nodiscard]] Real suggest_next_dt(Real lte, int newton_iters, int order = 2) {
+        auto decision = compute_combined(lte, newton_iters, order);
+        return decision.dt_new;
+    }
+
+    /// Update current timestep (call after accepting step)
+    void accept(Real dt) {
+        dt_previous_ = dt_current_;
+        dt_current_ = dt;
+    }
+
+    /// Handle event-aware timestep adjustment
+    [[nodiscard]] Real adjust_for_event(Real time_to_event, Real current_dt) const {
+        if (time_to_event <= 0) return current_dt;
+
+        // If event is within 1.5x current step, adjust to hit it exactly
+        if (time_to_event < 1.5 * current_dt) {
+            return time_to_event;
+        }
+
+        // If event is within 2x current step, split into two steps
+        if (time_to_event < 2.0 * current_dt) {
+            return time_to_event / 2.0;
+        }
+
+        return current_dt;
+    }
+
+    /// Force timestep to specific value (for events or restarts)
+    void force_timestep(Real dt) {
+        dt_current_ = std::clamp(dt, config_.dt_min, config_.dt_max);
+    }
+
+    /// Reset controller state
+    void reset() {
+        dt_current_ = config_.dt_initial;
+        dt_previous_ = config_.dt_initial;
+        error_prev_ = 0.0;
+        rejections_ = 0;
+        history_.clear();
+    }
+
+    [[nodiscard]] Real current_dt() const { return dt_current_; }
+    [[nodiscard]] Real previous_dt() const { return dt_previous_; }
+    [[nodiscard]] int rejections() const { return rejections_; }
+    [[nodiscard]] bool failed() const { return rejections_ > config_.max_rejections; }
+    [[nodiscard]] const AdvancedTimestepConfig& config() const { return config_; }
+    void set_config(const AdvancedTimestepConfig& cfg) { config_ = cfg; }
+
+private:
+    AdvancedTimestepConfig config_;
+    Real dt_current_;
+    Real dt_previous_;
+    Real error_prev_;
+    int rejections_;
+    TimestepHistory history_;
+
+    /// Compute timestep factor based on Newton iterations (7.1)
+    [[nodiscard]] Real compute_newton_factor(int newton_iters) const {
+        int target = config_.target_newton_iterations;
+
+        if (newton_iters <= config_.min_newton_iterations) {
+            // Very fast convergence - can increase timestep
+            return 1.0 + config_.newton_feedback_gain;
+        } else if (newton_iters <= target) {
+            // Normal convergence - slight increase
+            Real ratio = static_cast<Real>(target - newton_iters) / target;
+            return 1.0 + config_.newton_feedback_gain * ratio;
+        } else if (newton_iters < config_.max_newton_iterations) {
+            // Slow convergence - decrease timestep
+            Real ratio = static_cast<Real>(newton_iters - target) /
+                        (config_.max_newton_iterations - target);
+            return 1.0 - config_.newton_feedback_gain * ratio;
+        } else {
+            // Very slow or failed - significant decrease
+            return config_.shrink_factor;
+        }
+    }
+
+    /// Apply rate-of-change limiting for smooth transitions (7.3)
+    [[nodiscard]] Real apply_smoothing(Real dt_proposed,
+                                        AdvancedTimestepDecision& decision) const {
+        if (!config_.enable_smoothing) {
+            return dt_proposed;
+        }
+
+        Real ratio = dt_proposed / dt_current_;
+        Real smoothed = dt_proposed;
+
+        // Limit growth rate
+        if (ratio > config_.max_growth_rate) {
+            smoothed = dt_current_ * config_.max_growth_rate;
+            decision.smoothing_active = true;
+            decision.smoothing_factor = config_.max_growth_rate / ratio;
+        }
+        // Limit shrink rate
+        else if (ratio < config_.max_shrink_rate) {
+            smoothed = dt_current_ * config_.max_shrink_rate;
+            decision.smoothing_active = true;
+            decision.smoothing_factor = config_.max_shrink_rate / ratio;
+        }
+
+        return smoothed;
+    }
+};
+
+// =============================================================================
 // 3.3.4 & 3.3.6: Automatic BDF Order Selection and Reduction
 // =============================================================================
 
@@ -1184,5 +1466,330 @@ inline LTELogger& global_lte_logger() {
     static LTELogger instance;
     return instance;
 }
+
+// =============================================================================
+// Richardson LTE Estimation (Task 6)
+// Efficient LTE estimation using solution history without step-doubling
+// =============================================================================
+
+/// Method for LTE estimation
+enum class TimestepMethod {
+    StepDoubling,   // Traditional: requires 3x work (full step + 2 half steps)
+    Richardson      // Efficient: uses polynomial extrapolation from solution history
+};
+
+/// Single entry in solution history for Richardson extrapolation
+struct SolutionHistoryEntry {
+    Vector solution;      // Full solution vector
+    Real time = 0.0;      // Time point
+    Real timestep = 0.0;  // Timestep used to reach this solution
+
+    SolutionHistoryEntry() = default;
+    SolutionHistoryEntry(const Vector& x, Real t, Real dt)
+        : solution(x), time(t), timestep(dt) {}
+};
+
+/// Ring buffer storing solution history for Richardson extrapolation
+/// Requires minimal 3 entries for 2nd order extrapolation (BDF2)
+class SolutionHistory {
+public:
+    static constexpr std::size_t default_capacity = 5;
+
+    explicit SolutionHistory(std::size_t capacity = default_capacity)
+        : capacity_(capacity) {
+        entries_.reserve(capacity);
+    }
+
+    /// Push new solution to history (oldest is removed if at capacity)
+    void push(const Vector& solution, Real time, Real timestep) {
+        if (entries_.size() >= capacity_) {
+            // Shift entries, remove oldest
+            for (std::size_t i = entries_.size() - 1; i > 0; --i) {
+                entries_[i] = std::move(entries_[i - 1]);
+            }
+            entries_[0] = SolutionHistoryEntry(solution, time, timestep);
+        } else {
+            // Insert at front, shift others
+            entries_.insert(entries_.begin(), SolutionHistoryEntry(solution, time, timestep));
+        }
+    }
+
+    /// Get entry at index (0 = most recent)
+    [[nodiscard]] const SolutionHistoryEntry& operator[](std::size_t i) const {
+        return entries_.at(i);
+    }
+
+    /// Get number of entries
+    [[nodiscard]] std::size_t size() const { return entries_.size(); }
+
+    /// Check if we have enough history for Richardson extrapolation
+    [[nodiscard]] bool has_sufficient_history(int order = 2) const {
+        // Need at least 2 points for linear extrapolation (minimum for any LTE estimate)
+        // Quadratic extrapolation (order >= 2) ideally needs 3 points, but can fall back to linear
+        return entries_.size() >= 2;
+    }
+
+    /// Clear all history
+    void clear() { entries_.clear(); }
+
+    /// Get most recent solution
+    [[nodiscard]] const Vector& most_recent() const {
+        return entries_.front().solution;
+    }
+
+    /// Get most recent time
+    [[nodiscard]] Real most_recent_time() const {
+        return entries_.empty() ? 0.0 : entries_.front().time;
+    }
+
+    /// Get most recent timestep
+    [[nodiscard]] Real most_recent_timestep() const {
+        return entries_.empty() ? 0.0 : entries_.front().timestep;
+    }
+
+    /// Check if empty
+    [[nodiscard]] bool empty() const { return entries_.empty(); }
+
+private:
+    std::vector<SolutionHistoryEntry> entries_;
+    std::size_t capacity_;
+};
+
+/// Richardson extrapolation-based LTE estimator
+/// Uses polynomial extrapolation from solution history to estimate error
+/// without requiring additional solves (3x speedup vs step-doubling)
+class RichardsonLTE {
+public:
+    /// Compute LTE estimate using Richardson extrapolation
+    /// @param current Current solution at time t_n
+    /// @param history Solution history (must have >= 2 previous solutions)
+    /// @param order Integration method order (default: 2 for BDF2/Trapezoidal)
+    /// @return Estimated LTE (infinity norm), or -1 if insufficient history
+    [[nodiscard]] static Real compute(
+        const Vector& current,
+        const SolutionHistory& history,
+        int order = 2) {
+
+        if (!history.has_sufficient_history(order)) {
+            return -1.0;  // Insufficient history
+        }
+
+        // Prefer quadratic extrapolation when we have enough history
+        // Quadratic is more accurate and should be used when 3+ points available
+        if (order >= 2 && history.size() >= 3) {
+            // Quadratic extrapolation for higher accuracy
+            return compute_quadratic(current, history);
+        }
+
+        // Fall back to linear extrapolation with 2 points
+        if (history.size() >= 2) {
+            // Linear prediction: x_pred = x_{n-1} + (x_{n-1} - x_{n-2}) * (t_n - t_{n-1}) / (t_{n-1} - t_{n-2})
+            const auto& h0 = history[0];  // Most recent (x_{n-1})
+            const auto& h1 = history[1];  // Second most recent (x_{n-2})
+
+            Real dt_ratio = h0.timestep / std::max(h1.timestep, Real{1e-15});
+
+            // Linear extrapolation
+            Vector predicted = h0.solution + (h0.solution - h1.solution) * dt_ratio;
+
+            // LTE estimate: |x_n - x_predicted| / (2^p - 1) for Richardson
+            // For BDF2, error constant is 1/3
+            Real lte = (current - predicted).lpNorm<Eigen::Infinity>();
+            return lte / 3.0;  // BDF2 error constant
+        }
+
+        // Fallback: linear extrapolation
+        return compute_linear(current, history);
+    }
+
+    /// Compute per-variable LTE (for weighted norm convergence)
+    [[nodiscard]] static Vector compute_per_variable(
+        const Vector& current,
+        const SolutionHistory& history,
+        int order = 2) {
+
+        if (!history.has_sufficient_history(order)) {
+            return Vector::Zero(current.size());
+        }
+
+        const auto& h0 = history[0];
+        const auto& h1 = history[1];
+
+        Real dt_ratio = h0.timestep / std::max(h1.timestep, Real{1e-15});
+        Vector predicted = h0.solution + (h0.solution - h1.solution) * dt_ratio;
+
+        return (current - predicted).cwiseAbs() / 3.0;
+    }
+
+    /// Compute weighted LTE (separate tolerances for voltages and currents)
+    [[nodiscard]] static Real compute_weighted(
+        const Vector& current,
+        const SolutionHistory& history,
+        Index num_nodes,
+        Index num_branches,
+        Real voltage_tol = 1e-3,
+        Real current_tol = 1e-6,
+        int order = 2) {
+
+        if (!history.has_sufficient_history(order)) {
+            return -1.0;
+        }
+
+        Vector lte_per_var = compute_per_variable(current, history, order);
+
+        Real max_weighted_lte = 0.0;
+
+        // Check voltage nodes
+        for (Index i = 0; i < num_nodes; ++i) {
+            Real weighted = lte_per_var[i] / voltage_tol;
+            max_weighted_lte = std::max(max_weighted_lte, weighted);
+        }
+
+        // Check current branches
+        for (Index i = num_nodes; i < num_nodes + num_branches; ++i) {
+            Real weighted = lte_per_var[i] / current_tol;
+            max_weighted_lte = std::max(max_weighted_lte, weighted);
+        }
+
+        return max_weighted_lte;
+    }
+
+private:
+    /// Linear extrapolation (1st order polynomial)
+    [[nodiscard]] static Real compute_linear(
+        const Vector& current,
+        const SolutionHistory& history) {
+
+        if (history.size() < 2) return 0.0;
+
+        const auto& h0 = history[0];
+        const auto& h1 = history[1];
+
+        Real dt_ratio = h0.timestep / std::max(h1.timestep, Real{1e-15});
+        Vector predicted = h0.solution + (h0.solution - h1.solution) * dt_ratio;
+
+        return (current - predicted).lpNorm<Eigen::Infinity>() / 2.0;
+    }
+
+    /// Quadratic extrapolation (2nd order polynomial) using Lagrange interpolation
+    [[nodiscard]] static Real compute_quadratic(
+        const Vector& current,
+        const SolutionHistory& history) {
+
+        if (history.size() < 3) return compute_linear(current, history);
+
+        const auto& h0 = history[0];  // t_{n-1}
+        const auto& h1 = history[1];  // t_{n-2}
+        const auto& h2 = history[2];  // t_{n-3}
+
+        // Times relative to current time
+        Real t_n = h0.time + h0.timestep;  // Current time
+        Real t0 = h0.time;                  // t_{n-1}
+        Real t1 = h1.time;                  // t_{n-2}
+        Real t2 = h2.time;                  // t_{n-3}
+
+        // Lagrange interpolation coefficients at t_n
+        Real L0 = ((t_n - t1) * (t_n - t2)) / ((t0 - t1) * (t0 - t2));
+        Real L1 = ((t_n - t0) * (t_n - t2)) / ((t1 - t0) * (t1 - t2));
+        Real L2 = ((t_n - t0) * (t_n - t1)) / ((t2 - t0) * (t2 - t1));
+
+        // Predicted solution using quadratic interpolation
+        Vector predicted = L0 * h0.solution + L1 * h1.solution + L2 * h2.solution;
+
+        // LTE estimate with BDF2 error constant
+        return (current - predicted).lpNorm<Eigen::Infinity>() / 3.0;
+    }
+};
+
+/// Configuration for Richardson LTE estimator
+struct RichardsonLTEConfig {
+    TimestepMethod method = TimestepMethod::Richardson;  // Default to efficient method
+    int extrapolation_order = 2;       // Polynomial order for extrapolation
+    Real voltage_tolerance = 1e-3;     // Voltage tolerance for weighted LTE [V]
+    Real current_tolerance = 1e-6;     // Current tolerance for weighted LTE [A]
+    bool use_weighted_norm = true;     // Use weighted norm (separate V/I tolerances)
+    std::size_t history_depth = 5;     // Number of solutions to keep in history
+
+    [[nodiscard]] static constexpr RichardsonLTEConfig defaults() {
+        return RichardsonLTEConfig{};
+    }
+
+    [[nodiscard]] static constexpr RichardsonLTEConfig step_doubling() {
+        RichardsonLTEConfig cfg;
+        cfg.method = TimestepMethod::StepDoubling;
+        return cfg;
+    }
+};
+
+/// Integrated LTE estimator that supports both Richardson and step-doubling
+class AdaptiveLTEEstimator {
+public:
+    explicit AdaptiveLTEEstimator(const RichardsonLTEConfig& config = {})
+        : config_(config)
+        , history_(config.history_depth) {}
+
+    /// Record solution for Richardson extrapolation
+    /// Call this after each successful timestep
+    void record_solution(const Vector& solution, Real time, Real timestep) {
+        if (config_.method == TimestepMethod::Richardson) {
+            history_.push(solution, time, timestep);
+        }
+    }
+
+    /// Compute LTE using configured method
+    /// For Richardson: uses history (efficient)
+    /// For StepDoubling: caller must provide both solutions
+    [[nodiscard]] Real compute(
+        const Vector& current,
+        Index num_nodes = 0,
+        Index num_branches = 0) {
+
+        if (config_.method == TimestepMethod::Richardson) {
+            if (config_.use_weighted_norm && num_nodes > 0) {
+                return RichardsonLTE::compute_weighted(
+                    current, history_, num_nodes, num_branches,
+                    config_.voltage_tolerance, config_.current_tolerance,
+                    config_.extrapolation_order);
+            } else {
+                return RichardsonLTE::compute(current, history_, config_.extrapolation_order);
+            }
+        }
+
+        // StepDoubling: return -1 to indicate caller should use traditional method
+        return -1.0;
+    }
+
+    /// Check if we have sufficient history for Richardson
+    [[nodiscard]] bool has_sufficient_history() const {
+        return history_.has_sufficient_history(config_.extrapolation_order);
+    }
+
+    /// Get the number of solutions in history
+    [[nodiscard]] std::size_t history_size() const {
+        return history_.size();
+    }
+
+    /// Clear history (call at simulation start or restart)
+    void reset() {
+        history_.clear();
+    }
+
+    /// Check if using Richardson method
+    [[nodiscard]] bool is_richardson() const {
+        return config_.method == TimestepMethod::Richardson;
+    }
+
+    [[nodiscard]] const RichardsonLTEConfig& config() const { return config_; }
+    void set_config(const RichardsonLTEConfig& cfg) {
+        config_ = cfg;
+        history_ = SolutionHistory(cfg.history_depth);
+    }
+
+    [[nodiscard]] const SolutionHistory& history() const { return history_; }
+
+private:
+    RichardsonLTEConfig config_;
+    SolutionHistory history_;
+};
 
 } // namespace pulsim::v1

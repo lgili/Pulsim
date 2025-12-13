@@ -704,20 +704,17 @@ TEST_CASE("Progress callback - estimated time remaining", "[simulation][progress
 // =============================================================================
 
 TEST_CASE("Progress callback - performance overhead <5%", "[simulation][progress][benchmark]") {
-    // Create a moderately complex circuit
+    // Simple RC circuit for performance testing
     Circuit circuit;
-    circuit.add_voltage_source("V1", "in", "0", SineWaveform{0.0, 10.0, 1000.0, 0.0, 0.0});
-    circuit.add_resistor("R1", "in", "n1", 100.0);
-    circuit.add_capacitor("C1", "n1", "0", 1e-6);
-    circuit.add_resistor("R2", "n1", "n2", 100.0);
-    circuit.add_capacitor("C2", "n2", "0", 1e-6);
-    circuit.add_resistor("R3", "n2", "out", 100.0);
-    circuit.add_capacitor("C3", "out", "0", 1e-6);
+    circuit.add_voltage_source("V1", "in", "0", DCWaveform{10.0});
+    circuit.add_resistor("R1", "in", "out", 1000.0);
+    circuit.add_capacitor("C1", "out", "0", 1e-6);
 
     SimulationOptions opts;
     opts.tstart = 0.0;
     opts.tstop = 10e-3;  // 10ms simulation
     opts.dt = 1e-6;      // 10000 steps
+    opts.use_ic = true;  // Skip DC operating point for performance test
 
     // Run without progress callback
     Simulator sim1(circuit, opts);

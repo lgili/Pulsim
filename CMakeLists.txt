@@ -37,7 +37,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(PULSIM_BUILD_TESTS "Build tests" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
 option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
-option(PULSIM_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
+# Note: SuiteSparse/KLU is now a required dependency (default backend for linear solver)
 
 # =============================================================================
 # Performance Optimization Options
@@ -304,28 +304,136 @@ if(PULSIM_USE_SUNDIALS)
     message(STATUS "SUNDIALS support enabled")
 endif()
 
-# SuiteSparse KLU - Fast sparse LU for circuit matrices
-if(PULSIM_USE_SUITESPARSE)
-    # Try to find system-installed SuiteSparse
-    find_package(SuiteSparse CONFIG QUIET)
-    if(SuiteSparse_FOUND)
-        message(STATUS "Found system SuiteSparse")
-        add_compile_definitions(PULSIM_HAS_KLU)
-    else()
-        # Try pkg-config
-        find_package(PkgConfig QUIET)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(KLU QUIET klu)
-            if(KLU_FOUND)
-                message(STATUS "Found KLU via pkg-config")
-                add_compile_definitions(PULSIM_HAS_KLU)
-            else()
-                message(WARNING "SuiteSparse/KLU not found. Install with: brew install suite-sparse (macOS) or apt install libsuitesparse-dev (Linux)")
-            endif()
-        else()
-            message(WARNING "SuiteSparse/KLU not found and pkg-config not available")
+# =============================================================================
+# SuiteSparse KLU - Required dependency for fast sparse LU (circuit-optimized)
+# =============================================================================
+# KLU is the default linear solver backend. We try to find it on the system first,
+# then fall back to building from source via FetchContent.
+
+set(PULSIM_KLU_FOUND FALSE)
+
+# Method 1: Try to find system-installed SuiteSparse
+find_package(SuiteSparse CONFIG QUIET)
+if(SuiteSparse_FOUND AND TARGET SuiteSparse::KLU)
+    message(STATUS "Found system SuiteSparse with KLU")
+    set(PULSIM_KLU_FOUND TRUE)
+    set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+endif()
+
+# Method 2: Try pkg-config
+if(NOT PULSIM_KLU_FOUND)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(KLU QUIET klu)
+        if(KLU_FOUND)
+            message(STATUS "Found KLU via pkg-config: ${KLU_LIBRARY_DIRS}")
+            set(PULSIM_KLU_FOUND TRUE)
+            # Create imported target for KLU
+            # Use IMPORTED_TARGET to get proper linking with full paths
+            add_library(SuiteSparse::KLU INTERFACE IMPORTED)
+            set_target_properties(SuiteSparse::KLU PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${KLU_INCLUDE_DIRS}"
+                INTERFACE_LINK_DIRECTORIES "${KLU_LIBRARY_DIRS}"
+            )
+            # Link with full library path from pkg-config
+            target_link_libraries(SuiteSparse::KLU INTERFACE
+                "${KLU_LIBRARY_DIRS}/libklu.dylib"
+                "${KLU_LIBRARY_DIRS}/libamd.dylib"
+                "${KLU_LIBRARY_DIRS}/libcolamd.dylib"
+                "${KLU_LIBRARY_DIRS}/libbtf.dylib"
+                "${KLU_LIBRARY_DIRS}/libsuitesparseconfig.dylib"
+            )
+            set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
         endif()
     endif()
+endif()
+
+# Method 3: Try direct find_library (common locations)
+if(NOT PULSIM_KLU_FOUND)
+    find_library(KLU_LIBRARY NAMES klu PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_path(KLU_INCLUDE_DIR NAMES klu.h PATHS
+        /usr/local/include
+        /usr/local/include/suitesparse
+        /opt/homebrew/include
+        /opt/homebrew/include/suitesparse
+        /usr/include
+        /usr/include/suitesparse
+    )
+    find_library(AMD_LIBRARY NAMES amd PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_library(COLAMD_LIBRARY NAMES colamd PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_library(BTF_LIBRARY NAMES btf PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_library(SUITESPARSE_CONFIG_LIBRARY NAMES suitesparseconfig PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+
+    if(KLU_LIBRARY AND KLU_INCLUDE_DIR AND AMD_LIBRARY AND COLAMD_LIBRARY AND BTF_LIBRARY AND SUITESPARSE_CONFIG_LIBRARY)
+        message(STATUS "Found KLU via find_library: ${KLU_LIBRARY}")
+        set(PULSIM_KLU_FOUND TRUE)
+        # Create imported target
+        add_library(SuiteSparse::KLU INTERFACE IMPORTED)
+        set_target_properties(SuiteSparse::KLU PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${KLU_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "${KLU_LIBRARY};${AMD_LIBRARY};${COLAMD_LIBRARY};${BTF_LIBRARY};${SUITESPARSE_CONFIG_LIBRARY}"
+        )
+        set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+    endif()
+endif()
+
+# Method 4: Build from source via FetchContent
+if(NOT PULSIM_KLU_FOUND)
+    message(STATUS "SuiteSparse/KLU not found on system, building from source...")
+
+    # SuiteSparse requires some configuration
+    set(SUITESPARSE_ENABLE_PROJECTS "suitesparse_config;amd;colamd;btf;klu" CACHE STRING "" FORCE)
+    set(SUITESPARSE_USE_CUDA OFF CACHE BOOL "" FORCE)
+    set(SUITESPARSE_USE_FORTRAN OFF CACHE BOOL "" FORCE)
+    set(SUITESPARSE_DEMOS OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        suitesparse
+        GIT_REPOSITORY https://github.com/DrTimothyAldenDavis/SuiteSparse.git
+        GIT_TAG v7.6.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(suitesparse)
+
+    set(PULSIM_KLU_FOUND TRUE)
+    set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+    message(STATUS "Built SuiteSparse/KLU from source")
+endif()
+
+# Define the macro so code knows KLU is available
+if(PULSIM_KLU_FOUND)
+    add_compile_definitions(PULSIM_HAS_KLU)
+    message(STATUS "KLU support: ENABLED")
+else()
+    message(FATAL_ERROR "SuiteSparse/KLU is required but could not be found or built. "
+        "Install with: brew install suite-sparse (macOS) or apt install libsuitesparse-dev (Linux)")
 endif()
 
 # Core library (v2 header-only)
@@ -381,5 +489,5 @@ message(STATUS "  Native opts:       ${PULSIM_ENABLE_NATIVE}")
 message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
 message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
 message(STATUS "  SUNDIALS:          ${PULSIM_USE_SUNDIALS}")
-message(STATUS "  SuiteSparse:       ${PULSIM_USE_SUITESPARSE}")
+message(STATUS "  KLU (required):    ${PULSIM_KLU_FOUND}")
 message(STATUS "=========================================")

@@ -7,8 +7,8 @@
 #   .\scripts\setup-windows.ps1 -Help    # Show help
 #
 # This script installs:
-#   Required: LLVM/Clang 17+, CMake, Ninja, Python 3
-#   Optional (-Full): vcpkg, SuiteSparse, SUNDIALS, gRPC
+#   Required: LLVM/Clang 17+, CMake, Ninja, Python 3, SuiteSparse/KLU
+#   Optional (-Full): SUNDIALS, gRPC
 #
 # Run as Administrator for best results.
 # =============================================================================
@@ -68,7 +68,7 @@ PulsimCore Windows Dependency Installer
 Usage: .\setup-windows.ps1 [OPTIONS]
 
 Options:
-    -Full       Install optional dependencies (vcpkg, SuiteSparse, SUNDIALS, gRPC)
+    -Full       Install optional dependencies (SUNDIALS, gRPC)
     -Help       Show this help message
 
 Required dependencies (always installed):
@@ -76,10 +76,10 @@ Required dependencies (always installed):
     - CMake 3.20+
     - Ninja build system
     - Python 3.10+
+    - vcpkg (C++ package manager)
+    - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with -Full):
-    - vcpkg (C++ package manager)
-    - SuiteSparse (sparse matrix operations)
     - SUNDIALS (advanced ODE/DAE solvers)
     - gRPC and protobuf (remote API)
 
@@ -324,6 +324,32 @@ function Install-Vcpkg {
     Write-Success "vcpkg installed at $VCPKG_PATH"
 }
 
+function Install-SuiteSparse {
+    Write-Header "Installing SuiteSparse/KLU"
+
+    if (-not (Test-Path "$VCPKG_PATH\vcpkg.exe")) {
+        Install-Vcpkg
+    }
+
+    $vcpkg = "$VCPKG_PATH\vcpkg.exe"
+
+    # Check if already installed
+    if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\klu*") {
+        Write-Success "SuiteSparse already installed"
+        return
+    }
+
+    # SuiteSparse (required for KLU sparse linear solver)
+    Write-Info "Installing SuiteSparse (required for KLU linear solver, this may take a while)..."
+    & $vcpkg install suitesparse:x64-windows
+    Write-Success "SuiteSparse installed"
+
+    # Integrate vcpkg with CMake
+    Write-Info "Integrating vcpkg with CMake..."
+    & $vcpkg integrate install
+    Write-Success "vcpkg integrated"
+}
+
 function Install-OptionalDeps {
     Write-Header "Installing Optional Dependencies"
 
@@ -332,11 +358,6 @@ function Install-OptionalDeps {
     }
 
     $vcpkg = "$VCPKG_PATH\vcpkg.exe"
-
-    # SuiteSparse
-    Write-Info "Installing SuiteSparse (this may take a while)..."
-    & $vcpkg install suitesparse:x64-windows
-    Write-Success "SuiteSparse installed"
 
     # SUNDIALS
     Write-Info "Installing SUNDIALS..."
@@ -415,23 +436,28 @@ function Test-Installation {
 
     if (Get-Command python -ErrorAction SilentlyContinue) {
         $pyVersion = (python --version 2>&1) -replace "Python ", ""
-        Write-Host "Python:   $pyVersion"
+        Write-Host "Python:      $pyVersion"
+    }
+
+    # Required: SuiteSparse
+    if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\klu*") {
+        Write-Host "SuiteSparse: installed (KLU enabled)"
+    } else {
+        Write-Host "SuiteSparse: not installed" -ForegroundColor Yellow
     }
 
     if ($Full) {
         Write-Host ""
         Write-Host "Optional dependencies:"
-        if (Test-Path "$VCPKG_PATH\vcpkg.exe") {
-            Write-Host "  vcpkg:       installed at $VCPKG_PATH"
-        }
-        if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\suitesparse*") {
-            Write-Host "  SuiteSparse: installed"
-        }
         if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\sundials*") {
             Write-Host "  SUNDIALS:    installed"
+        } else {
+            Write-Host "  SUNDIALS:    not installed"
         }
         if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\grpc*") {
             Write-Host "  gRPC:        installed"
+        } else {
+            Write-Host "  gRPC:        not installed"
         }
     }
 
@@ -466,6 +492,7 @@ function Main {
     Install-BuildTools -PackageManager $pkgMgr
     Install-Python -PackageManager $pkgMgr
     Set-EnvironmentVariables
+    Install-SuiteSparse
 
     if ($Full) {
         Install-OptionalDeps
