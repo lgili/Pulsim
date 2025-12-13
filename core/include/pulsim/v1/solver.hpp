@@ -423,6 +423,16 @@ struct NewtonOptions {
     Index num_nodes = 0;      // For weighted norm
     Index num_branches = 0;   // For weighted norm
     ConvergenceChecker::Tolerances tolerances;
+
+    // Voltage/current limiting (can slow convergence in switching circuits)
+    Real max_voltage_step = 5.0;      // Max voltage change per iteration [V]
+    Real max_current_step = 10.0;     // Max current change per iteration [A]
+    bool enable_limiting = false;     // Disabled by default - can prevent convergence at switching transitions
+
+    // Stall detection (disable for transient simulations with stiff transitions)
+    bool detect_stall = false;        // Check for convergence stall (default: disabled for robustness)
+    int stall_window = 10;            // Window size for stall detection
+    Real stall_threshold = 0.95;      // Threshold for stall detection (0.95 = 5% improvement required)
 };
 
 // =============================================================================
@@ -496,6 +506,12 @@ public:
             }
             dx = *solve_result;
 
+            // Apply voltage/current limiting to prevent divergence
+            bool limiting_active = false;
+            if (options_.enable_limiting && options_.num_nodes > 0) {
+                limiting_active = apply_limiting(dx, options_.num_nodes, options_.num_branches);
+            }
+
             // Apply update with damping
             if (options_.auto_damping) {
                 damping = line_search(result.solution, dx, f_norm, system_func, damping);
@@ -530,8 +546,10 @@ public:
                 }
             }
 
-            // Check for stall
-            if (options_.track_history && result.history.is_stalling()) {
+            // Check for stall (skip if limiting is actively clamping values or stall detection is disabled)
+            // When limiting is active, the solver intentionally makes slow progress
+            if (options_.detect_stall && options_.track_history && !limiting_active &&
+                result.history.is_stalling(options_.stall_window, options_.stall_threshold)) {
                 result.status = SolverStatus::ConvergenceStall;
                 result.error_message = "Convergence stalled";
                 result.iterations = iter + 1;
@@ -570,6 +588,36 @@ private:
     NewtonOptions options_;
     LinearPolicy linear_solver_;
     ConvergenceChecker convergence_checker_;
+
+    /// Apply voltage/current limiting to dx vector
+    /// Returns true if any value was clamped (limiting is active)
+    bool apply_limiting(Vector& dx, Index num_nodes, Index num_branches) {
+        bool clamped = false;
+
+        // Limit voltage changes (first num_nodes entries)
+        for (Index i = 0; i < num_nodes && i < dx.size(); ++i) {
+            if (dx[i] > options_.max_voltage_step) {
+                dx[i] = options_.max_voltage_step;
+                clamped = true;
+            } else if (dx[i] < -options_.max_voltage_step) {
+                dx[i] = -options_.max_voltage_step;
+                clamped = true;
+            }
+        }
+
+        // Limit current changes (entries after num_nodes)
+        for (Index i = num_nodes; i < num_nodes + num_branches && i < dx.size(); ++i) {
+            if (dx[i] > options_.max_current_step) {
+                dx[i] = options_.max_current_step;
+                clamped = true;
+            } else if (dx[i] < -options_.max_current_step) {
+                dx[i] = -options_.max_current_step;
+                clamped = true;
+            }
+        }
+
+        return clamped;
+    }
 
     /// Simple backtracking line search
     Real line_search(const Vector& x, const Vector& dx, Real f_norm,
