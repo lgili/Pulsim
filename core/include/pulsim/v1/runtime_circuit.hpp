@@ -37,7 +37,8 @@ using DeviceVariant = std::variant<
     IGBT,
     PWMVoltageSource,
     SineVoltageSource,
-    PulseVoltageSource
+    PulseVoltageSource,
+    Transformer
 >;
 
 // =============================================================================
@@ -48,6 +49,7 @@ struct DeviceConnection {
     std::string name;
     std::vector<Index> nodes;  // Node indices for this device
     Index branch_index = -1;   // For devices with branch currents (VS, L)
+    Index branch_index_2 = -1; // For devices with two branch currents (Transformer)
 };
 
 // =============================================================================
@@ -171,6 +173,25 @@ public:
                   const IGBT::Params& params = IGBT::Params{}) {
         devices_.emplace_back(IGBT(params, name));
         connections_.push_back({name, {gate, collector, emitter}, -1});
+    }
+
+    /// Add transformer with turns ratio N:1 (primary:secondary)
+    /// @param name Transformer name
+    /// @param p1 Primary positive terminal
+    /// @param p2 Primary negative terminal
+    /// @param s1 Secondary positive terminal
+    /// @param s2 Secondary negative terminal
+    /// @param turns_ratio N:1 ratio (e.g., 2.0 means 2:1 step-down)
+    void add_transformer(const std::string& name, Index p1, Index p2,
+                         Index s1, Index s2, Real turns_ratio = 1.0) {
+        Index br_p = num_nodes() + num_branches_;
+        Index br_s = num_nodes() + num_branches_ + 1;
+
+        auto xfmr = Transformer(turns_ratio, name);
+        xfmr.set_branch_indices(br_p, br_s);
+        devices_.emplace_back(std::move(xfmr));
+        connections_.push_back({name, {p1, p2, s1, s2}, br_p, br_s});
+        num_branches_ += 2;  // Transformer uses two branch currents
     }
 
     /// Number of devices
@@ -528,6 +549,11 @@ private:
             // DC: use initial voltage
             stamp_voltage_source(dev.params().v_initial, conn.nodes, conn.branch_index, triplets, b);
         }
+        else if constexpr (std::is_same_v<T, Transformer>) {
+            // DC: ideal transformer (V1 = n*V2, I1 = -I2/n)
+            stamp_transformer(dev.turns_ratio(), conn.nodes, conn.branch_index,
+                              conn.branch_index_2, triplets, b);
+        }
     }
 
     template<typename Device>
@@ -686,6 +712,11 @@ private:
             if (npos >= 0) f[npos] += i_br;
             if (nneg >= 0) f[nneg] -= i_br;
         }
+        else if constexpr (std::is_same_v<T, Transformer>) {
+            // Ideal transformer Jacobian
+            stamp_transformer_jacobian(dev.turns_ratio(), conn.nodes, conn.branch_index,
+                                       conn.branch_index_2, triplets, f, x);
+        }
     }
 
     // =========================================================================
@@ -832,6 +863,98 @@ private:
         stamp_conductance(g, n_collector, n_emitter, triplets);
         if (n_collector >= 0) f[n_collector] += ic;
         if (n_emitter >= 0) f[n_emitter] -= ic;
+    }
+
+    // =========================================================================
+    // Transformer Stamping
+    // =========================================================================
+
+    /// Stamp ideal transformer for DC analysis
+    /// Transformer: V_p = n * V_s, I_p + n * I_s = 0 (power conservation)
+    /// nodes: {p1, p2, s1, s2} (primary+, primary-, secondary+, secondary-)
+    void stamp_transformer(Real n, const std::vector<Index>& nodes,
+                           Index br_p, Index br_s,
+                           std::vector<Eigen::Triplet<Real>>& triplets, Vector& b) const {
+        Index np1 = nodes[0];  // Primary +
+        Index np2 = nodes[1];  // Primary -
+        Index ns1 = nodes[2];  // Secondary +
+        Index ns2 = nodes[3];  // Secondary -
+
+        // KCL: Primary current I_p flows from np1 to np2
+        if (np1 >= 0) triplets.emplace_back(np1, br_p, 1.0);
+        if (np2 >= 0) triplets.emplace_back(np2, br_p, -1.0);
+
+        // KCL: Secondary current I_s flows from ns1 to ns2
+        if (ns1 >= 0) triplets.emplace_back(ns1, br_s, 1.0);
+        if (ns2 >= 0) triplets.emplace_back(ns2, br_s, -1.0);
+
+        // Branch equation 1 (row br_p): Vp1 - Vp2 - n*(Vs1 - Vs2) = 0
+        // This enforces V_primary = n * V_secondary
+        if (np1 >= 0) triplets.emplace_back(br_p, np1, 1.0);
+        if (np2 >= 0) triplets.emplace_back(br_p, np2, -1.0);
+        if (ns1 >= 0) triplets.emplace_back(br_p, ns1, -n);
+        if (ns2 >= 0) triplets.emplace_back(br_p, ns2, n);
+
+        // Branch equation 2 (row br_s): n * I_p + I_s = 0
+        // This enforces power conservation: Vp*Ip = Vs*Is
+        triplets.emplace_back(br_s, br_p, n);
+        triplets.emplace_back(br_s, br_s, 1.0);
+
+        // No DC offset
+        b[br_p] = 0.0;
+        b[br_s] = 0.0;
+    }
+
+    /// Stamp ideal transformer Jacobian for Newton iteration
+    void stamp_transformer_jacobian(Real n, const std::vector<Index>& nodes,
+                                    Index br_p, Index br_s,
+                                    std::vector<Eigen::Triplet<Real>>& triplets,
+                                    Vector& f, const Vector& x) const {
+        Index np1 = nodes[0];
+        Index np2 = nodes[1];
+        Index ns1 = nodes[2];
+        Index ns2 = nodes[3];
+
+        Real vp1 = (np1 >= 0) ? x[np1] : 0.0;
+        Real vp2 = (np2 >= 0) ? x[np2] : 0.0;
+        Real vs1 = (ns1 >= 0) ? x[ns1] : 0.0;
+        Real vs2 = (ns2 >= 0) ? x[ns2] : 0.0;
+        Real i_p = x[br_p];
+        Real i_s = x[br_s];
+
+        Real v_p = vp1 - vp2;  // Primary voltage
+        Real v_s = vs1 - vs2;  // Secondary voltage
+
+        // KCL: Primary current
+        if (np1 >= 0) triplets.emplace_back(np1, br_p, 1.0);
+        if (np2 >= 0) triplets.emplace_back(np2, br_p, -1.0);
+
+        // KCL: Secondary current
+        if (ns1 >= 0) triplets.emplace_back(ns1, br_s, 1.0);
+        if (ns2 >= 0) triplets.emplace_back(ns2, br_s, -1.0);
+
+        // Branch equation 1: Vp - n*Vs = 0
+        if (np1 >= 0) triplets.emplace_back(br_p, np1, 1.0);
+        if (np2 >= 0) triplets.emplace_back(br_p, np2, -1.0);
+        if (ns1 >= 0) triplets.emplace_back(br_p, ns1, -n);
+        if (ns2 >= 0) triplets.emplace_back(br_p, ns2, n);
+
+        // Branch equation 2: n*I_p + I_s = 0
+        triplets.emplace_back(br_s, br_p, n);
+        triplets.emplace_back(br_s, br_s, 1.0);
+
+        // Residuals
+        // f_br_p = Vp - n*Vs = 0
+        f[br_p] += (v_p - n * v_s);
+
+        // f_br_s = n*I_p + I_s = 0
+        f[br_s] += (n * i_p + i_s);
+
+        // KCL residual contributions
+        if (np1 >= 0) f[np1] += i_p;
+        if (np2 >= 0) f[np2] -= i_p;
+        if (ns1 >= 0) f[ns1] += i_s;
+        if (ns2 >= 0) f[ns2] -= i_s;
     }
 };
 
