@@ -260,12 +260,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
-# Catch2 for testing (v3.7.1+ required for GCC 14 compatibility)
+# Catch2 for testing (v3.8.0+ required for GCC 14 compatibility)
 if(PULSIM_BUILD_TESTS)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.7.1
+        GIT_TAG v3.8.0
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Catch2)
