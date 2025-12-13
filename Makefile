@@ -93,7 +93,8 @@ RUFF := $(shell command -v ruff 2>/dev/null || echo "$(PYTHON) -m ruff")
 # =============================================================================
 .PHONY: all help configure reconfigure build rebuild \
         lib cli grpc python \
-        test pytest test-all test-coverage \
+        test test-quick test-converters test-verbose test-list \
+        pytest test-all test-coverage \
         clean distclean \
         install uninstall \
         format format-cpp format-python format-check \
@@ -125,7 +126,11 @@ help:
 	@echo "  make python         Build Python bindings"
 	@echo ""
 	@echo "Test targets:"
-	@echo "  make test           Run C++ tests"
+	@echo "  make test           Run all C++ simulation tests"
+	@echo "  make test-quick     Run quick converter tests only"
+	@echo "  make test-converters Run converter topology tests"
+	@echo "  make test-verbose   Run tests with detailed output"
+	@echo "  make test-list      List all available tests"
 	@echo "  make pytest         Run Python tests"
 	@echo "  make test-all       Run all tests (C++ and Python)"
 	@echo "  make test-coverage  Run tests with coverage"
@@ -207,14 +212,14 @@ cli: $(BUILD_DIR)/CMakeCache.txt
 	@echo "Building CLI executable..."
 	$(CMAKE) --build $(BUILD_DIR) --target pulsim -j $(JOBS)
 
-grpc:
+grpc: $(BUILD_DIR)/CMakeCache.txt
 	@echo "Building gRPC server..."
-	$(CMAKE) -S . -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_OPTIONS) -DPULSIM_BUILD_GRPC=ON
+	$(CMAKE) -S . -B $(BUILD_DIR) $(CMAKE_OPTIONS) -DPULSIM_BUILD_GRPC=ON
 	$(CMAKE) --build $(BUILD_DIR) --target pulsim_grpc_server -j $(JOBS)
 
-python:
+python: $(BUILD_DIR)/CMakeCache.txt
 	@echo "Building Python bindings..."
-	$(CMAKE) -S . -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_OPTIONS) -DPULSIM_BUILD_PYTHON=ON
+	$(CMAKE) -S . -B $(BUILD_DIR) $(CMAKE_OPTIONS) -DPULSIM_BUILD_PYTHON=ON
 	$(CMAKE) --build $(BUILD_DIR) --target _pulsim -j $(JOBS)
 	@mkdir -p $(BUILD_DIR)/python
 	@cp -r python/tests $(BUILD_DIR)/python/ 2>/dev/null || true
@@ -224,14 +229,28 @@ python:
 # =============================================================================
 test: $(BUILD_DIR)/CMakeCache.txt
 	@echo "Building and running C++ tests..."
-	$(CMAKE) --build $(BUILD_DIR) --target pulsim_tests -j $(JOBS)
-	@if [ -x "$(TEST_BIN)" ]; then \
-		echo "Running: $(TEST_BIN)"; \
-		$(TEST_BIN); \
-	else \
-		echo "Running ctest..."; \
-		$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure -j $(JOBS); \
-	fi
+	$(CMAKE) --build $(BUILD_DIR) --target pulsim_simulation_tests -j $(JOBS)
+	@$(BUILD_DIR)/core/pulsim_simulation_tests
+
+test-quick: $(BUILD_DIR)/CMakeCache.txt
+	@echo "Running quick tests..."
+	$(CMAKE) --build $(BUILD_DIR) --target pulsim_simulation_tests -j $(JOBS)
+	@$(BUILD_DIR)/core/pulsim_simulation_tests "[quick]"
+
+test-converters: $(BUILD_DIR)/CMakeCache.txt
+	@echo "Running converter tests..."
+	$(CMAKE) --build $(BUILD_DIR) --target pulsim_simulation_tests -j $(JOBS)
+	@$(BUILD_DIR)/core/pulsim_simulation_tests "[converter]"
+
+test-verbose: $(BUILD_DIR)/CMakeCache.txt
+	@echo "Running tests with verbose output..."
+	$(CMAKE) --build $(BUILD_DIR) --target pulsim_simulation_tests -j $(JOBS)
+	@$(BUILD_DIR)/core/pulsim_simulation_tests -s -d
+
+test-list: $(BUILD_DIR)/CMakeCache.txt
+	@echo "Available tests:"
+	$(CMAKE) --build $(BUILD_DIR) --target pulsim_simulation_tests -j $(JOBS)
+	@$(BUILD_DIR)/core/pulsim_simulation_tests --list-tests
 
 pytest: python
 	@echo "Running Python tests..."
