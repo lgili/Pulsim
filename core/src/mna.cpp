@@ -1129,8 +1129,7 @@ void MNAAssembler::stamp_transformer_transient(std::vector<Triplet>& triplets, V
                                                const Vector& x_prev, Real dt) {
     const auto& params = std::get<TransformerParams>(comp.params());
 
-    // For now, use the same as DC (ideal transformer)
-    // TODO: Add magnetizing inductance model
+    // Stamp ideal transformer equations
     stamp_transformer_dc(triplets, b, comp, branch_idx_p, branch_idx_s);
 
     // If magnetizing inductance is specified, add it in parallel with primary

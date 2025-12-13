@@ -144,56 +144,139 @@ private:
 };
 
 // =============================================================================
-// 4.1.3: KLU Policy Stub (for SuiteSparse integration)
+// 4.1.3: KLU Policy (SuiteSparse KLU integration)
 // =============================================================================
 
-/// KLU solver policy (stub - requires SuiteSparse)
-/// Enable with PULSIM_HAS_SUITESPARSE define
+#ifdef PULSIM_HAS_KLU
+#include <klu.h>
+#endif
+
+/// KLU solver policy - high-performance sparse LU for circuit simulation
+/// Enable with PULSIM_HAS_KLU define (automatically set when SuiteSparse is found)
 class KLUPolicy {
 public:
-    explicit KLUPolicy([[maybe_unused]] const LinearSolverConfig& config = {}) {
-#ifndef PULSIM_HAS_SUITESPARSE
-        // KLU not available, will fall back to SparseLU
+    explicit KLUPolicy([[maybe_unused]] const LinearSolverConfig& config = {})
+        : config_(config) {
+#ifdef PULSIM_HAS_KLU
+        klu_defaults(&klu_common_);
+        klu_common_.btf = 1;  // Enable block triangular form
+        klu_common_.scale = 1; // Scale matrix for better conditioning
 #endif
     }
 
-    bool analyze([[maybe_unused]] const SparseMatrix& A) {
-#ifdef PULSIM_HAS_SUITESPARSE
-        // TODO: Implement KLU symbolic analysis
-        return true;
+    ~KLUPolicy() {
+#ifdef PULSIM_HAS_KLU
+        cleanup();
+#endif
+    }
+
+    // Disable copy
+    KLUPolicy(const KLUPolicy&) = delete;
+    KLUPolicy& operator=(const KLUPolicy&) = delete;
+
+    // Enable move
+    KLUPolicy(KLUPolicy&& other) noexcept
+        : config_(other.config_) {
+#ifdef PULSIM_HAS_KLU
+        klu_common_ = other.klu_common_;
+        klu_symbolic_ = other.klu_symbolic_;
+        klu_numeric_ = other.klu_numeric_;
+        n_ = other.n_;
+        Ap_ = std::move(other.Ap_);
+        Ai_ = std::move(other.Ai_);
+        Ax_ = std::move(other.Ax_);
+        other.klu_symbolic_ = nullptr;
+        other.klu_numeric_ = nullptr;
+#else
+        fallback_ = std::move(other.fallback_);
+#endif
+    }
+
+    bool analyze(const SparseMatrix& A) {
+#ifdef PULSIM_HAS_KLU
+        cleanup();
+        n_ = static_cast<int>(A.rows());
+
+        // Convert to compressed column format
+        A.makeCompressed();
+        Ap_.assign(A.outerIndexPtr(), A.outerIndexPtr() + A.outerSize() + 1);
+        Ai_.assign(A.innerIndexPtr(), A.innerIndexPtr() + A.nonZeros());
+        Ax_.resize(static_cast<size_t>(A.nonZeros()));
+
+        klu_symbolic_ = klu_analyze(n_, Ap_.data(), Ai_.data(), &klu_common_);
+        return klu_symbolic_ != nullptr;
 #else
         return fallback_.analyze(A);
 #endif
     }
 
-    bool factorize([[maybe_unused]] const SparseMatrix& A) {
-#ifdef PULSIM_HAS_SUITESPARSE
-        // TODO: Implement KLU numeric factorization
-        return true;
+    bool factorize(const SparseMatrix& A) {
+#ifdef PULSIM_HAS_KLU
+        if (!klu_symbolic_) {
+            if (!analyze(A)) return false;
+        }
+
+        // Copy values
+        const Real* values = A.valuePtr();
+        for (size_t i = 0; i < Ax_.size(); ++i) {
+            Ax_[i] = values[i];
+        }
+
+        // Refactorize if we already have numeric factorization
+        if (klu_numeric_) {
+            int ok = klu_refactor(Ap_.data(), Ai_.data(), Ax_.data(),
+                                   klu_symbolic_, klu_numeric_, &klu_common_);
+            if (ok == 0) {
+                // Refactor failed, try full factorization
+                klu_free_numeric(&klu_numeric_, &klu_common_);
+                klu_numeric_ = nullptr;
+            } else {
+                return true;
+            }
+        }
+
+        // Full numeric factorization
+        klu_numeric_ = klu_factor(Ap_.data(), Ai_.data(), Ax_.data(),
+                                   klu_symbolic_, &klu_common_);
+        return klu_numeric_ != nullptr;
 #else
         return fallback_.factorize(A);
 #endif
     }
 
-    [[nodiscard]] std::expected<Vector, std::string> solve([[maybe_unused]] const Vector& b) {
-#ifdef PULSIM_HAS_SUITESPARSE
-        // TODO: Implement KLU solve
-        return std::unexpected("KLU not implemented");
+    [[nodiscard]] std::expected<Vector, std::string> solve(const Vector& b) {
+#ifdef PULSIM_HAS_KLU
+        if (!klu_symbolic_ || !klu_numeric_) {
+            return std::unexpected("KLU not factorized");
+        }
+
+        Vector x = b;  // KLU solves in-place
+        int ok = klu_solve(klu_symbolic_, klu_numeric_, n_, 1,
+                           x.data(), &klu_common_);
+        if (ok == 0) {
+            return std::unexpected("KLU solve failed");
+        }
+        return x;
 #else
         return fallback_.solve(b);
 #endif
     }
 
     [[nodiscard]] bool is_singular() const {
-#ifdef PULSIM_HAS_SUITESPARSE
-        return false;  // TODO
+#ifdef PULSIM_HAS_KLU
+        if (!klu_numeric_) return true;
+        // Check reciprocal condition number
+        klu_rcond(const_cast<klu_symbolic*>(klu_symbolic_),
+                  const_cast<klu_numeric*>(klu_numeric_),
+                  const_cast<klu_common*>(&klu_common_));
+        return klu_common_.rcond < 1e-14;
 #else
         return fallback_.is_singular();
 #endif
     }
 
     [[nodiscard]] static bool is_available() {
-#ifdef PULSIM_HAS_SUITESPARSE
+#ifdef PULSIM_HAS_KLU
         return true;
 #else
         return false;
@@ -201,7 +284,28 @@ public:
     }
 
 private:
-#ifndef PULSIM_HAS_SUITESPARSE
+#ifdef PULSIM_HAS_KLU
+    void cleanup() {
+        if (klu_numeric_) {
+            klu_free_numeric(&klu_numeric_, &klu_common_);
+            klu_numeric_ = nullptr;
+        }
+        if (klu_symbolic_) {
+            klu_free_symbolic(&klu_symbolic_, &klu_common_);
+            klu_symbolic_ = nullptr;
+        }
+    }
+
+    LinearSolverConfig config_;
+    klu_common klu_common_{};
+    klu_symbolic* klu_symbolic_ = nullptr;
+    klu_numeric* klu_numeric_ = nullptr;
+    int n_ = 0;
+    std::vector<int> Ap_;
+    std::vector<int> Ai_;
+    std::vector<double> Ax_;
+#else
+    LinearSolverConfig config_;
     EnhancedSparseLUPolicy fallback_;
 #endif
 };
