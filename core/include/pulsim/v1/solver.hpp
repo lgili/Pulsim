@@ -12,15 +12,25 @@
 // =============================================================================
 
 #include "pulsim/v1/numeric_types.hpp"
+#include <Eigen/Core>
+#include <Eigen/SparseCore>
 #include <Eigen/SparseLU>
 #include <vector>
 #include <array>
 #include <functional>
 #include <optional>
 #include <span>
-#include <expected>
+#include <string>
 
 namespace pulsim::v1 {
+
+// =============================================================================
+// Type Aliases for Eigen Types
+// =============================================================================
+
+using Scalar = double;
+using SparseMatrix = Eigen::SparseMatrix<Scalar, Eigen::ColMajor>;
+using Vector = Eigen::VectorXd;
 
 // =============================================================================
 // Solver Status and Result Types
@@ -334,6 +344,30 @@ private:
 };
 
 // =============================================================================
+// Linear Solver Result Type (portable alternative to std::expected)
+// =============================================================================
+
+struct LinearSolveResult {
+    std::optional<Vector> solution;
+    std::string error;
+
+    [[nodiscard]] bool has_value() const { return solution.has_value(); }
+    [[nodiscard]] explicit operator bool() const { return has_value(); }
+    [[nodiscard]] const Vector& value() const { return *solution; }
+    [[nodiscard]] Vector& value() { return *solution; }
+    [[nodiscard]] const Vector& operator*() const { return *solution; }
+    [[nodiscard]] Vector& operator*() { return *solution; }
+
+    static LinearSolveResult success(Vector v) {
+        return {std::move(v), {}};
+    }
+
+    static LinearSolveResult failure(std::string err) {
+        return {std::nullopt, std::move(err)};
+    }
+};
+
+// =============================================================================
 // Linear Solver Policy Concept
 // =============================================================================
 
@@ -341,7 +375,7 @@ template<typename T>
 concept LinearSolverPolicy = requires(T solver, const SparseMatrix& A, const Vector& b) {
     { solver.analyze(A) } -> std::same_as<bool>;
     { solver.factorize(A) } -> std::same_as<bool>;
-    { solver.solve(b) } -> std::same_as<std::expected<Vector, std::string>>;
+    { solver.solve(b) } -> std::same_as<LinearSolveResult>;
     { solver.is_singular() } -> std::same_as<bool>;
 };
 
@@ -367,18 +401,18 @@ public:
         return factorized_;
     }
 
-    [[nodiscard]] std::expected<Vector, std::string> solve(const Vector& b) {
+    [[nodiscard]] LinearSolveResult solve(const Vector& b) {
         if (!factorized_) {
-            return std::unexpected("Matrix not factorized");
+            return LinearSolveResult::failure("Matrix not factorized");
         }
 
         Vector x = solver_.solve(b);
 
         if (solver_.info() != Eigen::Success) {
-            return std::unexpected("Linear solve failed");
+            return LinearSolveResult::failure("Linear solve failed");
         }
 
-        return x;
+        return LinearSolveResult::success(std::move(x));
     }
 
     [[nodiscard]] bool is_singular() const { return singular_; }

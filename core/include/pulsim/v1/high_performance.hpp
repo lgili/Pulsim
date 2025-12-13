@@ -44,6 +44,12 @@ public:
     explicit EnhancedSparseLUPolicy(const LinearSolverConfig& config = {})
         : config_(config) {}
 
+    // Disable copy and move (Eigen::SparseLU is not copyable/movable)
+    EnhancedSparseLUPolicy(const EnhancedSparseLUPolicy&) = delete;
+    EnhancedSparseLUPolicy& operator=(const EnhancedSparseLUPolicy&) = delete;
+    EnhancedSparseLUPolicy(EnhancedSparseLUPolicy&&) = delete;
+    EnhancedSparseLUPolicy& operator=(EnhancedSparseLUPolicy&&) = delete;
+
     bool analyze(const SparseMatrix& A) {
         // Check if pattern changed (4.1.4)
         if (config_.detect_pattern_change && analyzed_) {
@@ -78,18 +84,18 @@ public:
         return factorized_;
     }
 
-    [[nodiscard]] std::expected<Vector, std::string> solve(const Vector& b) {
+    [[nodiscard]] LinearSolveResult solve(const Vector& b) {
         if (!factorized_) {
-            return std::unexpected("Matrix not factorized");
+            return LinearSolveResult::failure("Matrix not factorized");
         }
 
         Vector x = solver_.solve(b);
 
         if (solver_.info() != Eigen::Success) {
-            return std::unexpected("Linear solve failed");
+            return LinearSolveResult::failure("Linear solve failed");
         }
 
-        return x;
+        return LinearSolveResult::success(std::move(x));
     }
 
     [[nodiscard]] bool is_singular() const { return singular_; }
@@ -170,27 +176,13 @@ public:
 #endif
     }
 
-    // Disable copy
+    // Disable copy (solvers contain non-copyable state)
     KLUPolicy(const KLUPolicy&) = delete;
     KLUPolicy& operator=(const KLUPolicy&) = delete;
 
-    // Enable move
-    KLUPolicy(KLUPolicy&& other) noexcept
-        : config_(other.config_) {
-#ifdef PULSIM_HAS_KLU
-        klu_common_ = other.klu_common_;
-        klu_symbolic_ = other.klu_symbolic_;
-        klu_numeric_ = other.klu_numeric_;
-        n_ = other.n_;
-        Ap_ = std::move(other.Ap_);
-        Ai_ = std::move(other.Ai_);
-        Ax_ = std::move(other.Ax_);
-        other.klu_symbolic_ = nullptr;
-        other.klu_numeric_ = nullptr;
-#else
-        fallback_ = std::move(other.fallback_);
-#endif
-    }
+    // Disable move as well (Eigen::SparseLU cannot be moved, and this simplifies lifetime management)
+    KLUPolicy(KLUPolicy&&) = delete;
+    KLUPolicy& operator=(KLUPolicy&&) = delete;
 
     bool analyze(const SparseMatrix& A) {
 #ifdef PULSIM_HAS_KLU
@@ -244,19 +236,19 @@ public:
 #endif
     }
 
-    [[nodiscard]] std::expected<Vector, std::string> solve(const Vector& b) {
+    [[nodiscard]] LinearSolveResult solve(const Vector& b) {
 #ifdef PULSIM_HAS_KLU
         if (!klu_symbolic_ || !klu_numeric_) {
-            return std::unexpected("KLU not factorized");
+            return LinearSolveResult::failure("KLU not factorized");
         }
 
         Vector x = b;  // KLU solves in-place
         int ok = klu_solve(klu_symbolic_, klu_numeric_, n_, 1,
                            x.data(), &klu_common_);
         if (ok == 0) {
-            return std::unexpected("KLU solve failed");
+            return LinearSolveResult::failure("KLU solve failed");
         }
-        return x;
+        return LinearSolveResult::success(std::move(x));
 #else
         return fallback_.solve(b);
 #endif
