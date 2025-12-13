@@ -88,7 +88,7 @@ class TestBuckConverterDC:
         v_sw = dc_result.newton_result.solution[1]
         v_out = dc_result.newton_result.solution[2]
 
-        print(f"\nBuck DC (switch closed):")
+        print("\nBuck DC (switch closed):")
         print(f"  V_in = {v_in:.4f}V")
         print(f"  V_sw = {v_sw:.4f}V")
         print(f"  V_out = {v_out:.4f}V")
@@ -133,7 +133,7 @@ class TestBuckConverterSteadyState:
         # Calculate average output voltage
         avg_voltage = np.mean(v_out)
 
-        print(f"\nBuck Steady State (switch always closed):")
+        print("\nBuck Steady State (switch always closed):")
         print(f"  V_out(min) = {np.min(v_out):.4f}V")
         print(f"  V_out(max) = {np.max(v_out):.4f}V")
         print(f"  V_out(avg) = {avg_voltage:.4f}V")
@@ -175,7 +175,7 @@ class TestBuckConverterTransient:
         times = np.array(times)
         v_out = np.array([s[2] for s in states])
 
-        print(f"\nBuck Startup Transient:")
+        print("\nBuck Startup Transient:")
         print(f"  V_out(0) = {v_out[0]:.4f}V")
         print(f"  V_out(max) = {np.max(v_out):.4f}V")
         print(f"  V_out(final) = {v_out[-1]:.4f}V")
@@ -212,7 +212,7 @@ class TestBuckConverterTransient:
         v_L = v_sw - v_out
         max_v_L = np.max(np.abs(v_L))
 
-        print(f"\nInductor Voltage Check:")
+        print("\nInductor Voltage Check:")
         print(f"  Max |V_L| = {max_v_L:.4f}V")
         print(f"  V_in = {V_IN}V")
 
@@ -241,7 +241,7 @@ class TestBuckConverterComponents:
 
         v_sw = dc_result.newton_result.solution[1]
 
-        print(f"\nDiode Reverse Bias Test:")
+        print("\nDiode Reverse Bias Test:")
         print(f"  V_sw = {v_sw:.4f}V")
         print(f"  Diode: Anode=0V, Cathode={v_sw:.4f}V")
         print(f"  Diode is {'REVERSE BIASED' if v_sw > 0 else 'FORWARD BIASED'}")
@@ -256,7 +256,7 @@ class TestBuckConverterComponents:
 
         # Corner frequency should be well below switching frequency
         # for good ripple attenuation
-        print(f"\nLC Filter Analysis:")
+        print("\nLC Filter Analysis:")
         print(f"  L = {L_VALUE*1e6:.1f} µH")
         print(f"  C = {C_VALUE*1e6:.1f} µF")
         print(f"  f_0 = {f_0:.1f} Hz")
@@ -274,7 +274,7 @@ class TestBuckConverterTheory:
         """Verify D = Vout / Vin relationship."""
         D = V_OUT / V_IN
 
-        print(f"\nDuty Cycle Calculation:")
+        print("\nDuty Cycle Calculation:")
         print(f"  V_in = {V_IN}V")
         print(f"  V_out (target) = {V_OUT}V")
         print(f"  D = V_out / V_in = {D:.4f} ({D*100:.1f}%)")
@@ -293,7 +293,7 @@ class TestBuckConverterTheory:
         # Peak-to-peak ripple
         ripple_percent = (delta_I_L / I_L_avg) * 100
 
-        print(f"\nInductor Current Ripple:")
+        print("\nInductor Current Ripple:")
         print(f"  I_L (avg) = {I_L_avg:.4f} A")
         print(f"  ΔI_L = {delta_I_L*1000:.4f} mA")
         print(f"  Ripple = {ripple_percent:.1f}%")
@@ -309,7 +309,7 @@ class TestBuckConverterTheory:
 
         ripple_percent = (delta_V_out / V_OUT) * 100
 
-        print(f"\nOutput Voltage Ripple:")
+        print("\nOutput Voltage Ripple:")
         print(f"  V_out (avg) = {V_OUT}V")
         print(f"  ΔV_out = {delta_V_out*1000:.4f} mV")
         print(f"  Ripple = {ripple_percent:.4f}%")

@@ -5,9 +5,7 @@ Tolerance: 0.01% maximum relative error (exact solutions).
 """
 
 import pytest
-import numpy as np
 import pulsim as ps
-from ..framework.base import ValidationLevel, CircuitDefinition, ValidationTest
 
 
 # =============================================================================

@@ -79,9 +79,9 @@ class TestDevices:
 
     def test_inductor(self):
         """Test Inductor device."""
-        l = ps.Inductor(1e-3, 0.0, "L1")
-        assert l.inductance() == 1e-3
-        assert l.name() == "L1"
+        ind = ps.Inductor(1e-3, 0.0, "L1")
+        assert ind.inductance() == 1e-3
+        assert ind.name() == "L1"
 
     def test_voltage_source(self):
         """Test VoltageSource device."""
@@ -522,7 +522,6 @@ class TestTransient:
 
     def test_transient_with_initial_state(self):
         """Test transient with DC initial state."""
-        import numpy as np
 
         ckt = ps.Circuit()
         gnd = ps.Circuit.ground()

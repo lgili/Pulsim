@@ -127,8 +127,8 @@ class AnalyticalSolutions:
             return (V0 - R * I_initial) * np.exp(-t / tau)
         elif node in ("v_r", "V_R"):
             # Voltage across resistor
-            I = I_final + (I_initial - I_final) * np.exp(-t / tau)
-            return R * I
+            i_current = I_final + (I_initial - I_final) * np.exp(-t / tau)
+            return R * i_current
         else:
             raise ValueError(f"Unknown node '{node}' for RL step response")
 

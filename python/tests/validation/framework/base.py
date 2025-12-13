@@ -1,7 +1,7 @@
 """Base classes for validation framework."""
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Callable, Any
+from dataclasses import dataclass
+from typing import Optional, Callable, Any
 from enum import Enum
 import numpy as np
 import time

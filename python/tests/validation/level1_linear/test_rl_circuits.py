@@ -76,7 +76,7 @@ class TestRLStepResponse:
         max_error = np.max(np.abs(v_sim - v_analytical))
         max_rel_error = max_error / V_SOURCE
 
-        print(f"\nRL Step Response Accuracy:")
+        print("\nRL Step Response Accuracy:")
         print(f"  Max absolute error: {max_error:.6f}V")
         print(f"  Max relative error: {max_rel_error*100:.4f}%")
 

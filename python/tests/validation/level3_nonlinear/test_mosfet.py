@@ -9,7 +9,6 @@ Tolerance: 5% for nonlinear behavior.
 """
 
 import pytest
-import numpy as np
 import pulsim as ps
 
 
@@ -61,7 +60,7 @@ class TestMOSFETCutoff:
 
         # With g_off = 1e-12, current is negligible
         # V_source should be very close to 0 (tied to ground through source)
-        print(f"\nMOSFET Cutoff Test:")
+        print("\nMOSFET Cutoff Test:")
         print(f"  V_gate = {V_GATE}V (< Vth={VTH}V)")
         print(f"  V_drain = {v_drain:.6f}V")
 
@@ -78,7 +77,6 @@ class TestMOSFETCutoff:
 
         V_DD = 5.0
         V_GATE = 0.0  # Well below threshold
-        R_LOAD = 1e6  # Large resistor to see leakage effect
 
         ckt.add_voltage_source("Vdd", n_drain, gnd, V_DD)
         ckt.add_voltage_source("Vgate", n_gate, gnd, V_GATE)
@@ -98,7 +96,7 @@ class TestMOSFETCutoff:
         # With R_load in series, voltage divider effect
         v_drain = dc_result.newton_result.solution[0]
 
-        print(f"\nMOSFET Leakage Test:")
+        print("\nMOSFET Leakage Test:")
         print(f"  g_off = {params.g_off}")
         print(f"  V_drain = {v_drain:.6f}V")
 
@@ -146,7 +144,7 @@ class TestMOSFETLinearRegion:
         if vds < vov:
             # Linear region formula
             id_expected = KP * ((vov * vds) - (vds**2 / 2))
-            print(f"\nMOSFET Linear Region Test:")
+            print("\nMOSFET Linear Region Test:")
             print(f"  Vgs = {vgs}V, Vth = {VTH}V, Vov = {vov}V")
             print(f"  Vds = {vds:.4f}V (< Vov, so linear region)")
             print(f"  Id (expected) = {id_expected*1000:.4f} mA")
@@ -189,7 +187,7 @@ class TestMOSFETSaturation:
         vds = v_drain
         vov = vgs - VTH
 
-        print(f"\nMOSFET Saturation Region Test:")
+        print("\nMOSFET Saturation Region Test:")
         print(f"  Vgs = {vgs}V, Vth = {VTH}V, Vov = {vov}V")
         print(f"  Vds = {vds:.4f}V")
 
@@ -197,7 +195,7 @@ class TestMOSFETSaturation:
         if vds > vov:
             # Saturation: Id = kp/2 * (Vgs - Vth)²
             id_sat = (KP / 2) * (vov ** 2)
-            print(f"  In saturation region (Vds > Vov)")
+            print("  In saturation region (Vds > Vov)")
             print(f"  Id (saturation formula) = {id_sat*1000:.4f} mA")
 
             # Voltage drop across R_load: V_R = Id * R_LOAD
@@ -236,7 +234,7 @@ class TestMOSFETSwitching:
         v_drain = dc_result.newton_result.solution[1]  # n_drain is node 1
 
         # With high gate voltage, MOSFET is on, drain should be near ground
-        print(f"\nMOSFET Switch ON Test:")
+        print("\nMOSFET Switch ON Test:")
         print(f"  V_gate = {V_GATE}V")
         print(f"  V_drain = {v_drain:.4f}V (expected ~0V)")
 
@@ -271,7 +269,7 @@ class TestMOSFETSwitching:
         v_drain = dc_result.newton_result.solution[1]
 
         # With gate below threshold, MOSFET is off, drain should be near Vdd
-        print(f"\nMOSFET Switch OFF Test:")
+        print("\nMOSFET Switch OFF Test:")
         print(f"  V_gate = {V_GATE}V (< Vth={VTH}V)")
         print(f"  V_drain = {v_drain:.4f}V (expected ~{V_DD}V)")
 
@@ -313,7 +311,7 @@ class TestMOSFETParameters:
             v_drain = dc_result.newton_result.solution[1]
             results.append((vth, v_drain))
 
-        print(f"\nThreshold Voltage Effect:")
+        print("\nThreshold Voltage Effect:")
         for vth, v_drain in results:
             status = "ON" if v_drain < 2.5 else "OFF"
             print(f"  Vth={vth}V: V_drain={v_drain:.4f}V ({status})")
@@ -355,7 +353,7 @@ class TestMOSFETParameters:
             i_drain = (V_DD - v_drain) / R_LOAD
             results.append((kp, v_drain, i_drain))
 
-        print(f"\nTransconductance (kp) Effect:")
+        print("\nTransconductance (kp) Effect:")
         for kp, v_drain, i_drain in results:
             print(f"  kp={kp}: V_drain={v_drain:.4f}V, Id={i_drain*1000:.4f}mA")
 

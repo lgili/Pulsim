@@ -5,7 +5,6 @@ Tolerance: 1% maximum relative error.
 """
 
 import pytest
-import numpy as np
 import pulsim as ps
 
 

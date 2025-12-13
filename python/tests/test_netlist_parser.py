@@ -9,7 +9,6 @@ from pulsim.netlist import (
     parse_netlist_verbose,
     parse_value,
     NetlistParseError,
-    ParsedNetlist,
 )
 
 
@@ -241,7 +240,7 @@ class TestModelDirective:
         model = result.models['MYMOS']
         assert model.vth == 2.0
         assert model.kp == 0.5
-        assert model.is_nmos == True
+        assert model.is_nmos
 
     def test_pmos_model(self):
         netlist = """
@@ -250,7 +249,7 @@ class TestModelDirective:
         """
         result = parse_netlist_verbose(netlist)
         model = result.models['PMODEL']
-        assert model.is_nmos == False
+        assert not model.is_nmos
 
 
 class TestComments:
