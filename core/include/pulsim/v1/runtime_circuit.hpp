@@ -33,6 +33,7 @@ using DeviceVariant = std::variant<
     CurrentSource,
     IdealDiode,
     IdealSwitch,
+    VoltageControlledSwitch,
     MOSFET,
     IGBT,
     PWMVoltageSource,
@@ -161,6 +162,14 @@ public:
                     bool closed = false, Real g_on = 1e6, Real g_off = 1e-12) {
         devices_.emplace_back(IdealSwitch(g_on, g_off, closed, name));
         connections_.push_back({name, {n1, n2}, -1});
+    }
+
+    /// Add voltage-controlled switch (controlled by a PWM source)
+    /// ctrl: control node (typically driven by PWM), t1/t2: switch terminals
+    void add_vcswitch(const std::string& name, Index ctrl, Index t1, Index t2,
+                      Real v_threshold = 2.5, Real g_on = 1e3, Real g_off = 1e-9) {
+        devices_.emplace_back(VoltageControlledSwitch(v_threshold, g_on, g_off, name));
+        connections_.push_back({name, {ctrl, t1, t2}, -1});
     }
 
     void add_mosfet(const std::string& name, Index gate, Index drain, Index source,
@@ -532,6 +541,10 @@ private:
             Real g = dev.is_closed() ? 1e6 : 1e-12;
             stamp_resistor(1.0 / g, conn.nodes, triplets);
         }
+        else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+            // Initial: off-state conductance between t1 and t2
+            stamp_resistor(1.0 / dev.g_off(), {conn.nodes[1], conn.nodes[2]}, triplets);
+        }
         else if constexpr (std::is_same_v<T, MOSFET> || std::is_same_v<T, IGBT>) {
             // Initial: off-state conductance
             auto params = dev.params();
@@ -624,6 +637,9 @@ private:
             stamp_conductance(g, n1, n2, triplets);
             if (n1 >= 0) f[n1] += i;
             if (n2 >= 0) f[n2] -= i;
+        }
+        else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+            stamp_vcswitch_jacobian(dev, conn.nodes, triplets, f, x);
         }
         else if constexpr (std::is_same_v<T, Capacitor>) {
             // Trapezoidal companion model: i_n = g_eq*(v_n - v_{n-1}) - i_{n-1}
@@ -781,6 +797,52 @@ private:
         stamp_conductance(g, n_anode, n_cathode, triplets);
         if (n_anode >= 0) f[n_anode] += i;
         if (n_cathode >= 0) f[n_cathode] -= i;
+    }
+
+    void stamp_vcswitch_jacobian(const VoltageControlledSwitch& dev, const std::vector<Index>& nodes,
+                                 std::vector<Eigen::Triplet<Real>>& triplets,
+                                 Vector& f, const Vector& x) const {
+        Index n_ctrl = nodes[0];
+        Index n_t1 = nodes[1];
+        Index n_t2 = nodes[2];
+
+        Real v_ctrl = (n_ctrl >= 0) ? x[n_ctrl] : 0.0;
+        Real v_t1 = (n_t1 >= 0) ? x[n_t1] : 0.0;
+        Real v_t2 = (n_t2 >= 0) ? x[n_t2] : 0.0;
+
+        // Smooth transition using tanh for better convergence
+        Real v_th = dev.v_threshold();
+        Real g_on = dev.g_on();
+        Real g_off = dev.g_off();
+        Real hysteresis = 0.5;  // Smooth transition width
+
+        Real v_norm = (v_ctrl - v_th) / hysteresis;
+        Real sigmoid = 0.5 * (1.0 + std::tanh(v_norm));
+        Real g = g_off + (g_on - g_off) * sigmoid;
+
+        // Derivative of g w.r.t. v_ctrl
+        Real tanh_val = std::tanh(v_norm);
+        Real dsigmoid = 0.5 / hysteresis * (1.0 - tanh_val * tanh_val);
+        Real dg_dvctrl = (g_on - g_off) * dsigmoid;
+
+        // Current through switch
+        Real v_sw = v_t1 - v_t2;
+        Real i_sw = g * v_sw;
+
+        // Stamp conductance
+        stamp_conductance(g, n_t1, n_t2, triplets);
+
+        // Additional Jacobian terms for control voltage dependency
+        if (n_ctrl >= 0 && n_t1 >= 0) {
+            triplets.emplace_back(n_t1, n_ctrl, dg_dvctrl * v_sw);
+        }
+        if (n_ctrl >= 0 && n_t2 >= 0) {
+            triplets.emplace_back(n_t2, n_ctrl, -dg_dvctrl * v_sw);
+        }
+
+        // Residuals
+        if (n_t1 >= 0) f[n_t1] += i_sw;
+        if (n_t2 >= 0) f[n_t2] -= i_sw;
     }
 
     void stamp_mosfet_jacobian(const MOSFET& dev, const std::vector<Index>& nodes,
