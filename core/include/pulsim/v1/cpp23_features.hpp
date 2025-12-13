@@ -14,6 +14,7 @@
 #include <span>
 #include <type_traits>
 #include <string_view>
+#include <vector>
 
 // Check for C++23 mdspan support
 #if __has_include(<mdspan>)

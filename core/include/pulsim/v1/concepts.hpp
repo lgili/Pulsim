@@ -12,8 +12,9 @@
 
 #include <concepts>
 #include <type_traits>
-#include <expected>
+#include <optional>
 #include <span>
+#include <string>
 
 namespace pulsim::v1 {
 
@@ -185,7 +186,7 @@ concept LineSearchPolicy = requires(
 };
 
 // =============================================================================
-// Result Types using std::expected (C++23)
+// Result Types (portable alternative to std::expected)
 // =============================================================================
 
 /// Error types for solver operations
@@ -197,9 +198,43 @@ enum class SolverError {
     MemoryAllocationFailed
 };
 
-/// Result type for operations that can fail
+/// Convert SolverError to string
+[[nodiscard]] inline constexpr const char* to_string(SolverError err) noexcept {
+    switch (err) {
+        case SolverError::SingularMatrix: return "SingularMatrix";
+        case SolverError::MaxIterationsReached: return "MaxIterationsReached";
+        case SolverError::NumericalInstability: return "NumericalInstability";
+        case SolverError::InvalidInput: return "InvalidInput";
+        case SolverError::MemoryAllocationFailed: return "MemoryAllocationFailed";
+        default: return "Unknown";
+    }
+}
+
+/// Result type for operations that can fail (portable alternative to std::expected)
 template<typename T>
-using Result = std::expected<T, SolverError>;
+struct Result {
+    std::optional<T> value;
+    SolverError error = SolverError::InvalidInput;
+
+    [[nodiscard]] bool has_value() const { return value.has_value(); }
+    [[nodiscard]] explicit operator bool() const { return has_value(); }
+    [[nodiscard]] T& operator*() { return *value; }
+    [[nodiscard]] const T& operator*() const { return *value; }
+    [[nodiscard]] T* operator->() { return &*value; }
+    [[nodiscard]] const T* operator->() const { return &*value; }
+
+    static Result success(T v) {
+        Result r;
+        r.value = std::move(v);
+        return r;
+    }
+
+    static Result failure(SolverError err) {
+        Result r;
+        r.error = err;
+        return r;
+    }
+};
 
 // =============================================================================
 // Utility Concepts
