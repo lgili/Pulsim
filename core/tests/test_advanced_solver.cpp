@@ -404,3 +404,170 @@ TEST_CASE("MNA assembler with integration method", "[solver][mna]") {
     // (We can't easily compare because of sparsity structure,
     //  but at least verify they all assembled without error)
 }
+
+// =============================================================================
+// KLU Enhancement Tests (Section 9)
+// =============================================================================
+
+TEST_CASE("AdvancedLinearSolver Backend::Auto selection", "[solver][klu]") {
+    AdvancedLinearSolver::Options opts;
+    opts.backend = AdvancedLinearSolver::Backend::Auto;
+
+    AdvancedLinearSolver solver(opts);
+
+    // Check that Auto resolves correctly
+    auto effective = solver.effective_backend();
+
+    if (AdvancedLinearSolver::klu_available()) {
+        CHECK(effective == AdvancedLinearSolver::Backend::KLU);
+    } else {
+        CHECK(effective == AdvancedLinearSolver::Backend::EigenSparseLU);
+    }
+
+    // klu_available() should be a compile-time constant
+    constexpr bool klu_avail = AdvancedLinearSolver::klu_available();
+    (void)klu_avail;  // Suppress unused warning
+}
+
+TEST_CASE("AdvancedLinearSolver structure change detection", "[solver][klu]") {
+    AdvancedLinearSolver::Options opts;
+    opts.backend = AdvancedLinearSolver::Backend::EigenSparseLU;  // Use Eigen for portability
+    opts.reuse_factorization = true;
+
+    AdvancedLinearSolver solver(opts);
+
+    // Create initial matrix
+    SparseMatrix A(3, 3);
+    std::vector<Triplet> triplets;
+    triplets.emplace_back(0, 0, 4.0);
+    triplets.emplace_back(0, 1, 1.0);
+    triplets.emplace_back(1, 0, 1.0);
+    triplets.emplace_back(1, 1, 3.0);
+    triplets.emplace_back(2, 2, 2.0);
+    A.setFromTriplets(triplets.begin(), triplets.end());
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    // First solve - should perform symbolic + numeric factorization
+    auto result1 = solver.solve(A, b);
+    REQUIRE(result1.status == SolverStatus::Success);
+    int initial_symbolic = solver.symbolic_count();
+    CHECK(initial_symbolic >= 1);
+
+    // Same structure, different values - should NOT require new symbolic
+    SparseMatrix A2(3, 3);
+    triplets.clear();
+    triplets.emplace_back(0, 0, 5.0);  // Different value
+    triplets.emplace_back(0, 1, 2.0);  // Different value
+    triplets.emplace_back(1, 0, 2.0);
+    triplets.emplace_back(1, 1, 4.0);
+    triplets.emplace_back(2, 2, 3.0);
+    A2.setFromTriplets(triplets.begin(), triplets.end());
+
+    CHECK_FALSE(solver.structure_changed(A2));  // Same structure
+
+    // Different structure - should require new symbolic
+    SparseMatrix A3(3, 3);
+    triplets.clear();
+    triplets.emplace_back(0, 0, 4.0);
+    triplets.emplace_back(0, 1, 1.0);
+    triplets.emplace_back(0, 2, 1.0);  // New entry!
+    triplets.emplace_back(1, 0, 1.0);
+    triplets.emplace_back(1, 1, 3.0);
+    triplets.emplace_back(2, 2, 2.0);
+    A3.setFromTriplets(triplets.begin(), triplets.end());
+
+    CHECK(solver.structure_changed(A3));  // Different structure
+}
+
+TEST_CASE("AdvancedLinearSolver condition monitoring options", "[solver][klu]") {
+    AdvancedLinearSolver::Options opts;
+    opts.monitor_condition = true;
+    opts.condition_warning_threshold = 1e-12;
+    opts.condition_refactor_threshold = 1e-14;
+
+    AdvancedLinearSolver solver(opts);
+
+    // Well-conditioned matrix
+    SparseMatrix A(3, 3);
+    std::vector<Triplet> triplets;
+    triplets.emplace_back(0, 0, 4.0);
+    triplets.emplace_back(1, 1, 3.0);
+    triplets.emplace_back(2, 2, 2.0);
+    A.setFromTriplets(triplets.begin(), triplets.end());
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    auto result = solver.solve(A, b);
+    REQUIRE(result.status == SolverStatus::Success);
+
+    // rcond should be available (1.0 for Eigen, actual value for KLU)
+    Real rcond = solver.rcond();
+    CHECK(rcond > 0.0);
+
+    // Check ill-conditioned detection interface
+    CHECK_FALSE(solver.is_ill_conditioned());
+}
+
+TEST_CASE("AdvancedLinearSolver symbolic reuse tracking", "[solver][klu]") {
+    AdvancedLinearSolver::Options opts;
+    opts.backend = AdvancedLinearSolver::Backend::EigenSparseLU;
+    opts.reuse_factorization = true;
+    opts.max_reuses = 100;
+
+    AdvancedLinearSolver solver(opts);
+
+    // Create matrix
+    SparseMatrix A(3, 3);
+    std::vector<Triplet> triplets;
+    triplets.emplace_back(0, 0, 4.0);
+    triplets.emplace_back(1, 1, 3.0);
+    triplets.emplace_back(2, 2, 2.0);
+    A.setFromTriplets(triplets.begin(), triplets.end());
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    // First solve
+    solver.solve(A, b);
+    int sym1 = solver.symbolic_count();
+    int fact1 = solver.factorization_count();
+
+    // Second solve with same structure
+    solver.solve(A, b);
+    int sym2 = solver.symbolic_count();
+    int fact2 = solver.factorization_count();
+
+    // Symbolic should stay the same (no structure change)
+    CHECK(sym2 == sym1);
+    // Factorization count increases (Eigen doesn't support true refactorization)
+    CHECK(fact2 >= fact1);
+}
+
+TEST_CASE("AdvancedLinearSolver singular matrix handling", "[solver][klu]") {
+    AdvancedLinearSolver::Options opts;
+    opts.monitor_condition = true;
+
+    AdvancedLinearSolver solver(opts);
+
+    // Create a singular matrix
+    SparseMatrix A(3, 3);
+    std::vector<Triplet> triplets;
+    triplets.emplace_back(0, 0, 1.0);
+    triplets.emplace_back(0, 1, 1.0);
+    triplets.emplace_back(1, 0, 1.0);
+    triplets.emplace_back(1, 1, 1.0);  // Row 0 and 1 are identical
+    triplets.emplace_back(2, 2, 1.0);
+    A.setFromTriplets(triplets.begin(), triplets.end());
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    auto result = solver.solve(A, b);
+
+    // Should detect singularity
+    CHECK(solver.is_singular());
+    CHECK(solver.rcond() == 0.0);
+}

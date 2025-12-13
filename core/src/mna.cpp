@@ -1287,8 +1287,10 @@ Real MNAAssembler::next_source_event_time(Real current_time) const {
                 }
 
                 // Find next edge after current position
-                // Use small epsilon to avoid detecting current time as an event
-                constexpr Real epsilon = 1e-12;
+                // Use reasonable epsilon to avoid detecting current time as an event
+                // 1e-9 (1ns) is small enough for accurate edge timing but avoids
+                // floating point precision issues that could cause millions of tiny steps
+                constexpr Real epsilon = 1e-9;
                 Real min_time_to_edge = period;  // Worst case: wait for next period
 
                 for (Real edge : edges) {
@@ -1323,8 +1325,10 @@ Real MNAAssembler::next_source_event_time(Real current_time) const {
                 // Build list of unique edge times
                 std::vector<Real> edges = {0, w.tr, w.tr + w.pw, w.tr + w.pw + w.tf};
 
-                // Use small epsilon to avoid detecting current time as an event
-                constexpr Real epsilon = 1e-12;
+                // Use reasonable epsilon to avoid detecting current time as an event
+                // 1e-9 (1ns) is small enough for accurate edge timing but avoids
+                // floating point precision issues that could cause millions of tiny steps
+                constexpr Real epsilon = 1e-9;
                 Real min_time_to_edge = period;  // Worst case: wait for next period
 
                 for (Real edge : edges) {

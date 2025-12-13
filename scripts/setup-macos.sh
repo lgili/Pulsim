@@ -8,8 +8,8 @@
 #   ./scripts/setup-macos.sh --help   # Show help
 #
 # This script installs:
-#   Required: Homebrew, LLVM/Clang 17+, CMake, Ninja, Python 3
-#   Optional (--full): SuiteSparse, SUNDIALS, gRPC, protobuf
+#   Required: Homebrew, LLVM/Clang 17+, CMake, Ninja, Python 3, SuiteSparse (KLU)
+#   Optional (--full): SUNDIALS, gRPC, protobuf
 # =============================================================================
 
 set -euo pipefail
@@ -58,7 +58,7 @@ PulsimCore macOS Dependency Installer
 Usage: $0 [OPTIONS]
 
 Options:
-    --full      Install optional dependencies (SuiteSparse, SUNDIALS, gRPC)
+    --full      Install optional dependencies (SUNDIALS, gRPC)
     --help, -h  Show this help message
 
 Required dependencies (always installed):
@@ -67,9 +67,9 @@ Required dependencies (always installed):
     - CMake 3.20+
     - Ninja build system
     - Python 3.10+
+    - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with --full):
-    - SuiteSparse (sparse matrix operations)
     - SUNDIALS (advanced ODE/DAE solvers)
     - gRPC and protobuf (remote API)
 
@@ -211,17 +211,21 @@ install_python() {
     fi
 }
 
-install_optional_deps() {
-    print_header "Installing Optional Dependencies"
+install_suitesparse() {
+    print_header "Installing SuiteSparse/KLU"
 
-    # SuiteSparse
+    # SuiteSparse (required for KLU sparse linear solver)
     if is_installed suite-sparse; then
         print_success "SuiteSparse already installed"
     else
-        print_info "Installing SuiteSparse..."
+        print_info "Installing SuiteSparse (required for KLU linear solver)..."
         brew install suite-sparse
         print_success "SuiteSparse installed"
     fi
+}
+
+install_optional_deps() {
+    print_header "Installing Optional Dependencies"
 
     # SUNDIALS
     if is_installed sundials; then
@@ -305,15 +309,15 @@ verify_installation() {
     local clang_version
     clang_version=$(get_clang_version "${llvm_path}/bin/clang")
 
-    echo "Clang:    ${clang_version} (${llvm_path}/bin/clang)"
-    echo "CMake:    $(cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-    echo "Ninja:    $(ninja --version)"
-    echo "Python:   $(python3 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+    echo "Clang:       ${clang_version} (${llvm_path}/bin/clang)"
+    echo "CMake:       $(cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+    echo "Ninja:       $(ninja --version)"
+    echo "Python:      $(python3 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+    is_installed suite-sparse && echo "SuiteSparse: installed (KLU enabled)" || echo "SuiteSparse: not installed"
 
     if [[ "${FULL_INSTALL:-false}" == "true" ]]; then
         echo ""
         echo "Optional dependencies:"
-        is_installed suite-sparse && echo "  SuiteSparse: installed" || echo "  SuiteSparse: not installed"
         is_installed sundials && echo "  SUNDIALS:    installed" || echo "  SUNDIALS:    not installed"
         is_installed grpc && echo "  gRPC:        installed" || echo "  gRPC:        not installed"
         is_installed protobuf && echo "  protobuf:    installed" || echo "  protobuf:    not installed"
@@ -361,6 +365,7 @@ main() {
     install_llvm
     install_build_tools
     install_python
+    install_suitesparse
 
     if [[ "$full_install" == "true" ]]; then
         install_optional_deps
