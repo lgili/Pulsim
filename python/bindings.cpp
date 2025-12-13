@@ -459,6 +459,10 @@ void init_v2_module(py::module_& v2) {
              py::arg("name"), py::arg("n1"), py::arg("n2"),
              py::arg("closed") = false, py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
              "Add controllable switch between n1 and n2")
+        .def("add_vcswitch", &Circuit::add_vcswitch,
+             py::arg("name"), py::arg("ctrl"), py::arg("t1"), py::arg("t2"),
+             py::arg("v_threshold") = 2.5, py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9,
+             "Add voltage-controlled switch: ON when V(ctrl) > v_threshold. Ideal for PWM-driven converters.")
         .def("add_mosfet", &Circuit::add_mosfet,
              py::arg("name"), py::arg("gate"), py::arg("drain"), py::arg("source"),
              py::arg("params") = MOSFET::Params{},
