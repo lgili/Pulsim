@@ -106,4 +106,48 @@ if(PULSIM_BUILD_TESTS)
     )
 
     catch_discover_tests(pulsim_simulation_tests)
+
+    # =============================================================================
+    # Custom test targets for convenience
+    # =============================================================================
+
+    # Run all simulation tests
+    add_custom_target(test-all
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running all simulation tests..."
+    )
+
+    # Run only quick tests (converters, etc.)
+    add_custom_target(test-quick
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests "[quick]"
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running quick tests..."
+    )
+
+    # Run converter tests
+    add_custom_target(test-converters
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests "[converter]"
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running converter tests..."
+    )
+
+    # Run tests with verbose output
+    add_custom_target(test-verbose
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests -s -d
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running all tests with verbose output..."
+    )
+
+    # List all available tests
+    add_custom_target(test-list
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests --list-tests
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Listing all available tests..."
+    )
 endif()
