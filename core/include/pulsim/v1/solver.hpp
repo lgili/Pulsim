@@ -533,7 +533,7 @@ public:
             auto solve_result = linear_solver_.solve(-f);
             if (!solve_result) {
                 result.status = SolverStatus::NumericalError;
-                result.error_message = solve_result.error();
+                result.error_message = solve_result.error;
                 result.iterations = iter + 1;
                 result.history.set_final_status(result.status);
                 return result;

@@ -193,9 +193,18 @@ private:
 ///   MyDevice d;
 ///   d.do_work(); // Automatically calls do_work_impl() on MyDevice
 ///
+// Check for "deducing this" support (C++23 P0847)
+// GCC 14+, Clang 18+, MSVC 19.32+ support this feature
+#if defined(__cpp_explicit_this_parameter) && __cpp_explicit_this_parameter >= 202110L
+    #define PULSIM_HAS_DEDUCING_THIS 1
+#else
+    #define PULSIM_HAS_DEDUCING_THIS 0
+#endif
+
 template<typename Derived>
 class DeducingCRTPBase {
 public:
+#if PULSIM_HAS_DEDUCING_THIS
     // Using deducing this (C++23 feature)
     // The 'this auto&&' syntax allows the compiler to deduce the exact type
 
@@ -216,6 +225,30 @@ public:
         using SelfType = std::remove_cvref_t<decltype(self)>;
         return SelfType(self);
     }
+#else
+    // Fallback: Traditional CRTP pattern for compilers without deducing this
+
+    /// Stamp device into MNA matrix - traditional CRTP
+    template<typename Matrix, typename Vec>
+    void stamp(Matrix& G, Vec& b, std::span<const int> nodes) {
+        static_cast<Derived*>(this)->stamp_impl(G, b, nodes);
+    }
+
+    /// Get device name - const version
+    [[nodiscard]] const std::string& name() const {
+        return name_;
+    }
+
+    /// Get device name - non-const version
+    [[nodiscard]] std::string& name() {
+        return name_;
+    }
+
+    /// Clone pattern using traditional CRTP
+    [[nodiscard]] Derived clone() const {
+        return Derived(static_cast<const Derived&>(*this));
+    }
+#endif
 
 protected:
     DeducingCRTPBase() = default;
@@ -228,6 +261,7 @@ protected:
 template<typename Derived>
 class ChainableSetters {
 public:
+#if PULSIM_HAS_DEDUCING_THIS
     /// Set name with chaining - returns reference to derived type
     auto& set_name(this auto&& self, std::string name) {
         self.name_ = std::move(name);
@@ -240,6 +274,22 @@ public:
         self.value_ = std::forward<T>(value);
         return self;
     }
+#else
+    // Fallback: Traditional CRTP pattern
+
+    /// Set name with chaining - returns reference to derived type
+    Derived& set_name(std::string n) {
+        static_cast<Derived*>(this)->name_ = std::move(n);
+        return static_cast<Derived&>(*this);
+    }
+
+    /// Set value with chaining
+    template<typename T>
+    Derived& set_value(T&& value) {
+        static_cast<Derived*>(this)->value_ = std::forward<T>(value);
+        return static_cast<Derived&>(*this);
+    }
+#endif
 };
 
 // =============================================================================

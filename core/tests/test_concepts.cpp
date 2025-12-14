@@ -142,17 +142,17 @@ TEST_CASE("API Jacobian sparsity pattern", "[api][sparsity]") {
     }
 }
 
-TEST_CASE("API Result type (std::expected)", "[api][expected]") {
+TEST_CASE("API Result type", "[api][result]") {
     SECTION("Success result") {
-        Result<int> result = 42;
+        auto result = Result<int>::success(42);
         REQUIRE(result.has_value());
         REQUIRE(*result == 42);
     }
 
     SECTION("Error result") {
-        Result<int> result = std::unexpected(SolverError::SingularMatrix);
+        auto result = Result<int>::failure(SolverError::SingularMatrix);
         REQUIRE(!result.has_value());
-        REQUIRE(result.error() == SolverError::SingularMatrix);
+        REQUIRE(result.error == SolverError::SingularMatrix);
     }
 }
 
