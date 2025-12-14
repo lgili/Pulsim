@@ -189,11 +189,19 @@ public:
         cleanup();
         n_ = static_cast<int>(A.rows());
 
-        // Convert to compressed column format
-        A.makeCompressed();
-        Ap_.assign(A.outerIndexPtr(), A.outerIndexPtr() + A.outerSize() + 1);
-        Ai_.assign(A.innerIndexPtr(), A.innerIndexPtr() + A.nonZeros());
-        Ax_.resize(static_cast<size_t>(A.nonZeros()));
+        // Copy sparse matrix structure (assume input is already compressed)
+        // If not compressed, we need to work with a copy
+        if (!A.isCompressed()) {
+            SparseMatrix A_compressed = A;
+            A_compressed.makeCompressed();
+            Ap_.assign(A_compressed.outerIndexPtr(), A_compressed.outerIndexPtr() + A_compressed.outerSize() + 1);
+            Ai_.assign(A_compressed.innerIndexPtr(), A_compressed.innerIndexPtr() + A_compressed.nonZeros());
+            Ax_.resize(static_cast<size_t>(A_compressed.nonZeros()));
+        } else {
+            Ap_.assign(A.outerIndexPtr(), A.outerIndexPtr() + A.outerSize() + 1);
+            Ai_.assign(A.innerIndexPtr(), A.innerIndexPtr() + A.nonZeros());
+            Ax_.resize(static_cast<size_t>(A.nonZeros()));
+        }
 
         klu_symbolic_ = klu_analyze(n_, Ap_.data(), Ai_.data(), &klu_common_);
         return klu_symbolic_ != nullptr;
