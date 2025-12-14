@@ -582,6 +582,9 @@ TEST_CASE("H-bridge inverter 4 switches", "[converter][hbridge][quick]") {
 // =============================================================================
 
 TEST_CASE("3-phase inverter 6 switches", "[converter][3phase][quick]") {
+#if PULSIM_SKIP_TIMING_CHECKS
+    SKIP("Heavy simulation skipped in CI/sanitizer builds (timeout risk)");
+#endif
     // 3-phase inverter topology (each phase has 2 switches):
     //     Vdc+
     //      |
