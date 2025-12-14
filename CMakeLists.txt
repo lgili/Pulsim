@@ -48,6 +48,19 @@ option(PULSIM_ENABLE_PGO_GENERATE "Enable PGO instrumentation (generate profile)
 option(PULSIM_ENABLE_PGO_USE "Enable PGO optimization (use profile)" OFF)
 set(PULSIM_PGO_PROFILE_DIR "${CMAKE_BINARY_DIR}/pgo-profiles" CACHE PATH "Directory for PGO profile data")
 
+# CI Build Detection - skip timing-sensitive benchmark tests
+# Auto-detect CI environments or allow manual override
+if(DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})
+    option(PULSIM_CI_BUILD "Building in CI environment (skips timing benchmarks)" ON)
+else()
+    option(PULSIM_CI_BUILD "Building in CI environment (skips timing benchmarks)" OFF)
+endif()
+
+if(PULSIM_CI_BUILD)
+    add_compile_definitions(PULSIM_CI_BUILD=1)
+    message(STATUS "CI Build: Timing benchmarks will be skipped")
+endif()
+
 # LTO (Link-Time Optimization) - significant performance improvement
 if(PULSIM_ENABLE_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
     include(CheckIPOSupported)

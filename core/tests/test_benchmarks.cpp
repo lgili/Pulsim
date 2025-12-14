@@ -28,6 +28,14 @@
 #else
     #define PULSIM_SANITIZERS_ENABLED 0
 #endif
+
+// Skip timing benchmarks in CI environments or with sanitizers
+// CI runners have variable performance making timing assertions unreliable
+#if PULSIM_SANITIZERS_ENABLED || defined(PULSIM_CI_BUILD)
+    #define PULSIM_SKIP_TIMING_BENCHMARKS 1
+#else
+    #define PULSIM_SKIP_TIMING_BENCHMARKS 0
+#endif
 #include "pulsim/v1/core.hpp"
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/convergence_aids.hpp"
@@ -90,8 +98,8 @@ Vector generate_test_vector(Index size) {
 // =============================================================================
 
 TEST_CASE("Linear Solver Benchmarks", "[benchmark][solver]") {
-#if PULSIM_SANITIZERS_ENABLED
-    SKIP("Timing benchmarks skipped when running with sanitizers");
+#if PULSIM_SKIP_TIMING_BENCHMARKS
+    SKIP("Timing benchmarks skipped in CI or with sanitizers");
 #endif
     SECTION("SparseLU factorization timing") {
         constexpr int NUM_RUNS = 10;
@@ -204,8 +212,8 @@ TEST_CASE("Newton Solver Convergence Benchmarks", "[benchmark][newton]") {
 // =============================================================================
 
 TEST_CASE("Richardson LTE Benchmarks", "[benchmark][lte]") {
-#if PULSIM_SANITIZERS_ENABLED
-    SKIP("Timing benchmarks skipped when running with sanitizers");
+#if PULSIM_SKIP_TIMING_BENCHMARKS
+    SKIP("Timing benchmarks skipped in CI or with sanitizers");
 #endif
     SECTION("LTE computation timing") {
         SolutionHistory history(10);
@@ -249,8 +257,8 @@ TEST_CASE("Richardson LTE Benchmarks", "[benchmark][lte]") {
 // =============================================================================
 
 TEST_CASE("Timestep Controller Benchmarks", "[benchmark][timestep]") {
-#if PULSIM_SANITIZERS_ENABLED
-    SKIP("Timing benchmarks skipped when running with sanitizers");
+#if PULSIM_SKIP_TIMING_BENCHMARKS
+    SKIP("Timing benchmarks skipped in CI or with sanitizers");
 #endif
     SECTION("Controller computation timing") {
         AdvancedTimestepController controller;
@@ -287,8 +295,8 @@ TEST_CASE("Timestep Controller Benchmarks", "[benchmark][timestep]") {
 // =============================================================================
 
 TEST_CASE("Arena Allocator Benchmarks", "[benchmark][memory]") {
-#if PULSIM_SANITIZERS_ENABLED
-    SKIP("Timing benchmarks skipped when running with sanitizers");
+#if PULSIM_SKIP_TIMING_BENCHMARKS
+    SKIP("Timing benchmarks skipped in CI or with sanitizers");
 #endif
     SECTION("Arena allocation speed") {
         ArenaAllocator arena(1024 * 1024);  // 1MB
@@ -398,8 +406,8 @@ TEST_CASE("Catch2 Benchmarks - Memory", "[!benchmark]") {
 // =============================================================================
 
 TEST_CASE("Performance Regression Tests", "[benchmark][regression]") {
-#if PULSIM_SANITIZERS_ENABLED
-    SKIP("Timing benchmarks skipped when running with sanitizers");
+#if PULSIM_SKIP_TIMING_BENCHMARKS
+    SKIP("Timing benchmarks skipped in CI or with sanitizers");
 #endif
     SECTION("Linear solve should complete quickly") {
         constexpr Index SIZE = 50;
