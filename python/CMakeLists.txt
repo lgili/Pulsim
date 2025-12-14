@@ -71,6 +71,7 @@ pybind11_add_module(_pulsim
 target_link_libraries(_pulsim
     PRIVATE
         pulsim::core
+        pulsim::pulsim
 )
 
 # Set the output name to match Python conventions
@@ -90,6 +91,8 @@ install(TARGETS _pulsim
     LIBRARY DESTINATION pulsim
 )
 
-install(FILES pulsim/__init__.py
+install(FILES
+    pulsim/__init__.py
+    pulsim/netlist.py
     DESTINATION pulsim
 )

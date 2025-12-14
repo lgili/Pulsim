@@ -15,9 +15,146 @@
 
 #include "pulsim/v1/core.hpp"
 #include "pulsim/v1/control.hpp"
+#include "pulsim/ac_analysis.hpp"
+#include "pulsim/circuit.hpp"
 
 namespace py = pybind11;
 using namespace pulsim::v1;
+
+// =============================================================================
+// Circuit Converter: v1::Circuit -> pulsim::Circuit (IR)
+// =============================================================================
+
+/// Convert runtime v1::Circuit to IR pulsim::Circuit for AC analysis
+/// Note: Only basic components (R, L, C, V, I) are supported for AC analysis.
+/// Complex devices (switches, MOSFETs, IGBTs) are linearized as resistors.
+pulsim::Circuit convert_to_ir_circuit(const Circuit& v1_circuit) {
+    pulsim::Circuit ir;
+
+    // Helper to get node name from index (GND for -1)
+    auto get_node_name = [&](pulsim::Index idx) -> std::string {
+        if (idx < 0) return "0";  // Ground
+        return v1_circuit.node_name(idx);
+    };
+
+    const auto& devices = v1_circuit.devices();
+    const auto& connections = v1_circuit.connections();
+
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        const auto& conn = connections[i];
+        const auto& dev = devices[i];
+
+        std::visit([&](const auto& d) -> void {
+            using T = std::decay_t<decltype(d)>;
+
+            if constexpr (std::is_same_v<T, Resistor>) {
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    d.resistance());
+            }
+            else if constexpr (std::is_same_v<T, Capacitor>) {
+                ir.add_capacitor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    d.capacitance());
+            }
+            else if constexpr (std::is_same_v<T, Inductor>) {
+                ir.add_inductor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    d.inductance());
+            }
+            else if constexpr (std::is_same_v<T, VoltageSource>) {
+                pulsim::DCWaveform wf{d.voltage()};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, CurrentSource>) {
+                pulsim::DCWaveform wf{d.current()};
+                ir.add_current_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, SineVoltageSource>) {
+                // Convert to DC source with amplitude value for AC analysis
+                pulsim::DCWaveform wf{d.params().amplitude};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, PulseVoltageSource>) {
+                // Use pulse high value as DC equivalent
+                pulsim::DCWaveform wf{d.params().v_pulse};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+                // Use average value for AC analysis
+                const auto& p = d.params();
+                pulsim::DCWaveform wf{p.v_low + (p.v_high - p.v_low) * p.duty};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, IdealDiode>) {
+                // Linearize as small resistor (conducting state for AC)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    1e-3);  // 1 mOhm forward resistance
+            }
+            else if constexpr (std::is_same_v<T, IdealSwitch>) {
+                // Linearize as resistor based on state
+                Scalar r = d.is_closed() ? 1e-6 : 1e12;
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    r);
+            }
+            else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                // Linearize as resistor (assume on state)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[1]),
+                    get_node_name(conn.nodes[2]),
+                    1e-3);
+            }
+            else if constexpr (std::is_same_v<T, MOSFET>) {
+                // Linearize MOSFET as resistor (assume on state)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[1]),  // drain
+                    get_node_name(conn.nodes[2]),  // source
+                    1e-3);  // Small on-resistance
+            }
+            else if constexpr (std::is_same_v<T, IGBT>) {
+                // Linearize IGBT as resistor (assume on state)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[1]),  // collector
+                    get_node_name(conn.nodes[2]),  // emitter
+                    1e-3);  // Small on-resistance
+            }
+            else if constexpr (std::is_same_v<T, Transformer>) {
+                // Approximate transformer as coupled inductors
+                // For now, use large inductor on primary and ideal ratio
+                const Scalar lp = 1.0;  // 1H primary
+                ir.add_inductor(conn.name + "_Lp",
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    lp);
+                // Secondary would need proper coupling - skip for now
+            }
+        }, dev);
+    }
+
+    return ir;
+}
 
 // =============================================================================
 // Helper: Convert Result types to Python (raise exception on error)
@@ -1705,6 +1842,133 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("output_power", &SystemLossSummary::output_power)
         .def_readwrite("efficiency", &SystemLossSummary::efficiency)
         .def("compute_totals", &SystemLossSummary::compute_totals);
+
+    // =========================================================================
+    // AC Analysis (Frequency Domain)
+    // =========================================================================
+
+    // Frequency sweep type enum
+    py::enum_<pulsim::FrequencySweepType>(v2, "FrequencySweepType",
+        "Frequency sweep type for AC analysis")
+        .value("Linear", pulsim::FrequencySweepType::Linear)
+        .value("Decade", pulsim::FrequencySweepType::Decade)
+        .value("Octave", pulsim::FrequencySweepType::Octave)
+        .value("List", pulsim::FrequencySweepType::List)
+        .export_values();
+
+    // Solver status enum (pulsim namespace, used by ACResult)
+    py::enum_<pulsim::SolverStatus>(v2, "ACSolverStatus",
+        "Solver status for AC analysis")
+        .value("Success", pulsim::SolverStatus::Success)
+        .value("MaxIterationsReached", pulsim::SolverStatus::MaxIterationsReached)
+        .value("SingularMatrix", pulsim::SolverStatus::SingularMatrix)
+        .value("NumericalError", pulsim::SolverStatus::NumericalError)
+        .export_values();
+
+    // AC analysis options
+    py::class_<pulsim::ACOptions>(v2, "ACOptions", "AC analysis options")
+        .def(py::init<>())
+        .def_readwrite("sweep_type", &pulsim::ACOptions::sweep_type)
+        .def_readwrite("fstart", &pulsim::ACOptions::fstart)
+        .def_readwrite("fstop", &pulsim::ACOptions::fstop)
+        .def_readwrite("npoints", &pulsim::ACOptions::npoints)
+        .def_readwrite("frequency_list", &pulsim::ACOptions::frequency_list)
+        .def("generate_frequencies", &pulsim::ACOptions::generate_frequencies,
+            "Generate frequency points based on options");
+
+    // AC analysis result
+    py::class_<pulsim::ACResult>(v2, "ACResult", "AC analysis result")
+        .def(py::init<>())
+        .def_readonly("frequencies", &pulsim::ACResult::frequencies)
+        .def_readonly("signal_names", &pulsim::ACResult::signal_names)
+        .def_readonly("data", &pulsim::ACResult::data)
+        .def_readonly("status", &pulsim::ACResult::status)
+        .def_readonly("error_message", &pulsim::ACResult::error_message)
+        .def("num_frequencies", &pulsim::ACResult::num_frequencies)
+        .def("num_signals", &pulsim::ACResult::num_signals)
+        .def("magnitude", &pulsim::ACResult::magnitude,
+            py::arg("freq_idx"), py::arg("signal_idx"),
+            "Get magnitude at frequency index for signal index")
+        .def("phase_deg", &pulsim::ACResult::phase_deg,
+            py::arg("freq_idx"), py::arg("signal_idx"),
+            "Get phase in degrees at frequency index for signal index")
+        .def("magnitude_db", &pulsim::ACResult::magnitude_db,
+            py::arg("freq_idx"), py::arg("signal_idx"),
+            "Get magnitude in dB at frequency index for signal index")
+        .def("transfer_magnitude_db", &pulsim::ACResult::transfer_magnitude_db,
+            py::arg("freq_idx"), py::arg("output_idx"), py::arg("input_idx"),
+            "Get transfer function magnitude in dB")
+        .def("transfer_phase_deg", &pulsim::ACResult::transfer_phase_deg,
+            py::arg("freq_idx"), py::arg("output_idx"), py::arg("input_idx"),
+            "Get transfer function phase in degrees");
+
+    // Bode data structure
+    py::class_<pulsim::BodeData>(v2, "BodeData", "Bode plot data")
+        .def(py::init<>())
+        .def_readonly("frequencies", &pulsim::BodeData::frequencies)
+        .def_readonly("magnitude_db", &pulsim::BodeData::magnitude_db)
+        .def_readonly("phase_deg", &pulsim::BodeData::phase_deg)
+        .def_readonly("gain_margin_db", &pulsim::BodeData::gain_margin_db)
+        .def_readonly("phase_margin_deg", &pulsim::BodeData::phase_margin_deg)
+        .def_readonly("gain_crossover_freq", &pulsim::BodeData::gain_crossover_freq)
+        .def_readonly("phase_crossover_freq", &pulsim::BodeData::phase_crossover_freq)
+        .def("has_gain_margin", &pulsim::BodeData::has_gain_margin)
+        .def("has_phase_margin", &pulsim::BodeData::has_phase_margin);
+
+    // Extract Bode data from AC result
+    v2.def("extract_bode_data",
+        py::overload_cast<const pulsim::ACResult&, size_t, size_t>(&pulsim::extract_bode_data),
+        py::arg("result"), py::arg("output_idx"), py::arg("input_idx"),
+        "Extract Bode plot data by signal indices");
+
+    v2.def("extract_bode_data",
+        py::overload_cast<const pulsim::ACResult&, const std::string&, const std::string&>(&pulsim::extract_bode_data),
+        py::arg("result"), py::arg("output_signal"), py::arg("input_signal"),
+        "Extract Bode plot data by signal names");
+
+    v2.def("calculate_stability_margins", &pulsim::calculate_stability_margins,
+        py::arg("bode"), "Calculate gain and phase margins from Bode data");
+
+    // =========================================================================
+    // AC Analysis Functions (with v1::Circuit conversion)
+    // =========================================================================
+
+    // Expose the circuit converter
+    v2.def("convert_to_ir_circuit", &convert_to_ir_circuit,
+        py::arg("circuit"),
+        "Convert v1::Circuit to IR circuit for AC analysis");
+
+    // AC analysis function that takes v1::Circuit
+    v2.def("run_ac",
+        [](const Circuit& circuit, const pulsim::ACOptions& options,
+           const std::optional<pulsim::Vector>& operating_point) {
+            // Convert v1::Circuit to IR circuit
+            pulsim::Circuit ir = convert_to_ir_circuit(circuit);
+
+            // Run AC analysis
+            if (operating_point) {
+                return pulsim::ac_analysis(ir, options, *operating_point);
+            } else {
+                return pulsim::ac_analysis(ir, options);
+            }
+        },
+        py::arg("circuit"), py::arg("options"),
+        py::arg("operating_point") = std::nullopt,
+        "Run AC frequency analysis on a circuit");
+
+    // AC Analyzer class (wraps v1::Circuit)
+    py::class_<pulsim::ACAnalyzer>(v2, "ACAnalyzer",
+        "AC small-signal analyzer for frequency-domain analysis")
+        .def(py::init([](const Circuit& circuit) {
+            return std::make_unique<pulsim::ACAnalyzer>(convert_to_ir_circuit(circuit));
+        }), py::arg("circuit"),
+            "Create AC analyzer from v1::Circuit")
+        .def("set_operating_point", &pulsim::ACAnalyzer::set_operating_point,
+            py::arg("x_op"), "Set DC operating point for linearization")
+        .def("analyze", &pulsim::ACAnalyzer::analyze, py::arg("options"),
+            "Run AC analysis over frequency range")
+        .def("analyze_at_frequency", &pulsim::ACAnalyzer::analyze_at_frequency,
+            py::arg("frequency"), "Analyze at a single frequency");
 
     // Version info
     v2.attr("__version__") = "2.0.0";

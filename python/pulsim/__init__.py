@@ -128,6 +128,17 @@ from ._pulsim import (
     EfficiencyCalculator,
     LossResult,
     SystemLossSummary,
+
+    # AC Analysis
+    ACOptions,
+    ACResult,
+    ACAnalyzer,
+    ACSolverStatus,
+    FrequencySweepType,
+    BodeData,
+    run_ac,
+    extract_bode_data,
+    calculate_stability_margins,
 )
 
 # Netlist Parser (Pure Python)
@@ -266,6 +277,17 @@ __all__ = [
     "EfficiencyCalculator",
     "LossResult",
     "SystemLossSummary",
+
+    # AC Analysis
+    "ACOptions",
+    "ACResult",
+    "ACAnalyzer",
+    "ACSolverStatus",
+    "FrequencySweepType",
+    "BodeData",
+    "run_ac",
+    "extract_bode_data",
+    "calculate_stability_margins",
 
     # Netlist Parser
     "parse_netlist",
