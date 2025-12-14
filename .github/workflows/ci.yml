@@ -116,7 +116,12 @@ jobs:
       - name: Run C++ Tests
         run: |
           cd build
-          ctest --output-on-failure --timeout 120
+          # Use longer timeout for sanitizer builds (10-20x overhead)
+          if [ "${{ matrix.sanitizers }}" = "ON" ]; then
+            ctest --output-on-failure --timeout 600
+          else
+            ctest --output-on-failure --timeout 120
+          fi
 
       - name: Run v2 API Tests
         run: |
