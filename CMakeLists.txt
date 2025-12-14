@@ -198,6 +198,13 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -Wall -Wextra -Wpedantic -Werror=return-type
         -Wno-c++98-compat -Wno-c++98-compat-pedantic
     )
+    # On Linux, use libc++ instead of libstdc++ for better C++23 support
+    # This avoids ABI issues between Clang and GCC's standard library
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_compile_options(-stdlib=libc++)
+        add_link_options(-stdlib=libc++ -lc++abi)
+        message(STATUS "Using libc++ on Linux for Clang")
+    endif()
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-g -O0 -fno-omit-frame-pointer)
     else()
