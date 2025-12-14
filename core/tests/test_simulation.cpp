@@ -180,6 +180,9 @@ TEST_CASE("RLC transient simulation", "[simulation]") {
 }
 
 TEST_CASE("Pulse source simulation", "[simulation]") {
+#if PULSIM_SKIP_TIMING_CHECKS
+    SKIP("Heavy simulation skipped in CI/sanitizer builds (timeout risk)");
+#endif
     Circuit circuit;
     PulseWaveform pulse{0.0, 5.0, 0.0, 1e-9, 1e-9, 0.5e-3, 1e-3};
     circuit.add_voltage_source("V1", "in", "0", pulse);

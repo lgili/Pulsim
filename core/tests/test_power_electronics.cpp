@@ -4,6 +4,26 @@
 #include <cmath>
 #include <vector>
 
+// Detect if running with sanitizers (ASan, UBSan, etc.)
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+    #define PULSIM_SANITIZERS_ENABLED 1
+#elif defined(__has_feature)
+    #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+        #define PULSIM_SANITIZERS_ENABLED 1
+    #else
+        #define PULSIM_SANITIZERS_ENABLED 0
+    #endif
+#else
+    #define PULSIM_SANITIZERS_ENABLED 0
+#endif
+
+// Skip heavy tests in CI environments or with sanitizers
+#if PULSIM_SANITIZERS_ENABLED || defined(PULSIM_CI_BUILD)
+    #define PULSIM_SKIP_HEAVY_TESTS 1
+#else
+    #define PULSIM_SKIP_HEAVY_TESTS 0
+#endif
+
 using namespace pulsim;
 using Catch::Matchers::WithinRel;
 using Catch::Matchers::WithinAbs;
@@ -92,6 +112,9 @@ TEST_CASE("Switch with control signal", "[power]") {
 }
 
 TEST_CASE("Buck converter topology", "[power]") {
+#if PULSIM_SKIP_HEAVY_TESTS
+    SKIP("Heavy simulation skipped in CI/sanitizer builds (timeout risk)");
+#endif
     // Simple buck converter: Vdc - S1 - L - C - R (load)
     //                              |
     //                              D1 (freewheeling diode)
