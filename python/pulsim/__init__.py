@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "2.0.0"
+__version__ = "0.2.0"
 
 from ._pulsim import (
     # Enums
@@ -58,6 +58,7 @@ from ._pulsim import (
 
     # Transient Simulation
     run_transient,
+    run_transient_streaming,
 
     # Solver Configuration
     Tolerances,
@@ -207,6 +208,7 @@ __all__ = [
 
     # Transient Simulation
     "run_transient",
+    "run_transient_streaming",
 
     # Solver Configuration
     "Tolerances",
