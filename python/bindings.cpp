@@ -20,15 +20,23 @@ namespace py = pybind11;
 using namespace pulsim::v1;
 
 // =============================================================================
-// Helper: Convert std::expected to Python (raise exception on error)
+// Helper: Convert Result types to Python (raise exception on error)
 // =============================================================================
 
 template<typename T>
-T unwrap_expected(const std::expected<T, std::string>& result, const char* context) {
+T unwrap_result(const Result<T>& result, const char* context) {
     if (!result) {
-        throw std::runtime_error(std::string(context) + ": " + result.error());
+        throw std::runtime_error(std::string(context) + ": " + to_string(result.error));
     }
     return *result;
+}
+
+template<typename T>
+T unwrap_solve_result(const LinearSolveResult& result, const char* context) {
+    if (!result) {
+        throw std::runtime_error(std::string(context) + ": " + result.error);
+    }
+    return result.value();
 }
 
 // =============================================================================
@@ -1296,7 +1304,9 @@ void init_v2_module(py::module_& v2) {
     // Utility Functions
     // =========================================================================
 
-    v2.def("solver_status_to_string", &to_string,
+    v2.def("solver_status_to_string", [](SolverStatus status) {
+               return std::string(to_string(status));
+           },
            py::arg("status"),
            "Convert SolverStatus to string");
 
