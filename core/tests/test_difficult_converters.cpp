@@ -16,6 +16,26 @@
 #include <vector>
 #include <chrono>
 
+// Detect if running with sanitizers (ASan, UBSan, etc.)
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+    #define PULSIM_SANITIZERS_ENABLED 1
+#elif defined(__has_feature)
+    #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+        #define PULSIM_SANITIZERS_ENABLED 1
+    #else
+        #define PULSIM_SANITIZERS_ENABLED 0
+    #endif
+#else
+    #define PULSIM_SANITIZERS_ENABLED 0
+#endif
+
+// Skip timing checks in CI environments or with sanitizers
+#if PULSIM_SANITIZERS_ENABLED || defined(PULSIM_CI_BUILD)
+    #define PULSIM_SKIP_TIMING_CHECKS 1
+#else
+    #define PULSIM_SKIP_TIMING_CHECKS 0
+#endif
+
 using namespace pulsim;
 using Catch::Matchers::WithinAbs;
 
@@ -343,7 +363,9 @@ TEST_CASE("DC source RC baseline", "[converter][baseline][quick]") {
 
     INFO("Duration: " << ms << " ms, Steps: " << result.total_steps);
     REQUIRE(result.final_status == SolverStatus::Success);
+#if !PULSIM_SKIP_TIMING_CHECKS
     CHECK(ms < 1000);  // Should complete in under 1 second
+#endif
 }
 
 TEST_CASE("Pulse source RC test", "[converter][pulse][quick]") {
@@ -370,7 +392,9 @@ TEST_CASE("Pulse source RC test", "[converter][pulse][quick]") {
 
     INFO("Duration: " << ms << " ms, Steps: " << result.total_steps);
     REQUIRE(result.final_status == SolverStatus::Success);
+#if !PULSIM_SKIP_TIMING_CHECKS
     CHECK(ms < 5000);
+#endif
 }
 
 // =============================================================================
@@ -553,7 +577,9 @@ TEST_CASE("H-bridge inverter 4 switches", "[converter][hbridge][quick]") {
     // Output should swing significantly in both directions
     CHECK(v_max > 20.0);
     CHECK(v_min < -20.0);
+#if !PULSIM_SKIP_TIMING_CHECKS
     CHECK(ms < 5000);
+#endif
 }
 
 // =============================================================================
@@ -679,5 +705,7 @@ TEST_CASE("3-phase inverter 6 switches", "[converter][3phase][quick]") {
     CHECK(va_max > 50.0);
     CHECK(vb_max > 50.0);
     CHECK(vc_max > 50.0);
+#if !PULSIM_SKIP_TIMING_CHECKS
     CHECK(ms < 10000);  // Allow more time for 6-switch complexity
+#endif
 }

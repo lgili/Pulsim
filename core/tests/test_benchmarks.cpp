@@ -463,9 +463,13 @@ TEST_CASE("Profiling Infrastructure", "[benchmark][profiling]") {
         double elapsed = timer.elapsed_ms();
         INFO("Timer reported: " << elapsed << " ms");
 
-        // Should be approximately 10ms (allow 50% tolerance due to OS scheduling)
+        // Should be approximately 10ms (allow large tolerance for OS scheduling and CI)
         CHECK(elapsed >= 5.0);
+#if !PULSIM_SKIP_TIMING_BENCHMARKS
         CHECK(elapsed < 50.0);
+#else
+        CHECK(elapsed < 500.0);  // Much more generous in CI/sanitizer builds
+#endif
     }
 
     SECTION("Profiler basic functionality") {
