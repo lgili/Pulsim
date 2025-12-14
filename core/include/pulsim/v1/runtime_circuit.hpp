@@ -495,6 +495,16 @@ public:
         return false;
     }
 
+    // =========================================================================
+    // Accessors for Circuit Conversion (AC Analysis)
+    // =========================================================================
+
+    /// Get all devices (for conversion to IR circuit)
+    [[nodiscard]] const std::vector<DeviceVariant>& devices() const { return devices_; }
+
+    /// Get all connections (for conversion to IR circuit)
+    [[nodiscard]] const std::vector<DeviceConnection>& connections() const { return connections_; }
+
 private:
     std::vector<DeviceVariant> devices_;
     std::vector<DeviceConnection> connections_;
