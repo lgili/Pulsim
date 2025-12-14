@@ -60,16 +60,9 @@ jobs:
               sudo apt-get update
               sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libsuitesparse-dev libeigen3-dev
 
-          # macOS with Apple Clang (Xcode) - Intel
-          - name: "macOS Apple Clang (Intel)"
-            os: macos-13
-            compiler: appleclang
-            cc: clang
-            cxx: clang++
-            build_type: Release
-            install_cmd: brew install cmake ninja suite-sparse eigen
-
           # macOS ARM64 (Apple Silicon)
+          # Note: macos-13 (Intel) removed - Apple has transitioned to ARM,
+          # and Intel runners frequently timeout in GitHub Actions queue
           - name: "macOS ARM64 (Apple Silicon)"
             os: macos-14
             compiler: appleclang
@@ -139,14 +132,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-13, macos-14]
+        # Note: macos-13 (Intel) removed - Apple has transitioned to ARM,
+        # and Intel runners frequently timeout in GitHub Actions queue
+        os: [ubuntu-24.04, macos-14]
         python-version: ['3.10', '3.11', '3.12', '3.13']
-        exclude:
-          # Skip some combinations to reduce CI time
-          - os: macos-13
-            python-version: '3.10'
-          - os: macos-13
-            python-version: '3.13'
 
     steps:
       - name: Checkout
