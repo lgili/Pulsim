@@ -7,6 +7,26 @@
 #include <thread>
 #include <vector>
 
+// Detect if running with sanitizers (ASan, UBSan, etc.)
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+    #define PULSIM_SANITIZERS_ENABLED 1
+#elif defined(__has_feature)
+    #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+        #define PULSIM_SANITIZERS_ENABLED 1
+    #else
+        #define PULSIM_SANITIZERS_ENABLED 0
+    #endif
+#else
+    #define PULSIM_SANITIZERS_ENABLED 0
+#endif
+
+// Skip timing checks in CI environments or with sanitizers
+#if PULSIM_SANITIZERS_ENABLED || defined(PULSIM_CI_BUILD)
+    #define PULSIM_SKIP_TIMING_CHECKS 1
+#else
+    #define PULSIM_SKIP_TIMING_CHECKS 0
+#endif
+
 using namespace pulsim;
 using Catch::Matchers::WithinRel;
 using Catch::Matchers::WithinAbs;
@@ -757,7 +777,11 @@ TEST_CASE("Progress callback - performance overhead <5%", "[simulation][progress
     // The overhead should be less than 50% even with callbacks
     // (5% target is for production builds with minimal callbacks;
     //  test builds and aggressive callbacks may be higher)
+#if !PULSIM_SKIP_TIMING_CHECKS
     CHECK(overhead < 50.0);
+#else
+    CHECK(overhead < 500.0);  // Much more generous in CI/sanitizer builds
+#endif
 }
 
 // =============================================================================
