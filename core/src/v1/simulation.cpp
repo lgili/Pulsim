@@ -418,6 +418,10 @@ SimulationResult Simulator::run_transient(const Vector& x0,
     Real dt = options_.dt;
     Vector x = x0;
 
+    int rejection_streak = 0;
+    int high_iter_streak = 0;
+    int stiffness_cooldown = 0;
+
     circuit_.set_current_time(t);
     circuit_.set_timestep(dt);
     circuit_.set_integration_order(options_.enable_bdf_order_control ?
@@ -465,6 +469,14 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         Real dt_used = dt;
 
         while (!accepted && retries <= options_.max_step_retries) {
+            if (options_.stiffness_config.enable && stiffness_cooldown > 0) {
+                dt = std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff);
+                if (options_.enable_bdf_order_control) {
+                    bdf_controller_.set_order(
+                        std::min(bdf_controller_.current_order(), options_.stiffness_config.max_bdf_order));
+                }
+            }
+
             Real t_next = t + dt;
             dt_used = dt;
 
@@ -474,6 +486,15 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                 dt = std::max(options_.dt_min, dt * 0.5);
                 result.timestep_rejections++;
                 retries++;
+                rejection_streak++;
+                high_iter_streak = 0;
+                if (options_.stiffness_config.enable &&
+                    rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
+                    stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+                }
+                if (options_.enable_bdf_order_control) {
+                    bdf_controller_.reduce_on_failure();
+                }
                 continue;
             }
 
@@ -493,10 +514,41 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                     dt = decision.dt_new;
                     result.timestep_rejections++;
                     retries++;
+                    rejection_streak++;
+                    high_iter_streak = 0;
+                    if (options_.stiffness_config.enable &&
+                        rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
+                        stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+                    }
                     continue;
                 }
 
                 dt = decision.dt_new;
+            }
+
+            // Event-aligned step splitting for hard switching edges
+            if (options_.enable_events && dt_used > options_.dt_min * 1.01) {
+                bool split_for_event = false;
+                for (auto& sw : switch_monitors_) {
+                    Real v_now = (sw.ctrl >= 0) ? step_result.solution[sw.ctrl] : 0.0;
+                    bool now_on = v_now > sw.v_threshold;
+                    if (now_on != sw.was_on) {
+                        Real t_event = t + dt_used;
+                        Vector x_event = step_result.solution;
+                        if (find_switch_event_time(sw, t, t + dt_used, x, t_event, x_event)) {
+                            Real dt_event = t_event - t;
+                            if (dt_event > options_.dt_min * 1.01 && dt_event < dt_used * 0.999) {
+                                dt = std::max(options_.dt_min, dt_event);
+                                retries++;
+                                split_for_event = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (split_for_event) {
+                    continue;
+                }
             }
 
             accepted = true;
@@ -511,6 +563,30 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         }
 
         result.newton_iterations_total += step_result.iterations;
+        rejection_streak = 0;
+
+        if (options_.stiffness_config.enable) {
+            if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {
+                high_iter_streak++;
+            } else {
+                high_iter_streak = 0;
+            }
+
+            if (high_iter_streak >= options_.stiffness_config.newton_streak_threshold) {
+                stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+            }
+
+            if (options_.stiffness_config.monitor_conditioning) {
+                auto telemetry = newton_solver_.linear_solver().telemetry();
+                if (telemetry.last_error > options_.stiffness_config.conditioning_error_threshold) {
+                    stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+                }
+            }
+
+            if (stiffness_cooldown > 0) {
+                stiffness_cooldown--;
+            }
+        }
 
         if (options_.enable_events) {
             for (auto& sw : switch_monitors_) {

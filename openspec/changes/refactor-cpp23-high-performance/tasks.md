@@ -27,9 +27,9 @@
 - [x] 2.5 Record nonlinear solver telemetry and fallback reason codes
 
 ## Phase 3: Stiffness & Event Handling
-- [ ] 3.1 Detect stiffness indicators (rejection streaks, conditioning shifts)
-- [ ] 3.2 Apply BDF order caps and dt backoff under stiffness
-- [ ] 3.3 Event-aligned step splitting for hard switching edges
+- [x] 3.1 Detect stiffness indicators (rejection streaks, conditioning shifts)
+- [x] 3.2 Apply BDF order caps and dt backoff under stiffness
+- [x] 3.3 Event-aligned step splitting for hard switching edges
 
 ## Phase 4: Performance & Memory
 - [ ] 4.1 Reuse Jacobian structure and symbolic factorization where possible

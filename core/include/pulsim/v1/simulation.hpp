@@ -56,6 +56,18 @@ struct SwitchingEnergy {
     Real err = 0.0;
 };
 
+struct StiffnessConfig {
+    bool enable = true;
+    int rejection_streak_threshold = 2;
+    int newton_iter_threshold = 40;
+    int newton_streak_threshold = 2;
+    int cooldown_steps = 3;
+    Real dt_backoff = 0.5;
+    int max_bdf_order = 1;
+    bool monitor_conditioning = true;
+    Real conditioning_error_threshold = 1e-6;
+};
+
 struct SimulationOptions {
     // Time parameters
     Real tstart = 0.0;
@@ -77,6 +89,9 @@ struct SimulationOptions {
     // BDF order control (currently supports order 1/2)
     bool enable_bdf_order_control = false;
     BDFOrderConfig bdf_config = BDFOrderConfig::defaults();
+
+    // Stiffness handling
+    StiffnessConfig stiffness_config{};
 
     // Events & losses
     bool enable_events = true;
