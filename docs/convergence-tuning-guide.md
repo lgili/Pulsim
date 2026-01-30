@@ -185,6 +185,87 @@ newton.i_tol = 1e-12;     // 1 pA current tolerance
 
 ---
 
+## Linear Solver Stack
+
+Pulsim supports a runtime linear solver stack with deterministic fallback order. For stiff or large systems, you can prefer iterative methods and control preconditioning.
+
+### Solver Order and Fallback
+
+```yaml
+simulation:
+    solver:
+        order: [klu, gmres]
+        fallback_order: [sparselu]
+        allow_fallback: true
+        auto_select: true
+```
+
+**Guidelines:**
+- Keep direct solvers early for small systems.
+- Prefer GMRES/BiCGSTAB for large sparse systems.
+- Disable `auto_select` only when forcing a known-good order.
+
+### Iterative Solver Tuning
+
+```yaml
+simulation:
+    solver:
+        iterative:
+            max_iterations: 200
+            tolerance: 1e-8
+            restart: 40
+            preconditioner: ilu0
+            enable_scaling: true
+            scaling_floor: 1e-12
+```
+
+**Tips:**
+- Use `ilu0` for harder problems; `jacobi` for speed.
+- Increase `max_iterations` for large power-electronics nets.
+- Enable scaling when the Jacobian has poor conditioning.
+
+---
+
+## Nonlinear Acceleration
+
+### Anderson and Broyden
+
+```yaml
+simulation:
+    solver:
+        nonlinear:
+            anderson:
+                enable: true
+                depth: 5
+                beta: 0.5
+            broyden:
+                enable: false
+                max_size: 8
+```
+
+**Guidelines:**
+- Anderson helps oscillatory Newton behavior.
+- Broyden is useful for small systems where Jacobian updates are cheap.
+
+### Trust Region and Newton–Krylov
+
+```yaml
+simulation:
+    solver:
+        nonlinear:
+            newton_krylov:
+                enable: true
+            trust_region:
+                enable: true
+                radius: 1.0
+                shrink: 0.5
+                expand: 1.2
+```
+
+Use trust-region when line search stalls or steps overshoot. Newton–Krylov pairs well with iterative linear solvers.
+
+---
+
 ## Tuning GMIN Stepping
 
 ### GMIN Configuration

@@ -10,6 +10,7 @@ High-performance circuit simulator focused on power electronics.
 - **Modified Nodal Analysis (MNA)** for circuit formulation
 - **Multiple integration methods** (BDF1-5, Trapezoidal) with automatic order control
 - **Newton-Raphson** nonlinear solver with damping, line search, and trust region
+- **Runtime linear solver stack** with deterministic fallback and iterative preconditioning
 - **Advanced convergence aids** (Gmin stepping, source stepping, pseudo-transient)
 - **Adaptive timestep control** with PI controller and LTE estimation
 - **YAML netlist format** with schema/versioning
@@ -73,6 +74,14 @@ Pulsim uses a versioned YAML netlist format:
 ```yaml
 schema: pulsim-v1
 version: 1
+simulation:
+  solver:
+    order: [klu, gmres]
+    fallback_order: [sparselu]
+    iterative:
+      max_iterations: 200
+      tolerance: 1e-8
+      preconditioner: ilu0
 components:
   - type: voltage_source
     name: V1

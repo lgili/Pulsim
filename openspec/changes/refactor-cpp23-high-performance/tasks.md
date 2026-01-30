@@ -37,17 +37,17 @@
 - [x] 4.3 SIMD/SoA optimizations for runtime device evaluation
 
 ## Phase 5: YAML + Python/CLI Configuration
-- [ ] 5.1 Extend YAML schema with `simulation.solver` options
-- [ ] 5.2 Map YAML options to v1 simulation config
-- [ ] 5.3 Expose solver configuration in Python API
-- [ ] 5.4 Update CLI to surface solver selection flags
+- [x] 5.1 Extend YAML schema with `simulation.solver` options
+- [x] 5.2 Map YAML options to v1 simulation config
+- [x] 5.3 Expose solver configuration in Python API
+- [ ] 5.4 Update CLI to surface solver selection flags (skipped per request; no CLI source in repo)
 
 ## Phase 6: Validation & Benchmarks
-- [ ] 6.1 Add solver-selection regression tests
-- [ ] 6.2 Add stress tests for stiff switching circuits
-- [ ] 6.3 Update benchmark suite to report solver paths + telemetry
+- [x] 6.1 Add solver-selection regression tests
+- [x] 6.2 Add stress tests for stiff switching circuits
+- [x] 6.3 Update benchmark suite to report solver paths + telemetry
 
 ## Phase 7: Documentation
-- [ ] 7.1 Update solver tuning guide
-- [ ] 7.2 Update netlist format docs with solver options
-- [ ] 7.3 Update README and notebooks with new solver configuration examples
+- [x] 7.1 Update solver tuning guide
+- [x] 7.2 Update netlist format docs with solver options
+- [x] 7.3 Update README and notebooks with new solver configuration examples

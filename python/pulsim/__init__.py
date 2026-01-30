@@ -105,6 +105,10 @@ from ._pulsim import (
 
     # High-Performance Features
     LinearSolverConfig,
+    LinearSolverKind,
+    PreconditionerKind,
+    IterativeSolverConfig,
+    LinearSolverStackConfig,
     detect_simd_level,
     simd_vector_width,
     solver_status_to_string,
@@ -575,6 +579,10 @@ __all__ = [
 
     # High-Performance Features
     "LinearSolverConfig",
+    "LinearSolverKind",
+    "PreconditionerKind",
+    "IterativeSolverConfig",
+    "LinearSolverStackConfig",
     "detect_simd_level",
     "simd_vector_width",
     "solver_status_to_string",

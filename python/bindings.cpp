@@ -725,12 +725,65 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("num_nodes", &NewtonOptions::num_nodes)
         .def_readwrite("num_branches", &NewtonOptions::num_branches)
         .def_readwrite("tolerances", &NewtonOptions::tolerances)
+        .def_readwrite("enable_anderson", &NewtonOptions::enable_anderson)
+        .def_readwrite("anderson_depth", &NewtonOptions::anderson_depth)
+        .def_readwrite("anderson_beta", &NewtonOptions::anderson_beta)
+        .def_readwrite("enable_broyden", &NewtonOptions::enable_broyden)
+        .def_readwrite("broyden_max_size", &NewtonOptions::broyden_max_size)
+        .def_readwrite("enable_newton_krylov", &NewtonOptions::enable_newton_krylov)
+        .def_readwrite("enable_trust_region", &NewtonOptions::enable_trust_region)
+        .def_readwrite("trust_radius", &NewtonOptions::trust_radius)
+        .def_readwrite("trust_shrink", &NewtonOptions::trust_shrink)
+        .def_readwrite("trust_expand", &NewtonOptions::trust_expand)
+        .def_readwrite("trust_min", &NewtonOptions::trust_min)
+        .def_readwrite("trust_max", &NewtonOptions::trust_max)
+        .def_readwrite("reuse_jacobian_pattern", &NewtonOptions::reuse_jacobian_pattern)
         .def_readwrite("max_voltage_step", &NewtonOptions::max_voltage_step,
             "Max voltage change per iteration [V] (default: 5.0)")
         .def_readwrite("max_current_step", &NewtonOptions::max_current_step,
             "Max current change per iteration [A] (default: 10.0)")
         .def_readwrite("enable_limiting", &NewtonOptions::enable_limiting,
             "Enable voltage/current limiting (default: True)");
+
+    py::enum_<LinearSolverKind>(v2, "LinearSolverKind", "Linear solver types")
+        .value("SparseLU", LinearSolverKind::SparseLU)
+        .value("EnhancedSparseLU", LinearSolverKind::EnhancedSparseLU)
+        .value("KLU", LinearSolverKind::KLU)
+        .value("GMRES", LinearSolverKind::GMRES)
+        .value("BiCGSTAB", LinearSolverKind::BiCGSTAB)
+        .value("CG", LinearSolverKind::CG)
+        .export_values();
+
+    py::enum_<IterativeSolverConfig::PreconditionerKind>(v2, "PreconditionerKind",
+        "Iterative preconditioner types")
+        .value("None_", IterativeSolverConfig::PreconditionerKind::None)
+        .value("Jacobi", IterativeSolverConfig::PreconditionerKind::Jacobi)
+        .value("ILU0", IterativeSolverConfig::PreconditionerKind::ILU0)
+        .export_values();
+
+    py::class_<IterativeSolverConfig>(v2, "IterativeSolverConfig",
+        "Iterative solver configuration")
+        .def(py::init<>())
+        .def_readwrite("max_iterations", &IterativeSolverConfig::max_iterations)
+        .def_readwrite("tolerance", &IterativeSolverConfig::tolerance)
+        .def_readwrite("restart", &IterativeSolverConfig::restart)
+        .def_readwrite("preconditioner", &IterativeSolverConfig::preconditioner)
+        .def_readwrite("enable_scaling", &IterativeSolverConfig::enable_scaling)
+        .def_readwrite("scaling_floor", &IterativeSolverConfig::scaling_floor)
+        .def_static("defaults", &IterativeSolverConfig::defaults);
+
+    py::class_<LinearSolverStackConfig>(v2, "LinearSolverStackConfig",
+        "Runtime linear solver stack configuration")
+        .def(py::init<>())
+        .def_readwrite("order", &LinearSolverStackConfig::order)
+        .def_readwrite("direct_config", &LinearSolverStackConfig::direct_config)
+        .def_readwrite("iterative_config", &LinearSolverStackConfig::iterative_config)
+        .def_readwrite("allow_fallback", &LinearSolverStackConfig::allow_fallback)
+        .def_readwrite("auto_select", &LinearSolverStackConfig::auto_select)
+        .def_readwrite("size_threshold", &LinearSolverStackConfig::size_threshold)
+        .def_readwrite("nnz_threshold", &LinearSolverStackConfig::nnz_threshold)
+        .def_readwrite("diag_min_threshold", &LinearSolverStackConfig::diag_min_threshold)
+        .def_static("defaults", &LinearSolverStackConfig::defaults);
 
     // =========================================================================
     // Convergence History & Monitoring
@@ -982,12 +1035,14 @@ void init_v2_module(py::module_& v2) {
 
     // Transient simulation (simplified API)
     v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
-                                const Vector& x0, const NewtonOptions& newton_opts) {
+                                const Vector& x0, const NewtonOptions& newton_opts,
+                                const LinearSolverStackConfig& linear_solver) {
         SimulationOptions opts;
         opts.tstart = t_start;
         opts.tstop = t_stop;
         opts.dt = dt;
         opts.newton_options = newton_opts;
+        opts.linear_solver = linear_solver;
         opts.newton_options.num_nodes = circuit.num_nodes();
         opts.newton_options.num_branches = circuit.num_branches();
         opts.adaptive_timestep = false;
@@ -996,8 +1051,9 @@ void init_v2_module(py::module_& v2) {
         Simulator sim(circuit, opts);
         auto result = sim.run_transient(x0);
         return std::make_tuple(result.time, result.states, result.success, result.message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-       py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
+     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+         py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
+         py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     R"doc(
     Run transient simulation (simplified API).
 
@@ -1008,6 +1064,7 @@ void init_v2_module(py::module_& v2) {
         dt: Timestep (s)
         x0: Initial state vector (e.g., from DC operating point)
         newton_options: Newton solver options
+        linear_solver: Linear solver stack configuration
 
     Returns:
         Tuple of (times, states, success, message)
@@ -1015,7 +1072,8 @@ void init_v2_module(py::module_& v2) {
 
     // Convenience function with zero initial state
     v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
-                                const NewtonOptions& newton_opts) {
+                                const NewtonOptions& newton_opts,
+                                const LinearSolverStackConfig& linear_solver) {
         Vector x0 = Vector::Zero(circuit.system_size());
 
         SimulationOptions opts;
@@ -1023,6 +1081,7 @@ void init_v2_module(py::module_& v2) {
         opts.tstop = t_stop;
         opts.dt = dt;
         opts.newton_options = newton_opts;
+        opts.linear_solver = linear_solver;
         opts.newton_options.num_nodes = circuit.num_nodes();
         opts.newton_options.num_branches = circuit.num_branches();
         opts.adaptive_timestep = false;
@@ -1031,8 +1090,9 @@ void init_v2_module(py::module_& v2) {
         Simulator sim(circuit, opts);
         auto result = sim.run_transient(x0);
         return std::make_tuple(result.time, result.states, result.success, result.message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-       py::arg("newton_options") = NewtonOptions(),
+     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+         py::arg("newton_options") = NewtonOptions(),
+         py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     "Run transient with zero initial state");
 
     // =========================================================================
@@ -1046,6 +1106,7 @@ void init_v2_module(py::module_& v2) {
         Real dt,
         const Vector& x0,
         const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
         py::object data_callback,
         py::object progress_callback,
         py::object cancel_check,
@@ -1056,6 +1117,7 @@ void init_v2_module(py::module_& v2) {
         opts.tstop = t_stop;
         opts.dt = dt;
         opts.newton_options = newton_opts;
+        opts.linear_solver = linear_solver;
         opts.newton_options.num_nodes = circuit.num_nodes();
         opts.newton_options.num_branches = circuit.num_branches();
         opts.adaptive_timestep = false;
@@ -1169,13 +1231,14 @@ void init_v2_module(py::module_& v2) {
         Real dt,
         const Vector& x0,
         const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
         py::object data_callback,
         py::object progress_callback,
         py::object cancel_check,
         int emit_interval
     ) {
         return run_transient_streaming_impl(
-            circuit, t_start, t_stop, dt, x0, newton_opts,
+            circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
             data_callback, progress_callback, cancel_check, emit_interval);
     },
     py::call_guard<py::gil_scoped_release>(),
@@ -1185,6 +1248,7 @@ void init_v2_module(py::module_& v2) {
     py::arg("dt"),
     py::arg("x0"),
     py::arg("newton_options") = NewtonOptions(),
+    py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     py::arg("data_callback") = py::none(),
     py::arg("progress_callback") = py::none(),
     py::arg("cancel_check") = py::none(),
@@ -1203,6 +1267,7 @@ void init_v2_module(py::module_& v2) {
         dt: Timestep (s)
         x0: Initial state vector (e.g., from DC operating point)
         newton_options: Newton solver options
+        linear_solver: Linear solver stack configuration
         data_callback: Called with (time, state_dict) for waveform updates
         progress_callback: Called with (percent, message) for progress bar
         cancel_check: Called to check if simulation should be cancelled
@@ -1219,6 +1284,7 @@ void init_v2_module(py::module_& v2) {
         Real t_stop,
         Real dt,
         const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
         py::object data_callback,
         py::object progress_callback,
         py::object cancel_check,
@@ -1226,7 +1292,7 @@ void init_v2_module(py::module_& v2) {
     ) {
         Vector x0 = Vector::Zero(circuit.system_size());
         return run_transient_streaming_impl(
-            circuit, t_start, t_stop, dt, x0, newton_opts,
+            circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
             data_callback, progress_callback, cancel_check, emit_interval);
     },
     py::call_guard<py::gil_scoped_release>(),
@@ -1235,6 +1301,7 @@ void init_v2_module(py::module_& v2) {
     py::arg("t_stop"),
     py::arg("dt"),
     py::arg("newton_options") = NewtonOptions(),
+    py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     py::arg("data_callback") = py::none(),
     py::arg("progress_callback") = py::none(),
     py::arg("cancel_check") = py::none(),
@@ -1245,13 +1312,14 @@ void init_v2_module(py::module_& v2) {
     // Shared Memory Transient Simulation (Zero-copy real-time display)
     // =========================================================================
 
-    v2.def("run_transient_shared", [](
+    auto run_transient_shared_impl = [](
         Circuit& circuit,
         Real t_start,
         Real t_stop,
         Real dt,
         const Vector& x0,
         const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
         py::array_t<double, py::array::c_style> time_buffer,
         py::array_t<double, py::array::c_style> states_buffer,
         py::array_t<int64_t, py::array::c_style> status_buffer,
@@ -1285,7 +1353,8 @@ void init_v2_module(py::module_& v2) {
         NewtonOptions opts = newton_opts;
         opts.num_nodes = circuit.num_nodes();
         opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
+        NewtonRaphsonSolver<RuntimeLinearSolver> solver(opts);
+        solver.linear_solver().set_config(linear_solver);
 
         GminConfig gmin_config;
         gmin_config.initial_gmin = 0.1;
@@ -1430,6 +1499,25 @@ void init_v2_module(py::module_& v2) {
         }
 
         return std::make_tuple(success, message);
+    };
+
+    v2.def("run_transient_shared", [run_transient_shared_impl](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
+        py::array_t<double, py::array::c_style> time_buffer,
+        py::array_t<double, py::array::c_style> states_buffer,
+        py::array_t<int64_t, py::array::c_style> status_buffer,
+        py::object cancel_check,
+        int cancel_check_interval
+    ) {
+        return run_transient_shared_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
+            time_buffer, states_buffer, status_buffer, cancel_check, cancel_check_interval);
     },
     py::call_guard<py::gil_scoped_release>(),
     py::arg("circuit"),
@@ -1438,6 +1526,7 @@ void init_v2_module(py::module_& v2) {
     py::arg("dt"),
     py::arg("x0"),
     py::arg("newton_options") = NewtonOptions(),
+    py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     py::arg("time_buffer"),
     py::arg("states_buffer"),
     py::arg("status_buffer"),
@@ -1457,6 +1546,7 @@ void init_v2_module(py::module_& v2) {
         dt: Timestep (s)
         x0: Initial state vector
         newton_options: Newton solver options
+        linear_solver: Linear solver stack configuration
         time_buffer: Pre-allocated 1D numpy array for time values
         states_buffer: Pre-allocated 2D numpy array (steps x nodes) for state values
         status_buffer: 1D numpy array with 3 elements:
@@ -1488,6 +1578,38 @@ void init_v2_module(py::module_& v2) {
             update_display(time_data, states_data)
             time.sleep(0.016)  # 60 FPS
     )doc");
+
+    v2.def("run_transient_shared", [run_transient_shared_impl](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        py::array_t<double, py::array::c_style> time_buffer,
+        py::array_t<double, py::array::c_style> states_buffer,
+        py::array_t<int64_t, py::array::c_style> status_buffer,
+        py::object cancel_check,
+        int cancel_check_interval
+    ) {
+        return run_transient_shared_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts,
+            LinearSolverStackConfig::defaults(),
+            time_buffer, states_buffer, status_buffer, cancel_check, cancel_check_interval);
+    },
+    py::call_guard<py::gil_scoped_release>(),
+    py::arg("circuit"),
+    py::arg("t_start"),
+    py::arg("t_stop"),
+    py::arg("dt"),
+    py::arg("x0"),
+    py::arg("newton_options") = NewtonOptions(),
+    py::arg("time_buffer"),
+    py::arg("states_buffer"),
+    py::arg("status_buffer"),
+    py::arg("cancel_check") = py::none(),
+    py::arg("cancel_check_interval") = 1000,
+    "Run transient shared with default linear solver");
 
     // =========================================================================
     // Validation Framework (Phase 6 exposed)

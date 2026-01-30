@@ -92,6 +92,12 @@ version: 1
 simulation:
   tstop: 0.01
   dt: 1e-6
+  solver:
+    order: [klu, gmres]
+    iterative:
+      max_iterations: 200
+      tolerance: 1e-8
+      preconditioner: ilu0
 components:
   - type: voltage_source
     name: V1

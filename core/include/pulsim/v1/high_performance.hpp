@@ -43,15 +43,6 @@ struct LinearSolverConfig {
     }
 };
 
-struct LinearSolverTelemetry {
-    int total_solve_calls = 0;
-    int total_iterations = 0;
-    int total_fallbacks = 0;
-    int last_iterations = 0;
-    Real last_error = 0.0;
-    std::optional<LinearSolverKind> last_solver;
-};
-
 struct IterativeSolverConfig {
     int max_iterations = 200;
     Real tolerance = 1e-10;

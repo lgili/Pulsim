@@ -195,8 +195,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
     // Simulation options
     if (root["simulation"]) {
         YAML::Node sim = root["simulation"];
-        validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "adaptive_timestep",
-                            "enable_events", "enable_losses", "newton", "timestep", "lte", "bdf"},
+          validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "adaptive_timestep",
+                        "enable_events", "enable_losses", "newton", "timestep", "lte", "bdf",
+                        "solver"},
                       "simulation", errors_, options_.strict);
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);
@@ -210,12 +211,29 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
 
         if (sim["newton"]) {
             YAML::Node n = sim["newton"];
-            validate_keys(n, {"max_iterations", "initial_damping", "min_damping", "auto_damping"},
+            validate_keys(n, {"max_iterations", "initial_damping", "min_damping", "auto_damping",
+                              "enable_anderson", "anderson_depth", "anderson_beta",
+                              "enable_broyden", "broyden_max_size", "enable_newton_krylov",
+                              "enable_trust_region", "trust_radius", "trust_shrink", "trust_expand",
+                              "trust_min", "trust_max", "reuse_jacobian_pattern"},
                           "simulation.newton", errors_, options_.strict);
             if (n["max_iterations"]) options.newton_options.max_iterations = n["max_iterations"].as<int>();
             if (n["initial_damping"]) options.newton_options.initial_damping = parse_real(n["initial_damping"], "newton.initial_damping", errors_);
             if (n["min_damping"]) options.newton_options.min_damping = parse_real(n["min_damping"], "newton.min_damping", errors_);
             if (n["auto_damping"]) options.newton_options.auto_damping = n["auto_damping"].as<bool>();
+            if (n["enable_anderson"]) options.newton_options.enable_anderson = n["enable_anderson"].as<bool>();
+            if (n["anderson_depth"]) options.newton_options.anderson_depth = n["anderson_depth"].as<int>();
+            if (n["anderson_beta"]) options.newton_options.anderson_beta = parse_real(n["anderson_beta"], "newton.anderson_beta", errors_);
+            if (n["enable_broyden"]) options.newton_options.enable_broyden = n["enable_broyden"].as<bool>();
+            if (n["broyden_max_size"]) options.newton_options.broyden_max_size = n["broyden_max_size"].as<int>();
+            if (n["enable_newton_krylov"]) options.newton_options.enable_newton_krylov = n["enable_newton_krylov"].as<bool>();
+            if (n["enable_trust_region"]) options.newton_options.enable_trust_region = n["enable_trust_region"].as<bool>();
+            if (n["trust_radius"]) options.newton_options.trust_radius = parse_real(n["trust_radius"], "newton.trust_radius", errors_);
+            if (n["trust_shrink"]) options.newton_options.trust_shrink = parse_real(n["trust_shrink"], "newton.trust_shrink", errors_);
+            if (n["trust_expand"]) options.newton_options.trust_expand = parse_real(n["trust_expand"], "newton.trust_expand", errors_);
+            if (n["trust_min"]) options.newton_options.trust_min = parse_real(n["trust_min"], "newton.trust_min", errors_);
+            if (n["trust_max"]) options.newton_options.trust_max = parse_real(n["trust_max"], "newton.trust_max", errors_);
+            if (n["reuse_jacobian_pattern"]) options.newton_options.reuse_jacobian_pattern = n["reuse_jacobian_pattern"].as<bool>();
         }
 
         if (sim["timestep"]) {
@@ -271,6 +289,150 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (b["min_order"]) options.bdf_config.min_order = b["min_order"].as<int>();
             if (b["max_order"]) options.bdf_config.max_order = b["max_order"].as<int>();
             if (b["initial_order"]) options.bdf_config.initial_order = b["initial_order"].as<int>();
+        }
+
+        if (sim["solver"]) {
+            YAML::Node s = sim["solver"];
+            validate_keys(s, {"linear", "iterative", "nonlinear", "order", "fallback_order",
+                              "allow_fallback", "auto_select", "size_threshold", "nnz_threshold",
+                              "diag_min_threshold", "preconditioner"},
+                          "simulation.solver", errors_, options_.strict);
+
+            auto parse_linear_kind = [&](const std::string& value, const std::string& path) -> std::optional<LinearSolverKind> {
+                std::string v = to_lower(value);
+                if (v == "klu") return LinearSolverKind::KLU;
+                if (v == "sparse_lu" || v == "sparselu" || v == "sparse") return LinearSolverKind::SparseLU;
+                if (v == "enhanced_sparse_lu" || v == "enhanced" || v == "enhanced_sparselu") return LinearSolverKind::EnhancedSparseLU;
+                if (v == "gmres") return LinearSolverKind::GMRES;
+                if (v == "bicgstab" || v == "bicg") return LinearSolverKind::BiCGSTAB;
+                if (v == "cg" || v == "conjugate_gradient") return LinearSolverKind::CG;
+                errors_.push_back("Invalid solver kind for " + path + ": " + value);
+                return std::nullopt;
+            };
+
+            auto parse_order = [&](const YAML::Node& node, const std::string& path) {
+                if (!node.IsSequence()) {
+                    errors_.push_back(path + " must be a list");
+                    return;
+                }
+                options.linear_solver.order.clear();
+                for (const auto& it : node) {
+                    if (!it.IsScalar()) {
+                        errors_.push_back(path + " entries must be strings");
+                        continue;
+                    }
+                    auto kind = parse_linear_kind(it.as<std::string>(), path);
+                    if (kind) options.linear_solver.order.push_back(*kind);
+                }
+            };
+
+            if (s["order"]) {
+                parse_order(s["order"], "simulation.solver.order");
+            }
+            if (s["fallback_order"]) {
+                parse_order(s["fallback_order"], "simulation.solver.fallback_order");
+            }
+            if (s["allow_fallback"]) options.linear_solver.allow_fallback = s["allow_fallback"].as<bool>();
+            if (s["auto_select"]) options.linear_solver.auto_select = s["auto_select"].as<bool>();
+            if (s["size_threshold"]) options.linear_solver.size_threshold = s["size_threshold"].as<int>();
+            if (s["nnz_threshold"]) options.linear_solver.nnz_threshold = s["nnz_threshold"].as<int>();
+            if (s["diag_min_threshold"]) options.linear_solver.diag_min_threshold = parse_real(s["diag_min_threshold"], "solver.diag_min_threshold", errors_);
+
+            if (s["preconditioner"]) {
+                std::string pre = to_lower(s["preconditioner"].as<std::string>());
+                if (pre == "none") {
+                    options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::None;
+                } else if (pre == "jacobi") {
+                    options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
+                } else if (pre == "ilu0" || pre == "ilu") {
+                    options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::ILU0;
+                } else {
+                    errors_.push_back("Invalid solver.preconditioner: " + pre);
+                }
+            }
+
+            if (s["linear"]) {
+                YAML::Node l = s["linear"];
+                validate_keys(l, {"order", "allow_fallback", "auto_select", "size_threshold",
+                                  "nnz_threshold", "diag_min_threshold"},
+                              "simulation.solver.linear", errors_, options_.strict);
+                if (l["order"]) parse_order(l["order"], "simulation.solver.linear.order");
+                if (l["allow_fallback"]) options.linear_solver.allow_fallback = l["allow_fallback"].as<bool>();
+                if (l["auto_select"]) options.linear_solver.auto_select = l["auto_select"].as<bool>();
+                if (l["size_threshold"]) options.linear_solver.size_threshold = l["size_threshold"].as<int>();
+                if (l["nnz_threshold"]) options.linear_solver.nnz_threshold = l["nnz_threshold"].as<int>();
+                if (l["diag_min_threshold"]) options.linear_solver.diag_min_threshold = parse_real(l["diag_min_threshold"], "solver.linear.diag_min_threshold", errors_);
+            }
+
+            if (s["iterative"]) {
+                YAML::Node it = s["iterative"];
+                validate_keys(it, {"max_iterations", "tolerance", "restart", "preconditioner",
+                                   "enable_scaling", "scaling_floor"},
+                              "simulation.solver.iterative", errors_, options_.strict);
+                if (it["max_iterations"]) options.linear_solver.iterative_config.max_iterations = it["max_iterations"].as<int>();
+                if (it["tolerance"]) options.linear_solver.iterative_config.tolerance = parse_real(it["tolerance"], "solver.iterative.tolerance", errors_);
+                if (it["restart"]) options.linear_solver.iterative_config.restart = it["restart"].as<int>();
+                if (it["enable_scaling"]) options.linear_solver.iterative_config.enable_scaling = it["enable_scaling"].as<bool>();
+                if (it["scaling_floor"]) options.linear_solver.iterative_config.scaling_floor = parse_real(it["scaling_floor"], "solver.iterative.scaling_floor", errors_);
+                if (it["preconditioner"]) {
+                    std::string pre = to_lower(it["preconditioner"].as<std::string>());
+                    if (pre == "none") {
+                        options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::None;
+                    } else if (pre == "jacobi") {
+                        options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
+                    } else if (pre == "ilu0" || pre == "ilu") {
+                        options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::ILU0;
+                    } else {
+                        errors_.push_back("Invalid solver.iterative.preconditioner: " + pre);
+                    }
+                }
+            }
+
+            if (s["nonlinear"]) {
+                YAML::Node nl = s["nonlinear"];
+                validate_keys(nl, {"anderson", "broyden", "newton_krylov", "trust_region", "reuse_jacobian_pattern"},
+                              "simulation.solver.nonlinear", errors_, options_.strict);
+
+                if (nl["anderson"]) {
+                    YAML::Node a = nl["anderson"];
+                    validate_keys(a, {"enable", "depth", "beta"},
+                                  "simulation.solver.nonlinear.anderson", errors_, options_.strict);
+                    if (a["enable"]) options.newton_options.enable_anderson = a["enable"].as<bool>();
+                    if (a["depth"]) options.newton_options.anderson_depth = a["depth"].as<int>();
+                    if (a["beta"]) options.newton_options.anderson_beta = parse_real(a["beta"], "solver.nonlinear.anderson.beta", errors_);
+                }
+
+                if (nl["broyden"]) {
+                    YAML::Node b = nl["broyden"];
+                    validate_keys(b, {"enable", "max_size"},
+                                  "simulation.solver.nonlinear.broyden", errors_, options_.strict);
+                    if (b["enable"]) options.newton_options.enable_broyden = b["enable"].as<bool>();
+                    if (b["max_size"]) options.newton_options.broyden_max_size = b["max_size"].as<int>();
+                }
+
+                if (nl["newton_krylov"]) {
+                    YAML::Node nk = nl["newton_krylov"];
+                    validate_keys(nk, {"enable"},
+                                  "simulation.solver.nonlinear.newton_krylov", errors_, options_.strict);
+                    if (nk["enable"]) options.newton_options.enable_newton_krylov = nk["enable"].as<bool>();
+                }
+
+                if (nl["trust_region"]) {
+                    YAML::Node tr = nl["trust_region"];
+                    validate_keys(tr, {"enable", "radius", "shrink", "expand", "min", "max"},
+                                  "simulation.solver.nonlinear.trust_region", errors_, options_.strict);
+                    if (tr["enable"]) options.newton_options.enable_trust_region = tr["enable"].as<bool>();
+                    if (tr["radius"]) options.newton_options.trust_radius = parse_real(tr["radius"], "solver.nonlinear.trust_region.radius", errors_);
+                    if (tr["shrink"]) options.newton_options.trust_shrink = parse_real(tr["shrink"], "solver.nonlinear.trust_region.shrink", errors_);
+                    if (tr["expand"]) options.newton_options.trust_expand = parse_real(tr["expand"], "solver.nonlinear.trust_region.expand", errors_);
+                    if (tr["min"]) options.newton_options.trust_min = parse_real(tr["min"], "solver.nonlinear.trust_region.min", errors_);
+                    if (tr["max"]) options.newton_options.trust_max = parse_real(tr["max"], "solver.nonlinear.trust_region.max", errors_);
+                }
+
+                if (nl["reuse_jacobian_pattern"]) {
+                    options.newton_options.reuse_jacobian_pattern = nl["reuse_jacobian_pattern"].as<bool>();
+                }
+            }
         }
     }
 

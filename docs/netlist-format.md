@@ -139,6 +139,50 @@ simulation:
   enable_losses: true
 ```
 
+### Solver Configuration
+
+Use `simulation.solver` to control linear/iterative solver selection and nonlinear aids:
+
+```yaml
+simulation:
+  solver:
+    order: [klu, gmres]
+    fallback_order: [sparselu]
+    allow_fallback: true
+    auto_select: true
+    size_threshold: 400
+    nnz_threshold: 2000
+    diag_min_threshold: 1e-12
+    preconditioner: ilu0
+    iterative:
+      max_iterations: 200
+      tolerance: 1e-8
+      restart: 40
+      preconditioner: jacobi
+      enable_scaling: true
+      scaling_floor: 1e-12
+    nonlinear:
+      anderson:
+        enable: true
+        depth: 5
+        beta: 0.5
+      broyden:
+        enable: false
+        max_size: 8
+      newton_krylov:
+        enable: false
+      trust_region:
+        enable: true
+        radius: 1.0
+        shrink: 0.5
+        expand: 1.2
+        min: 1e-4
+        max: 10.0
+      reuse_jacobian_pattern: true
+```
+
+You can also set Newton options directly under `simulation.newton` if preferred.
+
 ## SI Prefixes
 
 Values support SI prefixes: `f`, `p`, `n`, `u`, `m`, `k`, `meg`, `g`, `t`.

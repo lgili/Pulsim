@@ -409,6 +409,9 @@ SimulationResult Simulator::run_transient(const Vector& x0,
     auto start_time = std::chrono::high_resolution_clock::now();
 
     initialize_loss_tracking();
+    for (const auto& [name, energy] : options_.switching_energy) {
+        set_switching_energy(name, energy);
+    }
     lte_estimator_.reset();
     if (options_.enable_bdf_order_control) {
         bdf_controller_.set_order(std::clamp(options_.bdf_config.initial_order, 1, 2));
