@@ -162,7 +162,7 @@ The system SHALL track previous voltages for all nonlinear devices to enable vol
 - **THEN** V_old starts as the solution from timestep t_n
 - **AND** V_old is updated within Newton iterations
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Diode Stamp with Limiting
 

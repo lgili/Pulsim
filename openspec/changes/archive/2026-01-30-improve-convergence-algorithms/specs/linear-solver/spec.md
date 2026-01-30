@@ -177,7 +177,7 @@ The system SHALL detect when the sparsity pattern of the matrix changes.
 - **THEN** smaller structure is still compatible with cached symbolic
 - **AND** numeric solve can proceed with zero in removed position
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: AdvancedLinearSolver Enhancement
 
