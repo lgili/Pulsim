@@ -20,11 +20,11 @@
 - [x] 1.5 Emit linear solver telemetry (iterations, residuals, fallbacks)
 
 ## Phase 2: Nonlinear Solver Upgrades
-- [ ] 2.1 Add Anderson acceleration strategy
-- [ ] 2.2 Add Broyden update option
-- [ ] 2.3 Add Newton–Krylov path (matrix-free or Jacobian reuse)
-- [ ] 2.4 Strengthen line search / trust-region policies
-- [ ] 2.5 Record nonlinear solver telemetry and fallback reason codes
+- [x] 2.1 Add Anderson acceleration strategy
+- [x] 2.2 Add Broyden update option
+- [x] 2.3 Add Newton–Krylov path (matrix-free or Jacobian reuse)
+- [x] 2.4 Strengthen line search / trust-region policies
+- [x] 2.5 Record nonlinear solver telemetry and fallback reason codes
 
 ## Phase 3: Stiffness & Event Handling
 - [ ] 3.1 Detect stiffness indicators (rejection streaks, conditioning shifts)

@@ -951,6 +951,14 @@ public:
 
     [[nodiscard]] LinearSolverTelemetry telemetry() const { return telemetry_; }
 
+    void set_force_iterative(bool force) {
+        force_iterative_ = force;
+        active_order_.clear();
+        active_index_.reset();
+    }
+
+    [[nodiscard]] bool force_iterative() const { return force_iterative_; }
+
 private:
     LinearSolverStackConfig config_;
     std::unique_ptr<SparseLUPolicy> sparse_;
@@ -963,6 +971,7 @@ private:
     const SparseMatrix* last_matrix_ = nullptr;
     std::vector<LinearSolverKind> active_order_;
     LinearSolverTelemetry telemetry_{};
+    bool force_iterative_ = false;
 
     [[nodiscard]] bool is_available(LinearSolverKind kind) const {
         if (kind == LinearSolverKind::KLU) return KLUPolicy::is_available();
@@ -998,6 +1007,19 @@ private:
                    kind == LinearSolverKind::BiCGSTAB ||
                    kind == LinearSolverKind::CG;
         };
+
+        if (force_iterative_) {
+            std::vector<LinearSolverKind> filtered;
+            filtered.reserve(order.size());
+            for (auto kind : order) {
+                if (is_iterative(kind)) {
+                    filtered.push_back(kind);
+                }
+            }
+            if (!filtered.empty()) {
+                order = std::move(filtered);
+            }
+        }
 
         if (prefer_iterative) {
             auto it = std::find_if(order.begin(), order.end(), is_iterative);

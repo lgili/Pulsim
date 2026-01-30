@@ -13,8 +13,10 @@
 
 #include "pulsim/v1/numeric_types.hpp"
 #include <Eigen/Core>
+#include <Eigen/QR>
 #include <Eigen/SparseCore>
 #include <Eigen/SparseLU>
+#include <limits>
 #include <vector>
 #include <array>
 #include <functional>
@@ -436,6 +438,15 @@ struct NewtonResult {
     Real final_weighted_error = 0.0;
     ConvergenceHistory history;
     PerVariableConvergence variable_convergence;
+    struct NonlinearTelemetry {
+        bool used_anderson = false;
+        bool used_broyden = false;
+        bool used_newton_krylov = false;
+        int line_search_backtracks = 0;
+        int trust_region_shrinks = 0;
+        int trust_region_expands = 0;
+        std::vector<std::string> fallback_reasons;
+    } telemetry;
     std::string error_message;
 
     [[nodiscard]] bool success() const {
@@ -458,6 +469,18 @@ struct NewtonOptions {
     Index num_branches = 0;   // For weighted norm
     ConvergenceChecker::Tolerances tolerances;
 
+    // Anderson acceleration (optional)
+    bool enable_anderson = false;
+    int anderson_depth = 5;
+    Real anderson_beta = 1.0;
+
+    // Broyden update (optional, dense for small systems)
+    bool enable_broyden = false;
+    int broyden_max_size = 200;
+
+    // Newton-Krylov path (iterative linear solver)
+    bool enable_newton_krylov = false;
+
     // Voltage/current limiting (can slow convergence in switching circuits)
     Real max_voltage_step = 5.0;      // Max voltage change per iteration [V]
     Real max_current_step = 10.0;     // Max current change per iteration [A]
@@ -467,6 +490,14 @@ struct NewtonOptions {
     bool detect_stall = false;        // Check for convergence stall (default: disabled for robustness)
     int stall_window = 10;            // Window size for stall detection
     Real stall_threshold = 0.95;      // Threshold for stall detection (0.95 = 5% improvement required)
+
+    // Trust-region control
+    bool enable_trust_region = false;
+    Real trust_radius = 10.0;
+    Real trust_shrink = 0.5;
+    Real trust_expand = 1.5;
+    Real trust_min = 1e-6;
+    Real trust_max = 1e6;
 };
 
 // =============================================================================
@@ -486,6 +517,15 @@ public:
         NewtonResult result;
         result.solution = x0;
         result.history.clear();
+        anderson_f_history_.clear();
+
+        result.telemetry.used_anderson = options_.enable_anderson;
+        result.telemetry.used_broyden = options_.enable_broyden;
+        result.telemetry.used_newton_krylov = options_.enable_newton_krylov;
+
+        if constexpr (requires(LinearPolicy policy) { policy.set_force_iterative(false); }) {
+            linear_solver_.set_force_iterative(options_.enable_newton_krylov);
+        }
 
         const Index n = x0.size();
         Vector f(n);
@@ -494,10 +534,32 @@ public:
 
         Real damping = options_.initial_damping;
         Real prev_residual = std::numeric_limits<Real>::max();
+        Real trust_radius = options_.trust_radius;
+
+        const bool use_broyden = options_.enable_broyden && n <= options_.broyden_max_size;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> J_dense;
+        Vector prev_x;
+        Vector prev_f;
+        bool broyden_ready = false;
 
         for (int iter = 0; iter < options_.max_iterations; ++iter) {
             // Evaluate system
             system_func(result.solution, f, J);
+            const Vector x_current = result.solution;
+
+            if (use_broyden) {
+                if (!broyden_ready) {
+                    J_dense = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>(J);
+                } else {
+                    Vector s = result.solution - prev_x;
+                    Vector y = f - prev_f;
+                    Real denom = s.dot(s);
+                    if (denom > std::numeric_limits<Real>::epsilon()) {
+                        Vector Js = J_dense * s;
+                        J_dense += (y - Js) * (s.transpose() / denom);
+                    }
+                }
+            }
 
             // Compute residual norm
             Real f_norm = f.norm();
@@ -522,23 +584,46 @@ public:
             prev_residual = f_norm;
 
             // Solve J * dx = -f
-            if (!linear_solver_.factorize(J)) {
-                result.status = SolverStatus::SingularMatrix;
-                result.error_message = "Jacobian is singular";
-                result.iterations = iter + 1;
-                result.history.set_final_status(result.status);
-                return result;
-            }
+            if (use_broyden) {
+                dx = J_dense.colPivHouseholderQr().solve(-f);
+                if (!dx.allFinite()) {
+                    result.telemetry.fallback_reasons.push_back("BroydenFallback");
+                    if (!linear_solver_.factorize(J)) {
+                        result.status = SolverStatus::SingularMatrix;
+                        result.error_message = "Jacobian is singular";
+                        result.iterations = iter + 1;
+                        result.history.set_final_status(result.status);
+                        return result;
+                    }
+                    auto solve_result = linear_solver_.solve(-f);
+                    if (!solve_result) {
+                        result.status = SolverStatus::NumericalError;
+                        result.error_message = solve_result.error;
+                        result.iterations = iter + 1;
+                        result.history.set_final_status(result.status);
+                        return result;
+                    }
+                    dx = *solve_result;
+                }
+            } else {
+                if (!linear_solver_.factorize(J)) {
+                    result.status = SolverStatus::SingularMatrix;
+                    result.error_message = "Jacobian is singular";
+                    result.iterations = iter + 1;
+                    result.history.set_final_status(result.status);
+                    return result;
+                }
 
-            auto solve_result = linear_solver_.solve(-f);
-            if (!solve_result) {
-                result.status = SolverStatus::NumericalError;
-                result.error_message = solve_result.error;
-                result.iterations = iter + 1;
-                result.history.set_final_status(result.status);
-                return result;
+                auto solve_result = linear_solver_.solve(-f);
+                if (!solve_result) {
+                    result.status = SolverStatus::NumericalError;
+                    result.error_message = solve_result.error;
+                    result.iterations = iter + 1;
+                    result.history.set_final_status(result.status);
+                    return result;
+                }
+                dx = *solve_result;
             }
-            dx = *solve_result;
 
             // Apply voltage/current limiting to prevent divergence
             bool limiting_active = false;
@@ -546,11 +631,43 @@ public:
                 limiting_active = apply_limiting(dx, options_.num_nodes, options_.num_branches);
             }
 
+            // Trust region scaling
+            if (options_.enable_trust_region) {
+                Real step_norm = dx.norm();
+                if (step_norm > trust_radius && step_norm > std::numeric_limits<Real>::epsilon()) {
+                    dx *= (trust_radius / step_norm);
+                    result.telemetry.trust_region_shrinks += 1;
+                    result.telemetry.fallback_reasons.push_back("TrustRegion");
+                }
+            }
+
             // Apply update with damping
             if (options_.auto_damping) {
-                damping = line_search(result.solution, dx, f_norm, system_func, damping);
+                auto ls = line_search(result.solution, dx, f_norm, system_func, damping);
+                damping = ls.damping;
+                if (ls.backtracks > 0) {
+                    result.telemetry.line_search_backtracks += ls.backtracks;
+                    result.telemetry.fallback_reasons.push_back("LineSearch");
+                }
+
+                if (options_.enable_trust_region) {
+                    if (ls.backtracks > 0) {
+                        trust_radius = std::max(options_.trust_min, trust_radius * options_.trust_shrink);
+                    } else {
+                        trust_radius = std::min(options_.trust_max, trust_radius * options_.trust_expand);
+                        result.telemetry.trust_region_expands += 1;
+                    }
+                }
             }
-            result.solution += dx * damping;
+            Vector g = result.solution + dx * damping;
+            if (options_.enable_anderson) {
+                g = apply_anderson(result.solution, g);
+            }
+            result.solution = std::move(g);
+
+            prev_x = x_current;
+            prev_f = f;
+            broyden_ready = true;
 
             // Check convergence with weighted norm
             if (options_.num_nodes > 0 || options_.num_branches > 0) {
@@ -625,6 +742,12 @@ private:
     NewtonOptions options_;
     LinearPolicy linear_solver_;
     ConvergenceChecker convergence_checker_;
+    std::vector<Vector> anderson_f_history_;
+
+    struct LineSearchResult {
+        Real damping = 1.0;
+        int backtracks = 0;
+    };
 
     /// Apply voltage/current limiting to dx vector
     /// Returns true if any value was clamped (limiting is active)
@@ -657,8 +780,8 @@ private:
     }
 
     /// Simple backtracking line search
-    Real line_search(const Vector& x, const Vector& dx, Real f_norm,
-                     SystemFunction& system_func, Real initial_damping) {
+    LineSearchResult line_search(const Vector& x, const Vector& dx, Real f_norm,
+                                 SystemFunction& system_func, Real initial_damping) {
         Real damping = initial_damping;
         const Index n = x.size();
         Vector x_new(n);
@@ -681,7 +804,42 @@ private:
         }
 
         // Gradually restore damping
-        return std::min(damping * 1.5, options_.initial_damping);
+        LineSearchResult result;
+        result.damping = std::min(damping * 1.5, options_.initial_damping);
+        result.backtracks = bt;
+        return result;
+    }
+
+    /// Anderson acceleration using previous update vectors
+    [[nodiscard]] Vector apply_anderson(const Vector& x, const Vector& g) {
+        if (options_.anderson_depth <= 0) {
+            return g;
+        }
+
+        Vector f_k = g - x;
+        const int history_size = static_cast<int>(anderson_f_history_.size());
+        const int m = std::min(options_.anderson_depth, history_size);
+
+        Vector accelerated = g;
+
+        if (m > 0) {
+            Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> F(x.size(), m);
+            for (int i = 0; i < m; ++i) {
+                F.col(i) = anderson_f_history_[history_size - m + i];
+            }
+
+            Eigen::Matrix<Scalar, Eigen::Dynamic, 1> alpha = F.colPivHouseholderQr().solve(f_k);
+            if (alpha.allFinite()) {
+                accelerated = g - options_.anderson_beta * (F * alpha);
+            }
+        }
+
+        anderson_f_history_.push_back(f_k);
+        if (static_cast<int>(anderson_f_history_.size()) > options_.anderson_depth) {
+            anderson_f_history_.erase(anderson_f_history_.begin());
+        }
+
+        return accelerated;
     }
 };
 
