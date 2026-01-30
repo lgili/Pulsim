@@ -53,8 +53,8 @@ Run a simple simulation:
 
    import pulsim
 
-   # Simulate from JSON netlist
-   result = pulsim.simulate("circuit.json")
+   # Simulate from YAML netlist
+   result = pulsim.simulate("circuit.yaml")
 
    # Access results
    print(result.time)

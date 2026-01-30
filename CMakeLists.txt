@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # =============================================================================
 # macOS: Force AppleClang for Python bindings (ABI compatibility)
@@ -279,6 +280,17 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(json)
+
+# yaml-cpp - YAML parser
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG 0.8.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(yaml-cpp)
 
 # Catch2 for testing (v3.8.0+ required for GCC 14 compatibility)
 if(PULSIM_BUILD_TESTS)

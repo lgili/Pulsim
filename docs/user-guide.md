@@ -82,38 +82,43 @@ docker run -p 50051:50051 -p 9090:9090 pulsim:latest
 
 ## Quick Start
 
-### 1. Create a Circuit (JSON Netlist)
+### 1. Create a Circuit (YAML Netlist)
 
-Create a file `rc_circuit.json`:
+Create a file `rc_circuit.yaml`:
 
-```json
-{
-  "name": "RC Low-Pass Filter",
-  "components": [
-    {"type": "V", "name": "V1", "nodes": ["in", "0"], "value": 1.0},
-    {"type": "R", "name": "R1", "nodes": ["in", "out"], "value": 1000},
-    {"type": "C", "name": "C1", "nodes": ["out", "0"], "value": 1e-6}
-  ],
-  "simulation": {
-    "type": "transient",
-    "stop_time": 0.01,
-    "timestep": 1e-6
-  }
-}
+```yaml
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 0.01
+  dt: 1e-6
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: {type: dc, value: 1.0}
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 1000
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1e-6
 ```
 
 ### 2. Run Simulation
 
 **CLI:**
 ```bash
-pulsim run rc_circuit.json -o results.csv
+pulsim run rc_circuit.yaml -o results.csv
 ```
 
 **Python:**
 ```python
 import pulsim
 
-result = pulsim.simulate("rc_circuit.json")
+result = pulsim.simulate("rc_circuit.yaml")
 print(result.time)
 print(result.voltages["out"])
 ```
@@ -162,13 +167,13 @@ Options:
 
 ```bash
 # Basic simulation with CSV output
-pulsim run buck_converter.json -o results.csv
+pulsim run buck_converter.yaml -o results.csv
 
 # JSON output with custom tolerances
-pulsim run circuit.json -f json --abstol 1e-14 --reltol 1e-4
+pulsim run circuit.yaml -f json --abstol 1e-14 --reltol 1e-4
 
 # HDF5 output for large simulations
-pulsim run large_circuit.json -f hdf5 -o results.h5
+pulsim run large_circuit.yaml -f hdf5 -o results.h5
 ```
 
 ### Sweep Command
@@ -186,7 +191,7 @@ Options:
 
 ```bash
 # Sweep load resistance from 10 to 100 ohms in 10 steps
-pulsim sweep buck.json --param R_load=10:100:10 -j 8 -o sweep_results/
+pulsim sweep buck.yaml --param R_load=10:100:10 -j 8 -o sweep_results/
 ```
 
 ### Serve Command
@@ -225,7 +230,7 @@ import pulsim
 import numpy as np
 
 # Load and simulate
-result = pulsim.simulate("circuit.json")
+result = pulsim.simulate("circuit.yaml")
 
 # Access results
 time = result.time                    # numpy array
@@ -273,7 +278,7 @@ result = pulsim.simulate(circuit, options)
 ```python
 import matplotlib.pyplot as plt
 
-result = pulsim.simulate("buck.json")
+result = pulsim.simulate("buck.yaml")
 
 fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
 
@@ -300,7 +305,7 @@ plt.savefig("buck_waveforms.png")
 ### Loss Analysis
 
 ```python
-result = pulsim.simulate("inverter.json")
+result = pulsim.simulate("inverter.yaml")
 
 # Get loss breakdown
 losses = result.losses
@@ -358,7 +363,7 @@ import pulsim
 from concurrent.futures import ProcessPoolExecutor
 
 def run_with_duty(duty):
-    circuit = pulsim.load("buck.json")
+    circuit = pulsim.load("buck.yaml")
     circuit.set_parameter("PWM1.duty_cycle", duty)
     result = pulsim.simulate(circuit)
     v_out_avg = np.mean(result.voltages["out"][-1000:])
@@ -393,10 +398,10 @@ client = PulsimClient("localhost:50051")
 session = client.create_session()
 
 # Run simulation
-result = session.simulate("circuit.json")
+result = session.simulate("circuit.yaml")
 
 # Stream results (for long simulations)
-for chunk in session.stream_simulation("large_circuit.json"):
+for chunk in session.stream_simulation("large_circuit.yaml"):
     print(f"Progress: {chunk.progress}%")
     process_partial_results(chunk.data)
 
@@ -409,10 +414,10 @@ session.close()
 # Create session
 grpcurl -d '{}' localhost:50051 pulsim.Simulator/CreateSession
 
-# Run simulation
+# Run simulation (payload contains YAML netlist content)
 grpcurl -d '{
   "session_id": "abc123",
-  "netlist_json": "{...}"
+  "netlist_json": "schema: pulsim-v1\nversion: 1\nsimulation:\n  tstop: 1e-4\n  dt: 1e-6\ncomponents:\n  - type: voltage_source\n    name: V1\n    nodes: [in, 0]\n    waveform:\n      type: dc\n      value: 5.0\n  - type: resistor\n    name: R1\n    nodes: [in, out]\n    value: 1k\n  - type: capacitor\n    name: C1\n    nodes: [out, 0]\n    value: 1u"
 }' localhost:50051 pulsim.Simulator/StartSimulation
 
 # Get results
@@ -423,7 +428,7 @@ grpcurl -d '{"session_id": "abc123"}' localhost:50051 pulsim.Simulator/GetResult
 
 ```python
 # For long simulations, stream results as they're computed
-async for waveform in session.stream_waveforms("simulation.json"):
+async for waveform in session.stream_waveforms("simulation.yaml"):
     # Update live plot
     update_plot(waveform.time, waveform.data)
 ```
@@ -434,117 +439,84 @@ async for waveform in session.stream_waveforms("simulation.json"):
 
 ### Example 1: RC Low-Pass Filter
 
-```json
-{
-  "name": "RC Low-Pass Filter",
-  "components": [
-    {"type": "V", "name": "Vin", "nodes": ["in", "0"],
-     "waveform": {"type": "pulse", "v1": 0, "v2": 1, "period": 1e-3}},
-    {"type": "R", "name": "R1", "nodes": ["in", "out"], "value": 1000},
-    {"type": "C", "name": "C1", "nodes": ["out", "0"], "value": 1e-6}
-  ],
-  "simulation": {
-    "type": "transient",
-    "stop_time": 5e-3,
-    "timestep": 1e-7
-  }
-}
+```yaml
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 5e-3
+  dt: 1e-7
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0
+      v_pulse: 1
+      t_delay: 0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 0.5e-3
+      period: 1e-3
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 1k
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1u
 ```
 
-### Example 2: Buck Converter
+### Example 2: Buck Converter (PWM + VCSwitch)
 
-```json
-{
-  "name": "Synchronous Buck Converter",
-  "components": [
-    {"type": "V", "name": "Vin", "nodes": ["in", "0"], "value": 12},
-    {"type": "SWITCH", "name": "S_high", "nodes": ["in", "sw"],
-     "control": "PWM", "ron": 0.01},
-    {"type": "SWITCH", "name": "S_low", "nodes": ["sw", "0"],
-     "control": "PWM_inv", "ron": 0.01},
-    {"type": "L", "name": "L1", "nodes": ["sw", "out"], "value": 100e-6},
-    {"type": "C", "name": "C1", "nodes": ["out", "0"], "value": 100e-6},
-    {"type": "R", "name": "R_load", "nodes": ["out", "0"], "value": 5}
-  ],
-  "sources": [
-    {"type": "PWM", "name": "PWM", "frequency": 100e3, "duty": 0.5},
-    {"type": "PWM", "name": "PWM_inv", "frequency": 100e3, "duty": 0.5,
-     "inverted": true, "dead_time": 100e-9}
-  ],
-  "simulation": {
-    "type": "transient",
-    "stop_time": 1e-3,
-    "timestep": 1e-9
-  }
-}
-```
-
-### Example 3: Full-Bridge Inverter
-
-```json
-{
-  "name": "H-Bridge Inverter",
-  "components": [
-    {"type": "V", "name": "Vdc", "nodes": ["vdc", "0"], "value": 400},
-    {"type": "MOSFET", "name": "Q1", "nodes": ["vdc", "g1", "a", "0"],
-     "model": "IRF540N"},
-    {"type": "MOSFET", "name": "Q2", "nodes": ["a", "g2", "0", "0"],
-     "model": "IRF540N"},
-    {"type": "MOSFET", "name": "Q3", "nodes": ["vdc", "g3", "b", "0"],
-     "model": "IRF540N"},
-    {"type": "MOSFET", "name": "Q4", "nodes": ["b", "g4", "0", "0"],
-     "model": "IRF540N"},
-    {"type": "L", "name": "L_load", "nodes": ["a", "mid"], "value": 1e-3},
-    {"type": "R", "name": "R_load", "nodes": ["mid", "b"], "value": 10}
-  ],
-  "sources": [
-    {"type": "PWM", "name": "g1", "frequency": 10e3, "duty": 0.5},
-    {"type": "PWM", "name": "g2", "frequency": 10e3, "duty": 0.5,
-     "inverted": true, "dead_time": 500e-9},
-    {"type": "PWM", "name": "g3", "frequency": 10e3, "duty": 0.5,
-     "phase": 180},
-    {"type": "PWM", "name": "g4", "frequency": 10e3, "duty": 0.5,
-     "phase": 180, "inverted": true, "dead_time": 500e-9}
-  ],
-  "simulation": {
-    "type": "transient",
-    "stop_time": 10e-3,
-    "timestep": 10e-9
-  }
-}
-```
-
-### Example 4: MOSFET with Thermal Model
-
-```json
-{
-  "name": "MOSFET Thermal Test",
-  "components": [
-    {"type": "V", "name": "Vds", "nodes": ["drain", "0"], "value": 50},
-    {"type": "V", "name": "Vgs", "nodes": ["gate", "0"], "value": 10},
-    {"type": "MOSFET", "name": "M1", "nodes": ["drain", "gate", "source", "0"],
-     "model": "IRF540N",
-     "thermal": {
-       "node": "Tj",
-       "rth_jc": 0.5,
-       "foster": {
-         "r": [0.1, 0.2, 0.15],
-         "tau": [1e-3, 10e-3, 100e-3]
-       }
-     }
-    },
-    {"type": "R", "name": "R_source", "nodes": ["source", "0"], "value": 0.1}
-  ],
-  "thermal": {
-    "ambient": 25,
-    "heatsink_rth": 1.5
-  },
-  "simulation": {
-    "type": "transient",
-    "stop_time": 1.0,
-    "timestep": 1e-6
-  }
-}
+```yaml
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-3
+  dt: 0.5e-6
+  dt_max: 2e-6
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 48.0
+  - type: voltage_source
+    name: Vpwm
+    nodes: [ctrl, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 5.0
+      t_delay: 0.0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 25e-6
+      period: 50e-6
+  - type: vcswitch
+    name: S1
+    nodes: [ctrl, vcc, sw_node]
+    v_threshold: 2.5
+    ron: 0.01
+    roff: 1e9
+  - type: diode
+    name: D1
+    nodes: [0, sw_node]
+  - type: inductor
+    name: L1
+    nodes: [sw_node, out]
+    value: 100u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0
 ```
 
 ---

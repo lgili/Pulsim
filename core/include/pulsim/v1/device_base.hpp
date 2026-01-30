@@ -581,6 +581,8 @@ public:
     /// Set smoothing voltage (higher = smoother transition, 0 = sharp)
     void set_smoothing(Scalar v_smooth) { v_smooth_ = v_smooth; }
     [[nodiscard]] Scalar smoothing() const { return v_smooth_; }
+    [[nodiscard]] Scalar g_on() const { return g_on_; }
+    [[nodiscard]] Scalar g_off() const { return g_off_; }
 
     /// Stamp Jacobian for Newton iteration with smooth transition
     template<typename Matrix, typename Vec>
@@ -755,6 +757,8 @@ public:
     void open() { is_closed_ = false; }
     void set_state(bool closed) { is_closed_ = closed; }
     [[nodiscard]] bool is_closed() const { return is_closed_; }
+    [[nodiscard]] Scalar g_on() const { return g_on_; }
+    [[nodiscard]] Scalar g_off() const { return g_off_; }
 
 private:
     Scalar g_on_;

@@ -85,6 +85,16 @@ configure_file(
     ${CMAKE_BINARY_DIR}/python/pulsim/__init__.py
     COPYONLY
 )
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/netlist.py
+    ${CMAKE_BINARY_DIR}/python/pulsim/netlist.py
+    COPYONLY
+)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.pyi
+    ${CMAKE_BINARY_DIR}/python/pulsim/__init__.pyi
+    COPYONLY
+)
 
 # Install targets
 install(TARGETS _pulsim

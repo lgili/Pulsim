@@ -43,11 +43,12 @@ class AnalyticalSolutions:
         V_initial = params.get("V_initial", 0.0)
         tau = R * C
 
-        if node in ("v_cap", "V_C", "output", "out", "V(out)"):
+        node_key = node.lower()
+        if node_key in ("v_cap", "v_c", "output", "out", "v(out)"):
             # Capacitor voltage
             V_final = V0
             return V_final + (V_initial - V_final) * np.exp(-t / tau)
-        elif node in ("i_cap", "I_C", "i_r", "I_R", "I(V1)"):
+        elif node_key in ("i_cap", "i_c", "i_r", "i(v1)"):
             # Current through circuit (same for R and C in series)
             return (V0 - V_initial) / R * np.exp(-t / tau)
         else:
@@ -78,9 +79,10 @@ class AnalyticalSolutions:
         C = params["C"]
         tau = R * C
 
-        if node in ("v_cap", "V_C", "output", "out", "V(out)"):
+        node_key = node.lower()
+        if node_key in ("v_cap", "v_c", "output", "out", "v(out)"):
             return V0 * np.exp(-t / tau)
-        elif node in ("i_cap", "I_C", "i_r", "I_R"):
+        elif node_key in ("i_cap", "i_c", "i_r"):
             # Discharge current (negative, capacitor is source)
             return -V0 / R * np.exp(-t / tau)
         else:
@@ -119,13 +121,14 @@ class AnalyticalSolutions:
         tau = L / R
         I_final = V0 / R
 
-        if node in ("i_ind", "I_L", "i_r", "I_R", "current", "I(L1)"):
+        node_key = node.lower()
+        if node_key in ("i_ind", "i_l", "i_r", "current", "i(l1)"):
             # Inductor current
             return I_final + (I_initial - I_final) * np.exp(-t / tau)
-        elif node in ("v_ind", "V_L"):
+        elif node_key in ("v_ind", "v_l"):
             # Voltage across inductor
             return (V0 - R * I_initial) * np.exp(-t / tau)
-        elif node in ("v_r", "V_R"):
+        elif node_key in ("v_r"):
             # Voltage across resistor
             i_current = I_final + (I_initial - I_final) * np.exp(-t / tau)
             return R * i_current
@@ -155,9 +158,10 @@ class AnalyticalSolutions:
         L = params["L"]
         tau = L / R
 
-        if node in ("i_ind", "I_L", "i_r", "I_R", "current", "I(L1)"):
+        node_key = node.lower()
+        if node_key in ("i_ind", "i_l", "i_r", "current", "i(l1)"):
             return I0 * np.exp(-t / tau)
-        elif node in ("v_ind", "V_L"):
+        elif node_key in ("v_ind", "v_l"):
             # Inductor voltage during decay (opposing current reduction)
             return -R * I0 * np.exp(-t / tau)
         else:
@@ -245,13 +249,14 @@ class AnalyticalSolutions:
             V_C = V0 + A1 * np.exp(s1 * t) + A2 * np.exp(s2 * t)
             I_L = C * (s1 * A1 * np.exp(s1 * t) + s2 * A2 * np.exp(s2 * t))
 
-        if node in ("v_cap", "V_C", "output", "out", "V(out)"):
+        node_key = node.lower()
+        if node_key in ("v_cap", "v_c", "output", "out", "v(out)"):
             return V_C
-        elif node in ("i_ind", "I_L", "i_cap", "I_C", "current", "I(L1)"):
+        elif node_key in ("i_ind", "i_l", "i_cap", "i_c", "current", "i(l1)"):
             return I_L
-        elif node in ("v_ind", "V_L"):
+        elif node_key in ("v_ind", "v_l"):
             return L * np.gradient(I_L, t)
-        elif node in ("v_r", "V_R"):
+        elif node_key in ("v_r"):
             return R * I_L
         else:
             raise ValueError(f"Unknown node '{node}' for RLC step response")
@@ -328,9 +333,10 @@ class AnalyticalSolutions:
 
         V_out = V_in * R2 / (R1 + R2)
 
-        if node in ("v_out", "output", "out", "V_out"):
+        node_key = node.lower()
+        if node_key in ("v_out", "output", "out", "v_out"):
             return np.full_like(t, V_out)
-        elif node in ("i", "current", "I"):
+        elif node_key in ("i", "current"):
             return np.full_like(t, V_in / (R1 + R2))
         else:
             raise ValueError(f"Unknown node '{node}' for voltage divider")
@@ -373,9 +379,10 @@ class AnalyticalSolutions:
         magnitude = 1.0 / np.sqrt(1 + (omega * tau)**2)
         phase_shift = -np.arctan(omega * tau)
 
-        if node in ("v_cap", "V_C", "output", "out"):
+        node_key = node.lower()
+        if node_key in ("v_cap", "v_c", "output", "out"):
             return V_amp * magnitude * np.sin(omega * t + phase_in + phase_shift)
-        elif node in ("v_in", "V_in", "input"):
+        elif node_key in ("v_in", "input"):
             return V_amp * np.sin(omega * t + phase_in)
         else:
             raise ValueError(f"Unknown node '{node}' for RC lowpass sine")
@@ -414,9 +421,10 @@ class AnalyticalSolutions:
         magnitude = (omega * tau) / np.sqrt(1 + (omega * tau)**2)
         phase_shift = np.pi / 2 - np.arctan(omega * tau)
 
-        if node in ("v_r", "V_R", "output", "out"):
+        node_key = node.lower()
+        if node_key in ("v_r", "output", "out"):
             return V_amp * magnitude * np.sin(omega * t + phase_in + phase_shift)
-        elif node in ("v_in", "V_in", "input"):
+        elif node_key in ("v_in", "input"):
             return V_amp * np.sin(omega * t + phase_in)
         else:
             raise ValueError(f"Unknown node '{node}' for RC highpass sine")

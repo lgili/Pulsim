@@ -77,18 +77,18 @@ int main() {
 }
 ```
 
-### Loading from JSON
+### Loading from YAML
 
 ```cpp
-#include <pulsim/parser.hpp>
-#include <pulsim/simulation.hpp>
+#include <pulsim/v1/core.hpp>
 
 int main() {
     // Parse netlist
-    auto [circuit, options] = pulsim::parse_netlist("circuit.json");
+    pulsim::v1::parser::YamlParser parser;
+    auto [circuit, options] = parser.load("circuit.yaml");
 
     // Run simulation
-    Simulator sim(circuit, options);
+    pulsim::v1::Simulator sim(circuit, options);
     auto result = sim.run_transient();
 
     return 0;

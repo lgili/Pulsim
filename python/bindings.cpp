@@ -13,6 +13,8 @@
 #include <pybind11/functional.h>
 #include <pybind11/chrono.h>
 
+#include <atomic>
+
 #include "pulsim/v1/core.hpp"
 #include "pulsim/v1/control.hpp"
 #include "pulsim/ac_analysis.hpp"
@@ -578,6 +580,10 @@ void init_v2_module(py::module_& v2) {
              "Get node name by index")
         .def("node_names", &Circuit::node_names,
              "Get all node names")
+        .def("signal_names", &Circuit::signal_names,
+             "Get signal names in state-vector order")
+        .def("initial_state", &Circuit::initial_state,
+             "Build initial state vector from device initial conditions")
         // Device addition
         .def("add_resistor", &Circuit::add_resistor,
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
@@ -932,22 +938,10 @@ void init_v2_module(py::module_& v2) {
 
     // High-level DC analysis with automatic strategy selection
     v2.def("dc_operating_point", [](Circuit& circuit, const DCConvergenceConfig& config) {
-        // For DC analysis, use very large timestep so inductor 2L/dt -> 0 (short circuit)
-        // and capacitor 2C/dt -> 0 (open circuit)
-        circuit.set_timestep(1e6);  // 1 million seconds -> effectively DC
-
-        // Create system function
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        // Initial guess
-        Vector x0 = Vector::Zero(circuit.system_size());
-
-        // Create and run DC solver
-        DCConvergenceSolver<SparseLUPolicy> solver(config);
-        return solver.solve(x0, circuit.num_nodes(), circuit.num_branches(),
-                           system_func, nullptr);
+        SimulationOptions opts;
+        opts.dc_config = config;
+        Simulator sim(circuit, opts);
+        return sim.dc_operating_point();
     }, py::arg("circuit"), py::arg("config") = DCConvergenceConfig(),
     R"doc(
     Compute DC operating point with automatic convergence aids.
@@ -986,166 +980,26 @@ void init_v2_module(py::module_& v2) {
             return std::get<3>(r);
         });
 
-    // Transient simulation function with built-in robustness
+    // Transient simulation (simplified API)
     v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
                                 const Vector& x0, const NewtonOptions& newton_opts) {
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-        int gmin_fallback_count = 0;
-        int dt_reduction_count = 0;
+        SimulationOptions opts;
+        opts.tstart = t_start;
+        opts.tstop = t_stop;
+        opts.dt = dt;
+        opts.newton_options = newton_opts;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
 
-        // Set timestep for dynamic elements
-        Real current_dt = dt;
-        circuit.set_timestep(current_dt);
-
-        // Configure Newton solver (respect user settings)
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        // Note: enable_limiting defaults to true in NewtonOptions
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        // Gmin configuration for fallback
-        GminConfig gmin_config;
-        gmin_config.initial_gmin = 0.1;
-        gmin_config.final_gmin = 1e-12;
-        gmin_config.reduction_factor = 10.0;
-        gmin_config.max_steps = 30;
-
-        // System function
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        // Initial state
-        Vector x = x0;
-
-        // Set initial time for time-varying sources
-        circuit.set_current_time(t_start);
-
-        // Initialize dynamic element history
-        circuit.update_history(x, true);
-
-        // Store initial state
-        times.push_back(t_start);
-        states.push_back(x);
-
-        // Time stepping
-        Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
-        const int max_dt_reductions = 5;
-        const Real dt_reduction_factor = 0.2;
-
-        while (t < t_stop && step < max_steps) {
-            // Advance time
-            Real t_next = t + current_dt;
-            circuit.set_current_time(t_next);
-
-            // Try normal Newton solve first
-            auto result = solver.solve(x, system_func);
-
-            // Fallback 1: Gmin stepping if Newton fails
-            if (!result.success()) {
-                GminStepping gmin_stepper(gmin_config);
-
-                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
-                    Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
-
-                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
-                        circuit.assemble_jacobian(J, f, x_inner);
-                        // Add Gmin to node diagonals
-                        for (Index i = 0; i < num_nodes; ++i) {
-                            J.coeffRef(i, i) += current_gmin;
-                        }
-                    };
-                    return solver.solve(x_start, modified_func);
-                };
-
-                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-
-                if (result.success()) {
-                    gmin_fallback_count++;
-                }
-            }
-
-            // Fallback 2: Timestep reduction if still failing
-            if (!result.success()) {
-                int reductions = 0;
-                Real temp_dt = current_dt;
-                Vector x_sub = x;
-                Real t_sub = t;
-                bool sub_success = true;
-
-                while (!result.success() && reductions < max_dt_reductions) {
-                    temp_dt *= dt_reduction_factor;
-                    circuit.set_timestep(temp_dt);
-                    reductions++;
-
-                    // Try sub-stepping
-                    x_sub = x;
-                    t_sub = t;
-                    sub_success = true;
-
-                    while (t_sub < t_next - temp_dt * 0.5) {
-                        t_sub += temp_dt;
-                        circuit.set_current_time(t_sub);
-                        result = solver.solve(x_sub, system_func);
-
-                        if (!result.success()) {
-                            sub_success = false;
-                            break;
-                        }
-                        x_sub = result.solution;
-                        circuit.update_history(x_sub);
-                    }
-
-                    if (sub_success) {
-                        result.solution = x_sub;
-                        result.status = SolverStatus::Success;
-                        dt_reduction_count++;
-                        break;
-                    }
-                }
-
-                // Restore original timestep
-                circuit.set_timestep(current_dt);
-            }
-
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
-            }
-
-            // Update solution
-            x = result.solution;
-            circuit.update_history(x);
-
-            // Store state
-            t = t_next;
-            step++;
-            times.push_back(t);
-            states.push_back(x);
-        }
-
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
-                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
-        }
-
-        return std::make_tuple(times, states, success, message);
+        Simulator sim(circuit, opts);
+        auto result = sim.run_transient(x0);
+        return std::make_tuple(result.time, result.states, result.success, result.message);
     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
        py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
     R"doc(
-    Run transient simulation with automatic convergence aids.
-
-    This function automatically uses fallback strategies when Newton fails:
-    - Gmin stepping: Adds conductances to improve matrix conditioning
-    - Timestep reduction: Uses smaller substeps for difficult transitions
+    Run transient simulation (simplified API).
 
     Args:
         circuit: Circuit object with devices
@@ -1164,120 +1018,19 @@ void init_v2_module(py::module_& v2) {
                                 const NewtonOptions& newton_opts) {
         Vector x0 = Vector::Zero(circuit.system_size());
 
-        // Call the full version (this is a simplified overload)
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-        int gmin_fallback_count = 0;
-        int dt_reduction_count = 0;
+        SimulationOptions opts;
+        opts.tstart = t_start;
+        opts.tstop = t_stop;
+        opts.dt = dt;
+        opts.newton_options = newton_opts;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
 
-        Real current_dt = dt;
-        circuit.set_timestep(current_dt);
-
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        GminConfig gmin_config;
-        gmin_config.initial_gmin = 0.1;
-        gmin_config.final_gmin = 1e-12;
-        gmin_config.reduction_factor = 10.0;
-        gmin_config.max_steps = 30;
-
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        Vector x = x0;
-        circuit.set_current_time(t_start);
-        circuit.update_history(x, true);
-        times.push_back(t_start);
-        states.push_back(x);
-
-        Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
-        const int max_dt_reductions = 5;
-        const Real dt_reduction_factor = 0.2;
-
-        while (t < t_stop && step < max_steps) {
-            Real t_next = t + current_dt;
-            circuit.set_current_time(t_next);
-
-            auto result = solver.solve(x, system_func);
-
-            if (!result.success()) {
-                GminStepping gmin_stepper(gmin_config);
-                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
-                    Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
-                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
-                        circuit.assemble_jacobian(J, f, x_inner);
-                        for (Index i = 0; i < num_nodes; ++i) {
-                            J.coeffRef(i, i) += current_gmin;
-                        }
-                    };
-                    return solver.solve(x_start, modified_func);
-                };
-                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-                if (result.success()) gmin_fallback_count++;
-            }
-
-            if (!result.success()) {
-                int reductions = 0;
-                Real temp_dt = current_dt;
-                Vector x_sub = x;
-                Real t_sub = t;
-                bool sub_success = true;
-
-                while (!result.success() && reductions < max_dt_reductions) {
-                    temp_dt *= dt_reduction_factor;
-                    circuit.set_timestep(temp_dt);
-                    reductions++;
-                    x_sub = x;
-                    t_sub = t;
-                    sub_success = true;
-
-                    while (t_sub < t_next - temp_dt * 0.5) {
-                        t_sub += temp_dt;
-                        circuit.set_current_time(t_sub);
-                        result = solver.solve(x_sub, system_func);
-                        if (!result.success()) { sub_success = false; break; }
-                        x_sub = result.solution;
-                        circuit.update_history(x_sub);
-                    }
-                    if (sub_success) {
-                        result.solution = x_sub;
-                        result.status = SolverStatus::Success;
-                        dt_reduction_count++;
-                        break;
-                    }
-                }
-                circuit.set_timestep(current_dt);
-            }
-
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
-            }
-
-            x = result.solution;
-            circuit.update_history(x);
-            t = t_next;
-            step++;
-            times.push_back(t);
-            states.push_back(x);
-        }
-
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
-                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
-        }
-
-        return std::make_tuple(times, states, success, message);
+        Simulator sim(circuit, opts);
+        auto result = sim.run_transient(x0);
+        return std::make_tuple(result.time, result.states, result.success, result.message);
     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
        py::arg("newton_options") = NewtonOptions(),
     "Run transient with zero initial state");
@@ -1286,7 +1039,7 @@ void init_v2_module(py::module_& v2) {
     // Streaming transient simulation (for real-time GUI updates)
     // =========================================================================
 
-    v2.def("run_transient_streaming", [](
+    auto run_transient_streaming_impl = [](
         Circuit& circuit,
         Real t_start,
         Real t_stop,
@@ -1298,201 +1051,132 @@ void init_v2_module(py::module_& v2) {
         py::object cancel_check,
         int emit_interval
     ) {
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-        int gmin_fallback_count = 0;
-        int dt_reduction_count = 0;
+        SimulationOptions opts;
+        opts.tstart = t_start;
+        opts.tstop = t_stop;
+        opts.dt = dt;
+        opts.newton_options = newton_opts;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
 
-        // Get node names for data callback
+        Simulator sim(circuit, opts);
+
         std::vector<std::string> node_names;
         for (Index i = 0; i < circuit.num_nodes(); ++i) {
             node_names.push_back(circuit.node_name(i));
         }
 
-        Real current_dt = dt;
-        circuit.set_timestep(current_dt);
-
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        GminConfig gmin_config;
-        gmin_config.initial_gmin = 0.1;
-        gmin_config.final_gmin = 1e-12;
-        gmin_config.reduction_factor = 10.0;
-        gmin_config.max_steps = 30;
-
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
+        struct PyControl final : SimulationControl {
+            std::atomic<bool>* stop = nullptr;
+            bool should_stop() const override { return stop && stop->load(); }
+            bool should_pause() const override { return false; }
+            void wait_until_resumed() override {}
         };
 
-        Vector x = x0;
-        circuit.set_current_time(t_start);
-        circuit.update_history(x, true);
-        times.push_back(t_start);
-        states.push_back(x);
+        std::atomic<bool> stop_requested{false};
+        PyControl control;
+        control.stop = &stop_requested;
 
-        Real t = t_start;
         int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
-        const int max_dt_reductions = 5;
-        const Real dt_reduction_factor = 0.2;
+        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
         const Real total_duration = t_stop - t_start;
 
-        // Ensure emit_interval is valid
-        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
-
-        while (t < t_stop && step < max_steps) {
-            // Check for cancellation (acquire GIL for Python call)
-            if (!cancel_check.is_none()) {
-                py::gil_scoped_acquire acquire;
-                try {
-                    if (py::cast<bool>(cancel_check())) {
-                        success = false;
-                        message = "Cancelled by user";
-                        break;
-                    }
-                } catch (...) {
-                    // Ignore callback errors
-                }
-            }
-
-            Real t_next = t + current_dt;
-            circuit.set_current_time(t_next);
-
-            auto result = solver.solve(x, system_func);
-
-            // Fallback 1: Gmin stepping if Newton fails
-            if (!result.success()) {
-                GminStepping gmin_stepper(gmin_config);
-                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
-                    Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
-                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
-                        circuit.assemble_jacobian(J, f, x_inner);
-                        for (Index i = 0; i < num_nodes; ++i) {
-                            J.coeffRef(i, i) += current_gmin;
-                        }
-                    };
-                    return solver.solve(x_start, modified_func);
-                };
-                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-                if (result.success()) {
-                    gmin_fallback_count++;
-                }
-            }
-
-            // Fallback 2: Timestep reduction if still failing
-            if (!result.success()) {
-                int reductions = 0;
-                Real temp_dt = current_dt;
-                Vector x_sub = x;
-                Real t_sub = t;
-                bool sub_success = true;
-
-                while (!result.success() && reductions < max_dt_reductions) {
-                    temp_dt *= dt_reduction_factor;
-                    circuit.set_timestep(temp_dt);
-                    reductions++;
-
-                    x_sub = x;
-                    t_sub = t;
-                    sub_success = true;
-
-                    while (t_sub < t_next - temp_dt * 0.5) {
-                        t_sub += temp_dt;
-                        circuit.set_current_time(t_sub);
-                        result = solver.solve(x_sub, system_func);
-
-                        if (!result.success()) {
-                            sub_success = false;
-                            break;
-                        }
-                        x_sub = result.solution;
-                        circuit.update_history(x_sub);
-                    }
-
-                    if (sub_success) {
-                        result.solution = x_sub;
-                        result.status = SolverStatus::Success;
-                        dt_reduction_count++;
-                        break;
-                    }
-                }
-                circuit.set_timestep(current_dt);
-            }
-
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
-            }
-
-            x = result.solution;
-            circuit.update_history(x);
-            t = t_next;
+        auto callback = [&](Real time, const Vector& state) {
             step++;
-            times.push_back(t);
-            states.push_back(x);
+            bool emit = (step % actual_emit_interval == 0);
 
-            // Emit callbacks at specified interval (acquire GIL for Python calls)
-            if (step % actual_emit_interval == 0) {
+            if (emit || !cancel_check.is_none()) {
                 py::gil_scoped_acquire acquire;
 
-                // Data callback with state dictionary
-                if (!data_callback.is_none()) {
+                if (emit && !data_callback.is_none()) {
                     try {
                         py::dict state_dict;
                         for (size_t i = 0; i < node_names.size(); ++i) {
-                            state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                            state_dict[py::str("V(" + node_names[i] + ")")] = state[static_cast<Index>(i)];
                         }
-                        data_callback(t, state_dict);
+                        data_callback(time, state_dict);
                     } catch (...) {
                         // Ignore callback errors
                     }
                 }
 
-                // Progress callback
-                if (!progress_callback.is_none()) {
+                if (emit && !progress_callback.is_none()) {
                     try {
-                        Real progress = (t - t_start) / total_duration * 100.0;
-                        std::string prog_msg = "Simulating: t=" + std::to_string(t * 1e6) + "us";
+                        Real progress = total_duration > 0
+                            ? (time - t_start) / total_duration * 100.0
+                            : 0.0;
+                        std::string prog_msg = "Simulating: t=" + std::to_string(time * 1e6) + "us";
                         progress_callback(progress, prog_msg);
                     } catch (...) {
                         // Ignore callback errors
                     }
                 }
+
+                if (!cancel_check.is_none()) {
+                    try {
+                        if (py::cast<bool>(cancel_check())) {
+                            stop_requested.store(true);
+                        }
+                    } catch (...) {
+                        // Ignore callback errors
+                    }
+                }
+            }
+        };
+
+        SimulationResult result = sim.run_transient(x0, callback, nullptr, &control);
+
+        bool success = result.success;
+        std::string message = result.message.empty()
+            ? (success ? "Transient completed" : "Transient failed")
+            : result.message;
+
+        if (stop_requested.load()) {
+            success = false;
+            if (message.empty() || message.find("stopped") != std::string::npos) {
+                message = "Cancelled by user";
             }
         }
 
-        // Final callbacks
         {
             py::gil_scoped_acquire acquire;
-            if (!data_callback.is_none() && !times.empty()) {
+            if (!data_callback.is_none() && !result.time.empty()) {
                 try {
+                    const Vector& state = result.states.back();
                     py::dict state_dict;
                     for (size_t i = 0; i < node_names.size(); ++i) {
-                        state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                        state_dict[py::str("V(" + node_names[i] + ")")] = state[static_cast<Index>(i)];
                     }
-                    data_callback(times.back(), state_dict);
+                    data_callback(result.time.back(), state_dict);
                 } catch (...) {}
             }
             if (!progress_callback.is_none()) {
                 try {
-                    progress_callback(100.0, success ? "Complete" : message);
+                    progress_callback(100.0, message);
                 } catch (...) {}
             }
         }
 
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
-                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
-        }
+        return std::make_tuple(result.time, result.states, success, message);
+    };
 
-        return std::make_tuple(times, states, success, message);
+    v2.def("run_transient_streaming", [run_transient_streaming_impl](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        py::object data_callback,
+        py::object progress_callback,
+        py::object cancel_check,
+        int emit_interval
+    ) {
+        return run_transient_streaming_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts,
+            data_callback, progress_callback, cancel_check, emit_interval);
     },
     py::call_guard<py::gil_scoped_release>(),
     py::arg("circuit"),
@@ -1529,7 +1213,7 @@ void init_v2_module(py::module_& v2) {
     )doc");
 
     // Convenience version with zero initial state
-    v2.def("run_transient_streaming", [](
+    v2.def("run_transient_streaming", [run_transient_streaming_impl](
         Circuit& circuit,
         Real t_start,
         Real t_stop,
@@ -1541,20 +1225,59 @@ void init_v2_module(py::module_& v2) {
         int emit_interval
     ) {
         Vector x0 = Vector::Zero(circuit.system_size());
-        // Forward to full version - need to duplicate logic here for now
-        // (pybind11 doesn't support easy forwarding between overloads)
+        return run_transient_streaming_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts,
+            data_callback, progress_callback, cancel_check, emit_interval);
+    },
+    py::call_guard<py::gil_scoped_release>(),
+    py::arg("circuit"),
+    py::arg("t_start"),
+    py::arg("t_stop"),
+    py::arg("dt"),
+    py::arg("newton_options") = NewtonOptions(),
+    py::arg("data_callback") = py::none(),
+    py::arg("progress_callback") = py::none(),
+    py::arg("cancel_check") = py::none(),
+    py::arg("emit_interval") = 100,
+    "Run streaming transient with zero initial state");
 
-        std::vector<Real> times;
-        std::vector<Vector> states;
+    // =========================================================================
+    // Shared Memory Transient Simulation (Zero-copy real-time display)
+    // =========================================================================
+
+    v2.def("run_transient_shared", [](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        py::array_t<double, py::array::c_style> time_buffer,
+        py::array_t<double, py::array::c_style> states_buffer,
+        py::array_t<int64_t, py::array::c_style> status_buffer,
+        py::object cancel_check,
+        int cancel_check_interval
+    ) {
+        // Get direct pointers to numpy arrays (zero-copy access)
+        auto time_ptr = time_buffer.mutable_unchecked<1>();
+        auto states_ptr = states_buffer.mutable_unchecked<2>();
+        auto status_ptr = status_buffer.mutable_unchecked<1>();
+
+        const int64_t max_steps = time_ptr.shape(0);
+        const int num_nodes = static_cast<int>(states_ptr.shape(1));
+
+        // Status buffer layout:
+        // [0] = current_index (how many steps completed)
+        // [1] = status (0=running, 1=completed, 2=error, 3=cancelled)
+        // [2] = error_code
+        status_ptr(0) = 0;  // current_index
+        status_ptr(1) = 0;  // status = running
+        status_ptr(2) = 0;  // error_code
+
         bool success = true;
         std::string message = "Transient completed";
         int gmin_fallback_count = 0;
         int dt_reduction_count = 0;
-
-        std::vector<std::string> node_names;
-        for (Index i = 0; i < circuit.num_nodes(); ++i) {
-            node_names.push_back(circuit.node_name(i));
-        }
 
         Real current_dt = dt;
         circuit.set_timestep(current_dt);
@@ -1577,50 +1300,64 @@ void init_v2_module(py::module_& v2) {
         Vector x = x0;
         circuit.set_current_time(t_start);
         circuit.update_history(x, true);
-        times.push_back(t_start);
-        states.push_back(x);
+
+        // Write initial state to shared buffer
+        time_ptr(0) = t_start;
+        for (int i = 0; i < num_nodes && i < static_cast<int>(x.size()); ++i) {
+            states_ptr(0, i) = x[i];
+        }
+        status_ptr(0) = 1;  // One step completed
 
         Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
+        int64_t step = 0;
+        const int64_t actual_max_steps = std::min(max_steps - 1,
+            static_cast<int64_t>((t_stop - t_start) / dt * 10) + 1);
         const int max_dt_reductions = 5;
         const Real dt_reduction_factor = 0.2;
-        const Real total_duration = t_stop - t_start;
-        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
 
-        while (t < t_stop && step < max_steps) {
-            if (!cancel_check.is_none()) {
-                py::gil_scoped_acquire acquire;
-                try {
-                    if (py::cast<bool>(cancel_check())) {
-                        success = false;
-                        message = "Cancelled by user";
-                        break;
+        // Main simulation loop - NO GIL acquired during computation
+        while (t < t_stop && step < actual_max_steps) {
+            // Check for cancellation periodically (acquire GIL only here)
+            if (cancel_check_interval > 0 && step % cancel_check_interval == 0) {
+                if (!cancel_check.is_none()) {
+                    py::gil_scoped_acquire acquire;
+                    try {
+                        if (py::cast<bool>(cancel_check())) {
+                            status_ptr(1) = 3;  // cancelled
+                            return std::make_tuple(false, std::string("Cancelled by user"));
+                        }
+                    } catch (...) {
+                        // Ignore callback errors
                     }
-                } catch (...) {}
+                }
             }
 
             Real t_next = t + current_dt;
             circuit.set_current_time(t_next);
+
             auto result = solver.solve(x, system_func);
 
+            // Fallback 1: Gmin stepping if Newton fails
             if (!result.success()) {
                 GminStepping gmin_stepper(gmin_config);
                 auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
                     Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
+                    Index n_nodes = circuit.num_nodes();
                     auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
                         circuit.assemble_jacobian(J, f, x_inner);
-                        for (Index i = 0; i < num_nodes; ++i) {
+                        for (Index i = 0; i < n_nodes; ++i) {
                             J.coeffRef(i, i) += current_gmin;
                         }
                     };
                     return solver.solve(x_start, modified_func);
                 };
                 result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-                if (result.success()) gmin_fallback_count++;
+                if (result.success()) {
+                    gmin_fallback_count++;
+                }
             }
 
+            // Fallback 2: Timestep reduction if still failing
             if (!result.success()) {
                 int reductions = 0;
                 Real temp_dt = current_dt;
@@ -1632,6 +1369,7 @@ void init_v2_module(py::module_& v2) {
                     temp_dt *= dt_reduction_factor;
                     circuit.set_timestep(temp_dt);
                     reductions++;
+
                     x_sub = x;
                     t_sub = t;
                     sub_success = true;
@@ -1640,7 +1378,11 @@ void init_v2_module(py::module_& v2) {
                         t_sub += temp_dt;
                         circuit.set_current_time(t_sub);
                         result = solver.solve(x_sub, system_func);
-                        if (!result.success()) { sub_success = false; break; }
+
+                        if (!result.success()) {
+                            sub_success = false;
+                            break;
+                        }
                         x_sub = result.solution;
                         circuit.update_history(x_sub);
                     }
@@ -1656,74 +1398,96 @@ void init_v2_module(py::module_& v2) {
             }
 
             if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
+                status_ptr(1) = 2;  // error
+                status_ptr(2) = 1;  // convergence error
+                return std::make_tuple(false,
+                    std::string("Newton failed at t=") + std::to_string(t_next) + ": " + result.error_message);
             }
 
             x = result.solution;
             circuit.update_history(x);
             t = t_next;
             step++;
-            times.push_back(t);
-            states.push_back(x);
 
-            if (step % actual_emit_interval == 0) {
-                py::gil_scoped_acquire acquire;
-                if (!data_callback.is_none()) {
-                    try {
-                        py::dict state_dict;
-                        for (size_t i = 0; i < node_names.size(); ++i) {
-                            state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
-                        }
-                        data_callback(t, state_dict);
-                    } catch (...) {}
+            // Write to shared buffer - this is the zero-copy magic!
+            // Python can read this data at any time without blocking
+            if (step < max_steps) {
+                time_ptr(step) = t;
+                for (int i = 0; i < num_nodes && i < static_cast<int>(x.size()); ++i) {
+                    states_ptr(step, i) = x[i];
                 }
-                if (!progress_callback.is_none()) {
-                    try {
-                        Real progress = (t - t_start) / total_duration * 100.0;
-                        progress_callback(progress, "Simulating...");
-                    } catch (...) {}
-                }
+                // Update index AFTER writing data (memory barrier implicit in x86)
+                status_ptr(0) = step + 1;
             }
         }
 
-        {
-            py::gil_scoped_acquire acquire;
-            if (!data_callback.is_none() && !times.empty()) {
-                try {
-                    py::dict state_dict;
-                    for (size_t i = 0; i < node_names.size(); ++i) {
-                        state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
-                    }
-                    data_callback(times.back(), state_dict);
-                } catch (...) {}
-            }
-            if (!progress_callback.is_none()) {
-                try {
-                    progress_callback(100.0, success ? "Complete" : message);
-                } catch (...) {}
-            }
+        // Mark as completed
+        status_ptr(1) = 1;  // completed
+
+        if (gmin_fallback_count > 0 || dt_reduction_count > 0) {
+            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
+                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
         }
 
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin: " + std::to_string(gmin_fallback_count) +
-                      ", dt: " + std::to_string(dt_reduction_count) + ")";
-        }
-
-        return std::make_tuple(times, states, success, message);
+        return std::make_tuple(success, message);
     },
     py::call_guard<py::gil_scoped_release>(),
     py::arg("circuit"),
     py::arg("t_start"),
     py::arg("t_stop"),
     py::arg("dt"),
+    py::arg("x0"),
     py::arg("newton_options") = NewtonOptions(),
-    py::arg("data_callback") = py::none(),
-    py::arg("progress_callback") = py::none(),
+    py::arg("time_buffer"),
+    py::arg("states_buffer"),
+    py::arg("status_buffer"),
     py::arg("cancel_check") = py::none(),
-    py::arg("emit_interval") = 100,
-    "Run streaming transient with zero initial state");
+    py::arg("cancel_check_interval") = 1000,
+    R"doc(
+    Run transient simulation with shared memory buffers for zero-copy real-time display.
+
+    This function writes simulation data directly to pre-allocated numpy arrays,
+    allowing Python to poll the data at any time without GIL contention.
+    This is the fastest method for real-time waveform display.
+
+    Args:
+        circuit: Circuit object with devices
+        t_start: Start time (s)
+        t_stop: Stop time (s)
+        dt: Timestep (s)
+        x0: Initial state vector
+        newton_options: Newton solver options
+        time_buffer: Pre-allocated 1D numpy array for time values
+        states_buffer: Pre-allocated 2D numpy array (steps x nodes) for state values
+        status_buffer: 1D numpy array with 3 elements:
+                      [0] = current_index (steps completed)
+                      [1] = status (0=running, 1=completed, 2=error, 3=cancelled)
+                      [2] = error_code
+        cancel_check: Optional callback to check for cancellation
+        cancel_check_interval: Steps between cancellation checks (default: 1000)
+
+    Returns:
+        Tuple of (success, message)
+
+    Usage:
+        # Pre-allocate buffers
+        max_steps = int((t_stop - t_start) / dt) + 100
+        time_buf = np.zeros(max_steps, dtype=np.float64)
+        states_buf = np.zeros((max_steps, num_nodes), dtype=np.float64)
+        status_buf = np.zeros(3, dtype=np.int64)
+
+        # Run in thread
+        thread = Thread(target=run_transient_shared, args=(...))
+        thread.start()
+
+        # Poll from main thread
+        while status_buf[1] == 0:  # while running
+            current_idx = status_buf[0]
+            time_data = time_buf[:current_idx]
+            states_data = states_buf[:current_idx]
+            update_display(time_data, states_data)
+            time.sleep(0.016)  # 60 FPS
+    )doc");
 
     // =========================================================================
     // Validation Framework (Phase 6 exposed)

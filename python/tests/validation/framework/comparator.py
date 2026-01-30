@@ -78,6 +78,42 @@ def compare_results(
     )
 
 
+class ResultComparator:
+    """Lightweight comparator for ad-hoc validation metrics."""
+
+    def compare(
+        self,
+        pulsim_times: np.ndarray,
+        pulsim_values: np.ndarray,
+        ref_times: np.ndarray,
+        ref_values: np.ndarray,
+    ) -> dict:
+        """Return basic error metrics and correlation.
+
+        The reference signal is interpolated to Pulsim's time grid when needed.
+        """
+        if len(ref_times) != len(pulsim_times) or not np.allclose(ref_times, pulsim_times):
+            ref_interpolated = interpolate_to_common_times(ref_times, ref_values, pulsim_times)
+        else:
+            ref_interpolated = ref_values
+
+        errors = np.abs(pulsim_values - ref_interpolated)
+        max_error = float(np.max(errors))
+        rms_error = float(np.sqrt(np.mean(errors**2)))
+
+        # Handle constant signals to avoid NaNs in correlation
+        if np.std(pulsim_values) < 1e-12 or np.std(ref_interpolated) < 1e-12:
+            correlation = 1.0 if np.allclose(pulsim_values, ref_interpolated) else 0.0
+        else:
+            correlation = float(np.corrcoef(pulsim_values, ref_interpolated)[0, 1])
+
+        return {
+            "max_error": max_error,
+            "rms_error": rms_error,
+            "correlation": correlation,
+        }
+
+
 def calculate_steady_state_error(
     times: np.ndarray,
     values: np.ndarray,

@@ -12,7 +12,7 @@ High-performance circuit simulator focused on power electronics.
 - **Newton-Raphson** nonlinear solver with damping, line search, and trust region
 - **Advanced convergence aids** (Gmin stepping, source stepping, pseudo-transient)
 - **Adaptive timestep control** with PI controller and LTE estimation
-- **JSON netlist format** with schematic position storage
+- **YAML netlist format** with schema/versioning
 - **CLI tool** for batch simulation
 - **Python bindings** for scripting and GUI integration
 - **GUI integration API** with pause/resume/stop, progress callbacks, and validation
@@ -57,27 +57,35 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 
 ```bash
 # Run a simulation
-./build/cli/pulsim run examples/rc_circuit.json -o result.csv
+./build/cli/pulsim run examples/rc_circuit.yaml -o result.csv
 
 # Validate a netlist
-./build/cli/pulsim validate examples/voltage_divider.json
+./build/cli/pulsim validate examples/voltage_divider.yaml
 
 # Get circuit info
-./build/cli/pulsim info examples/rlc_circuit.json
+./build/cli/pulsim info examples/rlc_circuit.yaml
 ```
 
 ## Netlist Format
 
-Pulsim uses a JSON-based netlist format:
+Pulsim uses a versioned YAML netlist format:
 
-```json
-{
-    "components": [
-        {"type": "voltage_source", "name": "V1", "npos": "in", "nneg": "0", "waveform": 5.0},
-        {"type": "resistor", "name": "R1", "n1": "in", "n2": "out", "value": "1k"},
-        {"type": "capacitor", "name": "C1", "n1": "out", "n2": "0", "value": "1u"}
-    ]
-}
+```yaml
+schema: pulsim-v1
+version: 1
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: {type: dc, value: 5.0}
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 1k
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1u
 ```
 
 ### Supported Components
@@ -89,17 +97,17 @@ Pulsim uses a JSON-based netlist format:
 | Inductor | `inductor`, `L` | `value` (H), `ic` (initial current) |
 | Voltage Source | `voltage_source`, `V` | `waveform` |
 | Current Source | `current_source`, `I` | `waveform` |
-| Diode | `diode`, `D` | `is`, `n`, `ideal` |
-| Switch | `switch`, `S` | `ron`, `roff`, `vth`, `ctrl_pos`, `ctrl_neg` |
-| MOSFET | `mosfet`, `nmos`, `pmos`, `M` | `vth`, `kp`, `lambda`, `w`, `l`, `rds_on`, `body_diode` |
+| Diode | `diode`, `D` | `g_on`, `g_off` |
+| Switch | `switch`, `S` | `ron`, `roff`, `initial_state` |
+| VCSwitch | `vcswitch` | `v_threshold`, `g_on`, `g_off` |
+| MOSFET | `mosfet`, `nmos`, `pmos`, `M` | `vth`, `kp`, `lambda`, `g_off`, `is_nmos` |
 | Transformer | `transformer`, `T` | `turns_ratio`, `lm` (magnetizing inductance) |
 
 ### Waveform Types
 
-- **DC**: `5.0` or `{"type": "dc", "value": 5.0}`
-- **Pulse**: `{"type": "pulse", "v1": 0, "v2": 5, "period": 1e-3, ...}`
-- **Sine**: `{"type": "sin", "amplitude": 2.5, "frequency": 1000, ...}`
-- **PWL**: `{"type": "pwl", "points": [[0, 0], [1e-3, 5], [2e-3, 0]]}`
+- **DC**: `{type: dc, value: 5.0}`
+- **Pulse**: `{type: pulse, v_initial: 0, v_pulse: 5, period: 1e-3, ...}`
+- **Sine**: `{type: sine, amplitude: 2.5, frequency: 1000, ...}`
 
 ### SI Prefixes
 
@@ -455,24 +463,16 @@ for category in registry.all_categories():
 
 ### Schematic Position Storage
 
-```python
-# Store component positions for layout persistence
-circuit.set_position("R1", pulsim.SchematicPosition(x=100, y=50, orientation=90))
+Schematic layout persistence is handled by the GUI integration layer. YAML netlists
+focus on simulation data; layout metadata is tracked separately.
 
-# Export circuit with positions
-json_str = pulsim.circuit_to_json(circuit, include_positions=True)
-
-# Import circuit (positions preserved)
-loaded = pulsim.parse_netlist_string(json_str)
-pos = loaded.get_position("R1")  # Returns the saved position
-```
-
-See `examples/gui_integration_example.py` for more examples.
+See `examples/gui_integration_example.py` for details.
 
 ## Documentation
 
 - [Performance Tuning](docs/performance-tuning.md) - SIMD, solver, and memory optimization
 - [Determinism Guide](docs/determinism.md) - Reproducibility and debugging
+- [Migration Guide](docs/migration-guide.md) - JSON → YAML and unified v1 core notes
 - [API Reference Notebook](examples/notebooks/14_api_reference.ipynb) - Interactive examples
 
 ## Roadmap

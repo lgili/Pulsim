@@ -9,6 +9,8 @@ PulsimCore has achieved functional completeness but suffers from several archite
 
 A ground-up refactoring using C++23 with template metaprogramming will deliver a simulator that matches or exceeds PSIM performance and accuracy.
 
+**Dependency**: This change builds on `unify-v1-core` (single v1 kernel + YAML netlist + unified simulator pipeline).
+
 ## What Changes
 
 ### **BREAKING** - Complete Kernel Rewrite

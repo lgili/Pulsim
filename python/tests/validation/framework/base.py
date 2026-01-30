@@ -1,7 +1,7 @@
 """Base classes for validation framework."""
 
 from dataclasses import dataclass
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Dict, List
 from enum import Enum
 import numpy as np
 import time
@@ -30,6 +30,8 @@ class ValidationResult:
     tolerance: float
     execution_time_ms: float
     notes: str = ""
+    max_error_threshold: Optional[float] = None
+    rms_error_threshold: Optional[float] = None
 
     def summary(self) -> str:
         """Return a summary string of the validation result."""
@@ -50,7 +52,8 @@ class CircuitDefinition:
     name: str
     description: str
     level: ValidationLevel
-    build_circuit: Callable[[], Any]  # Returns pulsim.Circuit
+    build_circuit: Optional[Callable[[], Any]] = None  # Returns pulsim.Circuit
+    pulsim_builder: Optional[Callable[[], Any]] = None
     analytical_solution: Optional[Callable[[np.ndarray], np.ndarray]] = None
     t_start: float = 0.0
     t_stop: float = 1e-3
@@ -61,6 +64,22 @@ class CircuitDefinition:
     spice_netlist: Optional[str] = None
     use_zero_ic: bool = False  # If True, use IC=0 instead of DC operating point
     custom_ic: Optional[Callable[[Any], np.ndarray]] = None  # Custom IC function(circuit) -> x0
+    # New-style validation fields (level2+)
+    tstart: Optional[float] = None
+    tstop: Optional[float] = None
+    compare_nodes: Optional[Dict[str, str]] = None
+    circuit_params: Optional[Dict[str, float]] = None
+    pulsim_options: Optional[Dict[str, Any]] = None
+    max_error_tolerance: Optional[float] = None
+    rms_error_tolerance: Optional[float] = None
+
+    def __post_init__(self):
+        if self.pulsim_builder is None:
+            self.pulsim_builder = self.build_circuit
+        if self.tstart is not None:
+            self.t_start = self.tstart
+        if self.tstop is not None:
+            self.t_stop = self.tstop
 
 
 class ValidationTest:
@@ -75,9 +94,15 @@ class ValidationTest:
         import pulsim as ps
         self.ps = ps
 
+    def _build_circuit(self):
+        builder = self.circuit_def.pulsim_builder or self.circuit_def.build_circuit
+        if builder is None:
+            raise ValueError("CircuitDefinition missing build_circuit/pulsim_builder")
+        return builder()
+
     def run_pulsim_dc(self):
         """Run DC analysis in Pulsim."""
-        circuit = self.circuit_def.build_circuit()
+        circuit = self._build_circuit()
         return self.ps.dc_operating_point(circuit)
 
     def run_pulsim_transient(self) -> tuple:
@@ -86,7 +111,7 @@ class ValidationTest:
         Returns:
             tuple: (times, states, success, message)
         """
-        circuit = self.circuit_def.build_circuit()
+        circuit = self._build_circuit()
 
         # Determine initial conditions
         if self.circuit_def.custom_ic is not None:
@@ -121,6 +146,98 @@ class ValidationTest:
             raise RuntimeError(f"Transient failed: {msg}")
 
         return np.array(times), states, success, msg
+
+    def validate(self, use_analytical: bool = True) -> List[ValidationResult]:
+        """Run validation for the configured circuit definition."""
+        # New-style validation with compare_nodes
+        if self.circuit_def.compare_nodes:
+            circuit = self._build_circuit()
+            opts = self.ps.SimulationOptions()
+            opts.tstart = self.circuit_def.t_start
+            opts.tstop = self.circuit_def.t_stop
+            opts.dt = self.circuit_def.dt
+
+            for key, value in (self.circuit_def.pulsim_options or {}).items():
+                setattr(opts, key, value)
+
+            sim = self.ps.Simulator(circuit, opts)
+            start = time.perf_counter()
+            result = sim.run_transient()
+            exec_time = (time.perf_counter() - start) * 1000
+
+            if result.final_status != self.ps.SolverStatus.Success:
+                max_tol = self.circuit_def.max_error_tolerance or self.circuit_def.tolerance
+                rms_tol = self.circuit_def.rms_error_tolerance or self.circuit_def.tolerance
+                return [ValidationResult(
+                    test_name=self.circuit_def.name,
+                    passed=False,
+                    pulsim_times=np.array([0.0]),
+                    pulsim_values=np.array([0.0]),
+                    reference_times=np.array([0.0]),
+                    reference_values=np.array([0.0]),
+                    max_error=float("inf"),
+                    rms_error=float("inf"),
+                    max_relative_error=float("inf"),
+                    tolerance=max_tol,
+                    execution_time_ms=exec_time,
+                    notes=result.message,
+                    max_error_threshold=max_tol,
+                    rms_error_threshold=rms_tol,
+                )]
+
+            times = np.array(result.time)
+            data_matrix = np.array(result.data)
+            signal_index = {name: i for i, name in enumerate(result.signal_names)}
+
+            results: List[ValidationResult] = []
+            for pulsim_signal, analytical_key in self.circuit_def.compare_nodes.items():
+                if pulsim_signal not in signal_index:
+                    raise ValueError(f"Signal '{pulsim_signal}' not found in results")
+
+                pulsim_values = data_matrix[:, signal_index[pulsim_signal]]
+
+                ref_values = None
+                if use_analytical and self.circuit_def.analytical_solution:
+                    params = self.circuit_def.circuit_params or {}
+                    ref_values = self.circuit_def.analytical_solution(times, analytical_key, params)
+
+                if ref_values is None:
+                    raise ValueError("No analytical solution defined for this circuit")
+
+                errors = np.abs(pulsim_values - ref_values)
+                max_error = float(np.max(errors))
+                rms_error = float(np.sqrt(np.mean(errors**2)))
+                max_ref = float(np.max(np.abs(ref_values)))
+                max_rel_error = max_error / max_ref if max_ref > 1e-12 else max_error
+
+                max_tol = self.circuit_def.max_error_tolerance or self.circuit_def.tolerance
+                rms_tol = self.circuit_def.rms_error_tolerance or self.circuit_def.tolerance
+                passed = (max_error <= max_tol) and (rms_error <= rms_tol)
+
+                test_name = self.circuit_def.name
+                if len(self.circuit_def.compare_nodes) > 1:
+                    test_name = f"{test_name}:{pulsim_signal}"
+
+                results.append(ValidationResult(
+                    test_name=test_name,
+                    passed=passed,
+                    pulsim_times=times,
+                    pulsim_values=pulsim_values,
+                    reference_times=times,
+                    reference_values=ref_values,
+                    max_error=max_error,
+                    rms_error=rms_error,
+                    max_relative_error=max_rel_error,
+                    tolerance=max_tol,
+                    execution_time_ms=exec_time,
+                    max_error_threshold=max_tol,
+                    rms_error_threshold=rms_tol,
+                ))
+
+            return results
+
+        # Fallback to legacy transient validation
+        return [self.validate_transient()]
 
     def run_analytical(self, times: np.ndarray) -> Optional[np.ndarray]:
         """Calculate analytical solution."""
