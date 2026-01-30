@@ -474,6 +474,9 @@ struct NewtonOptions {
     int anderson_depth = 5;
     Real anderson_beta = 1.0;
 
+    // Jacobian pattern reuse
+    bool reuse_jacobian_pattern = true;
+
     // Broyden update (optional, dense for small systems)
     bool enable_broyden = false;
     int broyden_max_size = 200;
@@ -535,6 +538,7 @@ public:
         Real damping = options_.initial_damping;
         Real prev_residual = std::numeric_limits<Real>::max();
         Real trust_radius = options_.trust_radius;
+        bool pattern_analyzed = false;
 
         const bool use_broyden = options_.enable_broyden && n <= options_.broyden_max_size;
         Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> J_dense;
@@ -546,6 +550,17 @@ public:
             // Evaluate system
             system_func(result.solution, f, J);
             const Vector x_current = result.solution;
+
+            if (options_.reuse_jacobian_pattern && !pattern_analyzed) {
+                if (!linear_solver_.analyze(J)) {
+                    result.status = SolverStatus::NumericalError;
+                    result.error_message = "Jacobian pattern analysis failed";
+                    result.iterations = iter + 1;
+                    result.history.set_final_status(result.status);
+                    return result;
+                }
+                pattern_analyzed = true;
+            }
 
             if (use_broyden) {
                 if (!broyden_ready) {

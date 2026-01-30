@@ -32,9 +32,9 @@
 - [x] 3.3 Event-aligned step splitting for hard switching edges
 
 ## Phase 4: Performance & Memory
-- [ ] 4.1 Reuse Jacobian structure and symbolic factorization where possible
-- [ ] 4.2 Ensure hot-path allocation-free execution (arena reuse)
-- [ ] 4.3 SIMD/SoA optimizations for runtime device evaluation
+- [x] 4.1 Reuse Jacobian structure and symbolic factorization where possible
+- [x] 4.2 Ensure hot-path allocation-free execution (arena reuse)
+- [x] 4.3 SIMD/SoA optimizations for runtime device evaluation
 
 ## Phase 5: YAML + Python/CLI Configuration
 - [ ] 5.1 Extend YAML schema with `simulation.solver` options

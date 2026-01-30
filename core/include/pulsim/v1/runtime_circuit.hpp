@@ -315,6 +315,7 @@ public:
     void add_resistor(const std::string& name, Index n1, Index n2, Real R) {
         devices_.emplace_back(Resistor(R, name));
         connections_.push_back({name, {n1, n2}, -1});
+        resistor_cache_.push_back({n1, n2, R == 0.0 ? 0.0 : 1.0 / R});
     }
 
     void add_capacitor(const std::string& name, Index n1, Index n2, Real C, Real ic = 0.0) {
@@ -649,13 +650,24 @@ public:
         b.setZero();
 
         // Reserve space for triplets
-        std::vector<Eigen::Triplet<Real>> triplets;
-        triplets.reserve(devices_.size() * 9);  // Estimate
+        auto& triplets = dc_triplets_;
+        triplets.clear();
+        reserve_triplets(triplets, devices_.size() * 9);
+
+        // Fast-path stamping for resistors (SoA)
+        for (const auto& r : resistor_cache_) {
+            stamp_conductance(r.g, r.n1, r.n2, triplets);
+        }
 
         for (std::size_t i = 0; i < devices_.size(); ++i) {
             const auto& conn = connections_[i];
             std::visit([&](const auto& dev) {
-                stamp_device_dc(dev, conn, triplets, b);
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    return;
+                } else {
+                    stamp_device_dc(dev, conn, triplets, b);
+                }
             }, devices_[i]);
         }
 
@@ -674,13 +686,29 @@ public:
         f.resize(n);
         f.setZero();
 
-        std::vector<Eigen::Triplet<Real>> triplets;
-        triplets.reserve(devices_.size() * 9);
+        auto& triplets = jacobian_triplets_;
+        triplets.clear();
+        reserve_triplets(triplets, devices_.size() * 9);
+
+        // Fast-path stamping for resistors (SoA)
+        for (const auto& r : resistor_cache_) {
+            Real v1 = (r.n1 >= 0) ? x[r.n1] : 0.0;
+            Real v2 = (r.n2 >= 0) ? x[r.n2] : 0.0;
+            Real i = r.g * (v1 - v2);
+            stamp_conductance(r.g, r.n1, r.n2, triplets);
+            if (r.n1 >= 0) f[r.n1] += i;
+            if (r.n2 >= 0) f[r.n2] -= i;
+        }
 
         for (std::size_t i = 0; i < devices_.size(); ++i) {
             const auto& conn = connections_[i];
             std::visit([&](const auto& dev) {
-                stamp_device_jacobian(dev, conn, triplets, f, x);
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    return;
+                } else {
+                    stamp_device_jacobian(dev, conn, triplets, f, x);
+                }
             }, devices_[i]);
         }
 
@@ -710,8 +738,21 @@ public:
     [[nodiscard]] const std::vector<DeviceConnection>& connections() const { return connections_; }
 
 private:
+    struct ResistorStamp {
+        Index n1 = -1;
+        Index n2 = -1;
+        Real g = 0.0;
+    };
+
+    static void reserve_triplets(std::vector<Eigen::Triplet<Real>>& triplets, std::size_t estimate) {
+        if (triplets.capacity() < estimate) {
+            triplets.reserve(estimate);
+        }
+    }
+
     std::vector<DeviceVariant> devices_;
     std::vector<DeviceConnection> connections_;
+    std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index> node_map_;
     std::vector<std::string> node_names_;
     Index num_branches_ = 0;
@@ -719,6 +760,9 @@ private:
     int integration_order_ = 2;  // 1 = Backward Euler, 2 = Trapezoidal
     Real current_time_ = 0.0;
     inline static const std::string ground_name_ = "0";
+
+    mutable std::vector<Eigen::Triplet<Real>> dc_triplets_;
+    mutable std::vector<Eigen::Triplet<Real>> jacobian_triplets_;
 
     // =========================================================================
     // DC Stamping Helpers
