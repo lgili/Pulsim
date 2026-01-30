@@ -14,11 +14,16 @@
 #include "pulsim/v1/numeric_types.hpp"
 #include "pulsim/v1/solver.hpp"
 #include <Eigen/SparseLU>
+#include <Eigen/IterativeLinearSolvers>
+#include <unsupported/Eigen/IterativeSolvers>
 #include <memory>
 #include <new>
 #include <cstdlib>
 #include <cstring>
 #include <bit>
+#include <optional>
+#include <utility>
+#include <vector>
 
 namespace pulsim::v1 {
 
@@ -35,6 +40,72 @@ struct LinearSolverConfig {
 
     [[nodiscard]] static constexpr LinearSolverConfig defaults() {
         return LinearSolverConfig{};
+    }
+};
+
+struct LinearSolverTelemetry {
+    int total_solve_calls = 0;
+    int total_iterations = 0;
+    int total_fallbacks = 0;
+    int last_iterations = 0;
+    Real last_error = 0.0;
+    std::optional<LinearSolverKind> last_solver;
+};
+
+struct IterativeSolverConfig {
+    int max_iterations = 200;
+    Real tolerance = 1e-10;
+    int restart = 30;  // GMRES restart
+
+    enum class PreconditionerKind {
+        None,
+        Jacobi,
+        ILU0
+    };
+
+    PreconditionerKind preconditioner = PreconditionerKind::Jacobi;
+    bool enable_scaling = false;
+    Real scaling_floor = 1e-12;
+
+    [[nodiscard]] static constexpr IterativeSolverConfig defaults() {
+        return IterativeSolverConfig{};
+    }
+};
+
+// =============================================================================
+// Runtime Linear Solver Selection
+// =============================================================================
+
+enum class LinearSolverKind {
+    SparseLU,
+    EnhancedSparseLU,
+    KLU,
+    GMRES,
+    BiCGSTAB,
+    CG
+};
+
+struct LinearSolverTelemetry {
+    int total_solve_calls = 0;
+    int total_iterations = 0;
+    int total_fallbacks = 0;
+    int last_iterations = 0;
+    Real last_error = 0.0;
+    std::optional<LinearSolverKind> last_solver;
+};
+
+struct LinearSolverStackConfig {
+    std::vector<LinearSolverKind> order { LinearSolverKind::SparseLU };
+    LinearSolverConfig direct_config = LinearSolverConfig::defaults();
+    IterativeSolverConfig iterative_config = IterativeSolverConfig::defaults();
+    bool allow_fallback = true;
+    bool auto_select = true;
+    int size_threshold = 2000;
+    int nnz_threshold = 200000;
+    Real diag_min_threshold = 1e-12;
+
+    [[nodiscard]] static LinearSolverStackConfig defaults() {
+        return {};
     }
 };
 
@@ -283,6 +354,14 @@ public:
 #endif
     }
 
+        [[nodiscard]] const LinearSolverConfig& config() const { return config_; }
+        void set_config(const LinearSolverConfig& config) {
+        config_ = config;
+    #ifndef PULSIM_HAS_KLU
+        fallback_.set_config(config);
+    #endif
+        }
+
 private:
 #ifdef PULSIM_HAS_KLU
     void cleanup() {
@@ -308,6 +387,737 @@ private:
     LinearSolverConfig config_;
     EnhancedSparseLUPolicy fallback_;
 #endif
+};
+
+// =============================================================================
+// Iterative Linear Solver Policies
+// =============================================================================
+
+class GMRESPolicy {
+public:
+    explicit GMRESPolicy(const IterativeSolverConfig& config = {})
+        : config_(config) {
+        configure_all();
+    }
+
+    bool analyze(const SparseMatrix& A) {
+        prepare_matrix(A);
+        const SparseMatrix& target = scaled_ready_ ? scaled_matrix_ : A;
+        computed_ = compute_with(target);
+        return computed_;
+    }
+
+    bool factorize(const SparseMatrix& A) {
+        prepare_matrix(A);
+        const SparseMatrix& target = scaled_ready_ ? scaled_matrix_ : A;
+        computed_ = compute_with(target);
+        return computed_;
+    }
+
+    [[nodiscard]] LinearSolveResult solve(const Vector& b) {
+        if (!computed_) {
+            return LinearSolveResult::failure("GMRES: matrix not factorized");
+        }
+        Vector rhs = scaled_ready_ ? (row_scale_.array() * b.array()).matrix() : b;
+        auto result = solve_with(rhs);
+        if (!result) {
+            return LinearSolveResult::failure("GMRES solve failed");
+        }
+        return LinearSolveResult::success(std::move(*result));
+    }
+
+    [[nodiscard]] bool is_singular() const { return !computed_; }
+
+    [[nodiscard]] int last_iterations() const { return last_iterations_; }
+    [[nodiscard]] Real last_error() const { return last_error_; }
+
+    void set_config(const IterativeSolverConfig& config) {
+        config_ = config;
+        configure_all();
+        computed_ = false;
+    }
+
+private:
+    IterativeSolverConfig config_;
+    Eigen::GMRES<SparseMatrix, Eigen::IdentityPreconditioner> solver_identity_;
+    Eigen::GMRES<SparseMatrix, Eigen::DiagonalPreconditioner<Scalar>> solver_jacobi_;
+    Eigen::GMRES<SparseMatrix, Eigen::IncompleteLUT<Scalar>> solver_ilu0_;
+    bool computed_ = false;
+    SparseMatrix scaled_matrix_;
+    Vector row_scale_;
+    bool scaled_ready_ = false;
+    int last_iterations_ = 0;
+    Real last_error_ = 0.0;
+
+    void configure_all() {
+        solver_identity_.setMaxIterations(config_.max_iterations);
+        solver_identity_.setTolerance(config_.tolerance);
+        solver_identity_.set_restart(config_.restart);
+        solver_jacobi_.setMaxIterations(config_.max_iterations);
+        solver_jacobi_.setTolerance(config_.tolerance);
+        solver_jacobi_.set_restart(config_.restart);
+        solver_ilu0_.setMaxIterations(config_.max_iterations);
+        solver_ilu0_.setTolerance(config_.tolerance);
+        solver_ilu0_.set_restart(config_.restart);
+    }
+
+    void prepare_matrix(const SparseMatrix& A) {
+        if (!config_.enable_scaling) {
+            scaled_ready_ = false;
+            row_scale_.resize(0);
+            return;
+        }
+
+        row_scale_ = Vector::Ones(A.rows());
+        Vector max_abs = Vector::Zero(A.rows());
+        for (int col = 0; col < A.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(A, col); it; ++it) {
+                const Index row = it.row();
+                const Real val = std::abs(static_cast<Real>(it.value()));
+                if (val > max_abs[row]) {
+                    max_abs[row] = val;
+                }
+            }
+        }
+
+        for (Index i = 0; i < max_abs.size(); ++i) {
+            if (max_abs[i] > config_.scaling_floor) {
+                row_scale_[i] = Real(1.0) / max_abs[i];
+            }
+        }
+
+        scaled_matrix_ = A;
+        for (int col = 0; col < scaled_matrix_.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(scaled_matrix_, col); it; ++it) {
+                it.valueRef() *= row_scale_[it.row()];
+            }
+        }
+        scaled_ready_ = true;
+    }
+
+    bool compute_with(const SparseMatrix& A) {
+        switch (config_.preconditioner) {
+            case IterativeSolverConfig::PreconditionerKind::None:
+                solver_identity_.compute(A);
+                return solver_identity_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::Jacobi:
+                solver_jacobi_.compute(A);
+                return solver_jacobi_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::ILU0:
+                solver_ilu0_.compute(A);
+                return solver_ilu0_.info() == Eigen::Success;
+        }
+        return false;
+    }
+
+    [[nodiscard]] std::optional<Vector> solve_with(const Vector& b) {
+        switch (config_.preconditioner) {
+            case IterativeSolverConfig::PreconditionerKind::None: {
+                Vector x = solver_identity_.solve(b);
+                last_iterations_ = solver_identity_.iterations();
+                last_error_ = solver_identity_.error();
+                if (solver_identity_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::Jacobi: {
+                Vector x = solver_jacobi_.solve(b);
+                last_iterations_ = solver_jacobi_.iterations();
+                last_error_ = solver_jacobi_.error();
+                if (solver_jacobi_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::ILU0: {
+                Vector x = solver_ilu0_.solve(b);
+                last_iterations_ = solver_ilu0_.iterations();
+                last_error_ = solver_ilu0_.error();
+                if (solver_ilu0_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+class BiCGSTABPolicy {
+public:
+    explicit BiCGSTABPolicy(const IterativeSolverConfig& config = {})
+        : config_(config) {
+        configure_all();
+    }
+
+    bool analyze(const SparseMatrix& A) {
+        prepare_matrix(A);
+        const SparseMatrix& target = scaled_ready_ ? scaled_matrix_ : A;
+        computed_ = compute_with(target);
+        return computed_;
+    }
+
+    bool factorize(const SparseMatrix& A) {
+        prepare_matrix(A);
+        const SparseMatrix& target = scaled_ready_ ? scaled_matrix_ : A;
+        computed_ = compute_with(target);
+        return computed_;
+    }
+
+    [[nodiscard]] LinearSolveResult solve(const Vector& b) {
+        if (!computed_) {
+            return LinearSolveResult::failure("BiCGSTAB: matrix not factorized");
+        }
+        Vector rhs = scaled_ready_ ? (row_scale_.array() * b.array()).matrix() : b;
+        auto result = solve_with(rhs);
+        if (!result) {
+            return LinearSolveResult::failure("BiCGSTAB solve failed");
+        }
+        return LinearSolveResult::success(std::move(*result));
+    }
+
+    [[nodiscard]] bool is_singular() const { return !computed_; }
+
+    [[nodiscard]] int last_iterations() const { return last_iterations_; }
+    [[nodiscard]] Real last_error() const { return last_error_; }
+
+    void set_config(const IterativeSolverConfig& config) {
+        config_ = config;
+        configure_all();
+        computed_ = false;
+    }
+
+private:
+    IterativeSolverConfig config_;
+    Eigen::BiCGSTAB<SparseMatrix, Eigen::IdentityPreconditioner> solver_identity_;
+    Eigen::BiCGSTAB<SparseMatrix, Eigen::DiagonalPreconditioner<Scalar>> solver_jacobi_;
+    Eigen::BiCGSTAB<SparseMatrix, Eigen::IncompleteLUT<Scalar>> solver_ilu0_;
+    bool computed_ = false;
+    SparseMatrix scaled_matrix_;
+    Vector row_scale_;
+    bool scaled_ready_ = false;
+    int last_iterations_ = 0;
+    Real last_error_ = 0.0;
+
+    void configure_all() {
+        solver_identity_.setMaxIterations(config_.max_iterations);
+        solver_identity_.setTolerance(config_.tolerance);
+        solver_jacobi_.setMaxIterations(config_.max_iterations);
+        solver_jacobi_.setTolerance(config_.tolerance);
+        solver_ilu0_.setMaxIterations(config_.max_iterations);
+        solver_ilu0_.setTolerance(config_.tolerance);
+    }
+
+    void prepare_matrix(const SparseMatrix& A) {
+        if (!config_.enable_scaling) {
+            scaled_ready_ = false;
+            row_scale_.resize(0);
+            return;
+        }
+
+        row_scale_ = Vector::Ones(A.rows());
+        Vector max_abs = Vector::Zero(A.rows());
+        for (int col = 0; col < A.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(A, col); it; ++it) {
+                const Index row = it.row();
+                const Real val = std::abs(static_cast<Real>(it.value()));
+                if (val > max_abs[row]) {
+                    max_abs[row] = val;
+                }
+            }
+        }
+
+        for (Index i = 0; i < max_abs.size(); ++i) {
+            if (max_abs[i] > config_.scaling_floor) {
+                row_scale_[i] = Real(1.0) / max_abs[i];
+            }
+        }
+
+        scaled_matrix_ = A;
+        for (int col = 0; col < scaled_matrix_.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(scaled_matrix_, col); it; ++it) {
+                it.valueRef() *= row_scale_[it.row()];
+            }
+        }
+        scaled_ready_ = true;
+    }
+
+    bool compute_with(const SparseMatrix& A) {
+        switch (config_.preconditioner) {
+            case IterativeSolverConfig::PreconditionerKind::None:
+                solver_identity_.compute(A);
+                return solver_identity_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::Jacobi:
+                solver_jacobi_.compute(A);
+                return solver_jacobi_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::ILU0:
+                solver_ilu0_.compute(A);
+                return solver_ilu0_.info() == Eigen::Success;
+        }
+        return false;
+    }
+
+    [[nodiscard]] std::optional<Vector> solve_with(const Vector& b) {
+        switch (config_.preconditioner) {
+            case IterativeSolverConfig::PreconditionerKind::None: {
+                Vector x = solver_identity_.solve(b);
+                last_iterations_ = solver_identity_.iterations();
+                last_error_ = solver_identity_.error();
+                if (solver_identity_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::Jacobi: {
+                Vector x = solver_jacobi_.solve(b);
+                last_iterations_ = solver_jacobi_.iterations();
+                last_error_ = solver_jacobi_.error();
+                if (solver_jacobi_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::ILU0: {
+                Vector x = solver_ilu0_.solve(b);
+                last_iterations_ = solver_ilu0_.iterations();
+                last_error_ = solver_ilu0_.error();
+                if (solver_ilu0_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+class ConjugateGradientPolicy {
+public:
+    explicit ConjugateGradientPolicy(const IterativeSolverConfig& config = {})
+        : config_(config) {
+        configure_all();
+    }
+
+    bool analyze(const SparseMatrix& A) {
+        prepare_matrix(A);
+        const SparseMatrix& target = scaled_ready_ ? scaled_matrix_ : A;
+        computed_ = compute_with(target);
+        return computed_;
+    }
+
+    bool factorize(const SparseMatrix& A) {
+        prepare_matrix(A);
+        const SparseMatrix& target = scaled_ready_ ? scaled_matrix_ : A;
+        computed_ = compute_with(target);
+        return computed_;
+    }
+
+    [[nodiscard]] LinearSolveResult solve(const Vector& b) {
+        if (!computed_) {
+            return LinearSolveResult::failure("CG: matrix not factorized");
+        }
+        Vector rhs = scaled_ready_ ? (row_scale_.array() * b.array()).matrix() : b;
+        auto result = solve_with(rhs);
+        if (!result) {
+            return LinearSolveResult::failure("CG solve failed");
+        }
+        return LinearSolveResult::success(std::move(*result));
+    }
+
+    [[nodiscard]] bool is_singular() const { return !computed_; }
+
+    [[nodiscard]] int last_iterations() const { return last_iterations_; }
+    [[nodiscard]] Real last_error() const { return last_error_; }
+
+    void set_config(const IterativeSolverConfig& config) {
+        config_ = config;
+        configure_all();
+        computed_ = false;
+    }
+
+private:
+    IterativeSolverConfig config_;
+    Eigen::ConjugateGradient<SparseMatrix, Eigen::Lower|Eigen::Upper,
+                             Eigen::IdentityPreconditioner> solver_identity_;
+    Eigen::ConjugateGradient<SparseMatrix, Eigen::Lower|Eigen::Upper,
+                             Eigen::DiagonalPreconditioner<Scalar>> solver_jacobi_;
+    Eigen::ConjugateGradient<SparseMatrix, Eigen::Lower|Eigen::Upper,
+                             Eigen::IncompleteLUT<Scalar>> solver_ilu0_;
+    bool computed_ = false;
+    SparseMatrix scaled_matrix_;
+    Vector row_scale_;
+    bool scaled_ready_ = false;
+    int last_iterations_ = 0;
+    Real last_error_ = 0.0;
+
+    void configure_all() {
+        solver_identity_.setMaxIterations(config_.max_iterations);
+        solver_identity_.setTolerance(config_.tolerance);
+        solver_jacobi_.setMaxIterations(config_.max_iterations);
+        solver_jacobi_.setTolerance(config_.tolerance);
+        solver_ilu0_.setMaxIterations(config_.max_iterations);
+        solver_ilu0_.setTolerance(config_.tolerance);
+    }
+
+    void prepare_matrix(const SparseMatrix& A) {
+        if (!config_.enable_scaling) {
+            scaled_ready_ = false;
+            row_scale_.resize(0);
+            return;
+        }
+
+        row_scale_ = Vector::Ones(A.rows());
+        Vector max_abs = Vector::Zero(A.rows());
+        for (int col = 0; col < A.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(A, col); it; ++it) {
+                const Index row = it.row();
+                const Real val = std::abs(static_cast<Real>(it.value()));
+                if (val > max_abs[row]) {
+                    max_abs[row] = val;
+                }
+            }
+        }
+
+        for (Index i = 0; i < max_abs.size(); ++i) {
+            if (max_abs[i] > config_.scaling_floor) {
+                row_scale_[i] = Real(1.0) / max_abs[i];
+            }
+        }
+
+        scaled_matrix_ = A;
+        for (int col = 0; col < scaled_matrix_.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(scaled_matrix_, col); it; ++it) {
+                it.valueRef() *= row_scale_[it.row()];
+            }
+        }
+        scaled_ready_ = true;
+    }
+
+    bool compute_with(const SparseMatrix& A) {
+        switch (config_.preconditioner) {
+            case IterativeSolverConfig::PreconditionerKind::None:
+                solver_identity_.compute(A);
+                return solver_identity_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::Jacobi:
+                solver_jacobi_.compute(A);
+                return solver_jacobi_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::ILU0:
+                solver_ilu0_.compute(A);
+                return solver_ilu0_.info() == Eigen::Success;
+        }
+        return false;
+    }
+
+    [[nodiscard]] std::optional<Vector> solve_with(const Vector& b) {
+        switch (config_.preconditioner) {
+            case IterativeSolverConfig::PreconditionerKind::None: {
+                Vector x = solver_identity_.solve(b);
+                last_iterations_ = solver_identity_.iterations();
+                last_error_ = solver_identity_.error();
+                if (solver_identity_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::Jacobi: {
+                Vector x = solver_jacobi_.solve(b);
+                last_iterations_ = solver_jacobi_.iterations();
+                last_error_ = solver_jacobi_.error();
+                if (solver_jacobi_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::ILU0: {
+                Vector x = solver_ilu0_.solve(b);
+                last_iterations_ = solver_ilu0_.iterations();
+                last_error_ = solver_ilu0_.error();
+                if (solver_ilu0_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+// =============================================================================
+// Runtime Linear Solver Stack (selection + deterministic fallback)
+// =============================================================================
+
+class RuntimeLinearSolver {
+public:
+    explicit RuntimeLinearSolver(const LinearSolverStackConfig& config = {})
+        : config_(config),
+          sparse_(std::make_unique<SparseLUPolicy>()),
+          enhanced_(std::make_unique<EnhancedSparseLUPolicy>(config.direct_config)),
+                    klu_(std::make_unique<KLUPolicy>(config.direct_config)),
+                    gmres_(std::make_unique<GMRESPolicy>(config.iterative_config)),
+                    bicgstab_(std::make_unique<BiCGSTABPolicy>(config.iterative_config)),
+                    cg_(std::make_unique<ConjugateGradientPolicy>(config.iterative_config)) {}
+
+    RuntimeLinearSolver(const RuntimeLinearSolver&) = delete;
+    RuntimeLinearSolver& operator=(const RuntimeLinearSolver&) = delete;
+
+    RuntimeLinearSolver(RuntimeLinearSolver&&) noexcept = default;
+    RuntimeLinearSolver& operator=(RuntimeLinearSolver&&) noexcept = default;
+
+    bool analyze(const SparseMatrix& A) {
+        last_matrix_ = &A;
+        active_index_.reset();
+        active_order_ = build_order(A);
+        for (std::size_t i = 0; i < active_order_.size(); ++i) {
+            auto kind = active_order_[i];
+            if (!is_available(kind)) continue;
+            if (analyze_with(kind, A)) {
+                active_index_ = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool factorize(const SparseMatrix& A) {
+        last_matrix_ = &A;
+
+        if (active_index_ && *active_index_ < active_order_.size()) {
+            auto kind = active_order_[*active_index_];
+            if (is_available(kind)) {
+                if (factorize_with(kind, A)) {
+                    return true;
+                }
+            }
+        }
+
+        if (active_order_.empty()) {
+            active_order_ = build_order(A);
+        }
+
+        for (std::size_t i = 0; i < active_order_.size(); ++i) {
+            auto kind = active_order_[i];
+            if (!is_available(kind)) continue;
+            if (factorize_with(kind, A)) {
+                active_index_ = i;
+                return true;
+            }
+            if (!config_.allow_fallback) break;
+        }
+        return false;
+    }
+
+    [[nodiscard]] LinearSolveResult solve(const Vector& b) {
+        if (!active_index_ || *active_index_ >= active_order_.size()) {
+            return LinearSolveResult::failure("No active linear solver");
+        }
+
+        auto active_kind = active_order_[*active_index_];
+        auto result = solve_with(active_kind, b);
+        update_telemetry(active_kind, result);
+        if (result || !config_.allow_fallback || !last_matrix_) {
+            return result;
+        }
+
+        for (std::size_t i = 0; i < active_order_.size(); ++i) {
+            if (i == *active_index_) continue;
+            auto kind = active_order_[i];
+            if (!is_available(kind)) continue;
+
+            if (!factorize_with(kind, *last_matrix_)) {
+                if (!config_.allow_fallback) break;
+                continue;
+            }
+
+            auto retry = solve_with(kind, b);
+            update_telemetry(kind, retry);
+            if (retry) {
+                active_index_ = i;
+                telemetry_.total_fallbacks += 1;
+                return retry;
+            }
+
+            if (!config_.allow_fallback) break;
+        }
+
+        return result;
+    }
+
+    [[nodiscard]] bool is_singular() const {
+        if (!active_index_ || *active_index_ >= active_order_.size()) return true;
+        return is_singular_with(active_order_[*active_index_]);
+    }
+
+    [[nodiscard]] const LinearSolverStackConfig& config() const { return config_; }
+    void set_config(const LinearSolverStackConfig& config) {
+        config_ = config;
+        if (enhanced_) enhanced_->set_config(config_.direct_config);
+        if (klu_) klu_->set_config(config_.direct_config);
+        if (gmres_) gmres_->set_config(config_.iterative_config);
+        if (bicgstab_) bicgstab_->set_config(config_.iterative_config);
+        if (cg_) cg_->set_config(config_.iterative_config);
+        active_index_.reset();
+        last_matrix_ = nullptr;
+        active_order_.clear();
+        telemetry_ = {};
+    }
+
+    [[nodiscard]] std::optional<LinearSolverKind> active_kind() const {
+        if (!active_index_ || *active_index_ >= active_order_.size()) return std::nullopt;
+        return active_order_[*active_index_];
+    }
+
+    [[nodiscard]] LinearSolverTelemetry telemetry() const { return telemetry_; }
+
+private:
+    LinearSolverStackConfig config_;
+    std::unique_ptr<SparseLUPolicy> sparse_;
+    std::unique_ptr<EnhancedSparseLUPolicy> enhanced_;
+    std::unique_ptr<KLUPolicy> klu_;
+    std::unique_ptr<GMRESPolicy> gmres_;
+    std::unique_ptr<BiCGSTABPolicy> bicgstab_;
+    std::unique_ptr<ConjugateGradientPolicy> cg_;
+    std::optional<std::size_t> active_index_;
+    const SparseMatrix* last_matrix_ = nullptr;
+    std::vector<LinearSolverKind> active_order_;
+    LinearSolverTelemetry telemetry_{};
+
+    [[nodiscard]] bool is_available(LinearSolverKind kind) const {
+        if (kind == LinearSolverKind::KLU) return KLUPolicy::is_available();
+        return true;
+    }
+
+    [[nodiscard]] std::vector<LinearSolverKind> build_order(const SparseMatrix& A) const {
+        if (!config_.auto_select || config_.order.empty()) {
+            return config_.order;
+        }
+
+        const int rows = static_cast<int>(A.rows());
+        const int nnz = static_cast<int>(A.nonZeros());
+        bool prefer_iterative = (rows >= config_.size_threshold) || (nnz >= config_.nnz_threshold);
+
+        Real min_diag = std::numeric_limits<Real>::infinity();
+        for (int k = 0; k < A.outerSize(); ++k) {
+            for (SparseMatrix::InnerIterator it(A, k); it; ++it) {
+                if (it.row() == it.col()) {
+                    Real val = std::abs(static_cast<Real>(it.value()));
+                    if (val < min_diag) min_diag = val;
+                }
+            }
+        }
+
+        if (min_diag < config_.diag_min_threshold) {
+            prefer_iterative = false;  // ill-conditioned hint -> prefer direct
+        }
+
+        std::vector<LinearSolverKind> order = config_.order;
+        auto is_iterative = [](LinearSolverKind kind) {
+            return kind == LinearSolverKind::GMRES ||
+                   kind == LinearSolverKind::BiCGSTAB ||
+                   kind == LinearSolverKind::CG;
+        };
+
+        if (prefer_iterative) {
+            auto it = std::find_if(order.begin(), order.end(), is_iterative);
+            if (it != order.end() && it != order.begin()) {
+                LinearSolverKind chosen = *it;
+                order.erase(it);
+                order.insert(order.begin(), chosen);
+            }
+        } else {
+            auto it = std::find_if(order.begin(), order.end(),
+                                   [&](LinearSolverKind kind) { return !is_iterative(kind); });
+            if (it != order.end() && it != order.begin()) {
+                LinearSolverKind chosen = *it;
+                order.erase(it);
+                order.insert(order.begin(), chosen);
+            }
+        }
+
+        return order;
+    }
+
+    bool analyze_with(LinearSolverKind kind, const SparseMatrix& A) {
+        switch (kind) {
+            case LinearSolverKind::SparseLU:
+                return sparse_->analyze(A);
+            case LinearSolverKind::EnhancedSparseLU:
+                return enhanced_->analyze(A);
+            case LinearSolverKind::KLU:
+                return klu_->analyze(A);
+            case LinearSolverKind::GMRES:
+                return gmres_->analyze(A);
+            case LinearSolverKind::BiCGSTAB:
+                return bicgstab_->analyze(A);
+            case LinearSolverKind::CG:
+                return cg_->analyze(A);
+        }
+        return false;
+    }
+
+    bool factorize_with(LinearSolverKind kind, const SparseMatrix& A) {
+        switch (kind) {
+            case LinearSolverKind::SparseLU:
+                return sparse_->factorize(A);
+            case LinearSolverKind::EnhancedSparseLU:
+                return enhanced_->factorize(A);
+            case LinearSolverKind::KLU:
+                return klu_->factorize(A);
+            case LinearSolverKind::GMRES:
+                return gmres_->factorize(A);
+            case LinearSolverKind::BiCGSTAB:
+                return bicgstab_->factorize(A);
+            case LinearSolverKind::CG:
+                return cg_->factorize(A);
+        }
+        return false;
+    }
+
+    [[nodiscard]] LinearSolveResult solve_with(LinearSolverKind kind, const Vector& b) {
+        switch (kind) {
+            case LinearSolverKind::SparseLU:
+                return sparse_->solve(b);
+            case LinearSolverKind::EnhancedSparseLU:
+                return enhanced_->solve(b);
+            case LinearSolverKind::KLU:
+                return klu_->solve(b);
+            case LinearSolverKind::GMRES:
+                return gmres_->solve(b);
+            case LinearSolverKind::BiCGSTAB:
+                return bicgstab_->solve(b);
+            case LinearSolverKind::CG:
+                return cg_->solve(b);
+        }
+        return LinearSolveResult::failure("Unknown linear solver");
+    }
+
+    [[nodiscard]] bool is_singular_with(LinearSolverKind kind) const {
+        switch (kind) {
+            case LinearSolverKind::SparseLU:
+                return sparse_->is_singular();
+            case LinearSolverKind::EnhancedSparseLU:
+                return enhanced_->is_singular();
+            case LinearSolverKind::KLU:
+                return klu_->is_singular();
+            case LinearSolverKind::GMRES:
+                return gmres_->is_singular();
+            case LinearSolverKind::BiCGSTAB:
+                return bicgstab_->is_singular();
+            case LinearSolverKind::CG:
+                return cg_->is_singular();
+        }
+        return true;
+    }
+
+    void update_telemetry(LinearSolverKind kind, const LinearSolveResult& result) {
+        telemetry_.total_solve_calls += 1;
+        telemetry_.last_solver = kind;
+
+        int iterations = 0;
+        Real error = 0.0;
+        switch (kind) {
+            case LinearSolverKind::GMRES:
+                iterations = gmres_->last_iterations();
+                error = gmres_->last_error();
+                break;
+            case LinearSolverKind::BiCGSTAB:
+                iterations = bicgstab_->last_iterations();
+                error = bicgstab_->last_error();
+                break;
+            case LinearSolverKind::CG:
+                iterations = cg_->last_iterations();
+                error = cg_->last_error();
+                break;
+            default:
+                break;
+        }
+
+        telemetry_.last_iterations = iterations;
+        telemetry_.last_error = error;
+        telemetry_.total_iterations += iterations;
+    }
 };
 
 // =============================================================================

@@ -2,6 +2,7 @@
 
 #include "pulsim/v1/runtime_circuit.hpp"
 #include "pulsim/v1/solver.hpp"
+#include "pulsim/v1/high_performance.hpp"
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/losses.hpp"
@@ -66,6 +67,7 @@ struct SimulationOptions {
     // Solver options
     NewtonOptions newton_options{};
     DCConvergenceConfig dc_config{};
+    LinearSolverStackConfig linear_solver = LinearSolverStackConfig::defaults();
 
     // Adaptive timestep + LTE
     bool adaptive_timestep = true;
@@ -99,6 +101,8 @@ struct SimulationResult {
     int newton_iterations_total = 0;
     int timestep_rejections = 0;
     double total_time_seconds = 0.0;
+
+    LinearSolverTelemetry linear_solver_telemetry;
 
     SystemLossSummary loss_summary;
 };
@@ -170,7 +174,7 @@ private:
 
     Circuit& circuit_;
     SimulationOptions options_;
-    NewtonRaphsonSolver<SparseLUPolicy> newton_solver_;
+    NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
 
     std::vector<SwitchMonitor> switch_monitors_;
     std::vector<DeviceLossState> loss_states_;

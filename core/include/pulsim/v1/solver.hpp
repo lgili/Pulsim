@@ -614,6 +614,9 @@ public:
         convergence_checker_.set_tolerances(opts.tolerances);
     }
 
+    [[nodiscard]] LinearPolicy& linear_solver() { return linear_solver_; }
+    [[nodiscard]] const LinearPolicy& linear_solver() const { return linear_solver_; }
+
     [[nodiscard]] const ConvergenceChecker& convergence_checker() const {
         return convergence_checker_;
     }

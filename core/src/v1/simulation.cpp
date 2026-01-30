@@ -21,6 +21,7 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     options_.newton_options.num_nodes = circuit_.num_nodes();
     options_.newton_options.num_branches = circuit_.num_branches();
     newton_solver_.set_options(options_.newton_options);
+    newton_solver_.linear_solver().set_config(options_.linear_solver);
 
     // Ensure timestep controller limits align with simulation options
     auto cfg = options_.timestep_config;
@@ -86,7 +87,8 @@ DCAnalysisResult Simulator::dc_operating_point() {
 
     Vector x0 = Vector::Zero(circuit_.system_size());
 
-    DCConvergenceSolver<SparseLUPolicy> solver(options_.dc_config);
+    DCConvergenceSolver<RuntimeLinearSolver> solver(options_.dc_config);
+    solver.set_linear_solver_config(options_.linear_solver);
     return solver.solve(x0, circuit_.num_nodes(), circuit_.num_branches(), system_func, nullptr);
 }
 
@@ -392,6 +394,7 @@ SimulationResult Simulator::run_transient(SimulationCallback callback,
         result.success = false;
         result.final_status = dc.newton_result.status;
         result.message = "DC operating point failed: " + dc.message;
+        result.linear_solver_telemetry = dc.linear_solver_telemetry;
         return result;
     }
 
@@ -568,6 +571,8 @@ SimulationResult Simulator::run_transient(const Vector& x0,
     }
 
     finalize_loss_summary(result);
+
+    result.linear_solver_telemetry = newton_solver_.linear_solver().telemetry();
 
     return result;
 }

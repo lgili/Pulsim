@@ -12,6 +12,7 @@
 
 #include "pulsim/v1/numeric_types.hpp"
 #include "pulsim/v1/solver.hpp"
+#include "pulsim/v1/high_performance.hpp"
 #include <vector>
 #include <functional>
 #include <optional>
@@ -663,6 +664,7 @@ struct DCAnalysisResult {
     int total_newton_iterations = 0;
     bool success = false;
     std::string message;
+    LinearSolverTelemetry linear_solver_telemetry;
 };
 
 /// Integrated DC solver with automatic strategy selection
@@ -679,6 +681,10 @@ public:
           source_(config.source_config),
           pseudo_(config.pseudo_config),
           init_(config.init_config) {}
+
+    void set_linear_solver_config(const LinearSolverStackConfig& config) {
+        linear_solver_config_ = config;
+    }
 
     /// Solve DC operating point with automatic convergence aids
     [[nodiscard]] DCAnalysisResult solve(
@@ -698,6 +704,13 @@ public:
         newton_opts.num_nodes = num_nodes;
         newton_opts.num_branches = num_branches;
         NewtonRaphsonSolver<LinearPolicy> newton(newton_opts);
+        if (linear_solver_config_) {
+            if constexpr (requires(LinearPolicy policy, const LinearSolverStackConfig& cfg) {
+                              policy.set_config(cfg);
+                          }) {
+                newton.linear_solver().set_config(*linear_solver_config_);
+            }
+        }
 
         // Strategy selection
         if (config_.strategy == DCStrategy::Auto) {
@@ -765,6 +778,7 @@ private:
     SourceStepping source_;
     PseudoTransientContinuation pseudo_;
     RobustInitialization init_;
+    std::optional<LinearSolverStackConfig> linear_solver_config_;
 
     DCAnalysisResult try_direct(
         const Vector& x0,
@@ -778,6 +792,7 @@ private:
         result.success = result.newton_result.success();
         result.message = result.success ? "Direct solve succeeded" :
                          "Direct solve failed: " + result.newton_result.error_message;
+        attach_linear_telemetry(result, newton);
         return result;
     }
 
@@ -808,6 +823,7 @@ private:
         result.success = result.newton_result.success();
         result.message = result.success ? "Gmin stepping succeeded" :
                          "Gmin stepping failed: " + result.newton_result.error_message;
+        attach_linear_telemetry(result, newton);
         return result;
     }
 
@@ -818,9 +834,11 @@ private:
         DCAnalysisResult result;
         result.strategy_used = DCStrategy::SourceStepping;
 
+        NewtonOptions opts;
+        NewtonRaphsonSolver<LinearPolicy> newton(opts);
+        apply_linear_config(newton);
+
         auto scaled_solve = [&](const Vector& x_start, Real scale) -> NewtonResult {
-            NewtonOptions opts;
-            NewtonRaphsonSolver<LinearPolicy> newton(opts);
             auto system = [&](const Vector& x, Vector& f, SparseMatrix& J) {
                 scaled_func(x, f, J, scale);
             };
@@ -833,6 +851,7 @@ private:
         result.success = ss_result.success;
         result.message = ss_result.success ? "Source stepping succeeded" :
                          "Source stepping failed: " + ss_result.error_message;
+        attach_linear_telemetry(result, newton);
         return result;
     }
 
@@ -867,6 +886,7 @@ private:
         result.success = ptc_result.success;
         result.message = ptc_result.success ? "Pseudo-transient succeeded" :
                          "Pseudo-transient failed: " + ptc_result.error_message;
+        attach_linear_telemetry(result, newton);
         return result;
     }
 
@@ -891,13 +911,31 @@ private:
                 result.success = true;
                 result.message = "Random restart succeeded on attempt " +
                                  std::to_string(i + 1);
+                attach_linear_telemetry(result, newton);
                 return result;
             }
         }
 
         result.success = false;
         result.message = "All random restarts failed";
+        attach_linear_telemetry(result, newton);
         return result;
+    }
+
+    void apply_linear_config(NewtonRaphsonSolver<LinearPolicy>& newton) {
+        if (linear_solver_config_) {
+            if constexpr (requires(LinearPolicy policy, const LinearSolverStackConfig& cfg) {
+                              policy.set_config(cfg);
+                          }) {
+                newton.linear_solver().set_config(*linear_solver_config_);
+            }
+        }
+    }
+
+    void attach_linear_telemetry(DCAnalysisResult& result, NewtonRaphsonSolver<LinearPolicy>& newton) {
+        if constexpr (requires(LinearPolicy policy) { policy.telemetry(); }) {
+            result.linear_solver_telemetry = newton.linear_solver().telemetry();
+        }
     }
 };
 

@@ -1,97 +1,36 @@
 ## Why
 
-PulsimCore has achieved functional completeness but suffers from several architectural limitations that prevent it from competing with industry-standard simulators like PSIM, PLECS, and LTSpice. Current issues include:
+With `unify-v1-core` completed, PulsimCore now has a single runtime v1 kernel and YAML-only netlists. The next bottleneck is solver power and robustness: stiff switching circuits still need stronger nonlinear/linear strategies, better conditioning, and clearer telemetry. We also want predictable performance while keeping the Python/CLI surface stable.
 
-1. **Numerical Precision**: DC operating point convergence bugs, Trapezoidal integration accuracy issues (~8% error), incorrect companion model implementations
-2. **Performance**: No use of modern C++ compile-time optimizations, inefficient runtime polymorphism, suboptimal matrix operations
-3. **Architecture**: Monolithic solver design makes it hard to add new integration methods, tightly coupled components
-4. **Robustness**: Many edge cases cause convergence failures, inadequate error recovery mechanisms
-
-A ground-up refactoring using C++23 with template metaprogramming will deliver a simulator that matches or exceeds PSIM performance and accuracy.
-
-**Dependency**: This change builds on `unify-v1-core` (single v1 kernel + YAML netlist + unified simulator pipeline).
+This change focuses on upgrading the **solver stack** (linear + nonlinear) and the **runtime execution pipeline** to make simulations both faster and more reliable without introducing a separate v2 core.
 
 ## What Changes
 
-### **BREAKING** - Complete Kernel Rewrite
+### Solver Stack Upgrade (Runtime v1)
+- Add **iterative linear solvers** (GMRES/BiCGSTAB/CG) with preconditioners (ILU0/Jacobi) and runtime auto-selection.
+- Add **nonlinear accelerators** (Anderson/Broyden) and optional **Newton–Krylov** path.
+- Expand fallback order and deterministic solver selection.
+- Expose solver telemetry (iteration counts, fallbacks, conditioning hints).
 
-#### Phase 1: C++23 Foundation & Build System
-- Migrate from C++20 to C++23 with Clang 17+
-- Enable modules support for faster compilation
-- Configure LTO (Link-Time Optimization) and PGO (Profile-Guided Optimization)
-- Add SIMD intrinsics support (AVX2/AVX-512, ARM NEON)
+### Robustness for Stiff Switching Circuits
+- Stiffness-aware transient control (order caps, dt adaptation when repeated rejections occur).
+- Improved Jacobian reuse and solver warm-starts.
+- Event-aligned step splitting tuned for hard switching edges.
 
-#### Phase 2: Template Metaprogramming Architecture
-- Static polymorphism for device models (CRTP pattern)
-- Compile-time circuit graph analysis
-- Expression templates for matrix operations
-- Constexpr evaluation of stamp patterns
-- Policy-based design for solver configuration
-
-#### Phase 3: Precision & Numerical Robustness
-- Fix DC operating point convergence (residual check after final Newton step)
-- Fix Trapezoidal integration (correct companion model with history terms)
-- Implement BDF2/GEAR with proper coefficient handling
-- Add adaptive order selection (BDF1-5)
-- Implement proper local truncation error estimation
-- Add automatic timestep control with PI controller
-
-#### Phase 4: High-Performance Solvers
-- Template-based Newton solver with compile-time Jacobian sparsity
-- SIMD-optimized matrix assembly
-- Memory pool allocators for zero-allocation hot paths
-- Cache-friendly data layout (SoA vs AoS)
-- Parallel device evaluation with work stealing
-
-#### Phase 5: Advanced Convergence
-- Gmin stepping with exponential ramp
-- Source stepping with continuation
-- Pseudo-transient analysis
-- Automatic damping with Armijo line search
-- Trust region methods for difficult circuits
-
-#### Phase 6: Validation & Benchmarking
-- Comprehensive test suite against analytical solutions
-- SPICE reference comparisons (ngspice, LTSpice)
-- Performance benchmarks vs PSIM/PLECS
-- Automated regression testing
-
-### Cross-Cutting: Reliability & Compatibility
-- Deterministic execution guarantees on x86-64/arm64 with fixed seeds and ordered reductions
-- Observability: machine-readable artifacts for accuracy/perf/memory regressions stored per run
-- Backward-compat shim for v1 API/CLI/Python routed through v2 core
+### YAML + Python/CLI Configuration
+- Extend YAML schema to configure linear solver, nonlinear strategy, preconditioner, and fallback order.
+- Keep Python/CLI API stable; new options are additive and optional.
 
 ## Impact
 
-### Affected Capabilities (Complete Rewrite)
-- `kernel-mna` - MNA assembly with template metaprogramming
-- `kernel-solver` - Newton/linear solvers with static polymorphism
-- `kernel-devices` - Device models with CRTP
-- `kernel-events` - Event handling with compile-time dispatch
-- `kernel-losses` - Loss calculation with expression templates
-- `kernel-thermal` - Thermal coupling with cache-friendly layout
-
-### Affected Code
-- `core/include/pulsim/*.hpp` - Complete API redesign
-- `core/src/*.cpp` - Implementation rewrite
-- `python/` - Binding updates for new API
-- `CMakeLists.txt` - C++23 configuration
-
-### Migration Path
-- Python API will maintain backward compatibility where possible
-- JSON netlist format unchanged
-- New API alongside old during transition period
-
-### Risk Mitigation
-- Incremental phases allow validation at each step
-- Comprehensive test suite prevents regression
-- Performance benchmarks ensure improvements
+- Affected specs: `kernel-v1-core`, `netlist-yaml`.
+- Affected code: `core/include/pulsim/v1`, `core/src/v1`, YAML parser, Python bindings, docs.
+- JSON is **not** part of the migration path (YAML-only remains mandatory).
 
 ## Success Criteria
 
-1. **Accuracy**: All circuits match analytical/SPICE results within 0.1%
-2. **Performance**: 2-5x speedup over current implementation
-3. **Robustness**: Zero convergence failures on standard test circuits
-4. **Compilation**: Full build < 30 seconds with modules
-5. **Determinism**: Repeatable results across runs on the same hardware class (x86-64/arm64) with fixed seeds
-6. **Compatibility**: v1 API/CLI/Python flows operate via v2 core without breaking changes during transition
+1. **Accuracy**: Analytical and SPICE comparisons within 0.1% where applicable.
+2. **Robustness**: Difficult switching circuits converge with fewer failures and clear fallback traces.
+3. **Performance**: 2x speedup on benchmark suite or reduced iteration counts for same accuracy.
+4. **Determinism**: Fixed-order solver selection with reproducible results per hardware class.
+5. **Compatibility**: Existing v1 Python/CLI flows continue to work without code changes.
