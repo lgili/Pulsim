@@ -74,6 +74,11 @@ target_link_libraries(_pulsim
         pulsim::pulsim
 )
 
+target_include_directories(_pulsim
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/legacy/include
+)
+
 # Set the output name to match Python conventions
 set_target_properties(_pulsim PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim"
@@ -83,6 +88,16 @@ set_target_properties(_pulsim PROPERTIES
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.py
     ${CMAKE_BINARY_DIR}/python/pulsim/__init__.py
+    COPYONLY
+)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/netlist.py
+    ${CMAKE_BINARY_DIR}/python/pulsim/netlist.py
+    COPYONLY
+)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.pyi
+    ${CMAKE_BINARY_DIR}/python/pulsim/__init__.pyi
     COPYONLY
 )
 

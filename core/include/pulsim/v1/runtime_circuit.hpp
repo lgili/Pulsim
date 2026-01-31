@@ -11,6 +11,8 @@
 #include "pulsim/v1/device_base.hpp"
 #include "pulsim/v1/solver.hpp"
 #include "pulsim/v1/sources.hpp"
+#include "pulsim/v1/integration.hpp"
+#include <algorithm>
 #include <variant>
 #include <unordered_map>
 #include <memory>
@@ -74,6 +76,31 @@ public:
         if (it != node_map_.end()) {
             return it->second;
         }
+        if (num_branches_ > 0) {
+            for (auto& conn : connections_) {
+                if (conn.branch_index >= 0) {
+                    conn.branch_index += 1;
+                }
+                if (conn.branch_index_2 >= 0) {
+                    conn.branch_index_2 += 1;
+                }
+            }
+
+            for (std::size_t i = 0; i < devices_.size(); ++i) {
+                auto& conn = connections_[i];
+                std::visit([&](auto& dev) {
+                    using T = std::decay_t<decltype(dev)>;
+                    if constexpr (std::is_same_v<T, VoltageSource> ||
+                                  std::is_same_v<T, PWMVoltageSource> ||
+                                  std::is_same_v<T, SineVoltageSource> ||
+                                  std::is_same_v<T, PulseVoltageSource>) {
+                        dev.set_branch_index(conn.branch_index);
+                    } else if constexpr (std::is_same_v<T, Transformer>) {
+                        dev.set_branch_indices(conn.branch_index, conn.branch_index_2);
+                    }
+                }, devices_[i]);
+            }
+        }
         Index idx = static_cast<Index>(node_names_.size());
         node_map_[name] = idx;
         node_names_.push_back(name);
@@ -117,6 +144,171 @@ public:
         return node_names_;
     }
 
+    /// Get signal names in state-vector order (V(node...), I(device...))
+    [[nodiscard]] std::vector<std::string> signal_names() const {
+        std::vector<std::string> names;
+        names.reserve(num_nodes() + num_branches_);
+
+        for (const auto& name : node_names_) {
+            names.push_back("V(" + name + ")");
+        }
+
+        std::vector<std::string> branch_names(static_cast<std::size_t>(num_branches_));
+        auto add_branch_name = [&](Index branch_index, const std::string& dev_name, const char* suffix) {
+            if (branch_index < 0) return;
+            Index local = branch_index - num_nodes();
+            if (local < 0 || local >= num_branches_) return;
+            std::string label = std::string("I(") + dev_name + suffix + ")";
+            branch_names[static_cast<std::size_t>(local)] = std::move(label);
+        };
+
+        for (const auto& conn : connections_) {
+            add_branch_name(conn.branch_index, conn.name, "");
+            add_branch_name(conn.branch_index_2, conn.name, "_2");
+        }
+
+        for (Index i = 0; i < num_branches_; ++i) {
+            auto& name = branch_names[static_cast<std::size_t>(i)];
+            if (name.empty()) {
+                name = "I(branch" + std::to_string(i) + ")";
+            }
+            names.push_back(name);
+        }
+
+        return names;
+    }
+
+    /// Build a simple initial state vector from device initial conditions.
+    [[nodiscard]] Vector initial_state() const {
+        Vector x = Vector::Zero(system_size());
+        std::vector<bool> node_set(static_cast<std::size_t>(num_nodes()), false);
+
+        auto set_node = [&](Index node, Real value) {
+            if (node >= 0 && node < num_nodes()) {
+                x[node] = value;
+                node_set[static_cast<std::size_t>(node)] = true;
+            }
+        };
+
+        // Initialize node voltages from sources (when referenced to ground).
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+
+                if constexpr (std::is_same_v<T, VoltageSource>) {
+                    Index npos = conn.nodes[0];
+                    Index nneg = conn.nodes[1];
+                    if (npos >= 0 && nneg < 0) {
+                        set_node(npos, dev.voltage());
+                    } else if (nneg >= 0 && npos < 0) {
+                        set_node(nneg, -dev.voltage());
+                    }
+                } else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+                    Index npos = conn.nodes[0];
+                    Index nneg = conn.nodes[1];
+                    Real v = dev.voltage_at(0.0);
+                    if (npos >= 0 && nneg < 0) {
+                        set_node(npos, v);
+                    } else if (nneg >= 0 && npos < 0) {
+                        set_node(nneg, -v);
+                    }
+                } else if constexpr (std::is_same_v<T, SineVoltageSource>) {
+                    Index npos = conn.nodes[0];
+                    Index nneg = conn.nodes[1];
+                    Real v = dev.params().offset;
+                    if (npos >= 0 && nneg < 0) {
+                        set_node(npos, v);
+                    } else if (nneg >= 0 && npos < 0) {
+                        set_node(nneg, -v);
+                    }
+                } else if constexpr (std::is_same_v<T, PulseVoltageSource>) {
+                    Index npos = conn.nodes[0];
+                    Index nneg = conn.nodes[1];
+                    Real v = dev.params().v_initial;
+                    if (npos >= 0 && nneg < 0) {
+                        set_node(npos, v);
+                    } else if (nneg >= 0 && npos < 0) {
+                        set_node(nneg, -v);
+                    }
+                }
+            }, devices_[i]);
+        }
+
+        // Apply capacitor initial voltages.
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Capacitor>) {
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    Real v = dev.voltage_prev();
+
+                    if (n1 >= 0 && n2 < 0) {
+                        set_node(n1, v);
+                    } else if (n2 >= 0 && n1 < 0) {
+                        set_node(n2, -v);
+                    } else if (n1 >= 0 && n2 >= 0) {
+                        bool n1_set = node_set[static_cast<std::size_t>(n1)];
+                        bool n2_set = node_set[static_cast<std::size_t>(n2)];
+                        if (n1_set && !n2_set) {
+                            set_node(n2, x[n1] - v);
+                        } else if (n2_set && !n1_set) {
+                            set_node(n1, x[n2] + v);
+                        } else if (!n1_set && !n2_set) {
+                            set_node(n1, v);
+                            set_node(n2, 0.0);
+                        }
+                    }
+                }
+            }, devices_[i]);
+        }
+
+        // Propagate voltages across closed ideal switches.
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, IdealSwitch>) {
+                    if (!dev.is_closed()) {
+                        return;
+                    }
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    if (n1 >= 0 && n2 >= 0) {
+                        bool n1_set = node_set[static_cast<std::size_t>(n1)];
+                        bool n2_set = node_set[static_cast<std::size_t>(n2)];
+                        if (n1_set && !n2_set) {
+                            set_node(n2, x[n1]);
+                        } else if (n2_set && !n1_set) {
+                            set_node(n1, x[n2]);
+                        }
+                    } else if (n1 >= 0 && n2 < 0) {
+                        set_node(n1, 0.0);
+                    } else if (n2 >= 0 && n1 < 0) {
+                        set_node(n2, 0.0);
+                    }
+                }
+            }, devices_[i]);
+        }
+
+        // Apply inductor initial currents.
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Inductor>) {
+                    if (conn.branch_index >= 0 && conn.branch_index < system_size()) {
+                        x[conn.branch_index] = dev.current_prev();
+                    }
+                }
+            }, devices_[i]);
+        }
+
+        return x;
+    }
+
     // =========================================================================
     // Device Addition
     // =========================================================================
@@ -124,6 +316,7 @@ public:
     void add_resistor(const std::string& name, Index n1, Index n2, Real R) {
         devices_.emplace_back(Resistor(R, name));
         connections_.push_back({name, {n1, n2}, -1});
+        resistor_cache_.push_back({n1, n2, R == 0.0 ? 0.0 : 1.0 / R});
     }
 
     void add_capacitor(const std::string& name, Index n1, Index n2, Real C, Real ic = 0.0) {
@@ -372,6 +565,98 @@ public:
     [[nodiscard]] Real timestep() const { return timestep_; }
 
     // =========================================================================
+    // Integration Method Control
+    // =========================================================================
+
+    void set_integration_method(Integrator method) {
+        integration_method_ = method;
+        integration_order_ = companion_order(method);
+    }
+
+    void set_integration_order(int order) {
+        integration_order_ = std::clamp(order, 1, 2);
+        integration_method_ = (integration_order_ == 1) ? Integrator::BDF1 : Integrator::Trapezoidal;
+    }
+
+    [[nodiscard]] int integration_order() const { return integration_order_; }
+    [[nodiscard]] Integrator integration_method() const { return integration_method_; }
+
+    // =========================================================================
+    // Multi-Stage Integration Support (TR-BDF2 / SDIRK2 / RosenbrockW)
+    // =========================================================================
+
+    void clear_stage_context() {
+        stage_context_ = StageContext{};
+    }
+
+    void capture_trbdf2_stage1(const Vector& x_stage) {
+        ensure_stage_storage();
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Capacitor>) {
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    Real v1 = (n1 >= 0) ? x_stage[n1] : 0.0;
+                    Real v2 = (n2 >= 0) ? x_stage[n2] : 0.0;
+                    stage_cap_v_[i] = v1 - v2;
+                } else if constexpr (std::is_same_v<T, Inductor>) {
+                    Index br = conn.branch_index;
+                    stage_ind_i_[i] = (br >= 0) ? x_stage[br] : 0.0;
+                }
+            }, devices_[i]);
+        }
+
+        if (stage_context_.active) {
+            clear_stage_context();
+        }
+    }
+
+    void capture_sdirk_stage1(const Vector& x_stage, Real dt_total, Real a11) {
+        ensure_stage_storage();
+        const Real dt_stage = std::max(dt_total * a11, Real{1e-15});
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Capacitor>) {
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    Real v1 = (n1 >= 0) ? x_stage[n1] : 0.0;
+                    Real v2 = (n2 >= 0) ? x_stage[n2] : 0.0;
+                    Real v = v1 - v2;
+                    stage_cap_vdot_[i] = (v - dev.voltage_prev()) / dt_stage;
+                } else if constexpr (std::is_same_v<T, Inductor>) {
+                    Index br = conn.branch_index;
+                    Real i_val = (br >= 0) ? x_stage[br] : 0.0;
+                    stage_ind_idot_[i] = (i_val - dev.current_prev()) / dt_stage;
+                }
+            }, devices_[i]);
+        }
+    }
+
+    void begin_trbdf2_stage2(Real h1, Real h2) {
+        stage_context_.active = true;
+        stage_context_.scheme = StageScheme::TRBDF2;
+        stage_context_.method = Integrator::TRBDF2;
+        stage_context_.stage = 2;
+        stage_context_.h1 = h1;
+        stage_context_.h2 = h2;
+    }
+
+    void begin_sdirk_stage2(Integrator method, Real dt_total, Real a11, Real a21, Real a22) {
+        stage_context_.active = true;
+        stage_context_.scheme = StageScheme::SDIRK2;
+        stage_context_.method = method;
+        stage_context_.stage = 2;
+        stage_context_.dt = dt_total;
+        stage_context_.a11 = a11;
+        stage_context_.a21 = a21;
+        stage_context_.a22 = a22;
+    }
+
+    // =========================================================================
     // Update Dynamic Element History (for transient)
     // =========================================================================
 
@@ -392,10 +677,26 @@ public:
                     Real v2 = (n2 >= 0) ? x[n2] : 0.0;
                     Real v = v1 - v2;
 
-                    Real i;
+                    Real i = 0.0;
                     if (initialize) {
                         // At t=0: set v_prev = v, i_prev = 0 (DC steady state)
                         i = 0.0;
+                    } else if (stage_context_.active && stage_context_.scheme == StageScheme::TRBDF2) {
+                        auto coeffs = TRBDF2Coeffs::bdf2_variable(stage_context_.h1, stage_context_.h2);
+                        Real v_prev = dev.voltage_prev();
+                        Real v_stage = stage_cap_v_[i];
+                        i = dev.capacitance() * (coeffs.a2 * v + coeffs.a1 * v_stage + coeffs.a0 * v_prev);
+                    } else if (stage_context_.active && stage_context_.scheme == StageScheme::SDIRK2) {
+                        Real dt_total = std::max(stage_context_.dt, Real{1e-15});
+                        Real a22 = std::max(stage_context_.a22, Real{1e-15});
+                        Real v_prev = dev.voltage_prev();
+                        Real vdot1 = stage_cap_vdot_[i];
+                        Real vdot2 = (v - v_prev - dt_total * stage_context_.a21 * vdot1) / (a22 * dt_total);
+                        i = dev.capacitance() * vdot2;
+                    } else if (integration_order_ == 1) {
+                        // Backward Euler: i = C * (v_n - v_{n-1}) / dt
+                        Real g_eq = dev.capacitance() / timestep_;
+                        i = g_eq * (v - dev.voltage_prev());
                     } else {
                         // Trapezoidal: i_n = g_eq*(v_n - v_{n-1}) - i_{n-1}
                         // I_eq = -g_eq*v_{n-1} - i_{n-1}
@@ -419,8 +720,7 @@ public:
 
                     if (initialize) {
                         // At t=0: use i from solution (branch current), set v_prev = 0
-                        // This ensures first step uses: v_eq = -(2L/dt)*i_prev - v_prev
-                        // With v_prev = 0, i_prev = i (from DC), the history is consistent
+                        // This ensures first step uses a consistent history
                         v = 0.0;  // v_prev = 0 for inductor at t=0 (steady state: v_L = 0)
                     }
 
@@ -445,13 +745,24 @@ public:
         b.setZero();
 
         // Reserve space for triplets
-        std::vector<Eigen::Triplet<Real>> triplets;
-        triplets.reserve(devices_.size() * 9);  // Estimate
+        auto& triplets = dc_triplets_;
+        triplets.clear();
+        reserve_triplets(triplets, devices_.size() * 9);
+
+        // Fast-path stamping for resistors (SoA)
+        for (const auto& r : resistor_cache_) {
+            stamp_conductance(r.g, r.n1, r.n2, triplets);
+        }
 
         for (std::size_t i = 0; i < devices_.size(); ++i) {
             const auto& conn = connections_[i];
             std::visit([&](const auto& dev) {
-                stamp_device_dc(dev, conn, triplets, b);
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    return;
+                } else {
+                    stamp_device_dc(dev, conn, triplets, b);
+                }
             }, devices_[i]);
         }
 
@@ -470,17 +781,155 @@ public:
         f.resize(n);
         f.setZero();
 
-        std::vector<Eigen::Triplet<Real>> triplets;
-        triplets.reserve(devices_.size() * 9);
+        auto& triplets = jacobian_triplets_;
+        triplets.clear();
+        reserve_triplets(triplets, devices_.size() * 9);
+
+        // Fast-path stamping for resistors (SoA)
+        for (const auto& r : resistor_cache_) {
+            Real v1 = (r.n1 >= 0) ? x[r.n1] : 0.0;
+            Real v2 = (r.n2 >= 0) ? x[r.n2] : 0.0;
+            Real i = r.g * (v1 - v2);
+            stamp_conductance(r.g, r.n1, r.n2, triplets);
+            if (r.n1 >= 0) f[r.n1] += i;
+            if (r.n2 >= 0) f[r.n2] -= i;
+        }
 
         for (std::size_t i = 0; i < devices_.size(); ++i) {
             const auto& conn = connections_[i];
             std::visit([&](const auto& dev) {
-                stamp_device_jacobian(dev, conn, triplets, f, x);
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    return;
+                } else {
+                    stamp_device_jacobian(dev, conn, i, triplets, f, x);
+                }
             }, devices_[i]);
         }
 
         J.setFromTriplets(triplets.begin(), triplets.end());
+    }
+
+    /// Assemble residual f only (Jacobian-free)
+    void assemble_residual(Vector& f, const Vector& x) const {
+        const Index n = system_size();
+        f.resize(n);
+        f.setZero();
+
+        // Fast-path residual for resistors (SoA)
+        for (const auto& r : resistor_cache_) {
+            Real v1 = (r.n1 >= 0) ? x[r.n1] : 0.0;
+            Real v2 = (r.n2 >= 0) ? x[r.n2] : 0.0;
+            Real i = r.g * (v1 - v2);
+            if (r.n1 >= 0) f[r.n1] += i;
+            if (r.n2 >= 0) f[r.n2] -= i;
+        }
+
+        struct NullTriplets {
+            void emplace_back(Index, Index, Real) {}
+        } null_triplets;
+
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    return;
+                } else {
+                    stamp_device_jacobian(dev, conn, i, null_triplets, f, x);
+                }
+            }, devices_[i]);
+        }
+    }
+
+    /// Assemble residual for harmonic balance using direct time-derivatives
+    void assemble_residual_hb(Vector& f, const Eigen::Ref<const Vector>& x, Real time,
+                              std::span<const Real> dv_dt_nodes,
+                              std::span<const Real> di_dt_branches) const {
+        const Index n = system_size();
+        f.resize(n);
+        f.setZero();
+
+        // Resistors (SoA)
+        for (const auto& r : resistor_cache_) {
+            Real v1 = (r.n1 >= 0) ? x[r.n1] : 0.0;
+            Real v2 = (r.n2 >= 0) ? x[r.n2] : 0.0;
+            Real i = r.g * (v1 - v2);
+            if (r.n1 >= 0) f[r.n1] += i;
+            if (r.n2 >= 0) f[r.n2] -= i;
+        }
+
+        struct NullTriplets {
+            void emplace_back(Index, Index, Real) {}
+        } null_triplets;
+
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    return;
+                } else if constexpr (std::is_same_v<T, Capacitor>) {
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    Real dv1 = (n1 >= 0 && static_cast<std::size_t>(n1) < dv_dt_nodes.size())
+                        ? dv_dt_nodes[n1] : 0.0;
+                    Real dv2 = (n2 >= 0 && static_cast<std::size_t>(n2) < dv_dt_nodes.size())
+                        ? dv_dt_nodes[n2] : 0.0;
+                    Real i_c = dev.capacitance() * (dv1 - dv2);
+                    if (n1 >= 0) f[n1] += i_c;
+                    if (n2 >= 0) f[n2] -= i_c;
+                } else if constexpr (std::is_same_v<T, Inductor>) {
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    Index br = conn.branch_index;
+                    Real v1 = (n1 >= 0) ? x[n1] : 0.0;
+                    Real v2 = (n2 >= 0) ? x[n2] : 0.0;
+                    Real i_br = (br >= 0) ? x[br] : 0.0;
+                    Real di_dt = (br >= 0 && static_cast<std::size_t>(br) < di_dt_branches.size())
+                        ? di_dt_branches[br] : 0.0;
+                    if (n1 >= 0) f[n1] += i_br;
+                    if (n2 >= 0) f[n2] -= i_br;
+                    if (br >= 0) f[br] += (v1 - v2 - dev.inductance() * di_dt);
+                } else if constexpr (std::is_same_v<T, VoltageSource>) {
+                    Index npos = conn.nodes[0];
+                    Index nneg = conn.nodes[1];
+                    Index br = conn.branch_index;
+                    Real v_src = dev.voltage();
+
+                    Real vpos = (npos >= 0) ? x[npos] : 0.0;
+                    Real vneg = (nneg >= 0) ? x[nneg] : 0.0;
+                    if (br >= 0) f[br] += (vpos - vneg - v_src);
+
+                    Real i_br = (br >= 0) ? x[br] : 0.0;
+                    if (npos >= 0) f[npos] += i_br;
+                    if (nneg >= 0) f[nneg] -= i_br;
+                } else if constexpr (std::is_same_v<T, CurrentSource>) {
+                    Index npos = conn.nodes[0];
+                    Index nneg = conn.nodes[1];
+                    Real i_src = dev.current();
+                    if (npos >= 0) f[npos] -= i_src;
+                    if (nneg >= 0) f[nneg] += i_src;
+                } else if constexpr (std::is_same_v<T, PWMVoltageSource> ||
+                                     std::is_same_v<T, SineVoltageSource> ||
+                                     std::is_same_v<T, PulseVoltageSource>) {
+                    Index npos = conn.nodes[0];
+                    Index nneg = conn.nodes[1];
+                    Index br = conn.branch_index;
+                    Real v_src = dev.voltage_at(time);
+
+                    Real vpos = (npos >= 0) ? x[npos] : 0.0;
+                    Real vneg = (nneg >= 0) ? x[nneg] : 0.0;
+                    if (br >= 0) f[br] += (vpos - vneg - v_src);
+
+                    Real i_br = (br >= 0) ? x[br] : 0.0;
+                    if (npos >= 0) f[npos] += i_br;
+                    if (nneg >= 0) f[nneg] -= i_br;
+                } else {
+                    stamp_device_jacobian(dev, conn, i, null_triplets, f, x);
+                }
+            }, devices_[i]);
+        }
     }
 
     /// Check if circuit has nonlinear devices
@@ -506,14 +955,84 @@ public:
     [[nodiscard]] const std::vector<DeviceConnection>& connections() const { return connections_; }
 
 private:
+    enum class StageScheme {
+        None,
+        TRBDF2,
+        SDIRK2
+    };
+
+    struct StageContext {
+        bool active = false;
+        StageScheme scheme = StageScheme::None;
+        Integrator method = Integrator::Trapezoidal;
+        int stage = 0;
+        Real dt = 0.0;
+        Real h1 = 0.0;
+        Real h2 = 0.0;
+        Real a11 = 0.0;
+        Real a21 = 0.0;
+        Real a22 = 0.0;
+    };
+
+    struct ResistorStamp {
+        Index n1 = -1;
+        Index n2 = -1;
+        Real g = 0.0;
+    };
+
+    void ensure_stage_storage() {
+        if (stage_cap_v_.size() != devices_.size()) {
+            stage_cap_v_.assign(devices_.size(), 0.0);
+            stage_ind_i_.assign(devices_.size(), 0.0);
+            stage_cap_vdot_.assign(devices_.size(), 0.0);
+            stage_ind_idot_.assign(devices_.size(), 0.0);
+        }
+    }
+
+    static void reserve_triplets(std::vector<Eigen::Triplet<Real>>& triplets, std::size_t estimate) {
+        if (triplets.capacity() < estimate) {
+            triplets.reserve(estimate);
+        }
+    }
+
+    static constexpr int companion_order(Integrator method) {
+        switch (method) {
+            case Integrator::BDF1:
+            case Integrator::RosenbrockW:
+            case Integrator::SDIRK2:
+                return 1;
+            case Integrator::Trapezoidal:
+            case Integrator::BDF2:
+            case Integrator::TRBDF2:
+            case Integrator::Gear:
+            case Integrator::BDF3:
+            case Integrator::BDF4:
+            case Integrator::BDF5:
+            default:
+                return 2;
+        }
+    }
+
     std::vector<DeviceVariant> devices_;
     std::vector<DeviceConnection> connections_;
+    std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index> node_map_;
     std::vector<std::string> node_names_;
     Index num_branches_ = 0;
     Real timestep_ = 1e-6;
+    Integrator integration_method_ = Integrator::Trapezoidal;
+    int integration_order_ = 2;  // companion-model order (1 = BE, 2 = TR)
     Real current_time_ = 0.0;
     inline static const std::string ground_name_ = "0";
+
+    StageContext stage_context_{};
+    std::vector<Real> stage_cap_v_;
+    std::vector<Real> stage_ind_i_;
+    std::vector<Real> stage_cap_vdot_;
+    std::vector<Real> stage_ind_idot_;
+
+    mutable std::vector<Eigen::Triplet<Real>> dc_triplets_;
+    mutable std::vector<Eigen::Triplet<Real>> jacobian_triplets_;
 
     // =========================================================================
     // DC Stamping Helpers
@@ -579,9 +1098,10 @@ private:
         }
     }
 
-    template<typename Device>
+    template<typename Device, typename Triplets>
     void stamp_device_jacobian(const Device& dev, const DeviceConnection& conn,
-                               std::vector<Eigen::Triplet<Real>>& triplets,
+                               std::size_t device_index,
+                               Triplets& triplets,
                                Vector& f, const Vector& x) const {
         using T = std::decay_t<Device>;
 
@@ -652,18 +1172,39 @@ private:
             stamp_vcswitch_jacobian(dev, conn.nodes, triplets, f, x);
         }
         else if constexpr (std::is_same_v<T, Capacitor>) {
-            // Trapezoidal companion model: i_n = g_eq*(v_n - v_{n-1}) - i_{n-1}
-            // Rewritten as: i_n = g_eq*v_n + I_eq, where I_eq = -g_eq*v_{n-1} - i_{n-1}
             Real C = dev.capacitance();
-            Real g_eq = 2.0 * C / timestep_;
             Index n1 = conn.nodes[0];
             Index n2 = conn.nodes[1];
             Real v1 = (n1 >= 0) ? x[n1] : 0.0;
             Real v2 = (n2 >= 0) ? x[n2] : 0.0;
             Real v = v1 - v2;
             Real v_prev = dev.voltage_prev();
-            Real i_prev = dev.current_prev();
-            Real i_hist = -i_prev - g_eq * v_prev;
+            Real g_eq = 0.0;
+            Real i_hist = 0.0;
+
+            if (stage_context_.active && stage_context_.scheme == StageScheme::TRBDF2) {
+                auto coeffs = TRBDF2Coeffs::bdf2_variable(stage_context_.h1, stage_context_.h2);
+                Real v_stage = stage_cap_v_[device_index];
+                g_eq = C * coeffs.a2;
+                i_hist = C * (coeffs.a1 * v_stage + coeffs.a0 * v_prev);
+            } else if (stage_context_.active && stage_context_.scheme == StageScheme::SDIRK2) {
+                Real dt_total = std::max(stage_context_.dt, Real{1e-15});
+                Real a22 = std::max(stage_context_.a22, Real{1e-15});
+                Real vdot1 = stage_cap_vdot_[device_index];
+                g_eq = C / (a22 * dt_total);
+                i_hist = -g_eq * (v_prev + dt_total * stage_context_.a21 * vdot1);
+            } else if (integration_order_ == 1) {
+                // Backward Euler: i = (C/dt) * (v - v_prev)
+                g_eq = C / timestep_;
+                i_hist = -g_eq * v_prev;
+            } else {
+                // Trapezoidal: i_n = g_eq*(v_n - v_{n-1}) - i_{n-1}
+                // i = g_eq*v + (-g_eq*v_prev - i_prev)
+                g_eq = 2.0 * C / timestep_;
+                Real i_prev = dev.current_prev();
+                i_hist = -i_prev - g_eq * v_prev;
+            }
+
             Real i = g_eq * v + i_hist;
 
             stamp_conductance(g_eq, n1, n2, triplets);
@@ -671,7 +1212,6 @@ private:
             if (n2 >= 0) f[n2] -= i;
         }
         else if constexpr (std::is_same_v<T, Inductor>) {
-            // Trapezoidal: stamp as voltage source with history
             Index n1 = conn.nodes[0];
             Index n2 = conn.nodes[1];
             Index br = conn.branch_index;
@@ -679,11 +1219,29 @@ private:
             Real v_prev = dev.voltage_prev();
             Real i_prev = dev.current_prev();
 
-            // Trapezoidal (inductor): v_n = (2L/dt)(i_n - i_{n-1}) - v_{n-1}
-            // Rearranged for MNA branch equation:
-            //   v_n - (2L/dt) * i_n = - (2L/dt) * i_{n-1} - v_{n-1}
-            // The right-hand side is encoded as v_eq with a negative sign.
-            Real v_eq = - (2.0 * L / timestep_) * i_prev - v_prev;
+            Real coeff = 0.0;
+            Real v_eq = 0.0;
+
+            if (stage_context_.active && stage_context_.scheme == StageScheme::TRBDF2) {
+                auto coeffs = TRBDF2Coeffs::bdf2_variable(stage_context_.h1, stage_context_.h2);
+                Real i_stage = stage_ind_i_[device_index];
+                coeff = L * coeffs.a2;
+                v_eq = L * (coeffs.a1 * i_stage + coeffs.a0 * i_prev);
+            } else if (stage_context_.active && stage_context_.scheme == StageScheme::SDIRK2) {
+                Real dt_total = std::max(stage_context_.dt, Real{1e-15});
+                Real a22 = std::max(stage_context_.a22, Real{1e-15});
+                Real i_dot1 = stage_ind_idot_[device_index];
+                coeff = L / (a22 * dt_total);
+                v_eq = -coeff * (i_prev + dt_total * stage_context_.a21 * i_dot1);
+            } else if (integration_order_ == 1) {
+                // Backward Euler: v_n - (L/dt) * i_n = - (L/dt) * i_{n-1}
+                coeff = L / timestep_;
+                v_eq = -coeff * i_prev;
+            } else {
+                // Trapezoidal: v_n - (2L/dt) * i_n = - (2L/dt) * i_{n-1} - v_{n-1}
+                coeff = 2.0 * L / timestep_;
+                v_eq = -coeff * i_prev - v_prev;
+            }
 
             // MNA extension
             if (n1 >= 0) {
@@ -694,12 +1252,12 @@ private:
                 triplets.emplace_back(n2, br, -1.0);
                 triplets.emplace_back(br, n2, -1.0);
             }
-            triplets.emplace_back(br, br, -2.0 * L / timestep_);
+            triplets.emplace_back(br, br, -coeff);
 
             Real v1 = (n1 >= 0) ? x[n1] : 0.0;
             Real v2 = (n2 >= 0) ? x[n2] : 0.0;
             Real i_br = x[br];
-            f[br] += (v1 - v2 - (2.0 * L / timestep_) * i_br - v_eq);
+            f[br] += (v1 - v2 - coeff * i_br - v_eq);
             if (n1 >= 0) f[n1] += i_br;
             if (n2 >= 0) f[n2] -= i_br;
         }
@@ -749,14 +1307,16 @@ private:
     // Primitive Stamping Functions
     // =========================================================================
 
+    template<typename Triplets>
     void stamp_resistor(Real R, const std::vector<Index>& nodes,
-                        std::vector<Eigen::Triplet<Real>>& triplets) const {
+                        Triplets& triplets) const {
         Real g = 1.0 / R;
         stamp_conductance(g, nodes[0], nodes[1], triplets);
     }
 
+    template<typename Triplets>
     void stamp_conductance(Real g, Index n1, Index n2,
-                           std::vector<Eigen::Triplet<Real>>& triplets) const {
+                           Triplets& triplets) const {
         if (n1 >= 0) {
             triplets.emplace_back(n1, n1, g);
             if (n2 >= 0) triplets.emplace_back(n1, n2, -g);
@@ -767,8 +1327,9 @@ private:
         }
     }
 
+    template<typename Triplets>
     void stamp_voltage_source(Real V, const std::vector<Index>& nodes, Index br,
-                              std::vector<Eigen::Triplet<Real>>& triplets, Vector& b) const {
+                              Triplets& triplets, Vector& b) const {
         Index npos = nodes[0];
         Index nneg = nodes[1];
 
@@ -790,8 +1351,9 @@ private:
         if (nneg >= 0) b[nneg] += I;
     }
 
+    template<typename Triplets>
     void stamp_diode_jacobian(const IdealDiode& /*dev*/, const std::vector<Index>& nodes,
-                              std::vector<Eigen::Triplet<Real>>& triplets,
+                              Triplets& triplets,
                               Vector& f, const Vector& x) const {
         Index n_anode = nodes[0];
         Index n_cathode = nodes[1];
@@ -809,8 +1371,9 @@ private:
         if (n_cathode >= 0) f[n_cathode] -= i;
     }
 
+    template<typename Triplets>
     void stamp_vcswitch_jacobian(const VoltageControlledSwitch& dev, const std::vector<Index>& nodes,
-                                 std::vector<Eigen::Triplet<Real>>& triplets,
+                                 Triplets& triplets,
                                  Vector& f, const Vector& x) const {
         Index n_ctrl = nodes[0];
         Index n_t1 = nodes[1];
@@ -855,8 +1418,9 @@ private:
         if (n_t2 >= 0) f[n_t2] -= i_sw;
     }
 
+    template<typename Triplets>
     void stamp_mosfet_jacobian(const MOSFET& dev, const std::vector<Index>& nodes,
-                               std::vector<Eigen::Triplet<Real>>& triplets,
+                               Triplets& triplets,
                                Vector& f, const Vector& x) const {
         Index n_gate = nodes[0];
         Index n_drain = nodes[1];
@@ -912,8 +1476,9 @@ private:
         if (n_source >= 0) f[n_source] += i_eq;
     }
 
+    template<typename Triplets>
     void stamp_igbt_jacobian(const IGBT& dev, const std::vector<Index>& nodes,
-                             std::vector<Eigen::Triplet<Real>>& triplets,
+                             Triplets& triplets,
                              Vector& f, const Vector& x) const {
         Index n_gate = nodes[0];
         Index n_collector = nodes[1];
@@ -944,9 +1509,10 @@ private:
     /// Stamp ideal transformer for DC analysis
     /// Transformer: V_p = n * V_s, I_p + n * I_s = 0 (power conservation)
     /// nodes: {p1, p2, s1, s2} (primary+, primary-, secondary+, secondary-)
+    template<typename Triplets>
     void stamp_transformer(Real n, const std::vector<Index>& nodes,
                            Index br_p, Index br_s,
-                           std::vector<Eigen::Triplet<Real>>& triplets, Vector& b) const {
+                           Triplets& triplets, Vector& b) const {
         Index np1 = nodes[0];  // Primary +
         Index np2 = nodes[1];  // Primary -
         Index ns1 = nodes[2];  // Secondary +
@@ -978,9 +1544,10 @@ private:
     }
 
     /// Stamp ideal transformer Jacobian for Newton iteration
+    template<typename Triplets>
     void stamp_transformer_jacobian(Real n, const std::vector<Index>& nodes,
                                     Index br_p, Index br_s,
-                                    std::vector<Eigen::Triplet<Real>>& triplets,
+                                    Triplets& triplets,
                                     Vector& f, const Vector& x) const {
         Index np1 = nodes[0];
         Index np2 = nodes[1];

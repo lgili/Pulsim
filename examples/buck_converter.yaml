@@ -1,0 +1,46 @@
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-3
+  dt: 0.5e-6
+  dt_max: 2e-6
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 48.0
+  - type: voltage_source
+    name: Vpwm
+    nodes: [ctrl, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 5.0
+      t_delay: 0.0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 25e-6
+      period: 50e-6
+  - type: vcswitch
+    name: S1
+    nodes: [ctrl, vcc, sw_node]
+    v_threshold: 2.5
+    ron: 0.01
+    roff: 1e9
+  - type: diode
+    name: D1
+    nodes: [0, sw_node]
+  - type: inductor
+    name: L1
+    nodes: [sw_node, out]
+    value: 100u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

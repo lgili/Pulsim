@@ -111,4 +111,4 @@ Connect from Python:
    from pulsim.client import PulsimClient
 
    client = PulsimClient("localhost:50051")
-   result = client.simulate("circuit.json")
+   result = client.simulate("circuit.yaml")

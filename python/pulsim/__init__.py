@@ -102,6 +102,10 @@ from ._pulsim import (
 
     # High-Performance Features
     LinearSolverConfig,
+    LinearSolverKind,
+    PreconditionerKind,
+    IterativeSolverConfig,
+    LinearSolverStackConfig,
     detect_simd_level,
     simd_vector_width,
     solver_status_to_string,
@@ -130,16 +134,6 @@ from ._pulsim import (
     LossResult,
     SystemLossSummary,
 
-    # AC Analysis
-    ACOptions,
-    ACResult,
-    ACAnalyzer,
-    ACSolverStatus,
-    FrequencySweepType,
-    BodeData,
-    run_ac,
-    extract_bode_data,
-    calculate_stability_margins,
 )
 
 # Netlist Parser (Pure Python)
@@ -252,6 +246,10 @@ __all__ = [
 
     # High-Performance Features
     "LinearSolverConfig",
+    "LinearSolverKind",
+    "PreconditionerKind",
+    "IterativeSolverConfig",
+    "LinearSolverStackConfig",
     "detect_simd_level",
     "simd_vector_width",
     "solver_status_to_string",
@@ -279,17 +277,6 @@ __all__ = [
     "EfficiencyCalculator",
     "LossResult",
     "SystemLossSummary",
-
-    # AC Analysis
-    "ACOptions",
-    "ACResult",
-    "ACAnalyzer",
-    "ACSolverStatus",
-    "FrequencySweepType",
-    "BodeData",
-    "run_ac",
-    "extract_bode_data",
-    "calculate_stability_margins",
 
     # Netlist Parser
     "parse_netlist",

@@ -341,9 +341,9 @@ public:
 
         for (std::size_t i = 1; i < times.size(); ++i) {
             Real dt = times[i] - times[i-1];
-            // Use average power over interval (trapezoidal)
-            Real P_avg = 0.5 * (powers[i-1] + powers[i]);
-            step(P_avg, dt);
+            // Use power sample at interval end (zero-order hold from current sample)
+            Real P = powers[i];
+            step(P, dt);
             temperatures.push_back(state_.temperature);
         }
 

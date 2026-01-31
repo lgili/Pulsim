@@ -512,25 +512,21 @@ Pulsim includes a library of pre-defined device models based on manufacturer dat
 
 ### Using Library Models
 
-```json
-{
-  "type": "MOSFET",
-  "name": "Q1",
-  "nodes": ["d", "g", "s", "0"],
-  "model": "IRF540N"
-}
+```yaml
+- type: mosfet
+  name: Q1
+  nodes: [d, g, s, 0]
+  use: IRF540N
 ```
 
 Or override specific parameters:
 
-```json
-{
-  "type": "MOSFET",
-  "name": "Q1",
-  "nodes": ["d", "g", "s", "0"],
-  "model": "IRF540N",
-  "rds_on": 0.05
-}
+```yaml
+- type: mosfet
+  name: Q1
+  nodes: [d, g, s, 0]
+  use: IRF540N
+  rds_on: 0.05
 ```
 
 ---
