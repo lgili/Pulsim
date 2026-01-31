@@ -1,0 +1,8009 @@
+schema: pulsim-v1
+version: 1
+components:
+  - type: voltage_source
+    name: Vsrc
+    nodes: [n0, 0]
+    waveform:
+      type: dc
+      value: 1.0
+  - type: resistor
+    name: R0
+    nodes: [n0, n1]
+    value: 1000.0
+  - type: resistor
+    name: R1
+    nodes: [n1, n2]
+    value: 1000.0
+  - type: resistor
+    name: R2
+    nodes: [n2, n3]
+    value: 1000.0
+  - type: resistor
+    name: R3
+    nodes: [n3, n4]
+    value: 1000.0
+  - type: resistor
+    name: R4
+    nodes: [n4, n5]
+    value: 1000.0
+  - type: resistor
+    name: R5
+    nodes: [n5, n6]
+    value: 1000.0
+  - type: resistor
+    name: R6
+    nodes: [n6, n7]
+    value: 1000.0
+  - type: resistor
+    name: R7
+    nodes: [n7, n8]
+    value: 1000.0
+  - type: resistor
+    name: R8
+    nodes: [n8, n9]
+    value: 1000.0
+  - type: resistor
+    name: R9
+    nodes: [n9, n10]
+    value: 1000.0
+  - type: resistor
+    name: R10
+    nodes: [n10, n11]
+    value: 1000.0
+  - type: resistor
+    name: R11
+    nodes: [n11, n12]
+    value: 1000.0
+  - type: resistor
+    name: R12
+    nodes: [n12, n13]
+    value: 1000.0
+  - type: resistor
+    name: R13
+    nodes: [n13, n14]
+    value: 1000.0
+  - type: resistor
+    name: R14
+    nodes: [n14, n15]
+    value: 1000.0
+  - type: resistor
+    name: R15
+    nodes: [n15, n16]
+    value: 1000.0
+  - type: resistor
+    name: R16
+    nodes: [n16, n17]
+    value: 1000.0
+  - type: resistor
+    name: R17
+    nodes: [n17, n18]
+    value: 1000.0
+  - type: resistor
+    name: R18
+    nodes: [n18, n19]
+    value: 1000.0
+  - type: resistor
+    name: R19
+    nodes: [n19, n20]
+    value: 1000.0
+  - type: resistor
+    name: R20
+    nodes: [n20, n21]
+    value: 1000.0
+  - type: resistor
+    name: R21
+    nodes: [n21, n22]
+    value: 1000.0
+  - type: resistor
+    name: R22
+    nodes: [n22, n23]
+    value: 1000.0
+  - type: resistor
+    name: R23
+    nodes: [n23, n24]
+    value: 1000.0
+  - type: resistor
+    name: R24
+    nodes: [n24, n25]
+    value: 1000.0
+  - type: resistor
+    name: R25
+    nodes: [n25, n26]
+    value: 1000.0
+  - type: resistor
+    name: R26
+    nodes: [n26, n27]
+    value: 1000.0
+  - type: resistor
+    name: R27
+    nodes: [n27, n28]
+    value: 1000.0
+  - type: resistor
+    name: R28
+    nodes: [n28, n29]
+    value: 1000.0
+  - type: resistor
+    name: R29
+    nodes: [n29, n30]
+    value: 1000.0
+  - type: resistor
+    name: R30
+    nodes: [n30, n31]
+    value: 1000.0
+  - type: resistor
+    name: R31
+    nodes: [n31, n32]
+    value: 1000.0
+  - type: resistor
+    name: R32
+    nodes: [n32, n33]
+    value: 1000.0
+  - type: resistor
+    name: R33
+    nodes: [n33, n34]
+    value: 1000.0
+  - type: resistor
+    name: R34
+    nodes: [n34, n35]
+    value: 1000.0
+  - type: resistor
+    name: R35
+    nodes: [n35, n36]
+    value: 1000.0
+  - type: resistor
+    name: R36
+    nodes: [n36, n37]
+    value: 1000.0
+  - type: resistor
+    name: R37
+    nodes: [n37, n38]
+    value: 1000.0
+  - type: resistor
+    name: R38
+    nodes: [n38, n39]
+    value: 1000.0
+  - type: resistor
+    name: R39
+    nodes: [n39, n40]
+    value: 1000.0
+  - type: resistor
+    name: R40
+    nodes: [n40, n41]
+    value: 1000.0
+  - type: resistor
+    name: R41
+    nodes: [n41, n42]
+    value: 1000.0
+  - type: resistor
+    name: R42
+    nodes: [n42, n43]
+    value: 1000.0
+  - type: resistor
+    name: R43
+    nodes: [n43, n44]
+    value: 1000.0
+  - type: resistor
+    name: R44
+    nodes: [n44, n45]
+    value: 1000.0
+  - type: resistor
+    name: R45
+    nodes: [n45, n46]
+    value: 1000.0
+  - type: resistor
+    name: R46
+    nodes: [n46, n47]
+    value: 1000.0
+  - type: resistor
+    name: R47
+    nodes: [n47, n48]
+    value: 1000.0
+  - type: resistor
+    name: R48
+    nodes: [n48, n49]
+    value: 1000.0
+  - type: resistor
+    name: R49
+    nodes: [n49, n50]
+    value: 1000.0
+  - type: resistor
+    name: R50
+    nodes: [n50, n51]
+    value: 1000.0
+  - type: resistor
+    name: R51
+    nodes: [n51, n52]
+    value: 1000.0
+  - type: resistor
+    name: R52
+    nodes: [n52, n53]
+    value: 1000.0
+  - type: resistor
+    name: R53
+    nodes: [n53, n54]
+    value: 1000.0
+  - type: resistor
+    name: R54
+    nodes: [n54, n55]
+    value: 1000.0
+  - type: resistor
+    name: R55
+    nodes: [n55, n56]
+    value: 1000.0
+  - type: resistor
+    name: R56
+    nodes: [n56, n57]
+    value: 1000.0
+  - type: resistor
+    name: R57
+    nodes: [n57, n58]
+    value: 1000.0
+  - type: resistor
+    name: R58
+    nodes: [n58, n59]
+    value: 1000.0
+  - type: resistor
+    name: R59
+    nodes: [n59, n60]
+    value: 1000.0
+  - type: resistor
+    name: R60
+    nodes: [n60, n61]
+    value: 1000.0
+  - type: resistor
+    name: R61
+    nodes: [n61, n62]
+    value: 1000.0
+  - type: resistor
+    name: R62
+    nodes: [n62, n63]
+    value: 1000.0
+  - type: resistor
+    name: R63
+    nodes: [n63, n64]
+    value: 1000.0
+  - type: resistor
+    name: R64
+    nodes: [n64, n65]
+    value: 1000.0
+  - type: resistor
+    name: R65
+    nodes: [n65, n66]
+    value: 1000.0
+  - type: resistor
+    name: R66
+    nodes: [n66, n67]
+    value: 1000.0
+  - type: resistor
+    name: R67
+    nodes: [n67, n68]
+    value: 1000.0
+  - type: resistor
+    name: R68
+    nodes: [n68, n69]
+    value: 1000.0
+  - type: resistor
+    name: R69
+    nodes: [n69, n70]
+    value: 1000.0
+  - type: resistor
+    name: R70
+    nodes: [n70, n71]
+    value: 1000.0
+  - type: resistor
+    name: R71
+    nodes: [n71, n72]
+    value: 1000.0
+  - type: resistor
+    name: R72
+    nodes: [n72, n73]
+    value: 1000.0
+  - type: resistor
+    name: R73
+    nodes: [n73, n74]
+    value: 1000.0
+  - type: resistor
+    name: R74
+    nodes: [n74, n75]
+    value: 1000.0
+  - type: resistor
+    name: R75
+    nodes: [n75, n76]
+    value: 1000.0
+  - type: resistor
+    name: R76
+    nodes: [n76, n77]
+    value: 1000.0
+  - type: resistor
+    name: R77
+    nodes: [n77, n78]
+    value: 1000.0
+  - type: resistor
+    name: R78
+    nodes: [n78, n79]
+    value: 1000.0
+  - type: resistor
+    name: R79
+    nodes: [n79, n80]
+    value: 1000.0
+  - type: resistor
+    name: R80
+    nodes: [n80, n81]
+    value: 1000.0
+  - type: resistor
+    name: R81
+    nodes: [n81, n82]
+    value: 1000.0
+  - type: resistor
+    name: R82
+    nodes: [n82, n83]
+    value: 1000.0
+  - type: resistor
+    name: R83
+    nodes: [n83, n84]
+    value: 1000.0
+  - type: resistor
+    name: R84
+    nodes: [n84, n85]
+    value: 1000.0
+  - type: resistor
+    name: R85
+    nodes: [n85, n86]
+    value: 1000.0
+  - type: resistor
+    name: R86
+    nodes: [n86, n87]
+    value: 1000.0
+  - type: resistor
+    name: R87
+    nodes: [n87, n88]
+    value: 1000.0
+  - type: resistor
+    name: R88
+    nodes: [n88, n89]
+    value: 1000.0
+  - type: resistor
+    name: R89
+    nodes: [n89, n90]
+    value: 1000.0
+  - type: resistor
+    name: R90
+    nodes: [n90, n91]
+    value: 1000.0
+  - type: resistor
+    name: R91
+    nodes: [n91, n92]
+    value: 1000.0
+  - type: resistor
+    name: R92
+    nodes: [n92, n93]
+    value: 1000.0
+  - type: resistor
+    name: R93
+    nodes: [n93, n94]
+    value: 1000.0
+  - type: resistor
+    name: R94
+    nodes: [n94, n95]
+    value: 1000.0
+  - type: resistor
+    name: R95
+    nodes: [n95, n96]
+    value: 1000.0
+  - type: resistor
+    name: R96
+    nodes: [n96, n97]
+    value: 1000.0
+  - type: resistor
+    name: R97
+    nodes: [n97, n98]
+    value: 1000.0
+  - type: resistor
+    name: R98
+    nodes: [n98, n99]
+    value: 1000.0
+  - type: resistor
+    name: R99
+    nodes: [n99, n100]
+    value: 1000.0
+  - type: resistor
+    name: R100
+    nodes: [n100, n101]
+    value: 1000.0
+  - type: resistor
+    name: R101
+    nodes: [n101, n102]
+    value: 1000.0
+  - type: resistor
+    name: R102
+    nodes: [n102, n103]
+    value: 1000.0
+  - type: resistor
+    name: R103
+    nodes: [n103, n104]
+    value: 1000.0
+  - type: resistor
+    name: R104
+    nodes: [n104, n105]
+    value: 1000.0
+  - type: resistor
+    name: R105
+    nodes: [n105, n106]
+    value: 1000.0
+  - type: resistor
+    name: R106
+    nodes: [n106, n107]
+    value: 1000.0
+  - type: resistor
+    name: R107
+    nodes: [n107, n108]
+    value: 1000.0
+  - type: resistor
+    name: R108
+    nodes: [n108, n109]
+    value: 1000.0
+  - type: resistor
+    name: R109
+    nodes: [n109, n110]
+    value: 1000.0
+  - type: resistor
+    name: R110
+    nodes: [n110, n111]
+    value: 1000.0
+  - type: resistor
+    name: R111
+    nodes: [n111, n112]
+    value: 1000.0
+  - type: resistor
+    name: R112
+    nodes: [n112, n113]
+    value: 1000.0
+  - type: resistor
+    name: R113
+    nodes: [n113, n114]
+    value: 1000.0
+  - type: resistor
+    name: R114
+    nodes: [n114, n115]
+    value: 1000.0
+  - type: resistor
+    name: R115
+    nodes: [n115, n116]
+    value: 1000.0
+  - type: resistor
+    name: R116
+    nodes: [n116, n117]
+    value: 1000.0
+  - type: resistor
+    name: R117
+    nodes: [n117, n118]
+    value: 1000.0
+  - type: resistor
+    name: R118
+    nodes: [n118, n119]
+    value: 1000.0
+  - type: resistor
+    name: R119
+    nodes: [n119, n120]
+    value: 1000.0
+  - type: resistor
+    name: R120
+    nodes: [n120, n121]
+    value: 1000.0
+  - type: resistor
+    name: R121
+    nodes: [n121, n122]
+    value: 1000.0
+  - type: resistor
+    name: R122
+    nodes: [n122, n123]
+    value: 1000.0
+  - type: resistor
+    name: R123
+    nodes: [n123, n124]
+    value: 1000.0
+  - type: resistor
+    name: R124
+    nodes: [n124, n125]
+    value: 1000.0
+  - type: resistor
+    name: R125
+    nodes: [n125, n126]
+    value: 1000.0
+  - type: resistor
+    name: R126
+    nodes: [n126, n127]
+    value: 1000.0
+  - type: resistor
+    name: R127
+    nodes: [n127, n128]
+    value: 1000.0
+  - type: resistor
+    name: R128
+    nodes: [n128, n129]
+    value: 1000.0
+  - type: resistor
+    name: R129
+    nodes: [n129, n130]
+    value: 1000.0
+  - type: resistor
+    name: R130
+    nodes: [n130, n131]
+    value: 1000.0
+  - type: resistor
+    name: R131
+    nodes: [n131, n132]
+    value: 1000.0
+  - type: resistor
+    name: R132
+    nodes: [n132, n133]
+    value: 1000.0
+  - type: resistor
+    name: R133
+    nodes: [n133, n134]
+    value: 1000.0
+  - type: resistor
+    name: R134
+    nodes: [n134, n135]
+    value: 1000.0
+  - type: resistor
+    name: R135
+    nodes: [n135, n136]
+    value: 1000.0
+  - type: resistor
+    name: R136
+    nodes: [n136, n137]
+    value: 1000.0
+  - type: resistor
+    name: R137
+    nodes: [n137, n138]
+    value: 1000.0
+  - type: resistor
+    name: R138
+    nodes: [n138, n139]
+    value: 1000.0
+  - type: resistor
+    name: R139
+    nodes: [n139, n140]
+    value: 1000.0
+  - type: resistor
+    name: R140
+    nodes: [n140, n141]
+    value: 1000.0
+  - type: resistor
+    name: R141
+    nodes: [n141, n142]
+    value: 1000.0
+  - type: resistor
+    name: R142
+    nodes: [n142, n143]
+    value: 1000.0
+  - type: resistor
+    name: R143
+    nodes: [n143, n144]
+    value: 1000.0
+  - type: resistor
+    name: R144
+    nodes: [n144, n145]
+    value: 1000.0
+  - type: resistor
+    name: R145
+    nodes: [n145, n146]
+    value: 1000.0
+  - type: resistor
+    name: R146
+    nodes: [n146, n147]
+    value: 1000.0
+  - type: resistor
+    name: R147
+    nodes: [n147, n148]
+    value: 1000.0
+  - type: resistor
+    name: R148
+    nodes: [n148, n149]
+    value: 1000.0
+  - type: resistor
+    name: R149
+    nodes: [n149, n150]
+    value: 1000.0
+  - type: resistor
+    name: R150
+    nodes: [n150, n151]
+    value: 1000.0
+  - type: resistor
+    name: R151
+    nodes: [n151, n152]
+    value: 1000.0
+  - type: resistor
+    name: R152
+    nodes: [n152, n153]
+    value: 1000.0
+  - type: resistor
+    name: R153
+    nodes: [n153, n154]
+    value: 1000.0
+  - type: resistor
+    name: R154
+    nodes: [n154, n155]
+    value: 1000.0
+  - type: resistor
+    name: R155
+    nodes: [n155, n156]
+    value: 1000.0
+  - type: resistor
+    name: R156
+    nodes: [n156, n157]
+    value: 1000.0
+  - type: resistor
+    name: R157
+    nodes: [n157, n158]
+    value: 1000.0
+  - type: resistor
+    name: R158
+    nodes: [n158, n159]
+    value: 1000.0
+  - type: resistor
+    name: R159
+    nodes: [n159, n160]
+    value: 1000.0
+  - type: resistor
+    name: R160
+    nodes: [n160, n161]
+    value: 1000.0
+  - type: resistor
+    name: R161
+    nodes: [n161, n162]
+    value: 1000.0
+  - type: resistor
+    name: R162
+    nodes: [n162, n163]
+    value: 1000.0
+  - type: resistor
+    name: R163
+    nodes: [n163, n164]
+    value: 1000.0
+  - type: resistor
+    name: R164
+    nodes: [n164, n165]
+    value: 1000.0
+  - type: resistor
+    name: R165
+    nodes: [n165, n166]
+    value: 1000.0
+  - type: resistor
+    name: R166
+    nodes: [n166, n167]
+    value: 1000.0
+  - type: resistor
+    name: R167
+    nodes: [n167, n168]
+    value: 1000.0
+  - type: resistor
+    name: R168
+    nodes: [n168, n169]
+    value: 1000.0
+  - type: resistor
+    name: R169
+    nodes: [n169, n170]
+    value: 1000.0
+  - type: resistor
+    name: R170
+    nodes: [n170, n171]
+    value: 1000.0
+  - type: resistor
+    name: R171
+    nodes: [n171, n172]
+    value: 1000.0
+  - type: resistor
+    name: R172
+    nodes: [n172, n173]
+    value: 1000.0
+  - type: resistor
+    name: R173
+    nodes: [n173, n174]
+    value: 1000.0
+  - type: resistor
+    name: R174
+    nodes: [n174, n175]
+    value: 1000.0
+  - type: resistor
+    name: R175
+    nodes: [n175, n176]
+    value: 1000.0
+  - type: resistor
+    name: R176
+    nodes: [n176, n177]
+    value: 1000.0
+  - type: resistor
+    name: R177
+    nodes: [n177, n178]
+    value: 1000.0
+  - type: resistor
+    name: R178
+    nodes: [n178, n179]
+    value: 1000.0
+  - type: resistor
+    name: R179
+    nodes: [n179, n180]
+    value: 1000.0
+  - type: resistor
+    name: R180
+    nodes: [n180, n181]
+    value: 1000.0
+  - type: resistor
+    name: R181
+    nodes: [n181, n182]
+    value: 1000.0
+  - type: resistor
+    name: R182
+    nodes: [n182, n183]
+    value: 1000.0
+  - type: resistor
+    name: R183
+    nodes: [n183, n184]
+    value: 1000.0
+  - type: resistor
+    name: R184
+    nodes: [n184, n185]
+    value: 1000.0
+  - type: resistor
+    name: R185
+    nodes: [n185, n186]
+    value: 1000.0
+  - type: resistor
+    name: R186
+    nodes: [n186, n187]
+    value: 1000.0
+  - type: resistor
+    name: R187
+    nodes: [n187, n188]
+    value: 1000.0
+  - type: resistor
+    name: R188
+    nodes: [n188, n189]
+    value: 1000.0
+  - type: resistor
+    name: R189
+    nodes: [n189, n190]
+    value: 1000.0
+  - type: resistor
+    name: R190
+    nodes: [n190, n191]
+    value: 1000.0
+  - type: resistor
+    name: R191
+    nodes: [n191, n192]
+    value: 1000.0
+  - type: resistor
+    name: R192
+    nodes: [n192, n193]
+    value: 1000.0
+  - type: resistor
+    name: R193
+    nodes: [n193, n194]
+    value: 1000.0
+  - type: resistor
+    name: R194
+    nodes: [n194, n195]
+    value: 1000.0
+  - type: resistor
+    name: R195
+    nodes: [n195, n196]
+    value: 1000.0
+  - type: resistor
+    name: R196
+    nodes: [n196, n197]
+    value: 1000.0
+  - type: resistor
+    name: R197
+    nodes: [n197, n198]
+    value: 1000.0
+  - type: resistor
+    name: R198
+    nodes: [n198, n199]
+    value: 1000.0
+  - type: resistor
+    name: R199
+    nodes: [n199, n200]
+    value: 1000.0
+  - type: resistor
+    name: R200
+    nodes: [n200, n201]
+    value: 1000.0
+  - type: resistor
+    name: R201
+    nodes: [n201, n202]
+    value: 1000.0
+  - type: resistor
+    name: R202
+    nodes: [n202, n203]
+    value: 1000.0
+  - type: resistor
+    name: R203
+    nodes: [n203, n204]
+    value: 1000.0
+  - type: resistor
+    name: R204
+    nodes: [n204, n205]
+    value: 1000.0
+  - type: resistor
+    name: R205
+    nodes: [n205, n206]
+    value: 1000.0
+  - type: resistor
+    name: R206
+    nodes: [n206, n207]
+    value: 1000.0
+  - type: resistor
+    name: R207
+    nodes: [n207, n208]
+    value: 1000.0
+  - type: resistor
+    name: R208
+    nodes: [n208, n209]
+    value: 1000.0
+  - type: resistor
+    name: R209
+    nodes: [n209, n210]
+    value: 1000.0
+  - type: resistor
+    name: R210
+    nodes: [n210, n211]
+    value: 1000.0
+  - type: resistor
+    name: R211
+    nodes: [n211, n212]
+    value: 1000.0
+  - type: resistor
+    name: R212
+    nodes: [n212, n213]
+    value: 1000.0
+  - type: resistor
+    name: R213
+    nodes: [n213, n214]
+    value: 1000.0
+  - type: resistor
+    name: R214
+    nodes: [n214, n215]
+    value: 1000.0
+  - type: resistor
+    name: R215
+    nodes: [n215, n216]
+    value: 1000.0
+  - type: resistor
+    name: R216
+    nodes: [n216, n217]
+    value: 1000.0
+  - type: resistor
+    name: R217
+    nodes: [n217, n218]
+    value: 1000.0
+  - type: resistor
+    name: R218
+    nodes: [n218, n219]
+    value: 1000.0
+  - type: resistor
+    name: R219
+    nodes: [n219, n220]
+    value: 1000.0
+  - type: resistor
+    name: R220
+    nodes: [n220, n221]
+    value: 1000.0
+  - type: resistor
+    name: R221
+    nodes: [n221, n222]
+    value: 1000.0
+  - type: resistor
+    name: R222
+    nodes: [n222, n223]
+    value: 1000.0
+  - type: resistor
+    name: R223
+    nodes: [n223, n224]
+    value: 1000.0
+  - type: resistor
+    name: R224
+    nodes: [n224, n225]
+    value: 1000.0
+  - type: resistor
+    name: R225
+    nodes: [n225, n226]
+    value: 1000.0
+  - type: resistor
+    name: R226
+    nodes: [n226, n227]
+    value: 1000.0
+  - type: resistor
+    name: R227
+    nodes: [n227, n228]
+    value: 1000.0
+  - type: resistor
+    name: R228
+    nodes: [n228, n229]
+    value: 1000.0
+  - type: resistor
+    name: R229
+    nodes: [n229, n230]
+    value: 1000.0
+  - type: resistor
+    name: R230
+    nodes: [n230, n231]
+    value: 1000.0
+  - type: resistor
+    name: R231
+    nodes: [n231, n232]
+    value: 1000.0
+  - type: resistor
+    name: R232
+    nodes: [n232, n233]
+    value: 1000.0
+  - type: resistor
+    name: R233
+    nodes: [n233, n234]
+    value: 1000.0
+  - type: resistor
+    name: R234
+    nodes: [n234, n235]
+    value: 1000.0
+  - type: resistor
+    name: R235
+    nodes: [n235, n236]
+    value: 1000.0
+  - type: resistor
+    name: R236
+    nodes: [n236, n237]
+    value: 1000.0
+  - type: resistor
+    name: R237
+    nodes: [n237, n238]
+    value: 1000.0
+  - type: resistor
+    name: R238
+    nodes: [n238, n239]
+    value: 1000.0
+  - type: resistor
+    name: R239
+    nodes: [n239, n240]
+    value: 1000.0
+  - type: resistor
+    name: R240
+    nodes: [n240, n241]
+    value: 1000.0
+  - type: resistor
+    name: R241
+    nodes: [n241, n242]
+    value: 1000.0
+  - type: resistor
+    name: R242
+    nodes: [n242, n243]
+    value: 1000.0
+  - type: resistor
+    name: R243
+    nodes: [n243, n244]
+    value: 1000.0
+  - type: resistor
+    name: R244
+    nodes: [n244, n245]
+    value: 1000.0
+  - type: resistor
+    name: R245
+    nodes: [n245, n246]
+    value: 1000.0
+  - type: resistor
+    name: R246
+    nodes: [n246, n247]
+    value: 1000.0
+  - type: resistor
+    name: R247
+    nodes: [n247, n248]
+    value: 1000.0
+  - type: resistor
+    name: R248
+    nodes: [n248, n249]
+    value: 1000.0
+  - type: resistor
+    name: R249
+    nodes: [n249, n250]
+    value: 1000.0
+  - type: resistor
+    name: R250
+    nodes: [n250, n251]
+    value: 1000.0
+  - type: resistor
+    name: R251
+    nodes: [n251, n252]
+    value: 1000.0
+  - type: resistor
+    name: R252
+    nodes: [n252, n253]
+    value: 1000.0
+  - type: resistor
+    name: R253
+    nodes: [n253, n254]
+    value: 1000.0
+  - type: resistor
+    name: R254
+    nodes: [n254, n255]
+    value: 1000.0
+  - type: resistor
+    name: R255
+    nodes: [n255, n256]
+    value: 1000.0
+  - type: resistor
+    name: R256
+    nodes: [n256, n257]
+    value: 1000.0
+  - type: resistor
+    name: R257
+    nodes: [n257, n258]
+    value: 1000.0
+  - type: resistor
+    name: R258
+    nodes: [n258, n259]
+    value: 1000.0
+  - type: resistor
+    name: R259
+    nodes: [n259, n260]
+    value: 1000.0
+  - type: resistor
+    name: R260
+    nodes: [n260, n261]
+    value: 1000.0
+  - type: resistor
+    name: R261
+    nodes: [n261, n262]
+    value: 1000.0
+  - type: resistor
+    name: R262
+    nodes: [n262, n263]
+    value: 1000.0
+  - type: resistor
+    name: R263
+    nodes: [n263, n264]
+    value: 1000.0
+  - type: resistor
+    name: R264
+    nodes: [n264, n265]
+    value: 1000.0
+  - type: resistor
+    name: R265
+    nodes: [n265, n266]
+    value: 1000.0
+  - type: resistor
+    name: R266
+    nodes: [n266, n267]
+    value: 1000.0
+  - type: resistor
+    name: R267
+    nodes: [n267, n268]
+    value: 1000.0
+  - type: resistor
+    name: R268
+    nodes: [n268, n269]
+    value: 1000.0
+  - type: resistor
+    name: R269
+    nodes: [n269, n270]
+    value: 1000.0
+  - type: resistor
+    name: R270
+    nodes: [n270, n271]
+    value: 1000.0
+  - type: resistor
+    name: R271
+    nodes: [n271, n272]
+    value: 1000.0
+  - type: resistor
+    name: R272
+    nodes: [n272, n273]
+    value: 1000.0
+  - type: resistor
+    name: R273
+    nodes: [n273, n274]
+    value: 1000.0
+  - type: resistor
+    name: R274
+    nodes: [n274, n275]
+    value: 1000.0
+  - type: resistor
+    name: R275
+    nodes: [n275, n276]
+    value: 1000.0
+  - type: resistor
+    name: R276
+    nodes: [n276, n277]
+    value: 1000.0
+  - type: resistor
+    name: R277
+    nodes: [n277, n278]
+    value: 1000.0
+  - type: resistor
+    name: R278
+    nodes: [n278, n279]
+    value: 1000.0
+  - type: resistor
+    name: R279
+    nodes: [n279, n280]
+    value: 1000.0
+  - type: resistor
+    name: R280
+    nodes: [n280, n281]
+    value: 1000.0
+  - type: resistor
+    name: R281
+    nodes: [n281, n282]
+    value: 1000.0
+  - type: resistor
+    name: R282
+    nodes: [n282, n283]
+    value: 1000.0
+  - type: resistor
+    name: R283
+    nodes: [n283, n284]
+    value: 1000.0
+  - type: resistor
+    name: R284
+    nodes: [n284, n285]
+    value: 1000.0
+  - type: resistor
+    name: R285
+    nodes: [n285, n286]
+    value: 1000.0
+  - type: resistor
+    name: R286
+    nodes: [n286, n287]
+    value: 1000.0
+  - type: resistor
+    name: R287
+    nodes: [n287, n288]
+    value: 1000.0
+  - type: resistor
+    name: R288
+    nodes: [n288, n289]
+    value: 1000.0
+  - type: resistor
+    name: R289
+    nodes: [n289, n290]
+    value: 1000.0
+  - type: resistor
+    name: R290
+    nodes: [n290, n291]
+    value: 1000.0
+  - type: resistor
+    name: R291
+    nodes: [n291, n292]
+    value: 1000.0
+  - type: resistor
+    name: R292
+    nodes: [n292, n293]
+    value: 1000.0
+  - type: resistor
+    name: R293
+    nodes: [n293, n294]
+    value: 1000.0
+  - type: resistor
+    name: R294
+    nodes: [n294, n295]
+    value: 1000.0
+  - type: resistor
+    name: R295
+    nodes: [n295, n296]
+    value: 1000.0
+  - type: resistor
+    name: R296
+    nodes: [n296, n297]
+    value: 1000.0
+  - type: resistor
+    name: R297
+    nodes: [n297, n298]
+    value: 1000.0
+  - type: resistor
+    name: R298
+    nodes: [n298, n299]
+    value: 1000.0
+  - type: resistor
+    name: R299
+    nodes: [n299, n300]
+    value: 1000.0
+  - type: resistor
+    name: R300
+    nodes: [n300, n301]
+    value: 1000.0
+  - type: resistor
+    name: R301
+    nodes: [n301, n302]
+    value: 1000.0
+  - type: resistor
+    name: R302
+    nodes: [n302, n303]
+    value: 1000.0
+  - type: resistor
+    name: R303
+    nodes: [n303, n304]
+    value: 1000.0
+  - type: resistor
+    name: R304
+    nodes: [n304, n305]
+    value: 1000.0
+  - type: resistor
+    name: R305
+    nodes: [n305, n306]
+    value: 1000.0
+  - type: resistor
+    name: R306
+    nodes: [n306, n307]
+    value: 1000.0
+  - type: resistor
+    name: R307
+    nodes: [n307, n308]
+    value: 1000.0
+  - type: resistor
+    name: R308
+    nodes: [n308, n309]
+    value: 1000.0
+  - type: resistor
+    name: R309
+    nodes: [n309, n310]
+    value: 1000.0
+  - type: resistor
+    name: R310
+    nodes: [n310, n311]
+    value: 1000.0
+  - type: resistor
+    name: R311
+    nodes: [n311, n312]
+    value: 1000.0
+  - type: resistor
+    name: R312
+    nodes: [n312, n313]
+    value: 1000.0
+  - type: resistor
+    name: R313
+    nodes: [n313, n314]
+    value: 1000.0
+  - type: resistor
+    name: R314
+    nodes: [n314, n315]
+    value: 1000.0
+  - type: resistor
+    name: R315
+    nodes: [n315, n316]
+    value: 1000.0
+  - type: resistor
+    name: R316
+    nodes: [n316, n317]
+    value: 1000.0
+  - type: resistor
+    name: R317
+    nodes: [n317, n318]
+    value: 1000.0
+  - type: resistor
+    name: R318
+    nodes: [n318, n319]
+    value: 1000.0
+  - type: resistor
+    name: R319
+    nodes: [n319, n320]
+    value: 1000.0
+  - type: resistor
+    name: R320
+    nodes: [n320, n321]
+    value: 1000.0
+  - type: resistor
+    name: R321
+    nodes: [n321, n322]
+    value: 1000.0
+  - type: resistor
+    name: R322
+    nodes: [n322, n323]
+    value: 1000.0
+  - type: resistor
+    name: R323
+    nodes: [n323, n324]
+    value: 1000.0
+  - type: resistor
+    name: R324
+    nodes: [n324, n325]
+    value: 1000.0
+  - type: resistor
+    name: R325
+    nodes: [n325, n326]
+    value: 1000.0
+  - type: resistor
+    name: R326
+    nodes: [n326, n327]
+    value: 1000.0
+  - type: resistor
+    name: R327
+    nodes: [n327, n328]
+    value: 1000.0
+  - type: resistor
+    name: R328
+    nodes: [n328, n329]
+    value: 1000.0
+  - type: resistor
+    name: R329
+    nodes: [n329, n330]
+    value: 1000.0
+  - type: resistor
+    name: R330
+    nodes: [n330, n331]
+    value: 1000.0
+  - type: resistor
+    name: R331
+    nodes: [n331, n332]
+    value: 1000.0
+  - type: resistor
+    name: R332
+    nodes: [n332, n333]
+    value: 1000.0
+  - type: resistor
+    name: R333
+    nodes: [n333, n334]
+    value: 1000.0
+  - type: resistor
+    name: R334
+    nodes: [n334, n335]
+    value: 1000.0
+  - type: resistor
+    name: R335
+    nodes: [n335, n336]
+    value: 1000.0
+  - type: resistor
+    name: R336
+    nodes: [n336, n337]
+    value: 1000.0
+  - type: resistor
+    name: R337
+    nodes: [n337, n338]
+    value: 1000.0
+  - type: resistor
+    name: R338
+    nodes: [n338, n339]
+    value: 1000.0
+  - type: resistor
+    name: R339
+    nodes: [n339, n340]
+    value: 1000.0
+  - type: resistor
+    name: R340
+    nodes: [n340, n341]
+    value: 1000.0
+  - type: resistor
+    name: R341
+    nodes: [n341, n342]
+    value: 1000.0
+  - type: resistor
+    name: R342
+    nodes: [n342, n343]
+    value: 1000.0
+  - type: resistor
+    name: R343
+    nodes: [n343, n344]
+    value: 1000.0
+  - type: resistor
+    name: R344
+    nodes: [n344, n345]
+    value: 1000.0
+  - type: resistor
+    name: R345
+    nodes: [n345, n346]
+    value: 1000.0
+  - type: resistor
+    name: R346
+    nodes: [n346, n347]
+    value: 1000.0
+  - type: resistor
+    name: R347
+    nodes: [n347, n348]
+    value: 1000.0
+  - type: resistor
+    name: R348
+    nodes: [n348, n349]
+    value: 1000.0
+  - type: resistor
+    name: R349
+    nodes: [n349, n350]
+    value: 1000.0
+  - type: resistor
+    name: R350
+    nodes: [n350, n351]
+    value: 1000.0
+  - type: resistor
+    name: R351
+    nodes: [n351, n352]
+    value: 1000.0
+  - type: resistor
+    name: R352
+    nodes: [n352, n353]
+    value: 1000.0
+  - type: resistor
+    name: R353
+    nodes: [n353, n354]
+    value: 1000.0
+  - type: resistor
+    name: R354
+    nodes: [n354, n355]
+    value: 1000.0
+  - type: resistor
+    name: R355
+    nodes: [n355, n356]
+    value: 1000.0
+  - type: resistor
+    name: R356
+    nodes: [n356, n357]
+    value: 1000.0
+  - type: resistor
+    name: R357
+    nodes: [n357, n358]
+    value: 1000.0
+  - type: resistor
+    name: R358
+    nodes: [n358, n359]
+    value: 1000.0
+  - type: resistor
+    name: R359
+    nodes: [n359, n360]
+    value: 1000.0
+  - type: resistor
+    name: R360
+    nodes: [n360, n361]
+    value: 1000.0
+  - type: resistor
+    name: R361
+    nodes: [n361, n362]
+    value: 1000.0
+  - type: resistor
+    name: R362
+    nodes: [n362, n363]
+    value: 1000.0
+  - type: resistor
+    name: R363
+    nodes: [n363, n364]
+    value: 1000.0
+  - type: resistor
+    name: R364
+    nodes: [n364, n365]
+    value: 1000.0
+  - type: resistor
+    name: R365
+    nodes: [n365, n366]
+    value: 1000.0
+  - type: resistor
+    name: R366
+    nodes: [n366, n367]
+    value: 1000.0
+  - type: resistor
+    name: R367
+    nodes: [n367, n368]
+    value: 1000.0
+  - type: resistor
+    name: R368
+    nodes: [n368, n369]
+    value: 1000.0
+  - type: resistor
+    name: R369
+    nodes: [n369, n370]
+    value: 1000.0
+  - type: resistor
+    name: R370
+    nodes: [n370, n371]
+    value: 1000.0
+  - type: resistor
+    name: R371
+    nodes: [n371, n372]
+    value: 1000.0
+  - type: resistor
+    name: R372
+    nodes: [n372, n373]
+    value: 1000.0
+  - type: resistor
+    name: R373
+    nodes: [n373, n374]
+    value: 1000.0
+  - type: resistor
+    name: R374
+    nodes: [n374, n375]
+    value: 1000.0
+  - type: resistor
+    name: R375
+    nodes: [n375, n376]
+    value: 1000.0
+  - type: resistor
+    name: R376
+    nodes: [n376, n377]
+    value: 1000.0
+  - type: resistor
+    name: R377
+    nodes: [n377, n378]
+    value: 1000.0
+  - type: resistor
+    name: R378
+    nodes: [n378, n379]
+    value: 1000.0
+  - type: resistor
+    name: R379
+    nodes: [n379, n380]
+    value: 1000.0
+  - type: resistor
+    name: R380
+    nodes: [n380, n381]
+    value: 1000.0
+  - type: resistor
+    name: R381
+    nodes: [n381, n382]
+    value: 1000.0
+  - type: resistor
+    name: R382
+    nodes: [n382, n383]
+    value: 1000.0
+  - type: resistor
+    name: R383
+    nodes: [n383, n384]
+    value: 1000.0
+  - type: resistor
+    name: R384
+    nodes: [n384, n385]
+    value: 1000.0
+  - type: resistor
+    name: R385
+    nodes: [n385, n386]
+    value: 1000.0
+  - type: resistor
+    name: R386
+    nodes: [n386, n387]
+    value: 1000.0
+  - type: resistor
+    name: R387
+    nodes: [n387, n388]
+    value: 1000.0
+  - type: resistor
+    name: R388
+    nodes: [n388, n389]
+    value: 1000.0
+  - type: resistor
+    name: R389
+    nodes: [n389, n390]
+    value: 1000.0
+  - type: resistor
+    name: R390
+    nodes: [n390, n391]
+    value: 1000.0
+  - type: resistor
+    name: R391
+    nodes: [n391, n392]
+    value: 1000.0
+  - type: resistor
+    name: R392
+    nodes: [n392, n393]
+    value: 1000.0
+  - type: resistor
+    name: R393
+    nodes: [n393, n394]
+    value: 1000.0
+  - type: resistor
+    name: R394
+    nodes: [n394, n395]
+    value: 1000.0
+  - type: resistor
+    name: R395
+    nodes: [n395, n396]
+    value: 1000.0
+  - type: resistor
+    name: R396
+    nodes: [n396, n397]
+    value: 1000.0
+  - type: resistor
+    name: R397
+    nodes: [n397, n398]
+    value: 1000.0
+  - type: resistor
+    name: R398
+    nodes: [n398, n399]
+    value: 1000.0
+  - type: resistor
+    name: R399
+    nodes: [n399, n400]
+    value: 1000.0
+  - type: resistor
+    name: R400
+    nodes: [n400, n401]
+    value: 1000.0
+  - type: resistor
+    name: R401
+    nodes: [n401, n402]
+    value: 1000.0
+  - type: resistor
+    name: R402
+    nodes: [n402, n403]
+    value: 1000.0
+  - type: resistor
+    name: R403
+    nodes: [n403, n404]
+    value: 1000.0
+  - type: resistor
+    name: R404
+    nodes: [n404, n405]
+    value: 1000.0
+  - type: resistor
+    name: R405
+    nodes: [n405, n406]
+    value: 1000.0
+  - type: resistor
+    name: R406
+    nodes: [n406, n407]
+    value: 1000.0
+  - type: resistor
+    name: R407
+    nodes: [n407, n408]
+    value: 1000.0
+  - type: resistor
+    name: R408
+    nodes: [n408, n409]
+    value: 1000.0
+  - type: resistor
+    name: R409
+    nodes: [n409, n410]
+    value: 1000.0
+  - type: resistor
+    name: R410
+    nodes: [n410, n411]
+    value: 1000.0
+  - type: resistor
+    name: R411
+    nodes: [n411, n412]
+    value: 1000.0
+  - type: resistor
+    name: R412
+    nodes: [n412, n413]
+    value: 1000.0
+  - type: resistor
+    name: R413
+    nodes: [n413, n414]
+    value: 1000.0
+  - type: resistor
+    name: R414
+    nodes: [n414, n415]
+    value: 1000.0
+  - type: resistor
+    name: R415
+    nodes: [n415, n416]
+    value: 1000.0
+  - type: resistor
+    name: R416
+    nodes: [n416, n417]
+    value: 1000.0
+  - type: resistor
+    name: R417
+    nodes: [n417, n418]
+    value: 1000.0
+  - type: resistor
+    name: R418
+    nodes: [n418, n419]
+    value: 1000.0
+  - type: resistor
+    name: R419
+    nodes: [n419, n420]
+    value: 1000.0
+  - type: resistor
+    name: R420
+    nodes: [n420, n421]
+    value: 1000.0
+  - type: resistor
+    name: R421
+    nodes: [n421, n422]
+    value: 1000.0
+  - type: resistor
+    name: R422
+    nodes: [n422, n423]
+    value: 1000.0
+  - type: resistor
+    name: R423
+    nodes: [n423, n424]
+    value: 1000.0
+  - type: resistor
+    name: R424
+    nodes: [n424, n425]
+    value: 1000.0
+  - type: resistor
+    name: R425
+    nodes: [n425, n426]
+    value: 1000.0
+  - type: resistor
+    name: R426
+    nodes: [n426, n427]
+    value: 1000.0
+  - type: resistor
+    name: R427
+    nodes: [n427, n428]
+    value: 1000.0
+  - type: resistor
+    name: R428
+    nodes: [n428, n429]
+    value: 1000.0
+  - type: resistor
+    name: R429
+    nodes: [n429, n430]
+    value: 1000.0
+  - type: resistor
+    name: R430
+    nodes: [n430, n431]
+    value: 1000.0
+  - type: resistor
+    name: R431
+    nodes: [n431, n432]
+    value: 1000.0
+  - type: resistor
+    name: R432
+    nodes: [n432, n433]
+    value: 1000.0
+  - type: resistor
+    name: R433
+    nodes: [n433, n434]
+    value: 1000.0
+  - type: resistor
+    name: R434
+    nodes: [n434, n435]
+    value: 1000.0
+  - type: resistor
+    name: R435
+    nodes: [n435, n436]
+    value: 1000.0
+  - type: resistor
+    name: R436
+    nodes: [n436, n437]
+    value: 1000.0
+  - type: resistor
+    name: R437
+    nodes: [n437, n438]
+    value: 1000.0
+  - type: resistor
+    name: R438
+    nodes: [n438, n439]
+    value: 1000.0
+  - type: resistor
+    name: R439
+    nodes: [n439, n440]
+    value: 1000.0
+  - type: resistor
+    name: R440
+    nodes: [n440, n441]
+    value: 1000.0
+  - type: resistor
+    name: R441
+    nodes: [n441, n442]
+    value: 1000.0
+  - type: resistor
+    name: R442
+    nodes: [n442, n443]
+    value: 1000.0
+  - type: resistor
+    name: R443
+    nodes: [n443, n444]
+    value: 1000.0
+  - type: resistor
+    name: R444
+    nodes: [n444, n445]
+    value: 1000.0
+  - type: resistor
+    name: R445
+    nodes: [n445, n446]
+    value: 1000.0
+  - type: resistor
+    name: R446
+    nodes: [n446, n447]
+    value: 1000.0
+  - type: resistor
+    name: R447
+    nodes: [n447, n448]
+    value: 1000.0
+  - type: resistor
+    name: R448
+    nodes: [n448, n449]
+    value: 1000.0
+  - type: resistor
+    name: R449
+    nodes: [n449, n450]
+    value: 1000.0
+  - type: resistor
+    name: R450
+    nodes: [n450, n451]
+    value: 1000.0
+  - type: resistor
+    name: R451
+    nodes: [n451, n452]
+    value: 1000.0
+  - type: resistor
+    name: R452
+    nodes: [n452, n453]
+    value: 1000.0
+  - type: resistor
+    name: R453
+    nodes: [n453, n454]
+    value: 1000.0
+  - type: resistor
+    name: R454
+    nodes: [n454, n455]
+    value: 1000.0
+  - type: resistor
+    name: R455
+    nodes: [n455, n456]
+    value: 1000.0
+  - type: resistor
+    name: R456
+    nodes: [n456, n457]
+    value: 1000.0
+  - type: resistor
+    name: R457
+    nodes: [n457, n458]
+    value: 1000.0
+  - type: resistor
+    name: R458
+    nodes: [n458, n459]
+    value: 1000.0
+  - type: resistor
+    name: R459
+    nodes: [n459, n460]
+    value: 1000.0
+  - type: resistor
+    name: R460
+    nodes: [n460, n461]
+    value: 1000.0
+  - type: resistor
+    name: R461
+    nodes: [n461, n462]
+    value: 1000.0
+  - type: resistor
+    name: R462
+    nodes: [n462, n463]
+    value: 1000.0
+  - type: resistor
+    name: R463
+    nodes: [n463, n464]
+    value: 1000.0
+  - type: resistor
+    name: R464
+    nodes: [n464, n465]
+    value: 1000.0
+  - type: resistor
+    name: R465
+    nodes: [n465, n466]
+    value: 1000.0
+  - type: resistor
+    name: R466
+    nodes: [n466, n467]
+    value: 1000.0
+  - type: resistor
+    name: R467
+    nodes: [n467, n468]
+    value: 1000.0
+  - type: resistor
+    name: R468
+    nodes: [n468, n469]
+    value: 1000.0
+  - type: resistor
+    name: R469
+    nodes: [n469, n470]
+    value: 1000.0
+  - type: resistor
+    name: R470
+    nodes: [n470, n471]
+    value: 1000.0
+  - type: resistor
+    name: R471
+    nodes: [n471, n472]
+    value: 1000.0
+  - type: resistor
+    name: R472
+    nodes: [n472, n473]
+    value: 1000.0
+  - type: resistor
+    name: R473
+    nodes: [n473, n474]
+    value: 1000.0
+  - type: resistor
+    name: R474
+    nodes: [n474, n475]
+    value: 1000.0
+  - type: resistor
+    name: R475
+    nodes: [n475, n476]
+    value: 1000.0
+  - type: resistor
+    name: R476
+    nodes: [n476, n477]
+    value: 1000.0
+  - type: resistor
+    name: R477
+    nodes: [n477, n478]
+    value: 1000.0
+  - type: resistor
+    name: R478
+    nodes: [n478, n479]
+    value: 1000.0
+  - type: resistor
+    name: R479
+    nodes: [n479, n480]
+    value: 1000.0
+  - type: resistor
+    name: R480
+    nodes: [n480, n481]
+    value: 1000.0
+  - type: resistor
+    name: R481
+    nodes: [n481, n482]
+    value: 1000.0
+  - type: resistor
+    name: R482
+    nodes: [n482, n483]
+    value: 1000.0
+  - type: resistor
+    name: R483
+    nodes: [n483, n484]
+    value: 1000.0
+  - type: resistor
+    name: R484
+    nodes: [n484, n485]
+    value: 1000.0
+  - type: resistor
+    name: R485
+    nodes: [n485, n486]
+    value: 1000.0
+  - type: resistor
+    name: R486
+    nodes: [n486, n487]
+    value: 1000.0
+  - type: resistor
+    name: R487
+    nodes: [n487, n488]
+    value: 1000.0
+  - type: resistor
+    name: R488
+    nodes: [n488, n489]
+    value: 1000.0
+  - type: resistor
+    name: R489
+    nodes: [n489, n490]
+    value: 1000.0
+  - type: resistor
+    name: R490
+    nodes: [n490, n491]
+    value: 1000.0
+  - type: resistor
+    name: R491
+    nodes: [n491, n492]
+    value: 1000.0
+  - type: resistor
+    name: R492
+    nodes: [n492, n493]
+    value: 1000.0
+  - type: resistor
+    name: R493
+    nodes: [n493, n494]
+    value: 1000.0
+  - type: resistor
+    name: R494
+    nodes: [n494, n495]
+    value: 1000.0
+  - type: resistor
+    name: R495
+    nodes: [n495, n496]
+    value: 1000.0
+  - type: resistor
+    name: R496
+    nodes: [n496, n497]
+    value: 1000.0
+  - type: resistor
+    name: R497
+    nodes: [n497, n498]
+    value: 1000.0
+  - type: resistor
+    name: R498
+    nodes: [n498, n499]
+    value: 1000.0
+  - type: resistor
+    name: R499
+    nodes: [n499, n500]
+    value: 1000.0
+  - type: resistor
+    name: R500
+    nodes: [n500, n501]
+    value: 1000.0
+  - type: resistor
+    name: R501
+    nodes: [n501, n502]
+    value: 1000.0
+  - type: resistor
+    name: R502
+    nodes: [n502, n503]
+    value: 1000.0
+  - type: resistor
+    name: R503
+    nodes: [n503, n504]
+    value: 1000.0
+  - type: resistor
+    name: R504
+    nodes: [n504, n505]
+    value: 1000.0
+  - type: resistor
+    name: R505
+    nodes: [n505, n506]
+    value: 1000.0
+  - type: resistor
+    name: R506
+    nodes: [n506, n507]
+    value: 1000.0
+  - type: resistor
+    name: R507
+    nodes: [n507, n508]
+    value: 1000.0
+  - type: resistor
+    name: R508
+    nodes: [n508, n509]
+    value: 1000.0
+  - type: resistor
+    name: R509
+    nodes: [n509, n510]
+    value: 1000.0
+  - type: resistor
+    name: R510
+    nodes: [n510, n511]
+    value: 1000.0
+  - type: resistor
+    name: R511
+    nodes: [n511, n512]
+    value: 1000.0
+  - type: resistor
+    name: R512
+    nodes: [n512, n513]
+    value: 1000.0
+  - type: resistor
+    name: R513
+    nodes: [n513, n514]
+    value: 1000.0
+  - type: resistor
+    name: R514
+    nodes: [n514, n515]
+    value: 1000.0
+  - type: resistor
+    name: R515
+    nodes: [n515, n516]
+    value: 1000.0
+  - type: resistor
+    name: R516
+    nodes: [n516, n517]
+    value: 1000.0
+  - type: resistor
+    name: R517
+    nodes: [n517, n518]
+    value: 1000.0
+  - type: resistor
+    name: R518
+    nodes: [n518, n519]
+    value: 1000.0
+  - type: resistor
+    name: R519
+    nodes: [n519, n520]
+    value: 1000.0
+  - type: resistor
+    name: R520
+    nodes: [n520, n521]
+    value: 1000.0
+  - type: resistor
+    name: R521
+    nodes: [n521, n522]
+    value: 1000.0
+  - type: resistor
+    name: R522
+    nodes: [n522, n523]
+    value: 1000.0
+  - type: resistor
+    name: R523
+    nodes: [n523, n524]
+    value: 1000.0
+  - type: resistor
+    name: R524
+    nodes: [n524, n525]
+    value: 1000.0
+  - type: resistor
+    name: R525
+    nodes: [n525, n526]
+    value: 1000.0
+  - type: resistor
+    name: R526
+    nodes: [n526, n527]
+    value: 1000.0
+  - type: resistor
+    name: R527
+    nodes: [n527, n528]
+    value: 1000.0
+  - type: resistor
+    name: R528
+    nodes: [n528, n529]
+    value: 1000.0
+  - type: resistor
+    name: R529
+    nodes: [n529, n530]
+    value: 1000.0
+  - type: resistor
+    name: R530
+    nodes: [n530, n531]
+    value: 1000.0
+  - type: resistor
+    name: R531
+    nodes: [n531, n532]
+    value: 1000.0
+  - type: resistor
+    name: R532
+    nodes: [n532, n533]
+    value: 1000.0
+  - type: resistor
+    name: R533
+    nodes: [n533, n534]
+    value: 1000.0
+  - type: resistor
+    name: R534
+    nodes: [n534, n535]
+    value: 1000.0
+  - type: resistor
+    name: R535
+    nodes: [n535, n536]
+    value: 1000.0
+  - type: resistor
+    name: R536
+    nodes: [n536, n537]
+    value: 1000.0
+  - type: resistor
+    name: R537
+    nodes: [n537, n538]
+    value: 1000.0
+  - type: resistor
+    name: R538
+    nodes: [n538, n539]
+    value: 1000.0
+  - type: resistor
+    name: R539
+    nodes: [n539, n540]
+    value: 1000.0
+  - type: resistor
+    name: R540
+    nodes: [n540, n541]
+    value: 1000.0
+  - type: resistor
+    name: R541
+    nodes: [n541, n542]
+    value: 1000.0
+  - type: resistor
+    name: R542
+    nodes: [n542, n543]
+    value: 1000.0
+  - type: resistor
+    name: R543
+    nodes: [n543, n544]
+    value: 1000.0
+  - type: resistor
+    name: R544
+    nodes: [n544, n545]
+    value: 1000.0
+  - type: resistor
+    name: R545
+    nodes: [n545, n546]
+    value: 1000.0
+  - type: resistor
+    name: R546
+    nodes: [n546, n547]
+    value: 1000.0
+  - type: resistor
+    name: R547
+    nodes: [n547, n548]
+    value: 1000.0
+  - type: resistor
+    name: R548
+    nodes: [n548, n549]
+    value: 1000.0
+  - type: resistor
+    name: R549
+    nodes: [n549, n550]
+    value: 1000.0
+  - type: resistor
+    name: R550
+    nodes: [n550, n551]
+    value: 1000.0
+  - type: resistor
+    name: R551
+    nodes: [n551, n552]
+    value: 1000.0
+  - type: resistor
+    name: R552
+    nodes: [n552, n553]
+    value: 1000.0
+  - type: resistor
+    name: R553
+    nodes: [n553, n554]
+    value: 1000.0
+  - type: resistor
+    name: R554
+    nodes: [n554, n555]
+    value: 1000.0
+  - type: resistor
+    name: R555
+    nodes: [n555, n556]
+    value: 1000.0
+  - type: resistor
+    name: R556
+    nodes: [n556, n557]
+    value: 1000.0
+  - type: resistor
+    name: R557
+    nodes: [n557, n558]
+    value: 1000.0
+  - type: resistor
+    name: R558
+    nodes: [n558, n559]
+    value: 1000.0
+  - type: resistor
+    name: R559
+    nodes: [n559, n560]
+    value: 1000.0
+  - type: resistor
+    name: R560
+    nodes: [n560, n561]
+    value: 1000.0
+  - type: resistor
+    name: R561
+    nodes: [n561, n562]
+    value: 1000.0
+  - type: resistor
+    name: R562
+    nodes: [n562, n563]
+    value: 1000.0
+  - type: resistor
+    name: R563
+    nodes: [n563, n564]
+    value: 1000.0
+  - type: resistor
+    name: R564
+    nodes: [n564, n565]
+    value: 1000.0
+  - type: resistor
+    name: R565
+    nodes: [n565, n566]
+    value: 1000.0
+  - type: resistor
+    name: R566
+    nodes: [n566, n567]
+    value: 1000.0
+  - type: resistor
+    name: R567
+    nodes: [n567, n568]
+    value: 1000.0
+  - type: resistor
+    name: R568
+    nodes: [n568, n569]
+    value: 1000.0
+  - type: resistor
+    name: R569
+    nodes: [n569, n570]
+    value: 1000.0
+  - type: resistor
+    name: R570
+    nodes: [n570, n571]
+    value: 1000.0
+  - type: resistor
+    name: R571
+    nodes: [n571, n572]
+    value: 1000.0
+  - type: resistor
+    name: R572
+    nodes: [n572, n573]
+    value: 1000.0
+  - type: resistor
+    name: R573
+    nodes: [n573, n574]
+    value: 1000.0
+  - type: resistor
+    name: R574
+    nodes: [n574, n575]
+    value: 1000.0
+  - type: resistor
+    name: R575
+    nodes: [n575, n576]
+    value: 1000.0
+  - type: resistor
+    name: R576
+    nodes: [n576, n577]
+    value: 1000.0
+  - type: resistor
+    name: R577
+    nodes: [n577, n578]
+    value: 1000.0
+  - type: resistor
+    name: R578
+    nodes: [n578, n579]
+    value: 1000.0
+  - type: resistor
+    name: R579
+    nodes: [n579, n580]
+    value: 1000.0
+  - type: resistor
+    name: R580
+    nodes: [n580, n581]
+    value: 1000.0
+  - type: resistor
+    name: R581
+    nodes: [n581, n582]
+    value: 1000.0
+  - type: resistor
+    name: R582
+    nodes: [n582, n583]
+    value: 1000.0
+  - type: resistor
+    name: R583
+    nodes: [n583, n584]
+    value: 1000.0
+  - type: resistor
+    name: R584
+    nodes: [n584, n585]
+    value: 1000.0
+  - type: resistor
+    name: R585
+    nodes: [n585, n586]
+    value: 1000.0
+  - type: resistor
+    name: R586
+    nodes: [n586, n587]
+    value: 1000.0
+  - type: resistor
+    name: R587
+    nodes: [n587, n588]
+    value: 1000.0
+  - type: resistor
+    name: R588
+    nodes: [n588, n589]
+    value: 1000.0
+  - type: resistor
+    name: R589
+    nodes: [n589, n590]
+    value: 1000.0
+  - type: resistor
+    name: R590
+    nodes: [n590, n591]
+    value: 1000.0
+  - type: resistor
+    name: R591
+    nodes: [n591, n592]
+    value: 1000.0
+  - type: resistor
+    name: R592
+    nodes: [n592, n593]
+    value: 1000.0
+  - type: resistor
+    name: R593
+    nodes: [n593, n594]
+    value: 1000.0
+  - type: resistor
+    name: R594
+    nodes: [n594, n595]
+    value: 1000.0
+  - type: resistor
+    name: R595
+    nodes: [n595, n596]
+    value: 1000.0
+  - type: resistor
+    name: R596
+    nodes: [n596, n597]
+    value: 1000.0
+  - type: resistor
+    name: R597
+    nodes: [n597, n598]
+    value: 1000.0
+  - type: resistor
+    name: R598
+    nodes: [n598, n599]
+    value: 1000.0
+  - type: resistor
+    name: R599
+    nodes: [n599, n600]
+    value: 1000.0
+  - type: resistor
+    name: R600
+    nodes: [n600, n601]
+    value: 1000.0
+  - type: resistor
+    name: R601
+    nodes: [n601, n602]
+    value: 1000.0
+  - type: resistor
+    name: R602
+    nodes: [n602, n603]
+    value: 1000.0
+  - type: resistor
+    name: R603
+    nodes: [n603, n604]
+    value: 1000.0
+  - type: resistor
+    name: R604
+    nodes: [n604, n605]
+    value: 1000.0
+  - type: resistor
+    name: R605
+    nodes: [n605, n606]
+    value: 1000.0
+  - type: resistor
+    name: R606
+    nodes: [n606, n607]
+    value: 1000.0
+  - type: resistor
+    name: R607
+    nodes: [n607, n608]
+    value: 1000.0
+  - type: resistor
+    name: R608
+    nodes: [n608, n609]
+    value: 1000.0
+  - type: resistor
+    name: R609
+    nodes: [n609, n610]
+    value: 1000.0
+  - type: resistor
+    name: R610
+    nodes: [n610, n611]
+    value: 1000.0
+  - type: resistor
+    name: R611
+    nodes: [n611, n612]
+    value: 1000.0
+  - type: resistor
+    name: R612
+    nodes: [n612, n613]
+    value: 1000.0
+  - type: resistor
+    name: R613
+    nodes: [n613, n614]
+    value: 1000.0
+  - type: resistor
+    name: R614
+    nodes: [n614, n615]
+    value: 1000.0
+  - type: resistor
+    name: R615
+    nodes: [n615, n616]
+    value: 1000.0
+  - type: resistor
+    name: R616
+    nodes: [n616, n617]
+    value: 1000.0
+  - type: resistor
+    name: R617
+    nodes: [n617, n618]
+    value: 1000.0
+  - type: resistor
+    name: R618
+    nodes: [n618, n619]
+    value: 1000.0
+  - type: resistor
+    name: R619
+    nodes: [n619, n620]
+    value: 1000.0
+  - type: resistor
+    name: R620
+    nodes: [n620, n621]
+    value: 1000.0
+  - type: resistor
+    name: R621
+    nodes: [n621, n622]
+    value: 1000.0
+  - type: resistor
+    name: R622
+    nodes: [n622, n623]
+    value: 1000.0
+  - type: resistor
+    name: R623
+    nodes: [n623, n624]
+    value: 1000.0
+  - type: resistor
+    name: R624
+    nodes: [n624, n625]
+    value: 1000.0
+  - type: resistor
+    name: R625
+    nodes: [n625, n626]
+    value: 1000.0
+  - type: resistor
+    name: R626
+    nodes: [n626, n627]
+    value: 1000.0
+  - type: resistor
+    name: R627
+    nodes: [n627, n628]
+    value: 1000.0
+  - type: resistor
+    name: R628
+    nodes: [n628, n629]
+    value: 1000.0
+  - type: resistor
+    name: R629
+    nodes: [n629, n630]
+    value: 1000.0
+  - type: resistor
+    name: R630
+    nodes: [n630, n631]
+    value: 1000.0
+  - type: resistor
+    name: R631
+    nodes: [n631, n632]
+    value: 1000.0
+  - type: resistor
+    name: R632
+    nodes: [n632, n633]
+    value: 1000.0
+  - type: resistor
+    name: R633
+    nodes: [n633, n634]
+    value: 1000.0
+  - type: resistor
+    name: R634
+    nodes: [n634, n635]
+    value: 1000.0
+  - type: resistor
+    name: R635
+    nodes: [n635, n636]
+    value: 1000.0
+  - type: resistor
+    name: R636
+    nodes: [n636, n637]
+    value: 1000.0
+  - type: resistor
+    name: R637
+    nodes: [n637, n638]
+    value: 1000.0
+  - type: resistor
+    name: R638
+    nodes: [n638, n639]
+    value: 1000.0
+  - type: resistor
+    name: R639
+    nodes: [n639, n640]
+    value: 1000.0
+  - type: resistor
+    name: R640
+    nodes: [n640, n641]
+    value: 1000.0
+  - type: resistor
+    name: R641
+    nodes: [n641, n642]
+    value: 1000.0
+  - type: resistor
+    name: R642
+    nodes: [n642, n643]
+    value: 1000.0
+  - type: resistor
+    name: R643
+    nodes: [n643, n644]
+    value: 1000.0
+  - type: resistor
+    name: R644
+    nodes: [n644, n645]
+    value: 1000.0
+  - type: resistor
+    name: R645
+    nodes: [n645, n646]
+    value: 1000.0
+  - type: resistor
+    name: R646
+    nodes: [n646, n647]
+    value: 1000.0
+  - type: resistor
+    name: R647
+    nodes: [n647, n648]
+    value: 1000.0
+  - type: resistor
+    name: R648
+    nodes: [n648, n649]
+    value: 1000.0
+  - type: resistor
+    name: R649
+    nodes: [n649, n650]
+    value: 1000.0
+  - type: resistor
+    name: R650
+    nodes: [n650, n651]
+    value: 1000.0
+  - type: resistor
+    name: R651
+    nodes: [n651, n652]
+    value: 1000.0
+  - type: resistor
+    name: R652
+    nodes: [n652, n653]
+    value: 1000.0
+  - type: resistor
+    name: R653
+    nodes: [n653, n654]
+    value: 1000.0
+  - type: resistor
+    name: R654
+    nodes: [n654, n655]
+    value: 1000.0
+  - type: resistor
+    name: R655
+    nodes: [n655, n656]
+    value: 1000.0
+  - type: resistor
+    name: R656
+    nodes: [n656, n657]
+    value: 1000.0
+  - type: resistor
+    name: R657
+    nodes: [n657, n658]
+    value: 1000.0
+  - type: resistor
+    name: R658
+    nodes: [n658, n659]
+    value: 1000.0
+  - type: resistor
+    name: R659
+    nodes: [n659, n660]
+    value: 1000.0
+  - type: resistor
+    name: R660
+    nodes: [n660, n661]
+    value: 1000.0
+  - type: resistor
+    name: R661
+    nodes: [n661, n662]
+    value: 1000.0
+  - type: resistor
+    name: R662
+    nodes: [n662, n663]
+    value: 1000.0
+  - type: resistor
+    name: R663
+    nodes: [n663, n664]
+    value: 1000.0
+  - type: resistor
+    name: R664
+    nodes: [n664, n665]
+    value: 1000.0
+  - type: resistor
+    name: R665
+    nodes: [n665, n666]
+    value: 1000.0
+  - type: resistor
+    name: R666
+    nodes: [n666, n667]
+    value: 1000.0
+  - type: resistor
+    name: R667
+    nodes: [n667, n668]
+    value: 1000.0
+  - type: resistor
+    name: R668
+    nodes: [n668, n669]
+    value: 1000.0
+  - type: resistor
+    name: R669
+    nodes: [n669, n670]
+    value: 1000.0
+  - type: resistor
+    name: R670
+    nodes: [n670, n671]
+    value: 1000.0
+  - type: resistor
+    name: R671
+    nodes: [n671, n672]
+    value: 1000.0
+  - type: resistor
+    name: R672
+    nodes: [n672, n673]
+    value: 1000.0
+  - type: resistor
+    name: R673
+    nodes: [n673, n674]
+    value: 1000.0
+  - type: resistor
+    name: R674
+    nodes: [n674, n675]
+    value: 1000.0
+  - type: resistor
+    name: R675
+    nodes: [n675, n676]
+    value: 1000.0
+  - type: resistor
+    name: R676
+    nodes: [n676, n677]
+    value: 1000.0
+  - type: resistor
+    name: R677
+    nodes: [n677, n678]
+    value: 1000.0
+  - type: resistor
+    name: R678
+    nodes: [n678, n679]
+    value: 1000.0
+  - type: resistor
+    name: R679
+    nodes: [n679, n680]
+    value: 1000.0
+  - type: resistor
+    name: R680
+    nodes: [n680, n681]
+    value: 1000.0
+  - type: resistor
+    name: R681
+    nodes: [n681, n682]
+    value: 1000.0
+  - type: resistor
+    name: R682
+    nodes: [n682, n683]
+    value: 1000.0
+  - type: resistor
+    name: R683
+    nodes: [n683, n684]
+    value: 1000.0
+  - type: resistor
+    name: R684
+    nodes: [n684, n685]
+    value: 1000.0
+  - type: resistor
+    name: R685
+    nodes: [n685, n686]
+    value: 1000.0
+  - type: resistor
+    name: R686
+    nodes: [n686, n687]
+    value: 1000.0
+  - type: resistor
+    name: R687
+    nodes: [n687, n688]
+    value: 1000.0
+  - type: resistor
+    name: R688
+    nodes: [n688, n689]
+    value: 1000.0
+  - type: resistor
+    name: R689
+    nodes: [n689, n690]
+    value: 1000.0
+  - type: resistor
+    name: R690
+    nodes: [n690, n691]
+    value: 1000.0
+  - type: resistor
+    name: R691
+    nodes: [n691, n692]
+    value: 1000.0
+  - type: resistor
+    name: R692
+    nodes: [n692, n693]
+    value: 1000.0
+  - type: resistor
+    name: R693
+    nodes: [n693, n694]
+    value: 1000.0
+  - type: resistor
+    name: R694
+    nodes: [n694, n695]
+    value: 1000.0
+  - type: resistor
+    name: R695
+    nodes: [n695, n696]
+    value: 1000.0
+  - type: resistor
+    name: R696
+    nodes: [n696, n697]
+    value: 1000.0
+  - type: resistor
+    name: R697
+    nodes: [n697, n698]
+    value: 1000.0
+  - type: resistor
+    name: R698
+    nodes: [n698, n699]
+    value: 1000.0
+  - type: resistor
+    name: R699
+    nodes: [n699, n700]
+    value: 1000.0
+  - type: resistor
+    name: R700
+    nodes: [n700, n701]
+    value: 1000.0
+  - type: resistor
+    name: R701
+    nodes: [n701, n702]
+    value: 1000.0
+  - type: resistor
+    name: R702
+    nodes: [n702, n703]
+    value: 1000.0
+  - type: resistor
+    name: R703
+    nodes: [n703, n704]
+    value: 1000.0
+  - type: resistor
+    name: R704
+    nodes: [n704, n705]
+    value: 1000.0
+  - type: resistor
+    name: R705
+    nodes: [n705, n706]
+    value: 1000.0
+  - type: resistor
+    name: R706
+    nodes: [n706, n707]
+    value: 1000.0
+  - type: resistor
+    name: R707
+    nodes: [n707, n708]
+    value: 1000.0
+  - type: resistor
+    name: R708
+    nodes: [n708, n709]
+    value: 1000.0
+  - type: resistor
+    name: R709
+    nodes: [n709, n710]
+    value: 1000.0
+  - type: resistor
+    name: R710
+    nodes: [n710, n711]
+    value: 1000.0
+  - type: resistor
+    name: R711
+    nodes: [n711, n712]
+    value: 1000.0
+  - type: resistor
+    name: R712
+    nodes: [n712, n713]
+    value: 1000.0
+  - type: resistor
+    name: R713
+    nodes: [n713, n714]
+    value: 1000.0
+  - type: resistor
+    name: R714
+    nodes: [n714, n715]
+    value: 1000.0
+  - type: resistor
+    name: R715
+    nodes: [n715, n716]
+    value: 1000.0
+  - type: resistor
+    name: R716
+    nodes: [n716, n717]
+    value: 1000.0
+  - type: resistor
+    name: R717
+    nodes: [n717, n718]
+    value: 1000.0
+  - type: resistor
+    name: R718
+    nodes: [n718, n719]
+    value: 1000.0
+  - type: resistor
+    name: R719
+    nodes: [n719, n720]
+    value: 1000.0
+  - type: resistor
+    name: R720
+    nodes: [n720, n721]
+    value: 1000.0
+  - type: resistor
+    name: R721
+    nodes: [n721, n722]
+    value: 1000.0
+  - type: resistor
+    name: R722
+    nodes: [n722, n723]
+    value: 1000.0
+  - type: resistor
+    name: R723
+    nodes: [n723, n724]
+    value: 1000.0
+  - type: resistor
+    name: R724
+    nodes: [n724, n725]
+    value: 1000.0
+  - type: resistor
+    name: R725
+    nodes: [n725, n726]
+    value: 1000.0
+  - type: resistor
+    name: R726
+    nodes: [n726, n727]
+    value: 1000.0
+  - type: resistor
+    name: R727
+    nodes: [n727, n728]
+    value: 1000.0
+  - type: resistor
+    name: R728
+    nodes: [n728, n729]
+    value: 1000.0
+  - type: resistor
+    name: R729
+    nodes: [n729, n730]
+    value: 1000.0
+  - type: resistor
+    name: R730
+    nodes: [n730, n731]
+    value: 1000.0
+  - type: resistor
+    name: R731
+    nodes: [n731, n732]
+    value: 1000.0
+  - type: resistor
+    name: R732
+    nodes: [n732, n733]
+    value: 1000.0
+  - type: resistor
+    name: R733
+    nodes: [n733, n734]
+    value: 1000.0
+  - type: resistor
+    name: R734
+    nodes: [n734, n735]
+    value: 1000.0
+  - type: resistor
+    name: R735
+    nodes: [n735, n736]
+    value: 1000.0
+  - type: resistor
+    name: R736
+    nodes: [n736, n737]
+    value: 1000.0
+  - type: resistor
+    name: R737
+    nodes: [n737, n738]
+    value: 1000.0
+  - type: resistor
+    name: R738
+    nodes: [n738, n739]
+    value: 1000.0
+  - type: resistor
+    name: R739
+    nodes: [n739, n740]
+    value: 1000.0
+  - type: resistor
+    name: R740
+    nodes: [n740, n741]
+    value: 1000.0
+  - type: resistor
+    name: R741
+    nodes: [n741, n742]
+    value: 1000.0
+  - type: resistor
+    name: R742
+    nodes: [n742, n743]
+    value: 1000.0
+  - type: resistor
+    name: R743
+    nodes: [n743, n744]
+    value: 1000.0
+  - type: resistor
+    name: R744
+    nodes: [n744, n745]
+    value: 1000.0
+  - type: resistor
+    name: R745
+    nodes: [n745, n746]
+    value: 1000.0
+  - type: resistor
+    name: R746
+    nodes: [n746, n747]
+    value: 1000.0
+  - type: resistor
+    name: R747
+    nodes: [n747, n748]
+    value: 1000.0
+  - type: resistor
+    name: R748
+    nodes: [n748, n749]
+    value: 1000.0
+  - type: resistor
+    name: R749
+    nodes: [n749, n750]
+    value: 1000.0
+  - type: resistor
+    name: R750
+    nodes: [n750, n751]
+    value: 1000.0
+  - type: resistor
+    name: R751
+    nodes: [n751, n752]
+    value: 1000.0
+  - type: resistor
+    name: R752
+    nodes: [n752, n753]
+    value: 1000.0
+  - type: resistor
+    name: R753
+    nodes: [n753, n754]
+    value: 1000.0
+  - type: resistor
+    name: R754
+    nodes: [n754, n755]
+    value: 1000.0
+  - type: resistor
+    name: R755
+    nodes: [n755, n756]
+    value: 1000.0
+  - type: resistor
+    name: R756
+    nodes: [n756, n757]
+    value: 1000.0
+  - type: resistor
+    name: R757
+    nodes: [n757, n758]
+    value: 1000.0
+  - type: resistor
+    name: R758
+    nodes: [n758, n759]
+    value: 1000.0
+  - type: resistor
+    name: R759
+    nodes: [n759, n760]
+    value: 1000.0
+  - type: resistor
+    name: R760
+    nodes: [n760, n761]
+    value: 1000.0
+  - type: resistor
+    name: R761
+    nodes: [n761, n762]
+    value: 1000.0
+  - type: resistor
+    name: R762
+    nodes: [n762, n763]
+    value: 1000.0
+  - type: resistor
+    name: R763
+    nodes: [n763, n764]
+    value: 1000.0
+  - type: resistor
+    name: R764
+    nodes: [n764, n765]
+    value: 1000.0
+  - type: resistor
+    name: R765
+    nodes: [n765, n766]
+    value: 1000.0
+  - type: resistor
+    name: R766
+    nodes: [n766, n767]
+    value: 1000.0
+  - type: resistor
+    name: R767
+    nodes: [n767, n768]
+    value: 1000.0
+  - type: resistor
+    name: R768
+    nodes: [n768, n769]
+    value: 1000.0
+  - type: resistor
+    name: R769
+    nodes: [n769, n770]
+    value: 1000.0
+  - type: resistor
+    name: R770
+    nodes: [n770, n771]
+    value: 1000.0
+  - type: resistor
+    name: R771
+    nodes: [n771, n772]
+    value: 1000.0
+  - type: resistor
+    name: R772
+    nodes: [n772, n773]
+    value: 1000.0
+  - type: resistor
+    name: R773
+    nodes: [n773, n774]
+    value: 1000.0
+  - type: resistor
+    name: R774
+    nodes: [n774, n775]
+    value: 1000.0
+  - type: resistor
+    name: R775
+    nodes: [n775, n776]
+    value: 1000.0
+  - type: resistor
+    name: R776
+    nodes: [n776, n777]
+    value: 1000.0
+  - type: resistor
+    name: R777
+    nodes: [n777, n778]
+    value: 1000.0
+  - type: resistor
+    name: R778
+    nodes: [n778, n779]
+    value: 1000.0
+  - type: resistor
+    name: R779
+    nodes: [n779, n780]
+    value: 1000.0
+  - type: resistor
+    name: R780
+    nodes: [n780, n781]
+    value: 1000.0
+  - type: resistor
+    name: R781
+    nodes: [n781, n782]
+    value: 1000.0
+  - type: resistor
+    name: R782
+    nodes: [n782, n783]
+    value: 1000.0
+  - type: resistor
+    name: R783
+    nodes: [n783, n784]
+    value: 1000.0
+  - type: resistor
+    name: R784
+    nodes: [n784, n785]
+    value: 1000.0
+  - type: resistor
+    name: R785
+    nodes: [n785, n786]
+    value: 1000.0
+  - type: resistor
+    name: R786
+    nodes: [n786, n787]
+    value: 1000.0
+  - type: resistor
+    name: R787
+    nodes: [n787, n788]
+    value: 1000.0
+  - type: resistor
+    name: R788
+    nodes: [n788, n789]
+    value: 1000.0
+  - type: resistor
+    name: R789
+    nodes: [n789, n790]
+    value: 1000.0
+  - type: resistor
+    name: R790
+    nodes: [n790, n791]
+    value: 1000.0
+  - type: resistor
+    name: R791
+    nodes: [n791, n792]
+    value: 1000.0
+  - type: resistor
+    name: R792
+    nodes: [n792, n793]
+    value: 1000.0
+  - type: resistor
+    name: R793
+    nodes: [n793, n794]
+    value: 1000.0
+  - type: resistor
+    name: R794
+    nodes: [n794, n795]
+    value: 1000.0
+  - type: resistor
+    name: R795
+    nodes: [n795, n796]
+    value: 1000.0
+  - type: resistor
+    name: R796
+    nodes: [n796, n797]
+    value: 1000.0
+  - type: resistor
+    name: R797
+    nodes: [n797, n798]
+    value: 1000.0
+  - type: resistor
+    name: R798
+    nodes: [n798, n799]
+    value: 1000.0
+  - type: resistor
+    name: R799
+    nodes: [n799, n800]
+    value: 1000.0
+  - type: resistor
+    name: R800
+    nodes: [n800, n801]
+    value: 1000.0
+  - type: resistor
+    name: R801
+    nodes: [n801, n802]
+    value: 1000.0
+  - type: resistor
+    name: R802
+    nodes: [n802, n803]
+    value: 1000.0
+  - type: resistor
+    name: R803
+    nodes: [n803, n804]
+    value: 1000.0
+  - type: resistor
+    name: R804
+    nodes: [n804, n805]
+    value: 1000.0
+  - type: resistor
+    name: R805
+    nodes: [n805, n806]
+    value: 1000.0
+  - type: resistor
+    name: R806
+    nodes: [n806, n807]
+    value: 1000.0
+  - type: resistor
+    name: R807
+    nodes: [n807, n808]
+    value: 1000.0
+  - type: resistor
+    name: R808
+    nodes: [n808, n809]
+    value: 1000.0
+  - type: resistor
+    name: R809
+    nodes: [n809, n810]
+    value: 1000.0
+  - type: resistor
+    name: R810
+    nodes: [n810, n811]
+    value: 1000.0
+  - type: resistor
+    name: R811
+    nodes: [n811, n812]
+    value: 1000.0
+  - type: resistor
+    name: R812
+    nodes: [n812, n813]
+    value: 1000.0
+  - type: resistor
+    name: R813
+    nodes: [n813, n814]
+    value: 1000.0
+  - type: resistor
+    name: R814
+    nodes: [n814, n815]
+    value: 1000.0
+  - type: resistor
+    name: R815
+    nodes: [n815, n816]
+    value: 1000.0
+  - type: resistor
+    name: R816
+    nodes: [n816, n817]
+    value: 1000.0
+  - type: resistor
+    name: R817
+    nodes: [n817, n818]
+    value: 1000.0
+  - type: resistor
+    name: R818
+    nodes: [n818, n819]
+    value: 1000.0
+  - type: resistor
+    name: R819
+    nodes: [n819, n820]
+    value: 1000.0
+  - type: resistor
+    name: R820
+    nodes: [n820, n821]
+    value: 1000.0
+  - type: resistor
+    name: R821
+    nodes: [n821, n822]
+    value: 1000.0
+  - type: resistor
+    name: R822
+    nodes: [n822, n823]
+    value: 1000.0
+  - type: resistor
+    name: R823
+    nodes: [n823, n824]
+    value: 1000.0
+  - type: resistor
+    name: R824
+    nodes: [n824, n825]
+    value: 1000.0
+  - type: resistor
+    name: R825
+    nodes: [n825, n826]
+    value: 1000.0
+  - type: resistor
+    name: R826
+    nodes: [n826, n827]
+    value: 1000.0
+  - type: resistor
+    name: R827
+    nodes: [n827, n828]
+    value: 1000.0
+  - type: resistor
+    name: R828
+    nodes: [n828, n829]
+    value: 1000.0
+  - type: resistor
+    name: R829
+    nodes: [n829, n830]
+    value: 1000.0
+  - type: resistor
+    name: R830
+    nodes: [n830, n831]
+    value: 1000.0
+  - type: resistor
+    name: R831
+    nodes: [n831, n832]
+    value: 1000.0
+  - type: resistor
+    name: R832
+    nodes: [n832, n833]
+    value: 1000.0
+  - type: resistor
+    name: R833
+    nodes: [n833, n834]
+    value: 1000.0
+  - type: resistor
+    name: R834
+    nodes: [n834, n835]
+    value: 1000.0
+  - type: resistor
+    name: R835
+    nodes: [n835, n836]
+    value: 1000.0
+  - type: resistor
+    name: R836
+    nodes: [n836, n837]
+    value: 1000.0
+  - type: resistor
+    name: R837
+    nodes: [n837, n838]
+    value: 1000.0
+  - type: resistor
+    name: R838
+    nodes: [n838, n839]
+    value: 1000.0
+  - type: resistor
+    name: R839
+    nodes: [n839, n840]
+    value: 1000.0
+  - type: resistor
+    name: R840
+    nodes: [n840, n841]
+    value: 1000.0
+  - type: resistor
+    name: R841
+    nodes: [n841, n842]
+    value: 1000.0
+  - type: resistor
+    name: R842
+    nodes: [n842, n843]
+    value: 1000.0
+  - type: resistor
+    name: R843
+    nodes: [n843, n844]
+    value: 1000.0
+  - type: resistor
+    name: R844
+    nodes: [n844, n845]
+    value: 1000.0
+  - type: resistor
+    name: R845
+    nodes: [n845, n846]
+    value: 1000.0
+  - type: resistor
+    name: R846
+    nodes: [n846, n847]
+    value: 1000.0
+  - type: resistor
+    name: R847
+    nodes: [n847, n848]
+    value: 1000.0
+  - type: resistor
+    name: R848
+    nodes: [n848, n849]
+    value: 1000.0
+  - type: resistor
+    name: R849
+    nodes: [n849, n850]
+    value: 1000.0
+  - type: resistor
+    name: R850
+    nodes: [n850, n851]
+    value: 1000.0
+  - type: resistor
+    name: R851
+    nodes: [n851, n852]
+    value: 1000.0
+  - type: resistor
+    name: R852
+    nodes: [n852, n853]
+    value: 1000.0
+  - type: resistor
+    name: R853
+    nodes: [n853, n854]
+    value: 1000.0
+  - type: resistor
+    name: R854
+    nodes: [n854, n855]
+    value: 1000.0
+  - type: resistor
+    name: R855
+    nodes: [n855, n856]
+    value: 1000.0
+  - type: resistor
+    name: R856
+    nodes: [n856, n857]
+    value: 1000.0
+  - type: resistor
+    name: R857
+    nodes: [n857, n858]
+    value: 1000.0
+  - type: resistor
+    name: R858
+    nodes: [n858, n859]
+    value: 1000.0
+  - type: resistor
+    name: R859
+    nodes: [n859, n860]
+    value: 1000.0
+  - type: resistor
+    name: R860
+    nodes: [n860, n861]
+    value: 1000.0
+  - type: resistor
+    name: R861
+    nodes: [n861, n862]
+    value: 1000.0
+  - type: resistor
+    name: R862
+    nodes: [n862, n863]
+    value: 1000.0
+  - type: resistor
+    name: R863
+    nodes: [n863, n864]
+    value: 1000.0
+  - type: resistor
+    name: R864
+    nodes: [n864, n865]
+    value: 1000.0
+  - type: resistor
+    name: R865
+    nodes: [n865, n866]
+    value: 1000.0
+  - type: resistor
+    name: R866
+    nodes: [n866, n867]
+    value: 1000.0
+  - type: resistor
+    name: R867
+    nodes: [n867, n868]
+    value: 1000.0
+  - type: resistor
+    name: R868
+    nodes: [n868, n869]
+    value: 1000.0
+  - type: resistor
+    name: R869
+    nodes: [n869, n870]
+    value: 1000.0
+  - type: resistor
+    name: R870
+    nodes: [n870, n871]
+    value: 1000.0
+  - type: resistor
+    name: R871
+    nodes: [n871, n872]
+    value: 1000.0
+  - type: resistor
+    name: R872
+    nodes: [n872, n873]
+    value: 1000.0
+  - type: resistor
+    name: R873
+    nodes: [n873, n874]
+    value: 1000.0
+  - type: resistor
+    name: R874
+    nodes: [n874, n875]
+    value: 1000.0
+  - type: resistor
+    name: R875
+    nodes: [n875, n876]
+    value: 1000.0
+  - type: resistor
+    name: R876
+    nodes: [n876, n877]
+    value: 1000.0
+  - type: resistor
+    name: R877
+    nodes: [n877, n878]
+    value: 1000.0
+  - type: resistor
+    name: R878
+    nodes: [n878, n879]
+    value: 1000.0
+  - type: resistor
+    name: R879
+    nodes: [n879, n880]
+    value: 1000.0
+  - type: resistor
+    name: R880
+    nodes: [n880, n881]
+    value: 1000.0
+  - type: resistor
+    name: R881
+    nodes: [n881, n882]
+    value: 1000.0
+  - type: resistor
+    name: R882
+    nodes: [n882, n883]
+    value: 1000.0
+  - type: resistor
+    name: R883
+    nodes: [n883, n884]
+    value: 1000.0
+  - type: resistor
+    name: R884
+    nodes: [n884, n885]
+    value: 1000.0
+  - type: resistor
+    name: R885
+    nodes: [n885, n886]
+    value: 1000.0
+  - type: resistor
+    name: R886
+    nodes: [n886, n887]
+    value: 1000.0
+  - type: resistor
+    name: R887
+    nodes: [n887, n888]
+    value: 1000.0
+  - type: resistor
+    name: R888
+    nodes: [n888, n889]
+    value: 1000.0
+  - type: resistor
+    name: R889
+    nodes: [n889, n890]
+    value: 1000.0
+  - type: resistor
+    name: R890
+    nodes: [n890, n891]
+    value: 1000.0
+  - type: resistor
+    name: R891
+    nodes: [n891, n892]
+    value: 1000.0
+  - type: resistor
+    name: R892
+    nodes: [n892, n893]
+    value: 1000.0
+  - type: resistor
+    name: R893
+    nodes: [n893, n894]
+    value: 1000.0
+  - type: resistor
+    name: R894
+    nodes: [n894, n895]
+    value: 1000.0
+  - type: resistor
+    name: R895
+    nodes: [n895, n896]
+    value: 1000.0
+  - type: resistor
+    name: R896
+    nodes: [n896, n897]
+    value: 1000.0
+  - type: resistor
+    name: R897
+    nodes: [n897, n898]
+    value: 1000.0
+  - type: resistor
+    name: R898
+    nodes: [n898, n899]
+    value: 1000.0
+  - type: resistor
+    name: R899
+    nodes: [n899, n900]
+    value: 1000.0
+  - type: resistor
+    name: R900
+    nodes: [n900, n901]
+    value: 1000.0
+  - type: resistor
+    name: R901
+    nodes: [n901, n902]
+    value: 1000.0
+  - type: resistor
+    name: R902
+    nodes: [n902, n903]
+    value: 1000.0
+  - type: resistor
+    name: R903
+    nodes: [n903, n904]
+    value: 1000.0
+  - type: resistor
+    name: R904
+    nodes: [n904, n905]
+    value: 1000.0
+  - type: resistor
+    name: R905
+    nodes: [n905, n906]
+    value: 1000.0
+  - type: resistor
+    name: R906
+    nodes: [n906, n907]
+    value: 1000.0
+  - type: resistor
+    name: R907
+    nodes: [n907, n908]
+    value: 1000.0
+  - type: resistor
+    name: R908
+    nodes: [n908, n909]
+    value: 1000.0
+  - type: resistor
+    name: R909
+    nodes: [n909, n910]
+    value: 1000.0
+  - type: resistor
+    name: R910
+    nodes: [n910, n911]
+    value: 1000.0
+  - type: resistor
+    name: R911
+    nodes: [n911, n912]
+    value: 1000.0
+  - type: resistor
+    name: R912
+    nodes: [n912, n913]
+    value: 1000.0
+  - type: resistor
+    name: R913
+    nodes: [n913, n914]
+    value: 1000.0
+  - type: resistor
+    name: R914
+    nodes: [n914, n915]
+    value: 1000.0
+  - type: resistor
+    name: R915
+    nodes: [n915, n916]
+    value: 1000.0
+  - type: resistor
+    name: R916
+    nodes: [n916, n917]
+    value: 1000.0
+  - type: resistor
+    name: R917
+    nodes: [n917, n918]
+    value: 1000.0
+  - type: resistor
+    name: R918
+    nodes: [n918, n919]
+    value: 1000.0
+  - type: resistor
+    name: R919
+    nodes: [n919, n920]
+    value: 1000.0
+  - type: resistor
+    name: R920
+    nodes: [n920, n921]
+    value: 1000.0
+  - type: resistor
+    name: R921
+    nodes: [n921, n922]
+    value: 1000.0
+  - type: resistor
+    name: R922
+    nodes: [n922, n923]
+    value: 1000.0
+  - type: resistor
+    name: R923
+    nodes: [n923, n924]
+    value: 1000.0
+  - type: resistor
+    name: R924
+    nodes: [n924, n925]
+    value: 1000.0
+  - type: resistor
+    name: R925
+    nodes: [n925, n926]
+    value: 1000.0
+  - type: resistor
+    name: R926
+    nodes: [n926, n927]
+    value: 1000.0
+  - type: resistor
+    name: R927
+    nodes: [n927, n928]
+    value: 1000.0
+  - type: resistor
+    name: R928
+    nodes: [n928, n929]
+    value: 1000.0
+  - type: resistor
+    name: R929
+    nodes: [n929, n930]
+    value: 1000.0
+  - type: resistor
+    name: R930
+    nodes: [n930, n931]
+    value: 1000.0
+  - type: resistor
+    name: R931
+    nodes: [n931, n932]
+    value: 1000.0
+  - type: resistor
+    name: R932
+    nodes: [n932, n933]
+    value: 1000.0
+  - type: resistor
+    name: R933
+    nodes: [n933, n934]
+    value: 1000.0
+  - type: resistor
+    name: R934
+    nodes: [n934, n935]
+    value: 1000.0
+  - type: resistor
+    name: R935
+    nodes: [n935, n936]
+    value: 1000.0
+  - type: resistor
+    name: R936
+    nodes: [n936, n937]
+    value: 1000.0
+  - type: resistor
+    name: R937
+    nodes: [n937, n938]
+    value: 1000.0
+  - type: resistor
+    name: R938
+    nodes: [n938, n939]
+    value: 1000.0
+  - type: resistor
+    name: R939
+    nodes: [n939, n940]
+    value: 1000.0
+  - type: resistor
+    name: R940
+    nodes: [n940, n941]
+    value: 1000.0
+  - type: resistor
+    name: R941
+    nodes: [n941, n942]
+    value: 1000.0
+  - type: resistor
+    name: R942
+    nodes: [n942, n943]
+    value: 1000.0
+  - type: resistor
+    name: R943
+    nodes: [n943, n944]
+    value: 1000.0
+  - type: resistor
+    name: R944
+    nodes: [n944, n945]
+    value: 1000.0
+  - type: resistor
+    name: R945
+    nodes: [n945, n946]
+    value: 1000.0
+  - type: resistor
+    name: R946
+    nodes: [n946, n947]
+    value: 1000.0
+  - type: resistor
+    name: R947
+    nodes: [n947, n948]
+    value: 1000.0
+  - type: resistor
+    name: R948
+    nodes: [n948, n949]
+    value: 1000.0
+  - type: resistor
+    name: R949
+    nodes: [n949, n950]
+    value: 1000.0
+  - type: resistor
+    name: R950
+    nodes: [n950, n951]
+    value: 1000.0
+  - type: resistor
+    name: R951
+    nodes: [n951, n952]
+    value: 1000.0
+  - type: resistor
+    name: R952
+    nodes: [n952, n953]
+    value: 1000.0
+  - type: resistor
+    name: R953
+    nodes: [n953, n954]
+    value: 1000.0
+  - type: resistor
+    name: R954
+    nodes: [n954, n955]
+    value: 1000.0
+  - type: resistor
+    name: R955
+    nodes: [n955, n956]
+    value: 1000.0
+  - type: resistor
+    name: R956
+    nodes: [n956, n957]
+    value: 1000.0
+  - type: resistor
+    name: R957
+    nodes: [n957, n958]
+    value: 1000.0
+  - type: resistor
+    name: R958
+    nodes: [n958, n959]
+    value: 1000.0
+  - type: resistor
+    name: R959
+    nodes: [n959, n960]
+    value: 1000.0
+  - type: resistor
+    name: R960
+    nodes: [n960, n961]
+    value: 1000.0
+  - type: resistor
+    name: R961
+    nodes: [n961, n962]
+    value: 1000.0
+  - type: resistor
+    name: R962
+    nodes: [n962, n963]
+    value: 1000.0
+  - type: resistor
+    name: R963
+    nodes: [n963, n964]
+    value: 1000.0
+  - type: resistor
+    name: R964
+    nodes: [n964, n965]
+    value: 1000.0
+  - type: resistor
+    name: R965
+    nodes: [n965, n966]
+    value: 1000.0
+  - type: resistor
+    name: R966
+    nodes: [n966, n967]
+    value: 1000.0
+  - type: resistor
+    name: R967
+    nodes: [n967, n968]
+    value: 1000.0
+  - type: resistor
+    name: R968
+    nodes: [n968, n969]
+    value: 1000.0
+  - type: resistor
+    name: R969
+    nodes: [n969, n970]
+    value: 1000.0
+  - type: resistor
+    name: R970
+    nodes: [n970, n971]
+    value: 1000.0
+  - type: resistor
+    name: R971
+    nodes: [n971, n972]
+    value: 1000.0
+  - type: resistor
+    name: R972
+    nodes: [n972, n973]
+    value: 1000.0
+  - type: resistor
+    name: R973
+    nodes: [n973, n974]
+    value: 1000.0
+  - type: resistor
+    name: R974
+    nodes: [n974, n975]
+    value: 1000.0
+  - type: resistor
+    name: R975
+    nodes: [n975, n976]
+    value: 1000.0
+  - type: resistor
+    name: R976
+    nodes: [n976, n977]
+    value: 1000.0
+  - type: resistor
+    name: R977
+    nodes: [n977, n978]
+    value: 1000.0
+  - type: resistor
+    name: R978
+    nodes: [n978, n979]
+    value: 1000.0
+  - type: resistor
+    name: R979
+    nodes: [n979, n980]
+    value: 1000.0
+  - type: resistor
+    name: R980
+    nodes: [n980, n981]
+    value: 1000.0
+  - type: resistor
+    name: R981
+    nodes: [n981, n982]
+    value: 1000.0
+  - type: resistor
+    name: R982
+    nodes: [n982, n983]
+    value: 1000.0
+  - type: resistor
+    name: R983
+    nodes: [n983, n984]
+    value: 1000.0
+  - type: resistor
+    name: R984
+    nodes: [n984, n985]
+    value: 1000.0
+  - type: resistor
+    name: R985
+    nodes: [n985, n986]
+    value: 1000.0
+  - type: resistor
+    name: R986
+    nodes: [n986, n987]
+    value: 1000.0
+  - type: resistor
+    name: R987
+    nodes: [n987, n988]
+    value: 1000.0
+  - type: resistor
+    name: R988
+    nodes: [n988, n989]
+    value: 1000.0
+  - type: resistor
+    name: R989
+    nodes: [n989, n990]
+    value: 1000.0
+  - type: resistor
+    name: R990
+    nodes: [n990, n991]
+    value: 1000.0
+  - type: resistor
+    name: R991
+    nodes: [n991, n992]
+    value: 1000.0
+  - type: resistor
+    name: R992
+    nodes: [n992, n993]
+    value: 1000.0
+  - type: resistor
+    name: R993
+    nodes: [n993, n994]
+    value: 1000.0
+  - type: resistor
+    name: R994
+    nodes: [n994, n995]
+    value: 1000.0
+  - type: resistor
+    name: R995
+    nodes: [n995, n996]
+    value: 1000.0
+  - type: resistor
+    name: R996
+    nodes: [n996, n997]
+    value: 1000.0
+  - type: resistor
+    name: R997
+    nodes: [n997, n998]
+    value: 1000.0
+  - type: resistor
+    name: R998
+    nodes: [n998, n999]
+    value: 1000.0
+  - type: resistor
+    name: R999
+    nodes: [n999, n1000]
+    value: 1000.0
+  - type: resistor
+    name: R1000
+    nodes: [n1000, n1001]
+    value: 1000.0
+  - type: resistor
+    name: R1001
+    nodes: [n1001, n1002]
+    value: 1000.0
+  - type: resistor
+    name: R1002
+    nodes: [n1002, n1003]
+    value: 1000.0
+  - type: resistor
+    name: R1003
+    nodes: [n1003, n1004]
+    value: 1000.0
+  - type: resistor
+    name: R1004
+    nodes: [n1004, n1005]
+    value: 1000.0
+  - type: resistor
+    name: R1005
+    nodes: [n1005, n1006]
+    value: 1000.0
+  - type: resistor
+    name: R1006
+    nodes: [n1006, n1007]
+    value: 1000.0
+  - type: resistor
+    name: R1007
+    nodes: [n1007, n1008]
+    value: 1000.0
+  - type: resistor
+    name: R1008
+    nodes: [n1008, n1009]
+    value: 1000.0
+  - type: resistor
+    name: R1009
+    nodes: [n1009, n1010]
+    value: 1000.0
+  - type: resistor
+    name: R1010
+    nodes: [n1010, n1011]
+    value: 1000.0
+  - type: resistor
+    name: R1011
+    nodes: [n1011, n1012]
+    value: 1000.0
+  - type: resistor
+    name: R1012
+    nodes: [n1012, n1013]
+    value: 1000.0
+  - type: resistor
+    name: R1013
+    nodes: [n1013, n1014]
+    value: 1000.0
+  - type: resistor
+    name: R1014
+    nodes: [n1014, n1015]
+    value: 1000.0
+  - type: resistor
+    name: R1015
+    nodes: [n1015, n1016]
+    value: 1000.0
+  - type: resistor
+    name: R1016
+    nodes: [n1016, n1017]
+    value: 1000.0
+  - type: resistor
+    name: R1017
+    nodes: [n1017, n1018]
+    value: 1000.0
+  - type: resistor
+    name: R1018
+    nodes: [n1018, n1019]
+    value: 1000.0
+  - type: resistor
+    name: R1019
+    nodes: [n1019, n1020]
+    value: 1000.0
+  - type: resistor
+    name: R1020
+    nodes: [n1020, n1021]
+    value: 1000.0
+  - type: resistor
+    name: R1021
+    nodes: [n1021, n1022]
+    value: 1000.0
+  - type: resistor
+    name: R1022
+    nodes: [n1022, n1023]
+    value: 1000.0
+  - type: resistor
+    name: R1023
+    nodes: [n1023, n1024]
+    value: 1000.0
+  - type: resistor
+    name: R1024
+    nodes: [n1024, n1025]
+    value: 1000.0
+  - type: resistor
+    name: R1025
+    nodes: [n1025, n1026]
+    value: 1000.0
+  - type: resistor
+    name: R1026
+    nodes: [n1026, n1027]
+    value: 1000.0
+  - type: resistor
+    name: R1027
+    nodes: [n1027, n1028]
+    value: 1000.0
+  - type: resistor
+    name: R1028
+    nodes: [n1028, n1029]
+    value: 1000.0
+  - type: resistor
+    name: R1029
+    nodes: [n1029, n1030]
+    value: 1000.0
+  - type: resistor
+    name: R1030
+    nodes: [n1030, n1031]
+    value: 1000.0
+  - type: resistor
+    name: R1031
+    nodes: [n1031, n1032]
+    value: 1000.0
+  - type: resistor
+    name: R1032
+    nodes: [n1032, n1033]
+    value: 1000.0
+  - type: resistor
+    name: R1033
+    nodes: [n1033, n1034]
+    value: 1000.0
+  - type: resistor
+    name: R1034
+    nodes: [n1034, n1035]
+    value: 1000.0
+  - type: resistor
+    name: R1035
+    nodes: [n1035, n1036]
+    value: 1000.0
+  - type: resistor
+    name: R1036
+    nodes: [n1036, n1037]
+    value: 1000.0
+  - type: resistor
+    name: R1037
+    nodes: [n1037, n1038]
+    value: 1000.0
+  - type: resistor
+    name: R1038
+    nodes: [n1038, n1039]
+    value: 1000.0
+  - type: resistor
+    name: R1039
+    nodes: [n1039, n1040]
+    value: 1000.0
+  - type: resistor
+    name: R1040
+    nodes: [n1040, n1041]
+    value: 1000.0
+  - type: resistor
+    name: R1041
+    nodes: [n1041, n1042]
+    value: 1000.0
+  - type: resistor
+    name: R1042
+    nodes: [n1042, n1043]
+    value: 1000.0
+  - type: resistor
+    name: R1043
+    nodes: [n1043, n1044]
+    value: 1000.0
+  - type: resistor
+    name: R1044
+    nodes: [n1044, n1045]
+    value: 1000.0
+  - type: resistor
+    name: R1045
+    nodes: [n1045, n1046]
+    value: 1000.0
+  - type: resistor
+    name: R1046
+    nodes: [n1046, n1047]
+    value: 1000.0
+  - type: resistor
+    name: R1047
+    nodes: [n1047, n1048]
+    value: 1000.0
+  - type: resistor
+    name: R1048
+    nodes: [n1048, n1049]
+    value: 1000.0
+  - type: resistor
+    name: R1049
+    nodes: [n1049, n1050]
+    value: 1000.0
+  - type: resistor
+    name: R1050
+    nodes: [n1050, n1051]
+    value: 1000.0
+  - type: resistor
+    name: R1051
+    nodes: [n1051, n1052]
+    value: 1000.0
+  - type: resistor
+    name: R1052
+    nodes: [n1052, n1053]
+    value: 1000.0
+  - type: resistor
+    name: R1053
+    nodes: [n1053, n1054]
+    value: 1000.0
+  - type: resistor
+    name: R1054
+    nodes: [n1054, n1055]
+    value: 1000.0
+  - type: resistor
+    name: R1055
+    nodes: [n1055, n1056]
+    value: 1000.0
+  - type: resistor
+    name: R1056
+    nodes: [n1056, n1057]
+    value: 1000.0
+  - type: resistor
+    name: R1057
+    nodes: [n1057, n1058]
+    value: 1000.0
+  - type: resistor
+    name: R1058
+    nodes: [n1058, n1059]
+    value: 1000.0
+  - type: resistor
+    name: R1059
+    nodes: [n1059, n1060]
+    value: 1000.0
+  - type: resistor
+    name: R1060
+    nodes: [n1060, n1061]
+    value: 1000.0
+  - type: resistor
+    name: R1061
+    nodes: [n1061, n1062]
+    value: 1000.0
+  - type: resistor
+    name: R1062
+    nodes: [n1062, n1063]
+    value: 1000.0
+  - type: resistor
+    name: R1063
+    nodes: [n1063, n1064]
+    value: 1000.0
+  - type: resistor
+    name: R1064
+    nodes: [n1064, n1065]
+    value: 1000.0
+  - type: resistor
+    name: R1065
+    nodes: [n1065, n1066]
+    value: 1000.0
+  - type: resistor
+    name: R1066
+    nodes: [n1066, n1067]
+    value: 1000.0
+  - type: resistor
+    name: R1067
+    nodes: [n1067, n1068]
+    value: 1000.0
+  - type: resistor
+    name: R1068
+    nodes: [n1068, n1069]
+    value: 1000.0
+  - type: resistor
+    name: R1069
+    nodes: [n1069, n1070]
+    value: 1000.0
+  - type: resistor
+    name: R1070
+    nodes: [n1070, n1071]
+    value: 1000.0
+  - type: resistor
+    name: R1071
+    nodes: [n1071, n1072]
+    value: 1000.0
+  - type: resistor
+    name: R1072
+    nodes: [n1072, n1073]
+    value: 1000.0
+  - type: resistor
+    name: R1073
+    nodes: [n1073, n1074]
+    value: 1000.0
+  - type: resistor
+    name: R1074
+    nodes: [n1074, n1075]
+    value: 1000.0
+  - type: resistor
+    name: R1075
+    nodes: [n1075, n1076]
+    value: 1000.0
+  - type: resistor
+    name: R1076
+    nodes: [n1076, n1077]
+    value: 1000.0
+  - type: resistor
+    name: R1077
+    nodes: [n1077, n1078]
+    value: 1000.0
+  - type: resistor
+    name: R1078
+    nodes: [n1078, n1079]
+    value: 1000.0
+  - type: resistor
+    name: R1079
+    nodes: [n1079, n1080]
+    value: 1000.0
+  - type: resistor
+    name: R1080
+    nodes: [n1080, n1081]
+    value: 1000.0
+  - type: resistor
+    name: R1081
+    nodes: [n1081, n1082]
+    value: 1000.0
+  - type: resistor
+    name: R1082
+    nodes: [n1082, n1083]
+    value: 1000.0
+  - type: resistor
+    name: R1083
+    nodes: [n1083, n1084]
+    value: 1000.0
+  - type: resistor
+    name: R1084
+    nodes: [n1084, n1085]
+    value: 1000.0
+  - type: resistor
+    name: R1085
+    nodes: [n1085, n1086]
+    value: 1000.0
+  - type: resistor
+    name: R1086
+    nodes: [n1086, n1087]
+    value: 1000.0
+  - type: resistor
+    name: R1087
+    nodes: [n1087, n1088]
+    value: 1000.0
+  - type: resistor
+    name: R1088
+    nodes: [n1088, n1089]
+    value: 1000.0
+  - type: resistor
+    name: R1089
+    nodes: [n1089, n1090]
+    value: 1000.0
+  - type: resistor
+    name: R1090
+    nodes: [n1090, n1091]
+    value: 1000.0
+  - type: resistor
+    name: R1091
+    nodes: [n1091, n1092]
+    value: 1000.0
+  - type: resistor
+    name: R1092
+    nodes: [n1092, n1093]
+    value: 1000.0
+  - type: resistor
+    name: R1093
+    nodes: [n1093, n1094]
+    value: 1000.0
+  - type: resistor
+    name: R1094
+    nodes: [n1094, n1095]
+    value: 1000.0
+  - type: resistor
+    name: R1095
+    nodes: [n1095, n1096]
+    value: 1000.0
+  - type: resistor
+    name: R1096
+    nodes: [n1096, n1097]
+    value: 1000.0
+  - type: resistor
+    name: R1097
+    nodes: [n1097, n1098]
+    value: 1000.0
+  - type: resistor
+    name: R1098
+    nodes: [n1098, n1099]
+    value: 1000.0
+  - type: resistor
+    name: R1099
+    nodes: [n1099, n1100]
+    value: 1000.0
+  - type: resistor
+    name: R1100
+    nodes: [n1100, n1101]
+    value: 1000.0
+  - type: resistor
+    name: R1101
+    nodes: [n1101, n1102]
+    value: 1000.0
+  - type: resistor
+    name: R1102
+    nodes: [n1102, n1103]
+    value: 1000.0
+  - type: resistor
+    name: R1103
+    nodes: [n1103, n1104]
+    value: 1000.0
+  - type: resistor
+    name: R1104
+    nodes: [n1104, n1105]
+    value: 1000.0
+  - type: resistor
+    name: R1105
+    nodes: [n1105, n1106]
+    value: 1000.0
+  - type: resistor
+    name: R1106
+    nodes: [n1106, n1107]
+    value: 1000.0
+  - type: resistor
+    name: R1107
+    nodes: [n1107, n1108]
+    value: 1000.0
+  - type: resistor
+    name: R1108
+    nodes: [n1108, n1109]
+    value: 1000.0
+  - type: resistor
+    name: R1109
+    nodes: [n1109, n1110]
+    value: 1000.0
+  - type: resistor
+    name: R1110
+    nodes: [n1110, n1111]
+    value: 1000.0
+  - type: resistor
+    name: R1111
+    nodes: [n1111, n1112]
+    value: 1000.0
+  - type: resistor
+    name: R1112
+    nodes: [n1112, n1113]
+    value: 1000.0
+  - type: resistor
+    name: R1113
+    nodes: [n1113, n1114]
+    value: 1000.0
+  - type: resistor
+    name: R1114
+    nodes: [n1114, n1115]
+    value: 1000.0
+  - type: resistor
+    name: R1115
+    nodes: [n1115, n1116]
+    value: 1000.0
+  - type: resistor
+    name: R1116
+    nodes: [n1116, n1117]
+    value: 1000.0
+  - type: resistor
+    name: R1117
+    nodes: [n1117, n1118]
+    value: 1000.0
+  - type: resistor
+    name: R1118
+    nodes: [n1118, n1119]
+    value: 1000.0
+  - type: resistor
+    name: R1119
+    nodes: [n1119, n1120]
+    value: 1000.0
+  - type: resistor
+    name: R1120
+    nodes: [n1120, n1121]
+    value: 1000.0
+  - type: resistor
+    name: R1121
+    nodes: [n1121, n1122]
+    value: 1000.0
+  - type: resistor
+    name: R1122
+    nodes: [n1122, n1123]
+    value: 1000.0
+  - type: resistor
+    name: R1123
+    nodes: [n1123, n1124]
+    value: 1000.0
+  - type: resistor
+    name: R1124
+    nodes: [n1124, n1125]
+    value: 1000.0
+  - type: resistor
+    name: R1125
+    nodes: [n1125, n1126]
+    value: 1000.0
+  - type: resistor
+    name: R1126
+    nodes: [n1126, n1127]
+    value: 1000.0
+  - type: resistor
+    name: R1127
+    nodes: [n1127, n1128]
+    value: 1000.0
+  - type: resistor
+    name: R1128
+    nodes: [n1128, n1129]
+    value: 1000.0
+  - type: resistor
+    name: R1129
+    nodes: [n1129, n1130]
+    value: 1000.0
+  - type: resistor
+    name: R1130
+    nodes: [n1130, n1131]
+    value: 1000.0
+  - type: resistor
+    name: R1131
+    nodes: [n1131, n1132]
+    value: 1000.0
+  - type: resistor
+    name: R1132
+    nodes: [n1132, n1133]
+    value: 1000.0
+  - type: resistor
+    name: R1133
+    nodes: [n1133, n1134]
+    value: 1000.0
+  - type: resistor
+    name: R1134
+    nodes: [n1134, n1135]
+    value: 1000.0
+  - type: resistor
+    name: R1135
+    nodes: [n1135, n1136]
+    value: 1000.0
+  - type: resistor
+    name: R1136
+    nodes: [n1136, n1137]
+    value: 1000.0
+  - type: resistor
+    name: R1137
+    nodes: [n1137, n1138]
+    value: 1000.0
+  - type: resistor
+    name: R1138
+    nodes: [n1138, n1139]
+    value: 1000.0
+  - type: resistor
+    name: R1139
+    nodes: [n1139, n1140]
+    value: 1000.0
+  - type: resistor
+    name: R1140
+    nodes: [n1140, n1141]
+    value: 1000.0
+  - type: resistor
+    name: R1141
+    nodes: [n1141, n1142]
+    value: 1000.0
+  - type: resistor
+    name: R1142
+    nodes: [n1142, n1143]
+    value: 1000.0
+  - type: resistor
+    name: R1143
+    nodes: [n1143, n1144]
+    value: 1000.0
+  - type: resistor
+    name: R1144
+    nodes: [n1144, n1145]
+    value: 1000.0
+  - type: resistor
+    name: R1145
+    nodes: [n1145, n1146]
+    value: 1000.0
+  - type: resistor
+    name: R1146
+    nodes: [n1146, n1147]
+    value: 1000.0
+  - type: resistor
+    name: R1147
+    nodes: [n1147, n1148]
+    value: 1000.0
+  - type: resistor
+    name: R1148
+    nodes: [n1148, n1149]
+    value: 1000.0
+  - type: resistor
+    name: R1149
+    nodes: [n1149, n1150]
+    value: 1000.0
+  - type: resistor
+    name: R1150
+    nodes: [n1150, n1151]
+    value: 1000.0
+  - type: resistor
+    name: R1151
+    nodes: [n1151, n1152]
+    value: 1000.0
+  - type: resistor
+    name: R1152
+    nodes: [n1152, n1153]
+    value: 1000.0
+  - type: resistor
+    name: R1153
+    nodes: [n1153, n1154]
+    value: 1000.0
+  - type: resistor
+    name: R1154
+    nodes: [n1154, n1155]
+    value: 1000.0
+  - type: resistor
+    name: R1155
+    nodes: [n1155, n1156]
+    value: 1000.0
+  - type: resistor
+    name: R1156
+    nodes: [n1156, n1157]
+    value: 1000.0
+  - type: resistor
+    name: R1157
+    nodes: [n1157, n1158]
+    value: 1000.0
+  - type: resistor
+    name: R1158
+    nodes: [n1158, n1159]
+    value: 1000.0
+  - type: resistor
+    name: R1159
+    nodes: [n1159, n1160]
+    value: 1000.0
+  - type: resistor
+    name: R1160
+    nodes: [n1160, n1161]
+    value: 1000.0
+  - type: resistor
+    name: R1161
+    nodes: [n1161, n1162]
+    value: 1000.0
+  - type: resistor
+    name: R1162
+    nodes: [n1162, n1163]
+    value: 1000.0
+  - type: resistor
+    name: R1163
+    nodes: [n1163, n1164]
+    value: 1000.0
+  - type: resistor
+    name: R1164
+    nodes: [n1164, n1165]
+    value: 1000.0
+  - type: resistor
+    name: R1165
+    nodes: [n1165, n1166]
+    value: 1000.0
+  - type: resistor
+    name: R1166
+    nodes: [n1166, n1167]
+    value: 1000.0
+  - type: resistor
+    name: R1167
+    nodes: [n1167, n1168]
+    value: 1000.0
+  - type: resistor
+    name: R1168
+    nodes: [n1168, n1169]
+    value: 1000.0
+  - type: resistor
+    name: R1169
+    nodes: [n1169, n1170]
+    value: 1000.0
+  - type: resistor
+    name: R1170
+    nodes: [n1170, n1171]
+    value: 1000.0
+  - type: resistor
+    name: R1171
+    nodes: [n1171, n1172]
+    value: 1000.0
+  - type: resistor
+    name: R1172
+    nodes: [n1172, n1173]
+    value: 1000.0
+  - type: resistor
+    name: R1173
+    nodes: [n1173, n1174]
+    value: 1000.0
+  - type: resistor
+    name: R1174
+    nodes: [n1174, n1175]
+    value: 1000.0
+  - type: resistor
+    name: R1175
+    nodes: [n1175, n1176]
+    value: 1000.0
+  - type: resistor
+    name: R1176
+    nodes: [n1176, n1177]
+    value: 1000.0
+  - type: resistor
+    name: R1177
+    nodes: [n1177, n1178]
+    value: 1000.0
+  - type: resistor
+    name: R1178
+    nodes: [n1178, n1179]
+    value: 1000.0
+  - type: resistor
+    name: R1179
+    nodes: [n1179, n1180]
+    value: 1000.0
+  - type: resistor
+    name: R1180
+    nodes: [n1180, n1181]
+    value: 1000.0
+  - type: resistor
+    name: R1181
+    nodes: [n1181, n1182]
+    value: 1000.0
+  - type: resistor
+    name: R1182
+    nodes: [n1182, n1183]
+    value: 1000.0
+  - type: resistor
+    name: R1183
+    nodes: [n1183, n1184]
+    value: 1000.0
+  - type: resistor
+    name: R1184
+    nodes: [n1184, n1185]
+    value: 1000.0
+  - type: resistor
+    name: R1185
+    nodes: [n1185, n1186]
+    value: 1000.0
+  - type: resistor
+    name: R1186
+    nodes: [n1186, n1187]
+    value: 1000.0
+  - type: resistor
+    name: R1187
+    nodes: [n1187, n1188]
+    value: 1000.0
+  - type: resistor
+    name: R1188
+    nodes: [n1188, n1189]
+    value: 1000.0
+  - type: resistor
+    name: R1189
+    nodes: [n1189, n1190]
+    value: 1000.0
+  - type: resistor
+    name: R1190
+    nodes: [n1190, n1191]
+    value: 1000.0
+  - type: resistor
+    name: R1191
+    nodes: [n1191, n1192]
+    value: 1000.0
+  - type: resistor
+    name: R1192
+    nodes: [n1192, n1193]
+    value: 1000.0
+  - type: resistor
+    name: R1193
+    nodes: [n1193, n1194]
+    value: 1000.0
+  - type: resistor
+    name: R1194
+    nodes: [n1194, n1195]
+    value: 1000.0
+  - type: resistor
+    name: R1195
+    nodes: [n1195, n1196]
+    value: 1000.0
+  - type: resistor
+    name: R1196
+    nodes: [n1196, n1197]
+    value: 1000.0
+  - type: resistor
+    name: R1197
+    nodes: [n1197, n1198]
+    value: 1000.0
+  - type: resistor
+    name: R1198
+    nodes: [n1198, n1199]
+    value: 1000.0
+  - type: resistor
+    name: R1199
+    nodes: [n1199, n1200]
+    value: 1000.0
+  - type: resistor
+    name: R1200
+    nodes: [n1200, n1201]
+    value: 1000.0
+  - type: resistor
+    name: R1201
+    nodes: [n1201, n1202]
+    value: 1000.0
+  - type: resistor
+    name: R1202
+    nodes: [n1202, n1203]
+    value: 1000.0
+  - type: resistor
+    name: R1203
+    nodes: [n1203, n1204]
+    value: 1000.0
+  - type: resistor
+    name: R1204
+    nodes: [n1204, n1205]
+    value: 1000.0
+  - type: resistor
+    name: R1205
+    nodes: [n1205, n1206]
+    value: 1000.0
+  - type: resistor
+    name: R1206
+    nodes: [n1206, n1207]
+    value: 1000.0
+  - type: resistor
+    name: R1207
+    nodes: [n1207, n1208]
+    value: 1000.0
+  - type: resistor
+    name: R1208
+    nodes: [n1208, n1209]
+    value: 1000.0
+  - type: resistor
+    name: R1209
+    nodes: [n1209, n1210]
+    value: 1000.0
+  - type: resistor
+    name: R1210
+    nodes: [n1210, n1211]
+    value: 1000.0
+  - type: resistor
+    name: R1211
+    nodes: [n1211, n1212]
+    value: 1000.0
+  - type: resistor
+    name: R1212
+    nodes: [n1212, n1213]
+    value: 1000.0
+  - type: resistor
+    name: R1213
+    nodes: [n1213, n1214]
+    value: 1000.0
+  - type: resistor
+    name: R1214
+    nodes: [n1214, n1215]
+    value: 1000.0
+  - type: resistor
+    name: R1215
+    nodes: [n1215, n1216]
+    value: 1000.0
+  - type: resistor
+    name: R1216
+    nodes: [n1216, n1217]
+    value: 1000.0
+  - type: resistor
+    name: R1217
+    nodes: [n1217, n1218]
+    value: 1000.0
+  - type: resistor
+    name: R1218
+    nodes: [n1218, n1219]
+    value: 1000.0
+  - type: resistor
+    name: R1219
+    nodes: [n1219, n1220]
+    value: 1000.0
+  - type: resistor
+    name: R1220
+    nodes: [n1220, n1221]
+    value: 1000.0
+  - type: resistor
+    name: R1221
+    nodes: [n1221, n1222]
+    value: 1000.0
+  - type: resistor
+    name: R1222
+    nodes: [n1222, n1223]
+    value: 1000.0
+  - type: resistor
+    name: R1223
+    nodes: [n1223, n1224]
+    value: 1000.0
+  - type: resistor
+    name: R1224
+    nodes: [n1224, n1225]
+    value: 1000.0
+  - type: resistor
+    name: R1225
+    nodes: [n1225, n1226]
+    value: 1000.0
+  - type: resistor
+    name: R1226
+    nodes: [n1226, n1227]
+    value: 1000.0
+  - type: resistor
+    name: R1227
+    nodes: [n1227, n1228]
+    value: 1000.0
+  - type: resistor
+    name: R1228
+    nodes: [n1228, n1229]
+    value: 1000.0
+  - type: resistor
+    name: R1229
+    nodes: [n1229, n1230]
+    value: 1000.0
+  - type: resistor
+    name: R1230
+    nodes: [n1230, n1231]
+    value: 1000.0
+  - type: resistor
+    name: R1231
+    nodes: [n1231, n1232]
+    value: 1000.0
+  - type: resistor
+    name: R1232
+    nodes: [n1232, n1233]
+    value: 1000.0
+  - type: resistor
+    name: R1233
+    nodes: [n1233, n1234]
+    value: 1000.0
+  - type: resistor
+    name: R1234
+    nodes: [n1234, n1235]
+    value: 1000.0
+  - type: resistor
+    name: R1235
+    nodes: [n1235, n1236]
+    value: 1000.0
+  - type: resistor
+    name: R1236
+    nodes: [n1236, n1237]
+    value: 1000.0
+  - type: resistor
+    name: R1237
+    nodes: [n1237, n1238]
+    value: 1000.0
+  - type: resistor
+    name: R1238
+    nodes: [n1238, n1239]
+    value: 1000.0
+  - type: resistor
+    name: R1239
+    nodes: [n1239, n1240]
+    value: 1000.0
+  - type: resistor
+    name: R1240
+    nodes: [n1240, n1241]
+    value: 1000.0
+  - type: resistor
+    name: R1241
+    nodes: [n1241, n1242]
+    value: 1000.0
+  - type: resistor
+    name: R1242
+    nodes: [n1242, n1243]
+    value: 1000.0
+  - type: resistor
+    name: R1243
+    nodes: [n1243, n1244]
+    value: 1000.0
+  - type: resistor
+    name: R1244
+    nodes: [n1244, n1245]
+    value: 1000.0
+  - type: resistor
+    name: R1245
+    nodes: [n1245, n1246]
+    value: 1000.0
+  - type: resistor
+    name: R1246
+    nodes: [n1246, n1247]
+    value: 1000.0
+  - type: resistor
+    name: R1247
+    nodes: [n1247, n1248]
+    value: 1000.0
+  - type: resistor
+    name: R1248
+    nodes: [n1248, n1249]
+    value: 1000.0
+  - type: resistor
+    name: R1249
+    nodes: [n1249, n1250]
+    value: 1000.0
+  - type: resistor
+    name: R1250
+    nodes: [n1250, n1251]
+    value: 1000.0
+  - type: resistor
+    name: R1251
+    nodes: [n1251, n1252]
+    value: 1000.0
+  - type: resistor
+    name: R1252
+    nodes: [n1252, n1253]
+    value: 1000.0
+  - type: resistor
+    name: R1253
+    nodes: [n1253, n1254]
+    value: 1000.0
+  - type: resistor
+    name: R1254
+    nodes: [n1254, n1255]
+    value: 1000.0
+  - type: resistor
+    name: R1255
+    nodes: [n1255, n1256]
+    value: 1000.0
+  - type: resistor
+    name: R1256
+    nodes: [n1256, n1257]
+    value: 1000.0
+  - type: resistor
+    name: R1257
+    nodes: [n1257, n1258]
+    value: 1000.0
+  - type: resistor
+    name: R1258
+    nodes: [n1258, n1259]
+    value: 1000.0
+  - type: resistor
+    name: R1259
+    nodes: [n1259, n1260]
+    value: 1000.0
+  - type: resistor
+    name: R1260
+    nodes: [n1260, n1261]
+    value: 1000.0
+  - type: resistor
+    name: R1261
+    nodes: [n1261, n1262]
+    value: 1000.0
+  - type: resistor
+    name: R1262
+    nodes: [n1262, n1263]
+    value: 1000.0
+  - type: resistor
+    name: R1263
+    nodes: [n1263, n1264]
+    value: 1000.0
+  - type: resistor
+    name: R1264
+    nodes: [n1264, n1265]
+    value: 1000.0
+  - type: resistor
+    name: R1265
+    nodes: [n1265, n1266]
+    value: 1000.0
+  - type: resistor
+    name: R1266
+    nodes: [n1266, n1267]
+    value: 1000.0
+  - type: resistor
+    name: R1267
+    nodes: [n1267, n1268]
+    value: 1000.0
+  - type: resistor
+    name: R1268
+    nodes: [n1268, n1269]
+    value: 1000.0
+  - type: resistor
+    name: R1269
+    nodes: [n1269, n1270]
+    value: 1000.0
+  - type: resistor
+    name: R1270
+    nodes: [n1270, n1271]
+    value: 1000.0
+  - type: resistor
+    name: R1271
+    nodes: [n1271, n1272]
+    value: 1000.0
+  - type: resistor
+    name: R1272
+    nodes: [n1272, n1273]
+    value: 1000.0
+  - type: resistor
+    name: R1273
+    nodes: [n1273, n1274]
+    value: 1000.0
+  - type: resistor
+    name: R1274
+    nodes: [n1274, n1275]
+    value: 1000.0
+  - type: resistor
+    name: R1275
+    nodes: [n1275, n1276]
+    value: 1000.0
+  - type: resistor
+    name: R1276
+    nodes: [n1276, n1277]
+    value: 1000.0
+  - type: resistor
+    name: R1277
+    nodes: [n1277, n1278]
+    value: 1000.0
+  - type: resistor
+    name: R1278
+    nodes: [n1278, n1279]
+    value: 1000.0
+  - type: resistor
+    name: R1279
+    nodes: [n1279, n1280]
+    value: 1000.0
+  - type: resistor
+    name: R1280
+    nodes: [n1280, n1281]
+    value: 1000.0
+  - type: resistor
+    name: R1281
+    nodes: [n1281, n1282]
+    value: 1000.0
+  - type: resistor
+    name: R1282
+    nodes: [n1282, n1283]
+    value: 1000.0
+  - type: resistor
+    name: R1283
+    nodes: [n1283, n1284]
+    value: 1000.0
+  - type: resistor
+    name: R1284
+    nodes: [n1284, n1285]
+    value: 1000.0
+  - type: resistor
+    name: R1285
+    nodes: [n1285, n1286]
+    value: 1000.0
+  - type: resistor
+    name: R1286
+    nodes: [n1286, n1287]
+    value: 1000.0
+  - type: resistor
+    name: R1287
+    nodes: [n1287, n1288]
+    value: 1000.0
+  - type: resistor
+    name: R1288
+    nodes: [n1288, n1289]
+    value: 1000.0
+  - type: resistor
+    name: R1289
+    nodes: [n1289, n1290]
+    value: 1000.0
+  - type: resistor
+    name: R1290
+    nodes: [n1290, n1291]
+    value: 1000.0
+  - type: resistor
+    name: R1291
+    nodes: [n1291, n1292]
+    value: 1000.0
+  - type: resistor
+    name: R1292
+    nodes: [n1292, n1293]
+    value: 1000.0
+  - type: resistor
+    name: R1293
+    nodes: [n1293, n1294]
+    value: 1000.0
+  - type: resistor
+    name: R1294
+    nodes: [n1294, n1295]
+    value: 1000.0
+  - type: resistor
+    name: R1295
+    nodes: [n1295, n1296]
+    value: 1000.0
+  - type: resistor
+    name: R1296
+    nodes: [n1296, n1297]
+    value: 1000.0
+  - type: resistor
+    name: R1297
+    nodes: [n1297, n1298]
+    value: 1000.0
+  - type: resistor
+    name: R1298
+    nodes: [n1298, n1299]
+    value: 1000.0
+  - type: resistor
+    name: R1299
+    nodes: [n1299, n1300]
+    value: 1000.0
+  - type: resistor
+    name: R1300
+    nodes: [n1300, n1301]
+    value: 1000.0
+  - type: resistor
+    name: R1301
+    nodes: [n1301, n1302]
+    value: 1000.0
+  - type: resistor
+    name: R1302
+    nodes: [n1302, n1303]
+    value: 1000.0
+  - type: resistor
+    name: R1303
+    nodes: [n1303, n1304]
+    value: 1000.0
+  - type: resistor
+    name: R1304
+    nodes: [n1304, n1305]
+    value: 1000.0
+  - type: resistor
+    name: R1305
+    nodes: [n1305, n1306]
+    value: 1000.0
+  - type: resistor
+    name: R1306
+    nodes: [n1306, n1307]
+    value: 1000.0
+  - type: resistor
+    name: R1307
+    nodes: [n1307, n1308]
+    value: 1000.0
+  - type: resistor
+    name: R1308
+    nodes: [n1308, n1309]
+    value: 1000.0
+  - type: resistor
+    name: R1309
+    nodes: [n1309, n1310]
+    value: 1000.0
+  - type: resistor
+    name: R1310
+    nodes: [n1310, n1311]
+    value: 1000.0
+  - type: resistor
+    name: R1311
+    nodes: [n1311, n1312]
+    value: 1000.0
+  - type: resistor
+    name: R1312
+    nodes: [n1312, n1313]
+    value: 1000.0
+  - type: resistor
+    name: R1313
+    nodes: [n1313, n1314]
+    value: 1000.0
+  - type: resistor
+    name: R1314
+    nodes: [n1314, n1315]
+    value: 1000.0
+  - type: resistor
+    name: R1315
+    nodes: [n1315, n1316]
+    value: 1000.0
+  - type: resistor
+    name: R1316
+    nodes: [n1316, n1317]
+    value: 1000.0
+  - type: resistor
+    name: R1317
+    nodes: [n1317, n1318]
+    value: 1000.0
+  - type: resistor
+    name: R1318
+    nodes: [n1318, n1319]
+    value: 1000.0
+  - type: resistor
+    name: R1319
+    nodes: [n1319, n1320]
+    value: 1000.0
+  - type: resistor
+    name: R1320
+    nodes: [n1320, n1321]
+    value: 1000.0
+  - type: resistor
+    name: R1321
+    nodes: [n1321, n1322]
+    value: 1000.0
+  - type: resistor
+    name: R1322
+    nodes: [n1322, n1323]
+    value: 1000.0
+  - type: resistor
+    name: R1323
+    nodes: [n1323, n1324]
+    value: 1000.0
+  - type: resistor
+    name: R1324
+    nodes: [n1324, n1325]
+    value: 1000.0
+  - type: resistor
+    name: R1325
+    nodes: [n1325, n1326]
+    value: 1000.0
+  - type: resistor
+    name: R1326
+    nodes: [n1326, n1327]
+    value: 1000.0
+  - type: resistor
+    name: R1327
+    nodes: [n1327, n1328]
+    value: 1000.0
+  - type: resistor
+    name: R1328
+    nodes: [n1328, n1329]
+    value: 1000.0
+  - type: resistor
+    name: R1329
+    nodes: [n1329, n1330]
+    value: 1000.0
+  - type: resistor
+    name: R1330
+    nodes: [n1330, n1331]
+    value: 1000.0
+  - type: resistor
+    name: R1331
+    nodes: [n1331, n1332]
+    value: 1000.0
+  - type: resistor
+    name: R1332
+    nodes: [n1332, n1333]
+    value: 1000.0
+  - type: resistor
+    name: R1333
+    nodes: [n1333, n1334]
+    value: 1000.0
+  - type: resistor
+    name: R1334
+    nodes: [n1334, n1335]
+    value: 1000.0
+  - type: resistor
+    name: R1335
+    nodes: [n1335, n1336]
+    value: 1000.0
+  - type: resistor
+    name: R1336
+    nodes: [n1336, n1337]
+    value: 1000.0
+  - type: resistor
+    name: R1337
+    nodes: [n1337, n1338]
+    value: 1000.0
+  - type: resistor
+    name: R1338
+    nodes: [n1338, n1339]
+    value: 1000.0
+  - type: resistor
+    name: R1339
+    nodes: [n1339, n1340]
+    value: 1000.0
+  - type: resistor
+    name: R1340
+    nodes: [n1340, n1341]
+    value: 1000.0
+  - type: resistor
+    name: R1341
+    nodes: [n1341, n1342]
+    value: 1000.0
+  - type: resistor
+    name: R1342
+    nodes: [n1342, n1343]
+    value: 1000.0
+  - type: resistor
+    name: R1343
+    nodes: [n1343, n1344]
+    value: 1000.0
+  - type: resistor
+    name: R1344
+    nodes: [n1344, n1345]
+    value: 1000.0
+  - type: resistor
+    name: R1345
+    nodes: [n1345, n1346]
+    value: 1000.0
+  - type: resistor
+    name: R1346
+    nodes: [n1346, n1347]
+    value: 1000.0
+  - type: resistor
+    name: R1347
+    nodes: [n1347, n1348]
+    value: 1000.0
+  - type: resistor
+    name: R1348
+    nodes: [n1348, n1349]
+    value: 1000.0
+  - type: resistor
+    name: R1349
+    nodes: [n1349, n1350]
+    value: 1000.0
+  - type: resistor
+    name: R1350
+    nodes: [n1350, n1351]
+    value: 1000.0
+  - type: resistor
+    name: R1351
+    nodes: [n1351, n1352]
+    value: 1000.0
+  - type: resistor
+    name: R1352
+    nodes: [n1352, n1353]
+    value: 1000.0
+  - type: resistor
+    name: R1353
+    nodes: [n1353, n1354]
+    value: 1000.0
+  - type: resistor
+    name: R1354
+    nodes: [n1354, n1355]
+    value: 1000.0
+  - type: resistor
+    name: R1355
+    nodes: [n1355, n1356]
+    value: 1000.0
+  - type: resistor
+    name: R1356
+    nodes: [n1356, n1357]
+    value: 1000.0
+  - type: resistor
+    name: R1357
+    nodes: [n1357, n1358]
+    value: 1000.0
+  - type: resistor
+    name: R1358
+    nodes: [n1358, n1359]
+    value: 1000.0
+  - type: resistor
+    name: R1359
+    nodes: [n1359, n1360]
+    value: 1000.0
+  - type: resistor
+    name: R1360
+    nodes: [n1360, n1361]
+    value: 1000.0
+  - type: resistor
+    name: R1361
+    nodes: [n1361, n1362]
+    value: 1000.0
+  - type: resistor
+    name: R1362
+    nodes: [n1362, n1363]
+    value: 1000.0
+  - type: resistor
+    name: R1363
+    nodes: [n1363, n1364]
+    value: 1000.0
+  - type: resistor
+    name: R1364
+    nodes: [n1364, n1365]
+    value: 1000.0
+  - type: resistor
+    name: R1365
+    nodes: [n1365, n1366]
+    value: 1000.0
+  - type: resistor
+    name: R1366
+    nodes: [n1366, n1367]
+    value: 1000.0
+  - type: resistor
+    name: R1367
+    nodes: [n1367, n1368]
+    value: 1000.0
+  - type: resistor
+    name: R1368
+    nodes: [n1368, n1369]
+    value: 1000.0
+  - type: resistor
+    name: R1369
+    nodes: [n1369, n1370]
+    value: 1000.0
+  - type: resistor
+    name: R1370
+    nodes: [n1370, n1371]
+    value: 1000.0
+  - type: resistor
+    name: R1371
+    nodes: [n1371, n1372]
+    value: 1000.0
+  - type: resistor
+    name: R1372
+    nodes: [n1372, n1373]
+    value: 1000.0
+  - type: resistor
+    name: R1373
+    nodes: [n1373, n1374]
+    value: 1000.0
+  - type: resistor
+    name: R1374
+    nodes: [n1374, n1375]
+    value: 1000.0
+  - type: resistor
+    name: R1375
+    nodes: [n1375, n1376]
+    value: 1000.0
+  - type: resistor
+    name: R1376
+    nodes: [n1376, n1377]
+    value: 1000.0
+  - type: resistor
+    name: R1377
+    nodes: [n1377, n1378]
+    value: 1000.0
+  - type: resistor
+    name: R1378
+    nodes: [n1378, n1379]
+    value: 1000.0
+  - type: resistor
+    name: R1379
+    nodes: [n1379, n1380]
+    value: 1000.0
+  - type: resistor
+    name: R1380
+    nodes: [n1380, n1381]
+    value: 1000.0
+  - type: resistor
+    name: R1381
+    nodes: [n1381, n1382]
+    value: 1000.0
+  - type: resistor
+    name: R1382
+    nodes: [n1382, n1383]
+    value: 1000.0
+  - type: resistor
+    name: R1383
+    nodes: [n1383, n1384]
+    value: 1000.0
+  - type: resistor
+    name: R1384
+    nodes: [n1384, n1385]
+    value: 1000.0
+  - type: resistor
+    name: R1385
+    nodes: [n1385, n1386]
+    value: 1000.0
+  - type: resistor
+    name: R1386
+    nodes: [n1386, n1387]
+    value: 1000.0
+  - type: resistor
+    name: R1387
+    nodes: [n1387, n1388]
+    value: 1000.0
+  - type: resistor
+    name: R1388
+    nodes: [n1388, n1389]
+    value: 1000.0
+  - type: resistor
+    name: R1389
+    nodes: [n1389, n1390]
+    value: 1000.0
+  - type: resistor
+    name: R1390
+    nodes: [n1390, n1391]
+    value: 1000.0
+  - type: resistor
+    name: R1391
+    nodes: [n1391, n1392]
+    value: 1000.0
+  - type: resistor
+    name: R1392
+    nodes: [n1392, n1393]
+    value: 1000.0
+  - type: resistor
+    name: R1393
+    nodes: [n1393, n1394]
+    value: 1000.0
+  - type: resistor
+    name: R1394
+    nodes: [n1394, n1395]
+    value: 1000.0
+  - type: resistor
+    name: R1395
+    nodes: [n1395, n1396]
+    value: 1000.0
+  - type: resistor
+    name: R1396
+    nodes: [n1396, n1397]
+    value: 1000.0
+  - type: resistor
+    name: R1397
+    nodes: [n1397, n1398]
+    value: 1000.0
+  - type: resistor
+    name: R1398
+    nodes: [n1398, n1399]
+    value: 1000.0
+  - type: resistor
+    name: R1399
+    nodes: [n1399, n1400]
+    value: 1000.0
+  - type: resistor
+    name: R1400
+    nodes: [n1400, n1401]
+    value: 1000.0
+  - type: resistor
+    name: R1401
+    nodes: [n1401, n1402]
+    value: 1000.0
+  - type: resistor
+    name: R1402
+    nodes: [n1402, n1403]
+    value: 1000.0
+  - type: resistor
+    name: R1403
+    nodes: [n1403, n1404]
+    value: 1000.0
+  - type: resistor
+    name: R1404
+    nodes: [n1404, n1405]
+    value: 1000.0
+  - type: resistor
+    name: R1405
+    nodes: [n1405, n1406]
+    value: 1000.0
+  - type: resistor
+    name: R1406
+    nodes: [n1406, n1407]
+    value: 1000.0
+  - type: resistor
+    name: R1407
+    nodes: [n1407, n1408]
+    value: 1000.0
+  - type: resistor
+    name: R1408
+    nodes: [n1408, n1409]
+    value: 1000.0
+  - type: resistor
+    name: R1409
+    nodes: [n1409, n1410]
+    value: 1000.0
+  - type: resistor
+    name: R1410
+    nodes: [n1410, n1411]
+    value: 1000.0
+  - type: resistor
+    name: R1411
+    nodes: [n1411, n1412]
+    value: 1000.0
+  - type: resistor
+    name: R1412
+    nodes: [n1412, n1413]
+    value: 1000.0
+  - type: resistor
+    name: R1413
+    nodes: [n1413, n1414]
+    value: 1000.0
+  - type: resistor
+    name: R1414
+    nodes: [n1414, n1415]
+    value: 1000.0
+  - type: resistor
+    name: R1415
+    nodes: [n1415, n1416]
+    value: 1000.0
+  - type: resistor
+    name: R1416
+    nodes: [n1416, n1417]
+    value: 1000.0
+  - type: resistor
+    name: R1417
+    nodes: [n1417, n1418]
+    value: 1000.0
+  - type: resistor
+    name: R1418
+    nodes: [n1418, n1419]
+    value: 1000.0
+  - type: resistor
+    name: R1419
+    nodes: [n1419, n1420]
+    value: 1000.0
+  - type: resistor
+    name: R1420
+    nodes: [n1420, n1421]
+    value: 1000.0
+  - type: resistor
+    name: R1421
+    nodes: [n1421, n1422]
+    value: 1000.0
+  - type: resistor
+    name: R1422
+    nodes: [n1422, n1423]
+    value: 1000.0
+  - type: resistor
+    name: R1423
+    nodes: [n1423, n1424]
+    value: 1000.0
+  - type: resistor
+    name: R1424
+    nodes: [n1424, n1425]
+    value: 1000.0
+  - type: resistor
+    name: R1425
+    nodes: [n1425, n1426]
+    value: 1000.0
+  - type: resistor
+    name: R1426
+    nodes: [n1426, n1427]
+    value: 1000.0
+  - type: resistor
+    name: R1427
+    nodes: [n1427, n1428]
+    value: 1000.0
+  - type: resistor
+    name: R1428
+    nodes: [n1428, n1429]
+    value: 1000.0
+  - type: resistor
+    name: R1429
+    nodes: [n1429, n1430]
+    value: 1000.0
+  - type: resistor
+    name: R1430
+    nodes: [n1430, n1431]
+    value: 1000.0
+  - type: resistor
+    name: R1431
+    nodes: [n1431, n1432]
+    value: 1000.0
+  - type: resistor
+    name: R1432
+    nodes: [n1432, n1433]
+    value: 1000.0
+  - type: resistor
+    name: R1433
+    nodes: [n1433, n1434]
+    value: 1000.0
+  - type: resistor
+    name: R1434
+    nodes: [n1434, n1435]
+    value: 1000.0
+  - type: resistor
+    name: R1435
+    nodes: [n1435, n1436]
+    value: 1000.0
+  - type: resistor
+    name: R1436
+    nodes: [n1436, n1437]
+    value: 1000.0
+  - type: resistor
+    name: R1437
+    nodes: [n1437, n1438]
+    value: 1000.0
+  - type: resistor
+    name: R1438
+    nodes: [n1438, n1439]
+    value: 1000.0
+  - type: resistor
+    name: R1439
+    nodes: [n1439, n1440]
+    value: 1000.0
+  - type: resistor
+    name: R1440
+    nodes: [n1440, n1441]
+    value: 1000.0
+  - type: resistor
+    name: R1441
+    nodes: [n1441, n1442]
+    value: 1000.0
+  - type: resistor
+    name: R1442
+    nodes: [n1442, n1443]
+    value: 1000.0
+  - type: resistor
+    name: R1443
+    nodes: [n1443, n1444]
+    value: 1000.0
+  - type: resistor
+    name: R1444
+    nodes: [n1444, n1445]
+    value: 1000.0
+  - type: resistor
+    name: R1445
+    nodes: [n1445, n1446]
+    value: 1000.0
+  - type: resistor
+    name: R1446
+    nodes: [n1446, n1447]
+    value: 1000.0
+  - type: resistor
+    name: R1447
+    nodes: [n1447, n1448]
+    value: 1000.0
+  - type: resistor
+    name: R1448
+    nodes: [n1448, n1449]
+    value: 1000.0
+  - type: resistor
+    name: R1449
+    nodes: [n1449, n1450]
+    value: 1000.0
+  - type: resistor
+    name: R1450
+    nodes: [n1450, n1451]
+    value: 1000.0
+  - type: resistor
+    name: R1451
+    nodes: [n1451, n1452]
+    value: 1000.0
+  - type: resistor
+    name: R1452
+    nodes: [n1452, n1453]
+    value: 1000.0
+  - type: resistor
+    name: R1453
+    nodes: [n1453, n1454]
+    value: 1000.0
+  - type: resistor
+    name: R1454
+    nodes: [n1454, n1455]
+    value: 1000.0
+  - type: resistor
+    name: R1455
+    nodes: [n1455, n1456]
+    value: 1000.0
+  - type: resistor
+    name: R1456
+    nodes: [n1456, n1457]
+    value: 1000.0
+  - type: resistor
+    name: R1457
+    nodes: [n1457, n1458]
+    value: 1000.0
+  - type: resistor
+    name: R1458
+    nodes: [n1458, n1459]
+    value: 1000.0
+  - type: resistor
+    name: R1459
+    nodes: [n1459, n1460]
+    value: 1000.0
+  - type: resistor
+    name: R1460
+    nodes: [n1460, n1461]
+    value: 1000.0
+  - type: resistor
+    name: R1461
+    nodes: [n1461, n1462]
+    value: 1000.0
+  - type: resistor
+    name: R1462
+    nodes: [n1462, n1463]
+    value: 1000.0
+  - type: resistor
+    name: R1463
+    nodes: [n1463, n1464]
+    value: 1000.0
+  - type: resistor
+    name: R1464
+    nodes: [n1464, n1465]
+    value: 1000.0
+  - type: resistor
+    name: R1465
+    nodes: [n1465, n1466]
+    value: 1000.0
+  - type: resistor
+    name: R1466
+    nodes: [n1466, n1467]
+    value: 1000.0
+  - type: resistor
+    name: R1467
+    nodes: [n1467, n1468]
+    value: 1000.0
+  - type: resistor
+    name: R1468
+    nodes: [n1468, n1469]
+    value: 1000.0
+  - type: resistor
+    name: R1469
+    nodes: [n1469, n1470]
+    value: 1000.0
+  - type: resistor
+    name: R1470
+    nodes: [n1470, n1471]
+    value: 1000.0
+  - type: resistor
+    name: R1471
+    nodes: [n1471, n1472]
+    value: 1000.0
+  - type: resistor
+    name: R1472
+    nodes: [n1472, n1473]
+    value: 1000.0
+  - type: resistor
+    name: R1473
+    nodes: [n1473, n1474]
+    value: 1000.0
+  - type: resistor
+    name: R1474
+    nodes: [n1474, n1475]
+    value: 1000.0
+  - type: resistor
+    name: R1475
+    nodes: [n1475, n1476]
+    value: 1000.0
+  - type: resistor
+    name: R1476
+    nodes: [n1476, n1477]
+    value: 1000.0
+  - type: resistor
+    name: R1477
+    nodes: [n1477, n1478]
+    value: 1000.0
+  - type: resistor
+    name: R1478
+    nodes: [n1478, n1479]
+    value: 1000.0
+  - type: resistor
+    name: R1479
+    nodes: [n1479, n1480]
+    value: 1000.0
+  - type: resistor
+    name: R1480
+    nodes: [n1480, n1481]
+    value: 1000.0
+  - type: resistor
+    name: R1481
+    nodes: [n1481, n1482]
+    value: 1000.0
+  - type: resistor
+    name: R1482
+    nodes: [n1482, n1483]
+    value: 1000.0
+  - type: resistor
+    name: R1483
+    nodes: [n1483, n1484]
+    value: 1000.0
+  - type: resistor
+    name: R1484
+    nodes: [n1484, n1485]
+    value: 1000.0
+  - type: resistor
+    name: R1485
+    nodes: [n1485, n1486]
+    value: 1000.0
+  - type: resistor
+    name: R1486
+    nodes: [n1486, n1487]
+    value: 1000.0
+  - type: resistor
+    name: R1487
+    nodes: [n1487, n1488]
+    value: 1000.0
+  - type: resistor
+    name: R1488
+    nodes: [n1488, n1489]
+    value: 1000.0
+  - type: resistor
+    name: R1489
+    nodes: [n1489, n1490]
+    value: 1000.0
+  - type: resistor
+    name: R1490
+    nodes: [n1490, n1491]
+    value: 1000.0
+  - type: resistor
+    name: R1491
+    nodes: [n1491, n1492]
+    value: 1000.0
+  - type: resistor
+    name: R1492
+    nodes: [n1492, n1493]
+    value: 1000.0
+  - type: resistor
+    name: R1493
+    nodes: [n1493, n1494]
+    value: 1000.0
+  - type: resistor
+    name: R1494
+    nodes: [n1494, n1495]
+    value: 1000.0
+  - type: resistor
+    name: R1495
+    nodes: [n1495, n1496]
+    value: 1000.0
+  - type: resistor
+    name: R1496
+    nodes: [n1496, n1497]
+    value: 1000.0
+  - type: resistor
+    name: R1497
+    nodes: [n1497, n1498]
+    value: 1000.0
+  - type: resistor
+    name: R1498
+    nodes: [n1498, n1499]
+    value: 1000.0
+  - type: resistor
+    name: R1499
+    nodes: [n1499, n1500]
+    value: 1000.0
+  - type: resistor
+    name: R1500
+    nodes: [n1500, n1501]
+    value: 1000.0
+  - type: resistor
+    name: R1501
+    nodes: [n1501, n1502]
+    value: 1000.0
+  - type: resistor
+    name: R1502
+    nodes: [n1502, n1503]
+    value: 1000.0
+  - type: resistor
+    name: R1503
+    nodes: [n1503, n1504]
+    value: 1000.0
+  - type: resistor
+    name: R1504
+    nodes: [n1504, n1505]
+    value: 1000.0
+  - type: resistor
+    name: R1505
+    nodes: [n1505, n1506]
+    value: 1000.0
+  - type: resistor
+    name: R1506
+    nodes: [n1506, n1507]
+    value: 1000.0
+  - type: resistor
+    name: R1507
+    nodes: [n1507, n1508]
+    value: 1000.0
+  - type: resistor
+    name: R1508
+    nodes: [n1508, n1509]
+    value: 1000.0
+  - type: resistor
+    name: R1509
+    nodes: [n1509, n1510]
+    value: 1000.0
+  - type: resistor
+    name: R1510
+    nodes: [n1510, n1511]
+    value: 1000.0
+  - type: resistor
+    name: R1511
+    nodes: [n1511, n1512]
+    value: 1000.0
+  - type: resistor
+    name: R1512
+    nodes: [n1512, n1513]
+    value: 1000.0
+  - type: resistor
+    name: R1513
+    nodes: [n1513, n1514]
+    value: 1000.0
+  - type: resistor
+    name: R1514
+    nodes: [n1514, n1515]
+    value: 1000.0
+  - type: resistor
+    name: R1515
+    nodes: [n1515, n1516]
+    value: 1000.0
+  - type: resistor
+    name: R1516
+    nodes: [n1516, n1517]
+    value: 1000.0
+  - type: resistor
+    name: R1517
+    nodes: [n1517, n1518]
+    value: 1000.0
+  - type: resistor
+    name: R1518
+    nodes: [n1518, n1519]
+    value: 1000.0
+  - type: resistor
+    name: R1519
+    nodes: [n1519, n1520]
+    value: 1000.0
+  - type: resistor
+    name: R1520
+    nodes: [n1520, n1521]
+    value: 1000.0
+  - type: resistor
+    name: R1521
+    nodes: [n1521, n1522]
+    value: 1000.0
+  - type: resistor
+    name: R1522
+    nodes: [n1522, n1523]
+    value: 1000.0
+  - type: resistor
+    name: R1523
+    nodes: [n1523, n1524]
+    value: 1000.0
+  - type: resistor
+    name: R1524
+    nodes: [n1524, n1525]
+    value: 1000.0
+  - type: resistor
+    name: R1525
+    nodes: [n1525, n1526]
+    value: 1000.0
+  - type: resistor
+    name: R1526
+    nodes: [n1526, n1527]
+    value: 1000.0
+  - type: resistor
+    name: R1527
+    nodes: [n1527, n1528]
+    value: 1000.0
+  - type: resistor
+    name: R1528
+    nodes: [n1528, n1529]
+    value: 1000.0
+  - type: resistor
+    name: R1529
+    nodes: [n1529, n1530]
+    value: 1000.0
+  - type: resistor
+    name: R1530
+    nodes: [n1530, n1531]
+    value: 1000.0
+  - type: resistor
+    name: R1531
+    nodes: [n1531, n1532]
+    value: 1000.0
+  - type: resistor
+    name: R1532
+    nodes: [n1532, n1533]
+    value: 1000.0
+  - type: resistor
+    name: R1533
+    nodes: [n1533, n1534]
+    value: 1000.0
+  - type: resistor
+    name: R1534
+    nodes: [n1534, n1535]
+    value: 1000.0
+  - type: resistor
+    name: R1535
+    nodes: [n1535, n1536]
+    value: 1000.0
+  - type: resistor
+    name: R1536
+    nodes: [n1536, n1537]
+    value: 1000.0
+  - type: resistor
+    name: R1537
+    nodes: [n1537, n1538]
+    value: 1000.0
+  - type: resistor
+    name: R1538
+    nodes: [n1538, n1539]
+    value: 1000.0
+  - type: resistor
+    name: R1539
+    nodes: [n1539, n1540]
+    value: 1000.0
+  - type: resistor
+    name: R1540
+    nodes: [n1540, n1541]
+    value: 1000.0
+  - type: resistor
+    name: R1541
+    nodes: [n1541, n1542]
+    value: 1000.0
+  - type: resistor
+    name: R1542
+    nodes: [n1542, n1543]
+    value: 1000.0
+  - type: resistor
+    name: R1543
+    nodes: [n1543, n1544]
+    value: 1000.0
+  - type: resistor
+    name: R1544
+    nodes: [n1544, n1545]
+    value: 1000.0
+  - type: resistor
+    name: R1545
+    nodes: [n1545, n1546]
+    value: 1000.0
+  - type: resistor
+    name: R1546
+    nodes: [n1546, n1547]
+    value: 1000.0
+  - type: resistor
+    name: R1547
+    nodes: [n1547, n1548]
+    value: 1000.0
+  - type: resistor
+    name: R1548
+    nodes: [n1548, n1549]
+    value: 1000.0
+  - type: resistor
+    name: R1549
+    nodes: [n1549, n1550]
+    value: 1000.0
+  - type: resistor
+    name: R1550
+    nodes: [n1550, n1551]
+    value: 1000.0
+  - type: resistor
+    name: R1551
+    nodes: [n1551, n1552]
+    value: 1000.0
+  - type: resistor
+    name: R1552
+    nodes: [n1552, n1553]
+    value: 1000.0
+  - type: resistor
+    name: R1553
+    nodes: [n1553, n1554]
+    value: 1000.0
+  - type: resistor
+    name: R1554
+    nodes: [n1554, n1555]
+    value: 1000.0
+  - type: resistor
+    name: R1555
+    nodes: [n1555, n1556]
+    value: 1000.0
+  - type: resistor
+    name: R1556
+    nodes: [n1556, n1557]
+    value: 1000.0
+  - type: resistor
+    name: R1557
+    nodes: [n1557, n1558]
+    value: 1000.0
+  - type: resistor
+    name: R1558
+    nodes: [n1558, n1559]
+    value: 1000.0
+  - type: resistor
+    name: R1559
+    nodes: [n1559, n1560]
+    value: 1000.0
+  - type: resistor
+    name: R1560
+    nodes: [n1560, n1561]
+    value: 1000.0
+  - type: resistor
+    name: R1561
+    nodes: [n1561, n1562]
+    value: 1000.0
+  - type: resistor
+    name: R1562
+    nodes: [n1562, n1563]
+    value: 1000.0
+  - type: resistor
+    name: R1563
+    nodes: [n1563, n1564]
+    value: 1000.0
+  - type: resistor
+    name: R1564
+    nodes: [n1564, n1565]
+    value: 1000.0
+  - type: resistor
+    name: R1565
+    nodes: [n1565, n1566]
+    value: 1000.0
+  - type: resistor
+    name: R1566
+    nodes: [n1566, n1567]
+    value: 1000.0
+  - type: resistor
+    name: R1567
+    nodes: [n1567, n1568]
+    value: 1000.0
+  - type: resistor
+    name: R1568
+    nodes: [n1568, n1569]
+    value: 1000.0
+  - type: resistor
+    name: R1569
+    nodes: [n1569, n1570]
+    value: 1000.0
+  - type: resistor
+    name: R1570
+    nodes: [n1570, n1571]
+    value: 1000.0
+  - type: resistor
+    name: R1571
+    nodes: [n1571, n1572]
+    value: 1000.0
+  - type: resistor
+    name: R1572
+    nodes: [n1572, n1573]
+    value: 1000.0
+  - type: resistor
+    name: R1573
+    nodes: [n1573, n1574]
+    value: 1000.0
+  - type: resistor
+    name: R1574
+    nodes: [n1574, n1575]
+    value: 1000.0
+  - type: resistor
+    name: R1575
+    nodes: [n1575, n1576]
+    value: 1000.0
+  - type: resistor
+    name: R1576
+    nodes: [n1576, n1577]
+    value: 1000.0
+  - type: resistor
+    name: R1577
+    nodes: [n1577, n1578]
+    value: 1000.0
+  - type: resistor
+    name: R1578
+    nodes: [n1578, n1579]
+    value: 1000.0
+  - type: resistor
+    name: R1579
+    nodes: [n1579, n1580]
+    value: 1000.0
+  - type: resistor
+    name: R1580
+    nodes: [n1580, n1581]
+    value: 1000.0
+  - type: resistor
+    name: R1581
+    nodes: [n1581, n1582]
+    value: 1000.0
+  - type: resistor
+    name: R1582
+    nodes: [n1582, n1583]
+    value: 1000.0
+  - type: resistor
+    name: R1583
+    nodes: [n1583, n1584]
+    value: 1000.0
+  - type: resistor
+    name: R1584
+    nodes: [n1584, n1585]
+    value: 1000.0
+  - type: resistor
+    name: R1585
+    nodes: [n1585, n1586]
+    value: 1000.0
+  - type: resistor
+    name: R1586
+    nodes: [n1586, n1587]
+    value: 1000.0
+  - type: resistor
+    name: R1587
+    nodes: [n1587, n1588]
+    value: 1000.0
+  - type: resistor
+    name: R1588
+    nodes: [n1588, n1589]
+    value: 1000.0
+  - type: resistor
+    name: R1589
+    nodes: [n1589, n1590]
+    value: 1000.0
+  - type: resistor
+    name: R1590
+    nodes: [n1590, n1591]
+    value: 1000.0
+  - type: resistor
+    name: R1591
+    nodes: [n1591, n1592]
+    value: 1000.0
+  - type: resistor
+    name: R1592
+    nodes: [n1592, n1593]
+    value: 1000.0
+  - type: resistor
+    name: R1593
+    nodes: [n1593, n1594]
+    value: 1000.0
+  - type: resistor
+    name: R1594
+    nodes: [n1594, n1595]
+    value: 1000.0
+  - type: resistor
+    name: R1595
+    nodes: [n1595, n1596]
+    value: 1000.0
+  - type: resistor
+    name: R1596
+    nodes: [n1596, n1597]
+    value: 1000.0
+  - type: resistor
+    name: R1597
+    nodes: [n1597, n1598]
+    value: 1000.0
+  - type: resistor
+    name: R1598
+    nodes: [n1598, n1599]
+    value: 1000.0
+  - type: resistor
+    name: R1599
+    nodes: [n1599, n1600]
+    value: 1000.0
+  - type: resistor
+    name: R1600
+    nodes: [n1600, n1601]
+    value: 1000.0
+  - type: resistor
+    name: R1601
+    nodes: [n1601, n1602]
+    value: 1000.0
+  - type: resistor
+    name: R1602
+    nodes: [n1602, n1603]
+    value: 1000.0
+  - type: resistor
+    name: R1603
+    nodes: [n1603, n1604]
+    value: 1000.0
+  - type: resistor
+    name: R1604
+    nodes: [n1604, n1605]
+    value: 1000.0
+  - type: resistor
+    name: R1605
+    nodes: [n1605, n1606]
+    value: 1000.0
+  - type: resistor
+    name: R1606
+    nodes: [n1606, n1607]
+    value: 1000.0
+  - type: resistor
+    name: R1607
+    nodes: [n1607, n1608]
+    value: 1000.0
+  - type: resistor
+    name: R1608
+    nodes: [n1608, n1609]
+    value: 1000.0
+  - type: resistor
+    name: R1609
+    nodes: [n1609, n1610]
+    value: 1000.0
+  - type: resistor
+    name: R1610
+    nodes: [n1610, n1611]
+    value: 1000.0
+  - type: resistor
+    name: R1611
+    nodes: [n1611, n1612]
+    value: 1000.0
+  - type: resistor
+    name: R1612
+    nodes: [n1612, n1613]
+    value: 1000.0
+  - type: resistor
+    name: R1613
+    nodes: [n1613, n1614]
+    value: 1000.0
+  - type: resistor
+    name: R1614
+    nodes: [n1614, n1615]
+    value: 1000.0
+  - type: resistor
+    name: R1615
+    nodes: [n1615, n1616]
+    value: 1000.0
+  - type: resistor
+    name: R1616
+    nodes: [n1616, n1617]
+    value: 1000.0
+  - type: resistor
+    name: R1617
+    nodes: [n1617, n1618]
+    value: 1000.0
+  - type: resistor
+    name: R1618
+    nodes: [n1618, n1619]
+    value: 1000.0
+  - type: resistor
+    name: R1619
+    nodes: [n1619, n1620]
+    value: 1000.0
+  - type: resistor
+    name: R1620
+    nodes: [n1620, n1621]
+    value: 1000.0
+  - type: resistor
+    name: R1621
+    nodes: [n1621, n1622]
+    value: 1000.0
+  - type: resistor
+    name: R1622
+    nodes: [n1622, n1623]
+    value: 1000.0
+  - type: resistor
+    name: R1623
+    nodes: [n1623, n1624]
+    value: 1000.0
+  - type: resistor
+    name: R1624
+    nodes: [n1624, n1625]
+    value: 1000.0
+  - type: resistor
+    name: R1625
+    nodes: [n1625, n1626]
+    value: 1000.0
+  - type: resistor
+    name: R1626
+    nodes: [n1626, n1627]
+    value: 1000.0
+  - type: resistor
+    name: R1627
+    nodes: [n1627, n1628]
+    value: 1000.0
+  - type: resistor
+    name: R1628
+    nodes: [n1628, n1629]
+    value: 1000.0
+  - type: resistor
+    name: R1629
+    nodes: [n1629, n1630]
+    value: 1000.0
+  - type: resistor
+    name: R1630
+    nodes: [n1630, n1631]
+    value: 1000.0
+  - type: resistor
+    name: R1631
+    nodes: [n1631, n1632]
+    value: 1000.0
+  - type: resistor
+    name: R1632
+    nodes: [n1632, n1633]
+    value: 1000.0
+  - type: resistor
+    name: R1633
+    nodes: [n1633, n1634]
+    value: 1000.0
+  - type: resistor
+    name: R1634
+    nodes: [n1634, n1635]
+    value: 1000.0
+  - type: resistor
+    name: R1635
+    nodes: [n1635, n1636]
+    value: 1000.0
+  - type: resistor
+    name: R1636
+    nodes: [n1636, n1637]
+    value: 1000.0
+  - type: resistor
+    name: R1637
+    nodes: [n1637, n1638]
+    value: 1000.0
+  - type: resistor
+    name: R1638
+    nodes: [n1638, n1639]
+    value: 1000.0
+  - type: resistor
+    name: R1639
+    nodes: [n1639, n1640]
+    value: 1000.0
+  - type: resistor
+    name: R1640
+    nodes: [n1640, n1641]
+    value: 1000.0
+  - type: resistor
+    name: R1641
+    nodes: [n1641, n1642]
+    value: 1000.0
+  - type: resistor
+    name: R1642
+    nodes: [n1642, n1643]
+    value: 1000.0
+  - type: resistor
+    name: R1643
+    nodes: [n1643, n1644]
+    value: 1000.0
+  - type: resistor
+    name: R1644
+    nodes: [n1644, n1645]
+    value: 1000.0
+  - type: resistor
+    name: R1645
+    nodes: [n1645, n1646]
+    value: 1000.0
+  - type: resistor
+    name: R1646
+    nodes: [n1646, n1647]
+    value: 1000.0
+  - type: resistor
+    name: R1647
+    nodes: [n1647, n1648]
+    value: 1000.0
+  - type: resistor
+    name: R1648
+    nodes: [n1648, n1649]
+    value: 1000.0
+  - type: resistor
+    name: R1649
+    nodes: [n1649, n1650]
+    value: 1000.0
+  - type: resistor
+    name: R1650
+    nodes: [n1650, n1651]
+    value: 1000.0
+  - type: resistor
+    name: R1651
+    nodes: [n1651, n1652]
+    value: 1000.0
+  - type: resistor
+    name: R1652
+    nodes: [n1652, n1653]
+    value: 1000.0
+  - type: resistor
+    name: R1653
+    nodes: [n1653, n1654]
+    value: 1000.0
+  - type: resistor
+    name: R1654
+    nodes: [n1654, n1655]
+    value: 1000.0
+  - type: resistor
+    name: R1655
+    nodes: [n1655, n1656]
+    value: 1000.0
+  - type: resistor
+    name: R1656
+    nodes: [n1656, n1657]
+    value: 1000.0
+  - type: resistor
+    name: R1657
+    nodes: [n1657, n1658]
+    value: 1000.0
+  - type: resistor
+    name: R1658
+    nodes: [n1658, n1659]
+    value: 1000.0
+  - type: resistor
+    name: R1659
+    nodes: [n1659, n1660]
+    value: 1000.0
+  - type: resistor
+    name: R1660
+    nodes: [n1660, n1661]
+    value: 1000.0
+  - type: resistor
+    name: R1661
+    nodes: [n1661, n1662]
+    value: 1000.0
+  - type: resistor
+    name: R1662
+    nodes: [n1662, n1663]
+    value: 1000.0
+  - type: resistor
+    name: R1663
+    nodes: [n1663, n1664]
+    value: 1000.0
+  - type: resistor
+    name: R1664
+    nodes: [n1664, n1665]
+    value: 1000.0
+  - type: resistor
+    name: R1665
+    nodes: [n1665, n1666]
+    value: 1000.0
+  - type: resistor
+    name: R1666
+    nodes: [n1666, n1667]
+    value: 1000.0
+  - type: resistor
+    name: R1667
+    nodes: [n1667, n1668]
+    value: 1000.0
+  - type: resistor
+    name: R1668
+    nodes: [n1668, n1669]
+    value: 1000.0
+  - type: resistor
+    name: R1669
+    nodes: [n1669, n1670]
+    value: 1000.0
+  - type: resistor
+    name: R1670
+    nodes: [n1670, n1671]
+    value: 1000.0
+  - type: resistor
+    name: R1671
+    nodes: [n1671, n1672]
+    value: 1000.0
+  - type: resistor
+    name: R1672
+    nodes: [n1672, n1673]
+    value: 1000.0
+  - type: resistor
+    name: R1673
+    nodes: [n1673, n1674]
+    value: 1000.0
+  - type: resistor
+    name: R1674
+    nodes: [n1674, n1675]
+    value: 1000.0
+  - type: resistor
+    name: R1675
+    nodes: [n1675, n1676]
+    value: 1000.0
+  - type: resistor
+    name: R1676
+    nodes: [n1676, n1677]
+    value: 1000.0
+  - type: resistor
+    name: R1677
+    nodes: [n1677, n1678]
+    value: 1000.0
+  - type: resistor
+    name: R1678
+    nodes: [n1678, n1679]
+    value: 1000.0
+  - type: resistor
+    name: R1679
+    nodes: [n1679, n1680]
+    value: 1000.0
+  - type: resistor
+    name: R1680
+    nodes: [n1680, n1681]
+    value: 1000.0
+  - type: resistor
+    name: R1681
+    nodes: [n1681, n1682]
+    value: 1000.0
+  - type: resistor
+    name: R1682
+    nodes: [n1682, n1683]
+    value: 1000.0
+  - type: resistor
+    name: R1683
+    nodes: [n1683, n1684]
+    value: 1000.0
+  - type: resistor
+    name: R1684
+    nodes: [n1684, n1685]
+    value: 1000.0
+  - type: resistor
+    name: R1685
+    nodes: [n1685, n1686]
+    value: 1000.0
+  - type: resistor
+    name: R1686
+    nodes: [n1686, n1687]
+    value: 1000.0
+  - type: resistor
+    name: R1687
+    nodes: [n1687, n1688]
+    value: 1000.0
+  - type: resistor
+    name: R1688
+    nodes: [n1688, n1689]
+    value: 1000.0
+  - type: resistor
+    name: R1689
+    nodes: [n1689, n1690]
+    value: 1000.0
+  - type: resistor
+    name: R1690
+    nodes: [n1690, n1691]
+    value: 1000.0
+  - type: resistor
+    name: R1691
+    nodes: [n1691, n1692]
+    value: 1000.0
+  - type: resistor
+    name: R1692
+    nodes: [n1692, n1693]
+    value: 1000.0
+  - type: resistor
+    name: R1693
+    nodes: [n1693, n1694]
+    value: 1000.0
+  - type: resistor
+    name: R1694
+    nodes: [n1694, n1695]
+    value: 1000.0
+  - type: resistor
+    name: R1695
+    nodes: [n1695, n1696]
+    value: 1000.0
+  - type: resistor
+    name: R1696
+    nodes: [n1696, n1697]
+    value: 1000.0
+  - type: resistor
+    name: R1697
+    nodes: [n1697, n1698]
+    value: 1000.0
+  - type: resistor
+    name: R1698
+    nodes: [n1698, n1699]
+    value: 1000.0
+  - type: resistor
+    name: R1699
+    nodes: [n1699, n1700]
+    value: 1000.0
+  - type: resistor
+    name: R1700
+    nodes: [n1700, n1701]
+    value: 1000.0
+  - type: resistor
+    name: R1701
+    nodes: [n1701, n1702]
+    value: 1000.0
+  - type: resistor
+    name: R1702
+    nodes: [n1702, n1703]
+    value: 1000.0
+  - type: resistor
+    name: R1703
+    nodes: [n1703, n1704]
+    value: 1000.0
+  - type: resistor
+    name: R1704
+    nodes: [n1704, n1705]
+    value: 1000.0
+  - type: resistor
+    name: R1705
+    nodes: [n1705, n1706]
+    value: 1000.0
+  - type: resistor
+    name: R1706
+    nodes: [n1706, n1707]
+    value: 1000.0
+  - type: resistor
+    name: R1707
+    nodes: [n1707, n1708]
+    value: 1000.0
+  - type: resistor
+    name: R1708
+    nodes: [n1708, n1709]
+    value: 1000.0
+  - type: resistor
+    name: R1709
+    nodes: [n1709, n1710]
+    value: 1000.0
+  - type: resistor
+    name: R1710
+    nodes: [n1710, n1711]
+    value: 1000.0
+  - type: resistor
+    name: R1711
+    nodes: [n1711, n1712]
+    value: 1000.0
+  - type: resistor
+    name: R1712
+    nodes: [n1712, n1713]
+    value: 1000.0
+  - type: resistor
+    name: R1713
+    nodes: [n1713, n1714]
+    value: 1000.0
+  - type: resistor
+    name: R1714
+    nodes: [n1714, n1715]
+    value: 1000.0
+  - type: resistor
+    name: R1715
+    nodes: [n1715, n1716]
+    value: 1000.0
+  - type: resistor
+    name: R1716
+    nodes: [n1716, n1717]
+    value: 1000.0
+  - type: resistor
+    name: R1717
+    nodes: [n1717, n1718]
+    value: 1000.0
+  - type: resistor
+    name: R1718
+    nodes: [n1718, n1719]
+    value: 1000.0
+  - type: resistor
+    name: R1719
+    nodes: [n1719, n1720]
+    value: 1000.0
+  - type: resistor
+    name: R1720
+    nodes: [n1720, n1721]
+    value: 1000.0
+  - type: resistor
+    name: R1721
+    nodes: [n1721, n1722]
+    value: 1000.0
+  - type: resistor
+    name: R1722
+    nodes: [n1722, n1723]
+    value: 1000.0
+  - type: resistor
+    name: R1723
+    nodes: [n1723, n1724]
+    value: 1000.0
+  - type: resistor
+    name: R1724
+    nodes: [n1724, n1725]
+    value: 1000.0
+  - type: resistor
+    name: R1725
+    nodes: [n1725, n1726]
+    value: 1000.0
+  - type: resistor
+    name: R1726
+    nodes: [n1726, n1727]
+    value: 1000.0
+  - type: resistor
+    name: R1727
+    nodes: [n1727, n1728]
+    value: 1000.0
+  - type: resistor
+    name: R1728
+    nodes: [n1728, n1729]
+    value: 1000.0
+  - type: resistor
+    name: R1729
+    nodes: [n1729, n1730]
+    value: 1000.0
+  - type: resistor
+    name: R1730
+    nodes: [n1730, n1731]
+    value: 1000.0
+  - type: resistor
+    name: R1731
+    nodes: [n1731, n1732]
+    value: 1000.0
+  - type: resistor
+    name: R1732
+    nodes: [n1732, n1733]
+    value: 1000.0
+  - type: resistor
+    name: R1733
+    nodes: [n1733, n1734]
+    value: 1000.0
+  - type: resistor
+    name: R1734
+    nodes: [n1734, n1735]
+    value: 1000.0
+  - type: resistor
+    name: R1735
+    nodes: [n1735, n1736]
+    value: 1000.0
+  - type: resistor
+    name: R1736
+    nodes: [n1736, n1737]
+    value: 1000.0
+  - type: resistor
+    name: R1737
+    nodes: [n1737, n1738]
+    value: 1000.0
+  - type: resistor
+    name: R1738
+    nodes: [n1738, n1739]
+    value: 1000.0
+  - type: resistor
+    name: R1739
+    nodes: [n1739, n1740]
+    value: 1000.0
+  - type: resistor
+    name: R1740
+    nodes: [n1740, n1741]
+    value: 1000.0
+  - type: resistor
+    name: R1741
+    nodes: [n1741, n1742]
+    value: 1000.0
+  - type: resistor
+    name: R1742
+    nodes: [n1742, n1743]
+    value: 1000.0
+  - type: resistor
+    name: R1743
+    nodes: [n1743, n1744]
+    value: 1000.0
+  - type: resistor
+    name: R1744
+    nodes: [n1744, n1745]
+    value: 1000.0
+  - type: resistor
+    name: R1745
+    nodes: [n1745, n1746]
+    value: 1000.0
+  - type: resistor
+    name: R1746
+    nodes: [n1746, n1747]
+    value: 1000.0
+  - type: resistor
+    name: R1747
+    nodes: [n1747, n1748]
+    value: 1000.0
+  - type: resistor
+    name: R1748
+    nodes: [n1748, n1749]
+    value: 1000.0
+  - type: resistor
+    name: R1749
+    nodes: [n1749, n1750]
+    value: 1000.0
+  - type: resistor
+    name: R1750
+    nodes: [n1750, n1751]
+    value: 1000.0
+  - type: resistor
+    name: R1751
+    nodes: [n1751, n1752]
+    value: 1000.0
+  - type: resistor
+    name: R1752
+    nodes: [n1752, n1753]
+    value: 1000.0
+  - type: resistor
+    name: R1753
+    nodes: [n1753, n1754]
+    value: 1000.0
+  - type: resistor
+    name: R1754
+    nodes: [n1754, n1755]
+    value: 1000.0
+  - type: resistor
+    name: R1755
+    nodes: [n1755, n1756]
+    value: 1000.0
+  - type: resistor
+    name: R1756
+    nodes: [n1756, n1757]
+    value: 1000.0
+  - type: resistor
+    name: R1757
+    nodes: [n1757, n1758]
+    value: 1000.0
+  - type: resistor
+    name: R1758
+    nodes: [n1758, n1759]
+    value: 1000.0
+  - type: resistor
+    name: R1759
+    nodes: [n1759, n1760]
+    value: 1000.0
+  - type: resistor
+    name: R1760
+    nodes: [n1760, n1761]
+    value: 1000.0
+  - type: resistor
+    name: R1761
+    nodes: [n1761, n1762]
+    value: 1000.0
+  - type: resistor
+    name: R1762
+    nodes: [n1762, n1763]
+    value: 1000.0
+  - type: resistor
+    name: R1763
+    nodes: [n1763, n1764]
+    value: 1000.0
+  - type: resistor
+    name: R1764
+    nodes: [n1764, n1765]
+    value: 1000.0
+  - type: resistor
+    name: R1765
+    nodes: [n1765, n1766]
+    value: 1000.0
+  - type: resistor
+    name: R1766
+    nodes: [n1766, n1767]
+    value: 1000.0
+  - type: resistor
+    name: R1767
+    nodes: [n1767, n1768]
+    value: 1000.0
+  - type: resistor
+    name: R1768
+    nodes: [n1768, n1769]
+    value: 1000.0
+  - type: resistor
+    name: R1769
+    nodes: [n1769, n1770]
+    value: 1000.0
+  - type: resistor
+    name: R1770
+    nodes: [n1770, n1771]
+    value: 1000.0
+  - type: resistor
+    name: R1771
+    nodes: [n1771, n1772]
+    value: 1000.0
+  - type: resistor
+    name: R1772
+    nodes: [n1772, n1773]
+    value: 1000.0
+  - type: resistor
+    name: R1773
+    nodes: [n1773, n1774]
+    value: 1000.0
+  - type: resistor
+    name: R1774
+    nodes: [n1774, n1775]
+    value: 1000.0
+  - type: resistor
+    name: R1775
+    nodes: [n1775, n1776]
+    value: 1000.0
+  - type: resistor
+    name: R1776
+    nodes: [n1776, n1777]
+    value: 1000.0
+  - type: resistor
+    name: R1777
+    nodes: [n1777, n1778]
+    value: 1000.0
+  - type: resistor
+    name: R1778
+    nodes: [n1778, n1779]
+    value: 1000.0
+  - type: resistor
+    name: R1779
+    nodes: [n1779, n1780]
+    value: 1000.0
+  - type: resistor
+    name: R1780
+    nodes: [n1780, n1781]
+    value: 1000.0
+  - type: resistor
+    name: R1781
+    nodes: [n1781, n1782]
+    value: 1000.0
+  - type: resistor
+    name: R1782
+    nodes: [n1782, n1783]
+    value: 1000.0
+  - type: resistor
+    name: R1783
+    nodes: [n1783, n1784]
+    value: 1000.0
+  - type: resistor
+    name: R1784
+    nodes: [n1784, n1785]
+    value: 1000.0
+  - type: resistor
+    name: R1785
+    nodes: [n1785, n1786]
+    value: 1000.0
+  - type: resistor
+    name: R1786
+    nodes: [n1786, n1787]
+    value: 1000.0
+  - type: resistor
+    name: R1787
+    nodes: [n1787, n1788]
+    value: 1000.0
+  - type: resistor
+    name: R1788
+    nodes: [n1788, n1789]
+    value: 1000.0
+  - type: resistor
+    name: R1789
+    nodes: [n1789, n1790]
+    value: 1000.0
+  - type: resistor
+    name: R1790
+    nodes: [n1790, n1791]
+    value: 1000.0
+  - type: resistor
+    name: R1791
+    nodes: [n1791, n1792]
+    value: 1000.0
+  - type: resistor
+    name: R1792
+    nodes: [n1792, n1793]
+    value: 1000.0
+  - type: resistor
+    name: R1793
+    nodes: [n1793, n1794]
+    value: 1000.0
+  - type: resistor
+    name: R1794
+    nodes: [n1794, n1795]
+    value: 1000.0
+  - type: resistor
+    name: R1795
+    nodes: [n1795, n1796]
+    value: 1000.0
+  - type: resistor
+    name: R1796
+    nodes: [n1796, n1797]
+    value: 1000.0
+  - type: resistor
+    name: R1797
+    nodes: [n1797, n1798]
+    value: 1000.0
+  - type: resistor
+    name: R1798
+    nodes: [n1798, n1799]
+    value: 1000.0
+  - type: resistor
+    name: R1799
+    nodes: [n1799, n1800]
+    value: 1000.0
+  - type: resistor
+    name: R1800
+    nodes: [n1800, n1801]
+    value: 1000.0
+  - type: resistor
+    name: R1801
+    nodes: [n1801, n1802]
+    value: 1000.0
+  - type: resistor
+    name: R1802
+    nodes: [n1802, n1803]
+    value: 1000.0
+  - type: resistor
+    name: R1803
+    nodes: [n1803, n1804]
+    value: 1000.0
+  - type: resistor
+    name: R1804
+    nodes: [n1804, n1805]
+    value: 1000.0
+  - type: resistor
+    name: R1805
+    nodes: [n1805, n1806]
+    value: 1000.0
+  - type: resistor
+    name: R1806
+    nodes: [n1806, n1807]
+    value: 1000.0
+  - type: resistor
+    name: R1807
+    nodes: [n1807, n1808]
+    value: 1000.0
+  - type: resistor
+    name: R1808
+    nodes: [n1808, n1809]
+    value: 1000.0
+  - type: resistor
+    name: R1809
+    nodes: [n1809, n1810]
+    value: 1000.0
+  - type: resistor
+    name: R1810
+    nodes: [n1810, n1811]
+    value: 1000.0
+  - type: resistor
+    name: R1811
+    nodes: [n1811, n1812]
+    value: 1000.0
+  - type: resistor
+    name: R1812
+    nodes: [n1812, n1813]
+    value: 1000.0
+  - type: resistor
+    name: R1813
+    nodes: [n1813, n1814]
+    value: 1000.0
+  - type: resistor
+    name: R1814
+    nodes: [n1814, n1815]
+    value: 1000.0
+  - type: resistor
+    name: R1815
+    nodes: [n1815, n1816]
+    value: 1000.0
+  - type: resistor
+    name: R1816
+    nodes: [n1816, n1817]
+    value: 1000.0
+  - type: resistor
+    name: R1817
+    nodes: [n1817, n1818]
+    value: 1000.0
+  - type: resistor
+    name: R1818
+    nodes: [n1818, n1819]
+    value: 1000.0
+  - type: resistor
+    name: R1819
+    nodes: [n1819, n1820]
+    value: 1000.0
+  - type: resistor
+    name: R1820
+    nodes: [n1820, n1821]
+    value: 1000.0
+  - type: resistor
+    name: R1821
+    nodes: [n1821, n1822]
+    value: 1000.0
+  - type: resistor
+    name: R1822
+    nodes: [n1822, n1823]
+    value: 1000.0
+  - type: resistor
+    name: R1823
+    nodes: [n1823, n1824]
+    value: 1000.0
+  - type: resistor
+    name: R1824
+    nodes: [n1824, n1825]
+    value: 1000.0
+  - type: resistor
+    name: R1825
+    nodes: [n1825, n1826]
+    value: 1000.0
+  - type: resistor
+    name: R1826
+    nodes: [n1826, n1827]
+    value: 1000.0
+  - type: resistor
+    name: R1827
+    nodes: [n1827, n1828]
+    value: 1000.0
+  - type: resistor
+    name: R1828
+    nodes: [n1828, n1829]
+    value: 1000.0
+  - type: resistor
+    name: R1829
+    nodes: [n1829, n1830]
+    value: 1000.0
+  - type: resistor
+    name: R1830
+    nodes: [n1830, n1831]
+    value: 1000.0
+  - type: resistor
+    name: R1831
+    nodes: [n1831, n1832]
+    value: 1000.0
+  - type: resistor
+    name: R1832
+    nodes: [n1832, n1833]
+    value: 1000.0
+  - type: resistor
+    name: R1833
+    nodes: [n1833, n1834]
+    value: 1000.0
+  - type: resistor
+    name: R1834
+    nodes: [n1834, n1835]
+    value: 1000.0
+  - type: resistor
+    name: R1835
+    nodes: [n1835, n1836]
+    value: 1000.0
+  - type: resistor
+    name: R1836
+    nodes: [n1836, n1837]
+    value: 1000.0
+  - type: resistor
+    name: R1837
+    nodes: [n1837, n1838]
+    value: 1000.0
+  - type: resistor
+    name: R1838
+    nodes: [n1838, n1839]
+    value: 1000.0
+  - type: resistor
+    name: R1839
+    nodes: [n1839, n1840]
+    value: 1000.0
+  - type: resistor
+    name: R1840
+    nodes: [n1840, n1841]
+    value: 1000.0
+  - type: resistor
+    name: R1841
+    nodes: [n1841, n1842]
+    value: 1000.0
+  - type: resistor
+    name: R1842
+    nodes: [n1842, n1843]
+    value: 1000.0
+  - type: resistor
+    name: R1843
+    nodes: [n1843, n1844]
+    value: 1000.0
+  - type: resistor
+    name: R1844
+    nodes: [n1844, n1845]
+    value: 1000.0
+  - type: resistor
+    name: R1845
+    nodes: [n1845, n1846]
+    value: 1000.0
+  - type: resistor
+    name: R1846
+    nodes: [n1846, n1847]
+    value: 1000.0
+  - type: resistor
+    name: R1847
+    nodes: [n1847, n1848]
+    value: 1000.0
+  - type: resistor
+    name: R1848
+    nodes: [n1848, n1849]
+    value: 1000.0
+  - type: resistor
+    name: R1849
+    nodes: [n1849, n1850]
+    value: 1000.0
+  - type: resistor
+    name: R1850
+    nodes: [n1850, n1851]
+    value: 1000.0
+  - type: resistor
+    name: R1851
+    nodes: [n1851, n1852]
+    value: 1000.0
+  - type: resistor
+    name: R1852
+    nodes: [n1852, n1853]
+    value: 1000.0
+  - type: resistor
+    name: R1853
+    nodes: [n1853, n1854]
+    value: 1000.0
+  - type: resistor
+    name: R1854
+    nodes: [n1854, n1855]
+    value: 1000.0
+  - type: resistor
+    name: R1855
+    nodes: [n1855, n1856]
+    value: 1000.0
+  - type: resistor
+    name: R1856
+    nodes: [n1856, n1857]
+    value: 1000.0
+  - type: resistor
+    name: R1857
+    nodes: [n1857, n1858]
+    value: 1000.0
+  - type: resistor
+    name: R1858
+    nodes: [n1858, n1859]
+    value: 1000.0
+  - type: resistor
+    name: R1859
+    nodes: [n1859, n1860]
+    value: 1000.0
+  - type: resistor
+    name: R1860
+    nodes: [n1860, n1861]
+    value: 1000.0
+  - type: resistor
+    name: R1861
+    nodes: [n1861, n1862]
+    value: 1000.0
+  - type: resistor
+    name: R1862
+    nodes: [n1862, n1863]
+    value: 1000.0
+  - type: resistor
+    name: R1863
+    nodes: [n1863, n1864]
+    value: 1000.0
+  - type: resistor
+    name: R1864
+    nodes: [n1864, n1865]
+    value: 1000.0
+  - type: resistor
+    name: R1865
+    nodes: [n1865, n1866]
+    value: 1000.0
+  - type: resistor
+    name: R1866
+    nodes: [n1866, n1867]
+    value: 1000.0
+  - type: resistor
+    name: R1867
+    nodes: [n1867, n1868]
+    value: 1000.0
+  - type: resistor
+    name: R1868
+    nodes: [n1868, n1869]
+    value: 1000.0
+  - type: resistor
+    name: R1869
+    nodes: [n1869, n1870]
+    value: 1000.0
+  - type: resistor
+    name: R1870
+    nodes: [n1870, n1871]
+    value: 1000.0
+  - type: resistor
+    name: R1871
+    nodes: [n1871, n1872]
+    value: 1000.0
+  - type: resistor
+    name: R1872
+    nodes: [n1872, n1873]
+    value: 1000.0
+  - type: resistor
+    name: R1873
+    nodes: [n1873, n1874]
+    value: 1000.0
+  - type: resistor
+    name: R1874
+    nodes: [n1874, n1875]
+    value: 1000.0
+  - type: resistor
+    name: R1875
+    nodes: [n1875, n1876]
+    value: 1000.0
+  - type: resistor
+    name: R1876
+    nodes: [n1876, n1877]
+    value: 1000.0
+  - type: resistor
+    name: R1877
+    nodes: [n1877, n1878]
+    value: 1000.0
+  - type: resistor
+    name: R1878
+    nodes: [n1878, n1879]
+    value: 1000.0
+  - type: resistor
+    name: R1879
+    nodes: [n1879, n1880]
+    value: 1000.0
+  - type: resistor
+    name: R1880
+    nodes: [n1880, n1881]
+    value: 1000.0
+  - type: resistor
+    name: R1881
+    nodes: [n1881, n1882]
+    value: 1000.0
+  - type: resistor
+    name: R1882
+    nodes: [n1882, n1883]
+    value: 1000.0
+  - type: resistor
+    name: R1883
+    nodes: [n1883, n1884]
+    value: 1000.0
+  - type: resistor
+    name: R1884
+    nodes: [n1884, n1885]
+    value: 1000.0
+  - type: resistor
+    name: R1885
+    nodes: [n1885, n1886]
+    value: 1000.0
+  - type: resistor
+    name: R1886
+    nodes: [n1886, n1887]
+    value: 1000.0
+  - type: resistor
+    name: R1887
+    nodes: [n1887, n1888]
+    value: 1000.0
+  - type: resistor
+    name: R1888
+    nodes: [n1888, n1889]
+    value: 1000.0
+  - type: resistor
+    name: R1889
+    nodes: [n1889, n1890]
+    value: 1000.0
+  - type: resistor
+    name: R1890
+    nodes: [n1890, n1891]
+    value: 1000.0
+  - type: resistor
+    name: R1891
+    nodes: [n1891, n1892]
+    value: 1000.0
+  - type: resistor
+    name: R1892
+    nodes: [n1892, n1893]
+    value: 1000.0
+  - type: resistor
+    name: R1893
+    nodes: [n1893, n1894]
+    value: 1000.0
+  - type: resistor
+    name: R1894
+    nodes: [n1894, n1895]
+    value: 1000.0
+  - type: resistor
+    name: R1895
+    nodes: [n1895, n1896]
+    value: 1000.0
+  - type: resistor
+    name: R1896
+    nodes: [n1896, n1897]
+    value: 1000.0
+  - type: resistor
+    name: R1897
+    nodes: [n1897, n1898]
+    value: 1000.0
+  - type: resistor
+    name: R1898
+    nodes: [n1898, n1899]
+    value: 1000.0
+  - type: resistor
+    name: R1899
+    nodes: [n1899, n1900]
+    value: 1000.0
+  - type: resistor
+    name: R1900
+    nodes: [n1900, n1901]
+    value: 1000.0
+  - type: resistor
+    name: R1901
+    nodes: [n1901, n1902]
+    value: 1000.0
+  - type: resistor
+    name: R1902
+    nodes: [n1902, n1903]
+    value: 1000.0
+  - type: resistor
+    name: R1903
+    nodes: [n1903, n1904]
+    value: 1000.0
+  - type: resistor
+    name: R1904
+    nodes: [n1904, n1905]
+    value: 1000.0
+  - type: resistor
+    name: R1905
+    nodes: [n1905, n1906]
+    value: 1000.0
+  - type: resistor
+    name: R1906
+    nodes: [n1906, n1907]
+    value: 1000.0
+  - type: resistor
+    name: R1907
+    nodes: [n1907, n1908]
+    value: 1000.0
+  - type: resistor
+    name: R1908
+    nodes: [n1908, n1909]
+    value: 1000.0
+  - type: resistor
+    name: R1909
+    nodes: [n1909, n1910]
+    value: 1000.0
+  - type: resistor
+    name: R1910
+    nodes: [n1910, n1911]
+    value: 1000.0
+  - type: resistor
+    name: R1911
+    nodes: [n1911, n1912]
+    value: 1000.0
+  - type: resistor
+    name: R1912
+    nodes: [n1912, n1913]
+    value: 1000.0
+  - type: resistor
+    name: R1913
+    nodes: [n1913, n1914]
+    value: 1000.0
+  - type: resistor
+    name: R1914
+    nodes: [n1914, n1915]
+    value: 1000.0
+  - type: resistor
+    name: R1915
+    nodes: [n1915, n1916]
+    value: 1000.0
+  - type: resistor
+    name: R1916
+    nodes: [n1916, n1917]
+    value: 1000.0
+  - type: resistor
+    name: R1917
+    nodes: [n1917, n1918]
+    value: 1000.0
+  - type: resistor
+    name: R1918
+    nodes: [n1918, n1919]
+    value: 1000.0
+  - type: resistor
+    name: R1919
+    nodes: [n1919, n1920]
+    value: 1000.0
+  - type: resistor
+    name: R1920
+    nodes: [n1920, n1921]
+    value: 1000.0
+  - type: resistor
+    name: R1921
+    nodes: [n1921, n1922]
+    value: 1000.0
+  - type: resistor
+    name: R1922
+    nodes: [n1922, n1923]
+    value: 1000.0
+  - type: resistor
+    name: R1923
+    nodes: [n1923, n1924]
+    value: 1000.0
+  - type: resistor
+    name: R1924
+    nodes: [n1924, n1925]
+    value: 1000.0
+  - type: resistor
+    name: R1925
+    nodes: [n1925, n1926]
+    value: 1000.0
+  - type: resistor
+    name: R1926
+    nodes: [n1926, n1927]
+    value: 1000.0
+  - type: resistor
+    name: R1927
+    nodes: [n1927, n1928]
+    value: 1000.0
+  - type: resistor
+    name: R1928
+    nodes: [n1928, n1929]
+    value: 1000.0
+  - type: resistor
+    name: R1929
+    nodes: [n1929, n1930]
+    value: 1000.0
+  - type: resistor
+    name: R1930
+    nodes: [n1930, n1931]
+    value: 1000.0
+  - type: resistor
+    name: R1931
+    nodes: [n1931, n1932]
+    value: 1000.0
+  - type: resistor
+    name: R1932
+    nodes: [n1932, n1933]
+    value: 1000.0
+  - type: resistor
+    name: R1933
+    nodes: [n1933, n1934]
+    value: 1000.0
+  - type: resistor
+    name: R1934
+    nodes: [n1934, n1935]
+    value: 1000.0
+  - type: resistor
+    name: R1935
+    nodes: [n1935, n1936]
+    value: 1000.0
+  - type: resistor
+    name: R1936
+    nodes: [n1936, n1937]
+    value: 1000.0
+  - type: resistor
+    name: R1937
+    nodes: [n1937, n1938]
+    value: 1000.0
+  - type: resistor
+    name: R1938
+    nodes: [n1938, n1939]
+    value: 1000.0
+  - type: resistor
+    name: R1939
+    nodes: [n1939, n1940]
+    value: 1000.0
+  - type: resistor
+    name: R1940
+    nodes: [n1940, n1941]
+    value: 1000.0
+  - type: resistor
+    name: R1941
+    nodes: [n1941, n1942]
+    value: 1000.0
+  - type: resistor
+    name: R1942
+    nodes: [n1942, n1943]
+    value: 1000.0
+  - type: resistor
+    name: R1943
+    nodes: [n1943, n1944]
+    value: 1000.0
+  - type: resistor
+    name: R1944
+    nodes: [n1944, n1945]
+    value: 1000.0
+  - type: resistor
+    name: R1945
+    nodes: [n1945, n1946]
+    value: 1000.0
+  - type: resistor
+    name: R1946
+    nodes: [n1946, n1947]
+    value: 1000.0
+  - type: resistor
+    name: R1947
+    nodes: [n1947, n1948]
+    value: 1000.0
+  - type: resistor
+    name: R1948
+    nodes: [n1948, n1949]
+    value: 1000.0
+  - type: resistor
+    name: R1949
+    nodes: [n1949, n1950]
+    value: 1000.0
+  - type: resistor
+    name: R1950
+    nodes: [n1950, n1951]
+    value: 1000.0
+  - type: resistor
+    name: R1951
+    nodes: [n1951, n1952]
+    value: 1000.0
+  - type: resistor
+    name: R1952
+    nodes: [n1952, n1953]
+    value: 1000.0
+  - type: resistor
+    name: R1953
+    nodes: [n1953, n1954]
+    value: 1000.0
+  - type: resistor
+    name: R1954
+    nodes: [n1954, n1955]
+    value: 1000.0
+  - type: resistor
+    name: R1955
+    nodes: [n1955, n1956]
+    value: 1000.0
+  - type: resistor
+    name: R1956
+    nodes: [n1956, n1957]
+    value: 1000.0
+  - type: resistor
+    name: R1957
+    nodes: [n1957, n1958]
+    value: 1000.0
+  - type: resistor
+    name: R1958
+    nodes: [n1958, n1959]
+    value: 1000.0
+  - type: resistor
+    name: R1959
+    nodes: [n1959, n1960]
+    value: 1000.0
+  - type: resistor
+    name: R1960
+    nodes: [n1960, n1961]
+    value: 1000.0
+  - type: resistor
+    name: R1961
+    nodes: [n1961, n1962]
+    value: 1000.0
+  - type: resistor
+    name: R1962
+    nodes: [n1962, n1963]
+    value: 1000.0
+  - type: resistor
+    name: R1963
+    nodes: [n1963, n1964]
+    value: 1000.0
+  - type: resistor
+    name: R1964
+    nodes: [n1964, n1965]
+    value: 1000.0
+  - type: resistor
+    name: R1965
+    nodes: [n1965, n1966]
+    value: 1000.0
+  - type: resistor
+    name: R1966
+    nodes: [n1966, n1967]
+    value: 1000.0
+  - type: resistor
+    name: R1967
+    nodes: [n1967, n1968]
+    value: 1000.0
+  - type: resistor
+    name: R1968
+    nodes: [n1968, n1969]
+    value: 1000.0
+  - type: resistor
+    name: R1969
+    nodes: [n1969, n1970]
+    value: 1000.0
+  - type: resistor
+    name: R1970
+    nodes: [n1970, n1971]
+    value: 1000.0
+  - type: resistor
+    name: R1971
+    nodes: [n1971, n1972]
+    value: 1000.0
+  - type: resistor
+    name: R1972
+    nodes: [n1972, n1973]
+    value: 1000.0
+  - type: resistor
+    name: R1973
+    nodes: [n1973, n1974]
+    value: 1000.0
+  - type: resistor
+    name: R1974
+    nodes: [n1974, n1975]
+    value: 1000.0
+  - type: resistor
+    name: R1975
+    nodes: [n1975, n1976]
+    value: 1000.0
+  - type: resistor
+    name: R1976
+    nodes: [n1976, n1977]
+    value: 1000.0
+  - type: resistor
+    name: R1977
+    nodes: [n1977, n1978]
+    value: 1000.0
+  - type: resistor
+    name: R1978
+    nodes: [n1978, n1979]
+    value: 1000.0
+  - type: resistor
+    name: R1979
+    nodes: [n1979, n1980]
+    value: 1000.0
+  - type: resistor
+    name: R1980
+    nodes: [n1980, n1981]
+    value: 1000.0
+  - type: resistor
+    name: R1981
+    nodes: [n1981, n1982]
+    value: 1000.0
+  - type: resistor
+    name: R1982
+    nodes: [n1982, n1983]
+    value: 1000.0
+  - type: resistor
+    name: R1983
+    nodes: [n1983, n1984]
+    value: 1000.0
+  - type: resistor
+    name: R1984
+    nodes: [n1984, n1985]
+    value: 1000.0
+  - type: resistor
+    name: R1985
+    nodes: [n1985, n1986]
+    value: 1000.0
+  - type: resistor
+    name: R1986
+    nodes: [n1986, n1987]
+    value: 1000.0
+  - type: resistor
+    name: R1987
+    nodes: [n1987, n1988]
+    value: 1000.0
+  - type: resistor
+    name: R1988
+    nodes: [n1988, n1989]
+    value: 1000.0
+  - type: resistor
+    name: R1989
+    nodes: [n1989, n1990]
+    value: 1000.0
+  - type: resistor
+    name: R1990
+    nodes: [n1990, n1991]
+    value: 1000.0
+  - type: resistor
+    name: R1991
+    nodes: [n1991, n1992]
+    value: 1000.0
+  - type: resistor
+    name: R1992
+    nodes: [n1992, n1993]
+    value: 1000.0
+  - type: resistor
+    name: R1993
+    nodes: [n1993, n1994]
+    value: 1000.0
+  - type: resistor
+    name: R1994
+    nodes: [n1994, n1995]
+    value: 1000.0
+  - type: resistor
+    name: R1995
+    nodes: [n1995, n1996]
+    value: 1000.0
+  - type: resistor
+    name: R1996
+    nodes: [n1996, n1997]
+    value: 1000.0
+  - type: resistor
+    name: R1997
+    nodes: [n1997, n1998]
+    value: 1000.0
+  - type: resistor
+    name: R1998
+    nodes: [n1998, n1999]
+    value: 1000.0
+  - type: resistor
+    name: Rlast
+    nodes: [n1999, 0]
+    value: 1000.0

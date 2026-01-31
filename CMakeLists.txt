@@ -468,6 +468,43 @@ else()
         "Install with: brew install suite-sparse (macOS) or apt install libsuitesparse-dev (Linux)")
 endif()
 
+# =============================================================================
+# HYPRE AMG - Optional dependency for AMG preconditioning
+# =============================================================================
+option(PULSIM_USE_HYPRE "Enable HYPRE AMG backend if available" ON)
+set(PULSIM_HYPRE_FOUND FALSE)
+set(PULSIM_HYPRE_LIBRARIES "")
+
+if(PULSIM_USE_HYPRE)
+    find_package(HYPRE QUIET)
+    if(HYPRE_FOUND)
+        set(PULSIM_HYPRE_FOUND TRUE)
+        if(TARGET HYPRE::HYPRE)
+            set(PULSIM_HYPRE_LIBRARIES HYPRE::HYPRE)
+        elseif(TARGET HYPRE)
+            set(PULSIM_HYPRE_LIBRARIES HYPRE)
+        else()
+            if(HYPRE_LIBRARIES)
+                add_library(HYPRE::HYPRE INTERFACE IMPORTED)
+                set_target_properties(HYPRE::HYPRE PROPERTIES
+                    INTERFACE_INCLUDE_DIRECTORIES "${HYPRE_INCLUDE_DIRS}"
+                    INTERFACE_LINK_LIBRARIES "${HYPRE_LIBRARIES}"
+                )
+                set(PULSIM_HYPRE_LIBRARIES HYPRE::HYPRE)
+            else()
+                set(PULSIM_HYPRE_FOUND FALSE)
+            endif()
+        endif()
+    endif()
+endif()
+
+if(PULSIM_HYPRE_FOUND)
+    add_compile_definitions(PULSIM_HAS_HYPRE)
+    message(STATUS "HYPRE AMG support: ENABLED")
+else()
+    message(STATUS "HYPRE AMG support: DISABLED")
+endif()
+
 # Core library (v2 header-only)
 add_subdirectory(core)
 
@@ -522,4 +559,5 @@ message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
 message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
 message(STATUS "  SUNDIALS:          ${PULSIM_USE_SUNDIALS}")
 message(STATUS "  KLU (required):    ${PULSIM_KLU_FOUND}")
+message(STATUS "  HYPRE AMG:         ${PULSIM_HYPRE_FOUND}")
 message(STATUS "=========================================")

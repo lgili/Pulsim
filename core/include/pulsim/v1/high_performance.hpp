@@ -14,8 +14,16 @@
 #include "pulsim/v1/numeric_types.hpp"
 #include "pulsim/v1/solver.hpp"
 #include <Eigen/SparseLU>
+#include <Eigen/SparseCholesky>
 #include <Eigen/IterativeLinearSolvers>
 #include <unsupported/Eigen/IterativeSolvers>
+#ifdef PULSIM_HAS_HYPRE
+#include <mpi.h>
+#include <HYPRE.h>
+#include <HYPRE_IJ_mv.h>
+#include <HYPRE_parcsr_ls.h>
+#endif
+#include <algorithm>
 #include <memory>
 #include <new>
 #include <cstdlib>
@@ -51,12 +59,16 @@ struct IterativeSolverConfig {
     enum class PreconditionerKind {
         None,
         Jacobi,
-        ILU0
+        ILU0,
+        ILUT,
+        AMG
     };
 
     PreconditionerKind preconditioner = PreconditionerKind::Jacobi;
     bool enable_scaling = false;
     Real scaling_floor = 1e-12;
+    Real ilut_drop_tolerance = 1e-4;
+    Real ilut_fill_factor = 10.0;
 
     [[nodiscard]] static constexpr IterativeSolverConfig defaults() {
         return IterativeSolverConfig{};
@@ -83,10 +95,12 @@ struct LinearSolverTelemetry {
     int last_iterations = 0;
     Real last_error = 0.0;
     std::optional<LinearSolverKind> last_solver;
+    std::optional<IterativeSolverConfig::PreconditionerKind> last_preconditioner;
 };
 
 struct LinearSolverStackConfig {
     std::vector<LinearSolverKind> order { LinearSolverKind::SparseLU };
+    std::vector<LinearSolverKind> fallback_order {};
     LinearSolverConfig direct_config = LinearSolverConfig::defaults();
     IterativeSolverConfig iterative_config = IterativeSolverConfig::defaults();
     bool allow_fallback = true;
@@ -384,6 +398,323 @@ private:
 // Iterative Linear Solver Policies
 // =============================================================================
 
+#ifdef PULSIM_HAS_HYPRE
+class HypreAMGSolver {
+public:
+    enum class KrylovKind {
+        GMRES,
+        BiCGSTAB,
+        CG
+    };
+
+    HypreAMGSolver() = default;
+    HypreAMGSolver(const HypreAMGSolver&) = delete;
+    HypreAMGSolver& operator=(const HypreAMGSolver&) = delete;
+    ~HypreAMGSolver() { destroy(); }
+
+    bool setup(const SparseMatrix& A, const IterativeSolverConfig& config, KrylovKind kind) {
+        destroy();
+
+        if (A.rows() != A.cols()) {
+            return false;
+        }
+
+        ensure_mpi_env();
+        int mpi_initialized = 0;
+        MPI_Initialized(&mpi_initialized);
+        if (!mpi_initialized) {
+            MPI_Init(nullptr, nullptr);
+        }
+
+        kind_ = kind;
+        config_ = config;
+        n_ = static_cast<HYPRE_Int>(A.rows());
+        A_cache_ = A;
+
+        if (n_ <= 0) {
+            return false;
+        }
+
+        HYPRE_IJMatrixCreate(MPI_COMM_SELF, 0, n_ - 1, 0, n_ - 1, &ij_matrix_);
+        HYPRE_IJMatrixSetObjectType(ij_matrix_, HYPRE_PARCSR);
+        HYPRE_IJMatrixInitialize(ij_matrix_);
+
+        Eigen::SparseMatrix<Scalar, Eigen::RowMajor> Arow = A;
+        std::vector<HYPRE_Int> cols;
+        std::vector<Scalar> vals;
+        cols.reserve(static_cast<std::size_t>(Arow.nonZeros() / std::max<HYPRE_Int>(n_, 1)));
+        vals.reserve(cols.capacity());
+
+        for (HYPRE_Int i = 0; i < n_; ++i) {
+            cols.clear();
+            vals.clear();
+            for (Eigen::SparseMatrix<Scalar, Eigen::RowMajor>::InnerIterator it(Arow, i); it; ++it) {
+                cols.push_back(static_cast<HYPRE_Int>(it.col()));
+                vals.push_back(static_cast<Scalar>(it.value()));
+            }
+            HYPRE_Int ncols = static_cast<HYPRE_Int>(cols.size());
+            if (ncols > 0) {
+                HYPRE_IJMatrixSetValues(ij_matrix_, 1, &ncols, &i, cols.data(), vals.data());
+            }
+        }
+
+        HYPRE_IJMatrixAssemble(ij_matrix_);
+        HYPRE_IJMatrixGetObject(ij_matrix_, reinterpret_cast<void**>(&par_matrix_));
+
+        if (!create_solver()) {
+            return false;
+        }
+        ready_ = true;
+        return true;
+    }
+
+    [[nodiscard]] std::optional<Vector> solve(const Vector& b) {
+        if (!ready_ || b.size() != n_) {
+            return std::nullopt;
+        }
+
+        HYPRE_IJVectorCreate(MPI_COMM_SELF, 0, n_ - 1, &ij_b_);
+        HYPRE_IJVectorSetObjectType(ij_b_, HYPRE_PARCSR);
+        HYPRE_IJVectorInitialize(ij_b_);
+
+        HYPRE_IJVectorCreate(MPI_COMM_SELF, 0, n_ - 1, &ij_x_);
+        HYPRE_IJVectorSetObjectType(ij_x_, HYPRE_PARCSR);
+        HYPRE_IJVectorInitialize(ij_x_);
+
+        std::vector<HYPRE_Int> indices(static_cast<std::size_t>(n_));
+        std::vector<Scalar> bvals(static_cast<std::size_t>(n_));
+        std::vector<Scalar> xvals(static_cast<std::size_t>(n_), Scalar(0));
+        for (HYPRE_Int i = 0; i < n_; ++i) {
+            indices[static_cast<std::size_t>(i)] = i;
+            bvals[static_cast<std::size_t>(i)] = b[i];
+        }
+
+        HYPRE_IJVectorSetValues(ij_b_, n_, indices.data(), bvals.data());
+        HYPRE_IJVectorSetValues(ij_x_, n_, indices.data(), xvals.data());
+        HYPRE_IJVectorAssemble(ij_b_);
+        HYPRE_IJVectorAssemble(ij_x_);
+        HYPRE_IJVectorGetObject(ij_b_, reinterpret_cast<void**>(&par_b_));
+        HYPRE_IJVectorGetObject(ij_x_, reinterpret_cast<void**>(&par_x_));
+
+        bool ok = solve_internal();
+
+        HYPRE_IJVectorGetValues(ij_x_, n_, indices.data(), xvals.data());
+        Vector x = Vector::Zero(n_);
+        for (HYPRE_Int i = 0; i < n_; ++i) {
+            x[i] = xvals[static_cast<std::size_t>(i)];
+        }
+
+        if (!ok) {
+            Vector r = A_cache_ * x - b;
+            Real denom = std::max<Real>(b.norm(), Real(1.0));
+            if (r.norm() <= config_.tolerance * denom) {
+                ok = true;
+            }
+        }
+
+        destroy_vectors();
+        if (!ok) {
+            return std::nullopt;
+        }
+        return x;
+    }
+
+    [[nodiscard]] int last_iterations() const { return static_cast<int>(last_iterations_); }
+    [[nodiscard]] Real last_error() const { return last_error_; }
+
+private:
+    IterativeSolverConfig config_{};
+    KrylovKind kind_ = KrylovKind::GMRES;
+    bool ready_ = false;
+    HYPRE_Int n_ = 0;
+
+    HYPRE_IJMatrix ij_matrix_ = nullptr;
+    HYPRE_ParCSRMatrix par_matrix_ = nullptr;
+    HYPRE_IJVector ij_b_ = nullptr;
+    HYPRE_IJVector ij_x_ = nullptr;
+    HYPRE_ParVector par_b_ = nullptr;
+    HYPRE_ParVector par_x_ = nullptr;
+    HYPRE_Solver solver_ = nullptr;
+    HYPRE_Solver precond_ = nullptr;
+    HYPRE_Int last_iterations_ = 0;
+    Real last_error_ = 0.0;
+    SparseMatrix A_cache_;
+
+    static void ensure_mpi_env() {
+#if defined(_WIN32)
+        if (std::getenv("OMPI_MCA_btl") == nullptr) {
+            _putenv_s("OMPI_MCA_btl", "self");
+        }
+        if (std::getenv("OMPI_MCA_btl_base_exclude") == nullptr) {
+            _putenv_s("OMPI_MCA_btl_base_exclude", "tcp,openib");
+        }
+#else
+        if (std::getenv("OMPI_MCA_btl") == nullptr) {
+            setenv("OMPI_MCA_btl", "self", 0);
+        }
+        if (std::getenv("OMPI_MCA_btl_base_exclude") == nullptr) {
+            setenv("OMPI_MCA_btl_base_exclude", "tcp,openib", 0);
+        }
+#endif
+    }
+
+    void destroy_vectors() {
+        if (ij_b_) {
+            HYPRE_IJVectorDestroy(ij_b_);
+            ij_b_ = nullptr;
+            par_b_ = nullptr;
+        }
+        if (ij_x_) {
+            HYPRE_IJVectorDestroy(ij_x_);
+            ij_x_ = nullptr;
+            par_x_ = nullptr;
+        }
+    }
+
+    void destroy() {
+        destroy_vectors();
+        if (solver_) {
+            switch (kind_) {
+                case KrylovKind::GMRES:
+                    HYPRE_ParCSRGMRESDestroy(solver_);
+                    break;
+                case KrylovKind::BiCGSTAB:
+                    HYPRE_ParCSRBiCGSTABDestroy(solver_);
+                    break;
+                case KrylovKind::CG:
+                    HYPRE_ParCSRPCGDestroy(solver_);
+                    break;
+            }
+            solver_ = nullptr;
+        }
+        if (precond_) {
+            HYPRE_BoomerAMGDestroy(precond_);
+            precond_ = nullptr;
+        }
+        if (ij_matrix_) {
+            HYPRE_IJMatrixDestroy(ij_matrix_);
+            ij_matrix_ = nullptr;
+            par_matrix_ = nullptr;
+        }
+        ready_ = false;
+        n_ = 0;
+    }
+
+    bool create_solver() {
+        switch (kind_) {
+            case KrylovKind::GMRES:
+                HYPRE_ParCSRGMRESCreate(MPI_COMM_SELF, &solver_);
+                HYPRE_ParCSRGMRESSetTol(solver_, config_.tolerance);
+                HYPRE_ParCSRGMRESSetMaxIter(solver_, config_.max_iterations);
+                {
+                    HYPRE_Int kdim = static_cast<HYPRE_Int>(config_.restart);
+                    if (kdim <= 0) kdim = 30;
+                    if (n_ > 0 && kdim > n_) kdim = n_;
+                    HYPRE_ParCSRGMRESSetKDim(solver_, kdim);
+                }
+                HYPRE_ParCSRGMRESSetPrintLevel(solver_, 0);
+                HYPRE_ParCSRGMRESSetLogging(solver_, 0);
+                break;
+            case KrylovKind::BiCGSTAB:
+                HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_SELF, &solver_);
+                HYPRE_ParCSRBiCGSTABSetTol(solver_, config_.tolerance);
+                HYPRE_ParCSRBiCGSTABSetMaxIter(solver_, config_.max_iterations);
+                HYPRE_ParCSRBiCGSTABSetPrintLevel(solver_, 0);
+                break;
+            case KrylovKind::CG:
+                HYPRE_ParCSRPCGCreate(MPI_COMM_SELF, &solver_);
+                HYPRE_ParCSRPCGSetTol(solver_, config_.tolerance);
+                HYPRE_ParCSRPCGSetMaxIter(solver_, config_.max_iterations);
+                HYPRE_ParCSRPCGSetPrintLevel(solver_, 0);
+                break;
+        }
+
+        if (!solver_) {
+            return false;
+        }
+
+        HYPRE_BoomerAMGCreate(&precond_);
+        if (!precond_) {
+            return false;
+        }
+        HYPRE_BoomerAMGSetTol(precond_, 0.0);
+        HYPRE_BoomerAMGSetMaxIter(precond_, 1);
+        HYPRE_BoomerAMGSetPrintLevel(precond_, 0);
+
+        switch (kind_) {
+            case KrylovKind::GMRES:
+                HYPRE_ParCSRGMRESSetPrecond(solver_, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond_);
+                break;
+            case KrylovKind::BiCGSTAB:
+                HYPRE_ParCSRBiCGSTABSetPrecond(solver_, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond_);
+                break;
+            case KrylovKind::CG:
+                HYPRE_ParCSRPCGSetPrecond(solver_, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond_);
+                break;
+        }
+
+        return true;
+    }
+
+    bool solve_internal() {
+        int status = 0;
+        switch (kind_) {
+            case KrylovKind::GMRES:
+                HYPRE_ParCSRGMRESSetup(solver_, par_matrix_, par_b_, par_x_);
+                status = HYPRE_ParCSRGMRESSolve(solver_, par_matrix_, par_b_, par_x_);
+                if (status == 0) {
+                    HYPRE_ParCSRGMRESGetNumIterations(solver_, &last_iterations_);
+                    HYPRE_Real hypre_res = 0.0;
+                    HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(solver_, &hypre_res);
+                    last_error_ = static_cast<Real>(hypre_res);
+                }
+                break;
+            case KrylovKind::BiCGSTAB:
+                HYPRE_ParCSRBiCGSTABSetup(solver_, par_matrix_, par_b_, par_x_);
+                status = HYPRE_ParCSRBiCGSTABSolve(solver_, par_matrix_, par_b_, par_x_);
+                if (status == 0) {
+                    HYPRE_ParCSRBiCGSTABGetNumIterations(solver_, &last_iterations_);
+                    HYPRE_Real hypre_res = 0.0;
+                    HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver_, &hypre_res);
+                    last_error_ = static_cast<Real>(hypre_res);
+                }
+                break;
+            case KrylovKind::CG:
+                HYPRE_ParCSRPCGSetup(solver_, par_matrix_, par_b_, par_x_);
+                status = HYPRE_ParCSRPCGSolve(solver_, par_matrix_, par_b_, par_x_);
+                if (status == 0) {
+                    HYPRE_ParCSRPCGGetNumIterations(solver_, &last_iterations_);
+                    HYPRE_Real hypre_res = 0.0;
+                    HYPRE_ParCSRPCGGetFinalRelativeResidualNorm(solver_, &hypre_res);
+                    last_error_ = static_cast<Real>(hypre_res);
+                }
+                break;
+        }
+        if (status == 0) {
+            return true;
+        }
+
+        if (precond_) {
+            HYPRE_BoomerAMGSetTol(precond_, config_.tolerance);
+            HYPRE_BoomerAMGSetMaxIter(precond_, config_.max_iterations);
+            int amg_status = HYPRE_BoomerAMGSetup(precond_, par_matrix_, par_b_, par_x_);
+            if (amg_status == 0) {
+                amg_status = HYPRE_BoomerAMGSolve(precond_, par_matrix_, par_b_, par_x_);
+            }
+            if (amg_status == 0) {
+                HYPRE_BoomerAMGGetNumIterations(precond_, &last_iterations_);
+                HYPRE_Real hypre_res = 0.0;
+                HYPRE_BoomerAMGGetFinalRelativeResidualNorm(precond_, &hypre_res);
+                last_error_ = static_cast<Real>(hypre_res);
+                return true;
+            }
+        }
+
+        return false;
+    }
+};
+#endif
+
 class GMRESPolicy {
 public:
     explicit GMRESPolicy(const IterativeSolverConfig& config = {})
@@ -433,6 +764,10 @@ private:
     Eigen::GMRES<SparseMatrix, Eigen::IdentityPreconditioner> solver_identity_;
     Eigen::GMRES<SparseMatrix, Eigen::DiagonalPreconditioner<Scalar>> solver_jacobi_;
     Eigen::GMRES<SparseMatrix, Eigen::IncompleteLUT<Scalar>> solver_ilu0_;
+    Eigen::GMRES<SparseMatrix, Eigen::IncompleteLUT<Scalar>> solver_ilut_;
+#ifdef PULSIM_HAS_HYPRE
+    HypreAMGSolver hypre_amg_;
+#endif
     bool computed_ = false;
     SparseMatrix scaled_matrix_;
     Vector row_scale_;
@@ -450,6 +785,13 @@ private:
         solver_ilu0_.setMaxIterations(config_.max_iterations);
         solver_ilu0_.setTolerance(config_.tolerance);
         solver_ilu0_.set_restart(config_.restart);
+        solver_ilu0_.preconditioner().setDroptol(0.0);
+        solver_ilu0_.preconditioner().setFillfactor(1.0);
+        solver_ilut_.setMaxIterations(config_.max_iterations);
+        solver_ilut_.setTolerance(config_.tolerance);
+        solver_ilut_.set_restart(config_.restart);
+        solver_ilut_.preconditioner().setDroptol(config_.ilut_drop_tolerance);
+        solver_ilut_.preconditioner().setFillfactor(config_.ilut_fill_factor);
     }
 
     void prepare_matrix(const SparseMatrix& A) {
@@ -497,6 +839,15 @@ private:
             case IterativeSolverConfig::PreconditionerKind::ILU0:
                 solver_ilu0_.compute(A);
                 return solver_ilu0_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::ILUT:
+                solver_ilut_.compute(A);
+                return solver_ilut_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::AMG:
+#ifdef PULSIM_HAS_HYPRE
+                return hypre_amg_.setup(A, config_, HypreAMGSolver::KrylovKind::GMRES);
+#else
+                return false;
+#endif
         }
         return false;
     }
@@ -523,6 +874,24 @@ private:
                 last_error_ = solver_ilu0_.error();
                 if (solver_ilu0_.info() != Eigen::Success) return std::nullopt;
                 return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::ILUT: {
+                Vector x = solver_ilut_.solve(b);
+                last_iterations_ = solver_ilut_.iterations();
+                last_error_ = solver_ilut_.error();
+                if (solver_ilut_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::AMG: {
+#ifdef PULSIM_HAS_HYPRE
+                auto x = hypre_amg_.solve(b);
+                if (!x) return std::nullopt;
+                last_iterations_ = hypre_amg_.last_iterations();
+                last_error_ = hypre_amg_.last_error();
+                return *x;
+#else
+                break;
+#endif
             }
         }
         return std::nullopt;
@@ -578,6 +947,10 @@ private:
     Eigen::BiCGSTAB<SparseMatrix, Eigen::IdentityPreconditioner> solver_identity_;
     Eigen::BiCGSTAB<SparseMatrix, Eigen::DiagonalPreconditioner<Scalar>> solver_jacobi_;
     Eigen::BiCGSTAB<SparseMatrix, Eigen::IncompleteLUT<Scalar>> solver_ilu0_;
+    Eigen::BiCGSTAB<SparseMatrix, Eigen::IncompleteLUT<Scalar>> solver_ilut_;
+#ifdef PULSIM_HAS_HYPRE
+    HypreAMGSolver hypre_amg_;
+#endif
     bool computed_ = false;
     SparseMatrix scaled_matrix_;
     Vector row_scale_;
@@ -592,6 +965,12 @@ private:
         solver_jacobi_.setTolerance(config_.tolerance);
         solver_ilu0_.setMaxIterations(config_.max_iterations);
         solver_ilu0_.setTolerance(config_.tolerance);
+        solver_ilu0_.preconditioner().setDroptol(0.0);
+        solver_ilu0_.preconditioner().setFillfactor(1.0);
+        solver_ilut_.setMaxIterations(config_.max_iterations);
+        solver_ilut_.setTolerance(config_.tolerance);
+        solver_ilut_.preconditioner().setDroptol(config_.ilut_drop_tolerance);
+        solver_ilut_.preconditioner().setFillfactor(config_.ilut_fill_factor);
     }
 
     void prepare_matrix(const SparseMatrix& A) {
@@ -639,6 +1018,15 @@ private:
             case IterativeSolverConfig::PreconditionerKind::ILU0:
                 solver_ilu0_.compute(A);
                 return solver_ilu0_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::ILUT:
+                solver_ilut_.compute(A);
+                return solver_ilut_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::AMG:
+#ifdef PULSIM_HAS_HYPRE
+                return hypre_amg_.setup(A, config_, HypreAMGSolver::KrylovKind::BiCGSTAB);
+#else
+                return false;
+#endif
         }
         return false;
     }
@@ -665,6 +1053,24 @@ private:
                 last_error_ = solver_ilu0_.error();
                 if (solver_ilu0_.info() != Eigen::Success) return std::nullopt;
                 return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::ILUT: {
+                Vector x = solver_ilut_.solve(b);
+                last_iterations_ = solver_ilut_.iterations();
+                last_error_ = solver_ilut_.error();
+                if (solver_ilut_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::AMG: {
+#ifdef PULSIM_HAS_HYPRE
+                auto x = hypre_amg_.solve(b);
+                if (!x) return std::nullopt;
+                last_iterations_ = hypre_amg_.last_iterations();
+                last_error_ = hypre_amg_.last_error();
+                return *x;
+#else
+                break;
+#endif
             }
         }
         return std::nullopt;
@@ -709,6 +1115,12 @@ public:
     [[nodiscard]] int last_iterations() const { return last_iterations_; }
     [[nodiscard]] Real last_error() const { return last_error_; }
 
+    [[nodiscard]] bool is_spd(const SparseMatrix& A) const {
+        Eigen::SimplicialLLT<SparseMatrix> llt;
+        llt.compute(A);
+        return llt.info() == Eigen::Success;
+    }
+
     void set_config(const IterativeSolverConfig& config) {
         config_ = config;
         configure_all();
@@ -723,6 +1135,11 @@ private:
                              Eigen::DiagonalPreconditioner<Scalar>> solver_jacobi_;
     Eigen::ConjugateGradient<SparseMatrix, Eigen::Lower|Eigen::Upper,
                              Eigen::IncompleteLUT<Scalar>> solver_ilu0_;
+    Eigen::ConjugateGradient<SparseMatrix, Eigen::Lower|Eigen::Upper,
+                             Eigen::IncompleteLUT<Scalar>> solver_ilut_;
+#ifdef PULSIM_HAS_HYPRE
+    HypreAMGSolver hypre_amg_;
+#endif
     bool computed_ = false;
     SparseMatrix scaled_matrix_;
     Vector row_scale_;
@@ -737,6 +1154,12 @@ private:
         solver_jacobi_.setTolerance(config_.tolerance);
         solver_ilu0_.setMaxIterations(config_.max_iterations);
         solver_ilu0_.setTolerance(config_.tolerance);
+        solver_ilu0_.preconditioner().setDroptol(0.0);
+        solver_ilu0_.preconditioner().setFillfactor(1.0);
+        solver_ilut_.setMaxIterations(config_.max_iterations);
+        solver_ilut_.setTolerance(config_.tolerance);
+        solver_ilut_.preconditioner().setDroptol(config_.ilut_drop_tolerance);
+        solver_ilut_.preconditioner().setFillfactor(config_.ilut_fill_factor);
     }
 
     void prepare_matrix(const SparseMatrix& A) {
@@ -784,6 +1207,15 @@ private:
             case IterativeSolverConfig::PreconditionerKind::ILU0:
                 solver_ilu0_.compute(A);
                 return solver_ilu0_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::ILUT:
+                solver_ilut_.compute(A);
+                return solver_ilut_.info() == Eigen::Success;
+            case IterativeSolverConfig::PreconditionerKind::AMG:
+#ifdef PULSIM_HAS_HYPRE
+                return hypre_amg_.setup(A, config_, HypreAMGSolver::KrylovKind::CG);
+#else
+                return false;
+#endif
         }
         return false;
     }
@@ -810,6 +1242,24 @@ private:
                 last_error_ = solver_ilu0_.error();
                 if (solver_ilu0_.info() != Eigen::Success) return std::nullopt;
                 return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::ILUT: {
+                Vector x = solver_ilut_.solve(b);
+                last_iterations_ = solver_ilut_.iterations();
+                last_error_ = solver_ilut_.error();
+                if (solver_ilut_.info() != Eigen::Success) return std::nullopt;
+                return x;
+            }
+            case IterativeSolverConfig::PreconditionerKind::AMG: {
+#ifdef PULSIM_HAS_HYPRE
+                auto x = hypre_amg_.solve(b);
+                if (!x) return std::nullopt;
+                last_iterations_ = hypre_amg_.last_iterations();
+                last_error_ = hypre_amg_.last_error();
+                return *x;
+#else
+                break;
+#endif
             }
         }
         return std::nullopt;
@@ -839,13 +1289,14 @@ public:
 
     bool analyze(const SparseMatrix& A) {
         last_matrix_ = &A;
-        active_index_.reset();
-        active_order_ = build_order(A);
-        for (std::size_t i = 0; i < active_order_.size(); ++i) {
-            auto kind = active_order_[i];
+        active_kind_.reset();
+        primary_order_ = build_order(A, config_.order);
+        fallback_order_ = build_fallback_order(A);
+        for (std::size_t i = 0; i < primary_order_.size(); ++i) {
+            auto kind = primary_order_[i];
             if (!is_available(kind)) continue;
             if (analyze_with(kind, A)) {
-                active_index_ = i;
+                active_kind_ = kind;
                 return true;
             }
         }
@@ -855,46 +1306,62 @@ public:
     bool factorize(const SparseMatrix& A) {
         last_matrix_ = &A;
 
-        if (active_index_ && *active_index_ < active_order_.size()) {
-            auto kind = active_order_[*active_index_];
-            if (is_available(kind)) {
-                if (factorize_with(kind, A)) {
-                    return true;
-                }
-            }
-        }
-
-        if (active_order_.empty()) {
-            active_order_ = build_order(A);
-        }
-
-        for (std::size_t i = 0; i < active_order_.size(); ++i) {
-            auto kind = active_order_[i];
-            if (!is_available(kind)) continue;
-            if (factorize_with(kind, A)) {
-                active_index_ = i;
+        if (active_kind_) {
+            auto kind = *active_kind_;
+            if (is_available(kind) && factorize_with(kind, A)) {
                 return true;
             }
-            if (!config_.allow_fallback) break;
+        }
+
+        if (primary_order_.empty()) {
+            primary_order_ = build_order(A, config_.order);
+        }
+        if (fallback_order_.empty()) {
+            fallback_order_ = build_fallback_order(A);
+        }
+
+        for (auto kind : primary_order_) {
+            if (!is_available(kind)) continue;
+            if (factorize_with(kind, A)) {
+                active_kind_ = kind;
+                return true;
+            }
+            if (!config_.allow_fallback) return false;
+        }
+
+        if (!config_.allow_fallback) return false;
+
+        for (auto kind : fallback_order_) {
+            if (!is_available(kind)) continue;
+            if (factorize_with(kind, A)) {
+                active_kind_ = kind;
+                return true;
+            }
         }
         return false;
     }
 
     [[nodiscard]] LinearSolveResult solve(const Vector& b) {
-        if (!active_index_ || *active_index_ >= active_order_.size()) {
+        if (!active_kind_) {
             return LinearSolveResult::failure("No active linear solver");
         }
 
-        auto active_kind = active_order_[*active_index_];
+        auto active_kind = *active_kind_;
         auto result = solve_with(active_kind, b);
         update_telemetry(active_kind, result);
         if (result || !config_.allow_fallback || !last_matrix_) {
             return result;
         }
 
-        for (std::size_t i = 0; i < active_order_.size(); ++i) {
-            if (i == *active_index_) continue;
-            auto kind = active_order_[i];
+        if (primary_order_.empty()) {
+            primary_order_ = build_order(*last_matrix_, config_.order);
+        }
+        if (fallback_order_.empty()) {
+            fallback_order_ = build_fallback_order(*last_matrix_);
+        }
+
+        for (auto kind : primary_order_) {
+            if (kind == active_kind) continue;
             if (!is_available(kind)) continue;
 
             if (!factorize_with(kind, *last_matrix_)) {
@@ -905,7 +1372,25 @@ public:
             auto retry = solve_with(kind, b);
             update_telemetry(kind, retry);
             if (retry) {
-                active_index_ = i;
+                active_kind_ = kind;
+                telemetry_.total_fallbacks += 1;
+                return retry;
+            }
+        }
+
+        for (auto kind : fallback_order_) {
+            if (kind == active_kind) continue;
+            if (!is_available(kind)) continue;
+
+            if (!factorize_with(kind, *last_matrix_)) {
+                if (!config_.allow_fallback) break;
+                continue;
+            }
+
+            auto retry = solve_with(kind, b);
+            update_telemetry(kind, retry);
+            if (retry) {
+                active_kind_ = kind;
                 telemetry_.total_fallbacks += 1;
                 return retry;
             }
@@ -917,8 +1402,8 @@ public:
     }
 
     [[nodiscard]] bool is_singular() const {
-        if (!active_index_ || *active_index_ >= active_order_.size()) return true;
-        return is_singular_with(active_order_[*active_index_]);
+        if (!active_kind_) return true;
+        return is_singular_with(*active_kind_);
     }
 
     [[nodiscard]] const LinearSolverStackConfig& config() const { return config_; }
@@ -929,23 +1414,24 @@ public:
         if (gmres_) gmres_->set_config(config_.iterative_config);
         if (bicgstab_) bicgstab_->set_config(config_.iterative_config);
         if (cg_) cg_->set_config(config_.iterative_config);
-        active_index_.reset();
+        active_kind_.reset();
         last_matrix_ = nullptr;
-        active_order_.clear();
+        primary_order_.clear();
+        fallback_order_.clear();
         telemetry_ = {};
     }
 
     [[nodiscard]] std::optional<LinearSolverKind> active_kind() const {
-        if (!active_index_ || *active_index_ >= active_order_.size()) return std::nullopt;
-        return active_order_[*active_index_];
+        return active_kind_;
     }
 
     [[nodiscard]] LinearSolverTelemetry telemetry() const { return telemetry_; }
 
     void set_force_iterative(bool force) {
         force_iterative_ = force;
-        active_order_.clear();
-        active_index_.reset();
+        primary_order_.clear();
+        fallback_order_.clear();
+        active_kind_.reset();
     }
 
     [[nodiscard]] bool force_iterative() const { return force_iterative_; }
@@ -958,9 +1444,10 @@ private:
     std::unique_ptr<GMRESPolicy> gmres_;
     std::unique_ptr<BiCGSTABPolicy> bicgstab_;
     std::unique_ptr<ConjugateGradientPolicy> cg_;
-    std::optional<std::size_t> active_index_;
+    std::optional<LinearSolverKind> active_kind_;
     const SparseMatrix* last_matrix_ = nullptr;
-    std::vector<LinearSolverKind> active_order_;
+    std::vector<LinearSolverKind> primary_order_;
+    std::vector<LinearSolverKind> fallback_order_;
     LinearSolverTelemetry telemetry_{};
     bool force_iterative_ = false;
 
@@ -969,9 +1456,32 @@ private:
         return true;
     }
 
-    [[nodiscard]] std::vector<LinearSolverKind> build_order(const SparseMatrix& A) const {
-        if (!config_.auto_select || config_.order.empty()) {
-            return config_.order;
+    [[nodiscard]] bool is_symmetric(const SparseMatrix& A, Real tol = 1e-12) const {
+        return A.isApprox(A.transpose(), tol);
+    }
+
+    [[nodiscard]] bool allow_cg(const SparseMatrix& A) const {
+        if (!cg_) return false;
+        if (config_.iterative_config.enable_scaling) return false;
+        if (config_.iterative_config.preconditioner == IterativeSolverConfig::PreconditionerKind::ILU0 ||
+            config_.iterative_config.preconditioner == IterativeSolverConfig::PreconditionerKind::ILUT ||
+            config_.iterative_config.preconditioner == IterativeSolverConfig::PreconditionerKind::AMG) {
+            return false;
+        }
+        if (!is_symmetric(A)) return false;
+        return cg_->is_spd(A);
+    }
+
+    [[nodiscard]] std::vector<LinearSolverKind> build_order(
+        const SparseMatrix& A,
+        const std::vector<LinearSolverKind>& base_order) const {
+
+        if (!config_.auto_select || base_order.empty()) {
+            std::vector<LinearSolverKind> order = base_order;
+            order.erase(std::remove_if(order.begin(), order.end(), [&](LinearSolverKind kind) {
+                return kind == LinearSolverKind::CG && !allow_cg(A);
+            }), order.end());
+            return order;
         }
 
         const int rows = static_cast<int>(A.rows());
@@ -992,7 +1502,7 @@ private:
             prefer_iterative = false;  // ill-conditioned hint -> prefer direct
         }
 
-        std::vector<LinearSolverKind> order = config_.order;
+        std::vector<LinearSolverKind> order = base_order;
         auto is_iterative = [](LinearSolverKind kind) {
             return kind == LinearSolverKind::GMRES ||
                    kind == LinearSolverKind::BiCGSTAB ||
@@ -1011,6 +1521,10 @@ private:
                 order = std::move(filtered);
             }
         }
+
+        order.erase(std::remove_if(order.begin(), order.end(), [&](LinearSolverKind kind) {
+            return kind == LinearSolverKind::CG && !allow_cg(A);
+        }), order.end());
 
         if (prefer_iterative) {
             auto it = std::find_if(order.begin(), order.end(), is_iterative);
@@ -1032,6 +1546,13 @@ private:
         return order;
     }
 
+    [[nodiscard]] std::vector<LinearSolverKind> build_fallback_order(const SparseMatrix& A) const {
+        if (!config_.fallback_order.empty()) {
+            return build_order(A, config_.fallback_order);
+        }
+        return build_order(A, config_.order);
+    }
+
     bool analyze_with(LinearSolverKind kind, const SparseMatrix& A) {
         switch (kind) {
             case LinearSolverKind::SparseLU:
@@ -1045,6 +1566,7 @@ private:
             case LinearSolverKind::BiCGSTAB:
                 return bicgstab_->analyze(A);
             case LinearSolverKind::CG:
+                if (!allow_cg(A)) return false;
                 return cg_->analyze(A);
         }
         return false;
@@ -1063,6 +1585,7 @@ private:
             case LinearSolverKind::BiCGSTAB:
                 return bicgstab_->factorize(A);
             case LinearSolverKind::CG:
+                if (!allow_cg(A)) return false;
                 return cg_->factorize(A);
         }
         return false;
@@ -1107,6 +1630,7 @@ private:
     void update_telemetry(LinearSolverKind kind, const LinearSolveResult& result) {
         telemetry_.total_solve_calls += 1;
         telemetry_.last_solver = kind;
+        telemetry_.last_preconditioner.reset();
 
         int iterations = 0;
         Real error = 0.0;
@@ -1114,14 +1638,17 @@ private:
             case LinearSolverKind::GMRES:
                 iterations = gmres_->last_iterations();
                 error = gmres_->last_error();
+                telemetry_.last_preconditioner = config_.iterative_config.preconditioner;
                 break;
             case LinearSolverKind::BiCGSTAB:
                 iterations = bicgstab_->last_iterations();
                 error = bicgstab_->last_error();
+                telemetry_.last_preconditioner = config_.iterative_config.preconditioner;
                 break;
             case LinearSolverKind::CG:
                 iterations = cg_->last_iterations();
                 error = cg_->last_error();
+                telemetry_.last_preconditioner = config_.iterative_config.preconditioner;
                 break;
             default:
                 break;

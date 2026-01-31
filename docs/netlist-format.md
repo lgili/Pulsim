@@ -137,6 +137,7 @@ simulation:
   adaptive_timestep: true
   enable_events: true
   enable_losses: true
+  integrator: trbdf2   # trapezoidal, bdf1, bdf2, trbdf2, rosenbrockw, sdirk2
 ```
 
 ### Solver Configuration
@@ -153,12 +154,16 @@ simulation:
     size_threshold: 400
     nnz_threshold: 2000
     diag_min_threshold: 1e-12
-    preconditioner: ilu0
+    preconditioner: ilut
+    ilut_drop_tolerance: 1e-3
+    ilut_fill_factor: 10
     iterative:
       max_iterations: 200
       tolerance: 1e-8
       restart: 40
-      preconditioner: jacobi
+      preconditioner: ilut
+      ilut_drop_tolerance: 1e-3
+      ilut_fill_factor: 10
       enable_scaling: true
       scaling_floor: 1e-12
     nonlinear:
@@ -182,6 +187,35 @@ simulation:
 ```
 
 You can also set Newton options directly under `simulation.newton` if preferred.
+
+```yaml
+simulation:
+  newton:
+    max_iterations: 50
+    enable_newton_krylov: true
+    krylov_residual_cache_tolerance: 1e-8
+    reuse_jacobian_pattern: true
+```
+
+### Periodic Steady-State
+
+```yaml
+simulation:
+  shooting:
+    period: 10e-6
+    max_iterations: 30
+    tolerance: 1e-6
+    relaxation: 0.5
+    store_last_transient: true
+
+  harmonic_balance:
+    period: 10e-6
+    num_samples: 128
+    max_iterations: 40
+    tolerance: 1e-6
+    relaxation: 0.5
+    initialize_from_transient: true
+```
 
 ## SI Prefixes
 

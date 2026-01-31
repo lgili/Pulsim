@@ -21,6 +21,18 @@ std::string to_lower(std::string s) {
     return s;
 }
 
+std::string normalize_key(std::string s) {
+    s = to_lower(s);
+    std::string out;
+    out.reserve(s.size());
+    for (unsigned char c : s) {
+        if (std::isalnum(c)) {
+            out.push_back(static_cast<char>(c));
+        }
+    }
+    return out;
+}
+
 bool is_known_key(const std::string& key, const std::unordered_set<std::string>& allowed) {
     return allowed.find(key) != allowed.end();
 }
@@ -196,8 +208,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
     if (root["simulation"]) {
         YAML::Node sim = root["simulation"];
           validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "adaptive_timestep",
-                        "enable_events", "enable_losses", "newton", "timestep", "lte", "bdf",
-                        "solver"},
+                        "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
+                        "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb"},
                       "simulation", errors_, options_.strict);
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);
@@ -209,13 +221,42 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         if (sim["enable_events"]) options.enable_events = sim["enable_events"].as<bool>();
         if (sim["enable_losses"]) options.enable_losses = sim["enable_losses"].as<bool>();
 
+        YAML::Node integrator_node = sim["integrator"] ? sim["integrator"] : sim["integration"];
+        if (integrator_node) {
+            std::string method = normalize_key(integrator_node.as<std::string>());
+            if (method == "trapezoidal" || method == "tr") {
+                options.integrator = Integrator::Trapezoidal;
+            } else if (method == "bdf1" || method == "be" || method == "backwardeuler") {
+                options.integrator = Integrator::BDF1;
+            } else if (method == "bdf2") {
+                options.integrator = Integrator::BDF2;
+            } else if (method == "bdf3") {
+                options.integrator = Integrator::BDF3;
+            } else if (method == "bdf4") {
+                options.integrator = Integrator::BDF4;
+            } else if (method == "bdf5") {
+                options.integrator = Integrator::BDF5;
+            } else if (method == "gear") {
+                options.integrator = Integrator::Gear;
+            } else if (method == "trbdf2") {
+                options.integrator = Integrator::TRBDF2;
+            } else if (method == "rosenbrock" || method == "rosenbrockw" || method == "rosenbrockw2") {
+                options.integrator = Integrator::RosenbrockW;
+            } else if (method == "sdirk2") {
+                options.integrator = Integrator::SDIRK2;
+            } else {
+                errors_.push_back("Invalid integrator: " + integrator_node.as<std::string>());
+            }
+        }
+
         if (sim["newton"]) {
             YAML::Node n = sim["newton"];
             validate_keys(n, {"max_iterations", "initial_damping", "min_damping", "auto_damping",
                               "enable_anderson", "anderson_depth", "anderson_beta",
                               "enable_broyden", "broyden_max_size", "enable_newton_krylov",
                               "enable_trust_region", "trust_radius", "trust_shrink", "trust_expand",
-                              "trust_min", "trust_max", "reuse_jacobian_pattern"},
+                              "trust_min", "trust_max", "reuse_jacobian_pattern",
+                              "krylov_residual_cache_tolerance"},
                           "simulation.newton", errors_, options_.strict);
             if (n["max_iterations"]) options.newton_options.max_iterations = n["max_iterations"].as<int>();
             if (n["initial_damping"]) options.newton_options.initial_damping = parse_real(n["initial_damping"], "newton.initial_damping", errors_);
@@ -234,6 +275,10 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (n["trust_min"]) options.newton_options.trust_min = parse_real(n["trust_min"], "newton.trust_min", errors_);
             if (n["trust_max"]) options.newton_options.trust_max = parse_real(n["trust_max"], "newton.trust_max", errors_);
             if (n["reuse_jacobian_pattern"]) options.newton_options.reuse_jacobian_pattern = n["reuse_jacobian_pattern"].as<bool>();
+            if (n["krylov_residual_cache_tolerance"]) {
+                options.newton_options.krylov_residual_cache_tolerance =
+                    parse_real(n["krylov_residual_cache_tolerance"], "newton.krylov_residual_cache_tolerance", errors_);
+            }
         }
 
         if (sim["timestep"]) {
@@ -295,7 +340,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             YAML::Node s = sim["solver"];
             validate_keys(s, {"linear", "iterative", "nonlinear", "order", "fallback_order",
                               "allow_fallback", "auto_select", "size_threshold", "nnz_threshold",
-                              "diag_min_threshold", "preconditioner"},
+                              "diag_min_threshold", "preconditioner", "ilut_drop_tolerance",
+                              "ilut_fill_factor"},
                           "simulation.solver", errors_, options_.strict);
 
             auto parse_linear_kind = [&](const std::string& value, const std::string& path) -> std::optional<LinearSolverKind> {
@@ -310,27 +356,29 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 return std::nullopt;
             };
 
-            auto parse_order = [&](const YAML::Node& node, const std::string& path) {
+            auto parse_order = [&](const YAML::Node& node, const std::string& path,
+                                   std::vector<LinearSolverKind>& target) {
                 if (!node.IsSequence()) {
                     errors_.push_back(path + " must be a list");
                     return;
                 }
-                options.linear_solver.order.clear();
+                target.clear();
                 for (const auto& it : node) {
                     if (!it.IsScalar()) {
                         errors_.push_back(path + " entries must be strings");
                         continue;
                     }
                     auto kind = parse_linear_kind(it.as<std::string>(), path);
-                    if (kind) options.linear_solver.order.push_back(*kind);
+                    if (kind) target.push_back(*kind);
                 }
             };
 
             if (s["order"]) {
-                parse_order(s["order"], "simulation.solver.order");
+                parse_order(s["order"], "simulation.solver.order", options.linear_solver.order);
             }
             if (s["fallback_order"]) {
-                parse_order(s["fallback_order"], "simulation.solver.fallback_order");
+                parse_order(s["fallback_order"], "simulation.solver.fallback_order",
+                            options.linear_solver.fallback_order);
             }
             if (s["allow_fallback"]) options.linear_solver.allow_fallback = s["allow_fallback"].as<bool>();
             if (s["auto_select"]) options.linear_solver.auto_select = s["auto_select"].as<bool>();
@@ -346,9 +394,21 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
                 } else if (pre == "ilu0" || pre == "ilu") {
                     options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::ILU0;
+                } else if (pre == "ilut") {
+                    options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::ILUT;
+                } else if (pre == "amg") {
+                    options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::AMG;
                 } else {
                     errors_.push_back("Invalid solver.preconditioner: " + pre);
                 }
+            }
+            if (s["ilut_drop_tolerance"]) {
+                options.linear_solver.iterative_config.ilut_drop_tolerance =
+                    parse_real(s["ilut_drop_tolerance"], "solver.ilut_drop_tolerance", errors_);
+            }
+            if (s["ilut_fill_factor"]) {
+                options.linear_solver.iterative_config.ilut_fill_factor =
+                    parse_real(s["ilut_fill_factor"], "solver.ilut_fill_factor", errors_);
             }
 
             if (s["linear"]) {
@@ -356,7 +416,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 validate_keys(l, {"order", "allow_fallback", "auto_select", "size_threshold",
                                   "nnz_threshold", "diag_min_threshold"},
                               "simulation.solver.linear", errors_, options_.strict);
-                if (l["order"]) parse_order(l["order"], "simulation.solver.linear.order");
+                if (l["order"]) parse_order(l["order"], "simulation.solver.linear.order",
+                                            options.linear_solver.order);
                 if (l["allow_fallback"]) options.linear_solver.allow_fallback = l["allow_fallback"].as<bool>();
                 if (l["auto_select"]) options.linear_solver.auto_select = l["auto_select"].as<bool>();
                 if (l["size_threshold"]) options.linear_solver.size_threshold = l["size_threshold"].as<int>();
@@ -367,7 +428,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (s["iterative"]) {
                 YAML::Node it = s["iterative"];
                 validate_keys(it, {"max_iterations", "tolerance", "restart", "preconditioner",
-                                   "enable_scaling", "scaling_floor"},
+                                   "enable_scaling", "scaling_floor", "ilut_drop_tolerance",
+                                   "ilut_fill_factor"},
                               "simulation.solver.iterative", errors_, options_.strict);
                 if (it["max_iterations"]) options.linear_solver.iterative_config.max_iterations = it["max_iterations"].as<int>();
                 if (it["tolerance"]) options.linear_solver.iterative_config.tolerance = parse_real(it["tolerance"], "solver.iterative.tolerance", errors_);
@@ -382,9 +444,21 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                         options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
                     } else if (pre == "ilu0" || pre == "ilu") {
                         options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::ILU0;
+                    } else if (pre == "ilut") {
+                        options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::ILUT;
+                    } else if (pre == "amg") {
+                        options.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::AMG;
                     } else {
                         errors_.push_back("Invalid solver.iterative.preconditioner: " + pre);
                     }
+                }
+                if (it["ilut_drop_tolerance"]) {
+                    options.linear_solver.iterative_config.ilut_drop_tolerance =
+                        parse_real(it["ilut_drop_tolerance"], "solver.iterative.ilut_drop_tolerance", errors_);
+                }
+                if (it["ilut_fill_factor"]) {
+                    options.linear_solver.iterative_config.ilut_fill_factor =
+                        parse_real(it["ilut_fill_factor"], "solver.iterative.ilut_fill_factor", errors_);
                 }
             }
 
@@ -432,6 +506,35 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 if (nl["reuse_jacobian_pattern"]) {
                     options.newton_options.reuse_jacobian_pattern = nl["reuse_jacobian_pattern"].as<bool>();
                 }
+            }
+        }
+
+        if (sim["shooting"]) {
+            YAML::Node sh = sim["shooting"];
+            validate_keys(sh, {"period", "max_iterations", "tolerance", "relaxation", "store_last_transient"},
+                          "simulation.shooting", errors_, options_.strict);
+            options.enable_periodic_shooting = true;
+            if (sh["period"]) options.periodic_options.period = parse_real(sh["period"], "shooting.period", errors_);
+            if (sh["max_iterations"]) options.periodic_options.max_iterations = sh["max_iterations"].as<int>();
+            if (sh["tolerance"]) options.periodic_options.tolerance = parse_real(sh["tolerance"], "shooting.tolerance", errors_);
+            if (sh["relaxation"]) options.periodic_options.relaxation = parse_real(sh["relaxation"], "shooting.relaxation", errors_);
+            if (sh["store_last_transient"]) options.periodic_options.store_last_transient = sh["store_last_transient"].as<bool>();
+        }
+
+        YAML::Node hb = sim["harmonic_balance"] ? sim["harmonic_balance"] : sim["hb"];
+        if (hb) {
+            validate_keys(hb, {"period", "num_samples", "max_iterations", "tolerance",
+                               "relaxation", "initialize_from_transient"},
+                          "simulation.harmonic_balance", errors_, options_.strict);
+            options.enable_harmonic_balance = true;
+            if (hb["period"]) options.harmonic_balance.period = parse_real(hb["period"], "hb.period", errors_);
+            if (hb["num_samples"]) options.harmonic_balance.num_samples = hb["num_samples"].as<int>();
+            if (hb["max_iterations"]) options.harmonic_balance.max_iterations = hb["max_iterations"].as<int>();
+            if (hb["tolerance"]) options.harmonic_balance.tolerance = parse_real(hb["tolerance"], "hb.tolerance", errors_);
+            if (hb["relaxation"]) options.harmonic_balance.relaxation = parse_real(hb["relaxation"], "hb.relaxation", errors_);
+            if (hb["initialize_from_transient"]) {
+                options.harmonic_balance.initialize_from_transient =
+                    hb["initialize_from_transient"].as<bool>();
             }
         }
     }

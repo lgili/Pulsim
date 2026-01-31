@@ -16,6 +16,7 @@ target_link_libraries(pulsim_core
     INTERFACE
         Eigen3::Eigen
         ${PULSIM_KLU_LIBRARIES}
+        ${PULSIM_HYPRE_LIBRARIES}
 )
 
 # Alias for cleaner usage
@@ -43,6 +44,7 @@ target_link_libraries(pulsim
         Eigen3::Eigen
         yaml-cpp
         ${PULSIM_KLU_LIBRARIES}
+        ${PULSIM_HYPRE_LIBRARIES}
 )
 
 # Alias for cleaner usage
@@ -76,7 +78,10 @@ if(PULSIM_BUILD_TESTS)
     # Compiled library tests (Circuit, Simulator, power electronics)
     add_executable(pulsim_simulation_tests
         tests/test_main.cpp
+        tests/test_linear_solver_selection.cpp
+        tests/test_newton_krylov.cpp
         tests/test_v1_kernel.cpp
+        tests/test_stress_simulation.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

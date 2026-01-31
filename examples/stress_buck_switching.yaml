@@ -1,0 +1,91 @@
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 0.01
+  dt: 1.25e-07
+  dt_min: 1.25e-07
+  dt_max: 1.25e-07
+  adaptive_timestep: false
+  integrator: bdf1
+  bdf:
+    enable: false
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 48.0
+  - type: voltage_source
+    name: Vpwm0
+    nodes: [ctrl0, 0]
+    waveform:
+      type: pwm
+      v_high: 5.0
+      v_low: 0.0
+      frequency: 20000.0
+      duty: 0.5
+      dead_time: 0.0
+      phase: 0.0
+  - type: vcswitch
+    name: S0
+    nodes: [ctrl0, vin, sw0]
+    v_threshold: 2.5
+    ron: 0.005
+    roff: 1e6
+  - type: diode
+    name: D0
+    nodes: [0, sw0]
+  - type: resistor
+    name: Rsnub0
+    nodes: [sw0, 0]
+    value: 1e6
+  - type: resistor
+    name: Rdcr0
+    nodes: [sw0, l0]
+    value: 0.01
+  - type: inductor
+    name: L0
+    nodes: [l0, out]
+    value: 150u
+  - type: voltage_source
+    name: Vpwm1
+    nodes: [ctrl1, 0]
+    waveform:
+      type: pwm
+      v_high: 5.0
+      v_low: 0.0
+      frequency: 20000.0
+      duty: 0.5
+      dead_time: 0.0
+      phase: 0.0
+  - type: vcswitch
+    name: S1
+    nodes: [ctrl1, vin, sw1]
+    v_threshold: 2.5
+    ron: 0.005
+    roff: 1e6
+  - type: diode
+    name: D1
+    nodes: [0, sw1]
+  - type: resistor
+    name: Rsnub1
+    nodes: [sw1, 0]
+    value: 1e6
+  - type: resistor
+    name: Rdcr1
+    nodes: [sw1, l1]
+    value: 0.01
+  - type: inductor
+    name: L1
+    nodes: [l1, out]
+    value: 150u
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 100u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

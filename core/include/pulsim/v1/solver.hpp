@@ -16,6 +16,7 @@
 #include <Eigen/QR>
 #include <Eigen/SparseCore>
 #include <Eigen/SparseLU>
+#include <cmath>
 #include <limits>
 #include <vector>
 #include <array>
@@ -442,6 +443,9 @@ struct NewtonResult {
         bool used_anderson = false;
         bool used_broyden = false;
         bool used_newton_krylov = false;
+        int krylov_iterations = 0;
+        int krylov_restarts = 0;
+        Real krylov_final_residual = 0.0;
         int line_search_backtracks = 0;
         int trust_region_shrinks = 0;
         int trust_region_expands = 0;
@@ -483,6 +487,12 @@ struct NewtonOptions {
 
     // Newton-Krylov path (iterative linear solver)
     bool enable_newton_krylov = false;
+    int krylov_max_iterations = 50;
+    int krylov_restart = 30;
+    Real krylov_tolerance = 1e-6;
+    Real krylov_fd_epsilon = 1e-7;
+    Real krylov_fd_min_step = 1e-12;
+    Real krylov_residual_cache_tolerance = -1.0;
 
     // Voltage/current limiting (can slow convergence in switching circuits)
     Real max_voltage_step = 5.0;      // Max voltage change per iteration [V]
@@ -511,20 +521,28 @@ template<LinearSolverPolicy LinearPolicy = SparseLUPolicy>
 class NewtonRaphsonSolver {
 public:
     using SystemFunction = std::function<void(const Vector& x, Vector& f, SparseMatrix& J)>;
+    using ResidualFunction = std::function<void(const Vector& x, Vector& f)>;
 
     explicit NewtonRaphsonSolver(const NewtonOptions& opts = {})
         : options_(opts), convergence_checker_(opts.tolerances) {}
 
     /// Solve F(x) = 0 with weighted norm convergence
-    [[nodiscard]] NewtonResult solve(const Vector& x0, SystemFunction system_func) {
+    [[nodiscard]] NewtonResult solve(const Vector& x0, SystemFunction system_func,
+                                     ResidualFunction residual_func = nullptr) {
         NewtonResult result;
         result.solution = x0;
         result.history.clear();
         anderson_f_history_.clear();
 
+        const bool has_residual = static_cast<bool>(residual_func);
+        const bool use_jfnk = options_.enable_newton_krylov && has_residual;
+
         result.telemetry.used_anderson = options_.enable_anderson;
-        result.telemetry.used_broyden = options_.enable_broyden;
-        result.telemetry.used_newton_krylov = options_.enable_newton_krylov;
+        result.telemetry.used_broyden = options_.enable_broyden && !use_jfnk;
+        result.telemetry.used_newton_krylov = use_jfnk;
+        if (options_.enable_newton_krylov && !use_jfnk) {
+            result.telemetry.fallback_reasons.push_back("JFNKResidualUnavailable");
+        }
 
         if constexpr (requires(LinearPolicy policy) { policy.set_force_iterative(false); }) {
             linear_solver_.set_force_iterative(options_.enable_newton_krylov);
@@ -540,18 +558,52 @@ public:
         Real trust_radius = options_.trust_radius;
         bool pattern_analyzed = false;
 
-        const bool use_broyden = options_.enable_broyden && n <= options_.broyden_max_size;
+        const bool use_broyden = options_.enable_broyden && !use_jfnk &&
+                                 n <= options_.broyden_max_size;
         Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> J_dense;
         Vector prev_x;
         Vector prev_f;
         bool broyden_ready = false;
 
+        Vector cached_x;
+        Vector cached_f;
+        bool has_cache = false;
+
+        ResidualFunction residual_eval = [&](const Vector& x, Vector& f_out) {
+            if (options_.krylov_residual_cache_tolerance > 0.0 && has_cache &&
+                x.size() == cached_x.size()) {
+                Real dx_norm = (x - cached_x).norm();
+                Real x_norm = std::max(x.norm(), Real{1.0});
+                if (dx_norm <= options_.krylov_residual_cache_tolerance * x_norm) {
+                    f_out = cached_f;
+                    return;
+                }
+            }
+
+            if (residual_func) {
+                residual_func(x, f_out);
+            } else {
+                SparseMatrix J_dummy;
+                system_func(x, f_out, J_dummy);
+            }
+
+            if (options_.krylov_residual_cache_tolerance > 0.0) {
+                cached_x = x;
+                cached_f = f_out;
+                has_cache = true;
+            }
+        };
+
         for (int iter = 0; iter < options_.max_iterations; ++iter) {
             // Evaluate system
-            system_func(result.solution, f, J);
+            if (use_jfnk) {
+                residual_eval(result.solution, f);
+            } else {
+                system_func(result.solution, f, J);
+            }
             const Vector x_current = result.solution;
 
-            if (options_.reuse_jacobian_pattern && !pattern_analyzed) {
+            if (!use_jfnk && options_.reuse_jacobian_pattern && !pattern_analyzed) {
                 if (!linear_solver_.analyze(J)) {
                     result.status = SolverStatus::NumericalError;
                     result.error_message = "Jacobian pattern analysis failed";
@@ -599,10 +651,56 @@ public:
             prev_residual = f_norm;
 
             // Solve J * dx = -f
-            if (use_broyden) {
-                dx = J_dense.colPivHouseholderQr().solve(-f);
-                if (!dx.allFinite()) {
-                    result.telemetry.fallback_reasons.push_back("BroydenFallback");
+            bool step_solved = false;
+            if (use_jfnk) {
+                auto krylov = solve_krylov(result.solution, f, residual_eval, dx);
+                result.telemetry.krylov_iterations += krylov.iterations;
+                result.telemetry.krylov_restarts += krylov.restarts;
+                result.telemetry.krylov_final_residual = krylov.final_residual;
+                if (krylov.success) {
+                    step_solved = true;
+                } else {
+                    result.telemetry.fallback_reasons.push_back("JFNKFailure");
+                }
+            }
+
+            if (!step_solved) {
+                if (use_jfnk) {
+                    system_func(result.solution, f, J);
+                    if (options_.reuse_jacobian_pattern && !pattern_analyzed) {
+                        if (!linear_solver_.analyze(J)) {
+                            result.status = SolverStatus::NumericalError;
+                            result.error_message = "Jacobian pattern analysis failed";
+                            result.iterations = iter + 1;
+                            result.history.set_final_status(result.status);
+                            return result;
+                        }
+                        pattern_analyzed = true;
+                    }
+                }
+
+                if (use_broyden) {
+                    dx = J_dense.colPivHouseholderQr().solve(-f);
+                    if (!dx.allFinite()) {
+                        result.telemetry.fallback_reasons.push_back("BroydenFallback");
+                        if (!linear_solver_.factorize(J)) {
+                            result.status = SolverStatus::SingularMatrix;
+                            result.error_message = "Jacobian is singular";
+                            result.iterations = iter + 1;
+                            result.history.set_final_status(result.status);
+                            return result;
+                        }
+                        auto solve_result = linear_solver_.solve(-f);
+                        if (!solve_result) {
+                            result.status = SolverStatus::NumericalError;
+                            result.error_message = solve_result.error;
+                            result.iterations = iter + 1;
+                            result.history.set_final_status(result.status);
+                            return result;
+                        }
+                        dx = *solve_result;
+                    }
+                } else {
                     if (!linear_solver_.factorize(J)) {
                         result.status = SolverStatus::SingularMatrix;
                         result.error_message = "Jacobian is singular";
@@ -610,6 +708,7 @@ public:
                         result.history.set_final_status(result.status);
                         return result;
                     }
+
                     auto solve_result = linear_solver_.solve(-f);
                     if (!solve_result) {
                         result.status = SolverStatus::NumericalError;
@@ -620,24 +719,6 @@ public:
                     }
                     dx = *solve_result;
                 }
-            } else {
-                if (!linear_solver_.factorize(J)) {
-                    result.status = SolverStatus::SingularMatrix;
-                    result.error_message = "Jacobian is singular";
-                    result.iterations = iter + 1;
-                    result.history.set_final_status(result.status);
-                    return result;
-                }
-
-                auto solve_result = linear_solver_.solve(-f);
-                if (!solve_result) {
-                    result.status = SolverStatus::NumericalError;
-                    result.error_message = solve_result.error;
-                    result.iterations = iter + 1;
-                    result.history.set_final_status(result.status);
-                    return result;
-                }
-                dx = *solve_result;
             }
 
             // Apply voltage/current limiting to prevent divergence
@@ -658,7 +739,7 @@ public:
 
             // Apply update with damping
             if (options_.auto_damping) {
-                auto ls = line_search(result.solution, dx, f_norm, system_func, damping);
+                auto ls = line_search(result.solution, dx, f_norm, residual_eval, damping);
                 damping = ls.damping;
                 if (ls.backtracks > 0) {
                     result.telemetry.line_search_backtracks += ls.backtracks;
@@ -725,7 +806,7 @@ public:
         }
 
         // Final check
-        system_func(result.solution, f, J);
+        residual_eval(result.solution, f);
         result.final_residual = f.norm();
         result.iterations = options_.max_iterations;
 
@@ -759,10 +840,229 @@ private:
     ConvergenceChecker convergence_checker_;
     std::vector<Vector> anderson_f_history_;
 
+    struct KrylovSolveResult {
+        bool success = false;
+        int iterations = 0;
+        int restarts = 0;
+        Real final_residual = 0.0;
+        std::string error;
+    };
+
     struct LineSearchResult {
         Real damping = 1.0;
         int backtracks = 0;
     };
+
+    KrylovSolveResult solve_krylov(const Vector& x, const Vector& f,
+                                   const ResidualFunction& residual_eval,
+                                   Vector& dx) {
+        KrylovSolveResult result;
+        const Index n = x.size();
+        dx = Vector::Zero(n);
+
+        Vector b = -f;
+        Real b_norm = b.norm();
+        Real tol = options_.krylov_tolerance > 0 ? options_.krylov_tolerance : 1e-6;
+        Real tol_abs = tol * b_norm;
+
+        if (b_norm <= tol_abs) {
+            result.success = true;
+            result.final_residual = b_norm;
+            return result;
+        }
+
+        int restart = options_.krylov_restart;
+        if (restart <= 0) {
+            restart = std::min<int>(30, n);
+        }
+        restart = std::max<int>(1, std::min<int>(restart, n));
+
+        int max_iters = options_.krylov_max_iterations;
+        if (max_iters <= 0) {
+            max_iters = std::max<int>(restart, n);
+        }
+
+        Vector xk = Vector::Zero(n);
+        Vector r = b;
+        Real beta = b_norm;
+        Vector x_pert(n);
+        Vector f_pert(n);
+        Vector w(n);
+
+        auto apply_jv = [&](const Vector& v, Vector& out) -> bool {
+            Real v_norm = v.norm();
+            if (v_norm <= std::numeric_limits<Real>::epsilon()) {
+                out.setZero(n);
+                return true;
+            }
+
+            Real eps = options_.krylov_fd_epsilon;
+            if (eps <= 0) {
+                eps = std::sqrt(std::numeric_limits<Real>::epsilon());
+            }
+            Real step = eps * (1.0 + x.norm()) / v_norm;
+            if (step < options_.krylov_fd_min_step) {
+                step = options_.krylov_fd_min_step;
+            }
+
+            x_pert = x + step * v;
+            residual_eval(x_pert, f_pert);
+            if (!f_pert.allFinite()) {
+                return false;
+            }
+            out = (f_pert - f) / step;
+            return out.allFinite();
+        };
+
+        std::vector<Vector> V(restart + 1, Vector(n));
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> H(restart + 1, restart);
+        std::vector<Real> cs(restart);
+        std::vector<Real> sn(restart);
+        Vector g(restart + 1);
+
+        int total_iters = 0;
+        int restarts = 0;
+
+        auto backsolve = [&](int k) -> std::optional<Vector> {
+            Vector y = Vector::Zero(k);
+            for (int i = k - 1; i >= 0; --i) {
+                Real sum = g[i];
+                for (int j = i + 1; j < k; ++j) {
+                    sum -= H(i, j) * y[j];
+                }
+                if (std::abs(H(i, i)) <= std::numeric_limits<Real>::epsilon()) {
+                    return std::nullopt;
+                }
+                y[i] = sum / H(i, i);
+            }
+            return y;
+        };
+
+        while (total_iters < max_iters) {
+            if (beta <= tol_abs) {
+                dx = xk;
+                result.success = true;
+                result.iterations = total_iters;
+                result.restarts = restarts;
+                result.final_residual = beta;
+                return result;
+            }
+
+            V[0] = r / beta;
+            H.setZero();
+            g.setZero();
+            g[0] = beta;
+
+            int inner = 0;
+            for (; inner < restart && total_iters < max_iters; ++inner) {
+                if (!apply_jv(V[inner], w)) {
+                    result.error = "JFNK Jv evaluation failed";
+                    result.iterations = total_iters;
+                    result.restarts = restarts;
+                    result.final_residual = beta;
+                    return result;
+                }
+
+                for (int i = 0; i <= inner; ++i) {
+                    H(i, inner) = V[i].dot(w);
+                    w -= H(i, inner) * V[i];
+                }
+                H(inner + 1, inner) = w.norm();
+                if (H(inner + 1, inner) > std::numeric_limits<Real>::epsilon()) {
+                    V[inner + 1] = w / H(inner + 1, inner);
+                }
+
+                for (int i = 0; i < inner; ++i) {
+                    Real temp = cs[i] * H(i, inner) + sn[i] * H(i + 1, inner);
+                    H(i + 1, inner) = -sn[i] * H(i, inner) + cs[i] * H(i + 1, inner);
+                    H(i, inner) = temp;
+                }
+
+                Real h1 = H(inner, inner);
+                Real h2 = H(inner + 1, inner);
+                Real denom = std::hypot(h1, h2);
+                if (denom <= std::numeric_limits<Real>::epsilon()) {
+                    cs[inner] = 1.0;
+                    sn[inner] = 0.0;
+                } else {
+                    cs[inner] = h1 / denom;
+                    sn[inner] = h2 / denom;
+                }
+                H(inner, inner) = cs[inner] * h1 + sn[inner] * h2;
+                H(inner + 1, inner) = 0.0;
+
+                Real g_i = g[inner];
+                Real g_ip1 = g[inner + 1];
+                g[inner] = cs[inner] * g_i + sn[inner] * g_ip1;
+                g[inner + 1] = -sn[inner] * g_i + cs[inner] * g_ip1;
+
+                ++total_iters;
+
+                Real resid = std::abs(g[inner + 1]);
+                if (!std::isfinite(resid)) {
+                    result.error = "JFNK residual is not finite";
+                    result.iterations = total_iters;
+                    result.restarts = restarts;
+                    result.final_residual = resid;
+                    return result;
+                }
+
+                if (resid <= tol_abs) {
+                    auto y_opt = backsolve(inner + 1);
+                    if (!y_opt) {
+                        result.error = "JFNK backsolve failed";
+                        result.iterations = total_iters;
+                        result.restarts = restarts;
+                        result.final_residual = resid;
+                        return result;
+                    }
+                    const Vector& y = *y_opt;
+                    dx = xk;
+                    for (int i = 0; i <= inner; ++i) {
+                        dx += V[i] * y[i];
+                    }
+                    result.success = true;
+                    result.iterations = total_iters;
+                    result.restarts = restarts;
+                    result.final_residual = resid;
+                    return result;
+                }
+            }
+
+            if (inner > 0) {
+                auto y_opt = backsolve(inner);
+                if (!y_opt) {
+                    result.error = "JFNK restart backsolve failed";
+                    result.iterations = total_iters;
+                    result.restarts = restarts;
+                    result.final_residual = beta;
+                    return result;
+                }
+                const Vector& y = *y_opt;
+                for (int i = 0; i < inner; ++i) {
+                    xk += V[i] * y[i];
+                }
+            }
+
+            if (!apply_jv(xk, w)) {
+                result.error = "JFNK residual update failed";
+                result.iterations = total_iters;
+                result.restarts = restarts;
+                result.final_residual = beta;
+                return result;
+            }
+            r = b - w;
+            beta = r.norm();
+            ++restarts;
+        }
+
+        dx = xk;
+        result.success = false;
+        result.iterations = total_iters;
+        result.restarts = restarts;
+        result.final_residual = beta;
+        return result;
+    }
 
     /// Apply voltage/current limiting to dx vector
     /// Returns true if any value was clamped (limiting is active)
@@ -796,15 +1096,14 @@ private:
 
     /// Simple backtracking line search
     LineSearchResult line_search(const Vector& x, const Vector& dx, Real f_norm,
-                                 SystemFunction& system_func, Real initial_damping) {
+                                 ResidualFunction& residual_eval, Real initial_damping) {
         Real damping = initial_damping;
         const Index n = x.size();
         Vector x_new(n);
         Vector f_new(n);
-        SparseMatrix J_dummy(n, n);
 
         x_new = x + dx * damping;
-        system_func(x_new, f_new, J_dummy);
+        residual_eval(x_new, f_new);
         Real f_new_norm = f_new.norm();
 
         // Reduce damping while residual increases
@@ -813,7 +1112,7 @@ private:
         while (f_new_norm > f_norm && damping > options_.min_damping && bt < max_backtracks) {
             damping *= 0.5;
             x_new = x + dx * damping;
-            system_func(x_new, f_new, J_dummy);
+            residual_eval(x_new, f_new);
             f_new_norm = f_new.norm();
             ++bt;
         }

@@ -1,0 +1,3215 @@
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 5e-4
+  dt: 1e-6
+  dt_min: 1e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  bdf:
+    enable: false
+components:
+  - type: voltage_source
+    name: Vsrc
+    nodes: [n0, 0]
+    waveform:
+      type: dc
+      value: 1.0
+  - type: resistor
+    name: R0
+    nodes: [n0, n1]
+    value: 1000.0
+  - type: resistor
+    name: R1
+    nodes: [n1, n2]
+    value: 1000.0
+  - type: resistor
+    name: R2
+    nodes: [n2, n3]
+    value: 1000.0
+  - type: resistor
+    name: R3
+    nodes: [n3, n4]
+    value: 1000.0
+  - type: resistor
+    name: R4
+    nodes: [n4, n5]
+    value: 1000.0
+  - type: resistor
+    name: R5
+    nodes: [n5, n6]
+    value: 1000.0
+  - type: resistor
+    name: R6
+    nodes: [n6, n7]
+    value: 1000.0
+  - type: resistor
+    name: R7
+    nodes: [n7, n8]
+    value: 1000.0
+  - type: resistor
+    name: R8
+    nodes: [n8, n9]
+    value: 1000.0
+  - type: resistor
+    name: R9
+    nodes: [n9, n10]
+    value: 1000.0
+  - type: resistor
+    name: R10
+    nodes: [n10, n11]
+    value: 1000.0
+  - type: resistor
+    name: R11
+    nodes: [n11, n12]
+    value: 1000.0
+  - type: resistor
+    name: R12
+    nodes: [n12, n13]
+    value: 1000.0
+  - type: resistor
+    name: R13
+    nodes: [n13, n14]
+    value: 1000.0
+  - type: resistor
+    name: R14
+    nodes: [n14, n15]
+    value: 1000.0
+  - type: resistor
+    name: R15
+    nodes: [n15, n16]
+    value: 1000.0
+  - type: resistor
+    name: R16
+    nodes: [n16, n17]
+    value: 1000.0
+  - type: resistor
+    name: R17
+    nodes: [n17, n18]
+    value: 1000.0
+  - type: resistor
+    name: R18
+    nodes: [n18, n19]
+    value: 1000.0
+  - type: resistor
+    name: R19
+    nodes: [n19, n20]
+    value: 1000.0
+  - type: resistor
+    name: R20
+    nodes: [n20, n21]
+    value: 1000.0
+  - type: resistor
+    name: R21
+    nodes: [n21, n22]
+    value: 1000.0
+  - type: resistor
+    name: R22
+    nodes: [n22, n23]
+    value: 1000.0
+  - type: resistor
+    name: R23
+    nodes: [n23, n24]
+    value: 1000.0
+  - type: resistor
+    name: R24
+    nodes: [n24, n25]
+    value: 1000.0
+  - type: resistor
+    name: R25
+    nodes: [n25, n26]
+    value: 1000.0
+  - type: resistor
+    name: R26
+    nodes: [n26, n27]
+    value: 1000.0
+  - type: resistor
+    name: R27
+    nodes: [n27, n28]
+    value: 1000.0
+  - type: resistor
+    name: R28
+    nodes: [n28, n29]
+    value: 1000.0
+  - type: resistor
+    name: R29
+    nodes: [n29, n30]
+    value: 1000.0
+  - type: resistor
+    name: R30
+    nodes: [n30, n31]
+    value: 1000.0
+  - type: resistor
+    name: R31
+    nodes: [n31, n32]
+    value: 1000.0
+  - type: resistor
+    name: R32
+    nodes: [n32, n33]
+    value: 1000.0
+  - type: resistor
+    name: R33
+    nodes: [n33, n34]
+    value: 1000.0
+  - type: resistor
+    name: R34
+    nodes: [n34, n35]
+    value: 1000.0
+  - type: resistor
+    name: R35
+    nodes: [n35, n36]
+    value: 1000.0
+  - type: resistor
+    name: R36
+    nodes: [n36, n37]
+    value: 1000.0
+  - type: resistor
+    name: R37
+    nodes: [n37, n38]
+    value: 1000.0
+  - type: resistor
+    name: R38
+    nodes: [n38, n39]
+    value: 1000.0
+  - type: resistor
+    name: R39
+    nodes: [n39, n40]
+    value: 1000.0
+  - type: resistor
+    name: R40
+    nodes: [n40, n41]
+    value: 1000.0
+  - type: resistor
+    name: R41
+    nodes: [n41, n42]
+    value: 1000.0
+  - type: resistor
+    name: R42
+    nodes: [n42, n43]
+    value: 1000.0
+  - type: resistor
+    name: R43
+    nodes: [n43, n44]
+    value: 1000.0
+  - type: resistor
+    name: R44
+    nodes: [n44, n45]
+    value: 1000.0
+  - type: resistor
+    name: R45
+    nodes: [n45, n46]
+    value: 1000.0
+  - type: resistor
+    name: R46
+    nodes: [n46, n47]
+    value: 1000.0
+  - type: resistor
+    name: R47
+    nodes: [n47, n48]
+    value: 1000.0
+  - type: resistor
+    name: R48
+    nodes: [n48, n49]
+    value: 1000.0
+  - type: resistor
+    name: R49
+    nodes: [n49, n50]
+    value: 1000.0
+  - type: resistor
+    name: R50
+    nodes: [n50, n51]
+    value: 1000.0
+  - type: resistor
+    name: R51
+    nodes: [n51, n52]
+    value: 1000.0
+  - type: resistor
+    name: R52
+    nodes: [n52, n53]
+    value: 1000.0
+  - type: resistor
+    name: R53
+    nodes: [n53, n54]
+    value: 1000.0
+  - type: resistor
+    name: R54
+    nodes: [n54, n55]
+    value: 1000.0
+  - type: resistor
+    name: R55
+    nodes: [n55, n56]
+    value: 1000.0
+  - type: resistor
+    name: R56
+    nodes: [n56, n57]
+    value: 1000.0
+  - type: resistor
+    name: R57
+    nodes: [n57, n58]
+    value: 1000.0
+  - type: resistor
+    name: R58
+    nodes: [n58, n59]
+    value: 1000.0
+  - type: resistor
+    name: R59
+    nodes: [n59, n60]
+    value: 1000.0
+  - type: resistor
+    name: R60
+    nodes: [n60, n61]
+    value: 1000.0
+  - type: resistor
+    name: R61
+    nodes: [n61, n62]
+    value: 1000.0
+  - type: resistor
+    name: R62
+    nodes: [n62, n63]
+    value: 1000.0
+  - type: resistor
+    name: R63
+    nodes: [n63, n64]
+    value: 1000.0
+  - type: resistor
+    name: R64
+    nodes: [n64, n65]
+    value: 1000.0
+  - type: resistor
+    name: R65
+    nodes: [n65, n66]
+    value: 1000.0
+  - type: resistor
+    name: R66
+    nodes: [n66, n67]
+    value: 1000.0
+  - type: resistor
+    name: R67
+    nodes: [n67, n68]
+    value: 1000.0
+  - type: resistor
+    name: R68
+    nodes: [n68, n69]
+    value: 1000.0
+  - type: resistor
+    name: R69
+    nodes: [n69, n70]
+    value: 1000.0
+  - type: resistor
+    name: R70
+    nodes: [n70, n71]
+    value: 1000.0
+  - type: resistor
+    name: R71
+    nodes: [n71, n72]
+    value: 1000.0
+  - type: resistor
+    name: R72
+    nodes: [n72, n73]
+    value: 1000.0
+  - type: resistor
+    name: R73
+    nodes: [n73, n74]
+    value: 1000.0
+  - type: resistor
+    name: R74
+    nodes: [n74, n75]
+    value: 1000.0
+  - type: resistor
+    name: R75
+    nodes: [n75, n76]
+    value: 1000.0
+  - type: resistor
+    name: R76
+    nodes: [n76, n77]
+    value: 1000.0
+  - type: resistor
+    name: R77
+    nodes: [n77, n78]
+    value: 1000.0
+  - type: resistor
+    name: R78
+    nodes: [n78, n79]
+    value: 1000.0
+  - type: resistor
+    name: R79
+    nodes: [n79, n80]
+    value: 1000.0
+  - type: resistor
+    name: R80
+    nodes: [n80, n81]
+    value: 1000.0
+  - type: resistor
+    name: R81
+    nodes: [n81, n82]
+    value: 1000.0
+  - type: resistor
+    name: R82
+    nodes: [n82, n83]
+    value: 1000.0
+  - type: resistor
+    name: R83
+    nodes: [n83, n84]
+    value: 1000.0
+  - type: resistor
+    name: R84
+    nodes: [n84, n85]
+    value: 1000.0
+  - type: resistor
+    name: R85
+    nodes: [n85, n86]
+    value: 1000.0
+  - type: resistor
+    name: R86
+    nodes: [n86, n87]
+    value: 1000.0
+  - type: resistor
+    name: R87
+    nodes: [n87, n88]
+    value: 1000.0
+  - type: resistor
+    name: R88
+    nodes: [n88, n89]
+    value: 1000.0
+  - type: resistor
+    name: R89
+    nodes: [n89, n90]
+    value: 1000.0
+  - type: resistor
+    name: R90
+    nodes: [n90, n91]
+    value: 1000.0
+  - type: resistor
+    name: R91
+    nodes: [n91, n92]
+    value: 1000.0
+  - type: resistor
+    name: R92
+    nodes: [n92, n93]
+    value: 1000.0
+  - type: resistor
+    name: R93
+    nodes: [n93, n94]
+    value: 1000.0
+  - type: resistor
+    name: R94
+    nodes: [n94, n95]
+    value: 1000.0
+  - type: resistor
+    name: R95
+    nodes: [n95, n96]
+    value: 1000.0
+  - type: resistor
+    name: R96
+    nodes: [n96, n97]
+    value: 1000.0
+  - type: resistor
+    name: R97
+    nodes: [n97, n98]
+    value: 1000.0
+  - type: resistor
+    name: R98
+    nodes: [n98, n99]
+    value: 1000.0
+  - type: resistor
+    name: R99
+    nodes: [n99, n100]
+    value: 1000.0
+  - type: resistor
+    name: R100
+    nodes: [n100, n101]
+    value: 1000.0
+  - type: resistor
+    name: R101
+    nodes: [n101, n102]
+    value: 1000.0
+  - type: resistor
+    name: R102
+    nodes: [n102, n103]
+    value: 1000.0
+  - type: resistor
+    name: R103
+    nodes: [n103, n104]
+    value: 1000.0
+  - type: resistor
+    name: R104
+    nodes: [n104, n105]
+    value: 1000.0
+  - type: resistor
+    name: R105
+    nodes: [n105, n106]
+    value: 1000.0
+  - type: resistor
+    name: R106
+    nodes: [n106, n107]
+    value: 1000.0
+  - type: resistor
+    name: R107
+    nodes: [n107, n108]
+    value: 1000.0
+  - type: resistor
+    name: R108
+    nodes: [n108, n109]
+    value: 1000.0
+  - type: resistor
+    name: R109
+    nodes: [n109, n110]
+    value: 1000.0
+  - type: resistor
+    name: R110
+    nodes: [n110, n111]
+    value: 1000.0
+  - type: resistor
+    name: R111
+    nodes: [n111, n112]
+    value: 1000.0
+  - type: resistor
+    name: R112
+    nodes: [n112, n113]
+    value: 1000.0
+  - type: resistor
+    name: R113
+    nodes: [n113, n114]
+    value: 1000.0
+  - type: resistor
+    name: R114
+    nodes: [n114, n115]
+    value: 1000.0
+  - type: resistor
+    name: R115
+    nodes: [n115, n116]
+    value: 1000.0
+  - type: resistor
+    name: R116
+    nodes: [n116, n117]
+    value: 1000.0
+  - type: resistor
+    name: R117
+    nodes: [n117, n118]
+    value: 1000.0
+  - type: resistor
+    name: R118
+    nodes: [n118, n119]
+    value: 1000.0
+  - type: resistor
+    name: R119
+    nodes: [n119, n120]
+    value: 1000.0
+  - type: resistor
+    name: R120
+    nodes: [n120, n121]
+    value: 1000.0
+  - type: resistor
+    name: R121
+    nodes: [n121, n122]
+    value: 1000.0
+  - type: resistor
+    name: R122
+    nodes: [n122, n123]
+    value: 1000.0
+  - type: resistor
+    name: R123
+    nodes: [n123, n124]
+    value: 1000.0
+  - type: resistor
+    name: R124
+    nodes: [n124, n125]
+    value: 1000.0
+  - type: resistor
+    name: R125
+    nodes: [n125, n126]
+    value: 1000.0
+  - type: resistor
+    name: R126
+    nodes: [n126, n127]
+    value: 1000.0
+  - type: resistor
+    name: R127
+    nodes: [n127, n128]
+    value: 1000.0
+  - type: resistor
+    name: R128
+    nodes: [n128, n129]
+    value: 1000.0
+  - type: resistor
+    name: R129
+    nodes: [n129, n130]
+    value: 1000.0
+  - type: resistor
+    name: R130
+    nodes: [n130, n131]
+    value: 1000.0
+  - type: resistor
+    name: R131
+    nodes: [n131, n132]
+    value: 1000.0
+  - type: resistor
+    name: R132
+    nodes: [n132, n133]
+    value: 1000.0
+  - type: resistor
+    name: R133
+    nodes: [n133, n134]
+    value: 1000.0
+  - type: resistor
+    name: R134
+    nodes: [n134, n135]
+    value: 1000.0
+  - type: resistor
+    name: R135
+    nodes: [n135, n136]
+    value: 1000.0
+  - type: resistor
+    name: R136
+    nodes: [n136, n137]
+    value: 1000.0
+  - type: resistor
+    name: R137
+    nodes: [n137, n138]
+    value: 1000.0
+  - type: resistor
+    name: R138
+    nodes: [n138, n139]
+    value: 1000.0
+  - type: resistor
+    name: R139
+    nodes: [n139, n140]
+    value: 1000.0
+  - type: resistor
+    name: R140
+    nodes: [n140, n141]
+    value: 1000.0
+  - type: resistor
+    name: R141
+    nodes: [n141, n142]
+    value: 1000.0
+  - type: resistor
+    name: R142
+    nodes: [n142, n143]
+    value: 1000.0
+  - type: resistor
+    name: R143
+    nodes: [n143, n144]
+    value: 1000.0
+  - type: resistor
+    name: R144
+    nodes: [n144, n145]
+    value: 1000.0
+  - type: resistor
+    name: R145
+    nodes: [n145, n146]
+    value: 1000.0
+  - type: resistor
+    name: R146
+    nodes: [n146, n147]
+    value: 1000.0
+  - type: resistor
+    name: R147
+    nodes: [n147, n148]
+    value: 1000.0
+  - type: resistor
+    name: R148
+    nodes: [n148, n149]
+    value: 1000.0
+  - type: resistor
+    name: R149
+    nodes: [n149, n150]
+    value: 1000.0
+  - type: resistor
+    name: R150
+    nodes: [n150, n151]
+    value: 1000.0
+  - type: resistor
+    name: R151
+    nodes: [n151, n152]
+    value: 1000.0
+  - type: resistor
+    name: R152
+    nodes: [n152, n153]
+    value: 1000.0
+  - type: resistor
+    name: R153
+    nodes: [n153, n154]
+    value: 1000.0
+  - type: resistor
+    name: R154
+    nodes: [n154, n155]
+    value: 1000.0
+  - type: resistor
+    name: R155
+    nodes: [n155, n156]
+    value: 1000.0
+  - type: resistor
+    name: R156
+    nodes: [n156, n157]
+    value: 1000.0
+  - type: resistor
+    name: R157
+    nodes: [n157, n158]
+    value: 1000.0
+  - type: resistor
+    name: R158
+    nodes: [n158, n159]
+    value: 1000.0
+  - type: resistor
+    name: R159
+    nodes: [n159, n160]
+    value: 1000.0
+  - type: resistor
+    name: R160
+    nodes: [n160, n161]
+    value: 1000.0
+  - type: resistor
+    name: R161
+    nodes: [n161, n162]
+    value: 1000.0
+  - type: resistor
+    name: R162
+    nodes: [n162, n163]
+    value: 1000.0
+  - type: resistor
+    name: R163
+    nodes: [n163, n164]
+    value: 1000.0
+  - type: resistor
+    name: R164
+    nodes: [n164, n165]
+    value: 1000.0
+  - type: resistor
+    name: R165
+    nodes: [n165, n166]
+    value: 1000.0
+  - type: resistor
+    name: R166
+    nodes: [n166, n167]
+    value: 1000.0
+  - type: resistor
+    name: R167
+    nodes: [n167, n168]
+    value: 1000.0
+  - type: resistor
+    name: R168
+    nodes: [n168, n169]
+    value: 1000.0
+  - type: resistor
+    name: R169
+    nodes: [n169, n170]
+    value: 1000.0
+  - type: resistor
+    name: R170
+    nodes: [n170, n171]
+    value: 1000.0
+  - type: resistor
+    name: R171
+    nodes: [n171, n172]
+    value: 1000.0
+  - type: resistor
+    name: R172
+    nodes: [n172, n173]
+    value: 1000.0
+  - type: resistor
+    name: R173
+    nodes: [n173, n174]
+    value: 1000.0
+  - type: resistor
+    name: R174
+    nodes: [n174, n175]
+    value: 1000.0
+  - type: resistor
+    name: R175
+    nodes: [n175, n176]
+    value: 1000.0
+  - type: resistor
+    name: R176
+    nodes: [n176, n177]
+    value: 1000.0
+  - type: resistor
+    name: R177
+    nodes: [n177, n178]
+    value: 1000.0
+  - type: resistor
+    name: R178
+    nodes: [n178, n179]
+    value: 1000.0
+  - type: resistor
+    name: R179
+    nodes: [n179, n180]
+    value: 1000.0
+  - type: resistor
+    name: R180
+    nodes: [n180, n181]
+    value: 1000.0
+  - type: resistor
+    name: R181
+    nodes: [n181, n182]
+    value: 1000.0
+  - type: resistor
+    name: R182
+    nodes: [n182, n183]
+    value: 1000.0
+  - type: resistor
+    name: R183
+    nodes: [n183, n184]
+    value: 1000.0
+  - type: resistor
+    name: R184
+    nodes: [n184, n185]
+    value: 1000.0
+  - type: resistor
+    name: R185
+    nodes: [n185, n186]
+    value: 1000.0
+  - type: resistor
+    name: R186
+    nodes: [n186, n187]
+    value: 1000.0
+  - type: resistor
+    name: R187
+    nodes: [n187, n188]
+    value: 1000.0
+  - type: resistor
+    name: R188
+    nodes: [n188, n189]
+    value: 1000.0
+  - type: resistor
+    name: R189
+    nodes: [n189, n190]
+    value: 1000.0
+  - type: resistor
+    name: R190
+    nodes: [n190, n191]
+    value: 1000.0
+  - type: resistor
+    name: R191
+    nodes: [n191, n192]
+    value: 1000.0
+  - type: resistor
+    name: R192
+    nodes: [n192, n193]
+    value: 1000.0
+  - type: resistor
+    name: R193
+    nodes: [n193, n194]
+    value: 1000.0
+  - type: resistor
+    name: R194
+    nodes: [n194, n195]
+    value: 1000.0
+  - type: resistor
+    name: R195
+    nodes: [n195, n196]
+    value: 1000.0
+  - type: resistor
+    name: R196
+    nodes: [n196, n197]
+    value: 1000.0
+  - type: resistor
+    name: R197
+    nodes: [n197, n198]
+    value: 1000.0
+  - type: resistor
+    name: R198
+    nodes: [n198, n199]
+    value: 1000.0
+  - type: resistor
+    name: R199
+    nodes: [n199, n200]
+    value: 1000.0
+  - type: resistor
+    name: R200
+    nodes: [n200, n201]
+    value: 1000.0
+  - type: resistor
+    name: R201
+    nodes: [n201, n202]
+    value: 1000.0
+  - type: resistor
+    name: R202
+    nodes: [n202, n203]
+    value: 1000.0
+  - type: resistor
+    name: R203
+    nodes: [n203, n204]
+    value: 1000.0
+  - type: resistor
+    name: R204
+    nodes: [n204, n205]
+    value: 1000.0
+  - type: resistor
+    name: R205
+    nodes: [n205, n206]
+    value: 1000.0
+  - type: resistor
+    name: R206
+    nodes: [n206, n207]
+    value: 1000.0
+  - type: resistor
+    name: R207
+    nodes: [n207, n208]
+    value: 1000.0
+  - type: resistor
+    name: R208
+    nodes: [n208, n209]
+    value: 1000.0
+  - type: resistor
+    name: R209
+    nodes: [n209, n210]
+    value: 1000.0
+  - type: resistor
+    name: R210
+    nodes: [n210, n211]
+    value: 1000.0
+  - type: resistor
+    name: R211
+    nodes: [n211, n212]
+    value: 1000.0
+  - type: resistor
+    name: R212
+    nodes: [n212, n213]
+    value: 1000.0
+  - type: resistor
+    name: R213
+    nodes: [n213, n214]
+    value: 1000.0
+  - type: resistor
+    name: R214
+    nodes: [n214, n215]
+    value: 1000.0
+  - type: resistor
+    name: R215
+    nodes: [n215, n216]
+    value: 1000.0
+  - type: resistor
+    name: R216
+    nodes: [n216, n217]
+    value: 1000.0
+  - type: resistor
+    name: R217
+    nodes: [n217, n218]
+    value: 1000.0
+  - type: resistor
+    name: R218
+    nodes: [n218, n219]
+    value: 1000.0
+  - type: resistor
+    name: R219
+    nodes: [n219, n220]
+    value: 1000.0
+  - type: resistor
+    name: R220
+    nodes: [n220, n221]
+    value: 1000.0
+  - type: resistor
+    name: R221
+    nodes: [n221, n222]
+    value: 1000.0
+  - type: resistor
+    name: R222
+    nodes: [n222, n223]
+    value: 1000.0
+  - type: resistor
+    name: R223
+    nodes: [n223, n224]
+    value: 1000.0
+  - type: resistor
+    name: R224
+    nodes: [n224, n225]
+    value: 1000.0
+  - type: resistor
+    name: R225
+    nodes: [n225, n226]
+    value: 1000.0
+  - type: resistor
+    name: R226
+    nodes: [n226, n227]
+    value: 1000.0
+  - type: resistor
+    name: R227
+    nodes: [n227, n228]
+    value: 1000.0
+  - type: resistor
+    name: R228
+    nodes: [n228, n229]
+    value: 1000.0
+  - type: resistor
+    name: R229
+    nodes: [n229, n230]
+    value: 1000.0
+  - type: resistor
+    name: R230
+    nodes: [n230, n231]
+    value: 1000.0
+  - type: resistor
+    name: R231
+    nodes: [n231, n232]
+    value: 1000.0
+  - type: resistor
+    name: R232
+    nodes: [n232, n233]
+    value: 1000.0
+  - type: resistor
+    name: R233
+    nodes: [n233, n234]
+    value: 1000.0
+  - type: resistor
+    name: R234
+    nodes: [n234, n235]
+    value: 1000.0
+  - type: resistor
+    name: R235
+    nodes: [n235, n236]
+    value: 1000.0
+  - type: resistor
+    name: R236
+    nodes: [n236, n237]
+    value: 1000.0
+  - type: resistor
+    name: R237
+    nodes: [n237, n238]
+    value: 1000.0
+  - type: resistor
+    name: R238
+    nodes: [n238, n239]
+    value: 1000.0
+  - type: resistor
+    name: R239
+    nodes: [n239, n240]
+    value: 1000.0
+  - type: resistor
+    name: R240
+    nodes: [n240, n241]
+    value: 1000.0
+  - type: resistor
+    name: R241
+    nodes: [n241, n242]
+    value: 1000.0
+  - type: resistor
+    name: R242
+    nodes: [n242, n243]
+    value: 1000.0
+  - type: resistor
+    name: R243
+    nodes: [n243, n244]
+    value: 1000.0
+  - type: resistor
+    name: R244
+    nodes: [n244, n245]
+    value: 1000.0
+  - type: resistor
+    name: R245
+    nodes: [n245, n246]
+    value: 1000.0
+  - type: resistor
+    name: R246
+    nodes: [n246, n247]
+    value: 1000.0
+  - type: resistor
+    name: R247
+    nodes: [n247, n248]
+    value: 1000.0
+  - type: resistor
+    name: R248
+    nodes: [n248, n249]
+    value: 1000.0
+  - type: resistor
+    name: R249
+    nodes: [n249, n250]
+    value: 1000.0
+  - type: resistor
+    name: R250
+    nodes: [n250, n251]
+    value: 1000.0
+  - type: resistor
+    name: R251
+    nodes: [n251, n252]
+    value: 1000.0
+  - type: resistor
+    name: R252
+    nodes: [n252, n253]
+    value: 1000.0
+  - type: resistor
+    name: R253
+    nodes: [n253, n254]
+    value: 1000.0
+  - type: resistor
+    name: R254
+    nodes: [n254, n255]
+    value: 1000.0
+  - type: resistor
+    name: R255
+    nodes: [n255, n256]
+    value: 1000.0
+  - type: resistor
+    name: R256
+    nodes: [n256, n257]
+    value: 1000.0
+  - type: resistor
+    name: R257
+    nodes: [n257, n258]
+    value: 1000.0
+  - type: resistor
+    name: R258
+    nodes: [n258, n259]
+    value: 1000.0
+  - type: resistor
+    name: R259
+    nodes: [n259, n260]
+    value: 1000.0
+  - type: resistor
+    name: R260
+    nodes: [n260, n261]
+    value: 1000.0
+  - type: resistor
+    name: R261
+    nodes: [n261, n262]
+    value: 1000.0
+  - type: resistor
+    name: R262
+    nodes: [n262, n263]
+    value: 1000.0
+  - type: resistor
+    name: R263
+    nodes: [n263, n264]
+    value: 1000.0
+  - type: resistor
+    name: R264
+    nodes: [n264, n265]
+    value: 1000.0
+  - type: resistor
+    name: R265
+    nodes: [n265, n266]
+    value: 1000.0
+  - type: resistor
+    name: R266
+    nodes: [n266, n267]
+    value: 1000.0
+  - type: resistor
+    name: R267
+    nodes: [n267, n268]
+    value: 1000.0
+  - type: resistor
+    name: R268
+    nodes: [n268, n269]
+    value: 1000.0
+  - type: resistor
+    name: R269
+    nodes: [n269, n270]
+    value: 1000.0
+  - type: resistor
+    name: R270
+    nodes: [n270, n271]
+    value: 1000.0
+  - type: resistor
+    name: R271
+    nodes: [n271, n272]
+    value: 1000.0
+  - type: resistor
+    name: R272
+    nodes: [n272, n273]
+    value: 1000.0
+  - type: resistor
+    name: R273
+    nodes: [n273, n274]
+    value: 1000.0
+  - type: resistor
+    name: R274
+    nodes: [n274, n275]
+    value: 1000.0
+  - type: resistor
+    name: R275
+    nodes: [n275, n276]
+    value: 1000.0
+  - type: resistor
+    name: R276
+    nodes: [n276, n277]
+    value: 1000.0
+  - type: resistor
+    name: R277
+    nodes: [n277, n278]
+    value: 1000.0
+  - type: resistor
+    name: R278
+    nodes: [n278, n279]
+    value: 1000.0
+  - type: resistor
+    name: R279
+    nodes: [n279, n280]
+    value: 1000.0
+  - type: resistor
+    name: R280
+    nodes: [n280, n281]
+    value: 1000.0
+  - type: resistor
+    name: R281
+    nodes: [n281, n282]
+    value: 1000.0
+  - type: resistor
+    name: R282
+    nodes: [n282, n283]
+    value: 1000.0
+  - type: resistor
+    name: R283
+    nodes: [n283, n284]
+    value: 1000.0
+  - type: resistor
+    name: R284
+    nodes: [n284, n285]
+    value: 1000.0
+  - type: resistor
+    name: R285
+    nodes: [n285, n286]
+    value: 1000.0
+  - type: resistor
+    name: R286
+    nodes: [n286, n287]
+    value: 1000.0
+  - type: resistor
+    name: R287
+    nodes: [n287, n288]
+    value: 1000.0
+  - type: resistor
+    name: R288
+    nodes: [n288, n289]
+    value: 1000.0
+  - type: resistor
+    name: R289
+    nodes: [n289, n290]
+    value: 1000.0
+  - type: resistor
+    name: R290
+    nodes: [n290, n291]
+    value: 1000.0
+  - type: resistor
+    name: R291
+    nodes: [n291, n292]
+    value: 1000.0
+  - type: resistor
+    name: R292
+    nodes: [n292, n293]
+    value: 1000.0
+  - type: resistor
+    name: R293
+    nodes: [n293, n294]
+    value: 1000.0
+  - type: resistor
+    name: R294
+    nodes: [n294, n295]
+    value: 1000.0
+  - type: resistor
+    name: R295
+    nodes: [n295, n296]
+    value: 1000.0
+  - type: resistor
+    name: R296
+    nodes: [n296, n297]
+    value: 1000.0
+  - type: resistor
+    name: R297
+    nodes: [n297, n298]
+    value: 1000.0
+  - type: resistor
+    name: R298
+    nodes: [n298, n299]
+    value: 1000.0
+  - type: resistor
+    name: R299
+    nodes: [n299, n300]
+    value: 1000.0
+  - type: resistor
+    name: R300
+    nodes: [n300, n301]
+    value: 1000.0
+  - type: resistor
+    name: R301
+    nodes: [n301, n302]
+    value: 1000.0
+  - type: resistor
+    name: R302
+    nodes: [n302, n303]
+    value: 1000.0
+  - type: resistor
+    name: R303
+    nodes: [n303, n304]
+    value: 1000.0
+  - type: resistor
+    name: R304
+    nodes: [n304, n305]
+    value: 1000.0
+  - type: resistor
+    name: R305
+    nodes: [n305, n306]
+    value: 1000.0
+  - type: resistor
+    name: R306
+    nodes: [n306, n307]
+    value: 1000.0
+  - type: resistor
+    name: R307
+    nodes: [n307, n308]
+    value: 1000.0
+  - type: resistor
+    name: R308
+    nodes: [n308, n309]
+    value: 1000.0
+  - type: resistor
+    name: R309
+    nodes: [n309, n310]
+    value: 1000.0
+  - type: resistor
+    name: R310
+    nodes: [n310, n311]
+    value: 1000.0
+  - type: resistor
+    name: R311
+    nodes: [n311, n312]
+    value: 1000.0
+  - type: resistor
+    name: R312
+    nodes: [n312, n313]
+    value: 1000.0
+  - type: resistor
+    name: R313
+    nodes: [n313, n314]
+    value: 1000.0
+  - type: resistor
+    name: R314
+    nodes: [n314, n315]
+    value: 1000.0
+  - type: resistor
+    name: R315
+    nodes: [n315, n316]
+    value: 1000.0
+  - type: resistor
+    name: R316
+    nodes: [n316, n317]
+    value: 1000.0
+  - type: resistor
+    name: R317
+    nodes: [n317, n318]
+    value: 1000.0
+  - type: resistor
+    name: R318
+    nodes: [n318, n319]
+    value: 1000.0
+  - type: resistor
+    name: R319
+    nodes: [n319, n320]
+    value: 1000.0
+  - type: resistor
+    name: R320
+    nodes: [n320, n321]
+    value: 1000.0
+  - type: resistor
+    name: R321
+    nodes: [n321, n322]
+    value: 1000.0
+  - type: resistor
+    name: R322
+    nodes: [n322, n323]
+    value: 1000.0
+  - type: resistor
+    name: R323
+    nodes: [n323, n324]
+    value: 1000.0
+  - type: resistor
+    name: R324
+    nodes: [n324, n325]
+    value: 1000.0
+  - type: resistor
+    name: R325
+    nodes: [n325, n326]
+    value: 1000.0
+  - type: resistor
+    name: R326
+    nodes: [n326, n327]
+    value: 1000.0
+  - type: resistor
+    name: R327
+    nodes: [n327, n328]
+    value: 1000.0
+  - type: resistor
+    name: R328
+    nodes: [n328, n329]
+    value: 1000.0
+  - type: resistor
+    name: R329
+    nodes: [n329, n330]
+    value: 1000.0
+  - type: resistor
+    name: R330
+    nodes: [n330, n331]
+    value: 1000.0
+  - type: resistor
+    name: R331
+    nodes: [n331, n332]
+    value: 1000.0
+  - type: resistor
+    name: R332
+    nodes: [n332, n333]
+    value: 1000.0
+  - type: resistor
+    name: R333
+    nodes: [n333, n334]
+    value: 1000.0
+  - type: resistor
+    name: R334
+    nodes: [n334, n335]
+    value: 1000.0
+  - type: resistor
+    name: R335
+    nodes: [n335, n336]
+    value: 1000.0
+  - type: resistor
+    name: R336
+    nodes: [n336, n337]
+    value: 1000.0
+  - type: resistor
+    name: R337
+    nodes: [n337, n338]
+    value: 1000.0
+  - type: resistor
+    name: R338
+    nodes: [n338, n339]
+    value: 1000.0
+  - type: resistor
+    name: R339
+    nodes: [n339, n340]
+    value: 1000.0
+  - type: resistor
+    name: R340
+    nodes: [n340, n341]
+    value: 1000.0
+  - type: resistor
+    name: R341
+    nodes: [n341, n342]
+    value: 1000.0
+  - type: resistor
+    name: R342
+    nodes: [n342, n343]
+    value: 1000.0
+  - type: resistor
+    name: R343
+    nodes: [n343, n344]
+    value: 1000.0
+  - type: resistor
+    name: R344
+    nodes: [n344, n345]
+    value: 1000.0
+  - type: resistor
+    name: R345
+    nodes: [n345, n346]
+    value: 1000.0
+  - type: resistor
+    name: R346
+    nodes: [n346, n347]
+    value: 1000.0
+  - type: resistor
+    name: R347
+    nodes: [n347, n348]
+    value: 1000.0
+  - type: resistor
+    name: R348
+    nodes: [n348, n349]
+    value: 1000.0
+  - type: resistor
+    name: R349
+    nodes: [n349, n350]
+    value: 1000.0
+  - type: resistor
+    name: R350
+    nodes: [n350, n351]
+    value: 1000.0
+  - type: resistor
+    name: R351
+    nodes: [n351, n352]
+    value: 1000.0
+  - type: resistor
+    name: R352
+    nodes: [n352, n353]
+    value: 1000.0
+  - type: resistor
+    name: R353
+    nodes: [n353, n354]
+    value: 1000.0
+  - type: resistor
+    name: R354
+    nodes: [n354, n355]
+    value: 1000.0
+  - type: resistor
+    name: R355
+    nodes: [n355, n356]
+    value: 1000.0
+  - type: resistor
+    name: R356
+    nodes: [n356, n357]
+    value: 1000.0
+  - type: resistor
+    name: R357
+    nodes: [n357, n358]
+    value: 1000.0
+  - type: resistor
+    name: R358
+    nodes: [n358, n359]
+    value: 1000.0
+  - type: resistor
+    name: R359
+    nodes: [n359, n360]
+    value: 1000.0
+  - type: resistor
+    name: R360
+    nodes: [n360, n361]
+    value: 1000.0
+  - type: resistor
+    name: R361
+    nodes: [n361, n362]
+    value: 1000.0
+  - type: resistor
+    name: R362
+    nodes: [n362, n363]
+    value: 1000.0
+  - type: resistor
+    name: R363
+    nodes: [n363, n364]
+    value: 1000.0
+  - type: resistor
+    name: R364
+    nodes: [n364, n365]
+    value: 1000.0
+  - type: resistor
+    name: R365
+    nodes: [n365, n366]
+    value: 1000.0
+  - type: resistor
+    name: R366
+    nodes: [n366, n367]
+    value: 1000.0
+  - type: resistor
+    name: R367
+    nodes: [n367, n368]
+    value: 1000.0
+  - type: resistor
+    name: R368
+    nodes: [n368, n369]
+    value: 1000.0
+  - type: resistor
+    name: R369
+    nodes: [n369, n370]
+    value: 1000.0
+  - type: resistor
+    name: R370
+    nodes: [n370, n371]
+    value: 1000.0
+  - type: resistor
+    name: R371
+    nodes: [n371, n372]
+    value: 1000.0
+  - type: resistor
+    name: R372
+    nodes: [n372, n373]
+    value: 1000.0
+  - type: resistor
+    name: R373
+    nodes: [n373, n374]
+    value: 1000.0
+  - type: resistor
+    name: R374
+    nodes: [n374, n375]
+    value: 1000.0
+  - type: resistor
+    name: R375
+    nodes: [n375, n376]
+    value: 1000.0
+  - type: resistor
+    name: R376
+    nodes: [n376, n377]
+    value: 1000.0
+  - type: resistor
+    name: R377
+    nodes: [n377, n378]
+    value: 1000.0
+  - type: resistor
+    name: R378
+    nodes: [n378, n379]
+    value: 1000.0
+  - type: resistor
+    name: R379
+    nodes: [n379, n380]
+    value: 1000.0
+  - type: resistor
+    name: R380
+    nodes: [n380, n381]
+    value: 1000.0
+  - type: resistor
+    name: R381
+    nodes: [n381, n382]
+    value: 1000.0
+  - type: resistor
+    name: R382
+    nodes: [n382, n383]
+    value: 1000.0
+  - type: resistor
+    name: R383
+    nodes: [n383, n384]
+    value: 1000.0
+  - type: resistor
+    name: R384
+    nodes: [n384, n385]
+    value: 1000.0
+  - type: resistor
+    name: R385
+    nodes: [n385, n386]
+    value: 1000.0
+  - type: resistor
+    name: R386
+    nodes: [n386, n387]
+    value: 1000.0
+  - type: resistor
+    name: R387
+    nodes: [n387, n388]
+    value: 1000.0
+  - type: resistor
+    name: R388
+    nodes: [n388, n389]
+    value: 1000.0
+  - type: resistor
+    name: R389
+    nodes: [n389, n390]
+    value: 1000.0
+  - type: resistor
+    name: R390
+    nodes: [n390, n391]
+    value: 1000.0
+  - type: resistor
+    name: R391
+    nodes: [n391, n392]
+    value: 1000.0
+  - type: resistor
+    name: R392
+    nodes: [n392, n393]
+    value: 1000.0
+  - type: resistor
+    name: R393
+    nodes: [n393, n394]
+    value: 1000.0
+  - type: resistor
+    name: R394
+    nodes: [n394, n395]
+    value: 1000.0
+  - type: resistor
+    name: R395
+    nodes: [n395, n396]
+    value: 1000.0
+  - type: resistor
+    name: R396
+    nodes: [n396, n397]
+    value: 1000.0
+  - type: resistor
+    name: R397
+    nodes: [n397, n398]
+    value: 1000.0
+  - type: resistor
+    name: R398
+    nodes: [n398, n399]
+    value: 1000.0
+  - type: resistor
+    name: Rlast
+    nodes: [n399, 0]
+    value: 1000.0
+  - type: capacitor
+    name: C1
+    nodes: [n1, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C2
+    nodes: [n2, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C3
+    nodes: [n3, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C4
+    nodes: [n4, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C5
+    nodes: [n5, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C6
+    nodes: [n6, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C7
+    nodes: [n7, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C8
+    nodes: [n8, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C9
+    nodes: [n9, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C10
+    nodes: [n10, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C11
+    nodes: [n11, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C12
+    nodes: [n12, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C13
+    nodes: [n13, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C14
+    nodes: [n14, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C15
+    nodes: [n15, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C16
+    nodes: [n16, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C17
+    nodes: [n17, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C18
+    nodes: [n18, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C19
+    nodes: [n19, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C20
+    nodes: [n20, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C21
+    nodes: [n21, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C22
+    nodes: [n22, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C23
+    nodes: [n23, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C24
+    nodes: [n24, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C25
+    nodes: [n25, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C26
+    nodes: [n26, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C27
+    nodes: [n27, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C28
+    nodes: [n28, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C29
+    nodes: [n29, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C30
+    nodes: [n30, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C31
+    nodes: [n31, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C32
+    nodes: [n32, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C33
+    nodes: [n33, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C34
+    nodes: [n34, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C35
+    nodes: [n35, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C36
+    nodes: [n36, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C37
+    nodes: [n37, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C38
+    nodes: [n38, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C39
+    nodes: [n39, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C40
+    nodes: [n40, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C41
+    nodes: [n41, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C42
+    nodes: [n42, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C43
+    nodes: [n43, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C44
+    nodes: [n44, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C45
+    nodes: [n45, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C46
+    nodes: [n46, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C47
+    nodes: [n47, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C48
+    nodes: [n48, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C49
+    nodes: [n49, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C50
+    nodes: [n50, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C51
+    nodes: [n51, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C52
+    nodes: [n52, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C53
+    nodes: [n53, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C54
+    nodes: [n54, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C55
+    nodes: [n55, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C56
+    nodes: [n56, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C57
+    nodes: [n57, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C58
+    nodes: [n58, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C59
+    nodes: [n59, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C60
+    nodes: [n60, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C61
+    nodes: [n61, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C62
+    nodes: [n62, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C63
+    nodes: [n63, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C64
+    nodes: [n64, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C65
+    nodes: [n65, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C66
+    nodes: [n66, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C67
+    nodes: [n67, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C68
+    nodes: [n68, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C69
+    nodes: [n69, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C70
+    nodes: [n70, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C71
+    nodes: [n71, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C72
+    nodes: [n72, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C73
+    nodes: [n73, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C74
+    nodes: [n74, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C75
+    nodes: [n75, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C76
+    nodes: [n76, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C77
+    nodes: [n77, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C78
+    nodes: [n78, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C79
+    nodes: [n79, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C80
+    nodes: [n80, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C81
+    nodes: [n81, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C82
+    nodes: [n82, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C83
+    nodes: [n83, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C84
+    nodes: [n84, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C85
+    nodes: [n85, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C86
+    nodes: [n86, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C87
+    nodes: [n87, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C88
+    nodes: [n88, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C89
+    nodes: [n89, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C90
+    nodes: [n90, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C91
+    nodes: [n91, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C92
+    nodes: [n92, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C93
+    nodes: [n93, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C94
+    nodes: [n94, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C95
+    nodes: [n95, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C96
+    nodes: [n96, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C97
+    nodes: [n97, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C98
+    nodes: [n98, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C99
+    nodes: [n99, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C100
+    nodes: [n100, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C101
+    nodes: [n101, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C102
+    nodes: [n102, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C103
+    nodes: [n103, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C104
+    nodes: [n104, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C105
+    nodes: [n105, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C106
+    nodes: [n106, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C107
+    nodes: [n107, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C108
+    nodes: [n108, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C109
+    nodes: [n109, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C110
+    nodes: [n110, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C111
+    nodes: [n111, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C112
+    nodes: [n112, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C113
+    nodes: [n113, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C114
+    nodes: [n114, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C115
+    nodes: [n115, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C116
+    nodes: [n116, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C117
+    nodes: [n117, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C118
+    nodes: [n118, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C119
+    nodes: [n119, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C120
+    nodes: [n120, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C121
+    nodes: [n121, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C122
+    nodes: [n122, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C123
+    nodes: [n123, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C124
+    nodes: [n124, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C125
+    nodes: [n125, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C126
+    nodes: [n126, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C127
+    nodes: [n127, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C128
+    nodes: [n128, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C129
+    nodes: [n129, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C130
+    nodes: [n130, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C131
+    nodes: [n131, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C132
+    nodes: [n132, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C133
+    nodes: [n133, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C134
+    nodes: [n134, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C135
+    nodes: [n135, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C136
+    nodes: [n136, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C137
+    nodes: [n137, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C138
+    nodes: [n138, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C139
+    nodes: [n139, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C140
+    nodes: [n140, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C141
+    nodes: [n141, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C142
+    nodes: [n142, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C143
+    nodes: [n143, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C144
+    nodes: [n144, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C145
+    nodes: [n145, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C146
+    nodes: [n146, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C147
+    nodes: [n147, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C148
+    nodes: [n148, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C149
+    nodes: [n149, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C150
+    nodes: [n150, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C151
+    nodes: [n151, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C152
+    nodes: [n152, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C153
+    nodes: [n153, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C154
+    nodes: [n154, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C155
+    nodes: [n155, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C156
+    nodes: [n156, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C157
+    nodes: [n157, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C158
+    nodes: [n158, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C159
+    nodes: [n159, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C160
+    nodes: [n160, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C161
+    nodes: [n161, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C162
+    nodes: [n162, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C163
+    nodes: [n163, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C164
+    nodes: [n164, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C165
+    nodes: [n165, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C166
+    nodes: [n166, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C167
+    nodes: [n167, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C168
+    nodes: [n168, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C169
+    nodes: [n169, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C170
+    nodes: [n170, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C171
+    nodes: [n171, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C172
+    nodes: [n172, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C173
+    nodes: [n173, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C174
+    nodes: [n174, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C175
+    nodes: [n175, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C176
+    nodes: [n176, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C177
+    nodes: [n177, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C178
+    nodes: [n178, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C179
+    nodes: [n179, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C180
+    nodes: [n180, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C181
+    nodes: [n181, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C182
+    nodes: [n182, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C183
+    nodes: [n183, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C184
+    nodes: [n184, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C185
+    nodes: [n185, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C186
+    nodes: [n186, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C187
+    nodes: [n187, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C188
+    nodes: [n188, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C189
+    nodes: [n189, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C190
+    nodes: [n190, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C191
+    nodes: [n191, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C192
+    nodes: [n192, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C193
+    nodes: [n193, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C194
+    nodes: [n194, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C195
+    nodes: [n195, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C196
+    nodes: [n196, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C197
+    nodes: [n197, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C198
+    nodes: [n198, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C199
+    nodes: [n199, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C200
+    nodes: [n200, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C201
+    nodes: [n201, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C202
+    nodes: [n202, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C203
+    nodes: [n203, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C204
+    nodes: [n204, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C205
+    nodes: [n205, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C206
+    nodes: [n206, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C207
+    nodes: [n207, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C208
+    nodes: [n208, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C209
+    nodes: [n209, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C210
+    nodes: [n210, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C211
+    nodes: [n211, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C212
+    nodes: [n212, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C213
+    nodes: [n213, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C214
+    nodes: [n214, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C215
+    nodes: [n215, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C216
+    nodes: [n216, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C217
+    nodes: [n217, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C218
+    nodes: [n218, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C219
+    nodes: [n219, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C220
+    nodes: [n220, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C221
+    nodes: [n221, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C222
+    nodes: [n222, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C223
+    nodes: [n223, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C224
+    nodes: [n224, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C225
+    nodes: [n225, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C226
+    nodes: [n226, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C227
+    nodes: [n227, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C228
+    nodes: [n228, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C229
+    nodes: [n229, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C230
+    nodes: [n230, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C231
+    nodes: [n231, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C232
+    nodes: [n232, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C233
+    nodes: [n233, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C234
+    nodes: [n234, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C235
+    nodes: [n235, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C236
+    nodes: [n236, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C237
+    nodes: [n237, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C238
+    nodes: [n238, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C239
+    nodes: [n239, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C240
+    nodes: [n240, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C241
+    nodes: [n241, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C242
+    nodes: [n242, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C243
+    nodes: [n243, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C244
+    nodes: [n244, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C245
+    nodes: [n245, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C246
+    nodes: [n246, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C247
+    nodes: [n247, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C248
+    nodes: [n248, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C249
+    nodes: [n249, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C250
+    nodes: [n250, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C251
+    nodes: [n251, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C252
+    nodes: [n252, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C253
+    nodes: [n253, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C254
+    nodes: [n254, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C255
+    nodes: [n255, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C256
+    nodes: [n256, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C257
+    nodes: [n257, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C258
+    nodes: [n258, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C259
+    nodes: [n259, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C260
+    nodes: [n260, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C261
+    nodes: [n261, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C262
+    nodes: [n262, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C263
+    nodes: [n263, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C264
+    nodes: [n264, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C265
+    nodes: [n265, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C266
+    nodes: [n266, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C267
+    nodes: [n267, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C268
+    nodes: [n268, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C269
+    nodes: [n269, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C270
+    nodes: [n270, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C271
+    nodes: [n271, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C272
+    nodes: [n272, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C273
+    nodes: [n273, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C274
+    nodes: [n274, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C275
+    nodes: [n275, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C276
+    nodes: [n276, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C277
+    nodes: [n277, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C278
+    nodes: [n278, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C279
+    nodes: [n279, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C280
+    nodes: [n280, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C281
+    nodes: [n281, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C282
+    nodes: [n282, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C283
+    nodes: [n283, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C284
+    nodes: [n284, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C285
+    nodes: [n285, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C286
+    nodes: [n286, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C287
+    nodes: [n287, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C288
+    nodes: [n288, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C289
+    nodes: [n289, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C290
+    nodes: [n290, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C291
+    nodes: [n291, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C292
+    nodes: [n292, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C293
+    nodes: [n293, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C294
+    nodes: [n294, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C295
+    nodes: [n295, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C296
+    nodes: [n296, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C297
+    nodes: [n297, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C298
+    nodes: [n298, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C299
+    nodes: [n299, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C300
+    nodes: [n300, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C301
+    nodes: [n301, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C302
+    nodes: [n302, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C303
+    nodes: [n303, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C304
+    nodes: [n304, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C305
+    nodes: [n305, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C306
+    nodes: [n306, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C307
+    nodes: [n307, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C308
+    nodes: [n308, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C309
+    nodes: [n309, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C310
+    nodes: [n310, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C311
+    nodes: [n311, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C312
+    nodes: [n312, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C313
+    nodes: [n313, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C314
+    nodes: [n314, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C315
+    nodes: [n315, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C316
+    nodes: [n316, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C317
+    nodes: [n317, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C318
+    nodes: [n318, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C319
+    nodes: [n319, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C320
+    nodes: [n320, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C321
+    nodes: [n321, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C322
+    nodes: [n322, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C323
+    nodes: [n323, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C324
+    nodes: [n324, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C325
+    nodes: [n325, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C326
+    nodes: [n326, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C327
+    nodes: [n327, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C328
+    nodes: [n328, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C329
+    nodes: [n329, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C330
+    nodes: [n330, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C331
+    nodes: [n331, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C332
+    nodes: [n332, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C333
+    nodes: [n333, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C334
+    nodes: [n334, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C335
+    nodes: [n335, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C336
+    nodes: [n336, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C337
+    nodes: [n337, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C338
+    nodes: [n338, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C339
+    nodes: [n339, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C340
+    nodes: [n340, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C341
+    nodes: [n341, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C342
+    nodes: [n342, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C343
+    nodes: [n343, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C344
+    nodes: [n344, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C345
+    nodes: [n345, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C346
+    nodes: [n346, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C347
+    nodes: [n347, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C348
+    nodes: [n348, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C349
+    nodes: [n349, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C350
+    nodes: [n350, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C351
+    nodes: [n351, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C352
+    nodes: [n352, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C353
+    nodes: [n353, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C354
+    nodes: [n354, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C355
+    nodes: [n355, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C356
+    nodes: [n356, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C357
+    nodes: [n357, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C358
+    nodes: [n358, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C359
+    nodes: [n359, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C360
+    nodes: [n360, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C361
+    nodes: [n361, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C362
+    nodes: [n362, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C363
+    nodes: [n363, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C364
+    nodes: [n364, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C365
+    nodes: [n365, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C366
+    nodes: [n366, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C367
+    nodes: [n367, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C368
+    nodes: [n368, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C369
+    nodes: [n369, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C370
+    nodes: [n370, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C371
+    nodes: [n371, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C372
+    nodes: [n372, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C373
+    nodes: [n373, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C374
+    nodes: [n374, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C375
+    nodes: [n375, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C376
+    nodes: [n376, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C377
+    nodes: [n377, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C378
+    nodes: [n378, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C379
+    nodes: [n379, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C380
+    nodes: [n380, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C381
+    nodes: [n381, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C382
+    nodes: [n382, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C383
+    nodes: [n383, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C384
+    nodes: [n384, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C385
+    nodes: [n385, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C386
+    nodes: [n386, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C387
+    nodes: [n387, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C388
+    nodes: [n388, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C389
+    nodes: [n389, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C390
+    nodes: [n390, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C391
+    nodes: [n391, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C392
+    nodes: [n392, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C393
+    nodes: [n393, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C394
+    nodes: [n394, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C395
+    nodes: [n395, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C396
+    nodes: [n396, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C397
+    nodes: [n397, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C398
+    nodes: [n398, 0]
+    value: 1e-09
+  - type: capacitor
+    name: C399
+    nodes: [n399, 0]
+    value: 1e-09

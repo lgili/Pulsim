@@ -254,3 +254,87 @@ TEST_CASE("v1 linear solver telemetry report", "[v1][solver][telemetry]") {
     INFO("Linear solver total iterations: " << result.linear_solver_telemetry.total_iterations);
     INFO("Linear solver total fallbacks: " << result.linear_solver_telemetry.total_fallbacks);
 }
+
+TEST_CASE("v1 periodic shooting converges on RC", "[v1][steady][shooting]") {
+    Circuit circuit;
+
+    auto n_src = circuit.add_node("src");
+    auto n_out = circuit.add_node("out");
+
+    SineParams sine;
+    sine.amplitude = 5.0;
+    sine.frequency = 1000.0;
+    sine.offset = 0.0;
+    circuit.add_sine_voltage_source("V1", n_src, Circuit::ground(), sine);
+    circuit.add_resistor("R1", n_src, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 1e-5;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-4;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+
+    PeriodicSteadyStateOptions pss;
+    pss.period = 1.0 / sine.frequency;
+    pss.max_iterations = 12;
+    pss.tolerance = 1e-3;
+    pss.relaxation = 1.0;
+
+    auto result = sim.run_periodic_shooting(pss);
+    INFO("Shooting message: " << result.message);
+    INFO("Shooting residual: " << result.residual_norm);
+    REQUIRE(result.success);
+    CHECK(result.residual_norm <= pss.tolerance);
+}
+
+TEST_CASE("v1 harmonic balance converges on RC", "[v1][steady][hb]") {
+    Circuit circuit;
+
+    auto n_src = circuit.add_node("src");
+    auto n_out = circuit.add_node("out");
+
+    SineParams sine;
+    sine.amplitude = 5.0;
+    sine.frequency = 1000.0;
+    sine.offset = 0.0;
+    circuit.add_sine_voltage_source("V1", n_src, Circuit::ground(), sine);
+    circuit.add_resistor("R1", n_src, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 1e-5;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-4;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+    opts.newton_options.max_iterations = 40;
+    opts.newton_options.enable_newton_krylov = true;
+
+    Simulator sim(circuit, opts);
+
+    HarmonicBalanceOptions hb;
+    hb.period = 1.0 / sine.frequency;
+    hb.num_samples = 16;
+    hb.max_iterations = 25;
+    hb.tolerance = 1e-3;
+    hb.relaxation = 1.0;
+    hb.initialize_from_transient = true;
+
+    auto result = sim.run_harmonic_balance(hb);
+    INFO("HB message: " << result.message);
+    INFO("HB residual: " << result.residual_norm);
+    REQUIRE(result.success);
+    CHECK(result.residual_norm <= hb.tolerance);
+}

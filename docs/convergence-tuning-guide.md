@@ -204,6 +204,7 @@ simulation:
 - Keep direct solvers early for small systems.
 - Prefer GMRES/BiCGSTAB for large sparse systems.
 - Disable `auto_select` only when forcing a known-good order.
+- CG is only valid for SPD matrices; Pulsim will gate CG when SPD checks fail.
 
 ### Iterative Solver Tuning
 
@@ -223,6 +224,22 @@ simulation:
 - Use `ilu0` for harder problems; `jacobi` for speed.
 - Increase `max_iterations` for large power-electronics nets.
 - Enable scaling when the Jacobian has poor conditioning.
+
+### Advanced Preconditioning (ILUT / AMG)
+
+```yaml
+simulation:
+    solver:
+        iterative:
+            preconditioner: ilut
+            ilut_drop_tolerance: 1e-3
+            ilut_fill_factor: 10
+```
+
+**Guidelines:**
+- **ILUT** improves convergence on difficult sparse systems at the cost of setup time.
+- **AMG** (if available) can outperform ILU for very large problems; use when KLU is too slow or memory-heavy.
+- Start with ILUT drop tolerance `1e-3` to `1e-4` and fill factor `5-20`.
 
 ---
 
@@ -263,6 +280,26 @@ simulation:
 ```
 
 Use trust-region when line search stalls or steps overshoot. Newton–Krylov pairs well with iterative linear solvers.
+
+### Newton–Krylov (JFNK) Tuning
+
+```yaml
+simulation:
+    newton:
+        enable_newton_krylov: true
+        krylov_max_iterations: 50
+        krylov_restart: 30
+        krylov_tolerance: 1e-6
+        krylov_fd_epsilon: 1e-7
+        krylov_fd_min_step: 1e-12
+        krylov_residual_cache_tolerance: 1e-8
+```
+
+**Tips:**
+- Use JFNK when the Jacobian is large and expensive to assemble.
+- Tighten `krylov_tolerance` for accuracy; loosen it for speed.
+- Reduce `krylov_fd_epsilon` if finite-difference noise dominates.
+- `krylov_residual_cache_tolerance` can speed repeated residual calls; set `-1` to disable.
 
 ---
 
@@ -455,6 +492,58 @@ ts.dt_max = 1e-7;         // Limit to fraction of resonant period
 
 // May need many cycles to reach steady state
 ```
+
+### Integrator Selection (Stiff Transients)
+
+```yaml
+simulation:
+    integrator: trbdf2   # options: trapezoidal, bdf1, bdf2, trbdf2, rosenbrockw, sdirk2
+```
+
+**When to use:**
+- **TR-BDF2**: Robust for stiff switching transients; good default for power electronics.
+- **Rosenbrock-W / SDIRK2**: Stable for stiff systems when Newton struggles.
+- **BDF1**: Most robust but more dissipative; use when stability matters more than accuracy.
+
+---
+
+## Periodic Steady-State (Shooting / Harmonic Balance)
+
+Use periodic solvers to accelerate convergence for switching converters when you care about
+steady-state waveforms rather than start-up transients.
+
+### Shooting Method
+
+```yaml
+simulation:
+    shooting:
+        period: 10e-6
+        max_iterations: 30
+        tolerance: 1e-6
+        relaxation: 0.5
+        store_last_transient: true
+```
+
+**Tips:**
+- Use the switching period for `period`.
+- Reduce `relaxation` if the fixed-point iteration oscillates.
+
+### Harmonic Balance (HB)
+
+```yaml
+simulation:
+    harmonic_balance:
+        period: 10e-6
+        num_samples: 128
+        max_iterations: 40
+        tolerance: 1e-6
+        relaxation: 0.5
+        initialize_from_transient: true
+```
+
+**Tips:**
+- Increase `num_samples` for sharper waveforms (PWM edges).
+- Enable `initialize_from_transient` if HB struggles to converge from a cold start.
 
 ---
 

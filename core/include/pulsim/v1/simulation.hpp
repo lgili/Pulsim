@@ -66,6 +66,25 @@ struct StiffnessConfig {
     int max_bdf_order = 1;
     bool monitor_conditioning = true;
     Real conditioning_error_threshold = 1e-6;
+    bool switch_integrator = true;
+    Integrator stiff_integrator = Integrator::BDF1;
+};
+
+struct PeriodicSteadyStateOptions {
+    Real period = 0.0;
+    int max_iterations = 20;
+    Real tolerance = 1e-6;
+    Real relaxation = 0.5;
+    bool store_last_transient = true;
+};
+
+struct HarmonicBalanceOptions {
+    Real period = 0.0;
+    int num_samples = 32;
+    int max_iterations = 25;
+    Real tolerance = 1e-6;
+    Real relaxation = 1.0;
+    bool initialize_from_transient = true;
 };
 
 struct SimulationOptions {
@@ -86,12 +105,21 @@ struct SimulationOptions {
     AdvancedTimestepConfig timestep_config = AdvancedTimestepConfig::for_power_electronics();
     RichardsonLTEConfig lte_config = RichardsonLTEConfig::defaults();
 
+    // Integration method selection
+    Integrator integrator = Integrator::Trapezoidal;
+
     // BDF order control (currently supports order 1/2)
     bool enable_bdf_order_control = false;
     BDFOrderConfig bdf_config = BDFOrderConfig::defaults();
 
     // Stiffness handling
     StiffnessConfig stiffness_config{};
+
+    // Periodic steady-state options
+    bool enable_periodic_shooting = false;
+    PeriodicSteadyStateOptions periodic_options{};
+    bool enable_harmonic_balance = false;
+    HarmonicBalanceOptions harmonic_balance{};
 
     // Events & losses
     bool enable_events = true;
@@ -122,6 +150,24 @@ struct SimulationResult {
     SystemLossSummary loss_summary;
 };
 
+struct PeriodicSteadyStateResult {
+    bool success = false;
+    int iterations = 0;
+    Real residual_norm = 0.0;
+    Vector steady_state;
+    SimulationResult last_cycle;
+    std::string message;
+};
+
+struct HarmonicBalanceResult {
+    bool success = false;
+    int iterations = 0;
+    Real residual_norm = 0.0;
+    Vector solution;
+    std::vector<Real> sample_times;
+    std::string message;
+};
+
 class Simulator {
 public:
     explicit Simulator(Circuit& circuit, const SimulationOptions& options = {});
@@ -147,6 +193,22 @@ public:
         SimulationControl* control,
         const ProgressCallbackConfig& progress_config);
 
+    // Periodic steady-state (shooting method)
+    [[nodiscard]] PeriodicSteadyStateResult run_periodic_shooting(
+        const PeriodicSteadyStateOptions& options = {});
+
+    [[nodiscard]] PeriodicSteadyStateResult run_periodic_shooting(
+        const Vector& x0,
+        const PeriodicSteadyStateOptions& options = {});
+
+    // Harmonic balance (collocation with spectral differentiation)
+    [[nodiscard]] HarmonicBalanceResult run_harmonic_balance(
+        const HarmonicBalanceOptions& options = {});
+
+    [[nodiscard]] HarmonicBalanceResult run_harmonic_balance(
+        const Vector& x0,
+        const HarmonicBalanceOptions& options = {});
+
     // Loss model attachment (optional)
     void set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy);
 
@@ -171,6 +233,8 @@ private:
     };
 
     NewtonResult solve_step(Real t_next, Real dt, const Vector& x_prev);
+    NewtonResult solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev);
+    NewtonResult solve_sdirk2_step(Real t_next, Real dt, const Vector& x_prev, Integrator method);
     bool find_switch_event_time(const SwitchMonitor& sw,
                                 Real t_start, Real t_end,
                                 const Vector& x_start,
