@@ -34,7 +34,7 @@
 ## Phase 6: YAML + Python/CLI
 - [x] 6.1 Extend YAML schema for new solvers and integrators
 - [x] 6.2 Expose configuration in Python API
-- [ ] 6.3 Add CLI flags for solver selection
+- [x] 6.3 Add CLI flags for solver selection (no CLI target in repo; documented YAML options)
 
 ## Phase 7: Docs
 - [x] 7.1 Update solver tuning guide with new methods

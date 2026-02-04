@@ -154,14 +154,14 @@ simulation:
     size_threshold: 400
     nnz_threshold: 2000
     diag_min_threshold: 1e-12
-    preconditioner: ilut
+    preconditioner: ilut        # or amg (if available)
     ilut_drop_tolerance: 1e-3
     ilut_fill_factor: 10
     iterative:
       max_iterations: 200
       tolerance: 1e-8
       restart: 40
-      preconditioner: ilut
+      preconditioner: ilut      # or amg (if available)
       ilut_drop_tolerance: 1e-3
       ilut_fill_factor: 10
       enable_scaling: true
