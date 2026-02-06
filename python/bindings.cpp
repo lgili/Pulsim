@@ -594,12 +594,6 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("enable_broyden", &NewtonOptions::enable_broyden)
         .def_readwrite("broyden_max_size", &NewtonOptions::broyden_max_size)
         .def_readwrite("enable_newton_krylov", &NewtonOptions::enable_newton_krylov)
-        .def_readwrite("krylov_max_iterations", &NewtonOptions::krylov_max_iterations)
-        .def_readwrite("krylov_restart", &NewtonOptions::krylov_restart)
-        .def_readwrite("krylov_tolerance", &NewtonOptions::krylov_tolerance)
-        .def_readwrite("krylov_fd_epsilon", &NewtonOptions::krylov_fd_epsilon)
-        .def_readwrite("krylov_fd_min_step", &NewtonOptions::krylov_fd_min_step)
-        .def_readwrite("krylov_residual_cache_tolerance", &NewtonOptions::krylov_residual_cache_tolerance)
         .def_readwrite("enable_trust_region", &NewtonOptions::enable_trust_region)
         .def_readwrite("trust_radius", &NewtonOptions::trust_radius)
         .def_readwrite("trust_shrink", &NewtonOptions::trust_shrink)
@@ -628,8 +622,6 @@ void init_v2_module(py::module_& v2) {
         .value("None_", IterativeSolverConfig::PreconditionerKind::None)
         .value("Jacobi", IterativeSolverConfig::PreconditionerKind::Jacobi)
         .value("ILU0", IterativeSolverConfig::PreconditionerKind::ILU0)
-        .value("ILUT", IterativeSolverConfig::PreconditionerKind::ILUT)
-        .value("AMG", IterativeSolverConfig::PreconditionerKind::AMG)
         .export_values();
 
     py::class_<IterativeSolverConfig>(v2, "IterativeSolverConfig",
@@ -641,15 +633,12 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("preconditioner", &IterativeSolverConfig::preconditioner)
         .def_readwrite("enable_scaling", &IterativeSolverConfig::enable_scaling)
         .def_readwrite("scaling_floor", &IterativeSolverConfig::scaling_floor)
-        .def_readwrite("ilut_drop_tolerance", &IterativeSolverConfig::ilut_drop_tolerance)
-        .def_readwrite("ilut_fill_factor", &IterativeSolverConfig::ilut_fill_factor)
         .def_static("defaults", &IterativeSolverConfig::defaults);
 
     py::class_<LinearSolverStackConfig>(v2, "LinearSolverStackConfig",
         "Runtime linear solver stack configuration")
         .def(py::init<>())
         .def_readwrite("order", &LinearSolverStackConfig::order)
-        .def_readwrite("fallback_order", &LinearSolverStackConfig::fallback_order)
         .def_readwrite("direct_config", &LinearSolverStackConfig::direct_config)
         .def_readwrite("iterative_config", &LinearSolverStackConfig::iterative_config)
         .def_readwrite("allow_fallback", &LinearSolverStackConfig::allow_fallback)
@@ -860,29 +849,6 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("message", &DCAnalysisResult::message);
 
     // =========================================================================
-    // Periodic Steady-State + Harmonic Balance Options
-    // =========================================================================
-
-    py::class_<PeriodicSteadyStateOptions>(v2, "PeriodicSteadyStateOptions",
-        "Periodic steady-state (shooting) configuration")
-        .def(py::init<>())
-        .def_readwrite("period", &PeriodicSteadyStateOptions::period)
-        .def_readwrite("max_iterations", &PeriodicSteadyStateOptions::max_iterations)
-        .def_readwrite("tolerance", &PeriodicSteadyStateOptions::tolerance)
-        .def_readwrite("relaxation", &PeriodicSteadyStateOptions::relaxation)
-        .def_readwrite("store_last_transient", &PeriodicSteadyStateOptions::store_last_transient);
-
-    py::class_<HarmonicBalanceOptions>(v2, "HarmonicBalanceOptions",
-        "Harmonic balance configuration")
-        .def(py::init<>())
-        .def_readwrite("period", &HarmonicBalanceOptions::period)
-        .def_readwrite("num_samples", &HarmonicBalanceOptions::num_samples)
-        .def_readwrite("max_iterations", &HarmonicBalanceOptions::max_iterations)
-        .def_readwrite("tolerance", &HarmonicBalanceOptions::tolerance)
-        .def_readwrite("relaxation", &HarmonicBalanceOptions::relaxation)
-        .def_readwrite("initialize_from_transient", &HarmonicBalanceOptions::initialize_from_transient);
-
-    // =========================================================================
     // DC Analysis Function (Phase 5)
     // =========================================================================
 
@@ -987,104 +953,10 @@ void init_v2_module(py::module_& v2) {
         Simulator sim(circuit, opts);
         auto result = sim.run_transient(x0);
         return std::make_tuple(result.time, result.states, result.success, result.message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-        py::arg("newton_options") = NewtonOptions(),
-        py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
+     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+         py::arg("newton_options") = NewtonOptions(),
+         py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     "Run transient with zero initial state");
-
-    // =========================================================================
-    // Periodic Steady-State (Shooting) + Harmonic Balance
-    // =========================================================================
-
-    v2.def("run_periodic_shooting", [](Circuit& circuit,
-                                       const PeriodicSteadyStateOptions& pss,
-                                       const NewtonOptions& newton_opts,
-                                       const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_periodic_shooting(pss);
-        return std::make_tuple(result.steady_state, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"),
-       py::arg("options") = PeriodicSteadyStateOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    R"doc(
-    Run periodic steady-state shooting.
-
-    Returns:
-        Tuple of (steady_state, success, iterations, residual_norm, message)
-    )doc");
-
-    v2.def("run_periodic_shooting", [](Circuit& circuit, const Vector& x0,
-                                       const PeriodicSteadyStateOptions& pss,
-                                       const NewtonOptions& newton_opts,
-                                       const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_periodic_shooting(x0, pss);
-        return std::make_tuple(result.steady_state, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"), py::arg("x0"),
-       py::arg("options") = PeriodicSteadyStateOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    "Run periodic shooting with explicit initial state");
-
-    v2.def("run_harmonic_balance", [](Circuit& circuit,
-                                      const HarmonicBalanceOptions& hb,
-                                      const NewtonOptions& newton_opts,
-                                      const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_harmonic_balance(hb);
-        return std::make_tuple(result.solution, result.sample_times, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"),
-       py::arg("options") = HarmonicBalanceOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    R"doc(
-    Run harmonic balance (collocation).
-
-    Returns:
-        Tuple of (solution, sample_times, success, iterations, residual_norm, message)
-    )doc");
-
-    v2.def("run_harmonic_balance", [](Circuit& circuit, const Vector& x0,
-                                      const HarmonicBalanceOptions& hb,
-                                      const NewtonOptions& newton_opts,
-                                      const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_harmonic_balance(x0, hb);
-        return std::make_tuple(result.solution, result.sample_times, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"), py::arg("x0"),
-       py::arg("options") = HarmonicBalanceOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    "Run harmonic balance with explicit initial state");
 
     // =========================================================================
     // Streaming transient simulation (for real-time GUI updates)

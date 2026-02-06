@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -156,9 +157,13 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
         Circuit circuit;
         auto n_vin = circuit.add_node("vin");
         auto n_out = circuit.add_node("out");
+        std::vector<Index> ctrl_nodes;
         std::vector<Index> sw_nodes;
+        std::vector<Index> l_nodes;
         std::vector<Index> ind_branches;
+        ctrl_nodes.reserve(phases);
         sw_nodes.reserve(phases);
+        l_nodes.reserve(phases);
         ind_branches.reserve(phases);
 
         circuit.add_voltage_source("Vin", n_vin, Circuit::ground(), vin);
@@ -166,10 +171,15 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
         circuit.add_resistor("Rload", n_out, Circuit::ground(), 10.0);
 
         for (int i = 0; i < phases; ++i) {
-            auto n_ctrl = circuit.add_node("ctrl_" + std::to_string(i));
-            auto n_sw = circuit.add_node("sw_" + std::to_string(i));
-            auto n_l = circuit.add_node("l_" + std::to_string(i));
-            sw_nodes.push_back(n_sw);
+            ctrl_nodes.push_back(circuit.add_node("ctrl_" + std::to_string(i)));
+            sw_nodes.push_back(circuit.add_node("sw_" + std::to_string(i)));
+            l_nodes.push_back(circuit.add_node("l_" + std::to_string(i)));
+        }
+
+        for (int i = 0; i < phases; ++i) {
+            const auto n_ctrl = ctrl_nodes[i];
+            const auto n_sw = sw_nodes[i];
+            const auto n_l = l_nodes[i];
 
             PWMParams pwm;
             pwm.v_high = 5.0;
@@ -184,7 +194,8 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
             circuit.add_resistor("Rsnub_" + std::to_string(i), n_sw, Circuit::ground(), 1e6);
             circuit.add_resistor("Rdcr_" + std::to_string(i), n_sw, n_l, 0.01);
             Index l_branch = circuit.num_nodes() + circuit.num_branches();
-            circuit.add_inductor("L_" + std::to_string(i), n_l, n_out, 150e-6);
+            // Higher inductance keeps the buck in CCM for stress validation.
+            circuit.add_inductor("L_" + std::to_string(i), n_l, n_out, 1e-3);
             ind_branches.push_back(l_branch);
         }
 
@@ -225,21 +236,36 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
         Real sum_sw_prev = 0.0;
         Real sum_il_last = 0.0;
         Real sum_il_prev = 0.0;
+        Real vout_min = std::numeric_limits<Real>::infinity();
+        Real vout_max = -std::numeric_limits<Real>::infinity();
+        Real vsw_min = std::numeric_limits<Real>::infinity();
+        Real vsw_max = -std::numeric_limits<Real>::infinity();
+        Real il_min = std::numeric_limits<Real>::infinity();
+        Real il_max = -std::numeric_limits<Real>::infinity();
         int diode_on_last = 0;
         int diode_on_prev = 0;
         int count_last = 0;
         int count_prev = 0;
         for (std::size_t i = 0; i < result.time.size(); ++i) {
             if (result.time[i] >= t_start_avg) {
-                sum_last += result.states[i][n_out];
+                Real vout = result.states[i][n_out];
+                sum_last += vout;
+                vout_min = std::min(vout_min, vout);
+                vout_max = std::max(vout_max, vout);
                 for (auto sw : sw_nodes) {
-                    sum_sw_last += result.states[i][sw];
-                    if (result.states[i][sw] < 0.0) {
+                    Real vsw = result.states[i][sw];
+                    sum_sw_last += vsw;
+                    vsw_min = std::min(vsw_min, vsw);
+                    vsw_max = std::max(vsw_max, vsw);
+                    if (vsw < 0.0) {
                         diode_on_last++;
                     }
                 }
                 for (auto br : ind_branches) {
-                    sum_il_last += result.states[i][br];
+                    Real il = result.states[i][br];
+                    sum_il_last += il;
+                    il_min = std::min(il_min, il);
+                    il_max = std::max(il_max, il);
                 }
                 count_last++;
             } else if (result.time[i] >= t_start_prev) {
@@ -273,9 +299,12 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
             ? static_cast<Real>(diode_on_prev) / static_cast<Real>(count_prev * sw_nodes.size())
             : diode_duty_last;
         INFO("Vout avg last period: " << v_avg_last << " V, prev: " << v_avg_prev << " V");
+        INFO("Vout min/max last period: " << vout_min << " / " << vout_max << " V");
 
         INFO("Vsw avg last period: " << v_sw_avg_last << " V, prev: " << v_sw_avg_prev << " V");
+        INFO("Vsw min/max last period: " << vsw_min << " / " << vsw_max << " V");
         INFO("IL avg last period: " << il_avg_last << " A, prev: " << il_avg_prev << " A");
+        INFO("IL min/max last period: " << il_min << " / " << il_max << " A");
         INFO("Diode on duty last period: " << diode_duty_last
              << ", prev: " << diode_duty_prev);
 
@@ -283,8 +312,14 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
             if (env[0] != '\0' && env[0] != '0') {
                 std::cout << "buck_summary"
                           << " vout_avg=" << v_avg_last
+                          << " vout_min=" << vout_min
+                          << " vout_max=" << vout_max
                           << " vsw_avg=" << v_sw_avg_last
+                          << " vsw_min=" << vsw_min
+                          << " vsw_max=" << vsw_max
                           << " il_avg=" << il_avg_last
+                          << " il_min=" << il_min
+                          << " il_max=" << il_max
                           << " diode_duty=" << diode_duty_last
                           << " steps=" << result.total_steps
                           << "\\n";

@@ -1,0 +1,50 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: rlc_step
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5e-4
+  validation:
+    type: analytical
+    model: rlc_step
+    observable: V(out)
+    params:
+      v0: 10.0
+      r: 10
+      l: 1m
+      c: 10u
+simulation:
+  tstop: 5e-3
+  dt: 1e-6
+  uic: true
+components:
+  - type: voltage_source
+    name: Vpulse
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 10.0
+      t_delay: 0.0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 10e-3
+      period: 20e-3
+  - type: resistor
+    name: R1
+    nodes: [in, n1]
+    value: 10
+  - type: inductor
+    name: L1
+    nodes: [n1, out]
+    value: 1m
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 10u
+    ic: 0.0

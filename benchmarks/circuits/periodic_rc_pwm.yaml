@@ -1,0 +1,51 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: periodic_rc_pwm
+  category: periodic
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 1e-1
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/periodic_rc_pwm.csv
+simulation:
+  tstart: 0.0
+  tstop: 200e-6
+  dt: 0.5e-6
+  dt_max: 2e-6
+  shooting:
+    period: 20e-6
+    max_iterations: 20
+    tolerance: 1e-6
+    relaxation: 0.5
+    store_last_transient: true
+  harmonic_balance:
+    period: 20e-6
+    num_samples: 128
+    max_iterations: 30
+    tolerance: 1e-6
+    relaxation: 0.5
+    initialize_from_transient: true
+components:
+  - type: voltage_source
+    name: Vpwm
+    nodes: [in, 0]
+    waveform:
+      type: pwm
+      v_high: 5.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      dead_time: 200e-9
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 100
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1u

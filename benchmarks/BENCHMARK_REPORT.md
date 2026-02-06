@@ -1,8 +1,28 @@
-# Pulsim vs ngspice Benchmark Report
+# Pulsim Benchmark Suite Report
 
 ## Overview
+This report documents the legacy ngspice comparison for RC, RL, and RLC circuits. The benchmark suite has moved to YAML netlists and a modular runner; ngspice comparison remains optional and is now isolated to `benchmark_ngspice.py`.
 
-This report compares Pulsim simulation results against ngspice (industry-standard open-source SPICE simulator) for basic RC, RL, and RLC circuits. Both simulators' results are compared against analytical solutions.
+## Running the Benchmarks
+
+### YAML Benchmark Runner (current)
+
+```bash
+python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
+python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
+```
+
+### Legacy ngspice comparison
+
+```bash
+./build/cli/pulsim run benchmarks/circuits/rc_step.yaml -o benchmarks/results/rc_pulsim.csv
+./build/cli/pulsim run benchmarks/circuits/rc_step.yaml -o benchmarks/results/rc_pulsim_fixed.csv --dt 1e-6 --dtmax 1e-6
+```
+
+Files:
+- `circuits/rc_step.yaml` - RC circuit (Pulsim)
+- `circuits/rl_step.yaml` - RL circuit (Pulsim)
+- `circuits/rlc_step.yaml` - RLC circuit (Pulsim)
 
 ## Test Setup
 
