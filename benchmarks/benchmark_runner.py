@@ -136,6 +136,17 @@ def normalize_periodic_mode(netlist: Dict[str, Any], preferred_mode: Optional[st
         simulation.pop("shooting", None)
 
 
+def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
+    """Apply benchmark runtime defaults without overriding explicit YAML choices."""
+    simulation = netlist.get("simulation")
+    if not isinstance(simulation, dict):
+        return
+
+    # Benchmark suite targets deterministic comparisons by default.
+    if "adaptive_timestep" not in simulation:
+        simulation["adaptive_timestep"] = False
+
+
 def run_pulsim(
     netlist_path: Path,
     output_path: Path,
@@ -280,6 +291,7 @@ def run_benchmarks(
             scenario_netlist = deep_merge(netlist, scenario_override)
             preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
             normalize_periodic_mode(scenario_netlist, preferred_mode)
+            apply_runtime_defaults(scenario_netlist)
             simulation_cfg = scenario_netlist.get("simulation", {})
             use_initial_conditions = bool(
                 simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
@@ -355,7 +367,13 @@ def run_benchmarks(
                                     validation.get("params", {}),
                                 )
                                 if max_threshold is not None and max_error is not None:
-                                    status = "passed" if max_error <= max_threshold else "failed"
+                                    if max_error <= max_threshold:
+                                        status = "passed"
+                                    else:
+                                        status = "failed"
+                                        message = (
+                                            f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                                        )
                             except Exception as exc:
                                 status = "failed"
                                 message = str(exc)
@@ -381,7 +399,13 @@ def run_benchmarks(
                                     if max_error is None:
                                         status = "failed"
                                     elif max_threshold is not None:
-                                        status = "passed" if max_error <= max_threshold else "failed"
+                                        if max_error <= max_threshold:
+                                            status = "passed"
+                                        else:
+                                            status = "failed"
+                                            message = (
+                                                f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                                            )
                         else:
                             status = "failed"
                             message = f"Unsupported validation type: {validation_type}"

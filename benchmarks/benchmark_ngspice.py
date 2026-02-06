@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from benchmark_runner import (
+    apply_runtime_defaults,
     deep_merge,
     infer_preferred_mode,
     load_csv_series,
@@ -384,6 +385,7 @@ def run_single_pair(
     cli_observables: Optional[List[str]],
 ) -> List[BenchmarkResult]:
     netlist = load_yaml(pulsim_netlist)
+    apply_runtime_defaults(netlist)
     benchmark = netlist.get("benchmark", {})
     validation = benchmark.get("validation", {})
     benchmark_id = benchmark.get("id", pulsim_netlist.stem)
@@ -507,6 +509,7 @@ def run_manifest(
             scenario_netlist = deep_merge(netlist, scenario_override)
             preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
             normalize_periodic_mode(scenario_netlist, preferred_mode)
+            apply_runtime_defaults(scenario_netlist)
             try:
                 result = run_case(
                     scenario_netlist=scenario_netlist,

@@ -151,3 +151,46 @@ def test_python_backend_runs_shooting_and_harmonic_balance(tmp_path: Path) -> No
     assert harmonic_balance.steps > 0
     assert hb_out.exists()
     assert harmonic_balance.telemetry.get("harmonic_balance_iterations", 0.0) >= 1.0
+
+
+def test_runner_applies_default_fixed_timestep_for_unset_adaptive(tmp_path: Path) -> None:
+    netlist = {
+        "schema": "pulsim-v1",
+        "version": 1,
+        "benchmark": {
+            "id": "pulse_default_fixed_step",
+            "validation": {"type": "none"},
+        },
+        "simulation": {
+            "tstart": 0.0,
+            "tstop": 2e-4,
+            "dt": 1e-6,
+            # intentionally omit adaptive_timestep to test runtime default
+        },
+        "components": [
+            {
+                "type": "voltage_source",
+                "name": "Vpulse",
+                "nodes": ["in", "0"],
+                "waveform": {
+                    "type": "pulse",
+                    "v_initial": 0.0,
+                    "v_pulse": 5.0,
+                    "t_delay": 0.0,
+                    "t_rise": 1e-9,
+                    "t_fall": 1e-9,
+                    "t_width": 1e-3,
+                    "period": 2e-3,
+                },
+            },
+            {"type": "resistor", "name": "R1", "nodes": ["in", "out"], "value": "1k"},
+            {"type": "capacitor", "name": "C1", "nodes": ["out", "0"], "value": "1u", "ic": 0.0},
+        ],
+    }
+    (tmp_path / "pulse.yaml").write_text(yaml.safe_dump(netlist, sort_keys=False), encoding="utf-8")
+    manifest_path = _write_manifest(tmp_path, "pulse.yaml")
+
+    results = br.run_benchmarks(manifest_path, tmp_path / "out")
+
+    assert len(results) == 1
+    assert results[0].status == "passed"

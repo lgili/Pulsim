@@ -187,6 +187,10 @@ def run_from_yaml(
     circuit, options = parser.load(str(netlist_path))
     _raise_if_parser_errors(parser)
 
+    # Some solver internals require dimensions to be set before Simulator construction.
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+
     signal_names = list(circuit.signal_names())
     simulator = ps.Simulator(circuit, options)
     mode = _select_mode(options, preferred_mode)
