@@ -254,13 +254,73 @@ def validate_analytical(times: List[float], values: List[float], model: str, par
 def validate_reference(times: List[float], values: List[float], baseline_path: Path, column: str) -> Tuple[Optional[float], Optional[float], str]:
     if not baseline_path.exists():
         return None, None, f"Baseline missing: {baseline_path}"
-    _, ref_series = load_csv_series(baseline_path)
+    ref_times, ref_series = load_csv_series(baseline_path)
     if column not in ref_series:
         return None, None, f"Baseline missing column: {column}"
     ref_values = ref_series[column]
-    if len(ref_values) != len(values):
-        return None, None, "Baseline length mismatch"
-    return (*compute_errors(values, ref_values), "")
+    if len(ref_times) < 2 or len(times) < 2:
+        return None, None, "Not enough samples for baseline comparison"
+
+    overlap_start = max(times[0], ref_times[0])
+    overlap_end = min(times[-1], ref_times[-1])
+    if overlap_start >= overlap_end:
+        return None, None, "No overlapping time range with baseline"
+
+    eval_times: List[float] = []
+    eval_values: List[float] = []
+    for t, v in zip(times, values):
+        if overlap_start <= t <= overlap_end:
+            eval_times.append(t)
+            eval_values.append(v)
+
+    if len(eval_times) < 2:
+        return None, None, "Not enough overlapping samples with baseline"
+
+    interp_ref: List[float] = []
+    idx = 0
+    for t in eval_times:
+        while idx + 1 < len(ref_times) and ref_times[idx + 1] < t:
+            idx += 1
+        if idx + 1 >= len(ref_times):
+            interp_ref.append(ref_values[-1])
+            continue
+        t0, t1 = ref_times[idx], ref_times[idx + 1]
+        v0, v1 = ref_values[idx], ref_values[idx + 1]
+        if t1 == t0:
+            interp_ref.append(v0)
+            continue
+        alpha = (t - t0) / (t1 - t0)
+        interp_ref.append(v0 + alpha * (v1 - v0))
+
+    return (*compute_errors(eval_values, interp_ref), "")
+
+
+def apply_validation_window(
+    times: List[float],
+    values: List[float],
+    validation: Dict[str, Any],
+) -> Tuple[List[float], List[float]]:
+    if len(times) != len(values):
+        raise ValueError("Time/value length mismatch")
+
+    ignore_initial_samples = int(validation.get("ignore_initial_samples", 0) or 0)
+    start_time = validation.get("start_time")
+    start_time_value = parse_value(start_time) if start_time is not None else None
+
+    filtered_times: List[float] = []
+    filtered_values: List[float] = []
+    for idx, (t, v) in enumerate(zip(times, values)):
+        if idx < ignore_initial_samples:
+            continue
+        if start_time_value is not None and t < start_time_value:
+            continue
+        filtered_times.append(t)
+        filtered_values.append(v)
+
+    if len(filtered_times) < 2:
+        raise ValueError("Validation window has fewer than 2 samples")
+
+    return filtered_times, filtered_values
 
 
 def run_benchmarks(
@@ -358,47 +418,21 @@ def run_benchmarks(
                         message = f"Missing observable column: {observable}"
                     else:
                         values = series[observable]
-                        if validation_type == "analytical":
-                            try:
-                                max_error, rms_error = validate_analytical(
-                                    times,
-                                    values,
-                                    validation.get("model", ""),
-                                    validation.get("params", {}),
-                                )
-                                if max_threshold is not None and max_error is not None:
-                                    if max_error <= max_threshold:
-                                        status = "passed"
-                                    else:
-                                        status = "failed"
-                                        message = (
-                                            f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
-                                        )
-                            except Exception as exc:
-                                status = "failed"
-                                message = str(exc)
-                        elif validation_type == "reference":
-                            baseline_rel = validation.get("baseline")
-                            if not baseline_rel:
-                                status = "failed"
-                                message = "Missing baseline path"
-                            else:
-                                baseline_path = (benchmarks_path.parent / baseline_rel).resolve()
-                                if not baseline_path.exists() and generate_baselines:
-                                    baseline_path.parent.mkdir(parents=True, exist_ok=True)
-                                    with open(output_path, "r", encoding="utf-8") as src, open(
-                                        baseline_path, "w", encoding="utf-8"
-                                    ) as dst:
-                                        dst.write(src.read())
-                                    status = "baseline"
-                                    message = "Baseline generated"
-                                else:
-                                    max_error, rms_error, message = validate_reference(
-                                        times, values, baseline_path, observable
+                        try:
+                            times_eval, values_eval = apply_validation_window(times, values, validation)
+                        except Exception as exc:
+                            status = "failed"
+                            message = str(exc)
+                        else:
+                            if validation_type == "analytical":
+                                try:
+                                    max_error, rms_error = validate_analytical(
+                                        times_eval,
+                                        values_eval,
+                                        validation.get("model", ""),
+                                        validation.get("params", {}),
                                     )
-                                    if max_error is None:
-                                        status = "failed"
-                                    elif max_threshold is not None:
+                                    if max_threshold is not None and max_error is not None:
                                         if max_error <= max_threshold:
                                             status = "passed"
                                         else:
@@ -406,9 +440,41 @@ def run_benchmarks(
                                             message = (
                                                 f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
                                             )
-                        else:
-                            status = "failed"
-                            message = f"Unsupported validation type: {validation_type}"
+                                except Exception as exc:
+                                    status = "failed"
+                                    message = str(exc)
+                            elif validation_type == "reference":
+                                baseline_rel = validation.get("baseline")
+                                if not baseline_rel:
+                                    status = "failed"
+                                    message = "Missing baseline path"
+                                else:
+                                    baseline_path = (benchmarks_path.parent / baseline_rel).resolve()
+                                    if not baseline_path.exists() and generate_baselines:
+                                        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+                                        with open(output_path, "r", encoding="utf-8") as src, open(
+                                            baseline_path, "w", encoding="utf-8"
+                                        ) as dst:
+                                            dst.write(src.read())
+                                        status = "baseline"
+                                        message = "Baseline generated"
+                                    else:
+                                        max_error, rms_error, message = validate_reference(
+                                            times_eval, values_eval, baseline_path, observable
+                                        )
+                                        if max_error is None:
+                                            status = "failed"
+                                        elif max_threshold is not None:
+                                            if max_error <= max_threshold:
+                                                status = "passed"
+                                            else:
+                                                status = "failed"
+                                                message = (
+                                                    f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                                                )
+                            else:
+                                status = "failed"
+                                message = f"Unsupported validation type: {validation_type}"
 
                 results.append(
                     ScenarioResult(

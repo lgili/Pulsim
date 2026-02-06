@@ -194,3 +194,94 @@ def test_runner_applies_default_fixed_timestep_for_unset_adaptive(tmp_path: Path
 
     assert len(results) == 1
     assert results[0].status == "passed"
+
+
+def test_runner_retries_trbdf2_with_rosenbrock_fallback(tmp_path: Path) -> None:
+    netlist = {
+        "schema": "pulsim-v1",
+        "version": 1,
+        "benchmark": {
+            "id": "trbdf2_fallback",
+            "validation": {"type": "none"},
+        },
+        "simulation": {
+            "tstart": 0.0,
+            "tstop": 5e-4,
+            "dt": 1e-6,
+            "uic": True,
+            "integrator": "trbdf2",
+            "solver": {"order": ["gmres"]},
+        },
+        "components": [
+            {
+                "type": "voltage_source",
+                "name": "Vpulse",
+                "nodes": ["in", "0"],
+                "waveform": {
+                    "type": "pulse",
+                    "v_initial": 0.0,
+                    "v_pulse": 5.0,
+                    "t_delay": 0.0,
+                    "t_rise": 1e-9,
+                    "t_fall": 1e-9,
+                    "t_width": 1e-3,
+                    "period": 2e-3,
+                },
+            },
+            {"type": "resistor", "name": "R1", "nodes": ["in", "out"], "value": "1k"},
+            {"type": "capacitor", "name": "C1", "nodes": ["out", "0"], "value": "1u", "ic": 0.0},
+        ],
+    }
+    (tmp_path / "trbdf2.yaml").write_text(yaml.safe_dump(netlist, sort_keys=False), encoding="utf-8")
+    manifest_path = _write_manifest(tmp_path, "trbdf2.yaml")
+
+    results = br.run_benchmarks(manifest_path, tmp_path / "out")
+
+    assert len(results) == 1
+    assert results[0].status == "passed"
+    assert results[0].telemetry.get("integrator_mapped_to_rosenbrockw") == 1.0
+
+
+def test_shooting_uses_warm_start_retry_for_pwm_case(tmp_path: Path) -> None:
+    netlist = {
+        "schema": "pulsim-v1",
+        "version": 1,
+        "simulation": {
+            "tstart": 0.0,
+            "tstop": 200e-6,
+            "dt": 0.5e-6,
+            "adaptive_timestep": False,
+            "shooting": {
+                "period": 20e-6,
+                "max_iterations": 20,
+                "tolerance": 1e-6,
+                "relaxation": 0.5,
+                "store_last_transient": True,
+            },
+        },
+        "components": [
+            {
+                "type": "voltage_source",
+                "name": "Vpwm",
+                "nodes": ["in", "0"],
+                "waveform": {
+                    "type": "pwm",
+                    "v_high": 5.0,
+                    "v_low": 0.0,
+                    "frequency": 50000,
+                    "duty": 0.5,
+                    "dead_time": 200e-9,
+                },
+            },
+            {"type": "resistor", "name": "R1", "nodes": ["in", "out"], "value": 100},
+            {"type": "capacitor", "name": "C1", "nodes": ["out", "0"], "value": "1u"},
+        ],
+    }
+    netlist_path = tmp_path / "shooting_pwm.yaml"
+    netlist_path.write_text(yaml.safe_dump(netlist, sort_keys=False), encoding="utf-8")
+
+    result = backend.run_from_yaml(netlist_path, tmp_path / "shooting.csv", preferred_mode="shooting")
+
+    assert result.mode == "shooting"
+    assert result.steps > 0
+    assert result.telemetry.get("shooting_warm_start_retry", 0.0) >= 1.0

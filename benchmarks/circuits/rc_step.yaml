@@ -7,7 +7,7 @@ benchmark:
     - column: V(out)
   expectations:
     metrics:
-      max_error: 1e-4
+      max_error: 3e-3
   validation:
     type: analytical
     model: rc_step

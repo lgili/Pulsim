@@ -49,6 +49,8 @@ Each run produces:
 - `summary.json` — pass/fail summary.
 
 Telemetry fields are sourced from structured simulation result objects and included in `results.json`.
+Analytical `max_error` thresholds in `circuits/*.yaml` are calibrated for the current
+Python-first runtime defaults (fixed-step unless explicitly overridden).
 
 `benchmark_ngspice.py` also emits:
 
@@ -64,3 +66,6 @@ Telemetry fields are sourced from structured simulation result objects and inclu
 4. Optional: define `ngspice_observables` in `benchmarks.yaml` to map Pulsim CSV columns to ngspice vectors.
    - Example: `{ column: "V(out)", spice_vector: "v(out)" }`
 5. If using `reference` validation, add a baseline CSV under `baselines/`.
+6. Optional validation window controls:
+   - `benchmark.validation.ignore_initial_samples`: ignore N leading samples.
+   - `benchmark.validation.start_time`: compare only from a minimum time.

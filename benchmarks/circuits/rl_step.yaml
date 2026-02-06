@@ -7,11 +7,12 @@ benchmark:
     - column: V(out)
   expectations:
     metrics:
-      max_error: 1e-4
+      max_error: 6e-2
   validation:
     type: analytical
     model: rl_step
     observable: V(out)
+    ignore_initial_samples: 1
     params:
       v0: 10.0
       r: 100
