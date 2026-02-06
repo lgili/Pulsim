@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from benchmark_runner import (
-    can_use_pulsim_python_backend,
     deep_merge,
-    find_pulsim_cli,
+    infer_preferred_mode,
     load_csv_series,
     load_yaml,
+    normalize_periodic_mode,
     run_pulsim,
     yaml,
 )
@@ -315,7 +315,6 @@ def compare_pulsim_vs_ngspice(
 
 
 def run_case(
-    pulsim_cli: Optional[Path],
     scenario_netlist: Dict[str, Any],
     benchmark_id: str,
     scenario_name: str,
@@ -323,6 +322,7 @@ def run_case(
     observable_specs: List[ObservableSpec],
     max_error_threshold: Optional[float],
     output_dir: Path,
+    preferred_mode: Optional[str],
 ) -> BenchmarkResult:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -335,7 +335,18 @@ def run_case(
         with open(scenario_file, "w", encoding="utf-8") as handle:
             yaml.safe_dump(scenario_netlist, handle, sort_keys=False)
 
-        pulsim_runtime, pulsim_steps, _ = run_pulsim(pulsim_cli, scenario_file, pulsim_output)
+        simulation_cfg = scenario_netlist.get("simulation", {})
+        use_initial_conditions = bool(
+            simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
+        )
+        run_result = run_pulsim(
+            scenario_file,
+            pulsim_output,
+            preferred_mode=preferred_mode,
+            use_initial_conditions=use_initial_conditions,
+        )
+        pulsim_runtime = run_result.runtime_s
+        pulsim_steps = run_result.steps
 
     ng_runtime, ng_steps, observables, max_error, rms_error = compare_pulsim_vs_ngspice(
         pulsim_output,
@@ -367,7 +378,6 @@ def run_case(
 
 
 def run_single_pair(
-    pulsim_cli: Optional[Path],
     pulsim_netlist: Path,
     spice_netlist: Path,
     output_dir: Path,
@@ -384,7 +394,6 @@ def run_single_pair(
         observable_specs = [ObservableSpec(column="V(out)", spice_vector="v(out)")]
 
     result = run_case(
-        pulsim_cli=pulsim_cli,
         scenario_netlist=netlist,
         benchmark_id=benchmark_id,
         scenario_name="default",
@@ -392,12 +401,12 @@ def run_single_pair(
         observable_specs=observable_specs,
         max_error_threshold=max_threshold,
         output_dir=output_dir,
+        preferred_mode=None,
     )
     return [result]
 
 
 def run_manifest(
-    pulsim_cli: Optional[Path],
     manifest_path: Path,
     output_dir: Path,
     only: Optional[List[str]],
@@ -496,9 +505,10 @@ def run_manifest(
         for scenario_name in scenario_names:
             scenario_override = scenarios.get(scenario_name, {})
             scenario_netlist = deep_merge(netlist, scenario_override)
+            preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
+            normalize_periodic_mode(scenario_netlist, preferred_mode)
             try:
                 result = run_case(
-                    pulsim_cli=pulsim_cli,
                     scenario_netlist=scenario_netlist,
                     benchmark_id=benchmark_id,
                     scenario_name=scenario_name,
@@ -506,6 +516,7 @@ def run_manifest(
                     observable_specs=observable_specs,
                     max_error_threshold=max_threshold,
                     output_dir=output_dir,
+                    preferred_mode=preferred_mode,
                 )
             except Exception as exc:  # pragma: no cover - runtime dependent
                 result = BenchmarkResult(
@@ -593,7 +604,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Compare Pulsim and ngspice using equivalent circuits")
     parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/ngspice_out"))
-    parser.add_argument("--pulsim-cli", type=Path, default=None)
+    parser.add_argument(
+        "--pulsim-cli",
+        type=Path,
+        default=None,
+        help="Deprecated: ignored. ngspice comparator uses Python runtime bindings for Pulsim.",
+    )
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run (manifest mode)")
     parser.add_argument("--matrix", action="store_true", help="Run all scenarios from manifest")
     parser.add_argument("--scenario", type=str, default=None, help="Run only one scenario name")
@@ -607,20 +623,13 @@ def main() -> int:
     if not check_ngspice():
         raise SystemExit("ngspice not found. Install it before running this comparison.")
 
-    pulsim_cli = args.pulsim_cli or find_pulsim_cli()
-    if pulsim_cli is None and not can_use_pulsim_python_backend():
-        raise SystemExit(
-            "Pulsim CLI not found and Python backend unavailable. "
-            "Build the project, pass --pulsim-cli, or install the pulsim Python package."
-        )
-    if pulsim_cli is None:
-        print("Pulsim CLI not found. Using Python API backend.")
+    if args.pulsim_cli is not None:
+        print("Warning: --pulsim-cli is deprecated and ignored. Using Python runtime backend.")
 
     if args.pulsim_netlist is not None or args.spice_netlist is not None:
         if args.pulsim_netlist is None or args.spice_netlist is None:
             raise SystemExit("Single mode requires both --pulsim-netlist and --spice-netlist")
         results = run_single_pair(
-            pulsim_cli=pulsim_cli,
             pulsim_netlist=args.pulsim_netlist.resolve(),
             spice_netlist=args.spice_netlist.resolve(),
             output_dir=args.output_dir,
@@ -628,7 +637,6 @@ def main() -> int:
         )
     else:
         results = run_manifest(
-            pulsim_cli=pulsim_cli,
             manifest_path=args.benchmarks.resolve(),
             output_dir=args.output_dir,
             only=args.only,

@@ -1,6 +1,6 @@
 """Type stubs for PulsimCore High-Performance API."""
 
-from typing import List
+from typing import Dict, List, Optional, Tuple
 from enum import Enum
 
 __version__: str
@@ -63,6 +63,22 @@ class SIMDLevel(Enum):
     AVX2 = ...
     AVX512 = ...
     NEON = ...
+
+class Integrator(Enum):
+    Trapezoidal = ...
+    BDF1 = ...
+    BDF2 = ...
+    BDF3 = ...
+    BDF4 = ...
+    BDF5 = ...
+    Gear = ...
+    TRBDF2 = ...
+    RosenbrockW = ...
+    SDIRK2 = ...
+
+class TimestepMethod(Enum):
+    StepDoubling = ...
+    Richardson = ...
 
 # =============================================================================
 # Device Classes
@@ -206,6 +222,170 @@ class DCAnalysisResult:
 
     def __init__(self) -> None: ...
 
+class StiffnessConfig:
+    enable: bool
+    rejection_streak_threshold: int
+    newton_iter_threshold: int
+    newton_streak_threshold: int
+    cooldown_steps: int
+    dt_backoff: float
+    max_bdf_order: int
+    monitor_conditioning: bool
+    conditioning_error_threshold: float
+    switch_integrator: bool
+    stiff_integrator: Integrator
+
+    def __init__(self) -> None: ...
+
+class PeriodicSteadyStateOptions:
+    period: float
+    max_iterations: int
+    tolerance: float
+    relaxation: float
+    store_last_transient: bool
+
+    def __init__(self) -> None: ...
+
+class HarmonicBalanceOptions:
+    period: float
+    num_samples: int
+    max_iterations: int
+    tolerance: float
+    relaxation: float
+    initialize_from_transient: bool
+
+    def __init__(self) -> None: ...
+
+class SwitchingEnergy:
+    eon: float
+    eoff: float
+    err: float
+
+    def __init__(self) -> None: ...
+
+class LinearSolverTelemetry:
+    total_solve_calls: int
+    total_iterations: int
+    total_fallbacks: int
+    last_iterations: int
+    last_error: float
+    last_solver: Optional[LinearSolverKind]
+    last_preconditioner: Optional[PreconditionerKind]
+
+    def __init__(self) -> None: ...
+
+class SimulationEventType(Enum):
+    SwitchOn = ...
+    SwitchOff = ...
+    ConvergenceWarning = ...
+    TimestepChange = ...
+
+class SimulationEvent:
+    time: float
+    type: SimulationEventType
+    component: str
+    description: str
+    value1: float
+    value2: float
+
+    def __init__(self) -> None: ...
+
+class SimulationOptions:
+    tstart: float
+    tstop: float
+    dt: float
+    dt_min: float
+    dt_max: float
+    newton_options: NewtonOptions
+    dc_config: DCConvergenceConfig
+    linear_solver: LinearSolverStackConfig
+    adaptive_timestep: bool
+    timestep_config: AdvancedTimestepConfig
+    lte_config: RichardsonLTEConfig
+    integrator: Integrator
+    enable_bdf_order_control: bool
+    bdf_config: BDFOrderConfig
+    stiffness_config: StiffnessConfig
+    enable_periodic_shooting: bool
+    periodic_options: PeriodicSteadyStateOptions
+    enable_harmonic_balance: bool
+    harmonic_balance: HarmonicBalanceOptions
+    enable_events: bool
+    enable_losses: bool
+    switching_energy: Dict[str, SwitchingEnergy]
+    gmin_fallback: GminConfig
+    max_step_retries: int
+
+    def __init__(self) -> None: ...
+
+class SimulationResult:
+    time: List[float]
+    states: List[List[float]]
+    events: List[SimulationEvent]
+    success: bool
+    final_status: SolverStatus
+    message: str
+    total_steps: int
+    newton_iterations_total: int
+    timestep_rejections: int
+    total_time_seconds: float
+    linear_solver_telemetry: LinearSolverTelemetry
+    data: List[List[float]]
+
+    def __init__(self) -> None: ...
+
+class PeriodicSteadyStateResult:
+    success: bool
+    iterations: int
+    residual_norm: float
+    steady_state: List[float]
+    last_cycle: SimulationResult
+    message: str
+
+    def __init__(self) -> None: ...
+
+class HarmonicBalanceResult:
+    success: bool
+    iterations: int
+    residual_norm: float
+    solution: List[float]
+    sample_times: List[float]
+    message: str
+
+    def __init__(self) -> None: ...
+
+class Simulator:
+    options: SimulationOptions
+
+    def __init__(self, circuit: Circuit, options: SimulationOptions = ...) -> None: ...
+    def dc_operating_point(self) -> DCAnalysisResult: ...
+    def run_transient(self, x0: Optional[List[float]] = ...) -> SimulationResult: ...
+    def run_periodic_shooting(
+        self,
+        x0_or_options: Optional[object] = ...,
+        options: Optional[PeriodicSteadyStateOptions] = ...,
+    ) -> PeriodicSteadyStateResult: ...
+    def run_harmonic_balance(
+        self,
+        x0_or_options: Optional[object] = ...,
+        options: Optional[HarmonicBalanceOptions] = ...,
+    ) -> HarmonicBalanceResult: ...
+    def set_switching_energy(self, device_name: str, energy: SwitchingEnergy) -> None: ...
+
+class YamlParserOptions:
+    strict: bool
+    validate_nodes: bool
+
+    def __init__(self) -> None: ...
+
+class YamlParser:
+    errors: List[str]
+    warnings: List[str]
+
+    def __init__(self, options: YamlParserOptions = ...) -> None: ...
+    def load(self, path: str) -> Tuple[Circuit, SimulationOptions]: ...
+    def load_string(self, content: str) -> Tuple[Circuit, SimulationOptions]: ...
+
 # =============================================================================
 # Validation Framework
 # =============================================================================
@@ -316,6 +496,39 @@ class TimestepConfig:
     def conservative() -> TimestepConfig: ...
     @staticmethod
     def aggressive() -> TimestepConfig: ...
+
+class AdvancedTimestepConfig(TimestepConfig):
+    target_newton_iterations: int
+    min_newton_iterations: int
+    max_newton_iterations: int
+    newton_feedback_gain: float
+    max_growth_rate: float
+    max_shrink_rate: float
+    enable_smoothing: bool
+    lte_weight: float
+    newton_weight: float
+
+    def __init__(self) -> None: ...
+    @staticmethod
+    def defaults() -> AdvancedTimestepConfig: ...
+    @staticmethod
+    def for_switching() -> AdvancedTimestepConfig: ...
+    @staticmethod
+    def for_power_electronics() -> AdvancedTimestepConfig: ...
+
+class RichardsonLTEConfig:
+    method: TimestepMethod
+    extrapolation_order: int
+    voltage_tolerance: float
+    current_tolerance: float
+    use_weighted_norm: bool
+    history_depth: int
+
+    def __init__(self) -> None: ...
+    @staticmethod
+    def defaults() -> RichardsonLTEConfig: ...
+    @staticmethod
+    def step_doubling() -> RichardsonLTEConfig: ...
 
 # =============================================================================
 # High-Performance Features

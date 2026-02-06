@@ -13,6 +13,9 @@ This folder contains the YAML benchmark suite and validation runners.
 ## Running
 
 ```bash
+# Use local build bindings (repository workflow)
+export PYTHONPATH=build/python
+
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 
@@ -26,10 +29,8 @@ python3 benchmarks/benchmark_ngspice.py \
   --output-dir benchmarks/ngspice_single
 ```
 
-If `--pulsim-cli` is not provided and no `pulsim` executable is found, the runners
-automatically fall back to the installed Python package (`import pulsim`) when available.
-In this fallback mode, `benchmark_runner.py` records execution metrics but skips strict
-validation pass/fail checks tied to CLI-only solver/integrator settings.
+Benchmark runners are Python-first and execute through `pulsim` runtime bindings
+(`YamlParser` + `Simulator`). The `--pulsim-cli` flag is deprecated and ignored.
 
 Generate missing reference baselines:
 
@@ -45,7 +46,7 @@ Each run produces:
 - `results.json` — full structured results and metadata.
 - `summary.json` — pass/fail summary.
 
-Telemetry fields (when available) are extracted from CLI output and included in `results.json`.
+Telemetry fields are sourced from structured simulation result objects and included in `results.json`.
 
 `benchmark_ngspice.py` also emits:
 

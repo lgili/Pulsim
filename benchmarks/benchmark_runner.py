@@ -7,10 +7,7 @@ import argparse
 import csv
 import json
 import math
-import re
-import subprocess
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,16 +18,19 @@ except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
 try:
-    import numpy as np
-except ImportError:  # pragma: no cover - optional dependency
-    np = None
-
-try:
     from pulsim_python_backend import is_available as python_backend_available
     from pulsim_python_backend import run_from_yaml as run_pulsim_python
 except ImportError:  # pragma: no cover - local import fallback
     python_backend_available = None
     run_pulsim_python = None
+
+
+@dataclass
+class PulsimRunResult:
+    runtime_s: float
+    steps: int
+    mode: str
+    telemetry: Dict[str, Optional[float]]
 
 
 @dataclass
@@ -44,23 +44,6 @@ class ScenarioResult:
     rms_error: Optional[float]
     message: str
     telemetry: Dict[str, Optional[float]]
-
-
-def find_pulsim_cli() -> Optional[Path]:
-    script_dir = Path(__file__).resolve().parent.parent
-    candidates = [
-        script_dir / "build" / "cli" / "pulsim",
-        script_dir / "build" / "Release" / "cli" / "pulsim",
-        script_dir / "build" / "Debug" / "cli" / "pulsim",
-        Path("pulsim"),
-    ]
-    for path in candidates:
-        if path.exists():
-            return path
-        if path.name == "pulsim":
-            if subprocess.run(["which", "pulsim"], capture_output=True).returncode == 0:
-                return path
-    return None
 
 
 def can_use_pulsim_python_backend() -> bool:
@@ -121,59 +104,66 @@ def coerce_optional_float(value: Any) -> Optional[float]:
     return parse_value(value)
 
 
-def run_pulsim(cli_path: Optional[Path], netlist_path: Path, output_path: Path) -> Tuple[float, int, str]:
-    if cli_path is None:
-        if run_pulsim_python is None or not can_use_pulsim_python_backend():
-            raise RuntimeError(
-                "Pulsim CLI not found and Python backend unavailable. "
-                "Install pulsim package or provide --pulsim-cli."
-            )
-        return run_pulsim_python(netlist_path, output_path)
+def infer_preferred_mode(scenario_name: str, scenario_override: Dict[str, Any]) -> Optional[str]:
+    sim = scenario_override.get("simulation") if isinstance(scenario_override, dict) else None
+    if isinstance(sim, dict):
+        has_shooting = "shooting" in sim
+        has_hb = "harmonic_balance" in sim or "hb" in sim
+        if has_shooting and not has_hb:
+            return "shooting"
+        if has_hb and not has_shooting:
+            return "harmonic_balance"
 
-    start = time.perf_counter()
-    try:
-        result = subprocess.run(
-            [str(cli_path), "run", str(netlist_path), "-o", str(output_path)],
-            capture_output=True,
-            text=True,
+    lowered = scenario_name.lower()
+    if "shooting" in lowered:
+        return "shooting"
+    if "harmonic" in lowered or lowered == "hb":
+        return "harmonic_balance"
+    return None
+
+
+def normalize_periodic_mode(netlist: Dict[str, Any], preferred_mode: Optional[str]) -> None:
+    if preferred_mode is None:
+        return
+    simulation = netlist.get("simulation")
+    if not isinstance(simulation, dict):
+        return
+
+    if preferred_mode == "shooting":
+        simulation.pop("harmonic_balance", None)
+        simulation.pop("hb", None)
+    elif preferred_mode == "harmonic_balance":
+        simulation.pop("shooting", None)
+
+
+def run_pulsim(
+    netlist_path: Path,
+    output_path: Path,
+    preferred_mode: Optional[str] = None,
+    use_initial_conditions: bool = False,
+) -> PulsimRunResult:
+    if run_pulsim_python is None or not can_use_pulsim_python_backend():
+        raise RuntimeError(
+            "Pulsim Python runtime backend unavailable. "
+            "Build Python bindings and expose them via build/python or install pulsim package."
         )
-    except FileNotFoundError as exc:
-        if run_pulsim_python is not None and can_use_pulsim_python_backend():
-            return run_pulsim_python(netlist_path, output_path)
-        raise RuntimeError(f"Pulsim CLI not found: {cli_path}") from exc
 
-    elapsed = time.perf_counter() - start
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "Pulsim run failed")
-    steps = 0
-    if output_path.exists():
-        with open(output_path, "r", encoding="utf-8") as handle:
-            steps = max(0, sum(1 for _ in handle) - 1)
-    return elapsed, steps, result.stdout
+    raw_result = run_pulsim_python(
+        netlist_path,
+        output_path,
+        preferred_mode=preferred_mode,
+        use_initial_conditions=use_initial_conditions,
+    )
 
+    if not hasattr(raw_result, "runtime_s") or not hasattr(raw_result, "telemetry"):
+        raise RuntimeError("Unexpected backend response: structured telemetry result expected")
 
-def parse_telemetry(output: str) -> Dict[str, Optional[float]]:
-    telemetry: Dict[str, Optional[float]] = {
-        "newton_iterations": None,
-        "linear_iterations": None,
-        "residual_norm": None,
-        "timestep_rejections": None,
-    }
-
-    patterns = {
-        "newton_iterations": r"Newton iterations\s*[:=]\s*(\d+)",
-        "linear_iterations": r"Linear iterations\s*[:=]\s*(\d+)",
-        "residual_norm": r"Residual norm\s*[:=]\s*([0-9eE+\-.]+)",
-        "timestep_rejections": r"Timestep rejections\s*[:=]\s*(\d+)",
-    }
-
-    for key, pattern in patterns.items():
-        match = re.search(pattern, output)
-        if match:
-            value = match.group(1)
-            telemetry[key] = float(value) if "." in value or "e" in value.lower() else float(int(value))
-
-    return telemetry
+    return PulsimRunResult(
+        runtime_s=float(getattr(raw_result, "runtime_s")),
+        steps=int(getattr(raw_result, "steps")),
+        mode=str(getattr(raw_result, "mode")),
+        telemetry=dict(getattr(raw_result, "telemetry")),
+    )
 
 
 def load_csv_series(path: Path) -> Tuple[List[float], Dict[str, List[float]]]:
@@ -253,7 +243,7 @@ def validate_analytical(times: List[float], values: List[float], model: str, par
 def validate_reference(times: List[float], values: List[float], baseline_path: Path, column: str) -> Tuple[Optional[float], Optional[float], str]:
     if not baseline_path.exists():
         return None, None, f"Baseline missing: {baseline_path}"
-    ref_times, ref_series = load_csv_series(baseline_path)
+    _, ref_series = load_csv_series(baseline_path)
     if column not in ref_series:
         return None, None, f"Baseline missing column: {column}"
     ref_values = ref_series[column]
@@ -265,7 +255,6 @@ def validate_reference(times: List[float], values: List[float], baseline_path: P
 def run_benchmarks(
     benchmarks_path: Path,
     output_dir: Path,
-    cli_path: Optional[Path],
     selected: Optional[List[str]] = None,
     matrix: bool = False,
     generate_baselines: bool = False,
@@ -289,6 +278,12 @@ def run_benchmarks(
         for scenario_name in scenario_names:
             scenario_override = scenarios.get(scenario_name, {})
             scenario_netlist = deep_merge(netlist, scenario_override)
+            preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
+            normalize_periodic_mode(scenario_netlist, preferred_mode)
+            simulation_cfg = scenario_netlist.get("simulation", {})
+            use_initial_conditions = bool(
+                simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
+            )
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir_path = Path(tmpdir)
@@ -302,7 +297,12 @@ def run_benchmarks(
                     yaml.safe_dump(scenario_netlist, handle, sort_keys=False)
 
                 try:
-                    runtime_s, steps, stdout = run_pulsim(cli_path, scenario_file, output_path)
+                    run_result = run_pulsim(
+                        scenario_file,
+                        output_path,
+                        preferred_mode=preferred_mode,
+                        use_initial_conditions=use_initial_conditions,
+                    )
                 except Exception as exc:
                     results.append(
                         ScenarioResult(
@@ -323,11 +323,12 @@ def run_benchmarks(
                 max_error = None
                 rms_error = None
                 message = ""
-                telemetry = parse_telemetry(stdout)
+                runtime_s = run_result.runtime_s
+                steps = run_result.steps
+                telemetry = dict(run_result.telemetry)
                 telemetry["steps"] = float(steps)
                 telemetry["runtime_s"] = float(runtime_s)
-                using_python_backend = "Backend: python-api" in stdout
-                telemetry["python_backend"] = 1.0 if using_python_backend else 0.0
+                telemetry["python_backend"] = 1.0
 
                 validation = bench_meta.get("validation", {})
                 validation_type = validation.get("type", "none")
@@ -335,13 +336,10 @@ def run_benchmarks(
                 expectations = bench_meta.get("expectations", {})
                 max_threshold = coerce_optional_float(expectations.get("metrics", {}).get("max_error"))
 
-                if using_python_backend and validation_type != "none":
-                    status = "skipped"
-                    message = (
-                        "Validation skipped on Python backend fallback "
-                        "(CLI-only solver/integrator configuration not available)."
-                    )
-                elif validation_type != "none" and observable:
+                if validation_type != "none" and not observable:
+                    status = "failed"
+                    message = "Missing validation observable"
+                elif validation_type != "none":
                     times, series = load_csv_series(output_path)
                     if observable not in series:
                         status = "failed"
@@ -363,7 +361,10 @@ def run_benchmarks(
                                 message = str(exc)
                         elif validation_type == "reference":
                             baseline_rel = validation.get("baseline")
-                            if baseline_rel:
+                            if not baseline_rel:
+                                status = "failed"
+                                message = "Missing baseline path"
+                            else:
                                 baseline_path = (benchmarks_path.parent / baseline_rel).resolve()
                                 if not baseline_path.exists() and generate_baselines:
                                     baseline_path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,14 +379,11 @@ def run_benchmarks(
                                         times, values, baseline_path, observable
                                     )
                                     if max_error is None:
-                                        status = "skipped"
+                                        status = "failed"
                                     elif max_threshold is not None:
                                         status = "passed" if max_error <= max_threshold else "failed"
-                            else:
-                                status = "skipped"
-                                message = "Missing baseline path"
                         else:
-                            status = "skipped"
+                            status = "failed"
                             message = f"Unsupported validation type: {validation_type}"
 
                 results.append(
@@ -456,7 +454,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run Pulsim benchmark suite")
     parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/out"))
-    parser.add_argument("--pulsim-cli", type=Path, default=None)
+    parser.add_argument(
+        "--pulsim-cli",
+        type=Path,
+        default=None,
+        help="Deprecated: ignored. Benchmark runner now uses Python runtime bindings only.",
+    )
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run")
     parser.add_argument("--matrix", action="store_true", help="Run full validation matrix")
     parser.add_argument("--generate-baselines", action="store_true", help="Generate missing reference baselines")
@@ -465,19 +468,18 @@ def main() -> int:
     if yaml is None:
         raise SystemExit("PyYAML is required. Install with: pip install pyyaml")
 
-    cli_path = args.pulsim_cli or find_pulsim_cli()
-    if cli_path is None and not can_use_pulsim_python_backend():
+    if args.pulsim_cli is not None:
+        print("Warning: --pulsim-cli is deprecated and ignored. Using Python runtime backend.")
+
+    if not can_use_pulsim_python_backend():
         raise SystemExit(
-            "Pulsim CLI not found and Python backend unavailable. "
-            "Build the project, pass --pulsim-cli, or install the pulsim Python package."
+            "Pulsim Python runtime backend unavailable. "
+            "Build Python bindings and expose build/python on PYTHONPATH or install pulsim package."
         )
-    if cli_path is None:
-        print("Pulsim CLI not found. Using Python API backend.")
 
     results = run_benchmarks(
         args.benchmarks,
         args.output_dir,
-        cli_path,
         selected=args.only,
         matrix=args.matrix,
         generate_baselines=args.generate_baselines,

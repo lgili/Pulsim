@@ -12,11 +12,11 @@ python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 ```
 
-### Legacy ngspice comparison
+### ngspice comparison (current)
 
 ```bash
-./build/cli/pulsim run benchmarks/circuits/rc_step.yaml -o benchmarks/results/rc_pulsim.csv
-./build/cli/pulsim run benchmarks/circuits/rc_step.yaml -o benchmarks/results/rc_pulsim_fixed.csv --dt 1e-6 --dtmax 1e-6
+export PYTHONPATH=build/python
+python3 benchmarks/benchmark_ngspice.py --output-dir benchmarks/ngspice_out
 ```
 
 Files:
@@ -135,7 +135,7 @@ For higher accuracy applications:
 
 Example with improved accuracy:
 ```bash
-./build/cli/pulsim run circuit.json -o output.csv --dt 1e-7 --dtmax 1e-7
+python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 ```
 
 ## Conclusion
@@ -166,15 +166,14 @@ The remaining error difference vs ngspice is **expected** due to using Backward 
 ## Running the Benchmarks
 
 ```bash
-# Pulsim simulations (adaptive timestep)
-./build/cli/pulsim run benchmarks/circuits/rc_step.json -o benchmarks/results/rc_pulsim.csv
+export PYTHONPATH=build/python
 
-# Pulsim simulations (fixed timestep for higher accuracy)
-./build/cli/pulsim run benchmarks/circuits/rc_step.json -o benchmarks/results/rc_pulsim_fixed.csv --dt 1e-6 --dtmax 1e-6
+# Pulsim benchmark suite
+python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 
-# ngspice simulations
-cd benchmarks/ngspice && ngspice -b rc_step.cir && ngspice -b rl_step.cir && ngspice -b rlc_step.cir
+# Full matrix (scenarios from benchmarks.yaml)
+python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 
-# Compare results
-cd benchmarks && python3 compare_results.py
+# Pulsim vs ngspice parity
+python3 benchmarks/benchmark_ngspice.py --output-dir benchmarks/ngspice_out
 ```

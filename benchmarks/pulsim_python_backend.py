@@ -1,325 +1,268 @@
 #!/usr/bin/env python3
-"""Python API fallback backend for benchmark runners."""
+"""Python runtime backend for benchmark runners."""
 
 from __future__ import annotations
 
 import csv
+import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
-
-try:
-    import yaml
-except ImportError:  # pragma: no cover - optional dependency
-    yaml = None
+from typing import Dict, List, Optional, Sequence
 
 
-def parse_value(value: Any) -> float:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if value is None:
-        raise ValueError("Missing numeric value")
-    raw = str(value).strip().lower()
-    suffixes = {
-        "f": 1e-15,
-        "p": 1e-12,
-        "n": 1e-9,
-        "u": 1e-6,
-        "µ": 1e-6,
-        "m": 1e-3,
-        "k": 1e3,
-        "meg": 1e6,
-        "g": 1e9,
-        "t": 1e12,
-    }
-    if raw.endswith("meg"):
-        return float(raw[:-3]) * suffixes["meg"]
-    for suffix, multiplier in suffixes.items():
-        if suffix != "meg" and raw.endswith(suffix):
-            return float(raw[: -len(suffix)]) * multiplier
-    return float(raw)
+@dataclass
+class BackendRunResult:
+    runtime_s: float
+    steps: int
+    mode: str
+    telemetry: Dict[str, Optional[float]]
 
 
 def _import_pulsim():
     try:
         import pulsim as ps
-    except Exception:  # pragma: no cover - runtime import path dependent
-        return None
-    return ps
+
+        return ps
+    except Exception:
+        pass
+
+    repo_root = Path(__file__).resolve().parent.parent
+    build_python = repo_root / "build" / "python"
+    if build_python.exists():
+        build_python_str = str(build_python)
+        if build_python_str not in sys.path:
+            sys.path.insert(0, build_python_str)
+        try:
+            import pulsim as ps
+
+            return ps
+        except Exception:
+            return None
+
+    return None
 
 
-def is_available() -> bool:
-    ps = _import_pulsim()
-    return bool(ps and hasattr(ps, "Circuit") and hasattr(ps, "run_transient"))
+def _has_runtime_api(ps: object) -> bool:
+    required = [
+        "YamlParser",
+        "Simulator",
+        "SimulationOptions",
+        "SimulationResult",
+        "PeriodicSteadyStateOptions",
+        "HarmonicBalanceOptions",
+    ]
+    return all(hasattr(ps, name) for name in required)
 
 
-def _nodes_from_component(component: Dict[str, Any]) -> List[str]:
-    if isinstance(component.get("nodes"), list):
-        return [str(x) for x in component["nodes"]]
-    if component.get("n1") is not None and component.get("n2") is not None:
-        return [str(component["n1"]), str(component["n2"])]
-    if component.get("npos") is not None and component.get("nneg") is not None:
-        return [str(component["npos"]), str(component["nneg"])]
-    return []
+def _raise_if_parser_errors(parser: object) -> None:
+    errors = list(getattr(parser, "errors", []))
+    if errors:
+        raise RuntimeError("; ".join(str(item) for item in errors))
 
 
-def _resolve_node(ps: Any, node_map: Dict[str, int], name: str) -> int:
-    lowered = name.strip().lower()
-    if lowered in {"0", "gnd", "ground"}:
-        return int(ps.Circuit.ground())
-    if name not in node_map:
-        raise RuntimeError(f"Node '{name}' was not created before device stamping")
-    return node_map[name]
-
-
-def _coerce_g(value: Any, reciprocal_from_resistance: Any, default: float) -> float:
-    if value is not None:
-        return parse_value(value)
-    if reciprocal_from_resistance is not None:
-        resistance = parse_value(reciprocal_from_resistance)
-        return (1.0 / resistance) if resistance > 0.0 else 0.0
-    return default
-
-
-def _add_voltage_source(
-    ps: Any,
-    circuit: Any,
-    name: str,
-    nodes: Sequence[int],
-    component: Dict[str, Any],
-) -> None:
-    waveform = component.get("waveform", {})
-    if not isinstance(waveform, dict) or not waveform:
-        value = parse_value(component.get("value", 0.0))
-        circuit.add_voltage_source(name, nodes[0], nodes[1], value)
-        return
-
-    wtype = str(waveform.get("type", "dc")).strip().lower()
-    if wtype == "dc":
-        value = parse_value(waveform.get("value", component.get("value", 0.0)))
-        circuit.add_voltage_source(name, nodes[0], nodes[1], value)
-        return
-    if wtype == "pulse":
-        params = ps.PulseParams()
-        if waveform.get("v_initial") is not None:
-            params.v_initial = parse_value(waveform["v_initial"])
-        if waveform.get("v_pulse") is not None:
-            params.v_pulse = parse_value(waveform["v_pulse"])
-        if waveform.get("t_delay") is not None:
-            params.t_delay = parse_value(waveform["t_delay"])
-        if waveform.get("t_rise") is not None:
-            params.t_rise = parse_value(waveform["t_rise"])
-        if waveform.get("t_fall") is not None:
-            params.t_fall = parse_value(waveform["t_fall"])
-        if waveform.get("t_width") is not None:
-            params.t_width = parse_value(waveform["t_width"])
-        if waveform.get("period") is not None:
-            params.period = parse_value(waveform["period"])
-        circuit.add_pulse_voltage_source(name, nodes[0], nodes[1], params)
-        return
-    if wtype == "sine":
-        params = ps.SineParams()
-        if waveform.get("amplitude") is not None:
-            params.amplitude = parse_value(waveform["amplitude"])
-        if waveform.get("frequency") is not None:
-            params.frequency = parse_value(waveform["frequency"])
-        if waveform.get("offset") is not None:
-            params.offset = parse_value(waveform["offset"])
-        if waveform.get("phase") is not None:
-            params.phase = parse_value(waveform["phase"])
-        circuit.add_sine_voltage_source(name, nodes[0], nodes[1], params)
-        return
-    if wtype == "pwm":
-        params = ps.PWMParams()
-        if waveform.get("v_high") is not None:
-            params.v_high = parse_value(waveform["v_high"])
-        if waveform.get("v_low") is not None:
-            params.v_low = parse_value(waveform["v_low"])
-        if waveform.get("frequency") is not None:
-            params.frequency = parse_value(waveform["frequency"])
-        if waveform.get("duty") is not None:
-            params.duty = parse_value(waveform["duty"])
-        if waveform.get("dead_time") is not None:
-            params.dead_time = parse_value(waveform["dead_time"])
-        if waveform.get("phase") is not None:
-            params.phase = parse_value(waveform["phase"])
-        if waveform.get("t_rise") is not None and hasattr(params, "rise_time"):
-            params.rise_time = parse_value(waveform["t_rise"])
-        if waveform.get("t_fall") is not None and hasattr(params, "fall_time"):
-            params.fall_time = parse_value(waveform["t_fall"])
-        circuit.add_pwm_voltage_source(name, nodes[0], nodes[1], params)
-        return
-
-    raise RuntimeError(f"Unsupported voltage source waveform in Python backend: {wtype}")
-
-
-def _build_circuit_from_yaml(ps: Any, netlist: Dict[str, Any]) -> Tuple[Any, Dict[str, Any], List[str]]:
-    circuit = ps.Circuit()
-    node_map: Dict[str, int] = {}
-    branch_names: List[str] = []
-
-    components = [c for c in netlist.get("components", []) if isinstance(c, dict)]
-
-    # Circuit expects nodes to exist before devices are added.
-    for component in components:
-        for node_name in _nodes_from_component(component):
-            lowered = node_name.strip().lower()
-            if lowered in {"0", "gnd", "ground"}:
-                continue
-            if node_name not in node_map:
-                node_map[node_name] = int(circuit.add_node(node_name))
-
-    for index, component in enumerate(components):
-        ctype = str(component.get("type", "")).strip().lower()
-        name = str(component.get("name", f"X{index + 1}"))
-        node_names = _nodes_from_component(component)
-        if len(node_names) < 2:
-            raise RuntimeError(f"Component '{name}' has invalid or missing nodes")
-        nodes = [_resolve_node(ps, node_map, n) for n in node_names]
-
-        if ctype in {"resistor", "r"}:
-            value = parse_value(component.get("value", component.get("resistance")))
-            circuit.add_resistor(name, nodes[0], nodes[1], value)
-        elif ctype in {"capacitor", "c"}:
-            value = parse_value(component.get("value", component.get("capacitance")))
-            ic = parse_value(component.get("ic", 0.0))
-            circuit.add_capacitor(name, nodes[0], nodes[1], value, ic)
-        elif ctype in {"inductor", "l"}:
-            value = parse_value(component.get("value", component.get("inductance")))
-            ic = parse_value(component.get("ic", 0.0))
-            circuit.add_inductor(name, nodes[0], nodes[1], value, ic)
-            branch_names.append(f"I({name})")
-        elif ctype in {"voltage_source", "v"}:
-            _add_voltage_source(ps, circuit, name, nodes, component)
-            branch_names.append(f"I({name})")
-        elif ctype in {"current_source", "i"}:
-            value = parse_value(component.get("value", 0.0))
-            circuit.add_current_source(name, nodes[0], nodes[1], value)
-        elif ctype in {"diode", "d"}:
-            g_on = _coerce_g(component.get("g_on"), component.get("ron"), 1e3)
-            g_off = _coerce_g(component.get("g_off"), component.get("roff"), 1e-9)
-            circuit.add_diode(name, nodes[0], nodes[1], g_on, g_off)
-        elif ctype == "vcswitch":
-            if len(nodes) < 3:
-                raise RuntimeError(f"Component '{name}' (vcswitch) requires 3 nodes")
-            v_threshold = parse_value(component.get("v_threshold", 2.5))
-            g_on = _coerce_g(component.get("g_on"), component.get("ron"), 1e3)
-            g_off = _coerce_g(component.get("g_off"), component.get("roff"), 1e-9)
-            circuit.add_vcswitch(name, nodes[0], nodes[1], nodes[2], v_threshold, g_on, g_off)
-        else:
-            raise RuntimeError(f"Unsupported component type in Python backend: {ctype}")
-
-    return circuit, netlist.get("simulation", {}), branch_names
-
-
-def _make_newton_options(ps: Any, simulation: Dict[str, Any], circuit: Any) -> Any:
-    opts = ps.NewtonOptions()
-    newton = simulation.get("newton", {}) if isinstance(simulation.get("newton"), dict) else {}
-
-    for field in (
-        "max_iterations",
-        "initial_damping",
-        "min_damping",
-        "auto_damping",
-        "track_history",
-        "check_per_variable",
-        "enable_limiting",
-        "max_voltage_step",
-        "max_current_step",
-    ):
-        if field in newton and hasattr(opts, field):
-            value = newton[field]
-            if isinstance(getattr(opts, field), bool):
-                setattr(opts, field, bool(value))
-            elif isinstance(getattr(opts, field), int):
-                setattr(opts, field, int(value))
-            else:
-                setattr(opts, field, parse_value(value))
-
-    opts.num_nodes = int(circuit.num_nodes())
-    opts.num_branches = int(circuit.num_branches())
-    return opts
-
-
-def _write_transient_csv(
+def _write_state_csv(
     output_path: Path,
     times: Sequence[float],
     states: Sequence[Sequence[float]],
-    node_names: Sequence[str],
-    branch_names: Sequence[str],
-    num_branches: int,
+    signal_names: Sequence[str],
 ) -> int:
+    if len(times) != len(states):
+        raise RuntimeError("Simulation result time/state length mismatch")
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    effective_branch_names = list(branch_names)
-    while len(effective_branch_names) < num_branches:
-        effective_branch_names.append(f"I(B{len(effective_branch_names) + 1})")
-
-    header = ["time"] + [f"V({name})" for name in node_names] + effective_branch_names[:num_branches]
 
     with open(output_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(header)
+        writer.writerow(["time", *signal_names])
         for t, state in zip(times, states):
+            if len(state) != len(signal_names):
+                raise RuntimeError("Simulation state size mismatch with circuit signals")
             row = [f"{float(t):.9e}"]
-            row.extend(f"{float(v):.9e}" for v in state)
+            row.extend(f"{float(value):.9e}" for value in state)
             writer.writerow(row)
 
     return max(0, len(times) - 1)
 
 
-def run_from_yaml(netlist_path: Path, output_path: Path) -> Tuple[float, int, str]:
-    if yaml is None:
-        raise RuntimeError("PyYAML is required for Python backend (pip install pyyaml)")
+def _reshape_hb_solution(solution: Sequence[float], state_size: int) -> List[List[float]]:
+    if state_size <= 0:
+        raise RuntimeError("Invalid state size for harmonic balance output")
+    if len(solution) % state_size != 0:
+        raise RuntimeError("Harmonic balance solution size is not divisible by state size")
+
+    samples = len(solution) // state_size
+    out: List[List[float]] = []
+    for idx in range(samples):
+        start = idx * state_size
+        end = start + state_size
+        out.append([float(value) for value in solution[start:end]])
+    return out
+
+
+def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional[float]]:
+    linear = getattr(result, "linear_solver_telemetry", None)
+
+    return {
+        "newton_iterations": float(getattr(result, "newton_iterations_total", 0)),
+        "linear_iterations": float(getattr(linear, "total_iterations", 0)) if linear is not None else None,
+        "linear_solve_calls": float(getattr(linear, "total_solve_calls", 0)) if linear is not None else None,
+        "linear_fallbacks": float(getattr(linear, "total_fallbacks", 0)) if linear is not None else None,
+        "residual_norm": None,
+        "timestep_rejections": float(getattr(result, "timestep_rejections", 0)),
+        "runtime_kernel_s": float(getattr(result, "total_time_seconds", 0.0)),
+        "runtime_s": float(runtime_s),
+        "steps": float(getattr(result, "total_steps", 0)),
+        "python_backend": 1.0,
+    }
+
+
+def _hb_telemetry(result: object, runtime_s: float, steps: int) -> Dict[str, Optional[float]]:
+    return {
+        "newton_iterations": float(getattr(result, "iterations", 0)),
+        "linear_iterations": None,
+        "linear_solve_calls": None,
+        "linear_fallbacks": None,
+        "residual_norm": float(getattr(result, "residual_norm", 0.0)),
+        "timestep_rejections": None,
+        "runtime_kernel_s": None,
+        "runtime_s": float(runtime_s),
+        "steps": float(steps),
+        "python_backend": 1.0,
+        "harmonic_balance_iterations": float(getattr(result, "iterations", 0)),
+        "harmonic_balance_residual_norm": float(getattr(result, "residual_norm", 0.0)),
+    }
+
+
+def _select_mode(options: object, preferred_mode: Optional[str]) -> str:
+    valid_modes = {"transient", "shooting", "harmonic_balance"}
+    if preferred_mode is not None and preferred_mode not in valid_modes:
+        raise RuntimeError(f"Invalid preferred mode: {preferred_mode}")
+
+    enable_shooting = bool(getattr(options, "enable_periodic_shooting", False))
+    enable_hb = bool(getattr(options, "enable_harmonic_balance", False))
+
+    if preferred_mode == "transient":
+        return "transient"
+    if preferred_mode == "shooting":
+        if not enable_shooting:
+            raise RuntimeError("Scenario requested shooting mode but simulation.shooting is not configured")
+        return "shooting"
+    if preferred_mode == "harmonic_balance":
+        if not enable_hb:
+            raise RuntimeError("Scenario requested harmonic_balance mode but simulation.harmonic_balance is not configured")
+        return "harmonic_balance"
+
+    if enable_shooting and not enable_hb:
+        return "shooting"
+    if enable_hb and not enable_shooting:
+        return "harmonic_balance"
+    if enable_shooting and enable_hb:
+        return "shooting"
+    return "transient"
+
+
+def is_available() -> bool:
+    ps = _import_pulsim()
+    return bool(ps and _has_runtime_api(ps))
+
+
+def run_from_yaml(
+    netlist_path: Path,
+    output_path: Path,
+    preferred_mode: Optional[str] = None,
+    use_initial_conditions: bool = False,
+) -> BackendRunResult:
+    """Run benchmark netlist using Pulsim Python runtime and write output CSV."""
 
     ps = _import_pulsim()
     if ps is None:
         raise RuntimeError("Python package 'pulsim' is not available")
+    if not _has_runtime_api(ps):
+        raise RuntimeError("Installed pulsim package does not expose required runtime APIs")
 
-    with open(netlist_path, "r", encoding="utf-8") as handle:
-        netlist = yaml.safe_load(handle)
-    if not isinstance(netlist, dict):
-        raise RuntimeError("Invalid YAML netlist")
+    parser_options = ps.YamlParserOptions()
+    parser_options.strict = False
+    parser = ps.YamlParser(parser_options)
+    circuit, options = parser.load(str(netlist_path))
+    _raise_if_parser_errors(parser)
 
-    circuit, simulation, branch_names = _build_circuit_from_yaml(ps, netlist)
-    if not isinstance(simulation, dict):
-        simulation = {}
+    signal_names = list(circuit.signal_names())
+    simulator = ps.Simulator(circuit, options)
+    mode = _select_mode(options, preferred_mode)
+    x0 = circuit.initial_state() if use_initial_conditions else None
 
-    # The public Python API available in this environment exposes only transient run.
-    if "shooting" in simulation or "harmonic_balance" in simulation or "hb" in simulation:
-        raise RuntimeError("Python backend does not support shooting/harmonic balance scenarios")
+    if mode == "shooting":
+        shooting_opts = options.periodic_options
+        shooting_opts.store_last_transient = True
 
-    t_start = parse_value(simulation.get("tstart", 0.0))
-    t_stop = parse_value(simulation.get("tstop", 1e-3))
-    dt = parse_value(simulation.get("dt", 1e-6))
-    if dt <= 0.0:
-        raise RuntimeError("Simulation dt must be > 0")
-    if t_stop <= t_start:
-        raise RuntimeError("Simulation tstop must be greater than tstart")
+        start = time.perf_counter()
+        if x0 is not None:
+            shooting_result = simulator.run_periodic_shooting(x0, shooting_opts)
+        else:
+            shooting_result = simulator.run_periodic_shooting(shooting_opts)
+        elapsed = time.perf_counter() - start
 
-    newton_opts = _make_newton_options(ps, simulation, circuit)
+        if not shooting_result.success:
+            raise RuntimeError(shooting_result.message or "Periodic shooting failed")
+
+        cycle = shooting_result.last_cycle
+        steps = _write_state_csv(output_path, cycle.time, cycle.states, signal_names)
+        telemetry = _transient_telemetry(cycle, elapsed)
+        telemetry["periodic_iterations"] = float(shooting_result.iterations)
+        telemetry["periodic_residual_norm"] = float(shooting_result.residual_norm)
+        telemetry["steps"] = float(steps)
+
+        return BackendRunResult(
+            runtime_s=elapsed,
+            steps=steps,
+            mode="shooting",
+            telemetry=telemetry,
+        )
+
+    if mode == "harmonic_balance":
+        start = time.perf_counter()
+        if x0 is not None:
+            hb_result = simulator.run_harmonic_balance(x0, options.harmonic_balance)
+        else:
+            hb_result = simulator.run_harmonic_balance(options.harmonic_balance)
+        elapsed = time.perf_counter() - start
+
+        if not hb_result.success:
+            raise RuntimeError(hb_result.message or "Harmonic balance failed")
+
+        times = list(hb_result.sample_times)
+        states = _reshape_hb_solution(hb_result.solution, len(signal_names))
+        if len(times) != len(states):
+            raise RuntimeError("Harmonic balance output time/state length mismatch")
+
+        steps = _write_state_csv(output_path, times, states, signal_names)
+        telemetry = _hb_telemetry(hb_result, elapsed, steps)
+
+        return BackendRunResult(
+            runtime_s=elapsed,
+            steps=steps,
+            mode="harmonic_balance",
+            telemetry=telemetry,
+        )
 
     start = time.perf_counter()
-    times, states, success, message = ps.run_transient(circuit, t_start, t_stop, dt, newton_opts)
+    if x0 is not None:
+        transient_result = simulator.run_transient(x0)
+    else:
+        transient_result = simulator.run_transient()
     elapsed = time.perf_counter() - start
 
-    if not success:
-        raise RuntimeError(message or "Transient simulation failed in Python backend")
+    if not transient_result.success:
+        raise RuntimeError(transient_result.message or "Transient simulation failed")
 
-    node_names = list(circuit.node_names())
-    steps = _write_transient_csv(
-        output_path=output_path,
-        times=times,
-        states=states,
-        node_names=node_names,
-        branch_names=branch_names,
-        num_branches=int(circuit.num_branches()),
+    steps = _write_state_csv(output_path, transient_result.time, transient_result.states, signal_names)
+    telemetry = _transient_telemetry(transient_result, elapsed)
+    telemetry["steps"] = float(steps)
+
+    return BackendRunResult(
+        runtime_s=elapsed,
+        steps=steps,
+        mode="transient",
+        telemetry=telemetry,
     )
-    stdout = "\n".join(
-        [
-            "Backend: python-api",
-            f"steps: {steps}",
-            f"runtime_s: {elapsed:.6f}",
-        ]
-    )
-    return elapsed, steps, stdout
