@@ -13,6 +13,8 @@ from ._pulsim import (
     RLCDamping,
     DeviceHint,
     SIMDLevel,
+    Integrator,
+    TimestepMethod,
 
     # Device Classes - Linear
     Resistor,
@@ -59,6 +61,20 @@ from ._pulsim import (
     # Transient Simulation
     run_transient,
     run_transient_streaming,
+    SimulationOptions,
+    SimulationResult,
+    Simulator,
+    PeriodicSteadyStateOptions,
+    PeriodicSteadyStateResult,
+    HarmonicBalanceOptions,
+    HarmonicBalanceResult,
+    StiffnessConfig,
+    SwitchingEnergy,
+    SimulationEventType,
+    SimulationEvent,
+    LinearSolverTelemetry,
+    YamlParserOptions,
+    YamlParser,
 
     # Solver Configuration
     Tolerances,
@@ -99,6 +115,8 @@ from ._pulsim import (
     # Integration Methods
     BDFOrderConfig,
     TimestepConfig,
+    AdvancedTimestepConfig,
+    RichardsonLTEConfig,
 
     # High-Performance Features
     LinearSolverConfig,
@@ -157,6 +175,8 @@ __all__ = [
     "RLCDamping",
     "DeviceHint",
     "SIMDLevel",
+    "Integrator",
+    "TimestepMethod",
 
     # Device Classes - Linear
     "Resistor",
@@ -203,6 +223,20 @@ __all__ = [
     # Transient Simulation
     "run_transient",
     "run_transient_streaming",
+    "SimulationOptions",
+    "SimulationResult",
+    "Simulator",
+    "PeriodicSteadyStateOptions",
+    "PeriodicSteadyStateResult",
+    "HarmonicBalanceOptions",
+    "HarmonicBalanceResult",
+    "StiffnessConfig",
+    "SwitchingEnergy",
+    "SimulationEventType",
+    "SimulationEvent",
+    "LinearSolverTelemetry",
+    "YamlParserOptions",
+    "YamlParser",
 
     # Solver Configuration
     "Tolerances",
@@ -243,6 +277,8 @@ __all__ = [
     # Integration Methods
     "BDFOrderConfig",
     "TimestepConfig",
+    "AdvancedTimestepConfig",
+    "RichardsonLTEConfig",
 
     # High-Performance Features
     "LinearSolverConfig",

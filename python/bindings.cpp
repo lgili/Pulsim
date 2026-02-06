@@ -8,6 +8,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 #include <pybind11/eigen.h>
 #include <pybind11/functional.h>
 #include <pybind11/chrono.h>
@@ -19,6 +20,7 @@
 
 namespace py = pybind11;
 using namespace pulsim::v1;
+namespace v1parser = pulsim::v1::parser;
 
 
 // =============================================================================
@@ -594,12 +596,6 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("enable_broyden", &NewtonOptions::enable_broyden)
         .def_readwrite("broyden_max_size", &NewtonOptions::broyden_max_size)
         .def_readwrite("enable_newton_krylov", &NewtonOptions::enable_newton_krylov)
-        .def_readwrite("krylov_max_iterations", &NewtonOptions::krylov_max_iterations)
-        .def_readwrite("krylov_restart", &NewtonOptions::krylov_restart)
-        .def_readwrite("krylov_tolerance", &NewtonOptions::krylov_tolerance)
-        .def_readwrite("krylov_fd_epsilon", &NewtonOptions::krylov_fd_epsilon)
-        .def_readwrite("krylov_fd_min_step", &NewtonOptions::krylov_fd_min_step)
-        .def_readwrite("krylov_residual_cache_tolerance", &NewtonOptions::krylov_residual_cache_tolerance)
         .def_readwrite("enable_trust_region", &NewtonOptions::enable_trust_region)
         .def_readwrite("trust_radius", &NewtonOptions::trust_radius)
         .def_readwrite("trust_shrink", &NewtonOptions::trust_shrink)
@@ -859,12 +855,78 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("success", &DCAnalysisResult::success)
         .def_readonly("message", &DCAnalysisResult::message);
 
-    // =========================================================================
-    // Periodic Steady-State + Harmonic Balance Options
-    // =========================================================================
+    py::enum_<Integrator>(v2, "Integrator", "Transient integration method")
+        .value("Trapezoidal", Integrator::Trapezoidal)
+        .value("BDF1", Integrator::BDF1)
+        .value("BDF2", Integrator::BDF2)
+        .value("BDF3", Integrator::BDF3)
+        .value("BDF4", Integrator::BDF4)
+        .value("BDF5", Integrator::BDF5)
+        .value("Gear", Integrator::Gear)
+        .value("TRBDF2", Integrator::TRBDF2)
+        .value("RosenbrockW", Integrator::RosenbrockW)
+        .value("SDIRK2", Integrator::SDIRK2)
+        .export_values();
+
+    py::enum_<TimestepMethod>(v2, "TimestepMethod", "LTE estimation method")
+        .value("StepDoubling", TimestepMethod::StepDoubling)
+        .value("Richardson", TimestepMethod::Richardson)
+        .export_values();
+
+    py::class_<AdvancedTimestepConfig>(v2, "AdvancedTimestepConfig",
+        "Advanced adaptive timestep configuration with Newton feedback")
+        .def(py::init<>())
+        .def_readwrite("dt_min", &AdvancedTimestepConfig::dt_min)
+        .def_readwrite("dt_max", &AdvancedTimestepConfig::dt_max)
+        .def_readwrite("dt_initial", &AdvancedTimestepConfig::dt_initial)
+        .def_readwrite("safety_factor", &AdvancedTimestepConfig::safety_factor)
+        .def_readwrite("error_tolerance", &AdvancedTimestepConfig::error_tolerance)
+        .def_readwrite("growth_factor", &AdvancedTimestepConfig::growth_factor)
+        .def_readwrite("shrink_factor", &AdvancedTimestepConfig::shrink_factor)
+        .def_readwrite("max_rejections", &AdvancedTimestepConfig::max_rejections)
+        .def_readwrite("k_p", &AdvancedTimestepConfig::k_p)
+        .def_readwrite("k_i", &AdvancedTimestepConfig::k_i)
+        .def_readwrite("target_newton_iterations", &AdvancedTimestepConfig::target_newton_iterations)
+        .def_readwrite("min_newton_iterations", &AdvancedTimestepConfig::min_newton_iterations)
+        .def_readwrite("max_newton_iterations", &AdvancedTimestepConfig::max_newton_iterations)
+        .def_readwrite("newton_feedback_gain", &AdvancedTimestepConfig::newton_feedback_gain)
+        .def_readwrite("max_growth_rate", &AdvancedTimestepConfig::max_growth_rate)
+        .def_readwrite("max_shrink_rate", &AdvancedTimestepConfig::max_shrink_rate)
+        .def_readwrite("enable_smoothing", &AdvancedTimestepConfig::enable_smoothing)
+        .def_readwrite("lte_weight", &AdvancedTimestepConfig::lte_weight)
+        .def_readwrite("newton_weight", &AdvancedTimestepConfig::newton_weight)
+        .def_static("defaults", &AdvancedTimestepConfig::defaults)
+        .def_static("for_switching", &AdvancedTimestepConfig::for_switching)
+        .def_static("for_power_electronics", &AdvancedTimestepConfig::for_power_electronics);
+
+    py::class_<RichardsonLTEConfig>(v2, "RichardsonLTEConfig",
+        "Richardson LTE estimator configuration")
+        .def(py::init<>())
+        .def_readwrite("method", &RichardsonLTEConfig::method)
+        .def_readwrite("extrapolation_order", &RichardsonLTEConfig::extrapolation_order)
+        .def_readwrite("voltage_tolerance", &RichardsonLTEConfig::voltage_tolerance)
+        .def_readwrite("current_tolerance", &RichardsonLTEConfig::current_tolerance)
+        .def_readwrite("use_weighted_norm", &RichardsonLTEConfig::use_weighted_norm)
+        .def_readwrite("history_depth", &RichardsonLTEConfig::history_depth)
+        .def_static("defaults", &RichardsonLTEConfig::defaults)
+        .def_static("step_doubling", &RichardsonLTEConfig::step_doubling);
+
+    py::class_<StiffnessConfig>(v2, "StiffnessConfig", "Stiffness handling configuration")
+        .def(py::init<>())
+        .def_readwrite("enable", &StiffnessConfig::enable)
+        .def_readwrite("rejection_streak_threshold", &StiffnessConfig::rejection_streak_threshold)
+        .def_readwrite("newton_iter_threshold", &StiffnessConfig::newton_iter_threshold)
+        .def_readwrite("newton_streak_threshold", &StiffnessConfig::newton_streak_threshold)
+        .def_readwrite("cooldown_steps", &StiffnessConfig::cooldown_steps)
+        .def_readwrite("dt_backoff", &StiffnessConfig::dt_backoff)
+        .def_readwrite("max_bdf_order", &StiffnessConfig::max_bdf_order)
+        .def_readwrite("monitor_conditioning", &StiffnessConfig::monitor_conditioning)
+        .def_readwrite("conditioning_error_threshold", &StiffnessConfig::conditioning_error_threshold)
+        .def_readwrite("switch_integrator", &StiffnessConfig::switch_integrator)
+        .def_readwrite("stiff_integrator", &StiffnessConfig::stiff_integrator);
 
     py::class_<PeriodicSteadyStateOptions>(v2, "PeriodicSteadyStateOptions",
-        "Periodic steady-state (shooting) configuration")
+        "Shooting method configuration")
         .def(py::init<>())
         .def_readwrite("period", &PeriodicSteadyStateOptions::period)
         .def_readwrite("max_iterations", &PeriodicSteadyStateOptions::max_iterations)
@@ -881,6 +943,159 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("tolerance", &HarmonicBalanceOptions::tolerance)
         .def_readwrite("relaxation", &HarmonicBalanceOptions::relaxation)
         .def_readwrite("initialize_from_transient", &HarmonicBalanceOptions::initialize_from_transient);
+
+    py::class_<SwitchingEnergy>(v2, "SwitchingEnergy", "Per-event switching energy model")
+        .def(py::init<>())
+        .def_readwrite("eon", &SwitchingEnergy::eon)
+        .def_readwrite("eoff", &SwitchingEnergy::eoff)
+        .def_readwrite("err", &SwitchingEnergy::err);
+
+    py::class_<LinearSolverTelemetry>(v2, "LinearSolverTelemetry",
+        "Linear solver runtime telemetry")
+        .def(py::init<>())
+        .def_readwrite("total_solve_calls", &LinearSolverTelemetry::total_solve_calls)
+        .def_readwrite("total_iterations", &LinearSolverTelemetry::total_iterations)
+        .def_readwrite("total_fallbacks", &LinearSolverTelemetry::total_fallbacks)
+        .def_readwrite("last_iterations", &LinearSolverTelemetry::last_iterations)
+        .def_readwrite("last_error", &LinearSolverTelemetry::last_error)
+        .def_readwrite("last_solver", &LinearSolverTelemetry::last_solver)
+        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner);
+
+    py::enum_<SimulationEventType>(v2, "SimulationEventType", "Simulation event kind")
+        .value("SwitchOn", SimulationEventType::SwitchOn)
+        .value("SwitchOff", SimulationEventType::SwitchOff)
+        .value("ConvergenceWarning", SimulationEventType::ConvergenceWarning)
+        .value("TimestepChange", SimulationEventType::TimestepChange)
+        .export_values();
+
+    py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
+        .def(py::init<>())
+        .def_readwrite("time", &SimulationEvent::time)
+        .def_readwrite("type", &SimulationEvent::type)
+        .def_readwrite("component", &SimulationEvent::component)
+        .def_readwrite("description", &SimulationEvent::description)
+        .def_readwrite("value1", &SimulationEvent::value1)
+        .def_readwrite("value2", &SimulationEvent::value2);
+
+    py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
+        .def(py::init<>())
+        .def_readwrite("tstart", &SimulationOptions::tstart)
+        .def_readwrite("tstop", &SimulationOptions::tstop)
+        .def_readwrite("dt", &SimulationOptions::dt)
+        .def_readwrite("dt_min", &SimulationOptions::dt_min)
+        .def_readwrite("dt_max", &SimulationOptions::dt_max)
+        .def_readwrite("newton_options", &SimulationOptions::newton_options)
+        .def_readwrite("dc_config", &SimulationOptions::dc_config)
+        .def_readwrite("linear_solver", &SimulationOptions::linear_solver)
+        .def_readwrite("adaptive_timestep", &SimulationOptions::adaptive_timestep)
+        .def_readwrite("timestep_config", &SimulationOptions::timestep_config)
+        .def_readwrite("lte_config", &SimulationOptions::lte_config)
+        .def_readwrite("integrator", &SimulationOptions::integrator)
+        .def_readwrite("enable_bdf_order_control", &SimulationOptions::enable_bdf_order_control)
+        .def_readwrite("bdf_config", &SimulationOptions::bdf_config)
+        .def_readwrite("stiffness_config", &SimulationOptions::stiffness_config)
+        .def_readwrite("enable_periodic_shooting", &SimulationOptions::enable_periodic_shooting)
+        .def_readwrite("periodic_options", &SimulationOptions::periodic_options)
+        .def_readwrite("enable_harmonic_balance", &SimulationOptions::enable_harmonic_balance)
+        .def_readwrite("harmonic_balance", &SimulationOptions::harmonic_balance)
+        .def_readwrite("enable_events", &SimulationOptions::enable_events)
+        .def_readwrite("enable_losses", &SimulationOptions::enable_losses)
+        .def_readwrite("switching_energy", &SimulationOptions::switching_energy)
+        .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
+        .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries);
+
+    py::class_<SimulationResult>(v2, "SimulationResult", "Transient simulation result")
+        .def(py::init<>())
+        .def_readwrite("time", &SimulationResult::time)
+        .def_readwrite("states", &SimulationResult::states)
+        .def_readwrite("events", &SimulationResult::events)
+        .def_readwrite("success", &SimulationResult::success)
+        .def_readwrite("final_status", &SimulationResult::final_status)
+        .def_readwrite("message", &SimulationResult::message)
+        .def_readwrite("total_steps", &SimulationResult::total_steps)
+        .def_readwrite("newton_iterations_total", &SimulationResult::newton_iterations_total)
+        .def_readwrite("timestep_rejections", &SimulationResult::timestep_rejections)
+        .def_readwrite("total_time_seconds", &SimulationResult::total_time_seconds)
+        .def_readwrite("linear_solver_telemetry", &SimulationResult::linear_solver_telemetry)
+        .def_readwrite("loss_summary", &SimulationResult::loss_summary)
+        // Compatibility alias used by legacy Python tests
+        .def_property_readonly("data", [](const SimulationResult& result) {
+            return result.states;
+        });
+
+    py::class_<PeriodicSteadyStateResult>(v2, "PeriodicSteadyStateResult",
+        "Periodic steady-state result")
+        .def(py::init<>())
+        .def_readwrite("success", &PeriodicSteadyStateResult::success)
+        .def_readwrite("iterations", &PeriodicSteadyStateResult::iterations)
+        .def_readwrite("residual_norm", &PeriodicSteadyStateResult::residual_norm)
+        .def_readwrite("steady_state", &PeriodicSteadyStateResult::steady_state)
+        .def_readwrite("last_cycle", &PeriodicSteadyStateResult::last_cycle)
+        .def_readwrite("message", &PeriodicSteadyStateResult::message);
+
+    py::class_<HarmonicBalanceResult>(v2, "HarmonicBalanceResult",
+        "Harmonic balance result")
+        .def(py::init<>())
+        .def_readwrite("success", &HarmonicBalanceResult::success)
+        .def_readwrite("iterations", &HarmonicBalanceResult::iterations)
+        .def_readwrite("residual_norm", &HarmonicBalanceResult::residual_norm)
+        .def_readwrite("solution", &HarmonicBalanceResult::solution)
+        .def_readwrite("sample_times", &HarmonicBalanceResult::sample_times)
+        .def_readwrite("message", &HarmonicBalanceResult::message);
+
+    py::class_<Simulator>(v2, "Simulator", "Runtime simulator interface")
+        .def(py::init<Circuit&, const SimulationOptions&>(),
+             py::arg("circuit"), py::arg("options") = SimulationOptions(),
+             py::keep_alive<1, 2>())
+        .def("dc_operating_point", &Simulator::dc_operating_point,
+             "Solve the DC operating point")
+        .def("run_transient", [](Simulator& sim) {
+            return sim.run_transient();
+        }, "Run transient simulation from computed DC initial state")
+        .def("run_transient", [](Simulator& sim, const Vector& x0) {
+            return sim.run_transient(x0);
+        }, py::arg("x0"), "Run transient simulation with explicit initial state")
+        .def("run_periodic_shooting", [](Simulator& sim, const PeriodicSteadyStateOptions& options) {
+            return sim.run_periodic_shooting(options);
+        }, py::arg("options") = PeriodicSteadyStateOptions(),
+           "Run periodic steady-state using shooting method")
+        .def("run_periodic_shooting", [](Simulator& sim, const Vector& x0, const PeriodicSteadyStateOptions& options) {
+            return sim.run_periodic_shooting(x0, options);
+        }, py::arg("x0"), py::arg("options") = PeriodicSteadyStateOptions(),
+           "Run periodic steady-state using shooting method with explicit initial state")
+        .def("run_harmonic_balance", [](Simulator& sim, const HarmonicBalanceOptions& options) {
+            return sim.run_harmonic_balance(options);
+        }, py::arg("options") = HarmonicBalanceOptions(),
+           "Run harmonic balance solver")
+        .def("run_harmonic_balance", [](Simulator& sim, const Vector& x0, const HarmonicBalanceOptions& options) {
+            return sim.run_harmonic_balance(x0, options);
+        }, py::arg("x0"), py::arg("options") = HarmonicBalanceOptions(),
+           "Run harmonic balance with explicit initial state")
+        .def("set_switching_energy", &Simulator::set_switching_energy,
+             py::arg("device_name"), py::arg("energy"))
+        .def_property("options",
+            [](const Simulator& sim) { return sim.options(); },
+            &Simulator::set_options,
+            "Get or set simulation options");
+
+    py::class_<v1parser::YamlParserOptions>(v2, "YamlParserOptions", "YAML parser options")
+        .def(py::init<>())
+        .def_readwrite("strict", &v1parser::YamlParserOptions::strict)
+        .def_readwrite("validate_nodes", &v1parser::YamlParserOptions::validate_nodes);
+
+    py::class_<v1parser::YamlParser>(v2, "YamlParser", "v1 YAML netlist parser")
+        .def(py::init<v1parser::YamlParserOptions>(),
+             py::arg("options") = v1parser::YamlParserOptions())
+        .def("load", &v1parser::YamlParser::load, py::arg("path"),
+             "Parse YAML netlist file and return (Circuit, SimulationOptions)")
+        .def("load_string", &v1parser::YamlParser::load_string, py::arg("content"),
+             "Parse YAML netlist string and return (Circuit, SimulationOptions)")
+        .def_property_readonly("errors", [](const v1parser::YamlParser& parser) {
+            return parser.errors();
+        })
+        .def_property_readonly("warnings", [](const v1parser::YamlParser& parser) {
+            return parser.warnings();
+        });
 
     // =========================================================================
     // DC Analysis Function (Phase 5)
@@ -987,104 +1202,10 @@ void init_v2_module(py::module_& v2) {
         Simulator sim(circuit, opts);
         auto result = sim.run_transient(x0);
         return std::make_tuple(result.time, result.states, result.success, result.message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-        py::arg("newton_options") = NewtonOptions(),
-        py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
+     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+         py::arg("newton_options") = NewtonOptions(),
+         py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     "Run transient with zero initial state");
-
-    // =========================================================================
-    // Periodic Steady-State (Shooting) + Harmonic Balance
-    // =========================================================================
-
-    v2.def("run_periodic_shooting", [](Circuit& circuit,
-                                       const PeriodicSteadyStateOptions& pss,
-                                       const NewtonOptions& newton_opts,
-                                       const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_periodic_shooting(pss);
-        return std::make_tuple(result.steady_state, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"),
-       py::arg("options") = PeriodicSteadyStateOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    R"doc(
-    Run periodic steady-state shooting.
-
-    Returns:
-        Tuple of (steady_state, success, iterations, residual_norm, message)
-    )doc");
-
-    v2.def("run_periodic_shooting", [](Circuit& circuit, const Vector& x0,
-                                       const PeriodicSteadyStateOptions& pss,
-                                       const NewtonOptions& newton_opts,
-                                       const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_periodic_shooting(x0, pss);
-        return std::make_tuple(result.steady_state, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"), py::arg("x0"),
-       py::arg("options") = PeriodicSteadyStateOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    "Run periodic shooting with explicit initial state");
-
-    v2.def("run_harmonic_balance", [](Circuit& circuit,
-                                      const HarmonicBalanceOptions& hb,
-                                      const NewtonOptions& newton_opts,
-                                      const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_harmonic_balance(hb);
-        return std::make_tuple(result.solution, result.sample_times, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"),
-       py::arg("options") = HarmonicBalanceOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    R"doc(
-    Run harmonic balance (collocation).
-
-    Returns:
-        Tuple of (solution, sample_times, success, iterations, residual_norm, message)
-    )doc");
-
-    v2.def("run_harmonic_balance", [](Circuit& circuit, const Vector& x0,
-                                      const HarmonicBalanceOptions& hb,
-                                      const NewtonOptions& newton_opts,
-                                      const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-
-        Simulator sim(circuit, opts);
-        auto result = sim.run_harmonic_balance(x0, hb);
-        return std::make_tuple(result.solution, result.sample_times, result.success,
-                               result.iterations, result.residual_norm, result.message);
-    }, py::arg("circuit"), py::arg("x0"),
-       py::arg("options") = HarmonicBalanceOptions(),
-       py::arg("newton_options") = NewtonOptions(),
-       py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
-    "Run harmonic balance with explicit initial state");
 
     // =========================================================================
     // Streaming transient simulation (for real-time GUI updates)

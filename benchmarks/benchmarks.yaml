@@ -1,0 +1,79 @@
+benchmarks:
+  - path: circuits/rc_step.yaml
+    ngspice_netlist: ngspice/rc_step.cir
+    scenarios: [direct_trap, gmres_trbdf2, jfnk_trbdf2]
+  - path: circuits/rl_step.yaml
+    ngspice_netlist: ngspice/rl_step.cir
+    scenarios: [direct_trap, gmres_trbdf2]
+  - path: circuits/rlc_step.yaml
+    ngspice_netlist: ngspice/rlc_step.cir
+    scenarios: [direct_trap, gmres_trbdf2]
+  - path: circuits/rc_dc.yaml
+    ngspice_netlist: ngspice/rc_circuit.cir
+    scenarios: [direct_trap]
+  - path: circuits/diode_rectifier.yaml
+    scenarios: [direct_trap]
+  - path: circuits/buck_switching.yaml
+    scenarios: [direct_trap]
+  - path: circuits/stiff_rlc.yaml
+    scenarios: [trbdf2, rosenbrockw]
+  - path: circuits/periodic_rc_pwm.yaml
+    scenarios: [shooting_default, harmonic_balance]
+scenarios:
+  direct_trap:
+    simulation:
+      integrator: trapezoidal
+      solver:
+        order: [klu]
+  gmres_trbdf2:
+    simulation:
+      integrator: trbdf2
+      solver:
+        order: [gmres]
+        iterative:
+          max_iterations: 200
+          tolerance: 1e-8
+          restart: 40
+          preconditioner: ilut
+          ilut_drop_tolerance: 1e-3
+          ilut_fill_factor: 10
+  jfnk_trbdf2:
+    simulation:
+      integrator: trbdf2
+      solver:
+        order: [gmres]
+        iterative:
+          max_iterations: 200
+          tolerance: 1e-8
+          restart: 40
+          preconditioner: ilut
+      newton:
+        enable_newton_krylov: true
+        krylov_residual_cache_tolerance: 1e-8
+  trbdf2:
+    simulation:
+      integrator: trbdf2
+      solver:
+        order: [klu]
+  rosenbrockw:
+    simulation:
+      integrator: rosenbrockw
+      solver:
+        order: [klu]
+  shooting_default:
+    simulation:
+      shooting:
+        period: 20e-6
+        max_iterations: 20
+        tolerance: 1e-6
+        relaxation: 0.5
+        store_last_transient: true
+  harmonic_balance:
+    simulation:
+      harmonic_balance:
+        period: 20e-6
+        num_samples: 128
+        max_iterations: 30
+        tolerance: 1e-6
+        relaxation: 0.5
+        initialize_from_transient: true

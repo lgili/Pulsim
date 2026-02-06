@@ -18,6 +18,10 @@ cmake-build-*/
 
 # Results
 *.csv
+!benchmarks/baselines/*.csv
+benchmarks/out/
+benchmarks/matrix/
+benchmarks/ngspice_out/
 
 # Dependencies (fetched by CMake)
 _deps/
