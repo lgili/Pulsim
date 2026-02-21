@@ -95,4 +95,4 @@ scenarios:
         initialize_from_transient: true
 simulators:
   ltspice:
-    args: [-b, -Run, -ascii]
+    args: [-ascii, -b]

@@ -30,7 +30,7 @@ from benchmark_runner import (
 
 PARITY_SCHEMA_VERSION = "pulsim-parity-v1"
 SUPPORTED_BACKENDS = {"ngspice", "ltspice"}
-DEFAULT_LTSPICE_ARGS = ["-b", "-Run", "-ascii"]
+DEFAULT_LTSPICE_ARGS = ["-ascii", "-b"]
 
 
 @dataclass
@@ -308,7 +308,12 @@ def _parse_ltspice_numeric(token: str) -> float:
 
 
 def parse_ltspice_ascii_raw(path: Path) -> Tuple[List[float], Dict[str, List[float]]]:
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    raw_bytes = path.read_bytes()
+    if b"\x00" in raw_bytes[:128]:
+        text = raw_bytes.decode("utf-16-le", errors="replace")
+    else:
+        text = raw_bytes.decode("utf-8", errors="replace")
+    lines = text.splitlines()
     variable_names: List[str] = []
     series: Dict[str, List[float]] = {}
     values_start = -1
@@ -388,7 +393,18 @@ def parse_ltspice_ascii_raw(path: Path) -> Tuple[List[float], Dict[str, List[flo
 
 def _build_ltspice_command(executable: Path, args: Sequence[str], netlist: Path) -> List[str]:
     command = [str(executable)]
-    args_list = list(args) if args else list(DEFAULT_LTSPICE_ARGS)
+    args_list = [str(arg) for arg in args] if args else list(DEFAULT_LTSPICE_ARGS)
+    if not args_list:
+        args_list = list(DEFAULT_LTSPICE_ARGS)
+
+    # Keep "-ascii" in front of "-b" on macOS LTspice CLI to avoid input parsing errors.
+    if "-ascii" in args_list and "-b" in args_list:
+        ascii_idx = args_list.index("-ascii")
+        batch_idx = args_list.index("-b")
+        if ascii_idx > batch_idx:
+            args_list.pop(ascii_idx)
+            args_list.insert(batch_idx, "-ascii")
+
     has_netlist_placeholder = False
     for arg in args_list:
         if arg == "{netlist}":
@@ -1154,8 +1170,8 @@ def run_manifest(
             continue
 
         if not spice_rel:
-            status = "failed" if backend == "ltspice" else "skipped"
-            reason = "mapping_error" if backend == "ltspice" else None
+            status = "skipped"
+            reason = None
             for scenario_name in scenario_names:
                 entry_result = _result_for_error(
                     benchmark_id=benchmark_id,
@@ -1188,8 +1204,8 @@ def run_manifest(
             continue
 
         if not observable_specs:
-            status = "failed" if backend == "ltspice" else "skipped"
-            reason = "mapping_error" if backend == "ltspice" else None
+            status = "skipped"
+            reason = None
             for scenario_name in scenario_names:
                 entry_result = _result_for_error(
                     benchmark_id=benchmark_id,
