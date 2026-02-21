@@ -4306,10 +4306,11 @@ TEST_CASE("API DC convergence solver", "[api][convergence][dc][phase5]") {
             f[1] = G1 * (x[1] - x[0]) + G2 * x[1];
 
             // Jacobian
+            J.resize(2, 2);
             J.setZero();
-            J.insert(0, 0) = 1.0;
-            J.insert(1, 0) = -G1;
-            J.insert(1, 1) = G1 + G2;
+            J.coeffRef(0, 0) = 1.0;
+            J.coeffRef(1, 0) = -G1;
+            J.coeffRef(1, 1) = G1 + G2;
             J.makeCompressed();
         };
 
@@ -4337,10 +4338,11 @@ TEST_CASE("API DC convergence solver", "[api][convergence][dc][phase5]") {
             f[0] = x[0] - Vsource;
             f[1] = G * (x[1] - x[0]) + G * x[1];
 
+            J.resize(2, 2);
             J.setZero();
-            J.insert(0, 0) = 1.0;
-            J.insert(1, 0) = -G;
-            J.insert(1, 1) = 2.0 * G;
+            J.coeffRef(0, 0) = 1.0;
+            J.coeffRef(1, 0) = -G;
+            J.coeffRef(1, 1) = 2.0 * G;
             J.makeCompressed();
         };
 

@@ -49,6 +49,13 @@ option(PULSIM_ENABLE_PGO_GENERATE "Enable PGO instrumentation (generate profile)
 option(PULSIM_ENABLE_PGO_USE "Enable PGO optimization (use profile)" OFF)
 set(PULSIM_PGO_PROFILE_DIR "${CMAKE_BINARY_DIR}/pgo-profiles" CACHE PATH "Directory for PGO profile data")
 
+# Editable/wheel Python builds on Linux can hit linker relocation issues with
+# ThinLTO + pybind11 thread-local storage; keep LTO for core C++ builds.
+if((SKBUILD OR PULSIM_BUILD_PYTHON) AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(PULSIM_ENABLE_LTO OFF CACHE BOOL "Disable LTO for Python builds on Linux" FORCE)
+    message(STATUS "LTO: Disabled for Python build on Linux (pybind11 TLS compatibility)")
+endif()
+
 # CI Build Detection - skip timing-sensitive benchmark tests
 # Auto-detect CI environments or allow manual override
 if(DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})
