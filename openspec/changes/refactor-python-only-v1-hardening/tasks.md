@@ -54,9 +54,9 @@
 
 ## Phase 7: Documentation and Migration Guides
 
-- [ ] 7.1 Rewrite user docs to reflect Python-only supported usage.
-- [ ] 7.2 Remove stale CLI/grpc/JSON instructions from README and guides.
-- [ ] 7.3 Add migration notes for removed APIs and a versioned deprecation timeline.
+- [x] 7.1 Rewrite user docs to reflect Python-only supported usage.
+- [x] 7.2 Remove stale CLI/grpc/JSON instructions from README and guides.
+- [x] 7.3 Add migration notes for removed APIs and a versioned deprecation timeline.
 
 ## Phase 8: Final Verification
 

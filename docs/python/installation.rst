@@ -4,111 +4,57 @@ Installation
 Requirements
 ------------
 
-* Python 3.8 or later
+* Python 3.10 or later
 * NumPy 1.20 or later
-* A C++20 compatible compiler (for building from source)
+* C++23-capable toolchain (when building from source)
+* CMake 3.20+
 
-Installing from PyPI
---------------------
+Install from source (repository workflow)
+----------------------------------------
 
-The easiest way to install Pulsim is using pip:
+.. code-block:: bash
+
+   cmake -S . -B build -G Ninja \
+     -DCMAKE_BUILD_TYPE=Release \
+     -DPULSIM_BUILD_PYTHON=ON
+   cmake --build build -j
+
+Use local bindings directly:
+
+.. code-block:: bash
+
+   export PYTHONPATH=build/python
+
+Install package with pip
+------------------------
 
 .. code-block:: bash
 
    pip install pulsim
 
-This will install the pre-built binary package if available for your platform.
-
-
-Installing from Source
-----------------------
-
-To build Pulsim from source:
-
-1. Clone the repository:
-
-   .. code-block:: bash
-
-      git clone https://github.com/your-org/pulsim-core.git
-      cd pulsim-core
-
-2. Install build dependencies:
-
-   .. code-block:: bash
-
-      pip install build pybind11 numpy
-
-3. Build and install:
-
-   .. code-block:: bash
-
-      cd python
-      pip install .
-
-Or for development installation:
-
-   .. code-block:: bash
-
-      pip install -e .
-
-
-Optional Dependencies
+Optional dependencies
 ---------------------
 
-For additional functionality, install optional dependencies:
-
 .. code-block:: bash
 
-   # For plotting
-   pip install matplotlib
+   # Plotting / notebooks
+   pip install matplotlib jupyter ipywidgets
 
-   # For data analysis
+   # Data workflows
    pip install pandas xarray
 
-   # For Jupyter notebooks
-   pip install jupyter ipywidgets
-
-   # For gRPC client
-   pip install grpcio grpcio-tools
-
-   # All optional dependencies
-   pip install pulsim[all]
-
-
-Verifying Installation
-----------------------
-
-Verify that Pulsim is installed correctly:
+Verify installation
+-------------------
 
 .. code-block:: python
 
-   import pulsim
-   print(pulsim.__version__)
+   import pulsim as ps
 
-   # Run a quick test
-   circuit = pulsim.Circuit("Test")
-   circuit.add_resistor("R1", "a", "b", 1000)
-   print("Pulsim is working!")
+   print(ps.__version__)
+   parser = ps.YamlParser(ps.YamlParserOptions())
 
+Notes
+-----
 
-Docker
-------
-
-Pulsim is also available as a Docker image:
-
-.. code-block:: bash
-
-   # Pull the image
-   docker pull pulsim:latest
-
-   # Run the gRPC server
-   docker run -p 50051:50051 pulsim:latest
-
-Connect from Python:
-
-.. code-block:: python
-
-   from pulsim.client import PulsimClient
-
-   client = PulsimClient("localhost:50051")
-   result = client.simulate("circuit.yaml")
+Pulsim's supported user-facing runtime is Python + YAML netlists.
+Legacy CLI/gRPC/JSON flows are not part of the supported surface.

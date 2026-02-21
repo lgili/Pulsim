@@ -1,12 +1,26 @@
-# Migration Guide: JSON → YAML and Unified v1 Core
+# Migration Guide: Python-Only v1 Runtime
 
-This guide summarizes the changes introduced by the unified v1 core and the YAML netlist format.
+This guide documents the migration to the unified v1 kernel with a Python-only user-facing runtime.
 
-## 1) Netlist Format: JSON → YAML
+## 1. What Changed
 
-Pulsim now uses **versioned YAML netlists**. JSON netlists are no longer supported by the loader.
+### Removed / Unsupported User Surfaces
 
-### Required top-level fields
+- Legacy CLI execution flow
+- Legacy gRPC server/client workflow
+- JSON netlist loading path
+
+### Supported User Surface
+
+- Python package `pulsim`
+- YAML netlists (`schema: pulsim-v1`)
+- Python benchmark/parity/stress tooling in `benchmarks/`
+
+## 2. Netlist Migration (JSON -> YAML)
+
+JSON loaders are no longer part of the supported runtime path.
+
+Use versioned YAML:
 
 ```yaml
 schema: pulsim-v1
@@ -18,90 +32,49 @@ components:
     value: 1k
 ```
 
-### Waveform example
+## 3. Runtime Migration
 
-```yaml
-- type: voltage_source
-  name: Vpwm
-  nodes: [ctrl, 0]
-  waveform:
-    type: pwm
-    v_high: 10.0
-    v_low: 0.0
-    frequency: 20000
-    duty: 0.5
-    dead_time: 0.0
-```
+### Before (removed)
 
-### Model reuse
+- `pulsim` CLI command flows
+- Remote gRPC client/server product workflow
 
-```yaml
-models:
-  m1:
-    type: mosfet
-    vth: 3.0
-    kp: 0.02
-
-components:
-  - type: mosfet
-    name: Q1
-    nodes: [d, g, s, 0]
-    use: m1
-    kp: 0.03  # local override
-```
-
-## 2) Simulation API: Unified v1 Core
-
-Python and CLI flows now execute through `pulsim::v1::Simulator`.
-
-### C++ usage
-
-```cpp
-#include <pulsim/v1/core.hpp>
-
-pulsim::v1::parser::YamlParser parser;
-auto [circuit, options] = parser.load("circuit.yaml");
-
-pulsim::v1::Simulator sim(circuit, options);
-auto result = sim.run_transient();
-```
-
-### Python usage (programmatic circuits)
+### After (supported)
 
 ```python
-import pulsim as sl
+import pulsim as ps
 
-circuit = sl.Circuit()
-circuit.add_voltage_source("V1", "in", "0", 5.0)
-circuit.add_resistor("R1", "in", "out", 1000.0)
-circuit.add_capacitor("C1", "out", "0", 1e-6)
+parser = ps.YamlParser(ps.YamlParserOptions())
+circuit, options = parser.load("circuit.yaml")
 
-opts = sl.SimulationOptions()
-opts.tstop = 1e-3
-opts.dt = 1e-6
+options.newton_options.num_nodes = int(circuit.num_nodes())
+options.newton_options.num_branches = int(circuit.num_branches())
 
-sim = sl.Simulator(circuit, opts)
-result = sim.run_transient()
+sim = ps.Simulator(circuit, options)
+result = sim.run_transient(circuit.initial_state())
 ```
 
-## 3) Behavior Changes
+## 4. Removed API/Workflow Mapping
 
-- **Event detection**: switch events are bisected to refine timing.
-- **Loss accumulation**: conduction and switching losses are tracked per device and summarized in results.
-- **Determinism**: fixed ordering and explicit configuration improve reproducibility.
+| Removed workflow | Replacement |
+| --- | --- |
+| CLI `run/validate/info/sweep` | Python runtime + `benchmarks/*.py` runners |
+| gRPC remote simulation docs | Local Python runtime usage |
+| JSON netlist loader docs/tests | YAML parser (`YamlParser`) |
+| Planned placeholder high-level suites | Active runtime/benchmark/validation suites |
 
-## 4) Common YAML Changes
+## 5. Versioned Deprecation Timeline
 
-| JSON field | YAML field | Notes |
+| Version | Status | Notes |
 | --- | --- | --- |
-| `name` | `name` | unchanged |
-| `components` | `components` | list of component maps |
-| `waveform.type` | `waveform.type` | supports `dc`, `pulse`, `sine`, `pwm` |
-| `model` | `use` | model inheritance + overrides |
-| `value` | `value` | supports SI suffixes (`1k`, `10u`) |
+| `v0.2.0` | Deprecation window | Python-only surface declared; legacy docs marked stale |
+| `v0.3.0` | Removal | Legacy CLI/gRPC/JSON user-facing guidance removed from primary docs |
+| `v0.4.0` | Enforcement | Supported workflows restricted to Python + YAML + benchmark/parity/stress toolchain |
 
-## 5) Troubleshooting
+## 6. Upgrade Checklist
 
-- **Missing `schema`/`version`**: YAML parser will reject the netlist.
-- **Unknown fields**: strict validation rejects unsupported keys.
-- **Convergence**: reduce timestep or enable adaptive settings if needed.
+1. Replace any JSON netlist assets with YAML `pulsim-v1` netlists.
+2. Remove CLI automation and migrate to Python runners.
+3. Remove gRPC-dependent user scripts from active workflows.
+4. Update CI jobs to run Python benchmark/parity/stress scripts.
+5. Validate with `openspec validate refactor-python-only-v1-hardening --strict`.
