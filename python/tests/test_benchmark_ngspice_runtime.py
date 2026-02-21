@@ -112,6 +112,12 @@ def test_run_manifest_selects_preferred_periodic_mode(tmp_path: Path, monkeypatc
         max_error_threshold: float | None,
         output_dir: Path,
         preferred_mode: str | None,
+        backend_config: ng.BackendConfig | None = None,
+        period_hint: float | None = None,
+        rms_error_threshold: float | None = None,
+        phase_error_threshold: float | None = None,
+        steady_state_max_threshold: float | None = None,
+        steady_state_rms_threshold: float | None = None,
     ) -> ng.BenchmarkResult:
         captured_modes.append(preferred_mode)
         return ng.BenchmarkResult(

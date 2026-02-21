@@ -1,15 +1,31 @@
 benchmarks:
   - path: circuits/rc_step.yaml
     ngspice_netlist: ngspice/rc_step.cir
+    ltspice_netlist: ltspice/rc_step.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
     scenarios: [direct_trap, gmres_trbdf2, jfnk_trbdf2]
   - path: circuits/rl_step.yaml
     ngspice_netlist: ngspice/rl_step.cir
+    ltspice_netlist: ltspice/rl_step.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
     scenarios: [direct_trap, gmres_trbdf2]
   - path: circuits/rlc_step.yaml
     ngspice_netlist: ngspice/rlc_step.cir
+    ltspice_netlist: ltspice/rlc_step.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
     scenarios: [direct_trap, gmres_trbdf2]
   - path: circuits/rc_dc.yaml
     ngspice_netlist: ngspice/rc_circuit.cir
+    ltspice_netlist: ltspice/rc_circuit.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
     scenarios: [direct_trap]
   - path: circuits/diode_rectifier.yaml
     scenarios: [direct_trap]
@@ -77,3 +93,6 @@ scenarios:
         tolerance: 1e-6
         relaxation: 0.5
         initialize_from_transient: true
+simulators:
+  ltspice:
+    args: [-b, -Run, -ascii]
