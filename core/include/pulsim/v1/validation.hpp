@@ -16,6 +16,7 @@
 #include <functional>
 #include <chrono>
 #include <cmath>
+#include <numbers>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -169,7 +170,7 @@ struct DiodeRectifierAnalytical {
     Real frequency;  // AC frequency (Hz)
     Real V_forward;  // Diode forward voltage drop (V)
 
-    [[nodiscard]] Real omega() const { return 2.0 * M_PI * frequency; }
+    [[nodiscard]] Real omega() const { return 2.0 * std::numbers::pi_v<Real> * frequency; }
 
     [[nodiscard]] Real voltage_out(Real t) const {
         Real v_in = V_peak * std::sin(omega() * t);

@@ -380,7 +380,7 @@ public:
     /// Compares Trapezoidal result with Backward Euler predictor
     /// LTE ~ (1/12) * h^3 * y'''
     /// Practical estimate: LTE ~ |y_trap - y_be| / 3
-    [[nodiscard]] static constexpr Real trapezoidal_lte(
+    [[nodiscard]] static Real trapezoidal_lte(
         Real y_trap,      // Trapezoidal result
         Real y_be,        // Backward Euler result (or predictor)
         [[maybe_unused]] Real dt) noexcept {
@@ -390,7 +390,7 @@ public:
 
     /// LTE for BDF2 using order comparison
     /// Compare BDF2 with BDF1 (lower order)
-    [[nodiscard]] static constexpr Real bdf2_lte(
+    [[nodiscard]] static Real bdf2_lte(
         Real y_bdf2,
         Real y_bdf1,
         [[maybe_unused]] Real dt) noexcept {
@@ -402,7 +402,7 @@ public:
     /// @param y_high result from higher-order method
     /// @param y_low result from lower-order method
     /// @param order_diff difference in orders (usually 1)
-    [[nodiscard]] static constexpr Real general_lte(
+    [[nodiscard]] static Real general_lte(
         Real y_high, Real y_low, int order_diff = 1) noexcept {
         Real scale = 1.0 / (std::pow(2.0, order_diff) - 1.0);
         return std::abs(y_high - y_low) * scale;
@@ -484,12 +484,12 @@ public:
     }
 
     /// Check if value is numerically valid
-    [[nodiscard]] static constexpr bool is_valid(Real v) noexcept {
+    [[nodiscard]] static bool is_valid(Real v) noexcept {
         return std::isfinite(v) && std::abs(v) < 1e100;
     }
 
     /// Safe division with minimum denominator
-    [[nodiscard]] static constexpr Real safe_divide(Real num, Real denom) noexcept {
+    [[nodiscard]] static Real safe_divide(Real num, Real denom) noexcept {
         if (std::abs(denom) < 1e-30) {
             return (num >= 0) ? 1e30 : -1e30;
         }
