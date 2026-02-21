@@ -14,6 +14,15 @@ def _ensure_pulsim_path() -> None:
         sys.path.insert(0, build_path)
 
 
+def _ensure_benchmarks_path() -> None:
+    benchmarks_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks")
+    )
+    if os.path.exists(benchmarks_path):
+        sys.path = [p for p in sys.path if os.path.abspath(p) != benchmarks_path]
+        sys.path.insert(0, benchmarks_path)
+
+
 def _reload_pulsim_if_needed() -> None:
     if "pulsim" in sys.modules:
         mod = sys.modules["pulsim"]
@@ -28,5 +37,5 @@ def _reload_pulsim_if_needed() -> None:
 
 
 _ensure_pulsim_path()
+_ensure_benchmarks_path()
 _reload_pulsim_if_needed()
-
