@@ -1,0 +1,2134 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Python-first power electronics simulation with YAML netlists">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/device-models/">
+      
+      
+        <link rel="prev" href="../versioning-and-release/">
+      
+      
+        <link rel="next" href="../convergence-tuning-guide/">
+      
+      
+      <link rel="icon" href="../None">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>Device Models - PulsimCore</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#pulsim-device-model-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PulsimCore
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Device Models
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="lime"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../user-guide/" class="md-tabs__link">
+        
+  
+    
+  
+  User Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../python-api/" class="md-tabs__link">
+        
+  
+    
+  
+  API Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../netlist-format/" class="md-tabs__link">
+        
+  
+    
+  
+  Netlist YAML
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples-and-results/" class="md-tabs__link">
+        
+  
+    
+  
+  Examples and Results
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../benchmarks-and-parity/" class="md-tabs__link">
+        
+  
+    
+  
+  Benchmarks and Parity
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../notebooks/" class="md-tabs__link">
+        
+  
+    
+  
+  Notebooks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../versioning-and-release/" class="md-tabs__link">
+        
+  
+    
+  
+  Docs Versioning
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+    
+  
+  Device Models
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../convergence-tuning-guide/" class="md-tabs__link">
+        
+  
+    
+  
+  Convergence Tuning
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../migration-guide/" class="md-tabs__link">
+        
+  
+    
+  
+  Migration Guide
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    PulsimCore
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../netlist-format/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Netlist YAML
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples-and-results/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Examples and Results
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks-and-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Benchmarks and Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Device Models
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Device Models
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#table-of-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      Table of Contents
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#passive-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Passive Components
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Passive Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resistor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resistor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#capacitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Capacitor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inductor
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sources
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc-voltage-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC Voltage Source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pulse-voltage-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pulse Voltage Source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sinusoidal-voltage-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sinusoidal Voltage Source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pwm-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      PWM Source
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#semiconductor-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Semiconductor Devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Semiconductor Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#diode-ideal-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diode - Ideal Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diode-shockley-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diode - Shockley Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mosfet-level-1-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      MOSFET - Level 1 Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#power-mosfet-simplified-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Power MOSFET - Simplified Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbt-simplified-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      IGBT - Simplified Model
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#switching-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Switching Devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Switching Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ideal-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ideal Switch
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#magnetic-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic Components
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Magnetic Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ideal-transformer" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ideal Transformer
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transformer-with-parasitics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Transformer with Parasitics
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#thermal-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      Thermal Models
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Thermal Models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#foster-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      Foster Network
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temperature-dependent-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Temperature-Dependent Parameters
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#device-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      Device Library
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Device Library">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mosfets" class="md-nav__link">
+    <span class="md-ellipsis">
+      MOSFETs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbts" class="md-nav__link">
+    <span class="md-ellipsis">
+      IGBTs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diodes
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-library-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Library Models
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-selection-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Model Selection Guidelines
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model Selection Guidelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-fast-switching-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      For Fast Switching Analysis
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-loss-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      For Loss Calculation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-emi-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      For EMI Analysis
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-thermal-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      For Thermal Analysis
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-tuning-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#table-of-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      Table of Contents
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#passive-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Passive Components
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Passive Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resistor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resistor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#capacitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Capacitor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inductor
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sources
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc-voltage-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC Voltage Source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pulse-voltage-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pulse Voltage Source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sinusoidal-voltage-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sinusoidal Voltage Source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pwm-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      PWM Source
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#semiconductor-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Semiconductor Devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Semiconductor Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#diode-ideal-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diode - Ideal Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diode-shockley-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diode - Shockley Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mosfet-level-1-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      MOSFET - Level 1 Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#power-mosfet-simplified-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Power MOSFET - Simplified Model
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbt-simplified-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      IGBT - Simplified Model
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#switching-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Switching Devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Switching Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ideal-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ideal Switch
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#magnetic-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic Components
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Magnetic Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ideal-transformer" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ideal Transformer
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transformer-with-parasitics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Transformer with Parasitics
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#thermal-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      Thermal Models
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Thermal Models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#foster-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      Foster Network
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temperature-dependent-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Temperature-Dependent Parameters
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#device-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      Device Library
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Device Library">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mosfets" class="md-nav__link">
+    <span class="md-ellipsis">
+      MOSFETs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbts" class="md-nav__link">
+    <span class="md-ellipsis">
+      IGBTs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diodes
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-library-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Library Models
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-selection-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Model Selection Guidelines
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model Selection Guidelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-fast-switching-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      For Fast Switching Analysis
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-loss-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      For Loss Calculation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-emi-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      For EMI Analysis
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-thermal-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      For Thermal Analysis
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="pulsim-device-model-reference">Pulsim Device Model Reference<a class="headerlink" href="#pulsim-device-model-reference" title="Permanent link">&para;</a></h1>
+<p>This document provides detailed information about all device models supported by Pulsim, including their equations, parameters, and usage guidelines.</p>
+<h2 id="table-of-contents">Table of Contents<a class="headerlink" href="#table-of-contents" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#passive-components">Passive Components</a></li>
+<li><a href="#sources">Sources</a></li>
+<li><a href="#semiconductor-devices">Semiconductor Devices</a></li>
+<li><a href="#switching-devices">Switching Devices</a></li>
+<li><a href="#magnetic-components">Magnetic Components</a></li>
+<li><a href="#thermal-models">Thermal Models</a></li>
+<li><a href="#device-library">Device Library</a></li>
+</ol>
+<hr />
+<h2 id="passive-components">Passive Components<a class="headerlink" href="#passive-components" title="Permanent link">&para;</a></h2>
+<h3 id="resistor">Resistor<a class="headerlink" href="#resistor" title="Permanent link">&para;</a></h3>
+<p><strong>Symbol:</strong> R
+<strong>Equation:</strong> V = I × R</p>
+<p>The resistor is modeled as a linear conductance G = 1/R in the MNA matrix.</p>
+<p><strong>MNA Stamp:</strong>
+<div class="highlight"><pre><span></span><code>     n+    n-
+n+ [ +G   -G  ]
+n- [ -G   +G  ]
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Range | Description |
+|-----------|--------|------|-------|-------------|
+| value | R | Ω | &gt; 0 | Resistance |</p>
+<hr />
+<h3 id="capacitor">Capacitor<a class="headerlink" href="#capacitor" title="Permanent link">&para;</a></h3>
+<p><strong>Symbol:</strong> C
+<strong>Equation:</strong> I = C × dV/dt</p>
+<p>Pulsim uses the companion model approach for time integration.</p>
+<p><strong>Backward Euler Companion Model:</strong>
+<div class="highlight"><pre><span></span><code>I_eq = (C/dt) × V_new - (C/dt) × V_old
+G_eq = C/dt
+</code></pre></div></p>
+<p><strong>Trapezoidal Companion Model:</strong>
+<div class="highlight"><pre><span></span><code>I_eq = (2C/dt) × V_new - (2C/dt) × V_old - I_old
+G_eq = 2C/dt
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Range | Description |
+|-----------|--------|------|-------|-------------|
+| value | C | F | &gt; 0 | Capacitance |
+| ic | V₀ | V | any | Initial voltage |</p>
+<hr />
+<h3 id="inductor">Inductor<a class="headerlink" href="#inductor" title="Permanent link">&para;</a></h3>
+<p><strong>Symbol:</strong> L
+<strong>Equation:</strong> V = L × dI/dt</p>
+<p><strong>Backward Euler Companion Model:</strong>
+<div class="highlight"><pre><span></span><code>V_eq = (L/dt) × I_new - (L/dt) × I_old
+R_eq = L/dt
+</code></pre></div></p>
+<p><strong>Trapezoidal Companion Model:</strong>
+<div class="highlight"><pre><span></span><code>V_eq = (2L/dt) × I_new - (2L/dt) × I_old + V_old
+R_eq = 2L/dt
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Range | Description |
+|-----------|--------|------|-------|-------------|
+| value | L | H | &gt; 0 | Inductance |
+| ic | I₀ | A | any | Initial current |</p>
+<hr />
+<h2 id="sources">Sources<a class="headerlink" href="#sources" title="Permanent link">&para;</a></h2>
+<h3 id="dc-voltage-source">DC Voltage Source<a class="headerlink" href="#dc-voltage-source" title="Permanent link">&para;</a></h3>
+<p><strong>Symbol:</strong> V
+<strong>Equation:</strong> V = V_dc</p>
+<p>Implemented using a voltage source MNA stamp with an additional equation row.</p>
+<p><strong>MNA Stamp:</strong>
+<div class="highlight"><pre><span></span><code>      n+    n-    I_v
+n+  [  0    0    +1  ]
+n-  [  0    0    -1  ]
+I_v [ +1   -1     0  ] = V_dc
+</code></pre></div></p>
+<hr />
+<h3 id="pulse-voltage-source">Pulse Voltage Source<a class="headerlink" href="#pulse-voltage-source" title="Permanent link">&para;</a></h3>
+<p><strong>Waveform Definition:</strong>
+<div class="highlight"><pre><span></span><code>        V2  ____________________
+           /|                  |\
+          / |                  | \
+         /  |                  |  \
+    V1 _/   |                  |   \_____
+       |    |                  |   |
+       td   tr      pw         tf
+       |&lt;-------- period ----------&gt;|
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Description |
+|-----------|--------|------|-------------|
+| v1 | V₁ | V | Low voltage level |
+| v2 | V₂ | V | High voltage level |
+| td | t_d | s | Delay time |
+| tr | t_r | s | Rise time |
+| tf | t_f | s | Fall time |
+| pw | t_pw | s | Pulse width |
+| period | T | s | Period |</p>
+<hr />
+<h3 id="sinusoidal-voltage-source">Sinusoidal Voltage Source<a class="headerlink" href="#sinusoidal-voltage-source" title="Permanent link">&para;</a></h3>
+<p><strong>Equation:</strong>
+<div class="highlight"><pre><span></span><code>V(t) = V_o + V_a × sin(2π × f × (t - t_d) + φ) × e^(-θ(t-t_d))
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Description |
+|-----------|--------|------|-------------|
+| vo | V_o | V | DC offset |
+| va | V_a | V | Amplitude |
+| freq | f | Hz | Frequency |
+| td | t_d | s | Delay |
+| theta | θ | 1/s | Damping factor |
+| phi | φ | deg | Phase |</p>
+<hr />
+<h3 id="pwm-source">PWM Source<a class="headerlink" href="#pwm-source" title="Permanent link">&para;</a></h3>
+<p>Generates a pulse-width modulated signal for switching control.</p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Description |
+|-----------|--------|------|-------------|
+| frequency | f_sw | Hz | Switching frequency |
+| duty | D | - | Duty cycle (0-1) |
+| phase | φ | deg | Phase offset |
+| dead_time | t_dead | s | Dead time between transitions |
+| inverted | - | bool | Invert output |</p>
+<p><strong>Dead Time Handling:</strong></p>
+<p>For complementary switches (e.g., high-side and low-side in half-bridge):
+<div class="highlight"><pre><span></span><code>S_high: |----ON----|     |----ON----|
+S_low:       |----ON----|     |----ON----|
+        ^dead^      ^dead^
+</code></pre></div></p>
+<hr />
+<h2 id="semiconductor-devices">Semiconductor Devices<a class="headerlink" href="#semiconductor-devices" title="Permanent link">&para;</a></h2>
+<h3 id="diode-ideal-model">Diode - Ideal Model<a class="headerlink" href="#diode-ideal-model" title="Permanent link">&para;</a></h3>
+<p><strong>Symbol:</strong> D
+<strong>Model:</strong> ideal</p>
+<p><strong>Equations:</strong>
+<div class="highlight"><pre><span></span><code>OFF state (V_ak &lt; 0):  I = 0, G = G_off = 1e-9
+ON state (V_ak &gt;= 0):  I = V_ak / R_on, G = 1/R_on
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Default | Description |
+|-----------|--------|------|---------|-------------|
+| ron | R_on | Ω | 0.001 | On-state resistance |
+| roff | R_off | Ω | 1e9 | Off-state resistance |</p>
+<hr />
+<h3 id="diode-shockley-model">Diode - Shockley Model<a class="headerlink" href="#diode-shockley-model" title="Permanent link">&para;</a></h3>
+<p><strong>Symbol:</strong> D
+<strong>Model:</strong> shockley</p>
+<p><strong>DC Equation:</strong>
+<div class="highlight"><pre><span></span><code>I_d = I_s × (e^(V_d/(n×V_t)) - 1)
+
+where V_t = kT/q ≈ 26mV at 300K
+</code></pre></div></p>
+<p><strong>Junction Capacitance:</strong>
+<div class="highlight"><pre><span></span><code>C_j = C_jo / (1 - V_d/V_j)^m   for V_d &lt; FC×V_j
+C_j = C_jo × (1-FC)^(-1-m) × (1-FC(1+m) + m×V_d/V_j)   for V_d &gt;= FC×V_j
+</code></pre></div></p>
+<p><strong>Diffusion Capacitance:</strong>
+<div class="highlight"><pre><span></span><code>C_d = τ_t × dI_d/dV_d = τ_t × I_s/(n×V_t) × e^(V_d/(n×V_t))
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Default | Description |
+|-----------|--------|------|---------|-------------|
+| is | I_s | A | 1e-14 | Saturation current |
+| n | n | - | 1.0 | Emission coefficient |
+| rs | R_s | Ω | 0 | Series resistance |
+| cjo | C_jo | F | 0 | Zero-bias junction capacitance |
+| vj | V_j | V | 0.7 | Junction potential |
+| m | m | - | 0.5 | Grading coefficient |
+| tt | τ_t | s | 0 | Transit time |
+| bv | BV | V | ∞ | Breakdown voltage |
+| ibv | I_BV | A | 1e-10 | Breakdown knee current |
+| fc | FC | - | 0.5 | Forward-bias capacitance coefficient |</p>
+<p><strong>Linearization for Newton-Raphson:</strong>
+<div class="highlight"><pre><span></span><code>I_d ≈ I_d0 + G_d × (V_d - V_d0)
+G_d = dI_d/dV_d = I_s/(n×V_t) × e^(V_d0/(n×V_t))
+</code></pre></div></p>
+<hr />
+<h3 id="mosfet-level-1-model">MOSFET - Level 1 Model<a class="headerlink" href="#mosfet-level-1-model" title="Permanent link">&para;</a></h3>
+<p><strong>Symbol:</strong> M (NMOS/PMOS)</p>
+<p><strong>Operating Regions:</strong></p>
+<p><strong>Cutoff (V_gs &lt; V_th):</strong>
+<div class="highlight"><pre><span></span><code>I_ds = 0
+</code></pre></div></p>
+<p><strong>Linear/Triode (V_gs &gt;= V_th, V_ds &lt; V_gs - V_th):</strong>
+<div class="highlight"><pre><span></span><code>I_ds = K_p × (W/L) × [(V_gs - V_th) × V_ds - V_ds²/2] × (1 + λ × V_ds)
+</code></pre></div></p>
+<p><strong>Saturation (V_gs &gt;= V_th, V_ds &gt;= V_gs - V_th):</strong>
+<div class="highlight"><pre><span></span><code>I_ds = (K_p/2) × (W/L) × (V_gs - V_th)² × (1 + λ × V_ds)
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Default | Description |
+|-----------|--------|------|---------|-------------|
+| vth | V_th | V | 2.0 | Threshold voltage |
+| kp | K_p | A/V² | 20e-6 | Transconductance parameter |
+| lambda | λ | 1/V | 0.01 | Channel-length modulation |
+| w | W | m | 100e-6 | Channel width |
+| l | L | m | 10e-6 | Channel length |</p>
+<p><strong>Capacitances:</strong>
+| Parameter | Symbol | Unit | Description |
+|-----------|--------|------|-------------|
+| cgs | C_gs | F | Gate-source capacitance |
+| cgd | C_gd | F | Gate-drain (Miller) capacitance |
+| cds | C_ds | F | Drain-source capacitance |</p>
+<p><strong>Jacobian Elements for Newton-Raphson:</strong>
+<div class="highlight"><pre><span></span><code>∂I_ds/∂V_gs = g_m = K_p × (W/L) × V_ds                    (linear)
+∂I_ds/∂V_gs = g_m = K_p × (W/L) × (V_gs - V_th)           (saturation)
+
+∂I_ds/∂V_ds = g_ds = K_p × (W/L) × (V_gs - V_th - V_ds)   (linear)
+∂I_ds/∂V_ds = g_ds = λ × I_ds                              (saturation)
+</code></pre></div></p>
+<hr />
+<h3 id="power-mosfet-simplified-model">Power MOSFET - Simplified Model<a class="headerlink" href="#power-mosfet-simplified-model" title="Permanent link">&para;</a></h3>
+<p>For power electronics simulation, a simplified model using datasheet parameters is more practical.</p>
+<p><strong>On-State:</strong>
+<div class="highlight"><pre><span></span><code>V_ds = I_ds × R_ds(on)(T_j)
+</code></pre></div></p>
+<p><strong>Temperature Dependence:</strong>
+<div class="highlight"><pre><span></span><code>R_ds(on)(T_j) = R_ds(on)(25°C) × [1 + TC1×(T_j-25) + TC2×(T_j-25)²]
+</code></pre></div></p>
+<p><strong>Typical TC values for Si MOSFETs:</strong>
+- TC1 ≈ 0.005 to 0.01 /°C
+- TC2 ≈ 0 (often neglected)</p>
+<p><strong>Body Diode:</strong></p>
+<p>The intrinsic body diode is modeled as a fast-recovery diode:
+<div class="highlight"><pre><span></span><code>I_d = I_s × (e^(V_d/(n×V_t)) - 1)
+</code></pre></div></p>
+<p>With reverse recovery:
+<div class="highlight"><pre><span></span><code>Q_rr = I_F × t_rr / 2
+E_rr = Q_rr × V_R
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Default | Description |
+|-----------|--------|------|---------|-------------|
+| rds_on | R_ds(on) | Ω | - | On-state drain-source resistance |
+| vth | V_th | V | 3.0 | Gate threshold voltage |
+| ciss | C_iss | F | - | Input capacitance (C_gs + C_gd) |
+| coss | C_oss | F | - | Output capacitance (C_gd + C_ds) |
+| crss | C_rss | F | - | Reverse transfer capacitance (C_gd) |
+| qg | Q_g | C | - | Total gate charge |
+| tc1 | TC1 | 1/°C | 0.007 | Temperature coefficient 1 |
+| tc2 | TC2 | 1/°C² | 0 | Temperature coefficient 2 |</p>
+<hr />
+<h3 id="igbt-simplified-model">IGBT - Simplified Model<a class="headerlink" href="#igbt-simplified-model" title="Permanent link">&para;</a></h3>
+<p><strong>On-State Voltage:</strong>
+<div class="highlight"><pre><span></span><code>V_ce(sat) = V_ce0 + R_ce × I_c
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Description |
+|-----------|--------|------|-------------|
+| vce_sat | V_ce0 | V | On-state voltage at zero current |
+| rce | R_ce | Ω | On-state resistance |
+| vth | V_th | V | Gate threshold voltage |
+| td_on | t_d(on) | s | Turn-on delay time |
+| tr | t_r | s | Current rise time |
+| td_off | t_d(off) | s | Turn-off delay time |
+| tf | t_f | s | Current fall time |
+| cies | C_ies | F | Input capacitance |
+| coes | C_oes | F | Output capacitance |
+| cres | C_res | F | Reverse transfer capacitance |</p>
+<hr />
+<h2 id="switching-devices">Switching Devices<a class="headerlink" href="#switching-devices" title="Permanent link">&para;</a></h2>
+<h3 id="ideal-switch">Ideal Switch<a class="headerlink" href="#ideal-switch" title="Permanent link">&para;</a></h3>
+<p><strong>Model:</strong>
+<div class="highlight"><pre><span></span><code>OFF: R = R_off (very high, ~1e9 Ω)
+ON:  R = R_on (very low, ~1 mΩ)
+</code></pre></div></p>
+<p><strong>Control Logic:</strong>
+<div class="highlight"><pre><span></span><code>V_control &gt; V_th → ON
+V_control &lt;= V_th → OFF
+</code></pre></div></p>
+<p><strong>Event Handling:</strong></p>
+<p>When a switch changes state:
+1. Event detected at crossing time
+2. Simulation steps back to crossing
+3. Matrix is reformulated
+4. Integration restarts with new topology</p>
+<hr />
+<h2 id="magnetic-components">Magnetic Components<a class="headerlink" href="#magnetic-components" title="Permanent link">&para;</a></h2>
+<h3 id="ideal-transformer">Ideal Transformer<a class="headerlink" href="#ideal-transformer" title="Permanent link">&para;</a></h3>
+<p><strong>Equations:</strong>
+<div class="highlight"><pre><span></span><code>V_1 = n × V_2
+I_1 = -I_2 / n
+
+where n = N_1/N_2 (turns ratio)
+</code></pre></div></p>
+<p><strong>MNA Implementation:</strong></p>
+<p>The ideal transformer is implemented using coupled voltage and current sources.</p>
+<hr />
+<h3 id="transformer-with-parasitics">Transformer with Parasitics<a class="headerlink" href="#transformer-with-parasitics" title="Permanent link">&para;</a></h3>
+<p><strong>Equivalent Circuit:</strong>
+<div class="highlight"><pre><span></span><code>    R_p    L_lk_p        n:1        L_lk_s    R_s
+o---/\/\/---LLLL---o    | |    o---LLLL---/\/\/---o
+                       | |
+                    L_m ||
+                       | |
+o----------------------o    o---------------------o
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Description |
+|-----------|--------|------|-------------|
+| turns_ratio | n | - | Primary to secondary turns ratio |
+| lm | L_m | H | Magnetizing inductance |
+| llk_pri | L_lk,p | H | Primary leakage inductance |
+| llk_sec | L_lk,s | H | Secondary leakage inductance |
+| rp | R_p | Ω | Primary winding resistance |
+| rs | R_s | Ω | Secondary winding resistance |</p>
+<hr />
+<h2 id="thermal-models">Thermal Models<a class="headerlink" href="#thermal-models" title="Permanent link">&para;</a></h2>
+<h3 id="foster-network">Foster Network<a class="headerlink" href="#foster-network" title="Permanent link">&para;</a></h3>
+<p>Pulsim uses the Foster RC network representation for thermal modeling:</p>
+<div class="highlight"><pre><span></span><code>       R_th1        R_th2        R_th3
+P_loss --/\/\/--+--/\/\/--+--/\/\/--+-- T_ambient
+               |         |         |
+              ===C1     ===C2     ===C3
+               |         |         |
+              GND       GND       GND
+</code></pre></div>
+<p><strong>Time Constants:</strong>
+<div class="highlight"><pre><span></span><code>τ_i = R_th_i × C_th_i
+</code></pre></div></p>
+<p><strong>Transient Response:</strong>
+<div class="highlight"><pre><span></span><code>Z_th(t) = Σ R_th_i × (1 - e^(-t/τ_i))
+</code></pre></div></p>
+<p><strong>Steady-State:</strong>
+<div class="highlight"><pre><span></span><code>R_th_jc = Σ R_th_i
+</code></pre></div></p>
+<p><strong>Parameters:</strong>
+| Parameter | Symbol | Unit | Description |
+|-----------|--------|------|-------------|
+| rth | R_th | K/W | Array of thermal resistances |
+| tau | τ | s | Array of time constants |</p>
+<h3 id="temperature-dependent-parameters">Temperature-Dependent Parameters<a class="headerlink" href="#temperature-dependent-parameters" title="Permanent link">&para;</a></h3>
+<p><strong>MOSFET R_ds(on):</strong>
+<div class="highlight"><pre><span></span><code>R_ds(on)(T) = R_ds(on)(25°C) × (T/300)^α
+
+where α ≈ 2.0 to 2.5 for silicon
+</code></pre></div></p>
+<p><strong>Diode Forward Voltage:</strong>
+<div class="highlight"><pre><span></span><code>V_f(T) = V_f(25°C) - α_vf × (T - 25)
+
+where α_vf ≈ 2 mV/°C
+</code></pre></div></p>
+<hr />
+<h2 id="device-library">Device Library<a class="headerlink" href="#device-library" title="Permanent link">&para;</a></h2>
+<p>Pulsim includes a library of pre-defined device models based on manufacturer datasheets.</p>
+<h3 id="mosfets">MOSFETs<a class="headerlink" href="#mosfets" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>V_ds</th>
+<th>R_ds(on)</th>
+<th>I_d</th>
+<th>Package</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>IRF540N</td>
+<td>100V</td>
+<td>44mΩ</td>
+<td>33A</td>
+<td>TO-220</td>
+</tr>
+<tr>
+<td>IRFP460</td>
+<td>500V</td>
+<td>270mΩ</td>
+<td>20A</td>
+<td>TO-247</td>
+</tr>
+<tr>
+<td>IPP200N25N3</td>
+<td>250V</td>
+<td>20mΩ</td>
+<td>64A</td>
+<td>TO-220</td>
+</tr>
+<tr>
+<td>STW48NM60N</td>
+<td>600V</td>
+<td>70mΩ</td>
+<td>44A</td>
+<td>TO-247</td>
+</tr>
+</tbody>
+</table>
+<h3 id="igbts">IGBTs<a class="headerlink" href="#igbts" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>V_ce</th>
+<th>V_ce(sat)</th>
+<th>I_c</th>
+<th>Package</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>IRG4PH50UD</td>
+<td>1200V</td>
+<td>2.0V</td>
+<td>45A</td>
+<td>TO-247</td>
+</tr>
+<tr>
+<td>IKW40N120H3</td>
+<td>1200V</td>
+<td>1.7V</td>
+<td>40A</td>
+<td>TO-247</td>
+</tr>
+</tbody>
+</table>
+<h3 id="diodes">Diodes<a class="headerlink" href="#diodes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>V_r</th>
+<th>V_f</th>
+<th>I_f</th>
+<th>t_rr</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1N4148</td>
+<td>100V</td>
+<td>0.7V</td>
+<td>200mA</td>
+<td>4ns</td>
+</tr>
+<tr>
+<td>MUR860</td>
+<td>600V</td>
+<td>1.0V</td>
+<td>8A</td>
+<td>60ns</td>
+</tr>
+<tr>
+<td>STTH30R06</td>
+<td>600V</td>
+<td>0.95V</td>
+<td>30A</td>
+<td>35ns</td>
+</tr>
+</tbody>
+</table>
+<h3 id="using-library-models">Using Library Models<a class="headerlink" href="#using-library-models" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Q1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">d</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">s</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">use</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IRF540N</span>
+</code></pre></div>
+<p>Or override specific parameters:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Q1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">d</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">s</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">use</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IRF540N</span>
+<span class="w">  </span><span class="nt">rds_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.05</span>
+</code></pre></div>
+<hr />
+<h2 id="model-selection-guidelines">Model Selection Guidelines<a class="headerlink" href="#model-selection-guidelines" title="Permanent link">&para;</a></h2>
+<h3 id="for-fast-switching-analysis">For Fast Switching Analysis<a class="headerlink" href="#for-fast-switching-analysis" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Use simplified models with datasheet parameters</li>
+<li>Include gate charge model for timing</li>
+<li>Enable adaptive timestep near switching events</li>
+</ul>
+<h3 id="for-loss-calculation">For Loss Calculation<a class="headerlink" href="#for-loss-calculation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Use models with accurate on-state characteristics</li>
+<li>Include temperature dependence for thermal coupling</li>
+<li>Use switching energy lookup tables</li>
+</ul>
+<h3 id="for-emi-analysis">For EMI Analysis<a class="headerlink" href="#for-emi-analysis" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Include all parasitic capacitances</li>
+<li>Use short timesteps (&lt; 1/10 of rise time)</li>
+<li>Model PCB parasitics as lumped elements</li>
+</ul>
+<h3 id="for-thermal-analysis">For Thermal Analysis<a class="headerlink" href="#for-thermal-analysis" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Use Foster models with 3-4 time constants</li>
+<li>Enable bidirectional thermal-electrical coupling</li>
+<li>Run for sufficient time to reach thermal steady-state</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../versioning-and-release/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Docs Versioning">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Docs Versioning
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../convergence-tuning-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: Convergence Tuning">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Convergence Tuning
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+    
+  </body>
+</html>
