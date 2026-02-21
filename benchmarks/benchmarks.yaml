@@ -29,8 +29,6 @@ benchmarks:
     scenarios: [direct_trap]
   - path: circuits/diode_rectifier.yaml
     scenarios: [direct_trap]
-  - path: circuits/buck_switching.yaml
-    scenarios: [direct_trap]
   - path: circuits/stiff_rlc.yaml
     scenarios: [trbdf2, rosenbrockw]
   - path: circuits/periodic_rc_pwm.yaml

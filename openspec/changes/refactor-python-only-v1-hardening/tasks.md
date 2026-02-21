@@ -1,12 +1,12 @@
 ## Gates & Definition of Done
 
-- [ ] G1 Python-only product surface is enforced in docs, examples, and packaging.
-- [ ] G2 Legacy code is removed from default build/runtime paths after successful migration.
-- [ ] G3 Declared converter component matrix is fully supported in v1 (YAML + Python + runtime).
-- [ ] G4 Electro-thermal converter workflows pass correctness and stability gates.
-- [ ] G5 Stress tiers (A/B/C) converge with deterministic solver fallback traces.
-- [ ] G6 LTspice parity suite runs for mapped benchmarks with configured thresholds and artifacts.
-- [ ] G7 Required test suites have no planned-API placeholder skips in the supported surface.
+- [x] G1 Python-only product surface is enforced in docs, examples, and packaging.
+- [x] G2 Legacy code is removed from default build/runtime paths after successful migration.
+- [x] G3 Declared converter component matrix is fully supported in v1 (YAML + Python + runtime).
+- [x] G4 Electro-thermal converter workflows pass correctness and stability gates.
+- [x] G5 Stress tiers (A/B/C) converge with deterministic solver fallback traces.
+- [x] G6 LTspice parity suite runs for mapped benchmarks with configured thresholds and artifacts.
+- [x] G7 Required test suites have no planned-API placeholder skips in the supported surface.
 
 ## Phase 0: Baseline and Scope Lock
 
@@ -60,6 +60,6 @@
 
 ## Phase 8: Final Verification
 
-- [ ] 8.1 Run full test/benchmark/parity pipeline and store artifacts.
-- [ ] 8.2 Validate OpenSpec change with `openspec validate refactor-python-only-v1-hardening --strict`.
-- [ ] 8.3 Confirm all gates are met before archive.
+- [x] 8.1 Run full test/benchmark/parity pipeline and store artifacts.
+- [x] 8.2 Validate OpenSpec change with `openspec validate refactor-python-only-v1-hardening --strict`.
+- [x] 8.3 Confirm all gates are met before archive.

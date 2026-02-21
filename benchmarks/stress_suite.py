@@ -232,19 +232,34 @@ def run_stress_suite(
             raise RuntimeError(f"Tier '{tier_name}' has no cases")
 
         tier_manifest = build_tier_manifest(base_manifest, benchmark_index, cases)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_manifest = Path(tmpdir) / f"{tier_name}.yaml"
-            if yaml is None:
-                raise RuntimeError("PyYAML is required. Install with: pip install pyyaml")
-            tmp_manifest.write_text(yaml.safe_dump(tier_manifest, sort_keys=False), encoding="utf-8")
+        if yaml is None:
+            raise RuntimeError("PyYAML is required. Install with: pip install pyyaml")
+
+        # Keep the temporary manifest under the original benchmarks directory so
+        # benchmark-relative assets (for example, baselines/*.csv) still resolve.
+        tmp_manifest_path: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=f"_{tier_name}.yaml",
+                prefix="stress_",
+                dir=str(benchmarks_manifest_path.parent),
+                delete=False,
+                encoding="utf-8",
+            ) as handle:
+                yaml.safe_dump(tier_manifest, handle, sort_keys=False)
+                tmp_manifest_path = Path(handle.name)
 
             results = run_benchmarks(
-                benchmarks_path=tmp_manifest,
+                benchmarks_path=tmp_manifest_path,
                 output_dir=output_dir / "tiers" / tier_name,
                 selected=None,
                 matrix=False,
                 generate_baselines=False,
             )
+        finally:
+            if tmp_manifest_path is not None:
+                tmp_manifest_path.unlink(missing_ok=True)
 
         evaluation = evaluate_tier_results(tier=tier_name, results=results, criteria=criteria)
         tier_results.append(
