@@ -9,6 +9,8 @@ This folder contains the YAML benchmark suite and validation runners.
 - `benchmark_runner.py` — executes benchmarks and produces results artifacts.
 - `validation_matrix.py` — runs all solver/integrator combinations.
 - `benchmark_ngspice.py` — Pulsim vs external SPICE parity runner (`ngspice` or `ltspice` backends).
+- `stress_suite.py` — tiered stress validation runner (tiers A/B/C + pass criteria).
+- `stress_catalog.yaml` — stress tier definitions, mapped cases, and acceptance criteria.
 
 ## Running
 
@@ -18,6 +20,7 @@ export PYTHONPATH=build/python
 
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
+python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
 
 # Compare Pulsim vs ngspice (manifest mode)
 python3 benchmarks/benchmark_ngspice.py \
@@ -68,6 +71,12 @@ Python-first runtime defaults (fixed-step unless explicitly overridden).
 - `parity_summary.json` — pass/fail totals and grouped failure reasons.
 
 For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary.json`) are also written for compatibility.
+
+`stress_suite.py` emits:
+
+- `stress_results.csv` — per scenario stress execution rows with telemetry columns.
+- `stress_results.json` — tier criteria + per-tier evaluation + scenario records.
+- `stress_summary.json` — overall pass/fail and per-tier status.
 
 ## Adding Benchmarks
 

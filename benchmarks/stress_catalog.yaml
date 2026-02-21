@@ -1,0 +1,42 @@
+schema: pulsim-stress-catalog-v1
+version: 1
+tiers:
+  tier_a:
+    description: Analytical linear circuits
+    criteria:
+      min_pass_rate: 1.0
+      max_runtime_s: 3.0
+      max_max_error: 0.08
+      max_timestep_rejections: 20
+      required_telemetry: [runtime_s, steps, newton_iterations, timestep_rejections]
+    cases:
+      - benchmark_id: rc_step
+        scenarios: [direct_trap, gmres_trbdf2]
+      - benchmark_id: rl_step
+        scenarios: [direct_trap, gmres_trbdf2]
+      - benchmark_id: rlc_step
+        scenarios: [direct_trap, gmres_trbdf2]
+  tier_b:
+    description: Nonlinear and switching converters
+    criteria:
+      min_pass_rate: 1.0
+      max_runtime_s: 8.0
+      max_timestep_rejections: 120
+      required_telemetry: [runtime_s, steps, newton_iterations, timestep_rejections, linear_fallbacks]
+    cases:
+      - benchmark_id: diode_rectifier
+        scenarios: [direct_trap]
+      - benchmark_id: buck_switching
+        scenarios: [direct_trap]
+      - benchmark_id: periodic_rc_pwm
+        scenarios: [shooting_default, harmonic_balance]
+  tier_c:
+    description: Large and stiff converter-focused cases
+    criteria:
+      min_pass_rate: 1.0
+      max_runtime_s: 20.0
+      max_timestep_rejections: 400
+      required_telemetry: [runtime_s, steps, newton_iterations, timestep_rejections, linear_fallbacks]
+    cases:
+      - benchmark_id: stiff_rlc
+        scenarios: [trbdf2, rosenbrockw]
