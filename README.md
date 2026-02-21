@@ -67,6 +67,19 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
 PYTHONPATH=build/python python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
 ```
 
+## Documentation Site
+
+Build docs locally:
+
+```bash
+python3 -m pip install -r docs/requirements.txt
+sphinx-build -b html docs docs/_build/html
+```
+
+Open `docs/_build/html/index.html` in your browser.
+
+GitHub Pages deploy is automated by `.github/workflows/docs.yml` on pushes to `main`.
+
 ## Notes
 
 - YAML schema is `pulsim-v1`.
