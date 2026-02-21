@@ -161,3 +161,68 @@ def test_run_stress_suite_uses_tier_cases_and_generates_evaluations(
     assert len(tier_runs) == 1
     assert tier_runs[0].tier == "tier_a"
     assert tier_runs[0].evaluation.status == "passed"
+
+
+def test_run_stress_suite_temp_manifest_stays_under_base_dir(tmp_path: Path, monkeypatch) -> None:
+    circuit = {
+        "schema": "pulsim-v1",
+        "version": 1,
+        "benchmark": {"id": "rc_step", "validation": {"type": "none"}},
+        "simulation": {"tstop": 1e-5, "dt": 1e-6},
+        "components": [
+            {
+                "type": "voltage_source",
+                "name": "V1",
+                "nodes": ["in", "0"],
+                "waveform": {"type": "dc", "value": 1.0},
+            },
+            {"type": "resistor", "name": "R1", "nodes": ["in", "out"], "value": "1k"},
+            {"type": "capacitor", "name": "C1", "nodes": ["out", "0"], "value": "1u"},
+        ],
+    }
+    (tmp_path / "circuit.yaml").write_text(yaml.safe_dump(circuit, sort_keys=False), encoding="utf-8")
+
+    manifest = {
+        "benchmarks": [{"path": "circuit.yaml", "scenarios": ["direct_trap"]}],
+        "scenarios": {"direct_trap": {"simulation": {"integrator": "trapezoidal"}}},
+    }
+    manifest_path = tmp_path / "benchmarks.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    catalog = {
+        "schema": "pulsim-stress-catalog-v1",
+        "version": 1,
+        "tiers": {
+            "tier_a": {
+                "description": "analytical",
+                "criteria": {"min_pass_rate": 1.0},
+                "cases": [{"benchmark_id": "rc_step", "scenarios": ["direct_trap"]}],
+            }
+        },
+    }
+    catalog_path = tmp_path / "stress_catalog.yaml"
+    catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False), encoding="utf-8")
+
+    captured: dict[str, Path] = {}
+
+    def fake_run_benchmarks(
+        benchmarks_path: Path,
+        output_dir: Path,
+        selected=None,
+        matrix: bool = False,
+        generate_baselines: bool = False,
+    ):
+        captured["manifest"] = benchmarks_path
+        return [_result("rc_step", "direct_trap", status="passed", runtime_s=0.01)]
+
+    monkeypatch.setattr(ss, "run_benchmarks", fake_run_benchmarks)
+
+    ss.run_stress_suite(
+        benchmarks_manifest_path=manifest_path,
+        stress_catalog_path=catalog_path,
+        output_dir=tmp_path / "out",
+        selected_tiers=None,
+    )
+
+    assert captured["manifest"].parent == manifest_path.parent
+    assert not captured["manifest"].exists()

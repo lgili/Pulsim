@@ -401,6 +401,9 @@ def run_benchmarks(
                 telemetry["steps"] = float(steps)
                 telemetry["runtime_s"] = float(runtime_s)
                 telemetry["python_backend"] = 1.0
+                for key in ("newton_iterations", "timestep_rejections", "linear_fallbacks"):
+                    if telemetry.get(key) is None:
+                        telemetry[key] = 0.0
 
                 validation = bench_meta.get("validation", {})
                 validation_type = validation.get("type", "none")

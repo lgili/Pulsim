@@ -16,20 +16,14 @@ simulation:
   tstop: 50e-6
   dt: 50e-9
   dt_max: 200e-9
-  adaptive_timestep: true
+  adaptive_timestep: false
 components:
   - type: voltage_source
-    name: Vpulse
+    name: Vdc
     nodes: [in, 0]
     waveform:
-      type: pulse
-      v_initial: 0.0
-      v_pulse: 5.0
-      t_delay: 0.0
-      t_rise: 1e-9
-      t_fall: 1e-9
-      t_width: 5e-6
-      period: 10e-6
+      type: dc
+      value: 5.0
   - type: resistor
     name: R1
     nodes: [in, n1]
