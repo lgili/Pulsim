@@ -3,6 +3,7 @@ build/
 build-test/
 build-ci/
 docs/_build/
+site/
 cmake-build-*/
 
 # IDE

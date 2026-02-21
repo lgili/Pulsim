@@ -1,37 +1,21 @@
-name: Docs
+name: Docs (Versioned)
 
 on:
   push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - ".github/workflows/docs.yml"
-      - "README.md"
-      - "pyproject.toml"
-  pull_request:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - ".github/workflows/docs.yml"
-      - "README.md"
-      - "pyproject.toml"
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  build:
+  deploy-versioned-docs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -43,34 +27,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r docs/requirements.txt
 
-      - name: Build docs
-        run: sphinx-build -W --keep-going -b html docs docs/_build/html
+      - name: Build docs (strict)
+        run: mkdocs build --strict
 
-      - name: Configure GitHub Pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/configure-pages@v5
+      - name: Configure Git for deployment
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Upload pages artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/_build/html
-
-      - name: Upload docs preview artifact
-        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs-site-preview
-          path: docs/_build/html
-
-  deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Deploy versioned docs to gh-pages
+        env:
+          VERSION_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION_TAG#v}"
+          mike deploy --push --update-aliases "${VERSION}" latest
+          mike set-default --push latest

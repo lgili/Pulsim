@@ -54,11 +54,10 @@ dev = [
     "PyYAML>=6.0",
 ]
 docs = [
-    "sphinx>=6.0",
-    "furo>=2024.8.6",
-    "myst-parser>=2.0",
-    "sphinx-copybutton>=0.5",
-    "sphinx-rtd-theme>=1.0",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mike>=2.1",
+    "pymdown-extensions>=10.9",
 ]
 all = [
     "pulsim[grpc,jupyter,data,dev]",

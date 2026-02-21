@@ -1,14 +1,23 @@
-# Python API (superfície suportada)
+# Python API Reference
 
-A forma suportada de usar a biblioteca é via Python (`import pulsim`) com netlists YAML.
+A superfície suportada para usuários é a API Python do módulo `pulsim`.
 
-## Blocos principais
+## Fluxo principal de uso
 
-- `YamlParserOptions`, `YamlParser`: carregam e validam netlists.
-- `SimulationOptions`: opções de transiente, integrador, solver linear, fallback, térmico.
-- `Circuit`: circuito pronto para simulação (gerado do YAML).
-- `Simulator`: DC e transiente (`dc_operating_point`, `run_transient`, `run_periodic_shooting`, `run_harmonic_balance`).
-- `SimulationResult`: séries temporais, eventos, telemetria de solver, perdas, térmico.
+1. `YamlParser` carrega netlist e opções.
+2. Ajuste fino de `SimulationOptions` em runtime.
+3. `Simulator` executa DC/transiente/periódico.
+4. `SimulationResult` entrega sinais e telemetria.
+
+## Tipos principais
+
+| Tipo | Papel |
+| --- | --- |
+| `YamlParserOptions`, `YamlParser` | Parse/validação de YAML `pulsim-v1`. |
+| `Circuit` | Grafo/circuito pronto para simulação. |
+| `SimulationOptions` | Configuração completa da simulação. |
+| `Simulator` | Execução de `dc_operating_point`, `run_transient`, `run_periodic_shooting`, `run_harmonic_balance`. |
+| `SimulationResult` | Sinais (`time`, `states`), eventos, telemetria e resumos de perdas/térmico. |
 
 ## Exemplo completo
 
@@ -20,30 +29,61 @@ circuit, options = parser.load("benchmarks/circuits/buck_converter.yaml")
 
 options.newton_options.num_nodes = int(circuit.num_nodes())
 options.newton_options.num_branches = int(circuit.num_branches())
-
-# Exemplo: solver stack e integrador stiff
 options.linear_solver = ps.LinearSolverStackConfig.defaults()
 options.integrator = ps.Integrator.TRBDF2
 
 sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
 
-print("ok:", result.success)
+print("success:", result.success)
 print("steps:", result.total_steps)
-print("newton_iters:", result.newton_iterations_total)
-print("fallbacks:", result.linear_solver_telemetry.total_fallbacks)
+print("newton_total:", result.newton_iterations_total)
+print("linear_fallbacks:", result.linear_solver_telemetry.total_fallbacks)
 ```
 
-## Solvers lineares (runtime stack)
+## Enums importantes
 
-`LinearSolverStackConfig` permite ordem preferida e fallback:
+- `Integrator`: `Trapezoidal`, `BDF1..BDF5`, `TRBDF2`, `RosenbrockW`, `SDIRK2`
+- `LinearSolverKind`: `SparseLU`, `EnhancedSparseLU`, `KLU`, `GMRES`, `BiCGSTAB`, `CG`
+- `PreconditionerKind`: `None_`, `Jacobi`, `ILU0`, `ILUT`, `AMG` (quando disponível)
+- `SolverStatus`, `DCStrategy`, `SimulationEventType`, `FallbackReasonCode`
 
-- ordem direta/iterativa (`order`, `fallback_order`);
-- auto seleção por tamanho (`auto_select`, `size_threshold`, `nnz_threshold`);
-- precondicionador iterativo (`Jacobi`, `ILU0`, `ILUT`, `AMG` quando disponível).
+## Configurações que mais importam
 
-## Térmico e perdas
+### Solver linear
 
-- habilite em `options.thermal` e `options.thermal_devices`;
-- perdas de chaveamento em `options.switching_energy`;
-- resultado em `result.loss_summary` e `result.thermal_summary`.
+- `LinearSolverStackConfig.order`
+- `LinearSolverStackConfig.fallback_order`
+- `LinearSolverStackConfig.auto_select`
+- `IterativeSolverConfig.preconditioner`, `max_iterations`, `tolerance`
+
+### Newton e convergência
+
+- `NewtonOptions.max_iterations`
+- `NewtonOptions.enable_limiting`
+- `NewtonOptions.max_voltage_step` / `max_current_step`
+
+### Timestep e integrador
+
+- `SimulationOptions.integrator`
+- `SimulationOptions.adaptive_timestep`
+- `SimulationOptions.timestep_config`
+- `SimulationOptions.lte_config`
+
+### Térmico e perdas
+
+- `SimulationOptions.enable_losses`
+- `SimulationOptions.switching_energy`
+- `SimulationOptions.thermal`
+- `SimulationOptions.thermal_devices`
+
+## Resultados para análise
+
+Campos úteis de `SimulationResult`:
+
+- `time`, `states`
+- `events`
+- `success`, `final_status`, `message`
+- `newton_iterations_total`, `timestep_rejections`
+- `linear_solver_telemetry`, `fallback_trace`
+- `loss_summary`, `thermal_summary`
