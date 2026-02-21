@@ -9,7 +9,7 @@ on:
       publish_to_pypi:
         description: 'Publish to PyPI (otherwise just build)'
         required: false
-        default: false
+        default: true
         type: boolean
 
 jobs:
@@ -32,11 +32,6 @@ jobs:
           - os: windows-latest
             arch: AMD64
             cibw_archs: AMD64
-
-          # macOS Intel
-          - os: macos-13
-            arch: x86_64
-            cibw_archs: x86_64
 
           # macOS Apple Silicon
           - os: macos-14
@@ -181,7 +176,7 @@ jobs:
     # Only publish on tag push or manual trigger with publish_to_pypi=true
     if: >
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi)
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi && startsWith(github.ref, 'refs/tags/v'))
     permissions:
       id-token: write
 
@@ -213,8 +208,10 @@ jobs:
     name: Create GitHub Release
     needs: [publish]
     runs-on: ubuntu-latest
-    # Only create release on tag push
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # Create release for tag push or manual publish runs targeting a tag ref
+    if: >
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi && startsWith(github.ref, 'refs/tags/v'))
     permissions:
       contents: write
 
