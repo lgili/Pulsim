@@ -48,9 +48,9 @@
 
 ## Phase 6: Validation and Stress Suite Expansion
 
-- [ ] 6.1 Add tiered circuit suite (analytical, nonlinear switching, large stiff converters).
-- [ ] 6.2 Add per-tier pass criteria for accuracy, convergence, and runtime telemetry.
-- [ ] 6.3 Eliminate required-suite placeholder skips by either implementing or removing stale tests.
+- [x] 6.1 Add tiered circuit suite (analytical, nonlinear switching, large stiff converters).
+- [x] 6.2 Add per-tier pass criteria for accuracy, convergence, and runtime telemetry.
+- [x] 6.3 Eliminate required-suite placeholder skips by either implementing or removing stale tests.
 
 ## Phase 7: Documentation and Migration Guides
 
