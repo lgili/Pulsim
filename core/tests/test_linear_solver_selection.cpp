@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <algorithm>
+
 #include "pulsim/v1/high_performance.hpp"
 #include "pulsim/v1/parser/yaml_parser.hpp"
 
@@ -214,4 +216,58 @@ TEST_CASE("AMG preconditioner is feature-flagged and unavailable by default", "[
 #else
     CHECK_FALSE(solver.factorize(A));
 #endif
+}
+
+TEST_CASE("YAML parser keeps legacy SI suffix compatibility", "[v1][yaml][legacy]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2milli
+  dt: 10micro
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform:
+      type: dc
+      value: 12
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 2kilo
+  - type: resistor
+    name: R2
+    nodes: [out, 0]
+    value: 2K
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1uF
+)";
+
+    parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(yaml);
+    CHECK(options.tstop == Approx(2e-3));
+    CHECK(options.dt == Approx(10e-6));
+
+    options.tstart = 0.0;
+    options.dt_min = options.dt;
+    options.dt_max = options.dt;
+    options.adaptive_timestep = false;
+    options.enable_bdf_order_control = false;
+    options.newton_options.num_nodes = circuit.num_nodes();
+    options.newton_options.num_branches = circuit.num_branches();
+    options.linear_solver.order = {LinearSolverKind::KLU, LinearSolverKind::SparseLU};
+    options.linear_solver.auto_select = false;
+    options.linear_solver.allow_fallback = true;
+
+    Simulator sim(circuit, options);
+    auto dc = sim.dc_operating_point();
+    REQUIRE(dc.success);
+
+    const auto& node_names = circuit.node_names();
+    auto it = std::find(node_names.begin(), node_names.end(), "out");
+    REQUIRE(it != node_names.end());
+    const auto out_idx = static_cast<Index>(std::distance(node_names.begin(), it));
+    CHECK(dc.newton_result.solution[out_idx] == Approx(6.0).margin(1e-6));
 }

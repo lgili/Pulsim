@@ -1,5 +1,5 @@
 * RLC Step Response - ngspice benchmark
-* Matches Pulsim rlc_step.json
+* Matches Pulsim benchmarks/circuits/rlc_step.yaml
 * Underdamped response (zeta < 1)
 
 V1 in 0 PULSE(0 10 0 1n 1n 10m 20m)
