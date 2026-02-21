@@ -399,6 +399,61 @@ public:
     /// Number of devices
     [[nodiscard]] std::size_t num_devices() const { return devices_.size(); }
 
+    /// Clamp overly-ideal nonlinear parameters for better numerical robustness.
+    /// This is intended for fallback use when a transient repeatedly fails.
+    [[nodiscard]] int apply_numerical_regularization(
+        Real mosfet_kp_max = 8.0,
+        Real mosfet_g_off_min = 1e-7,
+        Real diode_g_on_max = 300.0,
+        Real diode_g_off_min = 1e-9,
+        Real igbt_g_on_max = 5e3,
+        Real igbt_g_off_min = 1e-9) {
+        int changed = 0;
+
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            auto& device = devices_[i];
+            const auto& conn = connections_[i];
+
+            if (auto* mosfet = std::get_if<MOSFET>(&device)) {
+                auto params = mosfet->params();
+                if (params.kp > mosfet_kp_max) {
+                    params.kp = mosfet_kp_max;
+                }
+                if (params.g_off < mosfet_g_off_min) {
+                    params.g_off = mosfet_g_off_min;
+                }
+                // Rebuild device even when unchanged to reset internal ON/OFF history.
+                device = MOSFET(params, conn.name);
+                ++changed;
+                continue;
+            }
+
+            if (auto* diode = std::get_if<IdealDiode>(&device)) {
+                const Real g_on = std::min(diode->g_on(), diode_g_on_max);
+                const Real g_off = std::max(diode->g_off(), diode_g_off_min);
+                // Rebuild also resets internal conduction state.
+                device = IdealDiode(g_on, g_off, conn.name);
+                ++changed;
+                continue;
+            }
+
+            if (auto* igbt = std::get_if<IGBT>(&device)) {
+                auto params = igbt->params();
+                if (params.g_on > igbt_g_on_max) {
+                    params.g_on = igbt_g_on_max;
+                }
+                if (params.g_off < igbt_g_off_min) {
+                    params.g_off = igbt_g_off_min;
+                }
+                device = IGBT(params, conn.name);
+                ++changed;
+                continue;
+            }
+        }
+
+        return changed;
+    }
+
     // =========================================================================
     // Time-Varying Sources
     // =========================================================================

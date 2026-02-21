@@ -13,6 +13,7 @@ Depois abra, por exemplo:
 - `examples/notebooks/01_getting_started.ipynb`
 - `examples/notebooks/02_buck_converter.ipynb`
 - `examples/notebooks/03_thermal_modeling.ipynb`
+- `examples/notebooks/forward_converter_design.ipynb`
 - `examples/notebooks/10_benchmarks.ipynb`
 
 ## Executar em modo não interativo (CI/local)

@@ -541,6 +541,14 @@ void init_v2_module(py::module_& v2) {
         // State
         .def("num_devices", &Circuit::num_devices,
              "Number of devices in circuit")
+        .def("apply_numerical_regularization", &Circuit::apply_numerical_regularization,
+             py::arg("mosfet_kp_max") = 8.0,
+             py::arg("mosfet_g_off_min") = 1e-7,
+             py::arg("diode_g_on_max") = 300.0,
+             py::arg("diode_g_off_min") = 1e-9,
+             py::arg("igbt_g_on_max") = 5e3,
+             py::arg("igbt_g_off_min") = 1e-9,
+             "Clamp overly-ideal nonlinear parameters for convergence fallback")
         .def("set_switch_state", &Circuit::set_switch_state,
              py::arg("name"), py::arg("closed"),
              "Set switch state by name")

@@ -64,6 +64,7 @@ Exemplo simplificado:
 ## Notebooks recomendados
 
 - `examples/notebooks/02_buck_converter.ipynb`
+- `examples/notebooks/forward_converter_design.ipynb`
 - `examples/notebooks/03_thermal_modeling.ipynb`
 - `examples/notebooks/10_benchmarks.ipynb`
 
