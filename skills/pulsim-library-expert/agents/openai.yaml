@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pulsim Library Expert"
+  short_description: "Expert help for Pulsim API usage and configuration"
+  default_prompt: "Guide users (beginner to advanced) on Pulsim Python API, YAML netlists, solver tuning, convergence settings, and simulation configuration with concrete examples."
