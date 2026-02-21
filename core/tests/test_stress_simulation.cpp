@@ -331,4 +331,50 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
         CHECK(v_avg_last == Approx(v_sw_avg_last).margin(std::max(1e-3, v_sw_avg_last * 0.05)));
         CHECK(std::abs(v_avg_last - v_avg_prev) <= std::max(1e-3, v_avg_last * 0.03));
     }
+
+    SECTION("Large pathological solve terminates with bounded fallback trace") {
+        const int sections = 1200;
+
+        Circuit circuit;
+        std::vector<Index> nodes;
+        nodes.reserve(sections);
+        for (int i = 0; i < sections; ++i) {
+            nodes.push_back(circuit.add_node("x" + std::to_string(i)));
+        }
+
+        circuit.add_voltage_source("Vsrc", nodes[0], Circuit::ground(), 1.0);
+        for (int i = 0; i < sections - 1; ++i) {
+            circuit.add_resistor("R" + std::to_string(i), nodes[i], nodes[i + 1], 1e3);
+        }
+        circuit.add_capacitor("Cend", nodes.back(), Circuit::ground(), 1e-8, 0.0);
+
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 1e-4;
+        opts.dt = 1e-6;
+        opts.dt_min = opts.dt;
+        opts.dt_max = opts.dt;
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
+        opts.max_step_retries = 6;
+        opts.fallback_policy.trace_retries = true;
+        opts.fallback_policy.enable_transient_gmin = true;
+        opts.fallback_policy.gmin_retry_threshold = 1;
+        opts.fallback_policy.gmin_initial = 1e-8;
+        opts.fallback_policy.gmin_max = 1e-3;
+        opts.linear_solver.order = {LinearSolverKind::CG};
+        opts.linear_solver.allow_fallback = false;
+        opts.linear_solver.auto_select = false;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+
+        Simulator sim(circuit, opts);
+        Vector x0 = Vector::Zero(circuit.system_size());
+        auto result = sim.run_transient(x0);
+
+        REQUIRE_FALSE(result.success);
+        REQUIRE_FALSE(result.fallback_trace.empty());
+        CHECK(result.fallback_trace.size() <= static_cast<std::size_t>(opts.max_step_retries * 3 + 4));
+        CHECK(result.total_steps == 0);
+    }
 }

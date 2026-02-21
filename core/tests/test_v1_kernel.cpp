@@ -176,6 +176,53 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
     CHECK_FALSE(result.thermal_summary.device_temperatures.empty());
 }
 
+TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
+    Circuit circuit;
+
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.max_step_retries = 3;
+    opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.enable_transient_gmin = true;
+    opts.fallback_policy.gmin_retry_threshold = 1;
+    opts.fallback_policy.gmin_initial = 1e-8;
+    opts.fallback_policy.gmin_max = 1e-4;
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = false;
+    opts.linear_solver.auto_select = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    Vector x0 = Vector::Zero(circuit.system_size());
+    auto result = sim.run_transient(x0);
+
+    REQUIRE_FALSE(result.success);
+    REQUIRE_FALSE(result.fallback_trace.empty());
+
+    auto has_reason = [&](FallbackReasonCode code) {
+        return std::any_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                           [&](const FallbackTraceEntry& entry) { return entry.reason == code; });
+    };
+
+    CHECK(has_reason(FallbackReasonCode::NewtonFailure));
+    CHECK(has_reason(FallbackReasonCode::TransientGminEscalation));
+    CHECK(has_reason(FallbackReasonCode::MaxRetriesExceeded));
+}
+
 TEST_CASE("v1 linear solver order honored", "[v1][solver][regression]") {
     Circuit circuit;
 

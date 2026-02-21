@@ -70,6 +70,34 @@ struct StiffnessConfig {
     Integrator stiff_integrator = Integrator::BDF1;
 };
 
+enum class FallbackReasonCode {
+    NewtonFailure,
+    LTERejection,
+    EventSplit,
+    StiffnessBackoff,
+    TransientGminEscalation,
+    MaxRetriesExceeded
+};
+
+struct FallbackTraceEntry {
+    int step_index = 0;
+    int retry_index = 0;
+    Real time = 0.0;
+    Real dt = 0.0;
+    FallbackReasonCode reason = FallbackReasonCode::NewtonFailure;
+    SolverStatus solver_status = SolverStatus::Success;
+    std::string action;
+};
+
+struct FallbackPolicyOptions {
+    bool trace_retries = true;
+    bool enable_transient_gmin = true;
+    int gmin_retry_threshold = 2;
+    Real gmin_initial = 1e-9;
+    Real gmin_max = 1e-3;
+    Real gmin_growth = 10.0;
+};
+
 struct PeriodicSteadyStateOptions {
     Real period = 0.0;
     int max_iterations = 20;
@@ -168,6 +196,7 @@ struct SimulationOptions {
     // Convergence fallback
     GminConfig gmin_fallback{};
     int max_step_retries = 6;
+    FallbackPolicyOptions fallback_policy{};
 };
 
 struct SimulationResult {
@@ -185,6 +214,7 @@ struct SimulationResult {
     double total_time_seconds = 0.0;
 
     LinearSolverTelemetry linear_solver_telemetry;
+    std::vector<FallbackTraceEntry> fallback_trace;
 
     SystemLossSummary loss_summary;
     ThermalSummary thermal_summary;
@@ -303,6 +333,16 @@ private:
     [[nodiscard]] Real thermal_scale_factor(std::size_t device_index) const;
     void update_thermal_state(Real dt);
     void finalize_thermal_summary(SimulationResult& result);
+    void record_fallback_event(SimulationResult& result,
+                               int step_index,
+                               int retry_index,
+                               Real time,
+                               Real dt,
+                               FallbackReasonCode reason,
+                               SolverStatus solver_status,
+                               const std::string& action);
+    void apply_transient_gmin(SparseMatrix& J, Vector& f, const Vector& x) const;
+    void apply_transient_gmin_residual(Vector& f, const Vector& x) const;
 
     Circuit& circuit_;
     SimulationOptions options_;
@@ -315,6 +355,7 @@ private:
     std::unordered_map<std::string, std::size_t> device_index_;
     std::vector<DeviceThermalState> thermal_states_;
     std::vector<Real> last_device_power_;
+    Real transient_gmin_ = 0.0;
 
     AdvancedTimestepController timestep_controller_;
     AdaptiveLTEEstimator lte_estimator_;

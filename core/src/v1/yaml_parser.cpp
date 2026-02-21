@@ -239,7 +239,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         YAML::Node sim = root["simulation"];
           validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "adaptive_timestep",
                         "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
-                        "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal"},
+                        "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
+                        "max_step_retries", "fallback"},
                       "simulation", errors_, options_.strict);
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);
@@ -250,6 +251,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         if (sim["adaptive_timestep"]) options.adaptive_timestep = sim["adaptive_timestep"].as<bool>();
         if (sim["enable_events"]) options.enable_events = sim["enable_events"].as<bool>();
         if (sim["enable_losses"]) options.enable_losses = sim["enable_losses"].as<bool>();
+        if (sim["max_step_retries"]) options.max_step_retries = sim["max_step_retries"].as<int>();
         if (sim["thermal"]) {
             YAML::Node thermal = sim["thermal"];
             validate_keys(thermal, {"enabled", "ambient", "policy", "default_rth", "default_cth"},
@@ -269,6 +271,31 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 } else {
                     errors_.push_back("Invalid thermal policy: " + thermal["policy"].as<std::string>());
                 }
+            }
+        }
+        if (sim["fallback"]) {
+            YAML::Node fallback = sim["fallback"];
+            validate_keys(fallback, {"trace_retries", "enable_transient_gmin",
+                                     "gmin_retry_threshold", "gmin_initial",
+                                     "gmin_max", "gmin_growth"},
+                          "simulation.fallback", errors_, options_.strict);
+            if (fallback["trace_retries"]) {
+                options.fallback_policy.trace_retries = fallback["trace_retries"].as<bool>();
+            }
+            if (fallback["enable_transient_gmin"]) {
+                options.fallback_policy.enable_transient_gmin = fallback["enable_transient_gmin"].as<bool>();
+            }
+            if (fallback["gmin_retry_threshold"]) {
+                options.fallback_policy.gmin_retry_threshold = fallback["gmin_retry_threshold"].as<int>();
+            }
+            if (fallback["gmin_initial"]) {
+                options.fallback_policy.gmin_initial = parse_real(fallback["gmin_initial"], "simulation.fallback.gmin_initial", errors_);
+            }
+            if (fallback["gmin_max"]) {
+                options.fallback_policy.gmin_max = parse_real(fallback["gmin_max"], "simulation.fallback.gmin_max", errors_);
+            }
+            if (fallback["gmin_growth"]) {
+                options.fallback_policy.gmin_growth = parse_real(fallback["gmin_growth"], "simulation.fallback.gmin_growth", errors_);
             }
         }
 

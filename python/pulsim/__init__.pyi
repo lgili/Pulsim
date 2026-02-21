@@ -280,6 +280,14 @@ class SimulationEventType(Enum):
     ConvergenceWarning = ...
     TimestepChange = ...
 
+class FallbackReasonCode(Enum):
+    NewtonFailure = ...
+    LTERejection = ...
+    EventSplit = ...
+    StiffnessBackoff = ...
+    TransientGminEscalation = ...
+    MaxRetriesExceeded = ...
+
 class ThermalCouplingPolicy(Enum):
     LossOnly = ...
     LossWithTemperatureScaling = ...
@@ -291,6 +299,27 @@ class SimulationEvent:
     description: str
     value1: float
     value2: float
+
+    def __init__(self) -> None: ...
+
+class FallbackPolicyOptions:
+    trace_retries: bool
+    enable_transient_gmin: bool
+    gmin_retry_threshold: int
+    gmin_initial: float
+    gmin_max: float
+    gmin_growth: float
+
+    def __init__(self) -> None: ...
+
+class FallbackTraceEntry:
+    step_index: int
+    retry_index: int
+    time: float
+    dt: float
+    reason: FallbackReasonCode
+    solver_status: SolverStatus
+    action: str
 
     def __init__(self) -> None: ...
 
@@ -357,6 +386,7 @@ class SimulationOptions:
     thermal_devices: Dict[str, ThermalDeviceConfig]
     gmin_fallback: GminConfig
     max_step_retries: int
+    fallback_policy: FallbackPolicyOptions
 
     def __init__(self) -> None: ...
 
@@ -372,6 +402,7 @@ class SimulationResult:
     timestep_rejections: int
     total_time_seconds: float
     linear_solver_telemetry: LinearSolverTelemetry
+    fallback_trace: List[FallbackTraceEntry]
     loss_summary: SystemLossSummary
     thermal_summary: ThermalSummary
     data: List[List[float]]
