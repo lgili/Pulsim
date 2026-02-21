@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <sstream>
 #include <span>
 
 namespace pulsim::v1 {
@@ -104,6 +105,47 @@ void Simulator::set_switching_energy(const std::string& device_name, const Switc
     switching_energy_[it->second] = energy;
 }
 
+void Simulator::record_fallback_event(SimulationResult& result,
+                                      int step_index,
+                                      int retry_index,
+                                      Real time,
+                                      Real dt,
+                                      FallbackReasonCode reason,
+                                      SolverStatus solver_status,
+                                      const std::string& action) {
+    if (!options_.fallback_policy.trace_retries) {
+        return;
+    }
+    FallbackTraceEntry entry;
+    entry.step_index = step_index;
+    entry.retry_index = retry_index;
+    entry.time = time;
+    entry.dt = dt;
+    entry.reason = reason;
+    entry.solver_status = solver_status;
+    entry.action = action;
+    result.fallback_trace.push_back(std::move(entry));
+}
+
+void Simulator::apply_transient_gmin(SparseMatrix& J, Vector& f, const Vector& x) const {
+    if (transient_gmin_ <= 0.0) {
+        return;
+    }
+    for (Index i = 0; i < circuit_.num_nodes(); ++i) {
+        J.coeffRef(i, i) += transient_gmin_;
+        f[i] += transient_gmin_ * x[i];
+    }
+}
+
+void Simulator::apply_transient_gmin_residual(Vector& f, const Vector& x) const {
+    if (transient_gmin_ <= 0.0) {
+        return;
+    }
+    for (Index i = 0; i < circuit_.num_nodes(); ++i) {
+        f[i] += transient_gmin_ * x[i];
+    }
+}
+
 void Simulator::initialize_thermal_tracking() {
     const auto& devices = circuit_.devices();
     const auto& conns = circuit_.connections();
@@ -199,10 +241,12 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
 
     auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
         circuit_.assemble_jacobian(J, f, x);
+        apply_transient_gmin(J, f, x);
     };
 
     auto residual_func = [this](const Vector& x, Vector& f) {
         circuit_.assemble_residual(f, x);
+        apply_transient_gmin_residual(f, x);
     };
 
     return newton_solver_.solve(x_prev, system_func, residual_func);
@@ -211,9 +255,11 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
 NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev) {
     auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
         circuit_.assemble_jacobian(J, f, x);
+        apply_transient_gmin(J, f, x);
     };
     auto residual_func = [this](const Vector& x, Vector& f) {
         circuit_.assemble_residual(f, x);
+        apply_transient_gmin_residual(f, x);
     };
 
     const Real gamma = TRBDF2Coeffs::gamma;
@@ -255,9 +301,11 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
 NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_prev, Integrator method) {
     auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
         circuit_.assemble_jacobian(J, f, x);
+        apply_transient_gmin(J, f, x);
     };
     auto residual_func = [this](const Vector& x, Vector& f) {
         circuit_.assemble_residual(f, x);
+        apply_transient_gmin_residual(f, x);
     };
 
     // RosenbrockW shares SDIRK2 stage coefficients (implicit solve per stage).
@@ -683,6 +731,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         set_switching_energy(name, energy);
     }
     lte_estimator_.reset();
+    transient_gmin_ = 0.0;
     const Integrator base_integrator = options_.integrator;
     bool using_stiff_integrator = false;
 
@@ -750,6 +799,14 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         while (!accepted && retries <= options_.max_step_retries) {
             if (options_.stiffness_config.enable && stiffness_cooldown > 0) {
                 dt = std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff);
+                record_fallback_event(result,
+                                      result.total_steps,
+                                      retries,
+                                      t,
+                                      dt,
+                                      FallbackReasonCode::StiffnessBackoff,
+                                      SolverStatus::Success,
+                                      "dt_backoff");
                 if (options_.enable_bdf_order_control) {
                     bdf_controller_.set_order(
                         std::min(bdf_controller_.current_order(), options_.stiffness_config.max_bdf_order));
@@ -769,14 +826,42 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                 dt = std::max(options_.dt_min, dt * 0.5);
                 result.timestep_rejections++;
                 retries++;
+                record_fallback_event(result,
+                                      result.total_steps,
+                                      retries,
+                                      t,
+                                      dt_used,
+                                      FallbackReasonCode::NewtonFailure,
+                                      step_result.status,
+                                      "halve_dt");
                 rejection_streak++;
                 high_iter_streak = 0;
                 if (options_.stiffness_config.enable &&
                     rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
                     stiffness_cooldown = options_.stiffness_config.cooldown_steps;
                 }
+                if (options_.fallback_policy.enable_transient_gmin &&
+                    retries >= options_.fallback_policy.gmin_retry_threshold) {
+                    Real next_gmin = transient_gmin_ > 0.0
+                        ? transient_gmin_ * options_.fallback_policy.gmin_growth
+                        : options_.fallback_policy.gmin_initial;
+                    next_gmin = std::min(options_.fallback_policy.gmin_max, next_gmin);
+                    if (next_gmin > transient_gmin_) {
+                        transient_gmin_ = next_gmin;
+                        std::ostringstream action;
+                        action << "gmin=" << transient_gmin_;
+                        record_fallback_event(result,
+                                              result.total_steps,
+                                              retries,
+                                              t,
+                                              dt_used,
+                                              FallbackReasonCode::TransientGminEscalation,
+                                              step_result.status,
+                                              action.str());
+                    }
+                }
                 if (options_.enable_bdf_order_control) {
-                    bdf_controller_.reduce_on_failure();
+                    (void)bdf_controller_.reduce_on_failure();
                 }
                 continue;
             }
@@ -798,6 +883,16 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                     dt = decision.dt_new;
                     result.timestep_rejections++;
                     retries++;
+                    std::ostringstream action;
+                    action << "lte_dt=" << decision.dt_new;
+                    record_fallback_event(result,
+                                          result.total_steps,
+                                          retries,
+                                          t,
+                                          dt_used,
+                                          FallbackReasonCode::LTERejection,
+                                          step_result.status,
+                                          action.str());
                     rejection_streak++;
                     high_iter_streak = 0;
                     if (options_.stiffness_config.enable &&
@@ -824,6 +919,14 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                             if (dt_event > options_.dt_min * 1.01 && dt_event < dt_used * 0.999) {
                                 dt = std::max(options_.dt_min, dt_event);
                                 retries++;
+                                record_fallback_event(result,
+                                                      result.total_steps,
+                                                      retries,
+                                                      t,
+                                                      dt_used,
+                                                      FallbackReasonCode::EventSplit,
+                                                      step_result.status,
+                                                      "split_to_event");
                                 split_for_event = true;
                                 break;
                             }
@@ -840,6 +943,14 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         }
 
         if (!accepted) {
+            record_fallback_event(result,
+                                  result.total_steps,
+                                  retries,
+                                  t,
+                                  dt_used,
+                                  FallbackReasonCode::MaxRetriesExceeded,
+                                  step_result.status,
+                                  "abort_step");
             result.success = false;
             result.final_status = step_result.status;
             result.message = "Transient failed at t=" + std::to_string(t + dt_used) +
@@ -849,6 +960,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
 
         result.newton_iterations_total += step_result.iterations;
         rejection_streak = 0;
+        transient_gmin_ = 0.0;
 
             if (options_.stiffness_config.enable) {
                 if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {

@@ -326,3 +326,37 @@ components:
     REQUIRE_FALSE(parser_json.errors().empty());
     CHECK(parser_json.errors().front().find("JSON netlists are unsupported") != std::string::npos);
 }
+
+TEST_CASE("YAML parser maps fallback policy controls", "[v1][yaml][fallback]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  max_step_retries: 4
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 2
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 5
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(yaml);
+    REQUIRE(parser.errors().empty());
+    CHECK(options.max_step_retries == 4);
+    CHECK(options.fallback_policy.trace_retries);
+    CHECK(options.fallback_policy.enable_transient_gmin);
+    CHECK(options.fallback_policy.gmin_retry_threshold == 2);
+    CHECK(options.fallback_policy.gmin_initial == Approx(1e-8));
+    CHECK(options.fallback_policy.gmin_max == Approx(1e-4));
+    CHECK(options.fallback_policy.gmin_growth == Approx(5.0));
+    CHECK(circuit.num_devices() == 1);
+}

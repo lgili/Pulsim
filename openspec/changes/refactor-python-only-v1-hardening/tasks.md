@@ -35,9 +35,9 @@
 
 ## Phase 4: Solver Robustness Hardening
 
-- [ ] 4.1 Expand convergence fallback policies for stiff converter transients.
-- [ ] 4.2 Add deterministic fallback reason codes and structured telemetry for every failed/retried step.
-- [ ] 4.3 Add large-scale stress regressions to prevent hangs and non-terminating convergence loops.
+- [x] 4.1 Expand convergence fallback policies for stiff converter transients.
+- [x] 4.2 Add deterministic fallback reason codes and structured telemetry for every failed/retried step.
+- [x] 4.3 Add large-scale stress regressions to prevent hangs and non-terminating convergence loops.
 
 ## Phase 5: LTspice Parity Infrastructure
 

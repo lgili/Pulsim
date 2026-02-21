@@ -230,3 +230,74 @@ def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     assert result.thermal_summary.enabled
     assert result.thermal_summary.max_temperature >= result.thermal_summary.ambient
     assert any(item.device_name == "M1" for item in result.thermal_summary.device_temperatures)
+
+
+def test_yaml_parser_maps_fallback_controls() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  max_step_retries: 4
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 2
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 5
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert options.max_step_retries == 4
+    assert options.fallback_policy.trace_retries
+    assert options.fallback_policy.enable_transient_gmin
+    assert options.fallback_policy.gmin_retry_threshold == 2
+    assert abs(options.fallback_policy.gmin_initial - 1e-8) < 1e-16
+    assert abs(options.fallback_policy.gmin_max - 1e-4) < 1e-12
+    assert abs(options.fallback_policy.gmin_growth - 5.0) < 1e-12
+
+
+def test_fallback_trace_records_retry_reasons() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 1e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.max_step_retries = 3
+    opts.linear_solver.order = [ps.LinearSolverKind.CG]
+    opts.linear_solver.allow_fallback = False
+    opts.linear_solver.auto_select = False
+    opts.fallback_policy.trace_retries = True
+    opts.fallback_policy.enable_transient_gmin = True
+    opts.fallback_policy.gmin_retry_threshold = 1
+    opts.fallback_policy.gmin_initial = 1e-8
+    opts.fallback_policy.gmin_max = 1e-4
+
+    sim = ps.Simulator(circuit, opts)
+    x0 = [0.0] * (circuit.num_nodes() + circuit.num_branches())
+    result = sim.run_transient(x0)
+    assert not result.success
+    assert len(result.fallback_trace) > 0
+    reasons = {entry.reason for entry in result.fallback_trace}
+    assert ps.FallbackReasonCode.NewtonFailure in reasons
+    assert ps.FallbackReasonCode.TransientGminEscalation in reasons
+    assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons

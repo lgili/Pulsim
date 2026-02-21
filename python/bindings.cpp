@@ -968,6 +968,16 @@ void init_v2_module(py::module_& v2) {
         .value("TimestepChange", SimulationEventType::TimestepChange)
         .export_values();
 
+    py::enum_<FallbackReasonCode>(v2, "FallbackReasonCode",
+        "Reason code for solver fallback/retry actions")
+        .value("NewtonFailure", FallbackReasonCode::NewtonFailure)
+        .value("LTERejection", FallbackReasonCode::LTERejection)
+        .value("EventSplit", FallbackReasonCode::EventSplit)
+        .value("StiffnessBackoff", FallbackReasonCode::StiffnessBackoff)
+        .value("TransientGminEscalation", FallbackReasonCode::TransientGminEscalation)
+        .value("MaxRetriesExceeded", FallbackReasonCode::MaxRetriesExceeded)
+        .export_values();
+
     py::enum_<ThermalCouplingPolicy>(v2, "ThermalCouplingPolicy",
         "Electro-thermal coupling policy")
         .value("LossOnly", ThermalCouplingPolicy::LossOnly)
@@ -982,6 +992,27 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("description", &SimulationEvent::description)
         .def_readwrite("value1", &SimulationEvent::value1)
         .def_readwrite("value2", &SimulationEvent::value2);
+
+    py::class_<FallbackPolicyOptions>(v2, "FallbackPolicyOptions",
+        "Convergence fallback policy options for stiff transients")
+        .def(py::init<>())
+        .def_readwrite("trace_retries", &FallbackPolicyOptions::trace_retries)
+        .def_readwrite("enable_transient_gmin", &FallbackPolicyOptions::enable_transient_gmin)
+        .def_readwrite("gmin_retry_threshold", &FallbackPolicyOptions::gmin_retry_threshold)
+        .def_readwrite("gmin_initial", &FallbackPolicyOptions::gmin_initial)
+        .def_readwrite("gmin_max", &FallbackPolicyOptions::gmin_max)
+        .def_readwrite("gmin_growth", &FallbackPolicyOptions::gmin_growth);
+
+    py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
+        "Structured telemetry entry for each fallback/retry action")
+        .def(py::init<>())
+        .def_readwrite("step_index", &FallbackTraceEntry::step_index)
+        .def_readwrite("retry_index", &FallbackTraceEntry::retry_index)
+        .def_readwrite("time", &FallbackTraceEntry::time)
+        .def_readwrite("dt", &FallbackTraceEntry::dt)
+        .def_readwrite("reason", &FallbackTraceEntry::reason)
+        .def_readwrite("solver_status", &FallbackTraceEntry::solver_status)
+        .def_readwrite("action", &FallbackTraceEntry::action);
 
     py::class_<ThermalCouplingOptions>(v2, "ThermalCouplingOptions",
         "Global electro-thermal coupling options")
@@ -1046,7 +1077,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("thermal", &SimulationOptions::thermal)
         .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
-        .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries);
+        .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
+        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy);
 
     py::class_<SimulationResult>(v2, "SimulationResult", "Transient simulation result")
         .def(py::init<>())
@@ -1061,6 +1093,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("timestep_rejections", &SimulationResult::timestep_rejections)
         .def_readwrite("total_time_seconds", &SimulationResult::total_time_seconds)
         .def_readwrite("linear_solver_telemetry", &SimulationResult::linear_solver_telemetry)
+        .def_readwrite("fallback_trace", &SimulationResult::fallback_trace)
         .def_readwrite("loss_summary", &SimulationResult::loss_summary)
         .def_readwrite("thermal_summary", &SimulationResult::thermal_summary)
         // Compatibility alias used by legacy Python tests
