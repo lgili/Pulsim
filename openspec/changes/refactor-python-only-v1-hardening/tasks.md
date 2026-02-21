@@ -41,10 +41,10 @@
 
 ## Phase 5: LTspice Parity Infrastructure
 
-- [ ] 5.1 Add LTspice runner backend with explicit executable-path configuration.
-- [ ] 5.2 Add benchmark mapping metadata for Pulsim signals to LTspice vectors.
-- [ ] 5.3 Implement unified comparator metrics (max/rms/phase/steady-state where applicable).
-- [ ] 5.4 Publish parity artifacts and summaries in stable machine-readable formats.
+- [x] 5.1 Add LTspice runner backend with explicit executable-path configuration.
+- [x] 5.2 Add benchmark mapping metadata for Pulsim signals to LTspice vectors.
+- [x] 5.3 Implement unified comparator metrics (max/rms/phase/steady-state where applicable).
+- [x] 5.4 Publish parity artifacts and summaries in stable machine-readable formats.
 
 ## Phase 6: Validation and Stress Suite Expansion
 

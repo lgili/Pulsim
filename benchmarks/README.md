@@ -8,7 +8,7 @@ This folder contains the YAML benchmark suite and validation runners.
 - `benchmarks.yaml` — scenario matrix and benchmark list.
 - `benchmark_runner.py` — executes benchmarks and produces results artifacts.
 - `validation_matrix.py` — runs all solver/integrator combinations.
-- `benchmark_ngspice.py` — optional Pulsim vs ngspice comparator (same circuit pair).
+- `benchmark_ngspice.py` — Pulsim vs external SPICE parity runner (`ngspice` or `ltspice` backends).
 
 ## Running
 
@@ -19,11 +19,20 @@ export PYTHONPATH=build/python
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 
-# Compare Pulsim vs ngspice (manifest mode, uses ngspice_netlist mappings)
-python3 benchmarks/benchmark_ngspice.py --output-dir benchmarks/ngspice_out
+# Compare Pulsim vs ngspice (manifest mode)
+python3 benchmarks/benchmark_ngspice.py \
+  --backend ngspice \
+  --output-dir benchmarks/ngspice_out
+
+# Compare Pulsim vs LTspice (explicit executable path is required)
+python3 benchmarks/benchmark_ngspice.py \
+  --backend ltspice \
+  --ltspice-exe "/Applications/LTspice.app/Contents/MacOS/LTspice" \
+  --output-dir benchmarks/ltspice_out
 
 # Compare one YAML vs one .cir directly
 python3 benchmarks/benchmark_ngspice.py \
+  --backend ngspice \
   --pulsim-netlist benchmarks/circuits/rc_step.yaml \
   --spice-netlist benchmarks/ngspice/rc_step.cir \
   --output-dir benchmarks/ngspice_single
@@ -54,18 +63,24 @@ Python-first runtime defaults (fixed-step unless explicitly overridden).
 
 `benchmark_ngspice.py` also emits:
 
-- `ngspice_results.csv` — per benchmark/scenario parity results.
-- `ngspice_results.json` — per-observable metrics (`max_error`, `rms_error`, `samples`).
-- `ngspice_summary.json` — pass/fail/skip totals.
+- `parity_results.csv` — per benchmark/scenario parity results.
+- `parity_results.json` — machine-readable parity payload (`schema_version`, backend metadata, per-observable metrics).
+- `parity_summary.json` — pass/fail totals and grouped failure reasons.
+
+For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary.json`) are also written for compatibility.
 
 ## Adding Benchmarks
 
 1. Create a YAML netlist in `circuits/` with a `benchmark` block.
 2. Add it to `benchmarks.yaml` and assign scenarios.
-3. If you want ngspice parity for this benchmark, add `ngspice_netlist: ngspice/<file>.cir` in `benchmarks.yaml`.
-4. Optional: define `ngspice_observables` in `benchmarks.yaml` to map Pulsim CSV columns to ngspice vectors.
-   - Example: `{ column: "V(out)", spice_vector: "v(out)" }`
-5. If using `reference` validation, add a baseline CSV under `baselines/`.
-6. Optional validation window controls:
+3. If you want parity for this benchmark:
+   - add `ngspice_netlist: ngspice/<file>.cir` and/or `ltspice_netlist: ltspice/<file>.cir` in `benchmarks.yaml`.
+4. Optional backend-specific mapping:
+   - `ngspice_observables`: `{ column: "V(out)", ngspice_vector: "v(out)" }`
+   - `ltspice_observables`: `{ column: "V(out)", ltspice_vector: "V(out)" }`
+5. Metric thresholds can be configured under `benchmark.expectations.metrics`:
+   - `max_error`, `rms_error`, `phase_error_deg`, `steady_state_max_error`, `steady_state_rms_error`
+6. If using `reference` validation, add a baseline CSV under `baselines/`.
+7. Optional validation window controls:
    - `benchmark.validation.ignore_initial_samples`: ignore N leading samples.
    - `benchmark.validation.start_time`: compare only from a minimum time.
