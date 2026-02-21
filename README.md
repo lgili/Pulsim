@@ -73,12 +73,21 @@ Build docs locally:
 
 ```bash
 python3 -m pip install -r docs/requirements.txt
-sphinx-build -b html docs docs/_build/html
+mkdocs build --strict
 ```
 
-Open `docs/_build/html/index.html` in your browser.
+Serve locally:
 
-GitHub Pages deploy is automated by `.github/workflows/docs.yml` on pushes to `main`.
+```bash
+mkdocs serve
+```
+
+Versioned deploy:
+
+- Workflow: `.github/workflows/docs.yml`
+- Trigger: only when pushing version tags `v*` (example: `v0.2.1`)
+- Deploy mode: `mike` on `gh-pages` branch with version selector enabled
+- Old versions remain published and selectable in the docs UI
 
 ## Notes
 

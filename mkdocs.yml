@@ -1,0 +1,85 @@
+site_name: PulsimCore
+site_description: Python-first power electronics simulation with YAML netlists
+site_url: https://lgili.github.io/Pulsim/
+repo_url: https://github.com/lgili/Pulsim
+repo_name: lgili/Pulsim
+
+exclude_docs: |
+  Doxyfile
+  __pycache__/
+  python/
+  refactor-python-only-v1-hardening/
+  convergence-algorithms.md
+  determinism.md
+  performance-tuning.md
+  mainpage.md
+
+theme:
+  name: material
+  logo: null
+  favicon: null
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: cyan
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: lime
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - navigation.tracking
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+plugins:
+  - search
+  - mike:
+      version_selector: true
+      canonical_version: latest
+      alias_type: redirect
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/lgili/Pulsim
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - User Guide: user-guide.md
+  - Configuration: configuration.md
+  - API Reference: python-api.md
+  - Netlist YAML: netlist-format.md
+  - Examples and Results: examples-and-results.md
+  - Benchmarks and Parity: benchmarks-and-parity.md
+  - Notebooks: notebooks.md
+  - Docs Versioning: versioning-and-release.md
+  - Device Models: device-models.md
+  - Convergence Tuning: convergence-tuning-guide.md
+  - Migration Guide: migration-guide.md
