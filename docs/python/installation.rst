@@ -1,6 +1,11 @@
 Installation
 ============
 
+.. note::
+
+   The maintained documentation now lives in ``docs/`` root.
+   Keep this page only for compatibility with old bookmarks.
+
 Requirements
 ------------
 
