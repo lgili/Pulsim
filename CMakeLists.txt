@@ -49,6 +49,12 @@ option(PULSIM_ENABLE_PGO_GENERATE "Enable PGO instrumentation (generate profile)
 option(PULSIM_ENABLE_PGO_USE "Enable PGO optimization (use profile)" OFF)
 set(PULSIM_PGO_PROFILE_DIR "${CMAKE_BINARY_DIR}/pgo-profiles" CACHE PATH "Directory for PGO profile data")
 
+# Python extension builds link static libraries into a shared module, so
+# position-independent code is required for reliable Linux wheel/editable builds.
+if(SKBUILD OR PULSIM_BUILD_PYTHON)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # Editable/wheel Python builds on Linux can hit linker relocation issues with
 # ThinLTO + pybind11 thread-local storage; keep LTO for core C++ builds.
 if((SKBUILD OR PULSIM_BUILD_PYTHON) AND CMAKE_SYSTEM_NAME STREQUAL "Linux")

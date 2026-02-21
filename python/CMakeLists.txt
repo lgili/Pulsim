@@ -65,6 +65,7 @@ endif()
 
 # Create the Python module (high-performance API)
 pybind11_add_module(_pulsim
+    NO_EXTRAS
     bindings.cpp
 )
 
