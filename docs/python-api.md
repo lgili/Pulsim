@@ -41,6 +41,24 @@ print("newton_total:", result.newton_iterations_total)
 print("linear_fallbacks:", result.linear_solver_telemetry.total_fallbacks)
 ```
 
+## Atalho recomendado para transiente
+
+Para uso direto em notebook, `ps.run_transient(...)` agora aplica fallback automático
+de robustez por padrão:
+
+- retry com `dt` menor e mais iterações de Newton;
+- regularização automática (bleeders + clamp de não linearidades) em caso de falha persistente.
+
+Você pode desativar:
+
+```python
+times, states, ok, msg = ps.run_transient(
+    ckt, t0, t1, dt, x0,
+    robust=False,
+    auto_regularize=False,
+)
+```
+
 ## Enums importantes
 
 - `Integrator`: `Trapezoidal`, `BDF1..BDF5`, `TRBDF2`, `RosenbrockW`, `SDIRK2`
