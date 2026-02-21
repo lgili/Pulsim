@@ -1,469 +1,49 @@
-# Pulsim User Guide
+# Pulsim User Guide (Python-Only)
 
-Pulsim is a high-performance circuit simulator optimized for power electronics applications. It provides fast transient simulation with accurate switching device models, thermal modeling, and loss calculation.
+Pulsim is a power-electronics simulator with a unified v1 kernel exposed through the Python package.
 
-## Table of Contents
+## 1. Scope
 
-1. [Getting Started](#getting-started)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [CLI Usage](#cli-usage)
-5. [Python Interface](#python-interface)
-6. [gRPC API](#grpc-api)
-7. [Examples](#examples)
+Supported:
 
----
+- Python runtime (`pulsim`)
+- YAML netlists (`schema: pulsim-v1`)
+- Benchmark/parity/stress tooling under `benchmarks/`
 
-## Getting Started
+Not supported as user-facing product surface:
 
-### System Requirements
+- Legacy CLI workflows
+- gRPC remote workflows
+- JSON netlist loading
 
-- **Operating Systems**: Linux, macOS, Windows
-- **Compiler**: C++20 compatible (GCC 10+, Clang 12+, MSVC 2019+)
-- **CMake**: 3.20 or later
-- **Python**: 3.8+ (for Python bindings)
-
-### Key Features
-
-- **Fast Transient Simulation**: Optimized sparse matrix solvers with adaptive timestep
-- **Power Electronics Focus**: Ideal switches, diodes, MOSFETs, IGBTs with accurate models
-- **Thermal Modeling**: Foster network thermal models with temperature-dependent parameters
-- **Loss Calculation**: Conduction and switching losses with efficiency reporting
-- **Multiple Interfaces**: CLI, Python bindings, gRPC API
-- **Parallel Execution**: Multi-threaded assembly and parameter sweeps
-
----
-
-## Installation
-
-### Building from Source
+## 2. Build and Runtime Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/pulsim-core.git
-cd pulsim-core
-
-# Create build directory
-mkdir build && cd build
-
-# Configure with CMake
-cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DPULSIM_BUILD_PYTHON=ON \
-         -DPULSIM_BUILD_GRPC=ON
-
-# Build
-cmake --build . --parallel
-
-# Install (optional)
-sudo cmake --install .
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPULSIM_BUILD_PYTHON=ON
+cmake --build build -j
 ```
 
-### Python Package
+Use local bindings:
 
 ```bash
-# Install from source
-pip install ./python
-
-# Or install pre-built wheel (when available)
-pip install pulsim
+export PYTHONPATH=build/python
 ```
 
-### Docker
-
-```bash
-# Pull image
-docker pull pulsim:latest
-
-# Run gRPC server
-docker run -p 50051:50051 -p 9090:9090 pulsim:latest
-```
-
----
-
-## Quick Start
-
-### 1. Create a Circuit (YAML Netlist)
-
-Create a file `rc_circuit.yaml`:
+## 3. YAML Netlist Example
 
 ```yaml
 schema: pulsim-v1
 version: 1
 simulation:
-  tstop: 0.01
+  tstop: 1e-3
   dt: 1e-6
-  solver:
-    order: [klu, gmres]
-    iterative:
-      max_iterations: 200
-      tolerance: 1e-8
-      preconditioner: ilu0
 components:
   - type: voltage_source
     name: V1
     nodes: [in, 0]
-    waveform: {type: dc, value: 1.0}
-  - type: resistor
-    name: R1
-    nodes: [in, out]
-    value: 1000
-  - type: capacitor
-    name: C1
-    nodes: [out, 0]
-    value: 1e-6
-```
-
-### 2. Run Simulation
-
-**CLI:**
-```bash
-pulsim run rc_circuit.yaml -o results.csv
-```
-
-**Python:**
-```python
-import pulsim
-
-result = pulsim.simulate("rc_circuit.yaml")
-print(result.time)
-print(result.voltages["out"])
-```
-
-### 3. View Results
-
-The output CSV contains time-series data:
-```
-time,V(in),V(out),I(V1),I(R1)
-0.000000e+00,1.000000e+00,0.000000e+00,-1.000000e-03,1.000000e-03
-1.000000e-06,1.000000e+00,9.990005e-04,-9.990005e-04,9.990005e-04
-...
-```
-
----
-
-## CLI Usage
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `run` | Run a simulation |
-| `validate` | Validate a netlist without running |
-| `sweep` | Parameter sweep with parallel execution |
-| `serve` | Start gRPC API server |
-| `info` | Display device model documentation |
-
-### Run Command
-
-```bash
-pulsim run <netlist> [options]
-
-Options:
-  -o, --output <file>     Output file (default: stdout)
-  -f, --format <format>   Output format: csv, json, hdf5, parquet
-  --timestep <value>      Override simulation timestep
-  --stop-time <value>     Override stop time
-  --abstol <value>        Absolute tolerance (default: 1e-12)
-  --reltol <value>        Relative tolerance (default: 1e-3)
-  -v, --verbose           Enable verbose output
-  -q, --quiet             Suppress progress output
-```
-
-**Examples:**
-
-```bash
-# Basic simulation with CSV output
-pulsim run buck_converter.yaml -o results.csv
-
-# JSON output with custom tolerances
-pulsim run circuit.yaml -f json --abstol 1e-14 --reltol 1e-4
-
-# HDF5 output for large simulations
-pulsim run large_circuit.yaml -f hdf5 -o results.h5
-```
-
-### Sweep Command
-
-```bash
-pulsim sweep <netlist> --param <name>=<start>:<stop>:<steps> [options]
-
-Options:
-  -j, --jobs <n>          Parallel jobs (default: CPU count)
-  -o, --output <dir>      Output directory
-  --format <format>       Output format per run
-```
-
-**Example:**
-
-```bash
-# Sweep load resistance from 10 to 100 ohms in 10 steps
-pulsim sweep buck.yaml --param R_load=10:100:10 -j 8 -o sweep_results/
-```
-
-### Serve Command
-
-```bash
-pulsim serve [options]
-
-Options:
-  --listen <addr>         Listen address (default: 0.0.0.0:50051)
-  --metrics-port <port>   Prometheus metrics port (default: 9090)
-  --workers <n>           Worker threads (default: auto)
-  --max-sessions <n>      Maximum concurrent sessions (default: 64)
-```
-
-### Info Command
-
-```bash
-# List all available device models
-pulsim info --list
-
-# Show details for a specific model
-pulsim info MOSFET
-
-# Show netlist format documentation
-pulsim info --format
-```
-
----
-
-## Python Interface
-
-### Basic Usage
-
-```python
-import pulsim
-import numpy as np
-
-# Load and simulate
-result = pulsim.simulate("circuit.yaml")
-
-# Access results
-time = result.time                    # numpy array
-v_out = result.voltages["out"]        # voltage at node "out"
-i_r1 = result.currents["R1"]          # current through R1
-
-# Get simulation statistics
-print(f"Total steps: {result.total_steps}")
-print(f"Newton iterations: {result.newton_iterations_total}")
-```
-
-### Building Circuits Programmatically
-
-```python
-import pulsim
-
-# Create circuit
-circuit = pulsim.Circuit("Buck Converter")
-
-# Add components
-circuit.add_voltage_source("Vin", "in", "0", 12.0)
-circuit.add_switch("S1", "in", "sw", control="PWM1")
-circuit.add_diode("D1", "0", "sw")
-circuit.add_inductor("L1", "sw", "out", 100e-6)
-circuit.add_capacitor("C1", "out", "0", 100e-6)
-circuit.add_resistor("R_load", "out", "0", 10.0)
-
-# Add PWM source
-circuit.add_pwm("PWM1", frequency=100e3, duty_cycle=0.5)
-
-# Configure simulation
-options = pulsim.SimulationOptions(
-    stop_time=1e-3,
-    timestep=1e-8,
-    abstol=1e-12,
-    reltol=1e-3
-)
-
-# Run simulation
-result = pulsim.simulate(circuit, options)
-```
-
-### Plotting Results
-
-```python
-import matplotlib.pyplot as plt
-
-result = pulsim.simulate("buck.yaml")
-
-fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-
-# Output voltage
-axes[0].plot(result.time * 1e3, result.voltages["out"])
-axes[0].set_ylabel("Vout (V)")
-axes[0].grid(True)
-
-# Inductor current
-axes[1].plot(result.time * 1e3, result.currents["L1"])
-axes[1].set_ylabel("IL (A)")
-axes[1].grid(True)
-
-# Switch voltage
-axes[2].plot(result.time * 1e3, result.voltages["sw"])
-axes[2].set_ylabel("Vsw (V)")
-axes[2].set_xlabel("Time (ms)")
-axes[2].grid(True)
-
-plt.tight_layout()
-plt.savefig("buck_waveforms.png")
-```
-
-### Loss Analysis
-
-```python
-result = pulsim.simulate("inverter.yaml")
-
-# Get loss breakdown
-losses = result.losses
-
-print("Loss Summary:")
-print(f"  Total: {losses.total_energy * 1e3:.2f} mJ")
-print(f"  Conduction: {losses.conduction_energy * 1e3:.2f} mJ")
-print(f"  Switching: {losses.switching_energy * 1e3:.2f} mJ")
-
-# Per-device losses
-for device, loss in losses.by_device.items():
-    print(f"  {device}: {loss * 1e3:.2f} mJ")
-
-# Calculate efficiency
-p_in = np.mean(result.voltages["in"] * result.currents["Vin"])
-p_out = np.mean(result.voltages["out"] ** 2 / 10)  # R_load = 10
-efficiency = p_out / p_in * 100
-print(f"Efficiency: {efficiency:.1f}%")
-```
-
-### Thermal Simulation
-
-```python
-# Circuit with thermal model
-circuit = pulsim.Circuit("MOSFET with Thermal")
-
-# MOSFET with thermal coupling
-circuit.add_mosfet("M1", "drain", "gate", "source", "0",
-    model="IRF540N",
-    thermal_node="Tj_M1"
-)
-
-# Thermal network (Foster model)
-circuit.add_thermal_network("Tj_M1", "Tc",
-    rth=[0.1, 0.2, 0.3],  # Thermal resistances (K/W)
-    tau=[1e-3, 10e-3, 100e-3]  # Time constants (s)
-)
-
-# Heatsink
-circuit.add_thermal_resistor("Rth_cs", "Tc", "Ta", 0.5)  # Case to sink
-circuit.add_thermal_resistor("Rth_sa", "Ta", "0", 1.0)   # Sink to ambient
-
-result = pulsim.simulate(circuit, options)
-
-# Plot junction temperature
-plt.plot(result.time, result.temperatures["Tj_M1"])
-plt.xlabel("Time (s)")
-plt.ylabel("Junction Temperature (°C)")
-```
-
-### Parameter Sweeps
-
-```python
-import pulsim
-from concurrent.futures import ProcessPoolExecutor
-
-def run_with_duty(duty):
-    circuit = pulsim.load("buck.yaml")
-    circuit.set_parameter("PWM1.duty_cycle", duty)
-    result = pulsim.simulate(circuit)
-    v_out_avg = np.mean(result.voltages["out"][-1000:])
-    return duty, v_out_avg
-
-# Parallel sweep
-duties = np.linspace(0.1, 0.9, 17)
-with ProcessPoolExecutor(max_workers=8) as executor:
-    results = list(executor.map(run_with_duty, duties))
-
-# Plot transfer characteristic
-duties, v_outs = zip(*results)
-plt.plot(duties, v_outs, 'o-')
-plt.xlabel("Duty Cycle")
-plt.ylabel("Average Output Voltage (V)")
-```
-
----
-
-## gRPC API
-
-### Connecting to Server
-
-**Python:**
-```python
-from pulsim.client import PulsimClient
-
-# Connect to server
-client = PulsimClient("localhost:50051")
-
-# Create session
-session = client.create_session()
-
-# Run simulation
-result = session.simulate("circuit.yaml")
-
-# Stream results (for long simulations)
-for chunk in session.stream_simulation("large_circuit.yaml"):
-    print(f"Progress: {chunk.progress}%")
-    process_partial_results(chunk.data)
-
-# Clean up
-session.close()
-```
-
-**Using grpcurl:**
-```bash
-# Create session
-grpcurl -d '{}' localhost:50051 pulsim.Simulator/CreateSession
-
-# Run simulation (payload contains YAML netlist content)
-grpcurl -d '{
-  "session_id": "abc123",
-  "netlist_json": "schema: pulsim-v1\nversion: 1\nsimulation:\n  tstop: 1e-4\n  dt: 1e-6\ncomponents:\n  - type: voltage_source\n    name: V1\n    nodes: [in, 0]\n    waveform:\n      type: dc\n      value: 5.0\n  - type: resistor\n    name: R1\n    nodes: [in, out]\n    value: 1k\n  - type: capacitor\n    name: C1\n    nodes: [out, 0]\n    value: 1u"
-}' localhost:50051 pulsim.Simulator/StartSimulation
-
-# Get results
-grpcurl -d '{"session_id": "abc123"}' localhost:50051 pulsim.Simulator/GetResult
-```
-
-### Streaming Waveforms
-
-```python
-# For long simulations, stream results as they're computed
-async for waveform in session.stream_waveforms("simulation.yaml"):
-    # Update live plot
-    update_plot(waveform.time, waveform.data)
-```
-
----
-
-## Examples
-
-### Example 1: RC Low-Pass Filter
-
-```yaml
-schema: pulsim-v1
-version: 1
-simulation:
-  tstop: 5e-3
-  dt: 1e-7
-components:
-  - type: voltage_source
-    name: Vin
-    nodes: [in, 0]
-    waveform:
-      type: pulse
-      v_initial: 0
-      v_pulse: 1
-      t_delay: 0
-      t_rise: 1e-9
-      t_fall: 1e-9
-      t_width: 0.5e-3
-      period: 1e-3
+    waveform: {type: dc, value: 5.0}
   - type: resistor
     name: R1
     nodes: [in, out]
@@ -474,89 +54,47 @@ components:
     value: 1u
 ```
 
-### Example 2: Buck Converter (PWM + VCSwitch)
+## 4. Python Simulation Flow
 
-```yaml
-schema: pulsim-v1
-version: 1
-simulation:
-  tstop: 2e-3
-  dt: 0.5e-6
-  dt_max: 2e-6
-components:
-  - type: voltage_source
-    name: Vdc
-    nodes: [vcc, 0]
-    waveform:
-      type: dc
-      value: 48.0
-  - type: voltage_source
-    name: Vpwm
-    nodes: [ctrl, 0]
-    waveform:
-      type: pulse
-      v_initial: 0.0
-      v_pulse: 5.0
-      t_delay: 0.0
-      t_rise: 1e-9
-      t_fall: 1e-9
-      t_width: 25e-6
-      period: 50e-6
-  - type: vcswitch
-    name: S1
-    nodes: [ctrl, vcc, sw_node]
-    v_threshold: 2.5
-    ron: 0.01
-    roff: 1e9
-  - type: diode
-    name: D1
-    nodes: [0, sw_node]
-  - type: inductor
-    name: L1
-    nodes: [sw_node, out]
-    value: 100u
-  - type: capacitor
-    name: C1
-    nodes: [out, 0]
-    value: 100u
-  - type: resistor
-    name: Rload
-    nodes: [out, 0]
-    value: 10.0
+```python
+import pulsim as ps
+
+parser_opts = ps.YamlParserOptions()
+parser = ps.YamlParser(parser_opts)
+circuit, options = parser.load("circuit.yaml")
+
+options.newton_options.num_nodes = int(circuit.num_nodes())
+options.newton_options.num_branches = int(circuit.num_branches())
+
+sim = ps.Simulator(circuit, options)
+result = sim.run_transient(circuit.initial_state())
+
+print(result.success, result.total_steps)
 ```
 
----
+## 5. Validation and Parity
 
-## Troubleshooting
+```bash
+# Core benchmark run
+python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 
-### Common Issues
+# Full scenario matrix
+python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 
-**1. Simulation doesn't converge**
-- Try reducing timestep
-- Enable Gmin stepping: `"convergence": {"gmin_stepping": true}`
-- Check for floating nodes
+# External parity (ngspice or ltspice)
+python3 benchmarks/benchmark_ngspice.py --backend ngspice --output-dir benchmarks/ngspice_out
+python3 benchmarks/benchmark_ngspice.py --backend ltspice --ltspice-exe "/path/to/LTspice" --output-dir benchmarks/ltspice_out
 
-**2. Slow simulation**
-- Increase timestep if accuracy permits
-- Use adaptive timestep: `"timestep": "auto"`
-- Enable parallel assembly for large circuits
+# Tiered stress suite
+python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
+```
 
-**3. Memory issues with large simulations**
-- Use HDF5 output format
-- Enable result streaming
-- Reduce output points with `"output_interval"`
+## 6. Output Artifacts
 
-### Getting Help
+- Benchmark: `results.csv`, `results.json`, `summary.json`
+- Parity: `parity_results.csv`, `parity_results.json`, `parity_summary.json`
+- Stress: `stress_results.csv`, `stress_results.json`, `stress_summary.json`
 
-- Documentation: https://pulsim.dev/docs
-- GitHub Issues: https://github.com/your-org/pulsim-core/issues
-- Discord: https://discord.gg/pulsim
+## 7. Migration and Compatibility
 
----
-
-## Next Steps
-
-- [Netlist Format Reference](netlist-format.md)
-- [Device Model Reference](device-models.md)
-- [API Reference](api-reference.md)
-- [Tutorial Notebooks](../examples/notebooks/)
+For removed API surfaces and deprecation timeline, see `docs/migration-guide.md`.

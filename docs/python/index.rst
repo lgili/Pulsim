@@ -1,8 +1,7 @@
 Pulsim Python API Documentation
-==================================
+===============================
 
-Pulsim is a high-performance circuit simulator for power electronics applications.
-This documentation covers the Python API for Pulsim.
+Pulsim provides a Python-first interface to the unified v1 simulation kernel.
 
 .. toctree::
    :maxdepth: 2
@@ -20,7 +19,6 @@ This documentation covers the Python API for Pulsim.
    api/simulation
    api/devices
    api/results
-   api/client
 
 .. toctree::
    :maxdepth: 2
@@ -37,61 +35,32 @@ This documentation covers the Python API for Pulsim.
    changelog
    contributing
 
-
 Quick Start
 -----------
 
-Install Pulsim:
-
-.. code-block:: bash
-
-   pip install pulsim
-
-Run a simple simulation:
-
 .. code-block:: python
 
-   import pulsim
+   import pulsim as ps
 
-   # Simulate from YAML netlist
-   result = pulsim.simulate("circuit.yaml")
+   parser = ps.YamlParser(ps.YamlParserOptions())
+   circuit, options = parser.load("circuit.yaml")
 
-   # Access results
-   print(result.time)
-   print(result.voltages["out"])
+   options.newton_options.num_nodes = int(circuit.num_nodes())
+   options.newton_options.num_branches = int(circuit.num_branches())
 
-Or build circuits programmatically:
+   simulator = ps.Simulator(circuit, options)
+   result = simulator.run_transient(circuit.initial_state())
 
-.. code-block:: python
-
-   import pulsim
-
-   # Create circuit
-   circuit = pulsim.Circuit("RC Filter")
-   circuit.add_voltage_source("V1", "in", "0", 5.0)
-   circuit.add_resistor("R1", "in", "out", 1000)
-   circuit.add_capacitor("C1", "out", "0", 1e-6)
-
-   # Configure simulation
-   options = pulsim.SimulationOptions(
-       stop_time=0.01,
-       timestep=1e-6
-   )
-
-   # Run simulation
-   result = pulsim.simulate(circuit, options)
-
+   print(result.success, result.total_steps)
 
 Features
 --------
 
-* **Fast Transient Simulation**: Optimized sparse matrix solvers
-* **Power Electronics**: Ideal switches, MOSFETs, IGBTs, diodes
-* **Thermal Modeling**: Foster networks with temperature coupling
-* **Loss Calculation**: Conduction and switching losses
-* **Parallel Execution**: Multi-threaded sweeps and batch runs
-* **Remote API**: gRPC client for server-based simulation
-
+* Fast transient simulation with runtime linear-solver stack
+* Power-electronics devices and converter-focused workflows
+* Electro-thermal options and telemetry
+* Deterministic fallback trace support for stiff cases
+* YAML-first benchmark/parity/stress tooling
 
 Indices and tables
 ==================
