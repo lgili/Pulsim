@@ -280,6 +280,10 @@ class SimulationEventType(Enum):
     ConvergenceWarning = ...
     TimestepChange = ...
 
+class ThermalCouplingPolicy(Enum):
+    LossOnly = ...
+    LossWithTemperatureScaling = ...
+
 class SimulationEvent:
     time: float
     type: SimulationEventType
@@ -287,6 +291,42 @@ class SimulationEvent:
     description: str
     value1: float
     value2: float
+
+    def __init__(self) -> None: ...
+
+class ThermalCouplingOptions:
+    enable: bool
+    ambient: float
+    policy: ThermalCouplingPolicy
+    default_rth: float
+    default_cth: float
+
+    def __init__(self) -> None: ...
+
+class ThermalDeviceConfig:
+    enabled: bool
+    rth: float
+    cth: float
+    temp_init: float
+    temp_ref: float
+    alpha: float
+
+    def __init__(self) -> None: ...
+
+class DeviceThermalTelemetry:
+    device_name: str
+    enabled: bool
+    final_temperature: float
+    peak_temperature: float
+    average_temperature: float
+
+    def __init__(self) -> None: ...
+
+class ThermalSummary:
+    enabled: bool
+    ambient: float
+    max_temperature: float
+    device_temperatures: List[DeviceThermalTelemetry]
 
     def __init__(self) -> None: ...
 
@@ -313,6 +353,8 @@ class SimulationOptions:
     enable_events: bool
     enable_losses: bool
     switching_energy: Dict[str, SwitchingEnergy]
+    thermal: ThermalCouplingOptions
+    thermal_devices: Dict[str, ThermalDeviceConfig]
     gmin_fallback: GminConfig
     max_step_retries: int
 
@@ -330,6 +372,8 @@ class SimulationResult:
     timestep_rejections: int
     total_time_seconds: float
     linear_solver_telemetry: LinearSolverTelemetry
+    loss_summary: SystemLossSummary
+    thermal_summary: ThermalSummary
     data: List[List[float]]
 
     def __init__(self) -> None: ...

@@ -126,6 +126,56 @@ TEST_CASE("v1 switching loss accumulation", "[v1][losses][regression]") {
     CHECK(summary.total_switching == Approx(expected_total).margin(expected_total * 0.2 + 1e-9));
 }
 
+TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][regression]") {
+    Circuit circuit;
+
+    auto n_gate = circuit.add_node("gate");
+    auto n_drain = circuit.add_node("drain");
+    auto n_source = circuit.add_node("source");
+
+    circuit.add_voltage_source("Vg", n_gate, Circuit::ground(), 10.0);
+    circuit.add_voltage_source("Vd", n_drain, Circuit::ground(), 20.0);
+
+    MOSFET::Params m;
+    m.vth = 2.5;
+    m.kp = 0.01;
+    m.lambda = 0.0;
+    m.g_off = 1e-8;
+    circuit.add_mosfet("M1", n_gate, n_drain, n_source, m);
+    circuit.add_resistor("Rload", n_source, Circuit::ground(), 100.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_losses = true;
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.policy = ThermalCouplingPolicy::LossWithTemperatureScaling;
+
+    ThermalDeviceConfig cfg;
+    cfg.rth = 0.5;
+    cfg.cth = 1e-4;
+    cfg.temp_init = 25.0;
+    cfg.temp_ref = 25.0;
+    cfg.alpha = 0.004;
+    opts.thermal_devices["M1"] = cfg;
+
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+    REQUIRE(result.success);
+    REQUIRE(result.thermal_summary.enabled);
+    CHECK(result.thermal_summary.max_temperature >= result.thermal_summary.ambient);
+    CHECK_FALSE(result.thermal_summary.device_temperatures.empty());
+}
+
 TEST_CASE("v1 linear solver order honored", "[v1][solver][regression]") {
     Circuit circuit;
 

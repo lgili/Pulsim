@@ -968,6 +968,12 @@ void init_v2_module(py::module_& v2) {
         .value("TimestepChange", SimulationEventType::TimestepChange)
         .export_values();
 
+    py::enum_<ThermalCouplingPolicy>(v2, "ThermalCouplingPolicy",
+        "Electro-thermal coupling policy")
+        .value("LossOnly", ThermalCouplingPolicy::LossOnly)
+        .value("LossWithTemperatureScaling", ThermalCouplingPolicy::LossWithTemperatureScaling)
+        .export_values();
+
     py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
         .def(py::init<>())
         .def_readwrite("time", &SimulationEvent::time)
@@ -976,6 +982,42 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("description", &SimulationEvent::description)
         .def_readwrite("value1", &SimulationEvent::value1)
         .def_readwrite("value2", &SimulationEvent::value2);
+
+    py::class_<ThermalCouplingOptions>(v2, "ThermalCouplingOptions",
+        "Global electro-thermal coupling options")
+        .def(py::init<>())
+        .def_readwrite("enable", &ThermalCouplingOptions::enable)
+        .def_readwrite("ambient", &ThermalCouplingOptions::ambient)
+        .def_readwrite("policy", &ThermalCouplingOptions::policy)
+        .def_readwrite("default_rth", &ThermalCouplingOptions::default_rth)
+        .def_readwrite("default_cth", &ThermalCouplingOptions::default_cth);
+
+    py::class_<ThermalDeviceConfig>(v2, "ThermalDeviceConfig",
+        "Per-device thermal configuration for electro-thermal coupling")
+        .def(py::init<>())
+        .def_readwrite("enabled", &ThermalDeviceConfig::enabled)
+        .def_readwrite("rth", &ThermalDeviceConfig::rth)
+        .def_readwrite("cth", &ThermalDeviceConfig::cth)
+        .def_readwrite("temp_init", &ThermalDeviceConfig::temp_init)
+        .def_readwrite("temp_ref", &ThermalDeviceConfig::temp_ref)
+        .def_readwrite("alpha", &ThermalDeviceConfig::alpha);
+
+    py::class_<DeviceThermalTelemetry>(v2, "DeviceThermalTelemetry",
+        "Per-device thermal telemetry")
+        .def(py::init<>())
+        .def_readwrite("device_name", &DeviceThermalTelemetry::device_name)
+        .def_readwrite("enabled", &DeviceThermalTelemetry::enabled)
+        .def_readwrite("final_temperature", &DeviceThermalTelemetry::final_temperature)
+        .def_readwrite("peak_temperature", &DeviceThermalTelemetry::peak_temperature)
+        .def_readwrite("average_temperature", &DeviceThermalTelemetry::average_temperature);
+
+    py::class_<ThermalSummary>(v2, "ThermalSummary",
+        "Electro-thermal summary for a transient run")
+        .def(py::init<>())
+        .def_readwrite("enabled", &ThermalSummary::enabled)
+        .def_readwrite("ambient", &ThermalSummary::ambient)
+        .def_readwrite("max_temperature", &ThermalSummary::max_temperature)
+        .def_readwrite("device_temperatures", &ThermalSummary::device_temperatures);
 
     py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
         .def(py::init<>())
@@ -1001,6 +1043,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("enable_events", &SimulationOptions::enable_events)
         .def_readwrite("enable_losses", &SimulationOptions::enable_losses)
         .def_readwrite("switching_energy", &SimulationOptions::switching_energy)
+        .def_readwrite("thermal", &SimulationOptions::thermal)
+        .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
         .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries);
 
@@ -1018,6 +1062,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("total_time_seconds", &SimulationResult::total_time_seconds)
         .def_readwrite("linear_solver_telemetry", &SimulationResult::linear_solver_telemetry)
         .def_readwrite("loss_summary", &SimulationResult::loss_summary)
+        .def_readwrite("thermal_summary", &SimulationResult::thermal_summary)
         // Compatibility alias used by legacy Python tests
         .def_property_readonly("data", [](const SimulationResult& result) {
             return result.states;

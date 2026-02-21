@@ -87,6 +87,43 @@ struct HarmonicBalanceOptions {
     bool initialize_from_transient = true;
 };
 
+enum class ThermalCouplingPolicy {
+    LossOnly,
+    LossWithTemperatureScaling
+};
+
+struct ThermalCouplingOptions {
+    bool enable = false;
+    Real ambient = 25.0;
+    ThermalCouplingPolicy policy = ThermalCouplingPolicy::LossWithTemperatureScaling;
+    Real default_rth = 1.0;
+    Real default_cth = 0.1;
+};
+
+struct ThermalDeviceConfig {
+    bool enabled = true;
+    Real rth = 1.0;
+    Real cth = 0.1;
+    Real temp_init = 25.0;
+    Real temp_ref = 25.0;
+    Real alpha = 0.004;
+};
+
+struct DeviceThermalTelemetry {
+    std::string device_name;
+    bool enabled = false;
+    Real final_temperature = 25.0;
+    Real peak_temperature = 25.0;
+    Real average_temperature = 25.0;
+};
+
+struct ThermalSummary {
+    bool enabled = false;
+    Real ambient = 25.0;
+    Real max_temperature = 25.0;
+    std::vector<DeviceThermalTelemetry> device_temperatures;
+};
+
 struct SimulationOptions {
     // Time parameters
     Real tstart = 0.0;
@@ -125,6 +162,8 @@ struct SimulationOptions {
     bool enable_events = true;
     bool enable_losses = true;
     std::unordered_map<std::string, SwitchingEnergy> switching_energy;
+    ThermalCouplingOptions thermal{};
+    std::unordered_map<std::string, ThermalDeviceConfig> thermal_devices;
 
     // Convergence fallback
     GminConfig gmin_fallback{};
@@ -148,6 +187,7 @@ struct SimulationResult {
     LinearSolverTelemetry linear_solver_telemetry;
 
     SystemLossSummary loss_summary;
+    ThermalSummary thermal_summary;
 };
 
 struct PeriodicSteadyStateResult {
@@ -223,6 +263,15 @@ private:
         Real peak_power = 0.0;
     };
 
+    struct DeviceThermalState {
+        bool enabled = false;
+        ThermalDeviceConfig config{};
+        Real temperature = 25.0;
+        Real peak_temperature = 25.0;
+        Real sum_temperature = 0.0;
+        int samples = 0;
+    };
+
     struct SwitchMonitor {
         std::string name;
         Index ctrl = -1;
@@ -250,6 +299,10 @@ private:
 
     void initialize_loss_tracking();
     void finalize_loss_summary(SimulationResult& result);
+    void initialize_thermal_tracking();
+    [[nodiscard]] Real thermal_scale_factor(std::size_t device_index) const;
+    void update_thermal_state(Real dt);
+    void finalize_thermal_summary(SimulationResult& result);
 
     Circuit& circuit_;
     SimulationOptions options_;
@@ -260,6 +313,8 @@ private:
     std::vector<std::optional<SwitchingEnergy>> switching_energy_;
     std::vector<bool> diode_conducting_;
     std::unordered_map<std::string, std::size_t> device_index_;
+    std::vector<DeviceThermalState> thermal_states_;
+    std::vector<Real> last_device_power_;
 
     AdvancedTimestepController timestep_controller_;
     AdaptiveLTEEstimator lte_estimator_;
