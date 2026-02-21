@@ -358,25 +358,12 @@ endif()
 if(NOT PULSIM_KLU_FOUND)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
-        pkg_check_modules(KLU QUIET klu)
-        if(KLU_FOUND)
+        pkg_check_modules(KLU QUIET IMPORTED_TARGET klu)
+        if(KLU_FOUND AND TARGET PkgConfig::KLU)
             message(STATUS "Found KLU via pkg-config: ${KLU_LIBRARY_DIRS}")
             set(PULSIM_KLU_FOUND TRUE)
-            # Create imported target for KLU
-            # Use IMPORTED_TARGET to get proper linking with full paths
             add_library(SuiteSparse::KLU INTERFACE IMPORTED)
-            set_target_properties(SuiteSparse::KLU PROPERTIES
-                INTERFACE_INCLUDE_DIRECTORIES "${KLU_INCLUDE_DIRS}"
-                INTERFACE_LINK_DIRECTORIES "${KLU_LIBRARY_DIRS}"
-            )
-            # Link with full library path from pkg-config
-            target_link_libraries(SuiteSparse::KLU INTERFACE
-                "${KLU_LIBRARY_DIRS}/libklu.dylib"
-                "${KLU_LIBRARY_DIRS}/libamd.dylib"
-                "${KLU_LIBRARY_DIRS}/libcolamd.dylib"
-                "${KLU_LIBRARY_DIRS}/libbtf.dylib"
-                "${KLU_LIBRARY_DIRS}/libsuitesparseconfig.dylib"
-            )
+            target_link_libraries(SuiteSparse::KLU INTERFACE PkgConfig::KLU)
             set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
         endif()
     endif()
@@ -386,8 +373,11 @@ endif()
 if(NOT PULSIM_KLU_FOUND)
     find_library(KLU_LIBRARY NAMES klu PATHS
         /usr/local/lib
+        /usr/local/lib64
         /opt/homebrew/lib
         /usr/lib
+        /usr/lib64
+        /usr/lib/aarch64-linux-gnu
         /usr/lib/x86_64-linux-gnu
     )
     find_path(KLU_INCLUDE_DIR NAMES klu.h PATHS
@@ -400,26 +390,38 @@ if(NOT PULSIM_KLU_FOUND)
     )
     find_library(AMD_LIBRARY NAMES amd PATHS
         /usr/local/lib
+        /usr/local/lib64
         /opt/homebrew/lib
         /usr/lib
+        /usr/lib64
+        /usr/lib/aarch64-linux-gnu
         /usr/lib/x86_64-linux-gnu
     )
     find_library(COLAMD_LIBRARY NAMES colamd PATHS
         /usr/local/lib
+        /usr/local/lib64
         /opt/homebrew/lib
         /usr/lib
+        /usr/lib64
+        /usr/lib/aarch64-linux-gnu
         /usr/lib/x86_64-linux-gnu
     )
     find_library(BTF_LIBRARY NAMES btf PATHS
         /usr/local/lib
+        /usr/local/lib64
         /opt/homebrew/lib
         /usr/lib
+        /usr/lib64
+        /usr/lib/aarch64-linux-gnu
         /usr/lib/x86_64-linux-gnu
     )
     find_library(SUITESPARSE_CONFIG_LIBRARY NAMES suitesparseconfig PATHS
         /usr/local/lib
+        /usr/local/lib64
         /opt/homebrew/lib
         /usr/lib
+        /usr/lib64
+        /usr/lib/aarch64-linux-gnu
         /usr/lib/x86_64-linux-gnu
     )
 
@@ -442,6 +444,13 @@ if(NOT PULSIM_KLU_FOUND)
 
     # SuiteSparse requires some configuration
     set(SUITESPARSE_ENABLE_PROJECTS "suitesparse_config;amd;colamd;btf;klu" CACHE STRING "" FORCE)
+    # KLU-only build avoids CHOLMOD/BLAS coupling and is enough for our solver.
+    set(KLU_USE_CHOLMOD OFF CACHE BOOL "" FORCE)
+    set(CHOLMOD_CAMD OFF CACHE BOOL "" FORCE)
+    set(SUITESPARSE_USE_OPENMP OFF CACHE BOOL "" FORCE)
+    set(SUITESPARSE_CONFIG_USE_OPENMP OFF CACHE BOOL "" FORCE)
+    # Bypass mandatory BLAS auto-detection for KLU-only builds on platforms where BLAS is unavailable.
+    set(BLAS_LIBRARIES "" CACHE STRING "" FORCE)
     set(SUITESPARSE_USE_CUDA OFF CACHE BOOL "" FORCE)
     set(SUITESPARSE_USE_FORTRAN OFF CACHE BOOL "" FORCE)
     set(SUITESPARSE_DEMOS OFF CACHE BOOL "" FORCE)
