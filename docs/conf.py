@@ -42,6 +42,7 @@ myst_enable_extensions = [
     "deflist",
     "fieldlist",
 ]
+myst_heading_anchors = 4
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
