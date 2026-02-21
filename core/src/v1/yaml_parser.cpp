@@ -191,6 +191,17 @@ std::pair<Circuit, SimulationOptions> YamlParser::load_string(const std::string&
 }
 
 void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, SimulationOptions& options) {
+    const auto first_non_space = content.find_first_not_of(" \t\r\n");
+    if (first_non_space != std::string::npos) {
+        const char first = content[first_non_space];
+        if ((first == '{' || first == '[') && content.find('"') != std::string::npos) {
+            errors_.push_back(
+                "JSON netlists are unsupported in the v1 YAML parser. "
+                "Migrate to pulsim-v1 YAML netlists (see docs/refactor-python-only-v1-hardening/runtime-surface.md).");
+            return;
+        }
+    }
+
     YAML::Node root;
     try {
         root = YAML::Load(content);
@@ -228,7 +239,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         YAML::Node sim = root["simulation"];
           validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "adaptive_timestep",
                         "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
-                        "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb"},
+                        "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal"},
                       "simulation", errors_, options_.strict);
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);
@@ -239,6 +250,27 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         if (sim["adaptive_timestep"]) options.adaptive_timestep = sim["adaptive_timestep"].as<bool>();
         if (sim["enable_events"]) options.enable_events = sim["enable_events"].as<bool>();
         if (sim["enable_losses"]) options.enable_losses = sim["enable_losses"].as<bool>();
+        if (sim["thermal"]) {
+            YAML::Node thermal = sim["thermal"];
+            validate_keys(thermal, {"enabled", "ambient", "policy", "default_rth", "default_cth"},
+                          "simulation.thermal", errors_, options_.strict);
+            options.thermal.enable = true;
+            if (thermal["enabled"]) options.thermal.enable = thermal["enabled"].as<bool>();
+            if (thermal["ambient"]) options.thermal.ambient = parse_real(thermal["ambient"], "simulation.thermal.ambient", errors_);
+            if (thermal["default_rth"]) options.thermal.default_rth = parse_real(thermal["default_rth"], "simulation.thermal.default_rth", errors_);
+            if (thermal["default_cth"]) options.thermal.default_cth = parse_real(thermal["default_cth"], "simulation.thermal.default_cth", errors_);
+            if (thermal["policy"]) {
+                const std::string policy = normalize_key(thermal["policy"].as<std::string>());
+                if (policy == "lossonly") {
+                    options.thermal.policy = ThermalCouplingPolicy::LossOnly;
+                } else if (policy == "losswithtemperaturescaling" ||
+                           policy == "losswithscaling") {
+                    options.thermal.policy = ThermalCouplingPolicy::LossWithTemperatureScaling;
+                } else {
+                    errors_.push_back("Invalid thermal policy: " + thermal["policy"].as<std::string>());
+                }
+            }
+        }
 
         YAML::Node integrator_node = sim["integrator"] ? sim["integrator"] : sim["integration"];
         if (integrator_node) {
@@ -616,29 +648,35 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             comp_node = merge_nodes(model, comp_node);
         }
 
-        validate_keys(comp_node,
+        const YAML::Node comp = comp_node;
+
+        validate_keys(comp,
             {"type", "name", "nodes", "value", "params", "waveform", "use", "loss",
+             "thermal",
              "resistance", "capacitance", "inductance", "ic",
              "g_on", "g_off", "ron", "roff", "v_threshold", "initial_state",
-             "vth", "kp", "lambda", "is_nmos",
-             "turns_ratio", "ratio"},
+             "vth", "kp", "lambda", "is_nmos", "v_ce_sat",
+             "turns_ratio", "ratio", "magnetizing_inductance", "lm"},
             "component", errors_, options_.strict);
 
-        if (!comp_node["type"] || !comp_node["name"] || !comp_node["nodes"]) {
+        if (!comp["type"] || !comp["name"] || !comp["nodes"]) {
             errors_.push_back("Component missing type, name, or nodes");
             continue;
         }
 
-        std::string type = to_lower(comp_node["type"].as<std::string>());
-        std::string name = comp_node["name"].as<std::string>();
-        std::vector<std::string> nodes = parse_nodes(comp_node["nodes"], name, errors_);
+        std::string type = to_lower(comp["type"].as<std::string>());
+        std::string name = comp["name"].as<std::string>();
+        std::vector<std::string> nodes = parse_nodes(comp["nodes"], name, errors_);
         if (nodes.empty()) continue;
 
-        YAML::Node params = comp_node["params"];
+        const YAML::Node comp_view = comp;
+        const YAML::Node params = comp_view["params"];
 
         auto get_param = [&](const std::string& key) -> YAML::Node {
-            if (comp_node[key]) return comp_node[key];
-            if (params && params[key]) return params[key];
+            YAML::Node top = comp_view[key];
+            if (top.IsDefined() && !top.IsNull()) return top;
+            YAML::Node nested = params ? params[key] : YAML::Node();
+            if (nested.IsDefined() && !nested.IsNull()) return nested;
             return YAML::Node();
         };
 
@@ -647,13 +685,31 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         };
 
         // Loss model (switching energy)
-        if (comp_node["loss"]) {
-            YAML::Node loss = comp_node["loss"];
+        if (comp["loss"]) {
+            YAML::Node loss = comp["loss"];
+            validate_keys(loss, {"eon", "eoff", "err"}, name + ".loss", errors_, options_.strict);
             SwitchingEnergy energy;
             if (loss["eon"]) energy.eon = parse_real(loss["eon"], name + ".loss.eon", errors_);
             if (loss["eoff"]) energy.eoff = parse_real(loss["eoff"], name + ".loss.eoff", errors_);
             if (loss["err"]) energy.err = parse_real(loss["err"], name + ".loss.err", errors_);
             options.switching_energy[name] = energy;
+        }
+
+        if (comp["thermal"]) {
+            YAML::Node thermal = comp["thermal"];
+            validate_keys(thermal, {"enabled", "rth", "cth", "temp_init", "temp_ref", "alpha"},
+                          name + ".thermal", errors_, options_.strict);
+            ThermalDeviceConfig cfg;
+            if (thermal["enabled"]) cfg.enabled = thermal["enabled"].as<bool>();
+            if (thermal["rth"]) cfg.rth = parse_real(thermal["rth"], name + ".thermal.rth", errors_);
+            if (thermal["cth"]) cfg.cth = parse_real(thermal["cth"], name + ".thermal.cth", errors_);
+            if (thermal["temp_init"]) cfg.temp_init = parse_real(thermal["temp_init"], name + ".thermal.temp_init", errors_);
+            if (thermal["temp_ref"]) cfg.temp_ref = parse_real(thermal["temp_ref"], name + ".thermal.temp_ref", errors_);
+            if (thermal["alpha"]) cfg.alpha = parse_real(thermal["alpha"], name + ".thermal.alpha", errors_);
+            options.thermal_devices[name] = cfg;
+            if (cfg.enabled) {
+                options.thermal.enable = true;
+            }
         }
 
         if (type == "resistor" || type == "r") {
@@ -679,7 +735,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             circuit.add_inductor(name, idx(nodes[0]), idx(nodes[1]), value, ic);
         }
         else if (type == "voltage_source" || type == "v") {
-            YAML::Node waveform = comp_node["waveform"];
+            YAML::Node waveform = comp["waveform"];
             if (waveform && waveform["type"]) {
                 std::string wtype = to_lower(waveform["type"].as<std::string>());
                 if (wtype == "dc") {
@@ -751,7 +807,10 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
             Real g_on = g_on_node ? parse_real(g_on_node, name + ".g_on", errors_) : 1e6;
             Real g_off = g_off_node ? parse_real(g_off_node, name + ".g_off", errors_) : 1e-12;
-            bool closed = get_param("initial_state") ? get_param("initial_state").as<bool>() : false;
+            YAML::Node initial_state_node = get_param("initial_state");
+            bool closed = (initial_state_node.IsDefined() && !initial_state_node.IsNull())
+                ? initial_state_node.as<bool>()
+                : false;
             circuit.add_switch(name, idx(nodes[0]), idx(nodes[1]), closed, g_on, g_off);
         }
         else if (type == "vcswitch") {
@@ -770,7 +829,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (get_param("kp")) p.kp = parse_real(get_param("kp"), name + ".kp", errors_);
             if (get_param("lambda")) p.lambda = parse_real(get_param("lambda"), name + ".lambda", errors_);
             if (get_param("g_off")) p.g_off = parse_real(get_param("g_off"), name + ".g_off", errors_);
-            if (get_param("is_nmos")) p.is_nmos = get_param("is_nmos").as<bool>();
+            YAML::Node is_nmos_node = get_param("is_nmos");
+            if (is_nmos_node.IsDefined() && !is_nmos_node.IsNull()) p.is_nmos = is_nmos_node.as<bool>();
             if (type == "pmos") p.is_nmos = false;
             circuit.add_mosfet(name, idx(nodes[0]), idx(nodes[1]), idx(nodes[2]), p);
         }

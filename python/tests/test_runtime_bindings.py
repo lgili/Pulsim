@@ -134,3 +134,99 @@ components:
     assert dc.success
     # Divider 2k/2k with Vin=12V -> V(out)=6V
     assert abs(dc.newton_result.solution[1] - 6.0) < 1e-6
+
+
+def test_yaml_parser_maps_thermal_fields_and_rejects_json() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-4
+  dt: 1e-6
+  thermal:
+    enabled: true
+    ambient: 30
+    policy: loss_with_temperature_scaling
+    default_rth: 1.2
+    default_cth: 0.4
+components:
+  - type: voltage_source
+    name: Vg
+    nodes: [gate, 0]
+    waveform: {type: dc, value: 10}
+  - type: voltage_source
+    name: Vd
+    nodes: [drain, 0]
+    waveform: {type: dc, value: 12}
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    thermal:
+      rth: 0.8
+      cth: 0.1
+      temp_init: 35
+      temp_ref: 25
+      alpha: 0.006
+  - type: resistor
+    name: Rload
+    nodes: [source, 0]
+    value: 5
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert options.thermal.enable
+    assert abs(options.thermal.ambient - 30.0) < 1e-12
+    assert options.thermal.policy == ps.ThermalCouplingPolicy.LossWithTemperatureScaling
+    assert "M1" in options.thermal_devices
+    assert abs(options.thermal_devices["M1"].rth - 0.8) < 1e-12
+
+    parser_json = ps.YamlParser()
+    parser_json.load_string('{"schema":"pulsim-v1","version":1,"components":[]}')
+    assert any("JSON netlists are unsupported" in msg for msg in parser_json.errors)
+
+
+def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
+    circuit = ps.Circuit()
+    n_gate = circuit.add_node("gate")
+    n_drain = circuit.add_node("drain")
+    n_source = circuit.add_node("source")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vg", n_gate, gnd, 10.0)
+    circuit.add_voltage_source("Vd", n_drain, gnd, 20.0)
+    mparams = ps.MOSFETParams()
+    mparams.vth = 2.5
+    mparams.kp = 0.01
+    mparams.lambda_ = 0.0
+    mparams.g_off = 1e-8
+    circuit.add_mosfet("M1", n_gate, n_drain, n_source, mparams)
+    circuit.add_resistor("Rload", n_source, gnd, 100.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 1e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+    opts.thermal.policy = ps.ThermalCouplingPolicy.LossWithTemperatureScaling
+    tcfg = ps.ThermalDeviceConfig()
+    tcfg.rth = 0.5
+    tcfg.cth = 1e-4
+    tcfg.temp_init = 25.0
+    tcfg.temp_ref = 25.0
+    tcfg.alpha = 0.004
+    opts.thermal_devices = {"M1": tcfg}
+
+    sim = ps.Simulator(circuit, opts)
+    result = sim.run_transient()
+    assert result.success
+    assert result.thermal_summary.enabled
+    assert result.thermal_summary.max_temperature >= result.thermal_summary.ambient
+    assert any(item.device_name == "M1" for item in result.thermal_summary.device_temperatures)

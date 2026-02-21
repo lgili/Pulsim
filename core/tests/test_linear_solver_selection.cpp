@@ -271,3 +271,58 @@ components:
     const auto out_idx = static_cast<Index>(std::distance(node_names.begin(), it));
     CHECK(dc.newton_result.solution[out_idx] == Approx(6.0).margin(1e-6));
 }
+
+TEST_CASE("YAML parser maps electro-thermal configuration and rejects JSON input",
+          "[v1][yaml][thermal]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-4
+  dt: 1e-6
+  thermal:
+    enabled: true
+    ambient: 30
+    policy: loss_with_temperature_scaling
+    default_rth: 1.5
+    default_cth: 0.2
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12}
+  - type: mosfet
+    name: M1
+    nodes: [gate, in, 0]
+    vth: 2.5
+    kp: 5
+    thermal:
+      rth: 0.8
+      cth: 0.05
+      temp_init: 35
+      temp_ref: 25
+      alpha: 0.006
+)";
+
+    parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(yaml);
+    REQUIRE(parser.errors().empty());
+    REQUIRE(options.thermal.enable);
+    CHECK(options.thermal.ambient == Approx(30.0));
+    CHECK(options.thermal.default_rth == Approx(1.5));
+    CHECK(options.thermal.default_cth == Approx(0.2));
+    CHECK(options.thermal.policy == ThermalCouplingPolicy::LossWithTemperatureScaling);
+
+    REQUIRE(options.thermal_devices.contains("M1"));
+    const auto& cfg = options.thermal_devices.at("M1");
+    CHECK(cfg.rth == Approx(0.8));
+    CHECK(cfg.cth == Approx(0.05));
+    CHECK(cfg.temp_init == Approx(35.0));
+    CHECK(cfg.temp_ref == Approx(25.0));
+    CHECK(cfg.alpha == Approx(0.006));
+
+    parser::YamlParser parser_json;
+    parser_json.load_string(R"({"schema":"pulsim-v1","version":1,"components":[]})");
+    REQUIRE_FALSE(parser_json.errors().empty());
+    CHECK(parser_json.errors().front().find("JSON netlists are unsupported") != std::string::npos);
+}

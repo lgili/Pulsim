@@ -28,10 +28,10 @@
 
 ## Phase 3: Converter and Thermal Capability Completion
 
-- [ ] 3.1 Implement missing converter-critical component behaviors in v1 runtime.
-- [ ] 3.2 Ensure YAML schema covers required electrical, loss, and thermal parameters.
-- [ ] 3.3 Expose all required component and solver options through Python bindings.
-- [ ] 3.4 Add electro-thermal coupled simulation mode and result telemetry where declared.
+- [x] 3.1 Implement missing converter-critical component behaviors in v1 runtime.
+- [x] 3.2 Ensure YAML schema covers required electrical, loss, and thermal parameters.
+- [x] 3.3 Expose all required component and solver options through Python bindings.
+- [x] 3.4 Add electro-thermal coupled simulation mode and result telemetry where declared.
 
 ## Phase 4: Solver Robustness Hardening
 

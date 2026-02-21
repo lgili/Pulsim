@@ -20,15 +20,13 @@ Legend:
 | IGBT | yes | yes | yes | device tests; limited parity coverage | partial |
 | Transformer | yes | yes | yes | limited converter validation | partial |
 | Loss accumulation telemetry | yes | yes (options/results) | yes | v1 regression tests | yes |
-| Thermal network simulation | yes | n/a (runtime utility) | yes | dedicated thermal tests | partial |
-| Coupled electro-thermal converter run | partial | partial | partial | missing end-to-end converter gate | partial |
+| Thermal network simulation | yes | yes (simulation.thermal + component.thermal) | yes | dedicated thermal + runtime regressions | yes |
+| Coupled electro-thermal converter run | yes | yes | yes | runtime regressions + telemetry | yes |
 | Periodic steady-state (shooting / HB) | yes | yes | yes | steady-state tests + benchmark | yes |
 
 ## Required Gaps Before Gate G3/G4
 
-- Complete coupled electro-thermal converter validation (not only standalone thermal utilities).
 - Increase parity-grade validation for IGBT and transformer converter scenarios.
-- Add explicit YAML coupling controls for thermal-enabled converter workflows.
 
 ## LTspice Parity Catalog (Acceptance Draft)
 

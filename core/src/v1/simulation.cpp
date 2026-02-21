@@ -94,12 +94,71 @@ void Simulator::initialize_loss_tracking() {
     loss_states_.assign(devices.size(), DeviceLossState{});
     switching_energy_.assign(devices.size(), std::nullopt);
     diode_conducting_.assign(devices.size(), false);
+    last_device_power_.assign(devices.size(), 0.0);
+    initialize_thermal_tracking();
 }
 
 void Simulator::set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy) {
     auto it = device_index_.find(device_name);
     if (it == device_index_.end()) return;
     switching_energy_[it->second] = energy;
+}
+
+void Simulator::initialize_thermal_tracking() {
+    const auto& devices = circuit_.devices();
+    const auto& conns = circuit_.connections();
+
+    thermal_states_.assign(devices.size(), DeviceThermalState{});
+    if (!options_.thermal.enable) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        bool supports_thermal = false;
+        std::visit([&](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            supports_thermal = device_traits<T>::has_thermal_model;
+        }, devices[i]);
+
+        if (!supports_thermal) {
+            continue;
+        }
+
+        auto& state = thermal_states_[i];
+        state.enabled = true;
+        state.config.enabled = true;
+        state.config.rth = options_.thermal.default_rth;
+        state.config.cth = options_.thermal.default_cth;
+        state.config.temp_init = options_.thermal.ambient;
+        state.config.temp_ref = options_.thermal.ambient;
+
+        auto cfg_it = options_.thermal_devices.find(conns[i].name);
+        if (cfg_it != options_.thermal_devices.end()) {
+            state.config = cfg_it->second;
+        }
+
+        state.enabled = state.config.enabled;
+        state.temperature = state.config.temp_init;
+        state.peak_temperature = state.temperature;
+        state.sum_temperature = 0.0;
+        state.samples = 0;
+    }
+}
+
+Real Simulator::thermal_scale_factor(std::size_t device_index) const {
+    if (!options_.thermal.enable ||
+        options_.thermal.policy == ThermalCouplingPolicy::LossOnly ||
+        device_index >= thermal_states_.size()) {
+        return 1.0;
+    }
+
+    const auto& state = thermal_states_[device_index];
+    if (!state.enabled) {
+        return 1.0;
+    }
+
+    Real scale = 1.0 + state.config.alpha * (state.temperature - state.config.temp_ref);
+    return std::max<Real>(0.05, scale);
 }
 
 DCAnalysisResult Simulator::dc_operating_point() {
@@ -382,6 +441,11 @@ void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
 
     const auto& devices = circuit_.devices();
     const auto& conns = circuit_.connections();
+    if (last_device_power_.size() != devices.size()) {
+        last_device_power_.assign(devices.size(), 0.0);
+    } else {
+        std::fill(last_device_power_.begin(), last_device_power_.end(), 0.0);
+    }
 
     for (std::size_t i = 0; i < devices.size(); ++i) {
         const auto& conn = conns[i];
@@ -466,11 +530,49 @@ void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
             }
         }, devices[i]);
 
+        p_cond *= thermal_scale_factor(i);
+        last_device_power_[i] = std::max<Real>(0.0, p_cond);
+
         if (p_cond > 0.0) {
             auto& state = loss_states_[i];
             state.accumulator.add_sample(p_cond, dt);
             state.peak_power = std::max(state.peak_power, p_cond);
         }
+    }
+}
+
+void Simulator::update_thermal_state(Real dt) {
+    if (!options_.thermal.enable || dt <= 0.0) {
+        return;
+    }
+
+    if (thermal_states_.size() != last_device_power_.size()) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < thermal_states_.size(); ++i) {
+        auto& state = thermal_states_[i];
+        if (!state.enabled) {
+            continue;
+        }
+
+        const Real power = std::max<Real>(0.0, last_device_power_[i]);
+        const Real ambient = options_.thermal.ambient;
+        const Real rth = std::max<Real>(state.config.rth, 1e-12);
+        const Real cth = state.config.cth;
+
+        if (cth <= 0.0) {
+            state.temperature = ambient + power * rth;
+        } else {
+            const Real tau = std::max<Real>(rth * cth, 1e-12);
+            const Real delta = state.temperature - ambient;
+            const Real delta_dot = (power * rth - delta) / tau;
+            state.temperature = ambient + delta + dt * delta_dot;
+        }
+
+        state.peak_temperature = std::max(state.peak_temperature, state.temperature);
+        state.sum_temperature += state.temperature;
+        state.samples += 1;
     }
 }
 
@@ -517,6 +619,40 @@ void Simulator::finalize_loss_summary(SimulationResult& result) {
 
     summary.compute_totals();
     result.loss_summary = summary;
+}
+
+void Simulator::finalize_thermal_summary(SimulationResult& result) {
+    ThermalSummary summary;
+    summary.enabled = options_.thermal.enable;
+    summary.ambient = options_.thermal.ambient;
+    summary.max_temperature = options_.thermal.ambient;
+
+    if (!options_.thermal.enable) {
+        result.thermal_summary = summary;
+        return;
+    }
+
+    const auto& conns = circuit_.connections();
+    for (std::size_t i = 0; i < thermal_states_.size() && i < conns.size(); ++i) {
+        const auto& state = thermal_states_[i];
+        if (!state.enabled) {
+            continue;
+        }
+
+        DeviceThermalTelemetry telemetry;
+        telemetry.device_name = conns[i].name;
+        telemetry.enabled = true;
+        telemetry.final_temperature = state.temperature;
+        telemetry.peak_temperature = state.peak_temperature;
+        telemetry.average_temperature =
+            (state.samples > 0) ? (state.sum_temperature / static_cast<Real>(state.samples))
+                                : state.temperature;
+
+        summary.max_temperature = std::max(summary.max_temperature, telemetry.peak_temperature);
+        summary.device_temperatures.push_back(std::move(telemetry));
+    }
+
+    result.thermal_summary = std::move(summary);
 }
 
 SimulationResult Simulator::run_transient(SimulationCallback callback,
@@ -762,6 +898,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         }
 
         accumulate_conduction_losses(step_result.solution, dt_used);
+        update_thermal_state(dt_used);
 
         t += dt_used;
         x = step_result.solution;
@@ -800,6 +937,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
     }
 
     finalize_loss_summary(result);
+    finalize_thermal_summary(result);
 
     result.linear_solver_telemetry = newton_solver_.linear_solver().telemetry();
 
