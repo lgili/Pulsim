@@ -5,7 +5,7 @@
 - [x] G.3 Periodic scenarios (shooting/HB) execute via Python runtime path.
 - [x] G.4 Telemetry is sourced from structured simulation results.
 - [x] G.5 Benchmark docs no longer depend on `build/cli/pulsim` instructions.
-- [ ] G.6 CLI path is removed only after all Python validation gates are green.
+- [x] G.6 CLI path removed after Python-first validation gates and regressions completed.
 
 ## Phase 1: Binding Surface
 
@@ -44,7 +44,7 @@
 
 ## Phase 6: Final CLI Removal (Post-Python Validation)
 
-- [ ] 6.1 Confirm Phases 1-5 completed and Python validation gates are all green.
-- [ ] 6.2 Remove `--pulsim-cli` argument and CLI discovery/dispatch code from benchmark runners.
-- [ ] 6.3 Remove benchmark documentation references to CLI-based execution fallback.
-- [ ] 6.4 Run full benchmark + matrix + ngspice smoke regression after CLI path removal.
+- [x] 6.1 Confirm Phases 1-5 completed and Python validation gates are all green.
+- [x] 6.2 Remove `--pulsim-cli` argument and CLI discovery/dispatch code from benchmark runners.
+- [x] 6.3 Remove benchmark documentation references to CLI-based execution fallback.
+- [x] 6.4 Run full benchmark + matrix + ngspice smoke regression after CLI path removal.

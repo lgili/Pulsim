@@ -607,12 +607,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Compare Pulsim and ngspice using equivalent circuits")
     parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/ngspice_out"))
-    parser.add_argument(
-        "--pulsim-cli",
-        type=Path,
-        default=None,
-        help="Deprecated: ignored. ngspice comparator uses Python runtime bindings for Pulsim.",
-    )
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run (manifest mode)")
     parser.add_argument("--matrix", action="store_true", help="Run all scenarios from manifest")
     parser.add_argument("--scenario", type=str, default=None, help="Run only one scenario name")
@@ -625,9 +619,6 @@ def main() -> int:
         raise SystemExit("PyYAML is required. Install with: pip install pyyaml")
     if not check_ngspice():
         raise SystemExit("ngspice not found. Install it before running this comparison.")
-
-    if args.pulsim_cli is not None:
-        print("Warning: --pulsim-cli is deprecated and ignored. Using Python runtime backend.")
 
     if args.pulsim_netlist is not None or args.spice_netlist is not None:
         if args.pulsim_netlist is None or args.spice_netlist is None:

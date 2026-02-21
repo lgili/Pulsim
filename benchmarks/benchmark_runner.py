@@ -544,12 +544,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run Pulsim benchmark suite")
     parser.add_argument("--benchmarks", type=Path, default=Path(__file__).with_name("benchmarks.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/out"))
-    parser.add_argument(
-        "--pulsim-cli",
-        type=Path,
-        default=None,
-        help="Deprecated: ignored. Benchmark runner now uses Python runtime bindings only.",
-    )
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run")
     parser.add_argument("--matrix", action="store_true", help="Run full validation matrix")
     parser.add_argument("--generate-baselines", action="store_true", help="Generate missing reference baselines")
@@ -557,9 +551,6 @@ def main() -> int:
 
     if yaml is None:
         raise SystemExit("PyYAML is required. Install with: pip install pyyaml")
-
-    if args.pulsim_cli is not None:
-        print("Warning: --pulsim-cli is deprecated and ignored. Using Python runtime backend.")
 
     if not can_use_pulsim_python_backend():
         raise SystemExit(
