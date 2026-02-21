@@ -30,7 +30,7 @@ python3 benchmarks/benchmark_ngspice.py \
 ```
 
 Benchmark runners are Python-first and execute through `pulsim` runtime bindings
-(`YamlParser` + `Simulator`). The `--pulsim-cli` flag is deprecated and ignored.
+(`YamlParser` + `Simulator`).
 When a benchmark netlist omits `simulation.adaptive_timestep`, runners default to
 fixed-step mode (`adaptive_timestep: false`) for deterministic comparisons.
 

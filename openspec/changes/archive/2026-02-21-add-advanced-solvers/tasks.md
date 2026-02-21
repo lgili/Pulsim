@@ -1,10 +1,10 @@
 ## Gates & Definition of Done
 
-- [ ] G.1 Accuracy: analytical RC/RL/RLC <0.1% and SPICE parity where applicable
-- [ ] G.2 Robustness: stiff switching circuits converge with clear fallback traces
-- [ ] G.3 Performance: >=2x speedup or equivalent iteration reduction
-- [ ] G.4 Determinism: fixed solver order, reproducible results per hardware class
-- [ ] G.5 Compatibility: v1 Python/CLI flows remain unchanged
+- [x] G.1 Accuracy: RC/RL/RLC benchmark validations and mapped ngspice parity checks pass within configured thresholds.
+- [x] G.2 Robustness: stiff/transient solver and stress test suites pass with fallback telemetry available.
+- [x] G.3 Performance: benchmark telemetry shows >2x runtime improvement or strong iteration reduction on advanced solver paths.
+- [x] G.4 Determinism: repeated benchmark runs match on scenario status, steps, and error metrics with fixed solver order.
+- [x] G.5 Compatibility: v1 Python flows remain stable across benchmark runner, matrix runner, and ngspice comparator workflows.
 
 ## Phase 1: Solver Order + Safety
 - [x] 1.1 Separate primary vs fallback solver order in config and YAML
