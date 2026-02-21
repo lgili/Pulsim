@@ -154,9 +154,9 @@ The remaining error difference vs ngspice is **expected** due to using Backward 
 
 ## Files
 
-- `circuits/rc_step.json` - RC circuit (Pulsim)
-- `circuits/rl_step.json` - RL circuit (Pulsim)
-- `circuits/rlc_step.json` - RLC circuit (Pulsim)
+- `circuits/rc_step.yaml` - RC circuit (Pulsim)
+- `circuits/rl_step.yaml` - RL circuit (Pulsim)
+- `circuits/rlc_step.yaml` - RLC circuit (Pulsim)
 - `ngspice/rc_step.cir` - RC circuit (ngspice)
 - `ngspice/rl_step.cir` - RL circuit (ngspice)
 - `ngspice/rlc_step.cir` - RLC circuit (ngspice)

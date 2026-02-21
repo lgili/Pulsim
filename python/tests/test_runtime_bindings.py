@@ -94,3 +94,43 @@ components:
     parser.load_string(content)
 
     assert any("unknown_field" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_supports_legacy_si_suffix_words() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 2milli
+  dt: 10micro
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12}
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 2kilo
+  - type: resistor
+    name: R2
+    nodes: [out, 0]
+    value: 2K
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1uF
+"""
+
+    parser = ps.YamlParser()
+    circuit, options = parser.load_string(content)
+
+    assert parser.errors == []
+    assert abs(options.tstop - 2e-3) < 1e-12
+    assert abs(options.dt - 10e-6) < 1e-12
+
+    dc = ps.dc_operating_point(circuit)
+    assert dc.success
+    # Divider 2k/2k with Vin=12V -> V(out)=6V
+    assert abs(dc.newton_result.solution[1] - 6.0) < 1e-6

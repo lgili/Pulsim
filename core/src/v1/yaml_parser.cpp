@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <functional>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -54,35 +56,52 @@ void validate_keys(const YAML::Node& node,
 Real parse_real_string(const std::string& raw) {
     if (raw.empty()) return 0.0;
 
-    std::string value = raw;
+    char* end = nullptr;
+    const double base = std::strtod(raw.c_str(), &end);
+    if (end == raw.c_str()) {
+        throw std::invalid_argument("invalid numeric value");
+    }
+
+    std::string suffix = raw.substr(static_cast<std::size_t>(end - raw.c_str()));
+    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!suffix.empty() && is_space(static_cast<unsigned char>(suffix.front()))) {
+        suffix.erase(suffix.begin());
+    }
+    while (!suffix.empty() && is_space(static_cast<unsigned char>(suffix.back()))) {
+        suffix.pop_back();
+    }
+    if (suffix.empty()) return base;
+
+    const std::string lower = to_lower(suffix);
+    auto starts_with = [&](const std::string& prefix) {
+        return lower.rfind(prefix, 0) == 0;
+    };
+
     double multiplier = 1.0;
-
-    // Handle 'meg'
-    if (value.size() >= 3) {
-        std::string last3 = to_lower(value.substr(value.size() - 3));
-        if (last3 == "meg") {
-            multiplier = 1e6;
-            value = value.substr(0, value.size() - 3);
-        }
+    if (starts_with("tera") || starts_with("t")) {
+        multiplier = 1e12;
+    } else if (starts_with("giga") || starts_with("g")) {
+        multiplier = 1e9;
+    } else if (starts_with("mega") || starts_with("meg") ||
+               (!suffix.empty() && suffix.front() == 'M')) {
+        multiplier = 1e6;
+    } else if (starts_with("kilo") || starts_with("k")) {
+        multiplier = 1e3;
+    } else if (starts_with("milli")) {
+        multiplier = 1e-3;
+    } else if (starts_with("micro") || starts_with("u")) {
+        multiplier = 1e-6;
+    } else if (starts_with("nano") || starts_with("n")) {
+        multiplier = 1e-9;
+    } else if (starts_with("pico") || starts_with("p")) {
+        multiplier = 1e-12;
+    } else if (starts_with("femto") || starts_with("f")) {
+        multiplier = 1e-15;
+    } else if (starts_with("m")) {
+        multiplier = 1e-3;
     }
 
-    if (multiplier == 1.0 && !value.empty()) {
-        char last = value.back();
-        char lower = static_cast<char>(std::tolower(last));
-        switch (lower) {
-            case 't': multiplier = 1e12; value.pop_back(); break;
-            case 'g': multiplier = 1e9; value.pop_back(); break;
-            case 'm': multiplier = (last == 'M') ? 1e6 : 1e-3; value.pop_back(); break;
-            case 'k': multiplier = 1e3; value.pop_back(); break;
-            case 'u': multiplier = 1e-6; value.pop_back(); break;
-            case 'n': multiplier = 1e-9; value.pop_back(); break;
-            case 'p': multiplier = 1e-12; value.pop_back(); break;
-            case 'f': multiplier = 1e-15; value.pop_back(); break;
-            default: break;
-        }
-    }
-
-    return std::stod(value) * multiplier;
+    return base * multiplier;
 }
 
 Real parse_real(const YAML::Node& node,

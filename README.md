@@ -18,6 +18,17 @@ High-performance circuit simulator focused on power electronics.
 - **Python bindings** for scripting and GUI integration
 - **GUI integration API** with pause/resume/stop, progress callbacks, and validation
 
+## Supported Runtime Surface
+
+The supported user-facing runtime is the Python package (`pulsim`) backed by the
+v1 kernel. Transitional docs for legacy surfaces remain in the repository and
+are being removed under `refactor-python-only-v1-hardening`.
+
+Baseline docs for this migration:
+- `docs/refactor-python-only-v1-hardening/runtime-surface.md`
+- `docs/refactor-python-only-v1-hardening/legacy-inventory.md`
+- `docs/refactor-python-only-v1-hardening/converter-support-and-parity-catalog.md`
+
 ### High-Performance API
 
 PulsimCore provides 2x+ performance improvement through:

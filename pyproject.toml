@@ -69,9 +69,7 @@ Issues = "https://github.com/pulsim/pulsim-core/issues"
 [tool.scikit-build]
 cmake.args = [
     "-DPULSIM_BUILD_TESTS=OFF",
-    "-DPULSIM_BUILD_CLI=OFF",
     "-DPULSIM_BUILD_PYTHON=ON",
-    "-DPULSIM_BUILD_GRPC=OFF",
 ]
 wheel.packages = ["python/pulsim"]
 editable.mode = "redirect"
