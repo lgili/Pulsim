@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 from pathlib import Path
 
 import yaml
-
-BENCHMARKS_DIR = Path(__file__).resolve().parents[2] / "benchmarks"
-if str(BENCHMARKS_DIR) not in sys.path:
-    sys.path.insert(0, str(BENCHMARKS_DIR))
 
 import benchmark_ngspice as ng
 
