@@ -177,6 +177,90 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
     CHECK_FALSE(result.thermal_summary.device_temperatures.empty());
 }
 
+TEST_CASE("v1 switching topologies auto-enable robust transient defaults", "[v1][robust][autoprofile]") {
+    Circuit circuit;
+
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 24.0);
+
+    PulseParams pwm;
+    pwm.v_initial = 0.0;
+    pwm.v_pulse = 10.0;
+    pwm.t_delay = 0.0;
+    pwm.t_rise = 50e-9;
+    pwm.t_fall = 50e-9;
+    pwm.t_width = 2e-6;
+    pwm.period = 4e-6;
+    circuit.add_pulse_voltage_source("Vctrl", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_out, 5.0, 1.0 / 0.01, 1.0 / 1e6);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 20.0);
+    circuit.add_capacitor("Cout", n_out, Circuit::ground(), 47e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 20e-6;
+    opts.dt = 200e-9;
+
+    Simulator sim(circuit, opts);
+    const auto& tuned = sim.options();
+
+    CHECK(tuned.integrator == Integrator::TRBDF2);
+    CHECK(tuned.adaptive_timestep);
+    CHECK(tuned.enable_bdf_order_control);
+    CHECK(tuned.max_step_retries >= 12);
+    CHECK(tuned.newton_options.max_iterations >= 120);
+    CHECK(tuned.linear_solver.allow_fallback);
+    CHECK(tuned.linear_solver.order.size() >= 2);
+}
+
+TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fallback][recovery]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-3;
+    opts.adaptive_timestep = true;
+    opts.enable_bdf_order_control = false;
+    opts.max_step_retries = 2;
+    opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.enable_transient_gmin = true;
+    opts.fallback_policy.gmin_retry_threshold = 1;
+    opts.fallback_policy.gmin_initial = 1e-8;
+    opts.fallback_policy.gmin_max = 1e-4;
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.fallback_order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = true;
+    opts.linear_solver.auto_select = false;
+    opts.linear_solver.iterative_config.max_iterations = 2;
+    opts.linear_solver.iterative_config.tolerance = 1e-16;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    Vector x0 = Vector::Zero(circuit.system_size());
+    auto result = sim.run_transient(x0);
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.message.find("automatic regularization attempted") != std::string::npos);
+    CHECK(std::any_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                      [](const FallbackTraceEntry& entry) {
+                          return entry.action.find("global_recovery_") != std::string::npos;
+                      }));
+}
+
 TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
     Circuit circuit;
 
