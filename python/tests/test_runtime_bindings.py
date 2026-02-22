@@ -336,6 +336,36 @@ components:
     assert metadata["F1.state"].domain == "events"
 
 
+def test_yaml_parser_registers_relay_dual_contact_controller() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: voltage_source
+    name: Vcoil
+    nodes: [coil_p, coil_n]
+    waveform: {type: dc, value: 12}
+  - type: relay
+    name: K1
+    nodes: [coil_p, coil_n, com, no, nc]
+    pickup_voltage: 8
+    dropout_voltage: 3
+    contact_resistance: 0.05
+    off_resistance: 1e9
+"""
+    parser = ps.YamlParser()
+    circuit, _ = parser.load_string(content)
+    assert parser.errors == []
+    assert "K1" in circuit.virtual_component_names()
+    # Relay is implemented as two electrical switches + one event controller.
+    assert circuit.num_devices() >= 3
+    metadata = circuit.virtual_channel_metadata()
+    assert "K1.state" in metadata
+    assert "K1.no_state" in metadata
+    assert "K1.nc_state" in metadata
+    assert metadata["K1.no_state"].domain == "events"
+
+
 def test_yaml_parser_registers_thyristor_event_controller() -> None:
     content = """
 schema: pulsim-v1
@@ -449,6 +479,47 @@ def test_virtual_channel_metadata_includes_relay_state_channel() -> None:
     assert "K1" in metadata
     assert metadata["K1"].component_type == "relay"
     assert metadata["K1.state"].domain == "events"
+    assert metadata["K1.no_state"].domain == "events"
+    assert metadata["K1.nc_state"].domain == "events"
+
+
+def test_relay_event_controller_drives_no_and_nc_switches() -> None:
+    circuit = ps.Circuit()
+    n_coil_p = circuit.add_node("coil_p")
+    n_coil_n = circuit.add_node("coil_n")
+    n_com = circuit.add_node("com")
+    n_no = circuit.add_node("no")
+    n_nc = circuit.add_node("nc")
+
+    circuit.add_switch("K1__no", n_com, n_no, False, 10.0, 1e-6)
+    circuit.add_switch("K1__nc", n_com, n_nc, True, 10.0, 1e-6)
+    circuit.add_virtual_component(
+        "relay",
+        "K1",
+        [n_coil_p, n_coil_n, n_com, n_no, n_nc],
+        {"pickup_voltage": 6.0, "dropout_voltage": 3.0, "initial_closed": 0.0},
+        {"target_component_no": "K1__no", "target_component_nc": "K1__nc"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_coil_p] = 12.0
+    x[n_coil_n] = 0.0
+    on_step = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert on_step.channel_values["K1.state"] == 1.0
+    assert on_step.channel_values["K1.no_state"] == 1.0
+    assert on_step.channel_values["K1.nc_state"] == 0.0
+    g_on, _ = circuit.assemble_dc()
+    assert g_on[n_com][n_no] < -1.0
+    assert g_on[n_com][n_nc] > -1e-3
+
+    x[n_coil_p] = 0.0
+    off_step = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert off_step.channel_values["K1.state"] == 0.0
+    assert off_step.channel_values["K1.no_state"] == 0.0
+    assert off_step.channel_values["K1.nc_state"] == 1.0
+    g_off, _ = circuit.assemble_dc()
+    assert g_off[n_com][n_nc] < -1.0
+    assert g_off[n_com][n_no] > -1e-3
 
 
 def test_scope_channels_emit_waveforms_with_metadata() -> None:
