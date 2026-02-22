@@ -25,8 +25,8 @@
 
 ## 5. Magnetic and Preconfigured Network Components
 
-- [ ] 5.1 Implement `SATURABLE_INDUCTOR` with current-dependent inductance model.
-- [ ] 5.2 Implement `COUPLED_INDUCTOR` with mutual inductance/coupling coefficient support.
+- [x] 5.1 Implement `SATURABLE_INDUCTOR` with current-dependent inductance model.
+- [x] 5.2 Implement `COUPLED_INDUCTOR` with mutual inductance/coupling coefficient support.
 - [x] 5.3 Implement `SNUBBER_RC` as canonical backend macro model (explicit R-C branch realization).
 
 ## 6. Analog and Control Blocks

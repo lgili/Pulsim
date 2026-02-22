@@ -930,7 +930,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "pickup_current", "dropout_current", "pickup_voltage", "dropout_voltage",
              "contact_resistance", "off_resistance", "target_component_no", "target_component_nc",
              "beta", "vbe_on", "holding_current", "latch_current", "gate_threshold",
-             "saturation_current", "saturation_inductance", "coupling", "k", "l1", "l2",
+             "saturation_current", "saturation_inductance", "saturation_exponent",
+             "coupling", "k", "mutual_inductance", "l1", "l2", "ic1", "ic2", "ic_primary", "ic_secondary",
              "state", "mode", "select_index", "gain", "rail_high", "rail_low",
              "hysteresis", "metadata", "table", "mapping"},
             "component", errors_, options_.strict);
@@ -1334,41 +1335,98 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         else if (type == "saturable_inductor") {
             YAML::Node l_node = get_param("inductance");
             if (!is_set(l_node)) l_node = get_param("value");
-            Real inductance = parse_real(l_node, name + ".inductance", errors_);
+            const Real inductance = parse_real(l_node, name + ".inductance", errors_);
             if (inductance <= 0.0) {
                 push_error(errors_, kDiagInvalidParameter,
                            "inductance must be > 0 for " + name);
                 continue;
             }
+            Real sat_current = get_param("saturation_current")
+                ? parse_real(get_param("saturation_current"), name + ".saturation_current", errors_)
+                : 1.0;
+            if (sat_current <= 0.0) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "saturation_current must be > 0 for " + name);
+                continue;
+            }
+            Real sat_inductance = get_param("saturation_inductance")
+                ? parse_real(get_param("saturation_inductance"), name + ".saturation_inductance", errors_)
+                : (0.2 * inductance);
+            if (sat_inductance <= 0.0 || sat_inductance > inductance) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "saturation_inductance must be in (0, inductance] for " + name);
+                continue;
+            }
             Real ic = 0.0;
             if (get_param("ic")) ic = parse_real(get_param("ic"), name + ".ic", errors_);
             circuit.add_inductor(name, node_at(0), node_at(1), inductance, ic);
-            push_warning(warnings_, kDiagSurrogateComponent,
-                         "Component '" + name + "' (saturable_inductor) mapped to linear inductor surrogate");
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["inductance"] = inductance;
+            numeric_params["saturation_current"] = sat_current;
+            numeric_params["saturation_inductance"] = sat_inductance;
+            if (get_param("saturation_exponent")) {
+                numeric_params["saturation_exponent"] =
+                    parse_real(get_param("saturation_exponent"), name + ".saturation_exponent", errors_);
+            }
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+            push_warning(warnings_, kDiagVirtualComponent,
+                         "Component '" + name + "' (saturable_inductor) registered with nonlinear inductance controller");
         }
         else if (type == "coupled_inductor") {
-            Real turns_ratio = 1.0;
-            const YAML::Node ratio_node = get_param("ratio");
-            const YAML::Node turns_ratio_node = get_param("turns_ratio");
-            const YAML::Node l1_node = get_param("l1");
-            const YAML::Node l2_node = get_param("l2");
-            if (is_set(ratio_node)) {
-                turns_ratio = parse_real(ratio_node, name + ".ratio", errors_);
-            } else if (is_set(turns_ratio_node)) {
-                turns_ratio = parse_real(turns_ratio_node, name + ".turns_ratio", errors_);
-            } else if (is_set(l1_node) && is_set(l2_node)) {
-                Real l1 = parse_real(l1_node, name + ".l1", errors_);
-                Real l2 = parse_real(l2_node, name + ".l2", errors_);
-                if (l1 <= 0.0 || l2 <= 0.0) {
-                    push_error(errors_, kDiagInvalidParameter,
-                               "l1 and l2 must be > 0 for " + name);
-                    continue;
-                }
-                turns_ratio = std::sqrt(l1 / l2);
+            Real l1 = get_param("l1")
+                ? parse_real(get_param("l1"), name + ".l1", errors_)
+                : (get_param("inductance") ? parse_real(get_param("inductance"), name + ".inductance", errors_) : 1e-3);
+            Real l2 = get_param("l2")
+                ? parse_real(get_param("l2"), name + ".l2", errors_)
+                : l1;
+
+            if (l1 <= 0.0 || l2 <= 0.0) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "l1 and l2 must be > 0 for " + name);
+                continue;
             }
-            circuit.add_transformer(name, node_at(0), node_at(1), node_at(2), node_at(3), turns_ratio);
-            push_warning(warnings_, kDiagSurrogateComponent,
-                         "Component '" + name + "' (coupled_inductor) mapped to ideal transformer surrogate");
+
+            Real k = 0.98;
+            if (get_param("coupling")) {
+                k = parse_real(get_param("coupling"), name + ".coupling", errors_);
+            } else if (get_param("k")) {
+                k = parse_real(get_param("k"), name + ".k", errors_);
+            } else if (get_param("mutual_inductance")) {
+                const Real m = parse_real(get_param("mutual_inductance"), name + ".mutual_inductance", errors_);
+                k = m / std::sqrt(l1 * l2);
+            }
+            if (std::abs(k) > 0.999) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "coupling must satisfy |k| <= 0.999 for " + name);
+                continue;
+            }
+
+            Real ic1 = 0.0;
+            Real ic2 = 0.0;
+            if (get_param("ic1")) ic1 = parse_real(get_param("ic1"), name + ".ic1", errors_);
+            else if (get_param("ic_primary")) ic1 = parse_real(get_param("ic_primary"), name + ".ic_primary", errors_);
+            if (get_param("ic2")) ic2 = parse_real(get_param("ic2"), name + ".ic2", errors_);
+            else if (get_param("ic_secondary")) ic2 = parse_real(get_param("ic_secondary"), name + ".ic_secondary", errors_);
+
+            const std::string l1_name = name + "__L1";
+            const std::string l2_name = name + "__L2";
+            circuit.add_inductor(l1_name, node_at(0), node_at(1), l1, ic1);
+            circuit.add_inductor(l2_name, node_at(2), node_at(3), l2, ic2);
+
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["l1"] = l1;
+            numeric_params["l2"] = l2;
+            numeric_params["coupling"] = k;
+            numeric_params["k"] = k;
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component_1"] = l1_name;
+            metadata["target_component_2"] = l2_name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+
+            push_warning(warnings_, kDiagVirtualComponent,
+                         "Component '" + name + "' (coupled_inductor) expanded to coupled inductor pair");
         }
         else if (virtual_component_types().contains(type)) {
             std::unordered_map<std::string, Real> numeric_params;
