@@ -1,45 +1,80 @@
-# PulsimCore Documentation
+# PulsimCore
 
 <div class="pulsim-hero">
-  <h1>PulsimCore</h1>
-  <p>Simulação de eletrônica de potência com runtime <strong>Python-first</strong>.</p>
-  <p>Uso suportado: <code>import pulsim</code> + netlists YAML <code>pulsim-v1</code>.</p>
-</div>
-
-## O que você encontra aqui
-
-<div class="pulsim-grid">
-  <div class="pulsim-card">
-    <strong>Getting Started</strong><br>
-    Build, primeiro circuito e primeiro resultado.
-  </div>
-  <div class="pulsim-card">
-    <strong>API + Configuração</strong><br>
-    Classes Python, integradores, solver stack, térmico e fallback.
-  </div>
-  <div class="pulsim-card">
-    <strong>Exemplos + Resultados</strong><br>
-    Conversores, benchmark, paridade com SPICE e stress tiers.
-  </div>
-  <div class="pulsim-card">
-    <strong>Versões</strong><br>
-    Cada release tag gera uma versão navegável da documentação.
+  <h1>PulsimCore Documentation</h1>
+  <p>Simulação de eletrônica de potência com foco em <strong>Python-first runtime</strong>, netlists YAML e validação contra ferramentas de referência.</p>
+  <p>API suportada: <code>import pulsim</code> + schema <code>pulsim-v1</code>.</p>
+  <div class="pulsim-hero-actions">
+    <a class="md-button md-button--primary" href="getting-started/">Começar agora</a>
+    <a class="md-button" href="python-api/">API Python</a>
+    <a class="md-button" href="versioning-and-release/">Versionamento</a>
   </div>
 </div>
 
-## Fluxo recomendado
+## Trilha recomendada
 
-1. Faça build local das bindings Python.
-2. Carregue YAML com `YamlParser`.
-3. Execute `Simulator(...).run_transient(...)`.
-4. Valide com benchmark/paridade/stress suite.
+<div class="grid cards" markdown>
 
-## Navegação
+- :material-rocket-launch-outline: **Primeiro contato**
 
-Use o menu superior para:
+  ---
 
-- começar rapidamente;
-- configurar simulações robustas;
-- consultar API e formato YAML;
-- comparar resultados com `ngspice`/`LTspice`;
-- selecionar versões antigas da documentação.
+  Build local, primeiro circuito e primeiro `run_transient`.
+
+  [Getting Started](getting-started.md)
+
+- :material-sine-wave: **Simulação de conversores**
+
+  ---
+
+  Buck/Boost/Flyback/Forward, malha fechada e tuning de controle.
+
+  [Notebooks](notebooks.md)
+
+- :material-memory: **Solver + convergência**
+
+  ---
+
+  Estratégias de fallback, robustez numérica e tuning de timestep.
+
+  [Convergence Tuning](convergence-tuning-guide.md)
+
+- :material-file-code-outline: **YAML e componentes**
+
+  ---
+
+  Formato de netlist, componentes avançados e paridade GUI/backend.
+
+  [Netlist YAML](netlist-format.md)
+
+- :material-chart-line: **Validação e benchmark**
+
+  ---
+
+  Métricas de precisão/performance e comparação com LTspice/ngspice.
+
+  [Benchmarks and Parity](benchmarks-and-parity.md)
+
+- :material-history: **Docs por versão**
+
+  ---
+
+  Cada tag `vX.Y.Z` gera documentação versionada com histórico preservado.
+
+  [Versionamento e Release](versioning-and-release.md)
+
+</div>
+
+## Quick start (2 comandos)
+
+```bash
+cmake -S . -B build -G Ninja -DPULSIM_BUILD_PYTHON=ON
+PYTHONPATH=build/python python3 -c "import pulsim; print(pulsim.__version__)"
+```
+
+## O que esta documentação cobre
+
+- API Python completa (configuração de solver, integração, análise e callbacks).
+- Fluxo YAML `pulsim-v1` com componentes elétricos, térmicos e mixed-domain.
+- Exemplos reproduzíveis com notebooks para projeto e validação.
+- Diretrizes de release para manter docs por versão no GitHub Pages.
