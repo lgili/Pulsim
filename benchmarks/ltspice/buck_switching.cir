@@ -1,0 +1,18 @@
+* Pulsim benchmark parity: buck_switching
+
+Vdc vcc 0 24
+Vpwm ctrl 0 PULSE(0 10 0 50n 50n 4u 10u)
+
+S1 vcc sw ctrl 0 SWMOD
+D1 0 sw DFREE
+Rdcr sw n_l 20m
+L1 n_l out 47u
+C1 out 0 100u
+Rload out 0 10
+
+.model SWMOD SW(Ron=0.005 Roff=1e6 Vt=5 Vh=0.1)
+.model DFREE D(Is=1e-15 N=1 Rs=1m)
+
+.tran 0.2u 350u 0 0.2u
+.save V(out)
+.end

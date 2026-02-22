@@ -1,0 +1,19 @@
+* Pulsim benchmark parity: buck_mosfet_nonlinear
+
+Vdc vin 0 24
+Vgate gate 0 PULSE(0 35 0 40n 40n 4.5u 12.5u)
+
+M1 vin gate sw sw NM1
+D1 0 sw DFREE
+Rdcr sw n_l 20m
+L1 n_l out 220u
+C1 out 0 220u
+Rload out 0 8
+Rbleed_sw sw 0 1e6
+
+.model NM1 NMOS(VTO=3 KP=0.2 LAMBDA=0.01)
+.model DFREE D(Is=1e-15 N=1 Rs=1m)
+
+.tran 0.2u 500u 0 0.2u
+.save V(out)
+.end

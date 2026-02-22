@@ -1,0 +1,35 @@
+* Pulsim benchmark parity: interleaved_buck_3ph
+
+Vdc vin 0 48
+Vpwm_a ctrl_a 0 PULSE(0 10 0 40n 40n 2.8u 10u)
+Vpwm_b ctrl_b 0 PULSE(0 10 3.333333u 40n 40n 2.8u 10u)
+Vpwm_c ctrl_c 0 PULSE(0 10 6.666667u 40n 40n 2.8u 10u)
+
+S_a vin sw_a ctrl_a 0 SWMOD
+S_b vin sw_b ctrl_b 0 SWMOD
+S_c vin sw_c ctrl_c 0 SWMOD
+
+D_a 0 sw_a DFREE
+D_b 0 sw_b DFREE
+D_c 0 sw_c DFREE
+
+Rdcr_a sw_a n_la 15m
+Rdcr_b sw_b n_lb 15m
+Rdcr_c sw_c n_lc 15m
+
+L_a n_la out 330u
+L_b n_lb out 330u
+L_c n_lc out 330u
+
+Cout out 0 470u
+Rload out 0 4
+Rsnub_a sw_a 0 1e6
+Rsnub_b sw_b 0 1e6
+Rsnub_c sw_c 0 1e6
+
+.model SWMOD SW(Ron=0.005 Roff=1e6 Vt=5 Vh=0.1)
+.model DFREE D(Is=1e-15 N=1 Rs=1m)
+
+.tran 0.2u 450u 0 0.2u
+.save V(out)
+.end

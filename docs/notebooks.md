@@ -15,6 +15,7 @@ Depois abra, por exemplo:
 - `examples/notebooks/02_buck_converter.ipynb`
 - `examples/notebooks/03_thermal_modeling.ipynb`
 - `examples/notebooks/forward_converter_design.ipynb`
+- `examples/notebooks/18_buck_mosfet_pwm_block.ipynb`
 - `examples/notebooks/10_benchmarks.ipynb`
 - `examples/notebooks/15_new_components_catalog.ipynb`
 - `examples/notebooks/16_control_blocks_mixed_domain.ipynb`
@@ -26,6 +27,7 @@ Depois abra, por exemplo:
 - `15_new_components_catalog.ipynb`: valida o parser com todos os componentes novos.
 - `16_control_blocks_mixed_domain.ipynb`: exemplos de blocos de controle e roteamento de sinais.
 - `17_protection_magnetics_probes.ipynb`: eventos de protecao/chaveamento, magneticos e probes.
+- `18_buck_mosfet_pwm_block.ipynb`: buck com MOSFET no estagio de potencia e `pwm_generator` comandando duty.
 
 ## Executar em modo não interativo (CI/local)
 

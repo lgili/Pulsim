@@ -7,6 +7,21 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
   --output-dir benchmarks/out
 ```
 
+## Casos complexos de conversores (foco em convergencia)
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only buck_switching boost_switching_complex interleaved_buck_3ph buck_mosfet_nonlinear \
+  --output-dir benchmarks/out_converters
+```
+
+Atalhos no Makefile:
+
+```bash
+make benchmark-converters BUILD_DIR=build
+make benchmark BUILD_DIR=build LTSPICE_EXE=/Applications/LTspice.app/Contents/MacOS/LTspice
+```
+
 ## Matriz de cenários (variações de solver/integrador)
 
 ```bash

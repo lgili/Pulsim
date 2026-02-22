@@ -1,0 +1,19 @@
+* Pulsim benchmark parity: boost_switching_complex
+
+Vdc in 0 24
+Vpwm ctrl 0 PULSE(0 10 0 50n 50n 5.8u 10u)
+
+S1 in sw ctrl 0 SWMOD
+Rdcr in n_l 30m
+L1 n_l sw 120u
+D1 sw out DFREE
+C1 out 0 220u
+Rload out 0 80
+Rbleed_sw sw 0 1e6
+
+.model SWMOD SW(Ron=0.005 Roff=1e6 Vt=5 Vh=0.1)
+.model DFREE D(Is=1e-15 N=1 Rs=1m)
+
+.tran 0.2u 700u 0 0.2u
+.save V(out)
+.end

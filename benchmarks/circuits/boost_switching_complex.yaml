@@ -1,22 +1,22 @@
 schema: pulsim-v1
 version: 1
 benchmark:
-  id: buck_switching
+  id: boost_switching_complex
   category: switching
   observables:
     - column: V(out)
   expectations:
     metrics:
-      max_error: 1e-1
+      max_error: 8e-2
   validation:
     type: reference
     observable: V(out)
-    baseline: baselines/buck_switching.csv
+    baseline: baselines/boost_switching_complex.csv
 simulation:
   tstart: 0.0
-  tstop: 350e-6
+  tstop: 700e-6
   dt: 0.2e-6
-  dt_max: 1e-6
+  dt_max: 0.8e-6
   adaptive_timestep: false
   integrator: bdf1
   enable_events: false
@@ -36,10 +36,11 @@ simulation:
 components:
   - type: voltage_source
     name: Vdc
-    nodes: [vcc, 0]
+    nodes: [in, 0]
     waveform:
       type: dc
       value: 24.0
+
   - type: voltage_source
     name: Vpwm
     nodes: [ctrl, 0]
@@ -47,33 +48,43 @@ components:
       type: pwm
       v_high: 10.0
       v_low: 0.0
-      frequency: 50000
-      duty: 0.4
-      dead_time: 200e-9
+      frequency: 100000
+      duty: 0.58
+      dead_time: 100e-9
+
   - type: vcswitch
     name: S1
-    nodes: [ctrl, vcc, sw]
+    nodes: [ctrl, in, sw]
     v_threshold: 5.0
     g_on: 200.0
     g_off: 1e-6
-  - type: diode
-    name: D1
-    nodes: [0, sw]
-    g_on: 200.0
-    g_off: 1e-6
+
   - type: resistor
     name: Rdcr
-    nodes: [sw, n_l]
-    value: 20m
+    nodes: [in, n_l]
+    value: 30m
   - type: inductor
     name: L1
-    nodes: [n_l, out]
-    value: 47u
+    nodes: [n_l, sw]
+    value: 120u
+
+  - type: diode
+    name: D1
+    nodes: [sw, out]
+    g_on: 200.0
+    g_off: 1e-6
+
   - type: capacitor
     name: C1
     nodes: [out, 0]
-    value: 100u
+    value: 220u
+
   - type: resistor
     name: Rload
     nodes: [out, 0]
-    value: 10
+    value: 80
+
+  - type: resistor
+    name: Rbleed_sw
+    nodes: [sw, 0]
+    value: 1e6

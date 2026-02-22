@@ -1,28 +1,28 @@
 schema: pulsim-v1
 version: 1
 benchmark:
-  id: buck_switching
-  category: switching
+  id: buck_mosfet_nonlinear
+  category: nonlinear
   observables:
     - column: V(out)
   expectations:
     metrics:
-      max_error: 1e-1
+      max_error: 1.0e-1
   validation:
     type: reference
     observable: V(out)
-    baseline: baselines/buck_switching.csv
+    baseline: baselines/buck_mosfet_nonlinear.csv
 simulation:
   tstart: 0.0
-  tstop: 350e-6
+  tstop: 500e-6
   dt: 0.2e-6
-  dt_max: 1e-6
+  dt_max: 0.8e-6
   adaptive_timestep: false
   integrator: bdf1
   enable_events: false
   max_step_retries: 8
   newton:
-    max_iterations: 220
+    max_iterations: 260
     initial_damping: 0.5
     min_damping: 1e-4
     auto_damping: true
@@ -36,31 +36,36 @@ simulation:
 components:
   - type: voltage_source
     name: Vdc
-    nodes: [vcc, 0]
+    nodes: [vin, 0]
     waveform:
       type: dc
       value: 24.0
+
   - type: voltage_source
-    name: Vpwm
-    nodes: [ctrl, 0]
+    name: Vgate
+    nodes: [gate, 0]
     waveform:
       type: pwm
-      v_high: 10.0
+      v_high: 35.0
       v_low: 0.0
-      frequency: 50000
-      duty: 0.4
-      dead_time: 200e-9
-  - type: vcswitch
-    name: S1
-    nodes: [ctrl, vcc, sw]
-    v_threshold: 5.0
-    g_on: 200.0
-    g_off: 1e-6
+      frequency: 80000
+      duty: 0.36
+      dead_time: 80e-9
+
+  - type: mosfet
+    name: M1
+    nodes: [gate, vin, sw]
+    vth: 3.0
+    kp: 0.20
+    lambda: 0.01
+    g_off: 1e-8
+
   - type: diode
     name: D1
     nodes: [0, sw]
-    g_on: 200.0
+    g_on: 150.0
     g_off: 1e-6
+
   - type: resistor
     name: Rdcr
     nodes: [sw, n_l]
@@ -68,12 +73,19 @@ components:
   - type: inductor
     name: L1
     nodes: [n_l, out]
-    value: 47u
+    value: 220u
+
   - type: capacitor
     name: C1
     nodes: [out, 0]
-    value: 100u
+    value: 220u
+
   - type: resistor
     name: Rload
     nodes: [out, 0]
-    value: 10
+    value: 8.0
+
+  - type: resistor
+    name: Rbleed_sw
+    nodes: [sw, 0]
+    value: 1e6

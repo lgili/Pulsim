@@ -88,6 +88,14 @@ PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/nul
 PYTEST := $(PYTHON) -m pytest
 RUFF := $(shell command -v ruff 2>/dev/null || echo "$(PYTHON) -m ruff")
 
+# Benchmark helpers
+BENCHMARKS_FILE ?= benchmarks/benchmarks.yaml
+BENCHMARK_OUT ?= benchmarks/out_converters
+LTSPICE_OUT ?= benchmarks/ltspice_out_converters
+LTSPICE_EXE ?= /Applications/LTspice.app/Contents/MacOS/LTspice
+CONVERTER_BENCH_IDS ?= buck_switching boost_switching_complex interleaved_buck_3ph buck_mosfet_nonlinear
+BENCHMARK_TABLE_TITLE ?= Converters: Runtime vs LTspice
+
 # =============================================================================
 # PHONY Targets
 # =============================================================================
@@ -95,6 +103,7 @@ RUFF := $(shell command -v ruff 2>/dev/null || echo "$(PYTHON) -m ruff")
         lib cli grpc python \
         test test-quick test-converters test-verbose test-list \
         pytest test-all test-coverage \
+        benchmark benchmark-converters benchmark-converters-baselines benchmark-ltspice benchmark-converters-compare benchmark-table \
         clean distclean \
         install uninstall \
         format format-cpp format-python format-check \
@@ -135,6 +144,14 @@ help:
 	@echo "  make test-all       Run all tests (C++ and Python)"
 	@echo "  make test-coverage  Run tests with coverage"
 	@echo ""
+	@echo "Benchmark targets:"
+	@echo "  make benchmark                      Run converter runtime + LTspice parity and print table"
+	@echo "  make benchmark-converters           Run complex converter benchmarks (runtime only)"
+	@echo "  make benchmark-converters-baselines Run converter benchmarks and regenerate baselines"
+	@echo "  make benchmark-ltspice              Run LTspice parity for converter benchmarks"
+	@echo "  make benchmark-converters-compare   Run runtime + LTspice parity and print one table"
+	@echo "  make benchmark-table                Print table from existing benchmark outputs"
+	@echo ""
 	@echo "Install targets:"
 	@echo "  make install        Install to $(PREFIX)"
 	@echo "  make uninstall      Uninstall from $(PREFIX)"
@@ -171,12 +188,14 @@ help:
 	@echo "  JOBS         Parallel jobs (current: $(JOBS))"
 	@echo "  PREFIX       Install prefix (current: $(PREFIX))"
 	@echo "  TOOLCHAIN    Toolchain: clang (current: $(or $(TOOLCHAIN),default))"
+	@echo "  LTSPICE_EXE  LTspice executable path (current: $(LTSPICE_EXE))"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make BUILD_TYPE=Release                    # Release build"
 	@echo "  make TOOLCHAIN=clang                       # Use Clang toolchain"
 	@echo "  make test JOBS=4                           # Run tests with 4 parallel jobs"
 	@echo "  make run ARGS='run examples/rc_circuit.json'"
+	@echo "  make benchmark-converters-compare LTSPICE_EXE=/Applications/LTspice.app/Contents/MacOS/LTspice"
 	@echo ""
 
 # =============================================================================
@@ -270,6 +289,87 @@ test-coverage:
 	@echo "Running tests..."
 	$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure
 	@echo "Coverage data generated. Use gcov/lcov to generate reports."
+
+# =============================================================================
+# Benchmark Targets
+# =============================================================================
+benchmark: benchmark-converters-compare
+
+benchmark-converters: python
+	@echo "Running converter benchmarks (runtime only)..."
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+		--benchmarks $(BENCHMARKS_FILE) \
+		--only $(CONVERTER_BENCH_IDS) \
+		--output-dir $(BENCHMARK_OUT)
+	@$(PYTHON) scripts/benchmark_table.py \
+		--runtime $(BENCHMARK_OUT)/results.json \
+		--title "Converter Benchmarks (Runtime)"
+
+benchmark-converters-baselines: python
+	@echo "Running converter benchmarks and generating missing baselines..."
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+		--benchmarks $(BENCHMARKS_FILE) \
+		--only $(CONVERTER_BENCH_IDS) \
+		--output-dir $(BENCHMARK_OUT) \
+		--generate-baselines
+	@$(PYTHON) scripts/benchmark_table.py \
+		--runtime $(BENCHMARK_OUT)/results.json \
+		--title "Converter Benchmarks (Runtime + Baselines)"
+
+benchmark-ltspice: python
+	@echo "Running LTspice parity for converter benchmarks..."
+	@if [ ! -x "$(LTSPICE_EXE)" ]; then \
+		echo "LTspice executable not found: $(LTSPICE_EXE)"; \
+		echo "Use: make benchmark-ltspice LTSPICE_EXE=/path/to/LTspice"; \
+		exit 1; \
+	fi
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_ngspice.py \
+		--benchmarks $(BENCHMARKS_FILE) \
+		--backend ltspice \
+		--ltspice-exe "$(LTSPICE_EXE)" \
+		--only $(CONVERTER_BENCH_IDS) \
+		--output-dir $(LTSPICE_OUT)
+	@$(PYTHON) scripts/benchmark_table.py \
+		--parity $(LTSPICE_OUT)/parity_results.json \
+		--title "Converter Parity (LTspice)"
+
+benchmark-converters-compare: python
+	@echo "Running runtime benchmarks + LTspice parity and printing combined table..."
+	@if [ ! -x "$(LTSPICE_EXE)" ]; then \
+		echo "LTspice executable not found: $(LTSPICE_EXE)"; \
+		echo "Use: make benchmark-converters-compare LTSPICE_EXE=/path/to/LTspice"; \
+		exit 1; \
+	fi
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_runner.py \
+		--benchmarks $(BENCHMARKS_FILE) \
+		--only $(CONVERTER_BENCH_IDS) \
+		--output-dir $(BENCHMARK_OUT)
+	@PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/benchmark_ngspice.py \
+		--benchmarks $(BENCHMARKS_FILE) \
+		--backend ltspice \
+		--ltspice-exe "$(LTSPICE_EXE)" \
+		--only $(CONVERTER_BENCH_IDS) \
+		--output-dir $(LTSPICE_OUT)
+	@$(PYTHON) scripts/benchmark_table.py \
+		--runtime $(BENCHMARK_OUT)/results.json \
+		--parity $(LTSPICE_OUT)/parity_results.json \
+		--title "$(BENCHMARK_TABLE_TITLE)"
+
+benchmark-table:
+	@echo "Rendering benchmark table from existing outputs..."
+	@runtime_file="$(BENCHMARK_OUT)/results.json"; \
+	parity_file="$(LTSPICE_OUT)/parity_results.json"; \
+	if [ -f "$$runtime_file" ] && [ -f "$$parity_file" ]; then \
+		$(PYTHON) scripts/benchmark_table.py --runtime "$$runtime_file" --parity "$$parity_file" --title "$(BENCHMARK_TABLE_TITLE)"; \
+	elif [ -f "$$runtime_file" ]; then \
+		$(PYTHON) scripts/benchmark_table.py --runtime "$$runtime_file" --title "Converter Benchmarks (Runtime)"; \
+	elif [ -f "$$parity_file" ]; then \
+		$(PYTHON) scripts/benchmark_table.py --parity "$$parity_file" --title "Converter Parity (LTspice)"; \
+	else \
+		echo "No benchmark outputs found."; \
+		echo "Run: make benchmark-converters or make benchmark-converters-compare"; \
+		exit 1; \
+	fi
 
 # =============================================================================
 # Install/Uninstall

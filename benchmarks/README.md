@@ -93,3 +93,27 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
 7. Optional validation window controls:
    - `benchmark.validation.ignore_initial_samples`: ignore N leading samples.
    - `benchmark.validation.start_time`: compare only from a minimum time.
+
+## Converter stress cases included
+
+The suite now includes larger converter-focused regression cases:
+
+- `buck_switching` (surrogate switch + freewheel diode + LC output stage)
+- `boost_switching_complex` (boost stage with switched inductor and output filter)
+- `interleaved_buck_3ph` (3-phase interleaved buck)
+- `buck_mosfet_nonlinear` (nonlinear MOSFET-based buck)
+
+Run only these converter cases:
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only buck_switching boost_switching_complex interleaved_buck_3ph buck_mosfet_nonlinear \
+  --output-dir benchmarks/out_converters
+```
+
+Or use the Make targets (includes terminal summary table):
+
+```bash
+make benchmark-converters BUILD_DIR=build
+make benchmark BUILD_DIR=build LTSPICE_EXE=/Applications/LTspice.app/Contents/MacOS/LTspice
+```

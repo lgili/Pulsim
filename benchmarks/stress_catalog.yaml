@@ -28,6 +28,8 @@ tiers:
         scenarios: [direct_trap]
       - benchmark_id: periodic_rc_pwm
         scenarios: [direct_trap, shooting_default, harmonic_balance]
+      - benchmark_id: buck_switching
+        scenarios: [direct_trap, trbdf2]
   tier_c:
     description: Large and stiff converter-focused cases
     criteria:
@@ -38,3 +40,9 @@ tiers:
     cases:
       - benchmark_id: stiff_rlc
         scenarios: [trbdf2, rosenbrockw]
+      - benchmark_id: boost_switching_complex
+        scenarios: [direct_trap, trbdf2]
+      - benchmark_id: interleaved_buck_3ph
+        scenarios: [direct_trap, trbdf2]
+      - benchmark_id: buck_mosfet_nonlinear
+        scenarios: [trbdf2]
