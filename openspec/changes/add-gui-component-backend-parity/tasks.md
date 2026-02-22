@@ -40,7 +40,7 @@
 
 - [x] 7.1 Implement virtual probe models: `VOLTAGE_PROBE`, `CURRENT_PROBE`, `POWER_PROBE`.
 - [x] 7.2 Implement scope-channel models: `ELECTRICAL_SCOPE`, `THERMAL_SCOPE` (channel metadata + extracted waveforms).
-- [ ] 7.3 Implement routing blocks: `SIGNAL_MUX`, `SIGNAL_DEMUX` with deterministic channel mapping.
+- [x] 7.3 Implement routing blocks: `SIGNAL_MUX`, `SIGNAL_DEMUX` with deterministic channel mapping.
 
 ## 8. YAML and Python APIs
 
