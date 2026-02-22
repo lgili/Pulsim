@@ -5,12 +5,18 @@ As docs são publicadas por versão usando tags Git e `mike`.
 ## Como publicar uma nova versão
 
 1. Atualize código e docs no branch principal.
-2. Crie tag sem o prefixo da branch, no formato `vX.Y.Z`.
-3. Faça push da tag.
+2. Atualize a versão em todos os arquivos gerenciados:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+python scripts/update_version.py 0.3.4
+```
+
+3. Crie tag no formato `vX.Y.Z`.
+4. Faça push da tag.
+
+```bash
+git tag v0.3.4
+git push origin v0.3.4
 ```
 
 ## O que o pipeline faz

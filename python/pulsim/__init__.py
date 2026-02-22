@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.3.3"
+__version__ = "0.4.0"
 
 import weakref
 from typing import Tuple
