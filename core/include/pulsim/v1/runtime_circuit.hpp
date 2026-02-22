@@ -55,6 +55,16 @@ struct DeviceConnection {
     Index branch_index_2 = -1; // For devices with two branch currents (Transformer)
 };
 
+/// Non-electrical components tracked by the mixed-domain runtime graph.
+/// These nodes do not stamp MNA matrices directly.
+struct VirtualComponent {
+    std::string type;  // Canonical type id (e.g. "voltage_probe")
+    std::string name;
+    std::vector<Index> nodes;
+    std::unordered_map<std::string, Real> numeric_params;
+    std::unordered_map<std::string, std::string> metadata;
+};
+
 // =============================================================================
 // Runtime Circuit Class
 // =============================================================================
@@ -324,6 +334,12 @@ public:
         connections_.push_back({name, {n1, n2}, -1});
     }
 
+    /// Add RC snubber branch (R and C in parallel across the same two nodes).
+    void add_snubber_rc(const std::string& name, Index n1, Index n2, Real R, Real C, Real ic = 0.0) {
+        add_resistor(name + "__R", n1, n2, R);
+        add_capacitor(name + "__C", n1, n2, C, ic);
+    }
+
     void add_inductor(const std::string& name, Index n1, Index n2, Real L, Real ic = 0.0) {
         Index br = num_nodes() + num_branches_;
         devices_.emplace_back(Inductor(L, ic, name));
@@ -398,6 +414,94 @@ public:
 
     /// Number of devices
     [[nodiscard]] std::size_t num_devices() const { return devices_.size(); }
+
+    /// Register a virtual (non-stamping) component in the runtime graph.
+    void add_virtual_component(
+        const std::string& type,
+        const std::string& name,
+        std::vector<Index> nodes,
+        std::unordered_map<std::string, Real> numeric_params = {},
+        std::unordered_map<std::string, std::string> metadata = {}) {
+        virtual_components_.push_back(
+            VirtualComponent{type, name, std::move(nodes), std::move(numeric_params), std::move(metadata)});
+    }
+
+    /// Number of virtual components
+    [[nodiscard]] std::size_t num_virtual_components() const { return virtual_components_.size(); }
+
+    /// Access all virtual components
+    [[nodiscard]] const std::vector<VirtualComponent>& virtual_components() const {
+        return virtual_components_;
+    }
+
+    /// Convenience list of virtual component names.
+    [[nodiscard]] std::vector<std::string> virtual_component_names() const {
+        std::vector<std::string> names;
+        names.reserve(virtual_components_.size());
+        for (const auto& component : virtual_components_) {
+            names.push_back(component.name);
+        }
+        return names;
+    }
+
+    /// Evaluate available probe-style virtual signals for a given state vector.
+    /// Unsupported virtual types are ignored by design.
+    [[nodiscard]] std::unordered_map<std::string, Real> evaluate_virtual_signals(const Vector& x) const {
+        std::unordered_map<std::string, Real> values;
+        values.reserve(virtual_components_.size());
+
+        auto node_voltage = [&](Index node) -> Real {
+            if (node < 0 || node >= system_size()) {
+                return 0.0;
+            }
+            return x[node];
+        };
+
+        auto find_connection = [&](const std::string& name) -> const DeviceConnection* {
+            for (const auto& conn : connections_) {
+                if (conn.name == name) {
+                    return &conn;
+                }
+            }
+            return nullptr;
+        };
+
+        auto branch_current = [&](const DeviceConnection* conn) -> Real {
+            if (!conn || conn->branch_index < 0 || conn->branch_index >= system_size()) {
+                return 0.0;
+            }
+            return x[conn->branch_index];
+        };
+
+        for (const auto& component : virtual_components_) {
+            if (component.type == "voltage_probe") {
+                if (component.nodes.size() < 2) continue;
+                values[component.name] = node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]);
+                continue;
+            }
+
+            if (component.type == "current_probe") {
+                const auto target_it = component.metadata.find("target_component");
+                if (target_it == component.metadata.end()) continue;
+                values[component.name] = branch_current(find_connection(target_it->second));
+                continue;
+            }
+
+            if (component.type == "power_probe") {
+                if (component.nodes.size() < 2) continue;
+                const Real voltage = node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]);
+                Real current = 0.0;
+                const auto target_it = component.metadata.find("target_component");
+                if (target_it != component.metadata.end()) {
+                    current = branch_current(find_connection(target_it->second));
+                }
+                values[component.name] = voltage * current;
+                continue;
+            }
+        }
+
+        return values;
+    }
 
     /// Clamp overly-ideal nonlinear parameters for better numerical robustness.
     /// This is intended for fallback use when a transient repeatedly fails.
@@ -1069,6 +1173,7 @@ private:
     }
 
     std::vector<DeviceVariant> devices_;
+    std::vector<VirtualComponent> virtual_components_;
     std::vector<DeviceConnection> connections_;
     std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index> node_map_;

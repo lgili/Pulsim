@@ -265,6 +265,64 @@ components:
     assert abs(options.fallback_policy.gmin_growth - 5.0) < 1e-12
 
 
+def test_yaml_parser_gui_parity_slice_registers_virtual_components() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12}
+  - type: BJT_PNP
+    name: QP1
+    nodes: [ctrl, in, out]
+    beta: 80
+  - type: THYRISTOR
+    name: SCR1
+    nodes: [gate, out, 0]
+  - type: FUSE
+    name: F1
+    nodes: [out, load]
+    initial_state: true
+  - type: RELAY
+    name: K1
+    nodes: [coil_p, coil_n, com, no, nc]
+  - type: OP_AMP
+    name: A1
+    nodes: [ref, fb, ctrl]
+  - type: VOLTAGE_PROBE
+    name: VP1
+    nodes: [out, 0]
+"""
+    parser = ps.YamlParser()
+    circuit, _ = parser.load_string(content)
+    assert parser.errors == []
+    assert circuit.num_devices() >= 4
+    assert circuit.num_virtual_components() >= 3
+    assert any("PULSIM_YAML_W_COMPONENT_SURROGATE" in msg for msg in parser.warnings)
+    assert any("PULSIM_YAML_W_COMPONENT_VIRTUAL" in msg for msg in parser.warnings)
+
+
+def test_virtual_probe_evaluation_from_state_vector() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_virtual_component("voltage_probe", "VP", [n_in, gnd], {}, {})
+    circuit.add_virtual_component("current_probe", "IP", [n_in, gnd], {}, {"target_component": "V1"})
+    circuit.add_virtual_component("power_probe", "PP", [n_in, gnd], {}, {"target_component": "V1"})
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 8.0
+    x[circuit.num_nodes()] = 0.5
+
+    values = circuit.evaluate_virtual_signals(x)
+    assert values["VP"] == 8.0
+    assert values["IP"] == 0.5
+    assert values["PP"] == 4.0
+
+
 def test_fallback_trace_records_retry_reasons() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")

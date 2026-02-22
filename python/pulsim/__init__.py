@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.3"
 
 import weakref
 from typing import Tuple
@@ -58,6 +58,7 @@ from ._pulsim import (
 
     # Circuit Builder
     Circuit,
+    VirtualComponent,
 
     # DC Solver
     solve_dc,
@@ -441,6 +442,7 @@ __all__ = [
 
     # Circuit Builder
     "Circuit",
+    "VirtualComponent",
 
     # DC Solver
     "solve_dc",

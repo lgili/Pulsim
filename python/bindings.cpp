@@ -422,6 +422,15 @@ void init_v2_module(py::module_& v2) {
         .def("__call__", &LookupTable1D::operator(), py::arg("x"))
         .def("interpolate", &LookupTable1D::interpolate, py::arg("x"));
 
+    py::class_<VirtualComponent>(v2, "VirtualComponent",
+        "Non-stamping runtime component descriptor")
+        .def(py::init<>())
+        .def_readwrite("type", &VirtualComponent::type)
+        .def_readwrite("name", &VirtualComponent::name)
+        .def_readwrite("nodes", &VirtualComponent::nodes)
+        .def_readwrite("numeric_params", &VirtualComponent::numeric_params)
+        .def_readwrite("metadata", &VirtualComponent::metadata);
+
     // =========================================================================
     // Runtime Circuit Builder (Phase 3)
     // =========================================================================
@@ -457,6 +466,10 @@ void init_v2_module(py::module_& v2) {
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("C"),
              py::arg("ic") = 0.0,
              "Add capacitor between nodes n1 and n2")
+        .def("add_snubber_rc", &Circuit::add_snubber_rc,
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
+             py::arg("C"), py::arg("ic") = 0.0,
+             "Add RC snubber (parallel R-C) between nodes n1 and n2")
         .def("add_inductor", &Circuit::add_inductor,
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("L"),
              py::arg("ic") = 0.0,
@@ -541,6 +554,19 @@ void init_v2_module(py::module_& v2) {
         // State
         .def("num_devices", &Circuit::num_devices,
              "Number of devices in circuit")
+        .def("add_virtual_component", &Circuit::add_virtual_component,
+             py::arg("type"), py::arg("name"), py::arg("nodes"),
+             py::arg("numeric_params") = std::unordered_map<std::string, Real>{},
+             py::arg("metadata") = std::unordered_map<std::string, std::string>{},
+             "Add mixed-domain virtual component (control/instrumentation/routing)")
+        .def("num_virtual_components", &Circuit::num_virtual_components,
+             "Number of virtual components in circuit")
+        .def("virtual_components", &Circuit::virtual_components,
+             "Get virtual component descriptors")
+        .def("virtual_component_names", &Circuit::virtual_component_names,
+             "Get virtual component names")
+        .def("evaluate_virtual_signals", &Circuit::evaluate_virtual_signals, py::arg("x"),
+             "Evaluate probe-style virtual signals for a state vector")
         .def("apply_numerical_regularization", &Circuit::apply_numerical_regularization,
              py::arg("mosfet_kp_max") = 8.0,
              py::arg("mosfet_g_off_min") = 1e-7,
