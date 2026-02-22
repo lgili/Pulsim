@@ -51,10 +51,10 @@
 
 ## 9. Validation and Benchmarking
 
-- [ ] 9.1 Add one smoke circuit per newly supported component type.
-- [ ] 9.2 Add behavioral reference tests per component family (switching, magnetic, control, protection, instrumentation).
-- [ ] 9.3 Add regression gate ensuring no GUI-declared component type returns “unsupported component type” in supported mode.
-- [ ] 9.4 Add performance checks for mixed-domain execution overhead.
+- [x] 9.1 Add one smoke circuit per newly supported component type.
+- [x] 9.2 Add behavioral reference tests per component family (switching, magnetic, control, protection, instrumentation).
+- [x] 9.3 Add regression gate ensuring no GUI-declared component type returns “unsupported component type” in supported mode.
+- [x] 9.4 Add performance checks for mixed-domain execution overhead.
 
 ## 10. Finalization
 

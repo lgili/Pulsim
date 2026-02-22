@@ -934,7 +934,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "coupling", "k", "mutual_inductance", "l1", "l2", "ic1", "ic2", "ic_primary", "ic_secondary",
              "state", "mode", "select_index", "gain", "open_loop_gain", "offset",
              "kp", "ki", "kd", "threshold", "high", "low",
-             "duty", "duty_min", "duty_max", "duty_from_input", "duty_gain", "duty_offset",
+             "frequency", "duty", "duty_min", "duty_max", "duty_from_input", "duty_gain", "duty_offset",
              "alpha", "anti_windup", "min", "max", "output_min", "output_max",
              "rising_rate", "falling_rate",
              "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping"},
