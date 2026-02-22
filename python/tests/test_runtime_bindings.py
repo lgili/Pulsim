@@ -420,6 +420,36 @@ def test_scope_channels_emit_waveforms_with_metadata() -> None:
     assert result.virtual_channel_metadata["SCOPE_T"].domain == "thermal"
 
 
+def test_signal_mux_demux_mapping_is_deterministic() -> None:
+    circuit = ps.Circuit()
+    n_a = circuit.add_node("a")
+    n_b = circuit.add_node("b")
+    n_c = circuit.add_node("c")
+    circuit.add_virtual_component(
+        "signal_mux",
+        "MUX1",
+        [n_a, n_b, n_c],
+        {"select_index": 1.0},
+        {},
+    )
+    circuit.add_virtual_component(
+        "signal_demux",
+        "DMX1",
+        [n_c, n_a, n_b],
+        {},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_a] = 2.0
+    x[n_b] = 5.0
+    x[n_c] = -1.0
+
+    step = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert step.channel_values["MUX1"] == 5.0
+    assert step.channel_values["DMX1"] == -1.0
+
+
 def test_fallback_trace_records_retry_reasons() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
