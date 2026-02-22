@@ -31,10 +31,10 @@
 
 ## 6. Analog and Control Blocks
 
-- [ ] 6.1 Implement `OP_AMP` and `COMPARATOR` behavioral models including output saturation and comparator hysteresis.
-- [ ] 6.2 Implement control-law blocks: `PI_CONTROLLER`, `PID_CONTROLLER`, `MATH_BLOCK`, `PWM_GENERATOR`.
-- [ ] 6.3 Implement signal-processing blocks: `INTEGRATOR`, `DIFFERENTIATOR`, `LIMITER`, `RATE_LIMITER`, `HYSTERESIS`.
-- [ ] 6.4 Implement advanced blocks: `LOOKUP_TABLE`, `TRANSFER_FUNCTION`, `DELAY_BLOCK`, `SAMPLE_HOLD`, `STATE_MACHINE`.
+- [x] 6.1 Implement `OP_AMP` and `COMPARATOR` behavioral models including output saturation and comparator hysteresis.
+- [x] 6.2 Implement control-law blocks: `PI_CONTROLLER`, `PID_CONTROLLER`, `MATH_BLOCK`, `PWM_GENERATOR`.
+- [x] 6.3 Implement signal-processing blocks: `INTEGRATOR`, `DIFFERENTIATOR`, `LIMITER`, `RATE_LIMITER`, `HYSTERESIS`.
+- [x] 6.4 Implement advanced blocks: `LOOKUP_TABLE`, `TRANSFER_FUNCTION`, `DELAY_BLOCK`, `SAMPLE_HOLD`, `STATE_MACHINE`.
 
 ## 7. Instrumentation and Signal Routing
 

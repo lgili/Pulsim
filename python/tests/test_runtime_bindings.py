@@ -528,6 +528,404 @@ def test_virtual_channel_metadata_includes_relay_state_channel() -> None:
     assert metadata["K1.nc_state"].domain == "events"
 
 
+def test_op_amp_saturates_to_output_rails() -> None:
+    circuit = ps.Circuit()
+    n_pos = circuit.add_node("v_plus")
+    n_neg = circuit.add_node("v_minus")
+    n_out = circuit.add_node("v_out")
+    circuit.add_virtual_component(
+        "op_amp",
+        "A1",
+        [n_pos, n_neg, n_out],
+        {"open_loop_gain": 1e5, "rail_low": -2.0, "rail_high": 2.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_pos] = 1.0
+    high = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert high.channel_values["A1"] == 2.0
+
+    x[n_pos] = -1.0
+    low = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert low.channel_values["A1"] == -2.0
+
+
+def test_comparator_hysteresis_is_stateful() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "comparator",
+        "CMP1",
+        [n_in, n_ref],
+        {"threshold": 0.0, "hysteresis": 2.0, "high": 5.0, "low": 0.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 0.8
+    below_upper = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert below_upper.channel_values["CMP1"] == 0.0
+
+    x[n_in] = 1.2
+    above_upper = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert above_upper.channel_values["CMP1"] == 5.0
+
+    x[n_in] = 0.4
+    hold_high = circuit.execute_mixed_domain_step(x, 3e-6)
+    assert hold_high.channel_values["CMP1"] == 5.0
+
+    x[n_in] = -1.2
+    below_lower = circuit.execute_mixed_domain_step(x, 4e-6)
+    assert below_lower.channel_values["CMP1"] == 0.0
+
+
+def test_pi_controller_anti_windup_recovers_faster_than_unclamped_integrator() -> None:
+    circuit = ps.Circuit()
+    n_err = circuit.add_node("err")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI_AW",
+        [n_err, n_ref],
+        {
+            "kp": 0.0,
+            "ki": 1.0,
+            "output_min": -1.0,
+            "output_max": 1.0,
+            "anti_windup": 1.0,
+        },
+        {},
+    )
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI_NO_AW",
+        [n_err, n_ref],
+        {
+            "kp": 0.0,
+            "ki": 1.0,
+            "output_min": -1.0,
+            "output_max": 1.0,
+            "anti_windup": 0.0,
+        },
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_err] = 2.0
+    circuit.execute_mixed_domain_step(x, 0.0)
+    circuit.execute_mixed_domain_step(x, 1.0)
+    circuit.execute_mixed_domain_step(x, 2.0)
+
+    x[n_err] = -2.0
+    recovery = circuit.execute_mixed_domain_step(x, 3.0)
+    assert recovery.channel_values["PI_AW"] <= 0.0
+    assert recovery.channel_values["PI_NO_AW"] > 0.0
+
+
+def test_pid_controller_uses_error_derivative() -> None:
+    circuit = ps.Circuit()
+    n_err = circuit.add_node("err")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "pid_controller",
+        "PID1",
+        [n_err, n_ref],
+        {"kp": 0.0, "ki": 0.0, "kd": 1.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_err] = 0.0
+    first = circuit.execute_mixed_domain_step(x, 0.0)
+    assert first.channel_values["PID1"] == 0.0
+
+    x[n_err] = 1.0
+    second = circuit.execute_mixed_domain_step(x, 1.0)
+    assert abs(second.channel_values["PID1"] - 1.0) < 1e-12
+
+    x[n_err] = 3.0
+    third = circuit.execute_mixed_domain_step(x, 2.0)
+    assert abs(third.channel_values["PID1"] - 2.0) < 1e-12
+
+
+def test_math_block_operations_and_divide_by_zero_behavior() -> None:
+    circuit = ps.Circuit()
+    n_a = circuit.add_node("a")
+    n_b = circuit.add_node("b")
+    circuit.add_virtual_component("math_block", "M_ADD", [n_a, n_b], {}, {"operation": "add"})
+    circuit.add_virtual_component("math_block", "M_SUB", [n_a, n_b], {}, {"operation": "sub"})
+    circuit.add_virtual_component("math_block", "M_MUL", [n_a, n_b], {}, {"operation": "mul"})
+    circuit.add_virtual_component("math_block", "M_DIV", [n_a, n_b], {}, {"operation": "div"})
+
+    x = [0.0] * circuit.system_size()
+    x[n_a] = 6.0
+    x[n_b] = 2.0
+    step = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert step.channel_values["M_ADD"] == 8.0
+    assert step.channel_values["M_SUB"] == 4.0
+    assert step.channel_values["M_MUL"] == 12.0
+    assert step.channel_values["M_DIV"] == 3.0
+
+    x[n_b] = 0.0
+    div_zero = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert div_zero.channel_values["M_DIV"] == 0.0
+
+
+def test_pwm_generator_supports_input_driven_duty_with_limits() -> None:
+    circuit = ps.Circuit()
+    n_ctrl = circuit.add_node("ctrl")
+    circuit.add_virtual_component(
+        "pwm_generator",
+        "PWM1",
+        [n_ctrl],
+        {
+            "frequency": 1.0,
+            "duty_from_input": 1.0,
+            "duty_gain": 0.5,
+            "duty_offset": 0.1,
+            "duty_min": 0.2,
+            "duty_max": 0.8,
+        },
+        {},
+    )
+
+    metadata = circuit.virtual_channel_metadata()
+    assert "PWM1.duty" in metadata
+    assert metadata["PWM1.duty"].domain == "control"
+
+    x = [0.0] * circuit.system_size()
+    x[n_ctrl] = 2.0
+    high_duty = circuit.execute_mixed_domain_step(x, 0.25)
+    assert abs(high_duty.channel_values["PWM1.duty"] - 0.8) < 1e-12
+    assert high_duty.channel_values["PWM1"] == 1.0
+
+    x[n_ctrl] = -2.0
+    low_duty = circuit.execute_mixed_domain_step(x, 0.75)
+    assert abs(low_duty.channel_values["PWM1.duty"] - 0.2) < 1e-12
+    assert low_duty.channel_values["PWM1"] == 0.0
+
+
+def test_integrator_respects_output_limits() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "integrator",
+        "INT1",
+        [n_in, n_ref],
+        {"output_min": -1.0, "output_max": 1.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 2.0
+    circuit.execute_mixed_domain_step(x, 0.0)
+    step1 = circuit.execute_mixed_domain_step(x, 1.0)
+    step2 = circuit.execute_mixed_domain_step(x, 2.0)
+    assert step1.channel_values["INT1"] == 1.0
+    assert step2.channel_values["INT1"] == 1.0
+
+
+def test_differentiator_alpha_filter_smooths_output() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "differentiator",
+        "D1",
+        [n_in, n_ref],
+        {"alpha": 0.5},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 0.0
+    circuit.execute_mixed_domain_step(x, 0.0)
+
+    x[n_in] = 10.0
+    step_up = circuit.execute_mixed_domain_step(x, 1.0)
+    assert abs(step_up.channel_values["D1"] - 5.0) < 1e-12
+
+    hold = circuit.execute_mixed_domain_step(x, 2.0)
+    assert abs(hold.channel_values["D1"] - 2.5) < 1e-12
+
+
+def test_rate_limiter_caps_rising_and_falling_edges() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "rate_limiter",
+        "RL1",
+        [n_in, n_ref],
+        {"rising_rate": 1.0, "falling_rate": 2.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    circuit.execute_mixed_domain_step(x, 0.0)
+
+    x[n_in] = 10.0
+    rise = circuit.execute_mixed_domain_step(x, 1.0)
+    assert rise.channel_values["RL1"] == 1.0
+
+    x[n_in] = -10.0
+    fall = circuit.execute_mixed_domain_step(x, 2.0)
+    assert fall.channel_values["RL1"] == -1.0
+
+
+def test_hysteresis_block_uses_high_low_states() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "hysteresis",
+        "HYS1",
+        [n_in, n_ref],
+        {"threshold": 0.0, "hysteresis": 1.0, "high": 3.0, "low": -1.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 0.3
+    below_upper = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert below_upper.channel_values["HYS1"] == -1.0
+
+    x[n_in] = 0.6
+    above_upper = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert above_upper.channel_values["HYS1"] == 3.0
+
+    x[n_in] = -0.6
+    below_lower = circuit.execute_mixed_domain_step(x, 3e-6)
+    assert below_lower.channel_values["HYS1"] == -1.0
+
+
+def test_lookup_table_performs_linear_interpolation() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "lookup_table",
+        "LUT1",
+        [n_in, n_ref],
+        {},
+        {"x": "[0, 1, 2]", "y": "[0, 10, 20]"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 0.5
+    mid = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert abs(mid.channel_values["LUT1"] - 5.0) < 1e-12
+
+    x[n_in] = 1.5
+    high = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert abs(high.channel_values["LUT1"] - 15.0) < 1e-12
+
+
+def test_transfer_function_supports_num_den_coefficients() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "transfer_function",
+        "TF1",
+        [n_in, n_ref],
+        {},
+        {"num": "[0.5, 0.5]", "den": "[1.0, -0.5]"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 1.0
+    first = circuit.execute_mixed_domain_step(x, 0.0)
+    assert abs(first.channel_values["TF1"] - 0.5) < 1e-12
+
+    second = circuit.execute_mixed_domain_step(x, 1.0)
+    assert abs(second.channel_values["TF1"] - 1.25) < 1e-12
+
+
+def test_delay_block_outputs_time_shifted_signal() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "delay_block",
+        "DL1",
+        [n_in, n_ref],
+        {"delay": 1.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 1.0
+    t0 = circuit.execute_mixed_domain_step(x, 0.0)
+    assert t0.channel_values["DL1"] == 1.0
+
+    x[n_in] = 3.0
+    t05 = circuit.execute_mixed_domain_step(x, 0.5)
+    assert t05.channel_values["DL1"] == 1.0
+
+    x[n_in] = 5.0
+    t15 = circuit.execute_mixed_domain_step(x, 1.5)
+    assert abs(t15.channel_values["DL1"] - 3.0) < 1e-12
+
+
+def test_sample_hold_updates_only_at_sample_period() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_ref = circuit.add_node("ref")
+    circuit.add_virtual_component(
+        "sample_hold",
+        "SH1",
+        [n_in, n_ref],
+        {"sample_period": 1.0},
+        {},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 0.0
+    t0 = circuit.execute_mixed_domain_step(x, 0.0)
+    assert t0.channel_values["SH1"] == 0.0
+
+    x[n_in] = 5.0
+    t04 = circuit.execute_mixed_domain_step(x, 0.4)
+    assert t04.channel_values["SH1"] == 0.0
+
+    t11 = circuit.execute_mixed_domain_step(x, 1.1)
+    assert t11.channel_values["SH1"] == 5.0
+
+    x[n_in] = -2.0
+    t16 = circuit.execute_mixed_domain_step(x, 1.6)
+    assert t16.channel_values["SH1"] == 5.0
+
+
+def test_state_machine_supports_set_reset_mode() -> None:
+    circuit = ps.Circuit()
+    n_set = circuit.add_node("set")
+    n_reset = circuit.add_node("reset")
+    circuit.add_virtual_component(
+        "state_machine",
+        "SM1",
+        [n_set, n_reset],
+        {"threshold": 0.5, "high": 10.0, "low": -10.0},
+        {"mode": "set_reset"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    base = circuit.execute_mixed_domain_step(x, 0.0)
+    assert base.channel_values["SM1"] == -10.0
+
+    x[n_set] = 1.0
+    set_state = circuit.execute_mixed_domain_step(x, 1.0)
+    assert set_state.channel_values["SM1"] == 10.0
+
+    x[n_set] = 0.0
+    x[n_reset] = 1.0
+    reset_state = circuit.execute_mixed_domain_step(x, 2.0)
+    assert reset_state.channel_values["SM1"] == -10.0
+
+
 def test_relay_event_controller_drives_no_and_nc_switches() -> None:
     circuit = ps.Circuit()
     n_coil_p = circuit.add_node("coil_p")
@@ -830,6 +1228,135 @@ def test_coupled_inductor_adds_mutual_terms_to_jacobian() -> None:
     assert abs(j[br2][br1]) > 1e-6
     assert abs(f[br1]) > 1e-9
     assert abs(f[br2]) > 1e-9
+
+
+def test_yaml_parser_rejects_invalid_control_block_parameters() -> None:
+    invalid_op_amp = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: op_amp
+    name: A1
+    nodes: [vp, vn, out]
+    rail_low: 5
+    rail_high: 2
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_op_amp)
+    assert any("rail_low must be < rail_high" in msg for msg in parser.errors)
+
+    invalid_pwm = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: pwm_generator
+    name: PWM1
+    nodes: [ctrl]
+    frequency: 10k
+    duty_min: 0.9
+    duty_max: 0.2
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_pwm)
+    assert any("duty_min/duty_max must satisfy" in msg for msg in parser.errors)
+
+    invalid_math = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: math_block
+    name: M1
+    nodes: [a, b]
+    operation: xor
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_math)
+    assert any("operation must be add/sub/mul/div" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_rejects_invalid_signal_processing_block_parameters() -> None:
+    invalid_limiter = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: limiter
+    name: LIM1
+    nodes: [a, b]
+    min: 5
+    max: 1
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_limiter)
+    assert any("min must be <= max" in msg for msg in parser.errors)
+
+    invalid_differentiator = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: differentiator
+    name: D1
+    nodes: [a, b]
+    alpha: 1.5
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_differentiator)
+    assert any("alpha must be in [0, 1]" in msg for msg in parser.errors)
+
+    invalid_rate_limiter = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: rate_limiter
+    name: RL1
+    nodes: [a, b]
+    rising_rate: -10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_rate_limiter)
+    assert any("rising_rate must be >= 0" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_rejects_invalid_advanced_control_block_parameters() -> None:
+    invalid_lookup = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: lookup_table
+    name: LUT1
+    nodes: [in, ref]
+    x: [0, 1]
+    y: [0]
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_lookup)
+    assert any("lookup_table requires x and y arrays" in msg for msg in parser.errors)
+
+    invalid_transfer = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: transfer_function
+    name: TF1
+    nodes: [in, ref]
+    num: [1, 1]
+    den: [0, 1]
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_transfer)
+    assert any("den[0] must be non-zero" in msg for msg in parser.errors)
+
+    invalid_state_machine = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: state_machine
+    name: SM1
+    nodes: [in]
+    mode: random
+"""
+    parser = ps.YamlParser()
+    parser.load_string(invalid_state_machine)
+    assert any("state_machine mode must be" in msg for msg in parser.errors)
 
 
 def test_fallback_trace_records_retry_reasons() -> None:

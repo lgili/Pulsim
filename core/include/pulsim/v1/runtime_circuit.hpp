@@ -12,8 +12,11 @@
 #include "pulsim/v1/solver.hpp"
 #include "pulsim/v1/sources.hpp"
 #include "pulsim/v1/integration.hpp"
+#include <yaml-cpp/yaml.h>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <deque>
 #include <limits>
 #include <variant>
 #include <unordered_map>
@@ -21,6 +24,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 #include <stdexcept>
 
@@ -440,6 +444,12 @@ public:
         std::vector<Index> nodes,
         std::unordered_map<std::string, Real> numeric_params = {},
         std::unordered_map<std::string, std::string> metadata = {}) {
+        lookup_table_cache_.erase(name);
+        transfer_coeff_cache_.erase(name + ":num");
+        transfer_coeff_cache_.erase(name + ":den");
+        transfer_input_history_.erase(name);
+        transfer_output_history_.erase(name);
+        virtual_time_history_.erase(name);
         virtual_components_.push_back(
             VirtualComponent{type, name, std::move(nodes), std::move(numeric_params), std::move(metadata)});
     }
@@ -508,6 +518,10 @@ public:
                 auto event = base;
                 event.domain = "events";
                 metadata.emplace(component.name + ".state", std::move(event));
+            } else if (component.type == "pwm_generator") {
+                auto control = base;
+                control.domain = "control";
+                metadata.emplace(component.name + ".duty", std::move(control));
             } else if (component.type == "saturable_inductor") {
                 auto electrical = base;
                 electrical.domain = "electrical";
@@ -542,6 +556,9 @@ public:
             const auto it = component.numeric_params.find(key);
             return (it != component.numeric_params.end()) ? it->second : fallback;
         };
+        auto has_numeric = [&](const VirtualComponent& component, const std::string& key) {
+            return component.numeric_params.find(key) != component.numeric_params.end();
+        };
 
         auto has_type = [](const std::unordered_set<std::string>& set, const std::string& value) {
             return set.find(value) != set.end();
@@ -571,8 +588,71 @@ public:
                 if (it == virtual_last_time_.end()) return Real{0.0};
                 return std::max<Real>(0.0, time - it->second);
             }();
+            const auto maybe_limit_output = [&](Real value, bool force_rails = false) {
+                bool has_limits = force_rails ||
+                    has_numeric(component, "output_min") || has_numeric(component, "output_max") ||
+                    has_numeric(component, "min") || has_numeric(component, "max") ||
+                    has_numeric(component, "rail_low") || has_numeric(component, "rail_high");
+                if (!has_limits) {
+                    return value;
+                }
 
-            if (component.type == "math_block") {
+                Real lo = force_rails
+                    ? get_numeric(component, "rail_low", -15.0)
+                    : get_numeric(component, "output_min",
+                                  get_numeric(component, "min", get_numeric(component, "rail_low", -1e12)));
+                Real hi = force_rails
+                    ? get_numeric(component, "rail_high", 15.0)
+                    : get_numeric(component, "output_max",
+                                  get_numeric(component, "max", get_numeric(component, "rail_high", 1e12)));
+                if (lo > hi) std::swap(lo, hi);
+                return std::clamp(value, lo, hi);
+            };
+
+            if (component.type == "op_amp") {
+                const Real gain = get_numeric(component, "open_loop_gain",
+                    get_numeric(component, "gain", 1e5));
+                const Real offset = get_numeric(component, "offset", 0.0);
+                output = gain * signal + offset;
+                output = maybe_limit_output(output, true);
+            } else if (component.type == "pi_controller") {
+                const Real kp = get_numeric(component, "kp", get_numeric(component, "gain", 1.0));
+                const Real ki = get_numeric(component, "ki", 0.0);
+                const std::string integral_key = component.name + ".integral";
+                Real integral = virtual_signal_state_[integral_key];
+                integral += signal * dt;
+                output = kp * signal + ki * integral;
+                const Real limited = maybe_limit_output(output);
+                const bool anti_windup = get_numeric(component, "anti_windup", 1.0) > 0.5;
+                if (anti_windup && ki != 0.0 && dt > 0.0 && limited != output) {
+                    integral = (limited - kp * signal) / ki;
+                    output = limited;
+                } else {
+                    output = limited;
+                }
+                virtual_signal_state_[integral_key] = integral;
+            } else if (component.type == "pid_controller") {
+                const Real kp = get_numeric(component, "kp", get_numeric(component, "gain", 1.0));
+                const Real ki = get_numeric(component, "ki", 0.0);
+                const Real kd = get_numeric(component, "kd", 0.0);
+                const std::string integral_key = component.name + ".integral";
+                const std::string prev_error_key = component.name + ".prev_error";
+                Real integral = virtual_signal_state_[integral_key];
+                integral += signal * dt;
+                const Real prev_error = virtual_last_input_[prev_error_key];
+                const Real derivative = (dt > 0.0) ? (signal - prev_error) / dt : 0.0;
+                output = kp * signal + ki * integral + kd * derivative;
+                const Real limited = maybe_limit_output(output);
+                const bool anti_windup = get_numeric(component, "anti_windup", 1.0) > 0.5;
+                if (anti_windup && ki != 0.0 && dt > 0.0 && limited != output) {
+                    integral = (limited - kp * signal - kd * derivative) / ki;
+                    output = limited;
+                } else {
+                    output = limited;
+                }
+                virtual_signal_state_[integral_key] = integral;
+                virtual_last_input_[prev_error_key] = signal;
+            } else if (component.type == "math_block") {
                 const std::string op = [&]() -> std::string {
                     const auto it = component.metadata.find("operation");
                     return it == component.metadata.end() ? "add" : it->second;
@@ -584,14 +664,16 @@ public:
             } else if (component.type == "integrator") {
                 Real integral = virtual_signal_state_[component.name];
                 integral += signal * dt;
-                output = integral;
+                output = maybe_limit_output(integral);
             } else if (component.type == "differentiator") {
                 const Real previous = virtual_last_input_[component.name];
-                output = (dt > 0.0) ? (signal - previous) / dt : 0.0;
+                const Real raw = (dt > 0.0) ? (signal - previous) / dt : 0.0;
+                const Real alpha = std::clamp(get_numeric(component, "alpha", 0.0), 0.0, 1.0);
+                const Real previous_output = virtual_signal_state_[component.name];
+                output = alpha * previous_output + (1.0 - alpha) * raw;
+                output = maybe_limit_output(output);
             } else if (component.type == "limiter") {
-                const Real lo = get_numeric(component, "min", get_numeric(component, "rail_low", 0.0));
-                const Real hi = get_numeric(component, "max", get_numeric(component, "rail_high", 1.0));
-                output = std::clamp(output, lo, hi);
+                output = maybe_limit_output(output);
             } else if (component.type == "rate_limiter") {
                 const Real rise = std::abs(get_numeric(component, "rising_rate", 1e6));
                 const Real fall = std::abs(get_numeric(component, "falling_rate", rise));
@@ -603,6 +685,7 @@ public:
                     if (delta > up) output = previous + up;
                     else if (delta < -down) output = previous - down;
                 }
+                output = maybe_limit_output(output);
             } else if (component.type == "hysteresis" || component.type == "comparator") {
                 const Real threshold = get_numeric(component, "threshold", 0.0);
                 const Real band = std::abs(get_numeric(component, "hysteresis", 0.0));
@@ -614,33 +697,133 @@ public:
                 }
                 virtual_binary_state_[component.name] = state;
                 output = state ? get_numeric(component, "high", 1.0) : get_numeric(component, "low", 0.0);
+            } else if (component.type == "lookup_table") {
+                const auto& samples = lookup_table_samples(component);
+                output = samples.empty()
+                    ? signal
+                    : interpolate_lookup(component, samples, signal);
+                output = maybe_limit_output(output);
             } else if (component.type == "sample_hold") {
                 const Real period = std::max<Real>(get_numeric(component, "sample_period", 0.0), 0.0);
-                const bool first = virtual_last_time_.find(component.name) == virtual_last_time_.end();
-                if (first || period <= 0.0 || dt >= period) {
+                const std::string hold_value_key = component.name + ".held_value";
+                const std::string hold_time_key = component.name + ".held_time";
+                const auto hold_time_it = virtual_signal_state_.find(hold_time_key);
+                const bool first = hold_time_it == virtual_signal_state_.end();
+                if (first || period <= 0.0 || (time - hold_time_it->second) >= period) {
+                    virtual_signal_state_[hold_value_key] = signal;
+                    virtual_signal_state_[hold_time_key] = time;
+                }
+                output = virtual_signal_state_[hold_value_key];
+            } else if (component.type == "delay_block") {
+                const Real delay = std::max<Real>(get_numeric(component, "delay", 0.0), 0.0);
+                auto& history = virtual_time_history_[component.name];
+                if (history.empty() || time >= history.back().first) {
+                    history.emplace_back(time, signal);
+                } else {
+                    history.back() = {time, signal};
+                }
+
+                if (delay <= 0.0) {
                     output = signal;
                 } else {
-                    output = virtual_signal_state_[component.name];
+                    const Real target_time = time - delay;
+                    if (target_time <= history.front().first) {
+                        output = history.front().second;
+                    } else if (target_time >= history.back().first) {
+                        output = history.back().second;
+                    } else {
+                        output = history.back().second;
+                        for (std::size_t i = 1; i < history.size(); ++i) {
+                            const auto& p0 = history[i - 1];
+                            const auto& p1 = history[i];
+                            if (target_time <= p1.first) {
+                                const Real span = std::max<Real>(p1.first - p0.first, 1e-15);
+                                const Real alpha = std::clamp((target_time - p0.first) / span, 0.0, 1.0);
+                                output = p0.second + alpha * (p1.second - p0.second);
+                                break;
+                            }
+                        }
+                    }
+
+                    const Real keep_after = target_time - std::max<Real>(delay, timestep_);
+                    while (history.size() > 2 && history[1].first < keep_after) {
+                        history.pop_front();
+                    }
                 }
-            } else if (component.type == "delay_block") {
-                output = virtual_last_input_[component.name];
             } else if (component.type == "transfer_function") {
-                const Real alpha = std::clamp(get_numeric(component, "alpha", 0.2), 0.0, 1.0);
-                const Real previous = virtual_signal_state_[component.name];
-                output = previous + alpha * (signal - previous);
+                const auto& num = transfer_coefficients(component, "num");
+                const auto& den = transfer_coefficients(component, "den");
+                if (!num.empty() && !den.empty() && std::abs(den.front()) > 1e-15) {
+                    auto& x_hist = transfer_input_history_[component.name];
+                    auto& y_hist = transfer_output_history_[component.name];
+                    x_hist.push_front(signal);
+                    while (x_hist.size() < num.size()) x_hist.push_back(0.0);
+                    while (x_hist.size() > num.size()) x_hist.pop_back();
+
+                    Real y = 0.0;
+                    for (std::size_t i = 0; i < num.size(); ++i) {
+                        y += num[i] * x_hist[i];
+                    }
+                    for (std::size_t i = 1; i < den.size(); ++i) {
+                        const Real y_prev = (i - 1 < y_hist.size()) ? y_hist[i - 1] : 0.0;
+                        y -= den[i] * y_prev;
+                    }
+                    output = maybe_limit_output(y / den.front());
+                    y_hist.push_front(output);
+                    const std::size_t y_limit = den.size() > 1 ? den.size() - 1 : 0;
+                    while (y_hist.size() > y_limit) y_hist.pop_back();
+                } else {
+                    const Real alpha = std::clamp(get_numeric(component, "alpha", 0.2), 0.0, 1.0);
+                    const Real previous = virtual_signal_state_[component.name];
+                    output = previous + alpha * (signal - previous);
+                }
             } else if (component.type == "pwm_generator") {
                 const Real frequency = std::max<Real>(get_numeric(component, "frequency", 1e3), 1.0);
-                const Real duty = std::clamp(get_numeric(component, "duty", 0.5), 0.0, 1.0);
+                Real duty = get_numeric(component, "duty", 0.5);
+                if (get_numeric(component, "duty_from_input", 0.0) > 0.5) {
+                    duty = get_numeric(component, "duty_offset", 0.0) +
+                           get_numeric(component, "duty_gain", 1.0) * in0;
+                }
+                const Real duty_min = std::clamp(get_numeric(component, "duty_min", 0.0), 0.0, 1.0);
+                const Real duty_max = std::clamp(get_numeric(component, "duty_max", 1.0), 0.0, 1.0);
+                if (duty_min <= duty_max) {
+                    duty = std::clamp(duty, duty_min, duty_max);
+                } else {
+                    duty = std::clamp(duty, duty_max, duty_min);
+                }
                 const Real phase = std::fmod(std::max<Real>(0.0, time * frequency), 1.0);
                 output = (phase < duty) ? 1.0 : 0.0;
+                result.channel_values[component.name + ".duty"] = duty;
             } else if (component.type == "state_machine") {
+                std::string mode = "toggle";
+                if (const auto it = component.metadata.find("mode"); it != component.metadata.end()) {
+                    mode = normalize_mode_token(it->second);
+                }
                 bool state = virtual_binary_state_[component.name];
                 const Real trigger = get_numeric(component, "threshold", 0.5);
-                if (signal > trigger) {
-                    state = !state;
+                if (mode == "set_reset" || mode == "sr") {
+                    const Real set_signal = in0;
+                    const Real reset_signal = (component.nodes.size() > 1)
+                        ? node_voltage(component.nodes[1])
+                        : 0.0;
+                    const bool set_active = set_signal > trigger;
+                    const bool reset_active = reset_signal > trigger;
+                    if (set_active && !reset_active) {
+                        state = true;
+                    } else if (reset_active) {
+                        state = false;
+                    }
+                } else if (mode == "level") {
+                    state = signal > trigger;
+                } else {
+                    const Real prev = virtual_last_input_[component.name];
+                    if (prev <= trigger && signal > trigger) {
+                        state = !state;
+                    }
                 }
                 virtual_binary_state_[component.name] = state;
-                output = state ? 1.0 : 0.0;
+                output = state ? get_numeric(component, "high", 1.0)
+                               : get_numeric(component, "low", 0.0);
             } else if (component.type == "signal_mux") {
                 const int select = static_cast<int>(std::llround(get_numeric(component, "select_index", 0.0)));
                 const std::size_t selected = static_cast<std::size_t>(std::max(select, 0));
@@ -1689,6 +1872,191 @@ private:
         return (it == params.end()) ? fallback : it->second;
     }
 
+    [[nodiscard]] static std::string normalize_mode_token(std::string token) {
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+            if (c == '-' || c == ' ') return '_';
+            return static_cast<char>(std::tolower(c));
+        });
+        return token;
+    }
+
+    [[nodiscard]] static std::optional<Real> parse_yaml_real(const YAML::Node& node) {
+        if (!node || node.IsNull()) return std::nullopt;
+        try {
+            return node.as<Real>();
+        } catch (...) {
+            try {
+                return static_cast<Real>(std::stod(node.as<std::string>()));
+            } catch (...) {
+                return std::nullopt;
+            }
+        }
+    }
+
+    [[nodiscard]] static std::vector<Real> parse_yaml_real_sequence(const YAML::Node& node) {
+        std::vector<Real> values;
+        if (!node || node.IsNull()) return values;
+        if (node.IsSequence()) {
+            values.reserve(node.size());
+            for (const auto& item : node) {
+                if (const auto value = parse_yaml_real(item); value.has_value()) {
+                    values.push_back(*value);
+                }
+            }
+        } else if (const auto value = parse_yaml_real(node); value.has_value()) {
+            values.push_back(*value);
+        }
+        return values;
+    }
+
+    [[nodiscard]] static std::vector<std::pair<Real, Real>> normalize_lookup_samples(
+        std::vector<std::pair<Real, Real>> samples) {
+        if (samples.empty()) return samples;
+        std::stable_sort(samples.begin(), samples.end(),
+                         [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+
+        std::vector<std::pair<Real, Real>> merged;
+        merged.reserve(samples.size());
+        for (const auto& sample : samples) {
+            if (!merged.empty() && std::abs(merged.back().first - sample.first) < 1e-15) {
+                merged.back().second = sample.second;
+            } else {
+                merged.push_back(sample);
+            }
+        }
+        return merged;
+    }
+
+    [[nodiscard]] std::vector<std::pair<Real, Real>> parse_lookup_samples(
+        const VirtualComponent& component) const {
+        std::vector<std::pair<Real, Real>> samples;
+
+        auto parse_metadata_node = [&](const std::string& key) -> YAML::Node {
+            const auto it = component.metadata.find(key);
+            if (it == component.metadata.end()) return YAML::Node();
+            try {
+                return YAML::Load(it->second);
+            } catch (...) {
+                return YAML::Node();
+            }
+        };
+
+        const YAML::Node x_node = parse_metadata_node("x");
+        const YAML::Node y_node = parse_metadata_node("y");
+        if (x_node && y_node) {
+            const auto x_vals = parse_yaml_real_sequence(x_node);
+            const auto y_vals = parse_yaml_real_sequence(y_node);
+            const std::size_t n = std::min(x_vals.size(), y_vals.size());
+            samples.reserve(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                samples.emplace_back(x_vals[i], y_vals[i]);
+            }
+        }
+
+        const YAML::Node table_node = parse_metadata_node("table");
+        if (table_node && table_node.IsSequence()) {
+            for (const auto& entry : table_node) {
+                if (entry.IsSequence() && entry.size() >= 2) {
+                    const auto x = parse_yaml_real(entry[0]);
+                    const auto y = parse_yaml_real(entry[1]);
+                    if (x.has_value() && y.has_value()) {
+                        samples.emplace_back(*x, *y);
+                    }
+                } else if (entry.IsMap()) {
+                    const auto x = parse_yaml_real(entry["x"]);
+                    const auto y = parse_yaml_real(entry["y"]);
+                    if (x.has_value() && y.has_value()) {
+                        samples.emplace_back(*x, *y);
+                    }
+                }
+            }
+        }
+
+        const YAML::Node mapping_node = parse_metadata_node("mapping");
+        if (mapping_node && mapping_node.IsMap()) {
+            for (const auto& entry : mapping_node) {
+                const auto x = parse_yaml_real(entry.first);
+                const auto y = parse_yaml_real(entry.second);
+                if (x.has_value() && y.has_value()) {
+                    samples.emplace_back(*x, *y);
+                }
+            }
+        }
+
+        return normalize_lookup_samples(std::move(samples));
+    }
+
+    [[nodiscard]] const std::vector<std::pair<Real, Real>>& lookup_table_samples(
+        const VirtualComponent& component) const {
+        if (const auto it = lookup_table_cache_.find(component.name);
+            it != lookup_table_cache_.end()) {
+            return it->second;
+        }
+        return lookup_table_cache_
+            .emplace(component.name, parse_lookup_samples(component))
+            .first->second;
+    }
+
+    [[nodiscard]] Real interpolate_lookup(
+        const VirtualComponent& component,
+        const std::vector<std::pair<Real, Real>>& samples,
+        Real input) const {
+        if (samples.empty()) return input;
+        if (samples.size() == 1) return samples.front().second;
+        if (input <= samples.front().first) return samples.front().second;
+        if (input >= samples.back().first) return samples.back().second;
+
+        const auto upper = std::lower_bound(
+            samples.begin(), samples.end(), input,
+            [](const std::pair<Real, Real>& sample, Real value) {
+                return sample.first < value;
+            });
+        if (upper == samples.begin()) return upper->second;
+        if (upper == samples.end()) return samples.back().second;
+
+        const auto& p1 = *upper;
+        const auto& p0 = *(upper - 1);
+
+        std::string mode = "linear";
+        if (const auto it = component.metadata.find("mode"); it != component.metadata.end()) {
+            mode = normalize_mode_token(it->second);
+        }
+        if (mode == "hold" || mode == "step") {
+            return p0.second;
+        }
+        if (mode == "nearest") {
+            const Real d0 = std::abs(input - p0.first);
+            const Real d1 = std::abs(input - p1.first);
+            return (d0 <= d1) ? p0.second : p1.second;
+        }
+
+        const Real span = std::max<Real>(p1.first - p0.first, 1e-15);
+        const Real alpha = std::clamp((input - p0.first) / span, 0.0, 1.0);
+        return p0.second + alpha * (p1.second - p0.second);
+    }
+
+    [[nodiscard]] const std::vector<Real>& transfer_coefficients(
+        const VirtualComponent& component,
+        const std::string& key) const {
+        const std::string cache_key = component.name + ":" + key;
+        if (const auto it = transfer_coeff_cache_.find(cache_key);
+            it != transfer_coeff_cache_.end()) {
+            return it->second;
+        }
+
+        std::vector<Real> coeffs;
+        if (const auto it = component.metadata.find(key); it != component.metadata.end()) {
+            try {
+                YAML::Node node = YAML::Load(it->second);
+                coeffs = parse_yaml_real_sequence(node);
+            } catch (...) {
+                coeffs.clear();
+            }
+        }
+
+        return transfer_coeff_cache_.emplace(cache_key, std::move(coeffs)).first->second;
+    }
+
     [[nodiscard]] Real saturable_effective_inductance(
         const VirtualComponent& component,
         Real i_est,
@@ -1876,6 +2244,11 @@ private:
     std::unordered_map<std::string, Real> virtual_last_input_;
     std::unordered_map<std::string, Real> virtual_last_time_;
     std::unordered_map<std::string, bool> virtual_binary_state_;
+    std::unordered_map<std::string, std::deque<std::pair<Real, Real>>> virtual_time_history_;
+    mutable std::unordered_map<std::string, std::vector<std::pair<Real, Real>>> lookup_table_cache_;
+    mutable std::unordered_map<std::string, std::vector<Real>> transfer_coeff_cache_;
+    std::unordered_map<std::string, std::deque<Real>> transfer_input_history_;
+    std::unordered_map<std::string, std::deque<Real>> transfer_output_history_;
     std::vector<DeviceConnection> connections_;
     std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index> node_map_;
