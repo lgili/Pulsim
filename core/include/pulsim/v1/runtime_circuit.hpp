@@ -473,7 +473,10 @@ public:
 
         auto channel_domain = [](const std::string& type) -> std::string {
             if (type == "thermal_scope") return "thermal";
-            if (type == "relay" || type == "fuse" || type == "circuit_breaker") return "events";
+            if (type == "relay" || type == "fuse" || type == "circuit_breaker" ||
+                type == "thyristor" || type == "triac") {
+                return "events";
+            }
             if (type == "voltage_probe" || type == "current_probe" || type == "power_probe" ||
                 type == "electrical_scope") {
                 return "instrumentation";
@@ -490,7 +493,8 @@ public:
             };
             metadata.emplace(component.name, base);
 
-            if (component.type == "relay" || component.type == "fuse" || component.type == "circuit_breaker") {
+            if (component.type == "relay" || component.type == "fuse" || component.type == "circuit_breaker" ||
+                component.type == "thyristor" || component.type == "triac") {
                 auto relay = base;
                 relay.domain = "events";
                 metadata.emplace(component.name + ".state", std::move(relay));
@@ -634,7 +638,8 @@ public:
         // Phase 3: event-driven transitions
         for (const auto& component : virtual_components_) {
             if (component.type != "relay" && component.type != "fuse" &&
-                component.type != "circuit_breaker") {
+                component.type != "circuit_breaker" && component.type != "thyristor" &&
+                component.type != "triac") {
                 continue;
             }
 
@@ -664,7 +669,7 @@ public:
                 } else {
                     if (std::abs(coil) >= pickup) closed = true;
                 }
-            } else {
+            } else if (component.type == "fuse" || component.type == "circuit_breaker") {
                 const Real v_term = (component.nodes.size() > 1)
                     ? (node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]))
                     : 0.0;
@@ -702,6 +707,55 @@ public:
                         closed = false;
                     }
                 }
+            } else {
+                const Real v_main = (component.nodes.size() > 2)
+                    ? (node_voltage(component.nodes[1]) - node_voltage(component.nodes[2]))
+                    : 0.0;
+                const Real v_gate_ref = (component.nodes.size() > 2)
+                    ? node_voltage(component.nodes[2])
+                    : 0.0;
+                const Real v_gate = (component.nodes.size() > 0)
+                    ? (node_voltage(component.nodes[0]) - v_gate_ref)
+                    : 0.0;
+
+                const Real gate_threshold = std::max<Real>(
+                    std::abs(get_numeric(component, "gate_threshold", 1.0)), 1e-3);
+                const Real holding_current = std::max<Real>(
+                    std::abs(get_numeric(component, "holding_current", 0.05)), 1e-6);
+                const Real latch_current = std::max<Real>(
+                    std::abs(get_numeric(component, "latch_current", holding_current * 1.2)),
+                    holding_current);
+                const Real g_on = std::max<Real>(get_numeric(component, "g_on", 1e4), 1.0);
+
+                const bool gate_active = (component.type == "triac")
+                    ? (std::abs(v_gate) >= gate_threshold)
+                    : (v_gate >= gate_threshold);
+                const Real i_abs = std::abs(v_main) * g_on;
+                const Real i_forward = std::max<Real>(v_main, 0.0) * g_on;
+
+                if (closed) {
+                    if (component.type == "thyristor") {
+                        if (v_main <= 0.0 || i_forward < holding_current) {
+                            closed = false;
+                        }
+                    } else {
+                        if (i_abs < holding_current) {
+                            closed = false;
+                        }
+                    }
+                } else if (gate_active) {
+                    if (component.type == "thyristor") {
+                        if (v_main > 0.0 && i_forward >= latch_current) {
+                            closed = true;
+                        }
+                    } else if (i_abs >= latch_current) {
+                        closed = true;
+                    }
+                }
+
+                result.channel_values[component.name + ".trigger"] = gate_active ? 1.0 : 0.0;
+                result.channel_values[component.name + ".i_est"] =
+                    (component.type == "thyristor") ? i_forward : i_abs;
             }
 
             virtual_binary_state_[component.name] = closed;
@@ -800,6 +854,12 @@ public:
         Real igbt_g_on_max = 5e3,
         Real igbt_g_off_min = 1e-9) {
         int changed = 0;
+        constexpr Real switch_g_on_max = 5e5;
+        constexpr Real switch_g_off_min = 1e-9;
+        constexpr Real latch_gate_threshold_min = 1e-3;
+        constexpr Real latch_holding_current_min = 1e-6;
+        constexpr Real latch_g_on_max = 5e5;
+        constexpr Real latch_g_off_min = 1e-9;
 
         for (std::size_t i = 0; i < devices_.size(); ++i) {
             auto& device = devices_[i];
@@ -840,6 +900,49 @@ public:
                 ++changed;
                 continue;
             }
+
+            if (auto* sw = std::get_if<IdealSwitch>(&device)) {
+                const Real g_on = std::clamp(sw->g_on(), 1.0, switch_g_on_max);
+                const Real g_off = std::max(sw->g_off(), switch_g_off_min);
+                if (g_on != sw->g_on() || g_off != sw->g_off()) {
+                    device = IdealSwitch(g_on, g_off, sw->is_closed(), conn.name);
+                    ++changed;
+                }
+                continue;
+            }
+        }
+
+        for (auto& component : virtual_components_) {
+            if (component.type != "thyristor" && component.type != "triac") {
+                continue;
+            }
+
+            auto read_param = [&](const std::string& key, Real fallback) -> Real {
+                const auto it = component.numeric_params.find(key);
+                return (it == component.numeric_params.end()) ? fallback : it->second;
+            };
+            auto write_param = [&](const std::string& key, Real value) {
+                const auto it = component.numeric_params.find(key);
+                if (it == component.numeric_params.end() || it->second != value) {
+                    component.numeric_params[key] = value;
+                    ++changed;
+                }
+            };
+
+            const Real g_on = std::clamp(std::abs(read_param("g_on", 1e4)), 1.0, latch_g_on_max);
+            const Real g_off = std::max(std::abs(read_param("g_off", 1e-9)), latch_g_off_min);
+            const Real gate_threshold = std::max(
+                std::abs(read_param("gate_threshold", 1.0)), latch_gate_threshold_min);
+            const Real holding_current = std::max(
+                std::abs(read_param("holding_current", 0.05)), latch_holding_current_min);
+            const Real latch_current = std::max(
+                std::abs(read_param("latch_current", holding_current * 1.2)), holding_current);
+
+            write_param("g_on", g_on);
+            write_param("g_off", g_off);
+            write_param("gate_threshold", gate_threshold);
+            write_param("holding_current", holding_current);
+            write_param("latch_current", latch_current);
         }
 
         return changed;

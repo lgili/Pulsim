@@ -336,6 +336,32 @@ components:
     assert metadata["F1.state"].domain == "events"
 
 
+def test_yaml_parser_registers_thyristor_event_controller() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: voltage_source
+    name: Vg
+    nodes: [gate, 0]
+    waveform: {type: dc, value: 2}
+  - type: thyristor
+    name: SCR1
+    nodes: [gate, anode, 0]
+    gate_threshold: 1.0
+    holding_current: 0.1
+    latch_current: 0.2
+"""
+    parser = ps.YamlParser()
+    circuit, _ = parser.load_string(content)
+    assert parser.errors == []
+    assert "SCR1" in circuit.virtual_component_names()
+    metadata = circuit.virtual_channel_metadata()
+    assert "SCR1.state" in metadata
+    assert metadata["SCR1.state"].domain == "events"
+    assert any("PULSIM_YAML_W_COMPONENT_SURROGATE" in msg for msg in parser.warnings)
+
+
 def test_virtual_probe_evaluation_from_state_vector() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
@@ -526,6 +552,106 @@ def test_breaker_event_controller_trips_by_time_overcurrent() -> None:
     assert mid.channel_values["B_EVT.state"] == 1.0
     assert end.channel_values["B_EVT.trip_timer"] >= 5e-3
     assert end.channel_values["B_EVT.state"] == 0.0
+
+
+def test_thyristor_latches_and_releases_on_holding_current() -> None:
+    circuit = ps.Circuit()
+    n_gate = circuit.add_node("gate")
+    n_anode = circuit.add_node("anode")
+    n_cathode = circuit.ground()
+    circuit.add_switch("SCR_SW", n_anode, n_cathode, False, 1e3, 1e-9)
+    circuit.add_virtual_component(
+        "thyristor",
+        "SCR_EVT",
+        [n_gate, n_anode, n_cathode],
+        {
+            "gate_threshold": 1.0,
+            "holding_current": 100.0,
+            "latch_current": 500.0,
+            "g_on": 1e3,
+        },
+        {"target_component": "SCR_SW"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_gate] = 2.0
+    x[n_anode] = 1.0  # 1V * 1e3S = 1000A estimated => latches
+    trig = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert trig.channel_values["SCR_EVT.trigger"] == 1.0
+    assert trig.channel_values["SCR_EVT.state"] == 1.0
+
+    x[n_gate] = 0.0
+    keep = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert keep.channel_values["SCR_EVT.state"] == 1.0
+
+    x[n_anode] = 1e-4  # 0.1A estimated => below holding current
+    release = circuit.execute_mixed_domain_step(x, 3e-6)
+    assert release.channel_values["SCR_EVT.state"] == 0.0
+
+
+def test_triac_triggers_both_polarities() -> None:
+    circuit = ps.Circuit()
+    n_gate = circuit.add_node("gate")
+    n_t1 = circuit.add_node("t1")
+    n_t2 = circuit.ground()
+    circuit.add_switch("TRI_SW", n_t1, n_t2, False, 1e3, 1e-9)
+    circuit.add_virtual_component(
+        "triac",
+        "TRI_EVT",
+        [n_gate, n_t1, n_t2],
+        {
+            "gate_threshold": 1.0,
+            "holding_current": 10.0,
+            "latch_current": 100.0,
+            "g_on": 1e3,
+        },
+        {"target_component": "TRI_SW"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_gate] = -2.0
+    x[n_t1] = -1.0  # reverse polarity but should still trigger for triac
+    trig = circuit.execute_mixed_domain_step(x, 1e-6)
+    assert trig.channel_values["TRI_EVT.trigger"] == 1.0
+    assert trig.channel_values["TRI_EVT.state"] == 1.0
+
+    x[n_gate] = 0.0
+    hold = circuit.execute_mixed_domain_step(x, 2e-6)
+    assert hold.channel_values["TRI_EVT.state"] == 1.0
+
+    x[n_t1] = 0.0
+    off = circuit.execute_mixed_domain_step(x, 3e-6)
+    assert off.channel_values["TRI_EVT.state"] == 0.0
+
+
+def test_latching_regularization_clamps_virtual_parameters() -> None:
+    circuit = ps.Circuit()
+    n_gate = circuit.add_node("gate")
+    n_anode = circuit.add_node("anode")
+    n_cathode = circuit.ground()
+    circuit.add_switch("SCR_SW", n_anode, n_cathode, False, 1e9, 1e-15)
+    circuit.add_virtual_component(
+        "thyristor",
+        "SCR_EVT",
+        [n_gate, n_anode, n_cathode],
+        {
+            "gate_threshold": 0.0,
+            "holding_current": 0.0,
+            "latch_current": 0.0,
+            "g_on": 1e9,
+            "g_off": 1e-15,
+        },
+        {"target_component": "SCR_SW"},
+    )
+
+    changed = circuit.apply_numerical_regularization()
+    assert changed > 0
+    params = {vc.name: vc for vc in circuit.virtual_components()}["SCR_EVT"].numeric_params
+    assert params["gate_threshold"] >= 1e-3
+    assert params["holding_current"] >= 1e-6
+    assert params["latch_current"] >= params["holding_current"]
+    assert params["g_on"] <= 5e5
+    assert params["g_off"] >= 1e-9
 
 
 def test_fallback_trace_records_retry_reasons() -> None:

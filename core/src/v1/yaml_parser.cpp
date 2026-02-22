@@ -1189,14 +1189,33 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                          "Component '" + name + "' (" + type + ") mapped to MOSFET surrogate model");
         }
         else if (type == "thyristor" || type == "triac") {
-            Real v_threshold = get_param("gate_threshold")
+            Real gate_threshold = get_param("gate_threshold")
                 ? parse_real(get_param("gate_threshold"), name + ".gate_threshold", errors_)
                 : 1.0;
             Real g_on = get_param("g_on") ? parse_real(get_param("g_on"), name + ".g_on", errors_) : 1e4;
             Real g_off = get_param("g_off") ? parse_real(get_param("g_off"), name + ".g_off", errors_) : 1e-9;
-            circuit.add_vcswitch(name, node_at(0), node_at(1), node_at(2), v_threshold, g_on, g_off);
+            Real holding_current = get_param("holding_current")
+                ? parse_real(get_param("holding_current"), name + ".holding_current", errors_)
+                : 0.05;
+            Real latch_current = get_param("latch_current")
+                ? parse_real(get_param("latch_current"), name + ".latch_current", errors_)
+                : (holding_current * 1.2);
+
+            circuit.add_switch(name, node_at(1), node_at(2), false, g_on, g_off);
+
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["gate_threshold"] = gate_threshold;
+            numeric_params["holding_current"] = holding_current;
+            numeric_params["latch_current"] = latch_current;
+            numeric_params["g_on"] = g_on;
+            numeric_params["g_off"] = g_off;
+            numeric_params["initial_closed"] = 0.0;
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+
             push_warning(warnings_, kDiagSurrogateComponent,
-                         "Component '" + name + "' (" + type + ") mapped to VCSwitch surrogate model");
+                         "Component '" + name + "' (" + type + ") mapped to switch surrogate with latching event controller");
         }
         else if (type == "fuse" || type == "circuit_breaker") {
             Real g_on = get_param("g_on") ? parse_real(get_param("g_on"), name + ".g_on", errors_) : 1e4;

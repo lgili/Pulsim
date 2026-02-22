@@ -13,9 +13,9 @@
 ## 3. Power Semiconductors and Switching
 
 - [x] 3.1 Implement `BJT_NPN` and `BJT_PNP` backend models and parameter structs.
-- [ ] 3.2 Implement `THYRISTOR` and `TRIAC` latching models with gate-trigger and holding-current behavior.
+- [x] 3.2 Implement `THYRISTOR` and `TRIAC` latching models with gate-trigger and holding-current behavior.
 - [x] 3.3 Close `SWITCH` parity so GUI switch semantics map directly to backend model behavior.
-- [ ] 3.4 Add nonlinear convergence and limiting aids specific to new switching/latching devices.
+- [x] 3.4 Add nonlinear convergence and limiting aids specific to new switching/latching devices.
 
 ## 4. Protection Components
 
