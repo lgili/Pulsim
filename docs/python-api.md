@@ -19,6 +19,8 @@ A superfície suportada para usuários é a API Python do módulo `pulsim`.
 | `Simulator` | Execução de `dc_operating_point`, `run_transient`, `run_periodic_shooting`, `run_harmonic_balance`. |
 | `SimulationResult` | Sinais (`time`, `states`), eventos, telemetria e resumos de perdas/térmico. |
 
+As APIs de transiente em Python (`Simulator.run_transient`, `run_transient_streaming`, `run_transient_shared` e `ps.run_transient`) aplicam perfil robusto por padrão para reduzir falhas de convergência.
+
 ## Exemplo completo
 
 ```python
@@ -39,6 +41,7 @@ print("success:", result.success)
 print("steps:", result.total_steps)
 print("newton_total:", result.newton_iterations_total)
 print("linear_fallbacks:", result.linear_solver_telemetry.total_fallbacks)
+print("backend_caps:", ps.backend_capabilities())
 ```
 
 ## Atalho recomendado para transiente

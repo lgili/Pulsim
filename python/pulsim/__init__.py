@@ -142,6 +142,7 @@ from ._pulsim import (
     LinearSolverStackConfig,
     detect_simd_level,
     simd_vector_width,
+    backend_capabilities,
     solver_status_to_string,
 
     # Thermal Simulation
@@ -300,6 +301,68 @@ def _is_retryable_failure(message: str) -> bool:
     return any(token in text for token in tokens)
 
 
+def _tune_linear_solver_for_robust(linear_solver):
+    try:
+        has_default_order = (
+            len(linear_solver.order) == 0
+            or (
+                len(linear_solver.order) == 1
+                and linear_solver.order[0] == LinearSolverKind.SparseLU
+            )
+        )
+        if has_default_order:
+            linear_solver.order = [
+                LinearSolverKind.KLU,
+                LinearSolverKind.EnhancedSparseLU,
+                LinearSolverKind.GMRES,
+                LinearSolverKind.BiCGSTAB,
+            ]
+
+        if len(linear_solver.fallback_order) == 0:
+            linear_solver.fallback_order = [
+                LinearSolverKind.EnhancedSparseLU,
+                LinearSolverKind.SparseLU,
+                LinearSolverKind.GMRES,
+                LinearSolverKind.BiCGSTAB,
+            ]
+
+        linear_solver.allow_fallback = True
+        linear_solver.auto_select = True
+        linear_solver.size_threshold = min(linear_solver.size_threshold, 1200)
+        linear_solver.nnz_threshold = min(linear_solver.nnz_threshold, 120000)
+        linear_solver.diag_min_threshold = max(linear_solver.diag_min_threshold, 1e-12)
+
+        it = linear_solver.iterative_config
+        it.max_iterations = max(it.max_iterations, 300)
+        it.tolerance = min(it.tolerance, 1e-8)
+        it.restart = max(it.restart, 40)
+        it.enable_scaling = True
+        it.scaling_floor = min(it.scaling_floor, 1e-12)
+        if it.preconditioner in (PreconditionerKind.None_, PreconditionerKind.Jacobi):
+            it.preconditioner = PreconditionerKind.ILUT
+        it.ilut_drop_tolerance = min(it.ilut_drop_tolerance, 1e-3)
+        it.ilut_fill_factor = max(it.ilut_fill_factor, 10.0)
+    except Exception:
+        pass
+
+
+def _tune_newton_for_robust(opts):
+    try:
+        opts.max_iterations = max(int(opts.max_iterations), 120)
+        opts.auto_damping = True
+        opts.min_damping = min(float(opts.min_damping), 1e-4)
+        opts.enable_limiting = True
+        opts.max_voltage_step = max(float(opts.max_voltage_step), 10.0)
+        opts.max_current_step = max(float(opts.max_current_step), 20.0)
+        opts.enable_trust_region = True
+        opts.trust_radius = max(float(opts.trust_radius), 8.0)
+        opts.trust_shrink = min(float(opts.trust_shrink), 0.5)
+        opts.trust_expand = max(float(opts.trust_expand), 1.5)
+        opts.detect_stall = False
+    except Exception:
+        pass
+
+
 def _apply_auto_bleeders(circuit, resistance=1e7):
     if circuit in _AUTO_BLEEDER_CIRCUITS:
         return False
@@ -338,6 +401,10 @@ def run_transient(
 
     base_newton = _copy_newton_options(user_newton)
     linear_solver = user_linear if user_linear is not None else LinearSolverStackConfig.defaults()
+
+    if robust:
+        _tune_newton_for_robust(base_newton)
+        _tune_linear_solver_for_robust(linear_solver)
 
     attempts = [
         (1.00, max(80, int(base_newton.max_iterations)), False),
@@ -528,6 +595,7 @@ __all__ = [
     "LinearSolverStackConfig",
     "detect_simd_level",
     "simd_vector_width",
+    "backend_capabilities",
     "solver_status_to_string",
 
     # Thermal Simulation
