@@ -392,6 +392,51 @@ components:
     assert any("PULSIM_YAML_W_COMPONENT_SURROGATE" in msg for msg in parser.warnings)
 
 
+def test_yaml_parser_registers_saturable_inductor_controller() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [in, 0]
+    inductance: 1m
+    saturation_current: 2
+    saturation_inductance: 100u
+"""
+    parser = ps.YamlParser()
+    circuit, _ = parser.load_string(content)
+    assert parser.errors == []
+    assert circuit.num_devices() == 1
+    assert "Lsat" in circuit.virtual_component_names()
+    metadata = circuit.virtual_channel_metadata()
+    assert "Lsat.l_eff" in metadata
+    assert metadata["Lsat.l_eff"].domain == "electrical"
+
+
+def test_yaml_parser_registers_coupled_inductor_pair_controller() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: coupled_inductor
+    name: K1
+    nodes: [p1, p2, s1, s2]
+    l1: 1m
+    l2: 4m
+    coupling: 0.95
+"""
+    parser = ps.YamlParser()
+    circuit, _ = parser.load_string(content)
+    assert parser.errors == []
+    # Coupled inductor expands to two inductor branches plus one virtual controller.
+    assert circuit.num_devices() == 2
+    assert "K1" in circuit.virtual_component_names()
+    metadata = circuit.virtual_channel_metadata()
+    assert "K1.mutual" in metadata
+    assert metadata["K1.mutual"].domain == "electrical"
+
+
 def test_virtual_probe_evaluation_from_state_vector() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
@@ -723,6 +768,68 @@ def test_latching_regularization_clamps_virtual_parameters() -> None:
     assert params["latch_current"] >= params["holding_current"]
     assert params["g_on"] <= 5e5
     assert params["g_off"] >= 1e-9
+
+
+def test_saturable_inductor_effective_inductance_decreases_with_current() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_inductor("Lsat", n_in, gnd, 1e-3, 0.0)
+    circuit.add_virtual_component(
+        "saturable_inductor",
+        "Lsat",
+        [n_in, gnd],
+        {
+            "inductance": 1e-3,
+            "saturation_current": 1.0,
+            "saturation_inductance": 1e-4,
+            "saturation_exponent": 2.0,
+        },
+        {"target_component": "Lsat"},
+    )
+
+    br = circuit.num_nodes()
+    x_low = [0.0] * circuit.system_size()
+    x_low[n_in] = 1.0
+    x_low[br] = 0.1
+    j_low, _ = circuit.assemble_jacobian(x_low)
+
+    x_high = [0.0] * circuit.system_size()
+    x_high[n_in] = 1.0
+    x_high[br] = 10.0
+    j_high, _ = circuit.assemble_jacobian(x_high)
+
+    assert abs(j_high[br][br]) < abs(j_low[br][br])
+
+
+def test_coupled_inductor_adds_mutual_terms_to_jacobian() -> None:
+    circuit = ps.Circuit()
+    n_p = circuit.add_node("p")
+    n_s = circuit.add_node("s")
+    gnd = circuit.ground()
+    circuit.add_inductor("K1__L1", n_p, gnd, 1e-3, 0.0)
+    circuit.add_inductor("K1__L2", n_s, gnd, 4e-3, 0.0)
+    circuit.add_virtual_component(
+        "coupled_inductor",
+        "K1",
+        [n_p, gnd, n_s, gnd],
+        {"l1": 1e-3, "l2": 4e-3, "coupling": 0.9},
+        {"target_component_1": "K1__L1", "target_component_2": "K1__L2"},
+    )
+
+    br1 = circuit.num_nodes()
+    br2 = circuit.num_nodes() + 1
+    x = [0.0] * circuit.system_size()
+    x[n_p] = 2.0
+    x[n_s] = -1.0
+    x[br1] = 1.5
+    x[br2] = -0.5
+
+    j, f = circuit.assemble_jacobian(x)
+    assert abs(j[br1][br2]) > 1e-6
+    assert abs(j[br2][br1]) > 1e-6
+    assert abs(f[br1]) > 1e-9
+    assert abs(f[br2]) > 1e-9
 
 
 def test_fallback_trace_records_retry_reasons() -> None:

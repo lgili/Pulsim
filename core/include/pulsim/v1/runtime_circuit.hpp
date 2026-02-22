@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <stdexcept>
@@ -477,6 +478,9 @@ public:
                 type == "thyristor" || type == "triac") {
                 return "events";
             }
+            if (type == "saturable_inductor" || type == "coupled_inductor") {
+                return "electrical";
+            }
             if (type == "voltage_probe" || type == "current_probe" || type == "power_probe" ||
                 type == "electrical_scope") {
                 return "instrumentation";
@@ -504,6 +508,16 @@ public:
                 auto event = base;
                 event.domain = "events";
                 metadata.emplace(component.name + ".state", std::move(event));
+            } else if (component.type == "saturable_inductor") {
+                auto electrical = base;
+                electrical.domain = "electrical";
+                metadata.emplace(component.name + ".l_eff", electrical);
+                metadata.emplace(component.name + ".i_est", std::move(electrical));
+            } else if (component.type == "coupled_inductor") {
+                auto electrical = base;
+                electrical.domain = "electrical";
+                metadata.emplace(component.name + ".mutual", electrical);
+                metadata.emplace(component.name + ".k", std::move(electrical));
             }
         }
 
@@ -805,6 +819,48 @@ public:
         const auto probes = evaluate_virtual_signals(x);
         result.channel_values.insert(probes.begin(), probes.end());
         for (const auto& component : virtual_components_) {
+            if (component.type == "saturable_inductor") {
+                const auto target_it = component.metadata.find("target_component");
+                const std::string target = (target_it == component.metadata.end()) ? component.name : target_it->second;
+                const DeviceConnection* conn = find_connection(target);
+                if (!conn || conn->branch_index < 0 || conn->branch_index >= system_size()) {
+                    continue;
+                }
+                const Real i_est = x[conn->branch_index];
+                const Real l_nom = get_numeric(component, "inductance", 1e-3);
+                const Real l_eff = saturable_effective_inductance(component, i_est, l_nom);
+                result.channel_values[component.name + ".l_eff"] = l_eff;
+                result.channel_values[component.name + ".i_est"] = i_est;
+                continue;
+            }
+            if (component.type == "coupled_inductor") {
+                Real l1 = std::max<Real>(get_numeric(component, "l1", 0.0), 0.0);
+                Real l2 = std::max<Real>(get_numeric(component, "l2", 0.0), 0.0);
+                if (l1 <= 0.0 || l2 <= 0.0) {
+                    const auto l1_it = component.metadata.find("target_component_1");
+                    const auto l2_it = component.metadata.find("target_component_2");
+                    if (l1_it != component.metadata.end()) {
+                        if (const auto index = find_connection_index(l1_it->second); index.has_value()) {
+                            if (const auto* inductor = std::get_if<Inductor>(&devices_[*index])) {
+                                l1 = inductor->inductance();
+                            }
+                        }
+                    }
+                    if (l2_it != component.metadata.end()) {
+                        if (const auto index = find_connection_index(l2_it->second); index.has_value()) {
+                            if (const auto* inductor = std::get_if<Inductor>(&devices_[*index])) {
+                                l2 = inductor->inductance();
+                            }
+                        }
+                    }
+                }
+                const Real k = std::clamp(get_numeric(component, "coupling", get_numeric(component, "k", 0.0)),
+                                          -0.999, 0.999);
+                const Real mutual = k * std::sqrt(std::max<Real>(l1 * l2, 0.0));
+                result.channel_values[component.name + ".k"] = k;
+                result.channel_values[component.name + ".mutual"] = mutual;
+                continue;
+            }
             if (component.type == "electrical_scope" || component.type == "thermal_scope") {
                 if (component.nodes.empty()) continue;
                 Real acc = 0.0;
@@ -829,15 +885,6 @@ public:
                 return 0.0;
             }
             return x[node];
-        };
-
-        auto find_connection = [&](const std::string& name) -> const DeviceConnection* {
-            for (const auto& conn : connections_) {
-                if (conn.name == name) {
-                    return &conn;
-                }
-            }
-            return nullptr;
         };
 
         auto branch_current = [&](const DeviceConnection* conn) -> Real {
@@ -946,7 +993,9 @@ public:
         }
 
         for (auto& component : virtual_components_) {
-            if (component.type != "thyristor" && component.type != "triac") {
+            if (component.type != "thyristor" && component.type != "triac" &&
+                component.type != "saturable_inductor" &&
+                component.type != "coupled_inductor") {
                 continue;
             }
 
@@ -962,20 +1011,45 @@ public:
                 }
             };
 
-            const Real g_on = std::clamp(std::abs(read_param("g_on", 1e4)), 1.0, latch_g_on_max);
-            const Real g_off = std::max(std::abs(read_param("g_off", 1e-9)), latch_g_off_min);
-            const Real gate_threshold = std::max(
-                std::abs(read_param("gate_threshold", 1.0)), latch_gate_threshold_min);
-            const Real holding_current = std::max(
-                std::abs(read_param("holding_current", 0.05)), latch_holding_current_min);
-            const Real latch_current = std::max(
-                std::abs(read_param("latch_current", holding_current * 1.2)), holding_current);
+            if (component.type == "thyristor" || component.type == "triac") {
+                const Real g_on = std::clamp(std::abs(read_param("g_on", 1e4)), 1.0, latch_g_on_max);
+                const Real g_off = std::max(std::abs(read_param("g_off", 1e-9)), latch_g_off_min);
+                const Real gate_threshold = std::max(
+                    std::abs(read_param("gate_threshold", 1.0)), latch_gate_threshold_min);
+                const Real holding_current = std::max(
+                    std::abs(read_param("holding_current", 0.05)), latch_holding_current_min);
+                const Real latch_current = std::max(
+                    std::abs(read_param("latch_current", holding_current * 1.2)), holding_current);
 
-            write_param("g_on", g_on);
-            write_param("g_off", g_off);
-            write_param("gate_threshold", gate_threshold);
-            write_param("holding_current", holding_current);
-            write_param("latch_current", latch_current);
+                write_param("g_on", g_on);
+                write_param("g_off", g_off);
+                write_param("gate_threshold", gate_threshold);
+                write_param("holding_current", holding_current);
+                write_param("latch_current", latch_current);
+                continue;
+            }
+
+            if (component.type == "saturable_inductor") {
+                const Real l_unsat = std::max(std::abs(read_param("inductance", 1e-3)), 1e-9);
+                const Real i_sat = std::max(std::abs(read_param("saturation_current", 1.0)), 1e-6);
+                const Real l_sat = std::clamp(
+                    std::abs(read_param("saturation_inductance", l_unsat * 0.2)),
+                    1e-9, l_unsat);
+                const Real exponent = std::clamp(read_param("saturation_exponent", 2.0), 1.0, 6.0);
+                write_param("inductance", l_unsat);
+                write_param("saturation_current", i_sat);
+                write_param("saturation_inductance", l_sat);
+                write_param("saturation_exponent", exponent);
+                continue;
+            }
+
+            const Real l1 = std::max(std::abs(read_param("l1", 1e-3)), 1e-9);
+            const Real l2 = std::max(std::abs(read_param("l2", 1e-3)), 1e-9);
+            const Real k = std::clamp(read_param("coupling", read_param("k", 0.98)), -0.999, 0.999);
+            write_param("l1", l1);
+            write_param("l2", l2);
+            write_param("coupling", k);
+            write_param("k", k);
         }
 
         return changed;
@@ -1389,6 +1463,8 @@ public:
             }, devices_[i]);
         }
 
+        stamp_coupled_inductor_terms(triplets, f, x);
+
         J.setFromTriplets(triplets.begin(), triplets.end());
     }
 
@@ -1422,6 +1498,8 @@ public:
                 }
             }, devices_[i]);
         }
+
+        stamp_coupled_inductor_terms(null_triplets, f, x);
     }
 
     /// Assemble residual for harmonic balance using direct time-derivatives
@@ -1470,9 +1548,10 @@ public:
                     Real i_br = (br >= 0) ? x[br] : 0.0;
                     Real di_dt = (br >= 0 && static_cast<std::size_t>(br) < di_dt_branches.size())
                         ? di_dt_branches[br] : 0.0;
+                    Real L_eff = effective_inductance_for(conn.name, i_br, dev.inductance());
                     if (n1 >= 0) f[n1] += i_br;
                     if (n2 >= 0) f[n2] -= i_br;
-                    if (br >= 0) f[br] += (v1 - v2 - dev.inductance() * di_dt);
+                    if (br >= 0) f[br] += (v1 - v2 - L_eff * di_dt);
                 } else if constexpr (std::is_same_v<T, VoltageSource>) {
                     Index npos = conn.nodes[0];
                     Index nneg = conn.nodes[1];
@@ -1512,6 +1591,8 @@ public:
                 }
             }, devices_[i]);
         }
+
+        stamp_coupled_inductor_hb_terms(f, x, di_dt_branches);
     }
 
     /// Check if circuit has nonlinear devices
@@ -1520,6 +1601,13 @@ public:
             if (std::holds_alternative<IdealDiode>(dev) ||
                 std::holds_alternative<MOSFET>(dev) ||
                 std::holds_alternative<IGBT>(dev)) {
+                return true;
+            }
+        }
+        for (const auto& component : virtual_components_) {
+            if (component.type == "saturable_inductor" ||
+                component.type == "thyristor" ||
+                component.type == "triac") {
                 return true;
             }
         }
@@ -1574,6 +1662,193 @@ private:
     static void reserve_triplets(std::vector<Eigen::Triplet<Real>>& triplets, std::size_t estimate) {
         if (triplets.capacity() < estimate) {
             triplets.reserve(estimate);
+        }
+    }
+
+    [[nodiscard]] const DeviceConnection* find_connection(const std::string& name) const {
+        if (const auto index = find_connection_index(name); index.has_value()) {
+            return &connections_[*index];
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> find_connection_index(const std::string& name) const {
+        for (std::size_t i = 0; i < connections_.size(); ++i) {
+            if (connections_[i].name == name) {
+                return i;
+            }
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] static Real get_param_value(
+        const std::unordered_map<std::string, Real>& params,
+        const std::string& key,
+        Real fallback) {
+        const auto it = params.find(key);
+        return (it == params.end()) ? fallback : it->second;
+    }
+
+    [[nodiscard]] Real saturable_effective_inductance(
+        const VirtualComponent& component,
+        Real i_est,
+        Real fallback_l) const {
+        const Real l_unsat = std::max<Real>(
+            std::abs(get_param_value(component.numeric_params, "inductance", fallback_l)), 1e-12);
+        const Real i_sat = std::max<Real>(
+            std::abs(get_param_value(component.numeric_params, "saturation_current", 1.0)), 1e-12);
+        const Real l_sat_raw = std::abs(get_param_value(component.numeric_params, "saturation_inductance",
+                                                        l_unsat * 0.2));
+        const Real l_sat = std::clamp(l_sat_raw, 1e-12, l_unsat);
+        const Real exponent = std::clamp(
+            get_param_value(component.numeric_params, "saturation_exponent", 2.0), 1.0, 8.0);
+        const Real ratio = std::pow(std::abs(i_est) / i_sat, exponent);
+        const Real l_eff = l_sat + (l_unsat - l_sat) / (1.0 + ratio);
+        return std::max<Real>(l_eff, 1e-12);
+    }
+
+    [[nodiscard]] Real effective_inductance_for(
+        const std::string& connection_name,
+        Real i_est,
+        Real fallback_l) const {
+        for (const auto& component : virtual_components_) {
+            if (component.type != "saturable_inductor") {
+                continue;
+            }
+            const auto target_it = component.metadata.find("target_component");
+            const std::string target = (target_it == component.metadata.end())
+                ? component.name : target_it->second;
+            if (target != connection_name) {
+                continue;
+            }
+            return saturable_effective_inductance(component, i_est, fallback_l);
+        }
+        return fallback_l;
+    }
+
+    template<typename Triplets>
+    void stamp_coupled_inductor_terms(Triplets& triplets, Vector& f, const Vector& x) const {
+        if (virtual_components_.empty()) return;
+
+        for (const auto& component : virtual_components_) {
+            if (component.type != "coupled_inductor") {
+                continue;
+            }
+
+            const auto t1_it = component.metadata.find("target_component_1");
+            const auto t2_it = component.metadata.find("target_component_2");
+            if (t1_it == component.metadata.end() || t2_it == component.metadata.end()) {
+                continue;
+            }
+
+            const auto idx1 = find_connection_index(t1_it->second);
+            const auto idx2 = find_connection_index(t2_it->second);
+            if (!idx1.has_value() || !idx2.has_value()) continue;
+
+            const auto& conn1 = connections_[*idx1];
+            const auto& conn2 = connections_[*idx2];
+            const Index br1 = conn1.branch_index;
+            const Index br2 = conn2.branch_index;
+            if (br1 < 0 || br2 < 0 || br1 >= system_size() || br2 >= system_size()) {
+                continue;
+            }
+
+            const auto* ind1 = std::get_if<Inductor>(&devices_[*idx1]);
+            const auto* ind2 = std::get_if<Inductor>(&devices_[*idx2]);
+            if (!ind1 || !ind2) continue;
+
+            const Real i1 = x[br1];
+            const Real i2 = x[br2];
+            const Real l1 = effective_inductance_for(conn1.name, i1, ind1->inductance());
+            const Real l2 = effective_inductance_for(conn2.name, i2, ind2->inductance());
+            const Real k = std::clamp(
+                get_param_value(component.numeric_params, "coupling",
+                                get_param_value(component.numeric_params, "k", 0.98)),
+                -0.999, 0.999);
+            const Real mutual = k * std::sqrt(std::max<Real>(l1 * l2, 0.0));
+            if (std::abs(mutual) <= 1e-18) {
+                continue;
+            }
+
+            Real coeff_m = 0.0;
+            Real history_1 = 0.0;
+            Real history_2 = 0.0;
+
+            if (stage_context_.active && stage_context_.scheme == StageScheme::TRBDF2 &&
+                *idx1 < stage_ind_i_.size() && *idx2 < stage_ind_i_.size()) {
+                auto coeffs = TRBDF2Coeffs::bdf2_variable(stage_context_.h1, stage_context_.h2);
+                coeff_m = mutual * coeffs.a2;
+                history_1 = mutual * (coeffs.a1 * stage_ind_i_[*idx2] + coeffs.a0 * ind2->current_prev());
+                history_2 = mutual * (coeffs.a1 * stage_ind_i_[*idx1] + coeffs.a0 * ind1->current_prev());
+            } else if (stage_context_.active && stage_context_.scheme == StageScheme::SDIRK2 &&
+                       *idx1 < stage_ind_idot_.size() && *idx2 < stage_ind_idot_.size()) {
+                Real dt_total = std::max(stage_context_.dt, Real{1e-15});
+                Real a22 = std::max(stage_context_.a22, Real{1e-15});
+                coeff_m = mutual / (a22 * dt_total);
+                history_1 = -coeff_m * (ind2->current_prev() + dt_total * stage_context_.a21 * stage_ind_idot_[*idx2]);
+                history_2 = -coeff_m * (ind1->current_prev() + dt_total * stage_context_.a21 * stage_ind_idot_[*idx1]);
+            } else if (integration_order_ == 1) {
+                coeff_m = mutual / timestep_;
+                history_1 = coeff_m * ind2->current_prev();
+                history_2 = coeff_m * ind1->current_prev();
+            } else {
+                coeff_m = 2.0 * mutual / timestep_;
+                history_1 = coeff_m * ind2->current_prev();
+                history_2 = coeff_m * ind1->current_prev();
+            }
+
+            triplets.emplace_back(br1, br2, -coeff_m);
+            triplets.emplace_back(br2, br1, -coeff_m);
+            f[br1] += (-coeff_m * i2 + history_1);
+            f[br2] += (-coeff_m * i1 + history_2);
+        }
+    }
+
+    void stamp_coupled_inductor_hb_terms(
+        Vector& f,
+        const Eigen::Ref<const Vector>& x,
+        std::span<const Real> di_dt_branches) const {
+        if (virtual_components_.empty()) return;
+
+        for (const auto& component : virtual_components_) {
+            if (component.type != "coupled_inductor") {
+                continue;
+            }
+
+            const auto t1_it = component.metadata.find("target_component_1");
+            const auto t2_it = component.metadata.find("target_component_2");
+            if (t1_it == component.metadata.end() || t2_it == component.metadata.end()) {
+                continue;
+            }
+            const auto idx1 = find_connection_index(t1_it->second);
+            const auto idx2 = find_connection_index(t2_it->second);
+            if (!idx1.has_value() || !idx2.has_value()) continue;
+
+            const auto& conn1 = connections_[*idx1];
+            const auto& conn2 = connections_[*idx2];
+            const Index br1 = conn1.branch_index;
+            const Index br2 = conn2.branch_index;
+            if (br1 < 0 || br2 < 0) continue;
+            if (static_cast<std::size_t>(br1) >= di_dt_branches.size() ||
+                static_cast<std::size_t>(br2) >= di_dt_branches.size()) {
+                continue;
+            }
+
+            const auto* ind1 = std::get_if<Inductor>(&devices_[*idx1]);
+            const auto* ind2 = std::get_if<Inductor>(&devices_[*idx2]);
+            if (!ind1 || !ind2) continue;
+
+            const Real l1 = effective_inductance_for(conn1.name, x[br1], ind1->inductance());
+            const Real l2 = effective_inductance_for(conn2.name, x[br2], ind2->inductance());
+            const Real k = std::clamp(
+                get_param_value(component.numeric_params, "coupling",
+                                get_param_value(component.numeric_params, "k", 0.98)),
+                -0.999, 0.999);
+            const Real mutual = k * std::sqrt(std::max<Real>(l1 * l2, 0.0));
+            if (std::abs(mutual) <= 1e-18) continue;
+
+            f[br1] -= mutual * di_dt_branches[br2];
+            f[br2] -= mutual * di_dt_branches[br1];
         }
     }
 
@@ -1802,7 +2077,8 @@ private:
             Index n1 = conn.nodes[0];
             Index n2 = conn.nodes[1];
             Index br = conn.branch_index;
-            Real L = dev.inductance();
+            const Real i_est = (br >= 0 && br < system_size()) ? x[br] : dev.current_prev();
+            Real L = effective_inductance_for(conn.name, i_est, dev.inductance());
             Real v_prev = dev.voltage_prev();
             Real i_prev = dev.current_prev();
 
