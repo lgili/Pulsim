@@ -53,19 +53,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION_TAG="${GITHUB_REF_NAME#v}"
             echo "Setting version to $VERSION_TAG"
-            # More robust regex that handles various formats
-            sed -i.bak -E 's/^version[[:space:]]*=[[:space:]]*"[^"]*"/version = "'"$VERSION_TAG"'"/' pyproject.toml || \
-            python -c "
-          import re
-          with open('pyproject.toml', 'r') as f:
-              content = f.read()
-          content = re.sub(r'^version\s*=\s*[\"'][^\"']*[\"']', 'version = \"$VERSION_TAG\"', content, count=1, flags=re.M)
-          with open('pyproject.toml', 'w') as f:
-              f.write(content)
-          "
-            rm -f pyproject.toml.bak
-            echo "Updated version:"
-            grep "^version" pyproject.toml
+            python scripts/update_version.py "$VERSION_TAG"
           else
             echo "Not a tag push, keeping existing version"
           fi
@@ -147,9 +135,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION_TAG="${GITHUB_REF_NAME#v}"
             echo "Setting version to $VERSION_TAG"
-            sed -i -E 's/^version[[:space:]]*=[[:space:]]*"[^"]*"/version = "'"$VERSION_TAG"'"/' pyproject.toml
-            echo "Updated version:"
-            grep "^version" pyproject.toml
+            python scripts/update_version.py "$VERSION_TAG"
           else
             echo "Not a tag push, keeping existing version"
           fi
