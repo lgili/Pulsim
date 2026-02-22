@@ -932,8 +932,12 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "beta", "vbe_on", "holding_current", "latch_current", "gate_threshold",
              "saturation_current", "saturation_inductance", "saturation_exponent",
              "coupling", "k", "mutual_inductance", "l1", "l2", "ic1", "ic2", "ic_primary", "ic_secondary",
-             "state", "mode", "select_index", "gain", "rail_high", "rail_low",
-             "hysteresis", "metadata", "table", "mapping"},
+             "state", "mode", "select_index", "gain", "open_loop_gain", "offset",
+             "kp", "ki", "kd", "threshold", "high", "low",
+             "duty", "duty_min", "duty_max", "duty_from_input", "duty_gain", "duty_offset",
+             "alpha", "anti_windup", "min", "max", "output_min", "output_max",
+             "rising_rate", "falling_rate",
+             "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping"},
             "component", errors_, options_.strict);
 
         if (!comp["type"] || !comp["name"]) {
@@ -1437,6 +1441,206 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (target && target.IsScalar()) {
                 metadata["target_component"] = target.as<std::string>();
             }
+
+            auto has_num = [&](const std::string& key) {
+                return numeric_params.find(key) != numeric_params.end();
+            };
+            auto get_num = [&](const std::string& key, Real fallback) {
+                const auto it = numeric_params.find(key);
+                return (it == numeric_params.end()) ? fallback : it->second;
+            };
+            auto metadata_node = [&](const std::string& key) -> YAML::Node {
+                const auto it = metadata.find(key);
+                if (it == metadata.end()) return YAML::Node();
+                try {
+                    return YAML::Load(it->second);
+                } catch (...) {
+                    return YAML::Node();
+                }
+            };
+            auto metadata_sequence_size = [&](const std::string& key) -> std::size_t {
+                const YAML::Node node = metadata_node(key);
+                if (!node || !node.IsSequence()) return 0;
+                return node.size();
+            };
+
+            if (type == "op_amp") {
+                const Real lo = get_num("rail_low", -15.0);
+                const Real hi = get_num("rail_high", 15.0);
+                if (lo >= hi) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "rail_low must be < rail_high for " + name);
+                    continue;
+                }
+            } else if (type == "comparator" || type == "hysteresis") {
+                const Real hyst = get_num("hysteresis", 0.0);
+                if (hyst < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "hysteresis must be >= 0 for " + name);
+                    continue;
+                }
+                const Real low = get_num("low", 0.0);
+                const Real high = get_num("high", 1.0);
+                if (high < low) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "high must be >= low for " + name);
+                    continue;
+                }
+            } else if (type == "pi_controller" || type == "pid_controller") {
+                if (has_num("output_min") && has_num("output_max")) {
+                    if (get_num("output_min", 0.0) > get_num("output_max", 0.0)) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "output_min must be <= output_max for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "integrator" || type == "limiter") {
+                if (has_num("output_min") && has_num("output_max")) {
+                    if (get_num("output_min", 0.0) > get_num("output_max", 0.0)) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "output_min must be <= output_max for " + name);
+                        continue;
+                    }
+                }
+                if (has_num("min") && has_num("max")) {
+                    if (get_num("min", 0.0) > get_num("max", 0.0)) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "min must be <= max for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "differentiator") {
+                if (has_num("alpha")) {
+                    const Real alpha = get_num("alpha", 0.0);
+                    if (alpha < 0.0 || alpha > 1.0) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "alpha must be in [0, 1] for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "rate_limiter") {
+                if (has_num("rising_rate") && get_num("rising_rate", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "rising_rate must be >= 0 for " + name);
+                    continue;
+                }
+                if (has_num("falling_rate") && get_num("falling_rate", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "falling_rate must be >= 0 for " + name);
+                    continue;
+                }
+            } else if (type == "lookup_table") {
+                const std::size_t x_size = metadata_sequence_size("x");
+                const std::size_t y_size = metadata_sequence_size("y");
+                std::size_t point_count = 0;
+                if (x_size > 0 || y_size > 0) {
+                    if (x_size != y_size || x_size < 2) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "lookup_table requires x and y arrays with the same size >= 2 for " + name);
+                        continue;
+                    }
+                    point_count = x_size;
+                } else {
+                    const YAML::Node table = metadata_node("table");
+                    if (table && table.IsSequence() && table.size() >= 2) {
+                        point_count = table.size();
+                    } else {
+                        const YAML::Node mapping = metadata_node("mapping");
+                        if (mapping && mapping.IsMap() && mapping.size() >= 2) {
+                            point_count = mapping.size();
+                        }
+                    }
+                }
+                if (point_count < 2) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "lookup_table requires at least two points (x/y, table, or mapping) for " + name);
+                    continue;
+                }
+            } else if (type == "transfer_function") {
+                const std::size_t num_size = metadata_sequence_size("num");
+                const std::size_t den_size = metadata_sequence_size("den");
+                if ((num_size > 0) != (den_size > 0)) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "transfer_function requires both num and den arrays for " + name);
+                    continue;
+                }
+                if (den_size > 0) {
+                    const YAML::Node den = metadata_node("den");
+                    if (!den || !den.IsSequence() || den.size() == 0) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "transfer_function den must be a non-empty array for " + name);
+                        continue;
+                    }
+                    bool den0_ok = false;
+                    try {
+                        den0_ok = std::abs(den[0].as<Real>()) > 1e-15;
+                    } catch (...) {
+                        den0_ok = false;
+                    }
+                    if (!den0_ok) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "transfer_function den[0] must be non-zero for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "delay_block") {
+                if (has_num("delay") && get_num("delay", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "delay must be >= 0 for " + name);
+                    continue;
+                }
+            } else if (type == "sample_hold") {
+                if (has_num("sample_period") && get_num("sample_period", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "sample_period must be >= 0 for " + name);
+                    continue;
+                }
+            } else if (type == "state_machine") {
+                const auto mode_it = metadata.find("mode");
+                if (mode_it != metadata.end()) {
+                    const std::string mode = normalize_key(mode_it->second);
+                    if (mode != "toggle" && mode != "level" &&
+                        mode != "set_reset" && mode != "sr") {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "state_machine mode must be toggle/level/set_reset/sr for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "pwm_generator") {
+                const Real freq = get_num("frequency", 1e3);
+                if (freq <= 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "frequency must be > 0 for " + name);
+                    continue;
+                }
+                if (has_num("duty")) {
+                    const Real duty = get_num("duty", 0.5);
+                    if (duty < 0.0 || duty > 1.0) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "duty must be in [0, 1] for " + name);
+                        continue;
+                    }
+                }
+                const Real duty_min = get_num("duty_min", 0.0);
+                const Real duty_max = get_num("duty_max", 1.0);
+                if (duty_min < 0.0 || duty_min > 1.0 ||
+                    duty_max < 0.0 || duty_max > 1.0 || duty_min > duty_max) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "duty_min/duty_max must satisfy 0 <= duty_min <= duty_max <= 1 for " + name);
+                    continue;
+                }
+            } else if (type == "math_block") {
+                const auto op_it = metadata.find("operation");
+                if (op_it != metadata.end()) {
+                    const std::string op = normalize_key(op_it->second);
+                    if (op != "add" && op != "sub" && op != "mul" && op != "div") {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "operation must be add/sub/mul/div for " + name);
+                        continue;
+                    }
+                }
+            }
+
             circuit.add_virtual_component(type, name, node_indices,
                                           std::move(numeric_params), std::move(metadata));
             push_warning(warnings_, kDiagVirtualComponent,
