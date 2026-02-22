@@ -763,6 +763,10 @@ SimulationResult Simulator::run_transient(const Vector& x0,
             return;
         }
 
+        if (result.virtual_channel_metadata.empty()) {
+            result.virtual_channel_metadata = circuit_.virtual_channel_metadata();
+        }
+
         auto mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
         if (result.mixed_domain_phase_order.empty()) {
             result.mixed_domain_phase_order = mixed_step.phase_order;
@@ -783,6 +787,12 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                 series.push_back(nan);
             }
             series.push_back(value);
+
+            if (!result.virtual_channel_metadata.contains(channel)) {
+                result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
+                    "virtual", channel, "control", {}
+                };
+            }
         }
 
         for (auto& [channel, series] : result.virtual_channels) {
