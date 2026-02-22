@@ -58,6 +58,6 @@
 
 ## 10. Finalization
 
-- [ ] 10.1 Update docs and capability matrix (GUI component -> backend support status).
-- [ ] 10.2 Run `openspec validate add-gui-component-backend-parity --strict`.
-- [ ] 10.3 Prepare migration notes for PulsimGui converter integration.
+- [x] 10.1 Update docs and capability matrix (GUI component -> backend support status).
+- [x] 10.2 Run `openspec validate add-gui-component-backend-parity --strict`.
+- [x] 10.3 Prepare migration notes for PulsimGui converter integration.

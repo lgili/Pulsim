@@ -38,6 +38,14 @@ PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
   --output-dir benchmarks/stress_out
 ```
 
+## Gate de paridade GUI -> backend
+
+```bash
+PYTHONPATH=build/python pytest -q python/tests/test_gui_component_parity.py
+PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py
+./build-test/core/pulsim_simulation_tests "[v1][yaml][gui-parity]"
+```
+
 ## Artefatos de saída
 
 - benchmark: `results.csv`, `results.json`, `summary.json`
