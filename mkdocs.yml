@@ -78,6 +78,7 @@ nav:
   - Netlist YAML: netlist-format.md
   - Examples and Results: examples-and-results.md
   - Benchmarks and Parity: benchmarks-and-parity.md
+  - GUI Backend Parity: gui-component-parity.md
   - Notebooks: notebooks.md
   - Docs Versioning: versioning-and-release.md
   - Device Models: device-models.md

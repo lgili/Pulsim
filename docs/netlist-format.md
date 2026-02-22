@@ -39,6 +39,9 @@ components:
 
 ## Components
 
+Para a matriz completa de paridade do catálogo do PulsimGui com status de
+suporte backend, veja `gui-component-parity`.
+
 ### Passive Components
 
 - **Resistor**: `type: resistor` (or `R`), `value`
