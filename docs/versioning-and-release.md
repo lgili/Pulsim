@@ -11,7 +11,7 @@ As docs são publicadas por versão usando tags Git e `mike`.
 python scripts/update_version.py 0.3.4
 ```
 
-3. Crie tag no formato `vX.Y.Z`.
+3. Crie tag no formato `vX.Y.Z` (semver).
 4. Faça push da tag.
 
 ```bash
@@ -21,12 +21,15 @@ git push origin v0.3.4
 
 ## O que o pipeline faz
 
-- workflow acionado apenas por `push` de tags `v*`;
+- workflow acionado apenas por `push` de tags de versão (`vX.Y.Z`, com opcional sufixo);
 - build `mkdocs --strict`;
 - deploy em `gh-pages` com:
   - versão numérica (`0.3.0`);
   - alias `latest`;
 - mantém versões antigas no branch `gh-pages`.
+
+> Não há deploy de docs em push de branch/pull request.
+> Sem tag de release, o site publicado não muda.
 
 ## Seleção de versão na UI
 
