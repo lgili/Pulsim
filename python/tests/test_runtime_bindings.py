@@ -304,6 +304,38 @@ components:
     assert any("PULSIM_YAML_W_COMPONENT_VIRTUAL" in msg for msg in parser.warnings)
 
 
+def test_yaml_parser_registers_fuse_event_controller() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-5
+  dt: 1e-6
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: {type: dc, value: 10}
+  - type: fuse
+    name: F1
+    nodes: [in, out]
+    rating: 5
+    blow_i2t: 2
+  - type: resistor
+    name: R1
+    nodes: [out, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    circuit, _ = parser.load_string(content)
+    assert parser.errors == []
+    assert "F1" in circuit.virtual_component_names()
+    metadata = circuit.virtual_channel_metadata()
+    assert "F1.state" in metadata
+    assert metadata["F1.state"].domain == "events"
+
+
 def test_virtual_probe_evaluation_from_state_vector() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
@@ -448,6 +480,52 @@ def test_signal_mux_demux_mapping_is_deterministic() -> None:
     step = circuit.execute_mixed_domain_step(x, 1e-6)
     assert step.channel_values["MUX1"] == 5.0
     assert step.channel_values["DMX1"] == -1.0
+
+
+def test_fuse_event_controller_trips_by_i2t() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_switch("F_SW", n_in, gnd, True, 1e3, 1e-9)
+    circuit.add_virtual_component(
+        "fuse",
+        "F_EVT",
+        [n_in, gnd],
+        {"g_on": 1e3, "blow_i2t": 1.0, "initial_closed": 1.0},
+        {"target_component": "F_SW"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 5.0
+    circuit.execute_mixed_domain_step(x, 0.0)
+    step = circuit.execute_mixed_domain_step(x, 1e-2)
+    assert step.channel_values["F_EVT.i2t"] > 1.0
+    assert step.channel_values["F_EVT.state"] == 0.0
+
+
+def test_breaker_event_controller_trips_by_time_overcurrent() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_switch("B_SW", n_in, gnd, True, 1e3, 1e-9)
+    circuit.add_virtual_component(
+        "circuit_breaker",
+        "B_EVT",
+        [n_in, gnd],
+        {"g_on": 1e3, "trip_current": 1000.0, "trip_time": 5e-3, "initial_closed": 1.0},
+        {"target_component": "B_SW"},
+    )
+
+    x = [0.0] * circuit.system_size()
+    x[n_in] = 5.0
+    circuit.execute_mixed_domain_step(x, 0.0)
+    mid = circuit.execute_mixed_domain_step(x, 2e-3)
+    end = circuit.execute_mixed_domain_step(x, 6e-3)
+    assert mid.channel_values["B_EVT.state"] == 1.0
+    assert end.channel_values["B_EVT.trip_timer"] >= 5e-3
+    assert end.channel_values["B_EVT.state"] == 0.0
 
 
 def test_fallback_trace_records_retry_reasons() -> None:

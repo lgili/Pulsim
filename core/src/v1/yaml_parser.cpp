@@ -926,7 +926,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "turns_ratio", "ratio", "magnetizing_inductance", "lm",
              "target_component", "target_device", "target", "operation", "channels", "inputs", "outputs",
              "x", "y", "num", "den", "delay", "sample_period",
-             "trip_current", "trip_time", "blow_i2t", "pickup_current", "dropout_current",
+             "trip_current", "trip_time", "trip", "rating", "blow_i2t", "i2t", "pickup_current", "dropout_current",
              "beta", "vbe_on", "holding_current", "latch_current", "gate_threshold",
              "saturation_current", "saturation_inductance", "coupling", "k", "l1", "l2",
              "state", "mode", "select_index", "gain", "rail_high", "rail_low",
@@ -1214,8 +1214,34 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 }
             }
             circuit.add_switch(name, node_at(0), node_at(1), closed, g_on, g_off);
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["g_on"] = g_on;
+            numeric_params["g_off"] = g_off;
+            numeric_params["initial_closed"] = closed ? 1.0 : 0.0;
+            if (get_param("rating")) {
+                numeric_params["rating"] = parse_real(get_param("rating"), name + ".rating", errors_);
+            }
+            if (type == "fuse") {
+                YAML::Node blow_i2t = get_param("blow_i2t");
+                if (!blow_i2t) blow_i2t = get_param("i2t");
+                if (blow_i2t) {
+                    numeric_params["blow_i2t"] = parse_real(blow_i2t, name + ".blow_i2t", errors_);
+                }
+            } else {
+                YAML::Node trip_current = get_param("trip_current");
+                if (!trip_current) trip_current = get_param("trip");
+                if (trip_current) {
+                    numeric_params["trip_current"] = parse_real(trip_current, name + ".trip_current", errors_);
+                }
+                if (get_param("trip_time")) {
+                    numeric_params["trip_time"] = parse_real(get_param("trip_time"), name + ".trip_time", errors_);
+                }
+            }
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
             push_warning(warnings_, kDiagSurrogateComponent,
-                         "Component '" + name + "' (" + type + ") mapped to switch surrogate model");
+                         "Component '" + name + "' (" + type + ") mapped to switch surrogate with event controller");
         }
         else if (type == "saturable_inductor") {
             YAML::Node l_node = get_param("inductance");

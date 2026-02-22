@@ -473,7 +473,7 @@ public:
 
         auto channel_domain = [](const std::string& type) -> std::string {
             if (type == "thermal_scope") return "thermal";
-            if (type == "relay") return "events";
+            if (type == "relay" || type == "fuse" || type == "circuit_breaker") return "events";
             if (type == "voltage_probe" || type == "current_probe" || type == "power_probe" ||
                 type == "electrical_scope") {
                 return "instrumentation";
@@ -490,7 +490,7 @@ public:
             };
             metadata.emplace(component.name, base);
 
-            if (component.type == "relay") {
+            if (component.type == "relay" || component.type == "fuse" || component.type == "circuit_breaker") {
                 auto relay = base;
                 relay.domain = "events";
                 metadata.emplace(component.name + ".state", std::move(relay));
@@ -633,22 +633,84 @@ public:
 
         // Phase 3: event-driven transitions
         for (const auto& component : virtual_components_) {
-            if (component.type != "relay") {
+            if (component.type != "relay" && component.type != "fuse" &&
+                component.type != "circuit_breaker") {
                 continue;
             }
-            const Real coil = (component.nodes.size() > 1)
-                ? (node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]))
-                : 0.0;
-            const Real pickup = std::abs(get_numeric(component, "pickup_current",
-                                    get_numeric(component, "pickup_voltage", 1.0)));
-            const Real dropout = std::abs(get_numeric(component, "dropout_current", pickup * 0.8));
-            bool closed = virtual_binary_state_[component.name];
-            if (closed) {
-                if (std::abs(coil) < dropout) closed = false;
+
+            const Real dt = [&]() {
+                const auto it = virtual_last_time_.find(component.name);
+                if (it == virtual_last_time_.end()) return Real{0.0};
+                return std::max<Real>(0.0, time - it->second);
+            }();
+
+            const auto initial_closed = [&]() -> bool {
+                return get_numeric(component, "initial_closed", 1.0) > 0.5;
+            };
+
+            bool closed = virtual_binary_state_.contains(component.name)
+                ? virtual_binary_state_[component.name]
+                : initial_closed();
+
+            if (component.type == "relay") {
+                const Real coil = (component.nodes.size() > 1)
+                    ? (node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]))
+                    : 0.0;
+                const Real pickup = std::abs(get_numeric(component, "pickup_current",
+                                        get_numeric(component, "pickup_voltage", 1.0)));
+                const Real dropout = std::abs(get_numeric(component, "dropout_current", pickup * 0.8));
+                if (closed) {
+                    if (std::abs(coil) < dropout) closed = false;
+                } else {
+                    if (std::abs(coil) >= pickup) closed = true;
+                }
             } else {
-                if (std::abs(coil) >= pickup) closed = true;
+                const Real v_term = (component.nodes.size() > 1)
+                    ? (node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]))
+                    : 0.0;
+                const Real g_on = std::max<Real>(get_numeric(component, "g_on", 1e4), 1e-12);
+                const Real i_abs = closed ? std::abs(v_term) * g_on : 0.0;
+
+                if (component.type == "fuse") {
+                    const Real rating = std::max<Real>(get_numeric(component, "rating", 1.0), 1e-6);
+                    const Real default_i2t = rating * rating * 1e-3;
+                    const Real blow_i2t = std::max<Real>(get_numeric(component, "blow_i2t", default_i2t), 1e-12);
+                    const std::string stress_key = component.name + ".i2t";
+                    Real i2t = virtual_signal_state_[stress_key];
+                    i2t += i_abs * i_abs * dt;
+                    virtual_signal_state_[stress_key] = i2t;
+                    result.channel_values[stress_key] = i2t;
+                    if (i2t >= blow_i2t) {
+                        closed = false;
+                    }
+                } else {
+                    const Real trip_current = std::abs(get_numeric(component, "trip_current",
+                        get_numeric(component, "rating", 1.0)));
+                    const Real trip_time = std::max<Real>(get_numeric(component, "trip_time", 0.0), 0.0);
+                    const std::string timer_key = component.name + ".trip_timer";
+                    Real timer = virtual_signal_state_[timer_key];
+                    if (i_abs >= trip_current) {
+                        timer += dt;
+                    } else {
+                        timer = 0.0;
+                    }
+                    virtual_signal_state_[timer_key] = timer;
+                    result.channel_values[timer_key] = timer;
+                    if (trip_time <= 0.0) {
+                        if (i_abs >= trip_current) closed = false;
+                    } else if (timer >= trip_time) {
+                        closed = false;
+                    }
+                }
             }
+
             virtual_binary_state_[component.name] = closed;
+            virtual_last_time_[component.name] = time;
+
+            if (const auto it = component.metadata.find("target_component");
+                it != component.metadata.end()) {
+                set_switch_state(it->second, closed);
+            }
             result.channel_values[component.name + ".state"] = closed ? 1.0 : 0.0;
         }
 
