@@ -11,6 +11,188 @@ namespace pulsim::v1 {
 
 namespace {
 constexpr int kMaxBisections = 12;
+constexpr int kMaxGlobalRecoveryAttempts = 2;
+
+struct CircuitRobustnessHints {
+    int switching_devices = 0;
+    int nonlinear_devices = 0;
+    int pwm_blocks = 0;
+    int control_blocks = 0;
+};
+
+[[nodiscard]] bool is_default_linear_order(const LinearSolverStackConfig& cfg) {
+    return cfg.order.empty() ||
+           (cfg.order.size() == 1 && cfg.order.front() == LinearSolverKind::SparseLU);
+}
+
+void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg, bool force = true) {
+    const bool has_default_order = is_default_linear_order(cfg);
+    if (!force && !has_default_order) {
+        return;
+    }
+
+    if (has_default_order) {
+        cfg.order = {
+            LinearSolverKind::KLU,
+            LinearSolverKind::EnhancedSparseLU,
+            LinearSolverKind::GMRES,
+            LinearSolverKind::BiCGSTAB
+        };
+    }
+    if (cfg.fallback_order.empty()) {
+        cfg.fallback_order = {
+            LinearSolverKind::EnhancedSparseLU,
+            LinearSolverKind::SparseLU,
+            LinearSolverKind::GMRES,
+            LinearSolverKind::BiCGSTAB
+        };
+    }
+    cfg.allow_fallback = true;
+    cfg.auto_select = true;
+    cfg.size_threshold = std::min(cfg.size_threshold, 1200);
+    cfg.nnz_threshold = std::min(cfg.nnz_threshold, 120000);
+    cfg.diag_min_threshold = std::max(cfg.diag_min_threshold, Real{1e-12});
+
+    auto& it = cfg.iterative_config;
+    it.max_iterations = std::max(it.max_iterations, 300);
+    it.tolerance = std::min(it.tolerance, Real{1e-8});
+    it.restart = std::max(it.restart, 40);
+    it.enable_scaling = true;
+    it.scaling_floor = std::min(it.scaling_floor, Real{1e-12});
+    if (it.preconditioner == IterativeSolverConfig::PreconditionerKind::None ||
+        it.preconditioner == IterativeSolverConfig::PreconditionerKind::Jacobi) {
+        it.preconditioner = IterativeSolverConfig::PreconditionerKind::ILUT;
+    }
+    it.ilut_drop_tolerance = std::min(it.ilut_drop_tolerance, Real{1e-3});
+    it.ilut_fill_factor = std::max(it.ilut_fill_factor, Real{10.0});
+}
+
+[[nodiscard]] bool is_default_newton_profile(const NewtonOptions& opts) {
+    NewtonOptions defaults;
+    return opts.max_iterations <= defaults.max_iterations &&
+           opts.enable_limiting == defaults.enable_limiting &&
+           opts.enable_trust_region == defaults.enable_trust_region &&
+           opts.max_voltage_step <= defaults.max_voltage_step &&
+           opts.max_current_step <= defaults.max_current_step &&
+           opts.min_damping >= defaults.min_damping;
+}
+
+void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
+    if (!force && !is_default_newton_profile(opts)) {
+        return;
+    }
+
+    opts.max_iterations = std::max(opts.max_iterations, 120);
+    opts.auto_damping = true;
+    opts.min_damping = std::min(opts.min_damping, Real{1e-4});
+    opts.enable_limiting = true;
+    opts.max_voltage_step = std::max(opts.max_voltage_step, Real{10.0});
+    opts.max_current_step = std::max(opts.max_current_step, Real{20.0});
+    opts.enable_trust_region = true;
+    opts.trust_radius = std::max(opts.trust_radius, Real{8.0});
+    opts.trust_shrink = std::min(opts.trust_shrink, Real{0.5});
+    opts.trust_expand = std::max(opts.trust_expand, Real{1.5});
+    opts.detect_stall = false;
+}
+
+[[nodiscard]] CircuitRobustnessHints analyze_circuit_robustness(const Circuit& circuit) {
+    CircuitRobustnessHints hints;
+    const auto& devices = circuit.devices();
+    for (const auto& device : devices) {
+        std::visit([&](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, VoltageControlledSwitch> ||
+                          std::is_same_v<T, IdealSwitch> ||
+                          std::is_same_v<T, MOSFET> ||
+                          std::is_same_v<T, IGBT>) {
+                hints.switching_devices++;
+                hints.nonlinear_devices++;
+            } else if constexpr (std::is_same_v<T, IdealDiode>) {
+                hints.nonlinear_devices++;
+            }
+        }, device);
+    }
+
+    const auto& virtual_components = circuit.virtual_components();
+    for (const auto& component : virtual_components) {
+        if (component.type == "pwm_generator") {
+            hints.pwm_blocks++;
+            hints.control_blocks++;
+        } else if (component.type == "pi_controller" ||
+                   component.type == "pid_controller" ||
+                   component.type == "hysteresis" ||
+                   component.type == "comparator" ||
+                   component.type == "state_machine" ||
+                   component.type == "relay") {
+            hints.control_blocks++;
+        }
+    }
+    return hints;
+}
+
+[[nodiscard]] bool is_fixed_timestep(const SimulationOptions& options) {
+    const Real span = std::abs(options.dt_max - options.dt_min);
+    const Real scale = std::max<Real>({Real{1.0}, std::abs(options.dt), std::abs(options.dt_max)});
+    return span <= scale * Real{1e-12};
+}
+
+void apply_auto_transient_profile(SimulationOptions& options, const Circuit& circuit) {
+    // Respect explicit strict mode: users can disable fallback for deterministic debugging.
+    if (!options.linear_solver.allow_fallback) {
+        return;
+    }
+
+    const auto hints = analyze_circuit_robustness(circuit);
+    const bool switching_topology =
+        hints.switching_devices > 0 || hints.pwm_blocks > 0 || hints.control_blocks > 0;
+    if (!switching_topology) {
+        return;
+    }
+
+    const bool fixed_step = is_fixed_timestep(options);
+    if (!fixed_step) {
+        options.adaptive_timestep = true;
+        options.timestep_config = AdvancedTimestepConfig::for_power_electronics();
+        options.timestep_config.dt_initial = options.dt;
+        options.timestep_config.dt_min = std::max(options.dt_min, Real{1e-12});
+        options.timestep_config.dt_max = std::max(options.timestep_config.dt_max, options.dt * 20.0);
+        options.timestep_config.error_tolerance =
+            std::max(options.timestep_config.error_tolerance, Real{5e-3});
+
+        options.enable_bdf_order_control = true;
+        options.bdf_config.min_order = 1;
+        options.bdf_config.max_order = 2;
+        options.bdf_config.initial_order = 1;
+    }
+
+    if (options.integrator == Integrator::Trapezoidal) {
+        options.integrator = Integrator::TRBDF2;
+    }
+
+    options.max_step_retries = std::max(options.max_step_retries, 12);
+    options.stiffness_config.enable = true;
+    options.stiffness_config.switch_integrator = true;
+    options.stiffness_config.stiff_integrator = Integrator::BDF1;
+    options.stiffness_config.rejection_streak_threshold =
+        std::min(options.stiffness_config.rejection_streak_threshold, 2);
+    options.stiffness_config.newton_iter_threshold =
+        std::min(options.stiffness_config.newton_iter_threshold, 30);
+    options.stiffness_config.newton_streak_threshold =
+        std::min(options.stiffness_config.newton_streak_threshold, 2);
+    options.stiffness_config.cooldown_steps = std::max(options.stiffness_config.cooldown_steps, 3);
+
+    if (options.fallback_policy.enable_transient_gmin) {
+        options.fallback_policy.gmin_retry_threshold =
+            std::min(options.fallback_policy.gmin_retry_threshold, 1);
+        options.fallback_policy.gmin_initial =
+            std::max(options.fallback_policy.gmin_initial, Real{1e-8});
+        options.fallback_policy.gmin_max = std::max(options.fallback_policy.gmin_max, Real{1e-3});
+        options.fallback_policy.gmin_growth = std::max(options.fallback_policy.gmin_growth, Real{10.0});
+    }
+
+    apply_robust_newton_defaults(options.newton_options, false);
+    apply_robust_linear_solver_defaults(options.linear_solver, false);
+}
 
 Matrix spectral_diff_matrix(int samples, Real period) {
     Matrix D = Matrix::Zero(samples, samples);
@@ -46,6 +228,9 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     , lte_estimator_(options_.lte_config)
     , bdf_controller_(options_.bdf_config) {
 
+    options_.newton_options.num_nodes = circuit_.num_nodes();
+    options_.newton_options.num_branches = circuit_.num_branches();
+    apply_auto_transient_profile(options_, circuit_);
     options_.newton_options.num_nodes = circuit_.num_nodes();
     options_.newton_options.num_branches = circuit_.num_branches();
     newton_solver_.set_options(options_.newton_options);
@@ -749,6 +934,11 @@ SimulationResult Simulator::run_transient(const Vector& x0,
     int rejection_streak = 0;
     int high_iter_streak = 0;
     int stiffness_cooldown = 0;
+    int global_recovery_attempts = 0;
+    bool auto_recovery_attempted = false;
+    const bool can_auto_recover = options_.adaptive_timestep &&
+                                  options_.linear_solver.allow_fallback &&
+                                  !is_fixed_timestep(options_);
 
     circuit_.set_current_time(t);
     circuit_.set_timestep(dt);
@@ -997,23 +1187,79 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                                   FallbackReasonCode::MaxRetriesExceeded,
                                   step_result.status,
                                   "abort_step");
+
+            if (can_auto_recover && global_recovery_attempts < kMaxGlobalRecoveryAttempts) {
+                ++global_recovery_attempts;
+                auto_recovery_attempted = true;
+
+                circuit_.clear_stage_context();
+                dt = std::max(options_.dt_min, dt_used * (global_recovery_attempts == 1 ? Real{0.25} : Real{0.1}));
+                rejection_streak = 0;
+                high_iter_streak = 0;
+                stiffness_cooldown = std::max(stiffness_cooldown, options_.stiffness_config.cooldown_steps);
+
+                NewtonOptions tuned_newton = newton_solver_.options();
+                apply_robust_newton_defaults(tuned_newton);
+                tuned_newton.max_iterations = std::max(tuned_newton.max_iterations, 200);
+                newton_solver_.set_options(tuned_newton);
+
+                LinearSolverStackConfig tuned_linear = options_.linear_solver;
+                apply_robust_linear_solver_defaults(tuned_linear);
+                newton_solver_.linear_solver().set_config(tuned_linear);
+
+                if (options_.fallback_policy.enable_transient_gmin) {
+                    Real next_gmin = transient_gmin_ > 0.0
+                        ? transient_gmin_ * options_.fallback_policy.gmin_growth
+                        : options_.fallback_policy.gmin_initial;
+                    transient_gmin_ = std::min(options_.fallback_policy.gmin_max,
+                                               std::max(next_gmin, options_.fallback_policy.gmin_initial));
+                }
+
+                if (options_.enable_bdf_order_control) {
+                    bdf_controller_.set_order(1);
+                    circuit_.set_integration_order(1);
+                } else {
+                    circuit_.set_integration_method(Integrator::TRBDF2);
+                    using_stiff_integrator = true;
+                }
+
+                std::ostringstream action;
+                action << "global_recovery_" << global_recovery_attempts;
+                if (transient_gmin_ > 0.0) {
+                    action << "_gmin=" << transient_gmin_;
+                }
+                record_fallback_event(result,
+                                      result.total_steps,
+                                      retries + global_recovery_attempts,
+                                      t,
+                                      dt,
+                                      FallbackReasonCode::MaxRetriesExceeded,
+                                      step_result.status,
+                                      action.str());
+                continue;
+            }
+
             result.success = false;
             result.final_status = step_result.status;
             result.message = "Transient failed at t=" + std::to_string(t + dt_used) +
                              ": " + step_result.error_message;
+            if (auto_recovery_attempted) {
+                result.message += " (automatic regularization attempted)";
+            }
             break;
         }
 
         result.newton_iterations_total += step_result.iterations;
         rejection_streak = 0;
+        global_recovery_attempts = 0;
         transient_gmin_ = 0.0;
 
-            if (options_.stiffness_config.enable) {
-                if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {
-                    high_iter_streak++;
-                } else {
-                    high_iter_streak = 0;
-                }
+        if (options_.stiffness_config.enable) {
+            if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {
+                high_iter_streak++;
+            } else {
+                high_iter_streak = 0;
+            }
 
             if (high_iter_streak >= options_.stiffness_config.newton_streak_threshold) {
                 stiffness_cooldown = options_.stiffness_config.cooldown_steps;
