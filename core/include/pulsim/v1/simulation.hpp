@@ -205,6 +205,7 @@ struct SimulationResult {
     std::vector<SimulationEvent> events;
     std::vector<std::string> mixed_domain_phase_order;
     std::unordered_map<std::string, std::vector<Real>> virtual_channels;
+    std::unordered_map<std::string, VirtualChannelMetadata> virtual_channel_metadata;
 
     bool success = true;
     SolverStatus final_status = SolverStatus::Success;

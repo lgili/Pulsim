@@ -74,6 +74,14 @@ struct MixedDomainStepResult {
     std::unordered_map<std::string, Real> channel_values;
 };
 
+/// Metadata describing a mixed-domain output channel.
+struct VirtualChannelMetadata {
+    std::string component_type;
+    std::string component_name;
+    std::string domain;
+    std::vector<Index> nodes;
+};
+
 // =============================================================================
 // Runtime Circuit Class
 // =============================================================================
@@ -456,6 +464,40 @@ public:
     /// Canonical mixed-domain phase order used by the runtime scheduler.
     [[nodiscard]] static std::vector<std::string> mixed_domain_phase_order() {
         return {"electrical", "control", "events", "instrumentation"};
+    }
+
+    /// Return metadata for channels produced by virtual components.
+    [[nodiscard]] std::unordered_map<std::string, VirtualChannelMetadata> virtual_channel_metadata() const {
+        std::unordered_map<std::string, VirtualChannelMetadata> metadata;
+        metadata.reserve(virtual_components_.size() * 2);
+
+        auto channel_domain = [](const std::string& type) -> std::string {
+            if (type == "thermal_scope") return "thermal";
+            if (type == "relay") return "events";
+            if (type == "voltage_probe" || type == "current_probe" || type == "power_probe" ||
+                type == "electrical_scope") {
+                return "instrumentation";
+            }
+            return "control";
+        };
+
+        for (const auto& component : virtual_components_) {
+            VirtualChannelMetadata base{
+                component.type,
+                component.name,
+                channel_domain(component.type),
+                component.nodes
+            };
+            metadata.emplace(component.name, base);
+
+            if (component.type == "relay") {
+                auto relay = base;
+                relay.domain = "events";
+                metadata.emplace(component.name + ".state", std::move(relay));
+            }
+        }
+
+        return metadata;
     }
 
     /// Execute one deterministic mixed-domain scheduler pass for a timestep.

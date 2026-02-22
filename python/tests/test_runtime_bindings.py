@@ -365,6 +365,59 @@ def test_simulation_result_includes_virtual_channels() -> None:
     assert result.mixed_domain_phase_order == ["electrical", "control", "events", "instrumentation"]
     assert "VP" in result.virtual_channels
     assert len(result.virtual_channels["VP"]) == len(result.time)
+    assert "VP" in result.virtual_channel_metadata
+    assert result.virtual_channel_metadata["VP"].component_type == "voltage_probe"
+    assert result.virtual_channel_metadata["VP"].domain == "instrumentation"
+
+
+def test_virtual_channel_metadata_includes_relay_state_channel() -> None:
+    circuit = ps.Circuit()
+    n_coil_p = circuit.add_node("coil_p")
+    n_coil_n = circuit.add_node("coil_n")
+    n_com = circuit.add_node("com")
+    n_no = circuit.add_node("no")
+    n_nc = circuit.add_node("nc")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_coil_p, gnd, 12.0)
+    circuit.add_virtual_component(
+        "relay",
+        "K1",
+        [n_coil_p, n_coil_n, n_com, n_no, n_nc],
+        {"pickup_voltage": 6.0, "dropout_voltage": 3.0},
+        {},
+    )
+
+    metadata = circuit.virtual_channel_metadata()
+    assert "K1" in metadata
+    assert metadata["K1"].component_type == "relay"
+    assert metadata["K1.state"].domain == "events"
+
+
+def test_scope_channels_emit_waveforms_with_metadata() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 10.0)
+    circuit.add_resistor("R1", n_in, gnd, 1_000.0)
+    circuit.add_virtual_component("electrical_scope", "SCOPE_E", [n_in, gnd], {}, {})
+    circuit.add_virtual_component("thermal_scope", "SCOPE_T", [n_in], {}, {})
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 3e-6
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+
+    result = ps.Simulator(circuit, opts).run_transient()
+    assert result.success
+    assert "SCOPE_E" in result.virtual_channels
+    assert "SCOPE_T" in result.virtual_channels
+    assert len(result.virtual_channels["SCOPE_E"]) == len(result.time)
+    assert result.virtual_channel_metadata["SCOPE_E"].domain == "instrumentation"
+    assert result.virtual_channel_metadata["SCOPE_T"].domain == "thermal"
 
 
 def test_fallback_trace_records_retry_reasons() -> None:

@@ -60,6 +60,7 @@ from ._pulsim import (
     Circuit,
     VirtualComponent,
     MixedDomainStepResult,
+    VirtualChannelMetadata,
 
     # DC Solver
     solve_dc,
@@ -445,6 +446,7 @@ __all__ = [
     "Circuit",
     "VirtualComponent",
     "MixedDomainStepResult",
+    "VirtualChannelMetadata",
 
     # DC Solver
     "solve_dc",

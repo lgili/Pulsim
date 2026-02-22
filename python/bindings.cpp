@@ -437,6 +437,14 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("phase_order", &MixedDomainStepResult::phase_order)
         .def_readwrite("channel_values", &MixedDomainStepResult::channel_values);
 
+    py::class_<VirtualChannelMetadata>(v2, "VirtualChannelMetadata",
+        "Metadata for a mixed-domain channel")
+        .def(py::init<>())
+        .def_readwrite("component_type", &VirtualChannelMetadata::component_type)
+        .def_readwrite("component_name", &VirtualChannelMetadata::component_name)
+        .def_readwrite("domain", &VirtualChannelMetadata::domain)
+        .def_readwrite("nodes", &VirtualChannelMetadata::nodes);
+
     // =========================================================================
     // Runtime Circuit Builder (Phase 3)
     // =========================================================================
@@ -571,6 +579,8 @@ void init_v2_module(py::module_& v2) {
              "Get virtual component descriptors")
         .def("virtual_component_names", &Circuit::virtual_component_names,
              "Get virtual component names")
+        .def("virtual_channel_metadata", &Circuit::virtual_channel_metadata,
+             "Get metadata for channels produced by virtual components")
         .def_static("mixed_domain_phase_order", &Circuit::mixed_domain_phase_order,
              "Get deterministic mixed-domain execution phase order")
         .def("execute_mixed_domain_step", &Circuit::execute_mixed_domain_step,
@@ -1132,6 +1142,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("events", &SimulationResult::events)
         .def_readwrite("mixed_domain_phase_order", &SimulationResult::mixed_domain_phase_order)
         .def_readwrite("virtual_channels", &SimulationResult::virtual_channels)
+        .def_readwrite("virtual_channel_metadata", &SimulationResult::virtual_channel_metadata)
         .def_readwrite("success", &SimulationResult::success)
         .def_readwrite("final_status", &SimulationResult::final_status)
         .def_readwrite("message", &SimulationResult::message)

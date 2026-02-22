@@ -38,15 +38,15 @@
 
 ## 7. Instrumentation and Signal Routing
 
-- [ ] 7.1 Implement virtual probe models: `VOLTAGE_PROBE`, `CURRENT_PROBE`, `POWER_PROBE`.
-- [ ] 7.2 Implement scope-channel models: `ELECTRICAL_SCOPE`, `THERMAL_SCOPE` (channel metadata + extracted waveforms).
+- [x] 7.1 Implement virtual probe models: `VOLTAGE_PROBE`, `CURRENT_PROBE`, `POWER_PROBE`.
+- [x] 7.2 Implement scope-channel models: `ELECTRICAL_SCOPE`, `THERMAL_SCOPE` (channel metadata + extracted waveforms).
 - [ ] 7.3 Implement routing blocks: `SIGNAL_MUX`, `SIGNAL_DEMUX` with deterministic channel mapping.
 
 ## 8. YAML and Python APIs
 
 - [x] 8.1 Extend YAML parser schemas for all newly supported component types.
 - [x] 8.2 Add strict validation diagnostics for missing pins, invalid parameter ranges, and incompatible block wiring.
-- [ ] 8.3 Expose Python bindings for new component creation/configuration APIs and result access for probes/scopes.
+- [x] 8.3 Expose Python bindings for new component creation/configuration APIs and result access for probes/scopes.
 - [x] 8.4 Preserve backward compatibility of existing `Circuit.add_*` methods.
 
 ## 9. Validation and Benchmarking
