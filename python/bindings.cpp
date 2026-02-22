@@ -431,6 +431,12 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("numeric_params", &VirtualComponent::numeric_params)
         .def_readwrite("metadata", &VirtualComponent::metadata);
 
+    py::class_<MixedDomainStepResult>(v2, "MixedDomainStepResult",
+        "Mixed-domain scheduler output for one timestep")
+        .def(py::init<>())
+        .def_readwrite("phase_order", &MixedDomainStepResult::phase_order)
+        .def_readwrite("channel_values", &MixedDomainStepResult::channel_values);
+
     // =========================================================================
     // Runtime Circuit Builder (Phase 3)
     // =========================================================================
@@ -565,6 +571,11 @@ void init_v2_module(py::module_& v2) {
              "Get virtual component descriptors")
         .def("virtual_component_names", &Circuit::virtual_component_names,
              "Get virtual component names")
+        .def_static("mixed_domain_phase_order", &Circuit::mixed_domain_phase_order,
+             "Get deterministic mixed-domain execution phase order")
+        .def("execute_mixed_domain_step", &Circuit::execute_mixed_domain_step,
+             py::arg("x"), py::arg("time"),
+             "Execute mixed-domain scheduler for one state sample")
         .def("evaluate_virtual_signals", &Circuit::evaluate_virtual_signals, py::arg("x"),
              "Evaluate probe-style virtual signals for a state vector")
         .def("apply_numerical_regularization", &Circuit::apply_numerical_regularization,
@@ -1119,6 +1130,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("time", &SimulationResult::time)
         .def_readwrite("states", &SimulationResult::states)
         .def_readwrite("events", &SimulationResult::events)
+        .def_readwrite("mixed_domain_phase_order", &SimulationResult::mixed_domain_phase_order)
+        .def_readwrite("virtual_channels", &SimulationResult::virtual_channels)
         .def_readwrite("success", &SimulationResult::success)
         .def_readwrite("final_status", &SimulationResult::final_status)
         .def_readwrite("message", &SimulationResult::message)

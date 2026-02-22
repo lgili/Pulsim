@@ -323,6 +323,50 @@ def test_virtual_probe_evaluation_from_state_vector() -> None:
     assert values["PP"] == 4.0
 
 
+def test_mixed_domain_scheduler_is_deterministic() -> None:
+    circuit = ps.Circuit()
+    n_ref = circuit.add_node("ref")
+    n_fb = circuit.add_node("fb")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_ref, gnd, 3.0)
+    circuit.add_resistor("Rfb", n_ref, n_fb, 10.0)
+    circuit.add_virtual_component("pi_controller", "PI1", [n_ref, n_fb, n_out], {"gain": 2.0}, {})
+
+    x = [0.0] * circuit.system_size()
+    x[n_ref] = 3.0
+    x[n_fb] = 1.0
+    step = circuit.execute_mixed_domain_step(x, 1e-6)
+
+    assert step.phase_order == ["electrical", "control", "events", "instrumentation"]
+    assert "PI1" in step.channel_values
+
+
+def test_simulation_result_includes_virtual_channels() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, gnd, 100.0)
+    circuit.add_virtual_component("voltage_probe", "VP", [n_in, gnd], {}, {})
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-6
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+
+    sim = ps.Simulator(circuit, opts)
+    result = sim.run_transient()
+    assert result.success
+    assert result.mixed_domain_phase_order == ["electrical", "control", "events", "instrumentation"]
+    assert "VP" in result.virtual_channels
+    assert len(result.virtual_channels["VP"]) == len(result.time)
+
+
 def test_fallback_trace_records_retry_reasons() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")

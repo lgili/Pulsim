@@ -13,8 +13,11 @@
 #include "pulsim/v1/sources.hpp"
 #include "pulsim/v1/integration.hpp"
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <variant>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -63,6 +66,12 @@ struct VirtualComponent {
     std::vector<Index> nodes;
     std::unordered_map<std::string, Real> numeric_params;
     std::unordered_map<std::string, std::string> metadata;
+};
+
+/// Deterministic mixed-domain scheduler output for one accepted timestep.
+struct MixedDomainStepResult {
+    std::vector<std::string> phase_order;
+    std::unordered_map<std::string, Real> channel_values;
 };
 
 // =============================================================================
@@ -442,6 +451,180 @@ public:
             names.push_back(component.name);
         }
         return names;
+    }
+
+    /// Canonical mixed-domain phase order used by the runtime scheduler.
+    [[nodiscard]] static std::vector<std::string> mixed_domain_phase_order() {
+        return {"electrical", "control", "events", "instrumentation"};
+    }
+
+    /// Execute one deterministic mixed-domain scheduler pass for a timestep.
+    /// Phase order: electrical -> control -> events -> instrumentation.
+    [[nodiscard]] MixedDomainStepResult execute_mixed_domain_step(const Vector& x, Real time) {
+        set_current_time(time);
+        MixedDomainStepResult result;
+        result.phase_order = mixed_domain_phase_order();
+
+        auto node_voltage = [&](Index node) -> Real {
+            if (node < 0 || node >= system_size()) {
+                return 0.0;
+            }
+            return x[node];
+        };
+
+        auto get_numeric = [&](const VirtualComponent& component, const std::string& key, Real fallback) {
+            const auto it = component.numeric_params.find(key);
+            return (it != component.numeric_params.end()) ? it->second : fallback;
+        };
+
+        auto has_type = [](const std::unordered_set<std::string>& set, const std::string& value) {
+            return set.find(value) != set.end();
+        };
+
+        const std::unordered_set<std::string> control_types = {
+            "op_amp", "comparator", "pi_controller", "pid_controller",
+            "math_block", "pwm_generator", "integrator", "differentiator",
+            "limiter", "rate_limiter", "hysteresis", "lookup_table",
+            "transfer_function", "delay_block", "sample_hold",
+            "state_machine", "signal_mux", "signal_demux"
+        };
+
+        // Phase 2: control update
+        for (const auto& component : virtual_components_) {
+            if (!has_type(control_types, component.type)) {
+                continue;
+            }
+
+            const Real in0 = (component.nodes.size() > 0) ? node_voltage(component.nodes[0]) : 0.0;
+            const Real in1 = (component.nodes.size() > 1) ? node_voltage(component.nodes[1]) : 0.0;
+            const Real signal = in0 - in1;
+            Real output = signal * get_numeric(component, "gain", 1.0);
+
+            const Real dt = [&]() {
+                const auto it = virtual_last_time_.find(component.name);
+                if (it == virtual_last_time_.end()) return Real{0.0};
+                return std::max<Real>(0.0, time - it->second);
+            }();
+
+            if (component.type == "math_block") {
+                const std::string op = [&]() -> std::string {
+                    const auto it = component.metadata.find("operation");
+                    return it == component.metadata.end() ? "add" : it->second;
+                }();
+                if (op == "sub") output = in0 - in1;
+                else if (op == "mul") output = in0 * in1;
+                else if (op == "div") output = std::abs(in1) > 1e-12 ? (in0 / in1) : 0.0;
+                else output = in0 + in1;
+            } else if (component.type == "integrator") {
+                Real integral = virtual_signal_state_[component.name];
+                integral += signal * dt;
+                output = integral;
+            } else if (component.type == "differentiator") {
+                const Real previous = virtual_last_input_[component.name];
+                output = (dt > 0.0) ? (signal - previous) / dt : 0.0;
+            } else if (component.type == "limiter") {
+                const Real lo = get_numeric(component, "min", get_numeric(component, "rail_low", 0.0));
+                const Real hi = get_numeric(component, "max", get_numeric(component, "rail_high", 1.0));
+                output = std::clamp(output, lo, hi);
+            } else if (component.type == "rate_limiter") {
+                const Real rise = std::abs(get_numeric(component, "rising_rate", 1e6));
+                const Real fall = std::abs(get_numeric(component, "falling_rate", rise));
+                const Real previous = virtual_signal_state_[component.name];
+                if (dt > 0.0) {
+                    const Real delta = output - previous;
+                    const Real up = rise * dt;
+                    const Real down = fall * dt;
+                    if (delta > up) output = previous + up;
+                    else if (delta < -down) output = previous - down;
+                }
+            } else if (component.type == "hysteresis" || component.type == "comparator") {
+                const Real threshold = get_numeric(component, "threshold", 0.0);
+                const Real band = std::abs(get_numeric(component, "hysteresis", 0.0));
+                bool state = virtual_binary_state_[component.name];
+                if (state) {
+                    if (signal < threshold - 0.5 * band) state = false;
+                } else {
+                    if (signal > threshold + 0.5 * band) state = true;
+                }
+                virtual_binary_state_[component.name] = state;
+                output = state ? get_numeric(component, "high", 1.0) : get_numeric(component, "low", 0.0);
+            } else if (component.type == "sample_hold") {
+                const Real period = std::max<Real>(get_numeric(component, "sample_period", 0.0), 0.0);
+                const bool first = virtual_last_time_.find(component.name) == virtual_last_time_.end();
+                if (first || period <= 0.0 || dt >= period) {
+                    output = signal;
+                } else {
+                    output = virtual_signal_state_[component.name];
+                }
+            } else if (component.type == "delay_block") {
+                output = virtual_last_input_[component.name];
+            } else if (component.type == "transfer_function") {
+                const Real alpha = std::clamp(get_numeric(component, "alpha", 0.2), 0.0, 1.0);
+                const Real previous = virtual_signal_state_[component.name];
+                output = previous + alpha * (signal - previous);
+            } else if (component.type == "pwm_generator") {
+                const Real frequency = std::max<Real>(get_numeric(component, "frequency", 1e3), 1.0);
+                const Real duty = std::clamp(get_numeric(component, "duty", 0.5), 0.0, 1.0);
+                const Real phase = std::fmod(std::max<Real>(0.0, time * frequency), 1.0);
+                output = (phase < duty) ? 1.0 : 0.0;
+            } else if (component.type == "state_machine") {
+                bool state = virtual_binary_state_[component.name];
+                const Real trigger = get_numeric(component, "threshold", 0.5);
+                if (signal > trigger) {
+                    state = !state;
+                }
+                virtual_binary_state_[component.name] = state;
+                output = state ? 1.0 : 0.0;
+            } else if (component.type == "signal_mux") {
+                const int select = static_cast<int>(std::llround(get_numeric(component, "select_index", 0.0)));
+                const std::size_t selected = static_cast<std::size_t>(std::max(select, 0));
+                output = selected < component.nodes.size() ? node_voltage(component.nodes[selected]) : in0;
+            } else if (component.type == "signal_demux") {
+                output = in0;
+            }
+
+            virtual_signal_state_[component.name] = output;
+            virtual_last_input_[component.name] = signal;
+            virtual_last_time_[component.name] = time;
+            result.channel_values[component.name] = output;
+        }
+
+        // Phase 3: event-driven transitions
+        for (const auto& component : virtual_components_) {
+            if (component.type != "relay") {
+                continue;
+            }
+            const Real coil = (component.nodes.size() > 1)
+                ? (node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]))
+                : 0.0;
+            const Real pickup = std::abs(get_numeric(component, "pickup_current",
+                                    get_numeric(component, "pickup_voltage", 1.0)));
+            const Real dropout = std::abs(get_numeric(component, "dropout_current", pickup * 0.8));
+            bool closed = virtual_binary_state_[component.name];
+            if (closed) {
+                if (std::abs(coil) < dropout) closed = false;
+            } else {
+                if (std::abs(coil) >= pickup) closed = true;
+            }
+            virtual_binary_state_[component.name] = closed;
+            result.channel_values[component.name + ".state"] = closed ? 1.0 : 0.0;
+        }
+
+        // Phase 4: instrumentation extraction
+        const auto probes = evaluate_virtual_signals(x);
+        result.channel_values.insert(probes.begin(), probes.end());
+        for (const auto& component : virtual_components_) {
+            if (component.type == "electrical_scope" || component.type == "thermal_scope") {
+                if (component.nodes.empty()) continue;
+                Real acc = 0.0;
+                for (Index node : component.nodes) {
+                    acc += node_voltage(node);
+                }
+                result.channel_values[component.name] = acc / static_cast<Real>(component.nodes.size());
+            }
+        }
+
+        return result;
     }
 
     /// Evaluate available probe-style virtual signals for a given state vector.
@@ -1174,6 +1357,10 @@ private:
 
     std::vector<DeviceVariant> devices_;
     std::vector<VirtualComponent> virtual_components_;
+    std::unordered_map<std::string, Real> virtual_signal_state_;
+    std::unordered_map<std::string, Real> virtual_last_input_;
+    std::unordered_map<std::string, Real> virtual_last_time_;
+    std::unordered_map<std::string, bool> virtual_binary_state_;
     std::vector<DeviceConnection> connections_;
     std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index> node_map_;

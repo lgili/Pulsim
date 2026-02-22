@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <span>
 
@@ -757,8 +758,43 @@ SimulationResult Simulator::run_transient(const Vector& x0,
 
     circuit_.update_history(x, true);
 
+    auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
+        if (circuit_.num_virtual_components() == 0) {
+            return;
+        }
+
+        auto mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
+        if (result.mixed_domain_phase_order.empty()) {
+            result.mixed_domain_phase_order = mixed_step.phase_order;
+        }
+
+        const std::size_t sample_count = result.time.size();
+        const Real nan = std::numeric_limits<Real>::quiet_NaN();
+
+        for (auto& [channel, series] : result.virtual_channels) {
+            while (series.size() + 1 < sample_count) {
+                series.push_back(nan);
+            }
+        }
+
+        for (const auto& [channel, value] : mixed_step.channel_values) {
+            auto& series = result.virtual_channels[channel];
+            while (series.size() + 1 < sample_count) {
+                series.push_back(nan);
+            }
+            series.push_back(value);
+        }
+
+        for (auto& [channel, series] : result.virtual_channels) {
+            if (series.size() < sample_count) {
+                series.push_back(nan);
+            }
+        }
+    };
+
     result.time.push_back(t);
     result.states.push_back(x);
+    append_virtual_sample(x, t);
 
     if (callback) {
         callback(t, x);
@@ -1030,6 +1066,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
 
         result.time.push_back(t);
         result.states.push_back(x);
+        append_virtual_sample(x, t);
 
         if (callback) {
             callback(t, x);
