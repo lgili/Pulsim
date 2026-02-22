@@ -493,11 +493,17 @@ public:
             };
             metadata.emplace(component.name, base);
 
-            if (component.type == "relay" || component.type == "fuse" || component.type == "circuit_breaker" ||
-                component.type == "thyristor" || component.type == "triac") {
-                auto relay = base;
-                relay.domain = "events";
-                metadata.emplace(component.name + ".state", std::move(relay));
+            if (component.type == "relay") {
+                auto event = base;
+                event.domain = "events";
+                metadata.emplace(component.name + ".state", event);
+                metadata.emplace(component.name + ".no_state", event);
+                metadata.emplace(component.name + ".nc_state", std::move(event));
+            } else if (component.type == "fuse" || component.type == "circuit_breaker" ||
+                       component.type == "thyristor" || component.type == "triac") {
+                auto event = base;
+                event.domain = "events";
+                metadata.emplace(component.name + ".state", std::move(event));
             }
         }
 
@@ -650,7 +656,12 @@ public:
             }();
 
             const auto initial_closed = [&]() -> bool {
-                return get_numeric(component, "initial_closed", 1.0) > 0.5;
+                Real fallback = 1.0;
+                if (component.type == "relay" || component.type == "thyristor" ||
+                    component.type == "triac") {
+                    fallback = 0.0;
+                }
+                return get_numeric(component, "initial_closed", fallback) > 0.5;
             };
 
             bool closed = virtual_binary_state_.contains(component.name)
@@ -669,6 +680,26 @@ public:
                 } else {
                     if (std::abs(coil) >= pickup) closed = true;
                 }
+
+                const bool no_closed = closed;
+                const bool nc_closed = !closed;
+
+                if (const auto it = component.metadata.find("target_component_no");
+                    it != component.metadata.end()) {
+                    set_switch_state(it->second, no_closed);
+                }
+                if (const auto it = component.metadata.find("target_component_nc");
+                    it != component.metadata.end()) {
+                    set_switch_state(it->second, nc_closed);
+                }
+                if (const auto it = component.metadata.find("target_component");
+                    it != component.metadata.end()) {
+                    set_switch_state(it->second, no_closed);
+                }
+
+                result.channel_values[component.name + ".state"] = closed ? 1.0 : 0.0;
+                result.channel_values[component.name + ".no_state"] = no_closed ? 1.0 : 0.0;
+                result.channel_values[component.name + ".nc_state"] = nc_closed ? 1.0 : 0.0;
             } else if (component.type == "fuse" || component.type == "circuit_breaker") {
                 const Real v_term = (component.nodes.size() > 1)
                     ? (node_voltage(component.nodes[0]) - node_voltage(component.nodes[1]))
@@ -761,11 +792,13 @@ public:
             virtual_binary_state_[component.name] = closed;
             virtual_last_time_[component.name] = time;
 
-            if (const auto it = component.metadata.find("target_component");
-                it != component.metadata.end()) {
-                set_switch_state(it->second, closed);
+            if (component.type != "relay") {
+                if (const auto it = component.metadata.find("target_component");
+                    it != component.metadata.end()) {
+                    set_switch_state(it->second, closed);
+                }
+                result.channel_values[component.name + ".state"] = closed ? 1.0 : 0.0;
             }
-            result.channel_values[component.name + ".state"] = closed ? 1.0 : 0.0;
         }
 
         // Phase 4: instrumentation extraction

@@ -926,7 +926,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "turns_ratio", "ratio", "magnetizing_inductance", "lm",
              "target_component", "target_device", "target", "operation", "channels", "inputs", "outputs",
              "x", "y", "num", "den", "delay", "sample_period",
-             "trip_current", "trip_time", "trip", "rating", "blow_i2t", "i2t", "pickup_current", "dropout_current",
+             "trip_current", "trip_time", "trip", "rating", "blow_i2t", "i2t",
+             "pickup_current", "dropout_current", "pickup_voltage", "dropout_voltage",
+             "contact_resistance", "off_resistance", "target_component_no", "target_component_nc",
              "beta", "vbe_on", "holding_current", "latch_current", "gate_threshold",
              "saturation_current", "saturation_inductance", "coupling", "k", "l1", "l2",
              "state", "mode", "select_index", "gain", "rail_high", "rail_low",
@@ -1187,6 +1189,73 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             circuit.add_mosfet(name, node_at(0), node_at(1), node_at(2), p);
             push_warning(warnings_, kDiagSurrogateComponent,
                          "Component '" + name + "' (" + type + ") mapped to MOSFET surrogate model");
+        }
+        else if (type == "relay") {
+            bool energized = false;
+            YAML::Node state_node = get_param("initial_state");
+            if (state_node.IsDefined() && !state_node.IsNull()) {
+                if (state_node.IsScalar()) {
+                    try {
+                        energized = state_node.as<bool>();
+                    } catch (...) {
+                        const std::string state = normalize_key(state_node.as<std::string>());
+                        energized = (state == "closed" || state == "energized" || state == "on" || state == "true");
+                    }
+                }
+            }
+
+            Real g_on = 1e4;
+            Real g_off = 1e-9;
+            if (get_param("g_on")) {
+                g_on = parse_real(get_param("g_on"), name + ".g_on", errors_);
+            } else if (get_param("contact_resistance")) {
+                const Real r_on = parse_real(get_param("contact_resistance"), name + ".contact_resistance", errors_);
+                g_on = (r_on > 0.0) ? (1.0 / r_on) : 1e4;
+            } else if (get_param("ron")) {
+                const Real r_on = parse_real(get_param("ron"), name + ".ron", errors_);
+                g_on = (r_on > 0.0) ? (1.0 / r_on) : 1e4;
+            }
+
+            if (get_param("g_off")) {
+                g_off = parse_real(get_param("g_off"), name + ".g_off", errors_);
+            } else if (get_param("off_resistance")) {
+                const Real r_off = parse_real(get_param("off_resistance"), name + ".off_resistance", errors_);
+                g_off = (r_off > 0.0) ? (1.0 / r_off) : 1e-9;
+            } else if (get_param("roff")) {
+                const Real r_off = parse_real(get_param("roff"), name + ".roff", errors_);
+                g_off = (r_off > 0.0) ? (1.0 / r_off) : 1e-9;
+            }
+
+            const std::string no_switch = name + "__no";
+            const std::string nc_switch = name + "__nc";
+            circuit.add_switch(no_switch, node_at(2), node_at(3), energized, g_on, g_off);
+            circuit.add_switch(nc_switch, node_at(2), node_at(4), !energized, g_on, g_off);
+
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["initial_closed"] = energized ? 1.0 : 0.0;
+            numeric_params["g_on"] = g_on;
+            numeric_params["g_off"] = g_off;
+            if (get_param("pickup_current")) {
+                numeric_params["pickup_current"] = parse_real(get_param("pickup_current"), name + ".pickup_current", errors_);
+            }
+            if (get_param("dropout_current")) {
+                numeric_params["dropout_current"] = parse_real(get_param("dropout_current"), name + ".dropout_current", errors_);
+            }
+            if (get_param("pickup_voltage")) {
+                numeric_params["pickup_voltage"] = parse_real(get_param("pickup_voltage"), name + ".pickup_voltage", errors_);
+            }
+            if (get_param("dropout_voltage")) {
+                numeric_params["dropout_voltage"] = parse_real(get_param("dropout_voltage"), name + ".dropout_voltage", errors_);
+            }
+
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = no_switch;
+            metadata["target_component_no"] = no_switch;
+            metadata["target_component_nc"] = nc_switch;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+
+            push_warning(warnings_, kDiagSurrogateComponent,
+                         "Component '" + name + "' (relay) mapped to dual-switch surrogate with event controller");
         }
         else if (type == "thyristor" || type == "triac") {
             Real gate_threshold = get_param("gate_threshold")

@@ -21,7 +21,7 @@
 
 - [x] 4.1 Implement `FUSE` behavior using I²t trip logic and open-state transition.
 - [x] 4.2 Implement `CIRCUIT_BREAKER` overcurrent + trip-delay behavior with deterministic state changes.
-- [ ] 4.3 Implement `RELAY` coil/contact model (`COM/NO/NC`) with pickup/dropout thresholds and contact resistance states.
+- [x] 4.3 Implement `RELAY` coil/contact model (`COM/NO/NC`) with pickup/dropout thresholds and contact resistance states.
 
 ## 5. Magnetic and Preconfigured Network Components
 
