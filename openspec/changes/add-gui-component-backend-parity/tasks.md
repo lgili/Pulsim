@@ -7,7 +7,7 @@
 ## 2. Kernel Runtime Foundation
 
 - [x] 2.1 Extend runtime component abstraction to support mixed domains: electrical devices, control blocks, and virtual instrumentation/routing nodes.
-- [ ] 2.2 Add deterministic execution ordering between electrical solve, control update, and event-driven state transitions.
+- [x] 2.2 Add deterministic execution ordering between electrical solve, control update, and event-driven state transitions.
 - [x] 2.3 Add structured diagnostics for unsupported/invalid component descriptors with stable error codes.
 
 ## 3. Power Semiconductors and Switching
