@@ -393,10 +393,14 @@ components:
     name: Lsat
     nodes: [load, 0]
     inductance: 1m
+    saturation_current: 2
+    saturation_inductance: 200u
   - type: COUPLED_INDUCTOR
     name: Lcpl
     nodes: [in, 0, aux, 0]
-    ratio: 2
+    l1: 1m
+    l2: 2m
+    coupling: 0.95
   - type: OP_AMP
     name: A1
     nodes: [ref, fb, ctrl]
@@ -467,8 +471,8 @@ components:
   - {type: FUSE, name: F1, nodes: [n_sw, n_load], initial_state: true}
   - {type: CIRCUIT_BREAKER, name: CB1, nodes: [n_load, n_out], initial_state: true}
   - {type: RELAY, name: K1, nodes: [n_cp, n_cn, n_com, n_no, n_nc]}
-  - {type: SATURABLE_INDUCTOR, name: Lsat, nodes: [n_out, 0], value: 1m}
-  - {type: COUPLED_INDUCTOR, name: Lcpl, nodes: [n_in, 0, n_aux, 0], ratio: 2}
+  - {type: SATURABLE_INDUCTOR, name: Lsat, nodes: [n_out, 0], value: 1m, saturation_current: 2, saturation_inductance: 200u}
+  - {type: COUPLED_INDUCTOR, name: Lcpl, nodes: [n_in, 0, n_aux, 0], l1: 1m, l2: 2m, coupling: 0.95}
   - {type: SNUBBER_RC, name: Sn1, nodes: [n_sw, 0], resistance: 100, capacitance: 1n}
   - {type: OP_AMP, name: OA1, nodes: [n_ref, n_fb, n_ctrl]}
   - {type: COMPARATOR, name: CMP1, nodes: [n_ref, n_fb, n_cmp]}
@@ -481,7 +485,7 @@ components:
   - {type: LIMITER, name: LIM1, nodes: [n_a, n_b]}
   - {type: RATE_LIMITER, name: RL1, nodes: [n_a, n_b]}
   - {type: HYSTERESIS, name: HYS1, nodes: [n_a, n_b]}
-  - {type: LOOKUP_TABLE, name: LUT1, nodes: [n_a, n_b]}
+  - {type: LOOKUP_TABLE, name: LUT1, nodes: [n_a, n_b], x: [0, 1], y: [0, 1]}
   - {type: TRANSFER_FUNCTION, name: TF1, nodes: [n_a, n_b]}
   - {type: DELAY_BLOCK, name: DLY1, nodes: [n_a, n_b]}
   - {type: SAMPLE_HOLD, name: SH1, nodes: [n_a, n_b]}

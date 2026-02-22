@@ -4,6 +4,7 @@
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 using namespace pulsim::v1;
 using Catch::Approx;
@@ -434,4 +435,756 @@ TEST_CASE("v1 harmonic balance converges on RC", "[v1][steady][hb]") {
     INFO("HB residual: " << result.residual_norm);
     REQUIRE(result.success);
     CHECK(result.residual_norm <= hb.tolerance);
+}
+
+TEST_CASE("v1 mixed-domain lookup modes are deterministic", "[v1][mixed-domain][lookup][regression]") {
+    SECTION("hold mode keeps previous sample bucket") {
+        Circuit circuit;
+        const auto n_in = circuit.add_node("in");
+        const auto n_out = circuit.add_node("out");
+        circuit.add_virtual_component("lookup_table", "LUT_H", {n_in, n_out}, {},
+                                      {{"x", "[0, 1, 2]"},
+                                       {"y", "[0, 10, 20]"},
+                                       {"mode", "hold"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_in] = 1.4;
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+
+        REQUIRE(step.channel_values.contains("LUT_H"));
+        CHECK(step.channel_values.at("LUT_H") == Approx(10.0).margin(1e-12));
+    }
+
+    SECTION("nearest mode selects nearest knot") {
+        Circuit circuit;
+        const auto n_in = circuit.add_node("in");
+        const auto n_out = circuit.add_node("out");
+        circuit.add_virtual_component("lookup_table", "LUT_N", {n_in, n_out}, {},
+                                      {{"x", "[0, 1, 2]"},
+                                       {"y", "[0, 10, 20]"},
+                                       {"mode", "nearest"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_in] = 1.6;
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+
+        REQUIRE(step.channel_values.contains("LUT_N"));
+        CHECK(step.channel_values.at("LUT_N") == Approx(20.0).margin(1e-12));
+    }
+}
+
+TEST_CASE("v1 state-machine set-reset mode prioritizes reset", "[v1][mixed-domain][state-machine][regression]") {
+    Circuit circuit;
+    const auto n_set = circuit.add_node("set");
+    const auto n_reset = circuit.add_node("reset");
+    circuit.add_virtual_component("state_machine", "SM1", {n_set, n_reset},
+                                  {{"threshold", 0.5}, {"high", 1.0}, {"low", 0.0}},
+                                  {{"mode", "set_reset"}});
+
+    Vector x = Vector::Zero(circuit.system_size());
+    x[n_set] = 1.0;
+    x[n_reset] = 0.0;
+    const auto step_set = circuit.execute_mixed_domain_step(x, 0.0);
+    REQUIRE(step_set.channel_values.contains("SM1"));
+    CHECK(step_set.channel_values.at("SM1") == Approx(1.0).margin(1e-12));
+
+    x[n_set] = 1.0;
+    x[n_reset] = 1.0;
+    const auto step_reset = circuit.execute_mixed_domain_step(x, 1e-6);
+    REQUIRE(step_reset.channel_values.contains("SM1"));
+    CHECK(step_reset.channel_values.at("SM1") == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("v1 transfer-function alpha fallback is stable", "[v1][mixed-domain][transfer][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    circuit.add_virtual_component("transfer_function", "TF1", {n_in},
+                                  {{"alpha", 0.5}}, {});
+
+    Vector x = Vector::Zero(circuit.system_size());
+    x[n_in] = 1.0;
+
+    const auto step0 = circuit.execute_mixed_domain_step(x, 0.0);
+    const auto step1 = circuit.execute_mixed_domain_step(x, 1e-6);
+    const auto step2 = circuit.execute_mixed_domain_step(x, 2e-6);
+
+    REQUIRE(step0.channel_values.contains("TF1"));
+    REQUIRE(step1.channel_values.contains("TF1"));
+    REQUIRE(step2.channel_values.contains("TF1"));
+    CHECK(step0.channel_values.at("TF1") == Approx(0.5).margin(1e-12));
+    CHECK(step1.channel_values.at("TF1") == Approx(0.75).margin(1e-12));
+    CHECK(step2.channel_values.at("TF1") == Approx(0.875).margin(1e-12));
+}
+
+TEST_CASE("v1 rate limiter enforces slew bounds", "[v1][mixed-domain][rate-limiter][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    circuit.add_virtual_component("rate_limiter", "RL1", {n_in},
+                                  {{"rising_rate", 1.0}, {"falling_rate", 2.0}}, {});
+
+    Vector x = Vector::Zero(circuit.system_size());
+
+    x[n_in] = 0.0;
+    (void)circuit.execute_mixed_domain_step(x, 0.0);
+
+    x[n_in] = 10.0;
+    const auto rise1 = circuit.execute_mixed_domain_step(x, 1.0);
+    const auto rise2 = circuit.execute_mixed_domain_step(x, 2.0);
+    REQUIRE(rise1.channel_values.contains("RL1"));
+    REQUIRE(rise2.channel_values.contains("RL1"));
+    CHECK(rise1.channel_values.at("RL1") == Approx(1.0).margin(1e-12));
+    CHECK(rise2.channel_values.at("RL1") == Approx(2.0).margin(1e-12));
+
+    x[n_in] = -10.0;
+    const auto fall = circuit.execute_mixed_domain_step(x, 3.0);
+    REQUIRE(fall.channel_values.contains("RL1"));
+    CHECK(fall.channel_values.at("RL1") == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("v1 protection event blocks trip predictably", "[v1][mixed-domain][events][regression]") {
+    SECTION("fuse trips by i2t integral") {
+        Circuit circuit;
+        const auto n_main = circuit.add_node("main");
+        circuit.add_switch("F_SW", n_main, Circuit::ground(), true, 1e3, 1e-9);
+        circuit.add_virtual_component("fuse", "F1", {n_main, Circuit::ground()},
+                                      {{"g_on", 1.0}, {"blow_i2t", 0.01}, {"initial_closed", 1.0}},
+                                      {{"target_component", "F_SW"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_main] = 2.0;
+        (void)circuit.execute_mixed_domain_step(x, 0.0);      // initialize state
+        const auto step = circuit.execute_mixed_domain_step(x, 0.01);  // adds i^2*dt = 0.04
+
+        REQUIRE(step.channel_values.contains("F1.state"));
+        REQUIRE(step.channel_values.contains("F1.i2t"));
+        CHECK(step.channel_values.at("F1.i2t") == Approx(0.04).margin(1e-12));
+        CHECK(step.channel_values.at("F1.state") == Approx(0.0).margin(1e-12));
+    }
+
+    SECTION("circuit breaker trips after overcurrent timer expires") {
+        Circuit circuit;
+        const auto n_main = circuit.add_node("main");
+        circuit.add_switch("B_SW", n_main, Circuit::ground(), true, 1e3, 1e-9);
+        circuit.add_virtual_component("circuit_breaker", "B1", {n_main, Circuit::ground()},
+                                      {{"g_on", 1.0}, {"trip_current", 1.0},
+                                       {"trip_time", 0.01}, {"initial_closed", 1.0}},
+                                      {{"target_component", "B_SW"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_main] = 2.0;
+        (void)circuit.execute_mixed_domain_step(x, 0.0);
+        const auto step = circuit.execute_mixed_domain_step(x, 0.015);
+
+        REQUIRE(step.channel_values.contains("B1.state"));
+        REQUIRE(step.channel_values.contains("B1.trip_timer"));
+        CHECK(step.channel_values.at("B1.trip_timer") == Approx(0.015).margin(1e-12));
+        CHECK(step.channel_values.at("B1.state") == Approx(0.0).margin(1e-12));
+    }
+}
+
+TEST_CASE("v1 relay and latch-type event blocks change states correctly",
+          "[v1][mixed-domain][events][latch][regression]") {
+    SECTION("relay pickup/dropout toggles NO and NC channels") {
+        Circuit circuit;
+        const auto n_coil = circuit.add_node("coil");
+        const auto n_main = circuit.add_node("main");
+        const auto n_no = circuit.add_node("no");
+        const auto n_nc = circuit.add_node("nc");
+        circuit.add_switch("K1__no", n_main, n_no, false, 1e3, 1e-9);
+        circuit.add_switch("K1__nc", n_main, n_nc, true, 1e3, 1e-9);
+        circuit.add_virtual_component("relay", "K1", {n_coil, Circuit::ground()},
+                                      {{"pickup_voltage", 5.0}, {"dropout_voltage", 3.0}},
+                                      {{"target_component_no", "K1__no"},
+                                       {"target_component_nc", "K1__nc"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_coil] = 6.0;
+        const auto step_on = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step_on.channel_values.contains("K1.no_state"));
+        REQUIRE(step_on.channel_values.contains("K1.nc_state"));
+        CHECK(step_on.channel_values.at("K1.no_state") == Approx(1.0).margin(1e-12));
+        CHECK(step_on.channel_values.at("K1.nc_state") == Approx(0.0).margin(1e-12));
+
+        x[n_coil] = 0.0;
+        const auto step_off = circuit.execute_mixed_domain_step(x, 2e-6);
+        CHECK(step_off.channel_values.at("K1.no_state") == Approx(0.0).margin(1e-12));
+        CHECK(step_off.channel_values.at("K1.nc_state") == Approx(1.0).margin(1e-12));
+    }
+
+    SECTION("thyristor latches on gate and commutates off") {
+        Circuit circuit;
+        const auto n_gate = circuit.add_node("gate");
+        const auto n_main = circuit.add_node("main");
+        circuit.add_switch("SCR_SW", n_main, Circuit::ground(), false, 1e3, 1e-9);
+        circuit.add_virtual_component("thyristor", "SCR1", {n_gate, n_main, Circuit::ground()},
+                                      {{"gate_threshold", 1.0}, {"holding_current", 0.05},
+                                       {"latch_current", 0.5}, {"g_on", 10.0}},
+                                      {{"target_component", "SCR_SW"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_gate] = 2.0;
+        x[n_main] = 0.2;
+        const auto step_on = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step_on.channel_values.contains("SCR1.state"));
+        CHECK(step_on.channel_values.at("SCR1.state") == Approx(1.0).margin(1e-12));
+
+        x[n_gate] = 0.0;
+        x[n_main] = 0.2;
+        const auto step_hold = circuit.execute_mixed_domain_step(x, 2e-6);
+        CHECK(step_hold.channel_values.at("SCR1.state") == Approx(1.0).margin(1e-12));
+
+        x[n_main] = -0.1;
+        const auto step_off = circuit.execute_mixed_domain_step(x, 3e-6);
+        CHECK(step_off.channel_values.at("SCR1.state") == Approx(0.0).margin(1e-12));
+    }
+
+    SECTION("triac accepts bipolar trigger and unlatches at low current") {
+        Circuit circuit;
+        const auto n_gate = circuit.add_node("gate");
+        const auto n_main = circuit.add_node("main");
+        circuit.add_switch("TRI_SW", n_main, Circuit::ground(), false, 1e3, 1e-9);
+        circuit.add_virtual_component("triac", "TRI1", {n_gate, n_main, Circuit::ground()},
+                                      {{"gate_threshold", 1.0}, {"holding_current", 0.05},
+                                       {"latch_current", 0.5}, {"g_on", 10.0}},
+                                      {{"target_component", "TRI_SW"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_gate] = -2.0;
+        x[n_main] = 0.2;
+        const auto step_on = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step_on.channel_values.contains("TRI1.state"));
+        CHECK(step_on.channel_values.at("TRI1.state") == Approx(1.0).margin(1e-12));
+
+        x[n_gate] = 0.0;
+        x[n_main] = 0.001;
+        const auto step_off = circuit.execute_mixed_domain_step(x, 2e-6);
+        CHECK(step_off.channel_values.at("TRI1.state") == Approx(0.0).margin(1e-12));
+    }
+}
+
+TEST_CASE("v1 signal mux/demux routing is deterministic", "[v1][mixed-domain][routing][regression]") {
+    Circuit circuit;
+    const auto n_a = circuit.add_node("a");
+    const auto n_b = circuit.add_node("b");
+    const auto n_c = circuit.add_node("c");
+
+    circuit.add_virtual_component("signal_mux", "MUX1", {n_a, n_b, n_c},
+                                  {{"select_index", 2.0}}, {});
+    circuit.add_virtual_component("signal_demux", "DMX1", {n_a, n_b, n_c},
+                                  {}, {});
+
+    Vector x = Vector::Zero(circuit.system_size());
+    x[n_a] = 1.0;
+    x[n_b] = 2.0;
+    x[n_c] = 3.0;
+    const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+
+    REQUIRE(step.channel_values.contains("MUX1"));
+    REQUIRE(step.channel_values.contains("DMX1"));
+    CHECK(step.channel_values.at("MUX1") == Approx(3.0).margin(1e-12));
+    CHECK(step.channel_values.at("DMX1") == Approx(1.0).margin(1e-12));
+}
+
+TEST_CASE("v1 comparator hysteresis keeps state across threshold band",
+          "[v1][mixed-domain][comparator][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    circuit.add_virtual_component("comparator", "CMP1", {n_in},
+                                  {{"threshold", 0.0}, {"hysteresis", 0.2},
+                                   {"high", 5.0}, {"low", 0.0}},
+                                  {});
+
+    Vector x = Vector::Zero(circuit.system_size());
+
+    x[n_in] = 0.0;
+    const auto step0 = circuit.execute_mixed_domain_step(x, 0.0);
+    x[n_in] = 0.11;  // Crosses +threshold + hysteresis/2
+    const auto step1 = circuit.execute_mixed_domain_step(x, 1e-6);
+    x[n_in] = 0.05;  // Inside band, should hold previous ON state
+    const auto step2 = circuit.execute_mixed_domain_step(x, 2e-6);
+    x[n_in] = -0.11;  // Crosses threshold - hysteresis/2
+    const auto step3 = circuit.execute_mixed_domain_step(x, 3e-6);
+
+    REQUIRE(step0.channel_values.contains("CMP1"));
+    REQUIRE(step1.channel_values.contains("CMP1"));
+    REQUIRE(step2.channel_values.contains("CMP1"));
+    REQUIRE(step3.channel_values.contains("CMP1"));
+
+    CHECK(step0.channel_values.at("CMP1") == Approx(0.0).margin(1e-12));
+    CHECK(step1.channel_values.at("CMP1") == Approx(5.0).margin(1e-12));
+    CHECK(step2.channel_values.at("CMP1") == Approx(5.0).margin(1e-12));
+    CHECK(step3.channel_values.at("CMP1") == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("v1 sample-hold updates only on sampling instants",
+          "[v1][mixed-domain][sample-hold][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    circuit.add_virtual_component("sample_hold", "SH1", {n_in},
+                                  {{"sample_period", 1e-3}}, {});
+
+    Vector x = Vector::Zero(circuit.system_size());
+
+    x[n_in] = 1.0;
+    const auto s0 = circuit.execute_mixed_domain_step(x, 0.0);
+    x[n_in] = 2.0;
+    const auto s1 = circuit.execute_mixed_domain_step(x, 4e-4);
+    x[n_in] = 3.0;
+    const auto s2 = circuit.execute_mixed_domain_step(x, 1e-3);
+    x[n_in] = 4.0;
+    const auto s3 = circuit.execute_mixed_domain_step(x, 1.5e-3);
+
+    REQUIRE(s0.channel_values.contains("SH1"));
+    REQUIRE(s1.channel_values.contains("SH1"));
+    REQUIRE(s2.channel_values.contains("SH1"));
+    REQUIRE(s3.channel_values.contains("SH1"));
+
+    CHECK(s0.channel_values.at("SH1") == Approx(1.0).margin(1e-12));
+    CHECK(s1.channel_values.at("SH1") == Approx(1.0).margin(1e-12));
+    CHECK(s2.channel_values.at("SH1") == Approx(3.0).margin(1e-12));
+    CHECK(s3.channel_values.at("SH1") == Approx(3.0).margin(1e-12));
+}
+
+TEST_CASE("v1 delay block interpolates delayed value", "[v1][mixed-domain][delay][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    circuit.add_virtual_component("delay_block", "DLY1", {n_in},
+                                  {{"delay", 1e-3}}, {});
+
+    Vector x = Vector::Zero(circuit.system_size());
+
+    x[n_in] = 0.0;
+    const auto s0 = circuit.execute_mixed_domain_step(x, 0.0);
+    x[n_in] = 10.0;
+    const auto s1 = circuit.execute_mixed_domain_step(x, 1e-3);
+    x[n_in] = 20.0;
+    const auto s2 = circuit.execute_mixed_domain_step(x, 1.5e-3);
+    x[n_in] = 30.0;
+    const auto s3 = circuit.execute_mixed_domain_step(x, 2e-3);
+
+    REQUIRE(s0.channel_values.contains("DLY1"));
+    REQUIRE(s1.channel_values.contains("DLY1"));
+    REQUIRE(s2.channel_values.contains("DLY1"));
+    REQUIRE(s3.channel_values.contains("DLY1"));
+
+    CHECK(s0.channel_values.at("DLY1") == Approx(0.0).margin(1e-12));
+    CHECK(s1.channel_values.at("DLY1") == Approx(0.0).margin(1e-12));
+    CHECK(s2.channel_values.at("DLY1") == Approx(5.0).margin(1e-12));
+    CHECK(s3.channel_values.at("DLY1") == Approx(10.0).margin(1e-12));
+}
+
+TEST_CASE("v1 pwm generator clamps duty from input", "[v1][mixed-domain][pwm][regression]") {
+    Circuit circuit;
+    const auto n_cmd = circuit.add_node("cmd");
+    circuit.add_virtual_component("pwm_generator", "PWM1", {n_cmd},
+                                  {{"frequency", 1000.0},
+                                   {"duty_from_input", 1.0},
+                                   {"duty_gain", 1.0},
+                                   {"duty_offset", 0.0},
+                                   {"duty_min", 0.2},
+                                   {"duty_max", 0.8}},
+                                  {});
+
+    Vector x = Vector::Zero(circuit.system_size());
+    x[n_cmd] = 0.95;
+    const auto hi = circuit.execute_mixed_domain_step(x, 0.0);
+    const auto hi_off = circuit.execute_mixed_domain_step(x, 8.5e-4);  // phase=0.85 > duty
+
+    x[n_cmd] = 0.10;
+    const auto lo = circuit.execute_mixed_domain_step(x, 2.5e-4);  // phase=0.25 > duty_min
+
+    REQUIRE(hi.channel_values.contains("PWM1"));
+    REQUIRE(hi.channel_values.contains("PWM1.duty"));
+    REQUIRE(hi_off.channel_values.contains("PWM1"));
+    REQUIRE(hi_off.channel_values.contains("PWM1.duty"));
+    REQUIRE(lo.channel_values.contains("PWM1"));
+    REQUIRE(lo.channel_values.contains("PWM1.duty"));
+
+    CHECK(hi.channel_values.at("PWM1.duty") == Approx(0.8).margin(1e-12));
+    CHECK(hi.channel_values.at("PWM1") == Approx(1.0).margin(1e-12));
+    CHECK(hi_off.channel_values.at("PWM1.duty") == Approx(0.8).margin(1e-12));
+    CHECK(hi_off.channel_values.at("PWM1") == Approx(0.0).margin(1e-12));
+    CHECK(lo.channel_values.at("PWM1.duty") == Approx(0.2).margin(1e-12));
+    CHECK(lo.channel_values.at("PWM1") == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
+          "[v1][mixed-domain][magnetic][regression]") {
+    SECTION("saturable inductor effective inductance decreases with current") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+        circuit.add_inductor("L1", n_a, n_b, 1e-3);
+        circuit.add_virtual_component("saturable_inductor", "LSAT1", {n_a, n_b},
+                                      {{"inductance", 1e-3},
+                                       {"saturation_current", 2.0},
+                                       {"saturation_inductance", 2e-4},
+                                       {"saturation_exponent", 2.0}},
+                                      {{"target_component", "L1"}});
+
+        const Index branch = circuit.num_nodes();  // first branch current index
+        Vector x = Vector::Zero(circuit.system_size());
+
+        x[branch] = 0.0;
+        const auto low_i = circuit.execute_mixed_domain_step(x, 1e-6);
+        x[branch] = 10.0;
+        const auto high_i = circuit.execute_mixed_domain_step(x, 2e-6);
+
+        REQUIRE(low_i.channel_values.contains("LSAT1.l_eff"));
+        REQUIRE(high_i.channel_values.contains("LSAT1.l_eff"));
+        const Real l_low = low_i.channel_values.at("LSAT1.l_eff");
+        const Real l_high = high_i.channel_values.at("LSAT1.l_eff");
+
+        CHECK(l_low >= 2e-4);
+        CHECK(l_low <= 1e-3);
+        CHECK(l_high >= 2e-4);
+        CHECK(l_high <= 1e-3);
+        CHECK(l_high < l_low);
+    }
+
+    SECTION("coupled inductor emits expected mutual inductance") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+        const auto n_c = circuit.add_node("c");
+        const auto n_d = circuit.add_node("d");
+        circuit.add_virtual_component("coupled_inductor", "K1", {n_a, n_b, n_c, n_d},
+                                      {{"l1", 1e-3}, {"l2", 4e-3}, {"coupling", 0.9}}, {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+
+        REQUIRE(step.channel_values.contains("K1.k"));
+        REQUIRE(step.channel_values.contains("K1.mutual"));
+        CHECK(step.channel_values.at("K1.k") == Approx(0.9).margin(1e-12));
+        CHECK(step.channel_values.at("K1.mutual") == Approx(1.8e-3).margin(1e-12));
+    }
+}
+
+TEST_CASE("v1 control primitives keep bounded deterministic outputs",
+          "[v1][mixed-domain][control][regression]") {
+    SECTION("op amp output saturates at configured rails") {
+        Circuit circuit;
+        const auto n_pos = circuit.add_node("v_plus");
+        const auto n_neg = circuit.add_node("v_minus");
+        const auto n_out = circuit.add_node("v_out");
+        circuit.add_virtual_component("op_amp", "A1", {n_pos, n_neg, n_out},
+                                      {{"open_loop_gain", 1e5},
+                                       {"rail_low", -2.0},
+                                       {"rail_high", 2.0}},
+                                      {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_pos] = 1.0;
+        x[n_neg] = 0.0;
+        const auto high = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(high.channel_values.contains("A1"));
+        CHECK(high.channel_values.at("A1") == Approx(2.0).margin(1e-12));
+
+        x[n_pos] = -1.0;
+        x[n_neg] = 0.0;
+        const auto low = circuit.execute_mixed_domain_step(x, 2e-6);
+        REQUIRE(low.channel_values.contains("A1"));
+        CHECK(low.channel_values.at("A1") == Approx(-2.0).margin(1e-12));
+    }
+
+    SECTION("pi anti-windup recovers faster than unclamped integral") {
+        Circuit circuit;
+        const auto n_err = circuit.add_node("err");
+        const auto n_ref = circuit.add_node("ref");
+
+        circuit.add_virtual_component(
+            "pi_controller", "PI_AW", {n_err, n_ref},
+            {{"kp", 0.0}, {"ki", 1.0}, {"output_min", -1.0}, {"output_max", 1.0}, {"anti_windup", 1.0}},
+            {});
+        circuit.add_virtual_component(
+            "pi_controller", "PI_NO_AW", {n_err, n_ref},
+            {{"kp", 0.0}, {"ki", 1.0}, {"output_min", -1.0}, {"output_max", 1.0}, {"anti_windup", 0.0}},
+            {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_err] = 2.0;
+        (void)circuit.execute_mixed_domain_step(x, 0.0);
+        (void)circuit.execute_mixed_domain_step(x, 1.0);
+        (void)circuit.execute_mixed_domain_step(x, 2.0);
+
+        x[n_err] = -2.0;
+        const auto recovery = circuit.execute_mixed_domain_step(x, 3.0);
+        REQUIRE(recovery.channel_values.contains("PI_AW"));
+        REQUIRE(recovery.channel_values.contains("PI_NO_AW"));
+        CHECK(recovery.channel_values.at("PI_AW") <= 0.0);
+        CHECK(recovery.channel_values.at("PI_NO_AW") > 0.0);
+    }
+
+    SECTION("pid derivative path reacts to error slope") {
+        Circuit circuit;
+        const auto n_err = circuit.add_node("err");
+        const auto n_ref = circuit.add_node("ref");
+        circuit.add_virtual_component("pid_controller", "PID1", {n_err, n_ref},
+                                      {{"kp", 0.0}, {"ki", 0.0}, {"kd", 1.0}}, {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_err] = 0.0;
+        const auto first = circuit.execute_mixed_domain_step(x, 0.0);
+        x[n_err] = 1.0;
+        const auto second = circuit.execute_mixed_domain_step(x, 1.0);
+        x[n_err] = 3.0;
+        const auto third = circuit.execute_mixed_domain_step(x, 2.0);
+
+        REQUIRE(first.channel_values.contains("PID1"));
+        REQUIRE(second.channel_values.contains("PID1"));
+        REQUIRE(third.channel_values.contains("PID1"));
+        CHECK(first.channel_values.at("PID1") == Approx(0.0).margin(1e-12));
+        CHECK(second.channel_values.at("PID1") == Approx(1.0).margin(1e-12));
+        CHECK(third.channel_values.at("PID1") == Approx(2.0).margin(1e-12));
+    }
+
+    SECTION("integrator remains bounded by configured output rails") {
+        Circuit circuit;
+        const auto n_in = circuit.add_node("in");
+        const auto n_ref = circuit.add_node("ref");
+        circuit.add_virtual_component("integrator", "INT1", {n_in, n_ref},
+                                      {{"output_min", -1.0}, {"output_max", 1.0}}, {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_in] = 2.0;
+        (void)circuit.execute_mixed_domain_step(x, 0.0);
+        const auto int_1 = circuit.execute_mixed_domain_step(x, 1.0);
+        const auto int_2 = circuit.execute_mixed_domain_step(x, 2.0);
+
+        REQUIRE(int_1.channel_values.contains("INT1"));
+        REQUIRE(int_2.channel_values.contains("INT1"));
+        CHECK(int_1.channel_values.at("INT1") == Approx(1.0).margin(1e-12));
+        CHECK(int_2.channel_values.at("INT1") == Approx(1.0).margin(1e-12));
+    }
+
+    SECTION("differentiator alpha filter smooths raw derivative") {
+        Circuit circuit;
+        const auto n_in = circuit.add_node("in");
+        const auto n_ref = circuit.add_node("ref");
+        circuit.add_virtual_component("differentiator", "D1", {n_in, n_ref},
+                                      {{"alpha", 0.5}}, {});
+
+        Vector xd = Vector::Zero(circuit.system_size());
+        xd[n_in] = 0.0;
+        (void)circuit.execute_mixed_domain_step(xd, 0.0);
+        xd[n_in] = 10.0;
+        const auto d_up = circuit.execute_mixed_domain_step(xd, 1.0);
+        const auto d_hold = circuit.execute_mixed_domain_step(xd, 2.0);
+
+        REQUIRE(d_up.channel_values.contains("D1"));
+        REQUIRE(d_hold.channel_values.contains("D1"));
+        CHECK(d_up.channel_values.at("D1") == Approx(5.0).margin(1e-12));
+        CHECK(d_hold.channel_values.at("D1") == Approx(2.5).margin(1e-12));
+    }
+}
+
+TEST_CASE("v1 mixed-domain math and state-machine edge behavior",
+          "[v1][mixed-domain][math][regression]") {
+    SECTION("math block operations are deterministic including divide by zero") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+        circuit.add_virtual_component("math_block", "M_ADD", {n_a, n_b}, {}, {{"operation", "add"}});
+        circuit.add_virtual_component("math_block", "M_SUB", {n_a, n_b}, {}, {{"operation", "sub"}});
+        circuit.add_virtual_component("math_block", "M_MUL", {n_a, n_b}, {}, {{"operation", "mul"}});
+        circuit.add_virtual_component("math_block", "M_DIV", {n_a, n_b}, {}, {{"operation", "div"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_a] = 6.0;
+        x[n_b] = 2.0;
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step.channel_values.contains("M_ADD"));
+        REQUIRE(step.channel_values.contains("M_SUB"));
+        REQUIRE(step.channel_values.contains("M_MUL"));
+        REQUIRE(step.channel_values.contains("M_DIV"));
+        CHECK(step.channel_values.at("M_ADD") == Approx(8.0).margin(1e-12));
+        CHECK(step.channel_values.at("M_SUB") == Approx(4.0).margin(1e-12));
+        CHECK(step.channel_values.at("M_MUL") == Approx(12.0).margin(1e-12));
+        CHECK(step.channel_values.at("M_DIV") == Approx(3.0).margin(1e-12));
+
+        x[n_b] = 0.0;
+        const auto div_zero = circuit.execute_mixed_domain_step(x, 2e-6);
+        REQUIRE(div_zero.channel_values.contains("M_DIV"));
+        CHECK(div_zero.channel_values.at("M_DIV") == Approx(0.0).margin(1e-12));
+    }
+
+    SECTION("toggle state machine changes state only on rising threshold crossing") {
+        Circuit circuit;
+        const auto n_ctrl = circuit.add_node("ctrl");
+        circuit.add_virtual_component("state_machine", "SM_T", {n_ctrl},
+                                      {{"threshold", 0.5}, {"high", 1.0}, {"low", 0.0}},
+                                      {{"mode", "toggle"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_ctrl] = 0.0;
+        const auto s0 = circuit.execute_mixed_domain_step(x, 0.0);
+        x[n_ctrl] = 1.0;
+        const auto s1 = circuit.execute_mixed_domain_step(x, 1e-6);
+        const auto s2 = circuit.execute_mixed_domain_step(x, 2e-6);
+        x[n_ctrl] = 0.0;
+        const auto s3 = circuit.execute_mixed_domain_step(x, 3e-6);
+        x[n_ctrl] = 1.0;
+        const auto s4 = circuit.execute_mixed_domain_step(x, 4e-6);
+
+        REQUIRE(s0.channel_values.contains("SM_T"));
+        REQUIRE(s1.channel_values.contains("SM_T"));
+        REQUIRE(s2.channel_values.contains("SM_T"));
+        REQUIRE(s3.channel_values.contains("SM_T"));
+        REQUIRE(s4.channel_values.contains("SM_T"));
+        CHECK(s0.channel_values.at("SM_T") == Approx(0.0).margin(1e-12));
+        CHECK(s1.channel_values.at("SM_T") == Approx(1.0).margin(1e-12));
+        CHECK(s2.channel_values.at("SM_T") == Approx(1.0).margin(1e-12));
+        CHECK(s3.channel_values.at("SM_T") == Approx(1.0).margin(1e-12));
+        CHECK(s4.channel_values.at("SM_T") == Approx(0.0).margin(1e-12));
+    }
+}
+
+TEST_CASE("v1 transient result exposes mixed-domain channels and metadata",
+          "[v1][mixed-domain][simulation][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, Circuit::ground(), 100.0);
+    circuit.add_virtual_component("voltage_probe", "VP", {n_in, Circuit::ground()}, {}, {});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+    REQUIRE(result.success);
+
+    REQUIRE(result.mixed_domain_phase_order == Circuit::mixed_domain_phase_order());
+    REQUIRE(result.virtual_channels.contains("VP"));
+    REQUIRE(result.virtual_channel_metadata.contains("VP"));
+    CHECK(result.virtual_channels.at("VP").size() == result.time.size());
+
+    const auto& meta = result.virtual_channel_metadata.at("VP");
+    CHECK(meta.component_type == "voltage_probe");
+    CHECK(meta.component_name == "VP");
+    CHECK(meta.domain == "instrumentation");
+}
+
+TEST_CASE("v1 buck closed-loop callback tracks reference without divergence",
+          "[v1][converter][closed-loop][regression]") {
+    constexpr Real vin = 24.0;
+    constexpr Real vref = 12.0;
+    constexpr Real frequency = 25'000.0;
+    constexpr Real period = 1.0 / frequency;
+
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto n_sw = circuit.add_node("sw");
+    const auto n_out = circuit.add_node("out");
+    const auto n_ctrl = circuit.add_node("ctrl");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), vin);
+
+    PWMParams pwm;
+    pwm.v_high = 5.0;
+    pwm.v_low = 0.0;
+    pwm.frequency = frequency;
+    pwm.duty = 0.25;
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_sw, 2.5, 350.0, 1e-9);
+    circuit.add_diode("D1", Circuit::ground(), n_sw, 350.0, 1e-9);
+    circuit.add_inductor("L1", n_sw, n_out, 330e-6);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 220e-6, 0.0);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 6.0);
+    circuit.add_resistor("Rbleed_sw", n_sw, Circuit::ground(), 1e6);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 6e-3;
+    opts.dt = period / 40.0;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.integrator = Integrator::BDF1;
+    opts.linear_solver.order = {LinearSolverKind::KLU, LinearSolverKind::SparseLU};
+    opts.linear_solver.auto_select = false;
+    opts.linear_solver.allow_fallback = true;
+    opts.newton_options.max_iterations = 140;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Real duty = 0.25;
+    Real next_control_time = period;
+    Real vout_filtered = 0.0;
+    bool vout_initialized = false;
+    Real integral = 0.0;
+    const Real duty_min = 0.05;
+    const Real duty_max = 0.90;
+    const Real duty_slew = 0.015;
+    const Real duty_ff = std::clamp(vref / vin, duty_min, duty_max);
+    const Real kp = 0.018;
+    const Real ki = 45.0;
+    const Real alpha = 0.92;
+
+    Simulator sim(circuit, opts);
+    auto callback = [&](Real time, const Vector& state) {
+        const Real vout = state[n_out];
+        if (!vout_initialized) {
+            vout_filtered = vout;
+            vout_initialized = true;
+        } else {
+            vout_filtered = alpha * vout_filtered + (1.0 - alpha) * vout;
+        }
+
+        if (time + 1e-15 < next_control_time) {
+            return;
+        }
+
+        const Real error = vref - vout_filtered;
+        integral += error * period;
+        integral = std::clamp(integral, -0.005, 0.005);
+
+        const Real duty_target = std::clamp(duty_ff + kp * error + ki * integral, duty_min, duty_max);
+        const Real duty_step = std::clamp(duty_target - duty, -duty_slew, duty_slew);
+        duty = std::clamp(duty + duty_step, duty_min, duty_max);
+        circuit.set_pwm_duty("Vpwm", duty);
+
+        while (next_control_time <= time + 1e-15) {
+            next_control_time += period;
+        }
+    };
+
+    auto result = sim.run_transient(callback);
+    REQUIRE(result.success);
+    REQUIRE(result.states.size() > 30);
+
+    const std::size_t n = result.states.size();
+    const std::size_t start_prev = n * 7 / 10;
+    const std::size_t start_last = n * 85 / 100;
+    REQUIRE(start_last > start_prev);
+
+    auto mean_vout = [&](std::size_t begin, std::size_t end) {
+        Real sum = 0.0;
+        for (std::size_t i = begin; i < end; ++i) {
+            sum += result.states[i][n_out];
+        }
+        return sum / static_cast<Real>(end - begin);
+    };
+
+    const Real vout_prev = mean_vout(start_prev, start_last);
+    const Real vout_last = mean_vout(start_last, n);
+
+    INFO("vout_prev=" << vout_prev << " vout_last=" << vout_last << " duty_final=" << duty);
+    CHECK(std::isfinite(vout_last));
+    CHECK(vout_last >= 10.5);
+    CHECK(vout_last <= 13.5);
+    CHECK(std::abs(vout_last - vout_prev) <= 2.0);
+    CHECK(duty >= 0.30);
+    CHECK(duty <= 0.70);
 }
