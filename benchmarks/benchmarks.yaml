@@ -29,6 +29,30 @@ benchmarks:
     scenarios: [direct_trap]
   - path: circuits/diode_rectifier.yaml
     scenarios: [direct_trap]
+  - path: circuits/buck_switching.yaml
+    ltspice_netlist: ltspice/buck_switching.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
+    scenarios: [direct_trap, trbdf2]
+  - path: circuits/boost_switching_complex.yaml
+    ltspice_netlist: ltspice/boost_switching_complex.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
+    scenarios: [direct_trap, trbdf2]
+  - path: circuits/interleaved_buck_3ph.yaml
+    ltspice_netlist: ltspice/interleaved_buck_3ph.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
+    scenarios: [direct_trap, trbdf2]
+  - path: circuits/buck_mosfet_nonlinear.yaml
+    ltspice_netlist: ltspice/buck_mosfet_nonlinear.cir
+    ltspice_observables:
+      - column: V(out)
+        ltspice_vector: V(out)
+    scenarios: [trbdf2]
   - path: circuits/stiff_rlc.yaml
     scenarios: [trbdf2, rosenbrockw]
   - path: circuits/periodic_rc_pwm.yaml

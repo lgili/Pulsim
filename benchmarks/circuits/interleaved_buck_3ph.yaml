@@ -1,0 +1,161 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: interleaved_buck_3ph
+  category: switching
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 8e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/interleaved_buck_3ph.csv
+simulation:
+  tstart: 0.0
+  tstop: 450e-6
+  dt: 0.2e-6
+  dt_max: 0.5e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 48.0
+
+  - type: voltage_source
+    name: Vpwm_a
+    nodes: [ctrl_a, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 100000
+      duty: 0.28
+      phase: 0.0
+      dead_time: 80e-9
+
+  - type: voltage_source
+    name: Vpwm_b
+    nodes: [ctrl_b, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 100000
+      duty: 0.28
+      phase: 0.3333333333
+      dead_time: 80e-9
+
+  - type: voltage_source
+    name: Vpwm_c
+    nodes: [ctrl_c, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 100000
+      duty: 0.28
+      phase: 0.6666666667
+      dead_time: 80e-9
+
+  - type: vcswitch
+    name: S_a
+    nodes: [ctrl_a, vin, sw_a]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_b
+    nodes: [ctrl_b, vin, sw_b]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_c
+    nodes: [ctrl_c, vin, sw_c]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+
+  - type: diode
+    name: D_a
+    nodes: [0, sw_a]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D_b
+    nodes: [0, sw_b]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D_c
+    nodes: [0, sw_c]
+    g_on: 200.0
+    g_off: 1e-6
+
+  - type: resistor
+    name: Rdcr_a
+    nodes: [sw_a, n_la]
+    value: 15m
+  - type: resistor
+    name: Rdcr_b
+    nodes: [sw_b, n_lb]
+    value: 15m
+  - type: resistor
+    name: Rdcr_c
+    nodes: [sw_c, n_lc]
+    value: 15m
+  - type: inductor
+    name: L_a
+    nodes: [n_la, out]
+    value: 330u
+  - type: inductor
+    name: L_b
+    nodes: [n_lb, out]
+    value: 330u
+  - type: inductor
+    name: L_c
+    nodes: [n_lc, out]
+    value: 330u
+
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 470u
+
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 4.0
+
+  - type: resistor
+    name: Rsnub_a
+    nodes: [sw_a, 0]
+    value: 1e6
+  - type: resistor
+    name: Rsnub_b
+    nodes: [sw_b, 0]
+    value: 1e6
+  - type: resistor
+    name: Rsnub_c
+    nodes: [sw_c, 0]
+    value: 1e6
