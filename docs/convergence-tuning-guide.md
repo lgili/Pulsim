@@ -17,6 +17,18 @@ Este guia foca no runtime suportado: Python + YAML (`pulsim-v1`).
 4. Ative precondicionador ILUT para malhas grandes.
 5. Use `adaptive_timestep: false` quando quiser baseline determinístico.
 
+## Verificar backends compilados
+
+No Python:
+
+```python
+import pulsim as ps
+print(ps.backend_capabilities())
+# {'klu': True, 'hypre_amg': True/False, 'sundials': True/False}
+```
+
+Observação: `sundials=True` indica suporte compilado, mas use primeiro o pipeline robusto padrão (`run_transient`) e o YAML v1 com fallback de solver para casos de chaveamento.
+
 ## Exemplo de configuração robusta
 
 ```yaml

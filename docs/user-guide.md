@@ -23,6 +23,8 @@ Não faz parte da superfície suportada:
 4. Rode `Simulator(...).run_transient(...)`.
 5. Valide com benchmark/paridade/stress.
 
+Por padrão, as APIs Python de transiente já aplicam perfil robusto (fallback de solver, damping/trust-region e fallback de gmin) para reduzir falhas de convergência em conversores.
+
 ## Exemplo mínimo
 
 ```python
@@ -38,6 +40,7 @@ sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
 
 print("ok:", result.success, "steps:", result.total_steps)
+print("capabilities:", ps.backend_capabilities())
 ```
 
 ## Onde continuar
