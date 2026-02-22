@@ -360,3 +360,172 @@ components:
     CHECK(options.fallback_policy.gmin_growth == Approx(5.0));
     CHECK(circuit.num_devices() == 1);
 }
+
+TEST_CASE("YAML parser accepts GUI parity slice with virtual and surrogate components",
+          "[v1][yaml][gui-parity]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: {type: dc, value: 24}
+  - type: switch
+    name: SW1
+    nodes: [in, sw]
+    initial_state: true
+  - type: BJT_NPN
+    name: QN1
+    nodes: [ctrl, sw, 0]
+    beta: 120
+  - type: THYRISTOR
+    name: SCR1
+    nodes: [gate, sw, 0]
+    gate_threshold: 0.8
+  - type: FUSE
+    name: F1
+    nodes: [sw, load]
+    initial_state: true
+  - type: SATURABLE_INDUCTOR
+    name: Lsat
+    nodes: [load, 0]
+    inductance: 1m
+  - type: COUPLED_INDUCTOR
+    name: Lcpl
+    nodes: [in, 0, aux, 0]
+    ratio: 2
+  - type: OP_AMP
+    name: A1
+    nodes: [ref, fb, ctrl]
+    gain: 1e4
+  - type: VOLTAGE_PROBE
+    name: VP1
+    nodes: [sw, 0]
+  - type: CURRENT_PROBE
+    name: IP1
+    nodes: [in, 0]
+    target_component: V1
+  - type: POWER_PROBE
+    name: PP1
+    nodes: [sw, 0]
+    target_component: V1
+  - type: SIGNAL_MUX
+    name: MUX1
+    nodes: [sig_a, sig_b, sig_out]
+)";
+
+    parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(yaml);
+    INFO("Errors: " << parser.errors().size());
+    INFO("Warnings: " << parser.warnings().size());
+    REQUIRE(parser.errors().empty());
+    CHECK(circuit.num_devices() >= 7);
+    CHECK(circuit.num_virtual_components() >= 5);
+    CHECK(std::any_of(parser.warnings().begin(), parser.warnings().end(),
+                      [](const std::string& msg) {
+                          return msg.find("PULSIM_YAML_W_COMPONENT_VIRTUAL") != std::string::npos;
+                      }));
+    CHECK(std::any_of(parser.warnings().begin(), parser.warnings().end(),
+                      [](const std::string& msg) {
+                          return msg.find("PULSIM_YAML_W_COMPONENT_SURROGATE") != std::string::npos;
+                      }));
+}
+
+TEST_CASE("YAML parser emits coded diagnostics for invalid parity descriptors",
+          "[v1][yaml][gui-parity][diagnostics]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+components:
+  - type: RELAY
+    name: K1
+    nodes: [coil_p, coil_n, com]
+)";
+
+    parser::YamlParser parser;
+    parser.load_string(yaml);
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& msg) {
+                          return msg.find("PULSIM_YAML_E_PIN_COUNT") != std::string::npos;
+                      }));
+}
+
+TEST_CASE("YAML parser accepts declared GUI parity type matrix",
+          "[v1][yaml][gui-parity][matrix]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+components:
+  - {type: voltage_source, name: V1, nodes: [n_in, 0], waveform: {type: dc, value: 24}}
+  - {type: SWITCH, name: SW1, nodes: [n_in, n_sw], initial_state: true}
+  - {type: BJT_NPN, name: QN1, nodes: [n_ctrl, n_sw, 0], beta: 100}
+  - {type: BJT_PNP, name: QP1, nodes: [n_ctrl, n_in, n_sw], beta: 80}
+  - {type: THYRISTOR, name: SCR1, nodes: [n_gate, n_sw, 0]}
+  - {type: TRIAC, name: TRI1, nodes: [n_gate, n_sw, n_aux]}
+  - {type: FUSE, name: F1, nodes: [n_sw, n_load], initial_state: true}
+  - {type: CIRCUIT_BREAKER, name: CB1, nodes: [n_load, n_out], initial_state: true}
+  - {type: RELAY, name: K1, nodes: [n_cp, n_cn, n_com, n_no, n_nc]}
+  - {type: SATURABLE_INDUCTOR, name: Lsat, nodes: [n_out, 0], value: 1m}
+  - {type: COUPLED_INDUCTOR, name: Lcpl, nodes: [n_in, 0, n_aux, 0], ratio: 2}
+  - {type: SNUBBER_RC, name: Sn1, nodes: [n_sw, 0], resistance: 100, capacitance: 1n}
+  - {type: OP_AMP, name: OA1, nodes: [n_ref, n_fb, n_ctrl]}
+  - {type: COMPARATOR, name: CMP1, nodes: [n_ref, n_fb, n_cmp]}
+  - {type: PI_CONTROLLER, name: PI1, nodes: [n_ref, n_fb, n_ctrl]}
+  - {type: PID_CONTROLLER, name: PID1, nodes: [n_ref, n_fb, n_ctrl]}
+  - {type: MATH_BLOCK, name: M1, nodes: [n_a, n_b, n_c]}
+  - {type: PWM_GENERATOR, name: PWM1, nodes: [n_ctrl, n_pwm]}
+  - {type: INTEGRATOR, name: INT1, nodes: [n_a, n_b]}
+  - {type: DIFFERENTIATOR, name: DIF1, nodes: [n_a, n_b]}
+  - {type: LIMITER, name: LIM1, nodes: [n_a, n_b]}
+  - {type: RATE_LIMITER, name: RL1, nodes: [n_a, n_b]}
+  - {type: HYSTERESIS, name: HYS1, nodes: [n_a, n_b]}
+  - {type: LOOKUP_TABLE, name: LUT1, nodes: [n_a, n_b]}
+  - {type: TRANSFER_FUNCTION, name: TF1, nodes: [n_a, n_b]}
+  - {type: DELAY_BLOCK, name: DLY1, nodes: [n_a, n_b]}
+  - {type: SAMPLE_HOLD, name: SH1, nodes: [n_a, n_b]}
+  - {type: STATE_MACHINE, name: SM1, nodes: [n_state]}
+  - {type: VOLTAGE_PROBE, name: VP1, nodes: [n_sw, 0]}
+  - {type: CURRENT_PROBE, name: IP1, nodes: [n_in, 0]}
+  - {type: POWER_PROBE, name: PP1, nodes: [n_sw, 0]}
+  - {type: ELECTRICAL_SCOPE, name: ES1, nodes: [n_a, n_b]}
+  - {type: THERMAL_SCOPE, name: TS1, nodes: [n_a, n_b]}
+  - {type: SIGNAL_MUX, name: MUX1, nodes: [n_a, n_b, n_c]}
+  - {type: SIGNAL_DEMUX, name: DMX1, nodes: [n_a, n_b, n_c]}
+)";
+
+    parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(yaml);
+    INFO("Errors: " << parser.errors().size());
+    INFO("Warnings: " << parser.warnings().size());
+    REQUIRE(parser.errors().empty());
+    CHECK(std::none_of(parser.errors().begin(), parser.errors().end(),
+                       [](const std::string& msg) {
+                           return msg.find("PULSIM_YAML_E_COMPONENT_UNSUPPORTED") != std::string::npos;
+                       }));
+}
+
+TEST_CASE("Runtime virtual probe evaluation derives signal values", "[v1][virtual][probe]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto gnd = Circuit::ground();
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0);
+    circuit.add_virtual_component("voltage_probe", "VP", {n_in, gnd});
+    circuit.add_virtual_component("current_probe", "IP", {n_in, gnd}, {},
+                                  {{"target_component", "V1"}});
+    circuit.add_virtual_component("power_probe", "PP", {n_in, gnd}, {},
+                                  {{"target_component", "V1"}});
+
+    Vector x = Vector::Zero(circuit.system_size());
+    x[n_in] = 10.0;
+    x[circuit.num_nodes()] = 0.25;  // V1 branch current
+    const auto signals = circuit.evaluate_virtual_signals(x);
+
+    REQUIRE(signals.contains("VP"));
+    REQUIRE(signals.contains("IP"));
+    REQUIRE(signals.contains("PP"));
+    CHECK(signals.at("VP") == Approx(10.0));
+    CHECK(signals.at("IP") == Approx(0.25));
+    CHECK(signals.at("PP") == Approx(2.5));
+}

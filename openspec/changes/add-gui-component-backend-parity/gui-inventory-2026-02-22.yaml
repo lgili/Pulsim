@@ -1,0 +1,83 @@
+snapshot_date: 2026-02-22
+source: PulsimGui component catalog vs PulsimCore backend parser/runtime
+summary:
+  gui_total: 47
+  fully_supported_before_change: 13
+  missing_before_change: 34
+missing_components:
+  power_semiconductors:
+    - BJT_NPN
+    - BJT_PNP
+    - THYRISTOR
+    - TRIAC
+    - SWITCH
+  protection:
+    - FUSE
+    - CIRCUIT_BREAKER
+    - RELAY
+  analog_control:
+    - OP_AMP
+    - COMPARATOR
+    - PI_CONTROLLER
+    - PID_CONTROLLER
+    - MATH_BLOCK
+    - PWM_GENERATOR
+    - INTEGRATOR
+    - DIFFERENTIATOR
+    - LIMITER
+    - RATE_LIMITER
+    - HYSTERESIS
+    - LOOKUP_TABLE
+    - TRANSFER_FUNCTION
+    - DELAY_BLOCK
+    - SAMPLE_HOLD
+    - STATE_MACHINE
+  magnetics_and_networks:
+    - SATURABLE_INDUCTOR
+    - COUPLED_INDUCTOR
+    - SNUBBER_RC
+  instrumentation_and_routing:
+    - VOLTAGE_PROBE
+    - CURRENT_PROBE
+    - POWER_PROBE
+    - ELECTRICAL_SCOPE
+    - THERMAL_SCOPE
+    - SIGNAL_MUX
+    - SIGNAL_DEMUX
+implementation_slice_1:
+  physical_or_surrogate:
+    - SWITCH
+    - BJT_NPN
+    - BJT_PNP
+    - THYRISTOR
+    - TRIAC
+    - FUSE
+    - CIRCUIT_BREAKER
+    - SATURABLE_INDUCTOR
+    - COUPLED_INDUCTOR
+    - SNUBBER_RC
+  virtual_runtime_registration:
+    - RELAY
+    - OP_AMP
+    - COMPARATOR
+    - PI_CONTROLLER
+    - PID_CONTROLLER
+    - MATH_BLOCK
+    - PWM_GENERATOR
+    - INTEGRATOR
+    - DIFFERENTIATOR
+    - LIMITER
+    - RATE_LIMITER
+    - HYSTERESIS
+    - LOOKUP_TABLE
+    - TRANSFER_FUNCTION
+    - DELAY_BLOCK
+    - SAMPLE_HOLD
+    - STATE_MACHINE
+    - VOLTAGE_PROBE
+    - CURRENT_PROBE
+    - POWER_PROBE
+    - ELECTRICAL_SCOPE
+    - THERMAL_SCOPE
+    - SIGNAL_MUX
+    - SIGNAL_DEMUX
