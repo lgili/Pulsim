@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pulsim as ps
+import pytest
 
 
 def _build_rc_circuit() -> ps.Circuit:
@@ -247,6 +248,8 @@ simulation:
     gmin_initial: 1e-8
     gmin_max: 1e-4
     gmin_growth: 5
+    enable_native_reentry: true
+    sundials_recovery_window: 5e-6
 components:
   - type: resistor
     name: R1
@@ -263,6 +266,93 @@ components:
     assert abs(options.fallback_policy.gmin_initial - 1e-8) < 1e-16
     assert abs(options.fallback_policy.gmin_max - 1e-4) < 1e-12
     assert abs(options.fallback_policy.gmin_growth - 5.0) < 1e-12
+    assert options.fallback_policy.enable_native_reentry
+    assert abs(options.fallback_policy.sundials_recovery_window - 5e-6) < 1e-14
+
+
+def test_yaml_parser_maps_backend_and_sundials_controls() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  backend: auto
+  sundials:
+    enabled: true
+    family: ida
+    formulation: direct
+    allow_formulation_fallback: false
+    rel_tol: 1e-5
+    abs_tol: 1e-8
+    max_steps: 50000
+    max_nonlinear_iterations: 9
+    use_jacobian: true
+    reuse_linear_solver: false
+  fallback:
+    enable_backend_escalation: true
+    backend_escalation_threshold: 3
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert options.transient_backend == ps.TransientBackendMode.Auto
+    assert options.sundials.enabled
+    assert options.sundials.family == ps.SundialsSolverFamily.IDA
+    assert options.sundials.formulation == ps.SundialsFormulationMode.Direct
+    assert not options.sundials.allow_formulation_fallback
+    assert abs(options.sundials.rel_tol - 1e-5) < 1e-14
+    assert abs(options.sundials.abs_tol - 1e-8) < 1e-14
+    assert options.sundials.max_steps == 50000
+    assert options.sundials.max_nonlinear_iterations == 9
+    assert options.sundials.use_jacobian
+    assert not options.sundials.reuse_linear_solver
+    assert options.fallback_policy.enable_backend_escalation
+    assert options.fallback_policy.backend_escalation_threshold == 3
+    assert ps.SimulationOptions().sundials.allow_formulation_fallback
+    assert ps.SimulationOptions().fallback_policy.enable_native_reentry is False
+    assert ps.SimulationOptions().fallback_policy.sundials_recovery_window == 0.0
+
+
+def test_sundials_formulation_enum_and_telemetry_binding() -> None:
+    options = ps.SimulationOptions()
+    options.sundials.formulation = ps.SundialsFormulationMode.Direct
+    options.sundials.allow_formulation_fallback = False
+    assert options.sundials.formulation == ps.SundialsFormulationMode.Direct
+    assert options.sundials.allow_formulation_fallback is False
+
+    telemetry = ps.BackendTelemetry()
+    telemetry.formulation_mode = "direct"
+    telemetry.function_evaluations = 10
+    assert telemetry.formulation_mode == "direct"
+    assert telemetry.function_evaluations == 10
+
+
+def test_sundials_direct_request_runs_for_cvode_family() -> None:
+    caps = ps.backend_capabilities()
+    if not caps.get("sundials_compiled", False):
+        pytest.skip("SUNDIALS support not available in this build")
+
+    circuit = _build_rc_circuit()
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 1e-4
+    opts.dt = 1e-6
+    opts.transient_backend = ps.TransientBackendMode.SundialsOnly
+    opts.sundials.enabled = True
+    opts.sundials.family = ps.SundialsSolverFamily.CVODE
+    opts.sundials.formulation = ps.SundialsFormulationMode.Direct
+
+    sim = ps.Simulator(circuit, opts)
+    result = sim.run_transient()
+    assert result.backend_telemetry.selected_backend == "sundials"
+    assert result.backend_telemetry.solver_family == "cvode"
+    assert result.backend_telemetry.formulation_mode == "direct"
 
 
 def test_yaml_parser_gui_parity_slice_registers_virtual_components() -> None:
@@ -1395,3 +1485,55 @@ def test_fallback_trace_records_retry_reasons() -> None:
     assert ps.FallbackReasonCode.NewtonFailure in reasons
     assert ps.FallbackReasonCode.TransientGminEscalation in reasons
     assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons
+
+
+def test_sundials_only_backend_reports_availability() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 1e-4
+    opts.dt = 1e-6
+    opts.transient_backend = ps.TransientBackendMode.SundialsOnly
+    opts.sundials.enabled = True
+    opts.sundials.family = ps.SundialsSolverFamily.IDA
+
+    result = ps.Simulator(circuit, opts).run_transient()
+    caps = ps.backend_capabilities()
+    if caps.get("sundials", False):
+        assert result.success
+        assert result.backend_telemetry.selected_backend == "sundials"
+        assert result.backend_telemetry.solver_family == "ida"
+        assert len(result.time) >= 2
+    else:
+        assert not result.success
+        assert "without SUNDIALS support" in result.message
+        assert result.backend_telemetry.failure_reason == "sundials_not_compiled"
+
+
+def test_sundials_only_backend_requires_explicit_enable() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 1e-4
+    opts.dt = 1e-6
+    opts.transient_backend = ps.TransientBackendMode.SundialsOnly
+    opts.sundials.enabled = False
+
+    result = ps.Simulator(circuit, opts).run_transient()
+    assert not result.success
+    assert "disabled in simulation.sundials.enabled" in result.message
+    assert result.backend_telemetry.failure_reason == "sundials_backend_disabled"

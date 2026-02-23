@@ -1,0 +1,73 @@
+## 0. Baseline freeze and guardrails
+- [ ] 0.1 Freeze current benchmark/parity/stress artifacts as baseline for regression comparison.
+- [ ] 0.2 Define KPI thresholds in benchmark configs (`success_rate`, `parity_rms_error`, `event_time_error`, `runtime_p95`).
+- [ ] 0.3 Add CI gate that blocks progression when KPI regression exceeds thresholds.
+- [ ] 0.4 Document baseline hardware/environment fingerprint for fair runtime comparison.
+
+## 1. Unified service interfaces
+- [ ] 1.1 Introduce shared interfaces for `EquationAssembler`, `NonlinearSolveEngine`, `LinearSolveService`, `EventScheduler`, `RecoveryManager`, and `TelemetryCollector`.
+- [ ] 1.2 Refactor transient orchestrator to depend only on these interfaces.
+- [ ] 1.3 Add architecture tests ensuring fixed/variable modes call the same nonlinear and linear services.
+- [ ] 1.4 Gate: no KPI regression vs baseline after interface extraction.
+
+## 2. Shared mathematical pipeline
+- [ ] 2.1 Migrate residual/Jacobian assembly to a single shared pipeline used by both modes.
+- [ ] 2.2 Remove duplicate step solve logic that only differs by wrapper/backend branch.
+- [ ] 2.3 Add unit tests for residual/Jacobian parity across mode contexts.
+- [ ] 2.4 Gate: parity error and convergence success non-regressive.
+
+## 3. Fixed-step engine
+- [ ] 3.1 Implement `FixedStepPolicy` with macro-grid determinism.
+- [ ] 3.2 Implement internal substep handling for event alignment and bounded convergence rescue.
+- [ ] 3.3 Ensure outputs remain aligned to user macro timestep.
+- [ ] 3.4 Add converter regression tests for fixed-step event accuracy.
+- [ ] 3.5 Gate: event-time KPI and runtime KPI pass fixed-mode matrix.
+
+## 4. Variable-step engine
+- [ ] 4.1 Implement `VariableStepPolicy` with LTE + Newton-feedback coupled control.
+- [ ] 4.2 Implement growth/shrink guards and event clipping in adaptive controller.
+- [ ] 4.3 Integrate stiff-profile switching policy near discontinuities.
+- [ ] 4.4 Add regression tests for adaptive acceptance/rejection determinism.
+- [ ] 4.5 Gate: accuracy/runtime KPI pass variable-mode matrix.
+
+## 5. Deterministic recovery ladder
+- [ ] 5.1 Implement ordered recovery stages (dt backoff, globalization escalation, stiffness profile downgrade, transient regularization).
+- [ ] 5.2 Enforce bounded retry budgets and rollback-to-last-accepted semantics.
+- [ ] 5.3 Emit typed fallback trace entries for each stage.
+- [ ] 5.4 Add failure-path tests that validate deterministic reason codes.
+- [ ] 5.5 Gate: convergence success KPI improves or remains non-regressive on hard converter set.
+
+## 6. Linear solver consolidation and caching
+- [ ] 6.1 Consolidate direct/iterative policy into one runtime linear service.
+- [ ] 6.2 Implement topology-signature keyed symbolic/factorization reuse.
+- [ ] 6.3 Implement deterministic preconditioner lifecycle and invalidation rules.
+- [ ] 6.4 Add telemetry for cache hit/miss and fallback transitions.
+- [ ] 6.5 Gate: runtime p95 improves or remains within threshold on large/stiff suites.
+
+## 7. Event scheduler and segmented integration
+- [ ] 7.1 Implement unified event calendar for PWM boundaries, dead-time, and threshold crossings.
+- [ ] 7.2 Implement earliest-event segmentation and local timestamp refinement.
+- [ ] 7.3 Minimize reinitialization scope after event commits.
+- [ ] 7.4 Add switching converter tests for multiple events in a single macro interval.
+- [ ] 7.5 Gate: event-time KPI and stability KPI pass converter stress tiers.
+
+## 8. User-facing surface simplification
+- [ ] 8.1 Add canonical mode field (`fixed`/`variable`) in YAML and Python runtime surfaces.
+- [ ] 8.2 Map canonical mode to internal solver profiles with deterministic defaults.
+- [ ] 8.3 Keep expert overrides under explicit advanced sections.
+- [ ] 8.4 Add migration diagnostics for deprecated legacy transient-backend keys.
+- [ ] 8.5 Add parser and binding tests for canonical mode selection and migration errors.
+
+## 9. Legacy path decommissioning
+- [ ] 9.1 Remove supported runtime routing through legacy alternate transient-backend branches.
+- [ ] 9.2 Remove duplicate projected-wrapper/transient wrapper code from supported execution path.
+- [ ] 9.3 Delete dead configuration branches and stale tests tied only to removed paths.
+- [ ] 9.4 Update docs to reflect single native core and dual-mode user choice.
+- [ ] 9.5 Gate: full benchmark/parity/stress suite passes with no unsupported legacy-path dependency.
+
+## 10. Final validation and rollout
+- [ ] 10.1 Run full benchmark matrix with frozen baseline comparison report.
+- [ ] 10.2 Run parity suite against ngspice/LTspice and publish KPI deltas.
+- [ ] 10.3 Run converter-focused stress tiers and verify convergence and runtime gates.
+- [ ] 10.4 Publish migration guide with before/after configuration examples.
+- [ ] 10.5 Mark all tasks complete only after KPI gates pass and reports are archived.

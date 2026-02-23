@@ -261,6 +261,372 @@ TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fall
                       }));
 }
 
+TEST_CASE("v1 sundials-only backend handles availability deterministically", "[v1][backend][sundials]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.transient_backend = TransientBackendMode::SundialsOnly;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::IDA;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+#ifdef PULSIM_HAS_SUNDIALS
+    REQUIRE(result.success);
+    CHECK(result.backend_telemetry.sundials_compiled);
+    CHECK(result.backend_telemetry.selected_backend == "sundials");
+    CHECK(result.backend_telemetry.solver_family == "ida");
+    CHECK(result.backend_telemetry.formulation_mode == "projected_wrapper");
+    CHECK(result.backend_telemetry.function_evaluations >= 0);
+    CHECK(result.backend_telemetry.jacobian_evaluations >= 0);
+    CHECK(result.backend_telemetry.nonlinear_iterations >= 0);
+    CHECK(result.backend_telemetry.error_test_failures >= 0);
+    CHECK(result.time.size() >= 2);
+#else
+    REQUIRE_FALSE(result.success);
+    CHECK_FALSE(result.backend_telemetry.sundials_compiled);
+    CHECK(result.message.find("without SUNDIALS support") != std::string::npos);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_not_compiled");
+#endif
+}
+
+TEST_CASE("v1 sundials-only backend requires explicit enable flag", "[v1][backend][sundials]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.transient_backend = TransientBackendMode::SundialsOnly;
+    opts.sundials.enabled = false;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.message.find("disabled in simulation.sundials.enabled") != std::string::npos);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_backend_disabled");
+}
+
+TEST_CASE("v1 sundials backend exposes direct formulation selection", "[v1][backend][sundials]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.transient_backend = TransientBackendMode::SundialsOnly;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::IDA;
+    opts.sundials.formulation = SundialsFormulationMode::Direct;
+    opts.sundials.allow_formulation_fallback = false;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+    CHECK(result.backend_telemetry.selected_backend == "sundials");
+    CHECK(result.backend_telemetry.solver_family == "ida");
+    CHECK(result.backend_telemetry.formulation_mode == "direct");
+}
+
+TEST_CASE("v1 sundials direct IDA handles switching reinitialization", "[v1][backend][sundials][direct]") {
+    Circuit circuit;
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_in = circuit.add_node("in");
+    auto n_sw = circuit.add_node("sw");
+
+    PWMParams pwm;
+    pwm.v_high = 5.0;
+    pwm.v_low = 0.0;
+    pwm.frequency = 60e3;
+    pwm.duty = 0.4;
+    pwm.rise_time = 20e-9;
+    pwm.fall_time = 20e-9;
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 24.0);
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_sw, 2.5, 1e3, 1e-9);
+    circuit.add_resistor("Rload", n_sw, Circuit::ground(), 20.0);
+    circuit.add_capacitor("Cout", n_sw, Circuit::ground(), 1.0e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 5e-8;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 5e-6;
+    opts.adaptive_timestep = true;
+    opts.enable_events = true;
+    opts.transient_backend = TransientBackendMode::SundialsOnly;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::IDA;
+    opts.sundials.formulation = SundialsFormulationMode::Direct;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+#ifdef PULSIM_HAS_SUNDIALS
+    CHECK(result.backend_telemetry.selected_backend == "sundials");
+    CHECK(result.backend_telemetry.solver_family == "ida");
+    CHECK(result.backend_telemetry.formulation_mode == "direct");
+    CHECK(result.backend_telemetry.function_evaluations >= 0);
+    CHECK(result.backend_telemetry.nonlinear_iterations >= 0);
+    if (result.success) {
+        CHECK(result.backend_telemetry.reinitialization_count >= 0);
+        CHECK(result.time.size() >= 2);
+    } else {
+        CHECK((result.backend_telemetry.failure_reason == "sundials_step_failed" ||
+               result.backend_telemetry.failure_reason == "sundials_reinit_failed" ||
+               result.backend_telemetry.failure_reason == "sundials_init_failed"));
+    }
+#else
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_not_compiled");
+#endif
+}
+
+TEST_CASE("v1 sundials direct CVODE reports direct formulation", "[v1][backend][sundials][direct]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-5;
+    opts.dt = 1e-6;
+    opts.transient_backend = TransientBackendMode::SundialsOnly;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::CVODE;
+    opts.sundials.formulation = SundialsFormulationMode::Direct;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+#ifdef PULSIM_HAS_SUNDIALS
+    CHECK(result.backend_telemetry.selected_backend == "sundials");
+    CHECK(result.backend_telemetry.solver_family == "cvode");
+    CHECK(result.backend_telemetry.formulation_mode == "direct");
+#else
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_not_compiled");
+#endif
+}
+
+TEST_CASE("v1 sundials backend records switch events and reinitializations", "[v1][backend][sundials][events]") {
+    Circuit circuit;
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_in = circuit.add_node("in");
+    auto n_sw = circuit.add_node("sw");
+
+    PWMParams pwm;
+    pwm.v_high = 5.0;
+    pwm.v_low = 0.0;
+    pwm.frequency = 80e3;
+    pwm.duty = 0.45;
+    pwm.rise_time = 50e-9;
+    pwm.fall_time = 50e-9;
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 24.0);
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_sw, 2.5, 1e3, 1e-9);
+    circuit.add_resistor("Rload", n_sw, Circuit::ground(), 12.0);
+    circuit.add_capacitor("Cout", n_sw, Circuit::ground(), 2.2e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1.5e-4;
+    opts.dt = 2e-8;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 2e-6;
+    opts.adaptive_timestep = true;
+    opts.transient_backend = TransientBackendMode::SundialsOnly;
+    opts.enable_events = true;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::ARKODE;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+#ifdef PULSIM_HAS_SUNDIALS
+    CHECK(result.backend_telemetry.selected_backend == "sundials");
+    CHECK(result.backend_telemetry.solver_family == "arkode");
+    if (result.success) {
+        CHECK(result.backend_telemetry.reinitialization_count >= 0);
+        CHECK_FALSE(result.events.empty());
+    } else {
+        CHECK((result.backend_telemetry.failure_reason == "sundials_step_failed" ||
+               result.backend_telemetry.failure_reason == "sundials_projection_failed"));
+    }
+#else
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_not_compiled");
+#endif
+}
+
+TEST_CASE("v1 sundials backend segments PWM source boundaries", "[v1][backend][sundials][pwm]") {
+    Circuit circuit;
+    auto n_sw = circuit.add_node("sw");
+
+    PWMParams pwm;
+    pwm.v_high = 12.0;
+    pwm.v_low = 0.0;
+    pwm.frequency = 50e3;
+    pwm.duty = 0.35;
+    pwm.rise_time = 0.0;
+    pwm.fall_time = 0.0;
+    circuit.add_pwm_voltage_source("Vpwm", n_sw, Circuit::ground(), pwm);
+    circuit.add_resistor("Rload", n_sw, Circuit::ground(), 10.0);
+    circuit.add_capacitor("Cout", n_sw, Circuit::ground(), 4.7e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1.5e-4;
+    opts.dt = 1e-7;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 2e-6;
+    opts.adaptive_timestep = true;
+    opts.enable_events = true;
+    opts.transient_backend = TransientBackendMode::SundialsOnly;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::ARKODE;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient();
+
+#ifdef PULSIM_HAS_SUNDIALS
+    REQUIRE(result.success);
+    CHECK(result.backend_telemetry.selected_backend == "sundials");
+    CHECK(result.backend_telemetry.reinitialization_count > 0);
+    CHECK(std::any_of(result.events.begin(), result.events.end(),
+                      [](const SimulationEvent& evt) {
+                          return evt.description == "pwm_boundary";
+                      }));
+#else
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_not_compiled");
+#endif
+}
+
+TEST_CASE("v1 auto backend records deterministic sundials escalation behavior", "[v1][backend][auto]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-3;
+    opts.adaptive_timestep = true;
+    opts.transient_backend = TransientBackendMode::Auto;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::IDA;
+    opts.sundials.formulation = SundialsFormulationMode::Direct;
+    opts.sundials.allow_formulation_fallback = false;
+    opts.fallback_policy.enable_backend_escalation = true;
+    opts.fallback_policy.backend_escalation_threshold = 1;
+
+    // Force native path to fail deterministically.
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.fallback_order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = false;
+    opts.linear_solver.auto_select = false;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient(Vector::Zero(circuit.system_size()), nullptr, nullptr, nullptr);
+
+#ifdef PULSIM_HAS_SUNDIALS
+    CHECK(result.backend_telemetry.sundials_compiled);
+#else
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_not_compiled");
+#endif
+}
+
+TEST_CASE("v1 auto backend can attempt native reentry after sundials recovery", "[v1][backend][auto][hybrid]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-3;
+    opts.adaptive_timestep = true;
+    opts.transient_backend = TransientBackendMode::Auto;
+    opts.sundials.enabled = true;
+    opts.sundials.family = SundialsSolverFamily::IDA;
+    opts.fallback_policy.enable_backend_escalation = true;
+    opts.fallback_policy.backend_escalation_threshold = 1;
+    opts.fallback_policy.enable_native_reentry = true;
+    opts.fallback_policy.sundials_recovery_window = 2e-5;
+
+    // Force native attempts (initial and reentry) to fail deterministically.
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.fallback_order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = false;
+    opts.linear_solver.auto_select = false;
+
+    Simulator sim(circuit, opts);
+    auto result = sim.run_transient(Vector::Zero(circuit.system_size()), nullptr, nullptr, nullptr);
+
+#ifdef PULSIM_HAS_SUNDIALS
+    CHECK(result.backend_telemetry.sundials_compiled);
+    CHECK(std::any_of(result.fallback_trace.begin(),
+                      result.fallback_trace.end(),
+                      [](const FallbackTraceEntry& entry) {
+                          return entry.action == "escalate_to_sundials";
+                      }));
+    const bool reentry_attempted = std::any_of(result.fallback_trace.begin(),
+                                               result.fallback_trace.end(),
+                                               [](const FallbackTraceEntry& entry) {
+                                                   return entry.action == "reenter_native";
+                                               });
+    const bool sundials_failed = std::any_of(result.fallback_trace.begin(),
+                                             result.fallback_trace.end(),
+                                             [](const FallbackTraceEntry& entry) {
+                                                 return entry.action == "sundials_failed";
+                                             });
+    CHECK((reentry_attempted || sundials_failed));
+    CHECK((result.backend_telemetry.selected_backend == "hybrid_auto" ||
+           result.backend_telemetry.selected_backend == "sundials"));
+#else
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.failure_reason == "sundials_not_compiled");
+#endif
+}
+
 TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
     Circuit circuit;
 

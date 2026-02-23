@@ -387,6 +387,22 @@ class FallbackReasonCode(Enum):
     StiffnessBackoff = ...
     TransientGminEscalation = ...
     MaxRetriesExceeded = ...
+    BackendEscalation = ...
+    BackendFailure = ...
+
+class TransientBackendMode(Enum):
+    Native = ...
+    SundialsOnly = ...
+    Auto = ...
+
+class SundialsSolverFamily(Enum):
+    IDA = ...
+    CVODE = ...
+    ARKODE = ...
+
+class SundialsFormulationMode(Enum):
+    ProjectedWrapper = ...
+    Direct = ...
 
 class ThermalCouplingPolicy(Enum):
     LossOnly = ...
@@ -409,6 +425,43 @@ class FallbackPolicyOptions:
     gmin_initial: float
     gmin_max: float
     gmin_growth: float
+    enable_backend_escalation: bool
+    backend_escalation_threshold: int
+    enable_native_reentry: bool
+    sundials_recovery_window: float
+
+    def __init__(self) -> None: ...
+
+class SundialsBackendOptions:
+    enabled: bool
+    family: SundialsSolverFamily
+    formulation: SundialsFormulationMode
+    rel_tol: float
+    abs_tol: float
+    max_steps: int
+    max_nonlinear_iterations: int
+    use_jacobian: bool
+    reuse_linear_solver: bool
+    allow_formulation_fallback: bool
+
+    def __init__(self) -> None: ...
+
+class BackendTelemetry:
+    requested_backend: str
+    selected_backend: str
+    solver_family: str
+    formulation_mode: str
+    function_evaluations: int
+    jacobian_evaluations: int
+    nonlinear_iterations: int
+    nonlinear_convergence_failures: int
+    error_test_failures: int
+    escalation_count: int
+    reinitialization_count: int
+    backend_recovery_count: int
+    sundials_compiled: bool
+    sundials_used: bool
+    failure_reason: str
 
     def __init__(self) -> None: ...
 
@@ -499,6 +552,8 @@ class SimulationOptions:
     gmin_fallback: GminConfig
     max_step_retries: int
     fallback_policy: FallbackPolicyOptions
+    transient_backend: TransientBackendMode
+    sundials: SundialsBackendOptions
 
     def __init__(self) -> None: ...
 
@@ -518,6 +573,7 @@ class SimulationResult:
     total_time_seconds: float
     linear_solver_telemetry: LinearSolverTelemetry
     fallback_trace: List[FallbackTraceEntry]
+    backend_telemetry: BackendTelemetry
     loss_summary: SystemLossSummary
     thermal_summary: ThermalSummary
     data: List[List[float]]

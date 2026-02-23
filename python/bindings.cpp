@@ -1149,12 +1149,34 @@ void init_v2_module(py::module_& v2) {
         .value("StiffnessBackoff", FallbackReasonCode::StiffnessBackoff)
         .value("TransientGminEscalation", FallbackReasonCode::TransientGminEscalation)
         .value("MaxRetriesExceeded", FallbackReasonCode::MaxRetriesExceeded)
+        .value("BackendEscalation", FallbackReasonCode::BackendEscalation)
+        .value("BackendFailure", FallbackReasonCode::BackendFailure)
         .export_values();
 
     py::enum_<ThermalCouplingPolicy>(v2, "ThermalCouplingPolicy",
         "Electro-thermal coupling policy")
         .value("LossOnly", ThermalCouplingPolicy::LossOnly)
         .value("LossWithTemperatureScaling", ThermalCouplingPolicy::LossWithTemperatureScaling)
+        .export_values();
+
+    py::enum_<TransientBackendMode>(v2, "TransientBackendMode",
+        "Transient backend selection mode")
+        .value("Native", TransientBackendMode::Native)
+        .value("SundialsOnly", TransientBackendMode::SundialsOnly)
+        .value("Auto", TransientBackendMode::Auto)
+        .export_values();
+
+    py::enum_<SundialsSolverFamily>(v2, "SundialsSolverFamily",
+        "SUNDIALS solver family")
+        .value("IDA", SundialsSolverFamily::IDA)
+        .value("CVODE", SundialsSolverFamily::CVODE)
+        .value("ARKODE", SundialsSolverFamily::ARKODE)
+        .export_values();
+
+    py::enum_<SundialsFormulationMode>(v2, "SundialsFormulationMode",
+        "SUNDIALS backend formulation mode")
+        .value("ProjectedWrapper", SundialsFormulationMode::ProjectedWrapper)
+        .value("Direct", SundialsFormulationMode::Direct)
         .export_values();
 
     py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
@@ -1174,7 +1196,44 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("gmin_retry_threshold", &FallbackPolicyOptions::gmin_retry_threshold)
         .def_readwrite("gmin_initial", &FallbackPolicyOptions::gmin_initial)
         .def_readwrite("gmin_max", &FallbackPolicyOptions::gmin_max)
-        .def_readwrite("gmin_growth", &FallbackPolicyOptions::gmin_growth);
+        .def_readwrite("gmin_growth", &FallbackPolicyOptions::gmin_growth)
+        .def_readwrite("enable_backend_escalation", &FallbackPolicyOptions::enable_backend_escalation)
+        .def_readwrite("backend_escalation_threshold", &FallbackPolicyOptions::backend_escalation_threshold)
+        .def_readwrite("enable_native_reentry", &FallbackPolicyOptions::enable_native_reentry)
+        .def_readwrite("sundials_recovery_window", &FallbackPolicyOptions::sundials_recovery_window);
+
+    py::class_<SundialsBackendOptions>(v2, "SundialsBackendOptions",
+        "SUNDIALS backend runtime configuration")
+        .def(py::init<>())
+        .def_readwrite("enabled", &SundialsBackendOptions::enabled)
+        .def_readwrite("family", &SundialsBackendOptions::family)
+        .def_readwrite("formulation", &SundialsBackendOptions::formulation)
+        .def_readwrite("rel_tol", &SundialsBackendOptions::rel_tol)
+        .def_readwrite("abs_tol", &SundialsBackendOptions::abs_tol)
+        .def_readwrite("max_steps", &SundialsBackendOptions::max_steps)
+        .def_readwrite("max_nonlinear_iterations", &SundialsBackendOptions::max_nonlinear_iterations)
+        .def_readwrite("use_jacobian", &SundialsBackendOptions::use_jacobian)
+        .def_readwrite("reuse_linear_solver", &SundialsBackendOptions::reuse_linear_solver)
+        .def_readwrite("allow_formulation_fallback", &SundialsBackendOptions::allow_formulation_fallback);
+
+    py::class_<BackendTelemetry>(v2, "BackendTelemetry",
+        "Backend selection and escalation telemetry")
+        .def(py::init<>())
+        .def_readwrite("requested_backend", &BackendTelemetry::requested_backend)
+        .def_readwrite("selected_backend", &BackendTelemetry::selected_backend)
+        .def_readwrite("solver_family", &BackendTelemetry::solver_family)
+        .def_readwrite("formulation_mode", &BackendTelemetry::formulation_mode)
+        .def_readwrite("function_evaluations", &BackendTelemetry::function_evaluations)
+        .def_readwrite("jacobian_evaluations", &BackendTelemetry::jacobian_evaluations)
+        .def_readwrite("nonlinear_iterations", &BackendTelemetry::nonlinear_iterations)
+        .def_readwrite("nonlinear_convergence_failures", &BackendTelemetry::nonlinear_convergence_failures)
+        .def_readwrite("error_test_failures", &BackendTelemetry::error_test_failures)
+        .def_readwrite("escalation_count", &BackendTelemetry::escalation_count)
+        .def_readwrite("reinitialization_count", &BackendTelemetry::reinitialization_count)
+        .def_readwrite("backend_recovery_count", &BackendTelemetry::backend_recovery_count)
+        .def_readwrite("sundials_compiled", &BackendTelemetry::sundials_compiled)
+        .def_readwrite("sundials_used", &BackendTelemetry::sundials_used)
+        .def_readwrite("failure_reason", &BackendTelemetry::failure_reason);
 
     py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
         "Structured telemetry entry for each fallback/retry action")
@@ -1251,7 +1310,9 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
         .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
-        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy);
+        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy)
+        .def_readwrite("transient_backend", &SimulationOptions::transient_backend)
+        .def_readwrite("sundials", &SimulationOptions::sundials);
 
     py::class_<SimulationResult>(v2, "SimulationResult", "Transient simulation result")
         .def(py::init<>())
@@ -1270,6 +1331,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("total_time_seconds", &SimulationResult::total_time_seconds)
         .def_readwrite("linear_solver_telemetry", &SimulationResult::linear_solver_telemetry)
         .def_readwrite("fallback_trace", &SimulationResult::fallback_trace)
+        .def_readwrite("backend_telemetry", &SimulationResult::backend_telemetry)
         .def_readwrite("loss_summary", &SimulationResult::loss_summary)
         .def_readwrite("thermal_summary", &SimulationResult::thermal_summary)
         // Compatibility alias used by legacy Python tests

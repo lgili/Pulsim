@@ -1,4 +1,5 @@
 #include "pulsim/v1/simulation.hpp"
+#include "sundials_backend.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -192,6 +193,131 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
 
     apply_robust_newton_defaults(options.newton_options, false);
     apply_robust_linear_solver_defaults(options.linear_solver, false);
+}
+
+[[nodiscard]] bool sundials_compiled() {
+#ifdef PULSIM_HAS_SUNDIALS
+    return true;
+#else
+    return false;
+#endif
+}
+
+[[nodiscard]] std::string backend_mode_to_string(TransientBackendMode mode) {
+    switch (mode) {
+        case TransientBackendMode::Native:
+            return "native";
+        case TransientBackendMode::SundialsOnly:
+            return "sundials";
+        case TransientBackendMode::Auto:
+            return "auto";
+    }
+    return "native";
+}
+
+[[nodiscard]] std::string solver_family_to_string(SundialsSolverFamily family) {
+    switch (family) {
+        case SundialsSolverFamily::IDA:
+            return "ida";
+        case SundialsSolverFamily::CVODE:
+            return "cvode";
+        case SundialsSolverFamily::ARKODE:
+            return "arkode";
+    }
+    return "ida";
+}
+
+[[nodiscard]] std::string formulation_mode_to_string(SundialsFormulationMode mode) {
+    switch (mode) {
+        case SundialsFormulationMode::ProjectedWrapper:
+            return "projected_wrapper";
+        case SundialsFormulationMode::Direct:
+            return "direct";
+    }
+    return "projected_wrapper";
+}
+
+[[nodiscard]] bool nearly_same_time(Real a, Real b) {
+    const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
+    return std::abs(a - b) <= scale * Real{1e-12};
+}
+
+void merge_linear_solver_telemetry(LinearSolverTelemetry& dst, const LinearSolverTelemetry& src) {
+    dst.total_solve_calls += src.total_solve_calls;
+    dst.total_iterations += src.total_iterations;
+    dst.total_fallbacks += src.total_fallbacks;
+    dst.last_iterations = src.last_iterations;
+    dst.last_error = src.last_error;
+    if (src.last_solver.has_value()) {
+        dst.last_solver = src.last_solver;
+    }
+    if (src.last_preconditioner.has_value()) {
+        dst.last_preconditioner = src.last_preconditioner;
+    }
+}
+
+void append_simulation_segment(SimulationResult& aggregate, const SimulationResult& segment) {
+    if (segment.time.empty()) {
+        aggregate.success = segment.success;
+        aggregate.final_status = segment.final_status;
+        aggregate.message = segment.message;
+        aggregate.backend_telemetry = segment.backend_telemetry;
+        aggregate.loss_summary = segment.loss_summary;
+        aggregate.thermal_summary = segment.thermal_summary;
+        aggregate.total_steps += segment.total_steps;
+        aggregate.newton_iterations_total += segment.newton_iterations_total;
+        aggregate.timestep_rejections += segment.timestep_rejections;
+        aggregate.total_time_seconds += segment.total_time_seconds;
+        merge_linear_solver_telemetry(aggregate.linear_solver_telemetry, segment.linear_solver_telemetry);
+        aggregate.fallback_trace.insert(
+            aggregate.fallback_trace.end(),
+            segment.fallback_trace.begin(),
+            segment.fallback_trace.end());
+        return;
+    }
+
+    std::size_t start_idx = 0;
+    if (!aggregate.time.empty() && nearly_same_time(aggregate.time.back(), segment.time.front())) {
+        start_idx = 1;
+    }
+
+    for (std::size_t i = start_idx; i < segment.time.size(); ++i) {
+        aggregate.time.push_back(segment.time[i]);
+        if (i < segment.states.size()) {
+            aggregate.states.push_back(segment.states[i]);
+        }
+    }
+
+    aggregate.events.insert(aggregate.events.end(), segment.events.begin(), segment.events.end());
+    aggregate.fallback_trace.insert(
+        aggregate.fallback_trace.end(),
+        segment.fallback_trace.begin(),
+        segment.fallback_trace.end());
+
+    for (const auto& [name, values] : segment.virtual_channels) {
+        auto& target = aggregate.virtual_channels[name];
+        target.insert(target.end(), values.begin(), values.end());
+    }
+    for (const auto& [name, meta] : segment.virtual_channel_metadata) {
+        aggregate.virtual_channel_metadata[name] = meta;
+    }
+    if (!segment.mixed_domain_phase_order.empty()) {
+        aggregate.mixed_domain_phase_order = segment.mixed_domain_phase_order;
+    }
+
+    aggregate.total_steps += segment.total_steps;
+    aggregate.newton_iterations_total += segment.newton_iterations_total;
+    aggregate.timestep_rejections += segment.timestep_rejections;
+    aggregate.total_time_seconds += segment.total_time_seconds;
+
+    merge_linear_solver_telemetry(aggregate.linear_solver_telemetry, segment.linear_solver_telemetry);
+
+    aggregate.success = segment.success;
+    aggregate.final_status = segment.final_status;
+    aggregate.message = segment.message;
+    aggregate.backend_telemetry = segment.backend_telemetry;
+    aggregate.loss_summary = segment.loss_summary;
+    aggregate.thermal_summary = segment.thermal_summary;
 }
 
 Matrix spectral_diff_matrix(int samples, Real period) {
@@ -905,12 +1031,328 @@ SimulationResult Simulator::run_transient(SimulationCallback callback,
     return run_transient(dc.newton_result.solution, callback, event_callback, control);
 }
 
+SimulationResult Simulator::run_transient_sundials_impl(
+    const Vector& x0,
+    SimulationCallback callback,
+    EventCallback event_callback,
+    SimulationControl* control,
+    bool escalated_from_native) {
+
+    auto finalize_backend_telemetry = [&](SimulationResult& run_result,
+                                          const SimulationOptions& run_options) {
+        run_result.backend_telemetry.requested_backend = backend_mode_to_string(options_.transient_backend);
+        if (run_result.backend_telemetry.selected_backend.empty()) {
+            run_result.backend_telemetry.selected_backend = "sundials";
+        }
+        if (run_result.backend_telemetry.solver_family.empty()) {
+            run_result.backend_telemetry.solver_family = solver_family_to_string(run_options.sundials.family);
+        }
+        if (run_result.backend_telemetry.formulation_mode.empty()) {
+            run_result.backend_telemetry.formulation_mode =
+                formulation_mode_to_string(run_options.sundials.formulation);
+        }
+        if (!run_result.backend_telemetry.sundials_compiled) {
+            run_result.backend_telemetry.sundials_compiled = sundials_compiled();
+        }
+    };
+
+    auto seed_recovery_options = [&](const SimulationResult& failed_result,
+                                     SimulationOptions& recovery_options,
+                                     Vector& recovery_x0) {
+        recovery_x0 = (!failed_result.states.empty() ? failed_result.states.back() : x0);
+        if (!failed_result.time.empty()) {
+            recovery_options.tstart = failed_result.time.back();
+            recovery_options.tstop = std::max(recovery_options.tstop, recovery_options.tstart);
+        }
+    };
+
+    SimulationResult result = run_sundials_backend(
+        circuit_,
+        options_,
+        x0,
+        callback,
+        event_callback,
+        control,
+        escalated_from_native);
+    finalize_backend_telemetry(result, options_);
+
+    const bool allow_formulation_recovery =
+        !result.success &&
+        options_.sundials.enabled &&
+        options_.sundials.allow_formulation_fallback &&
+        options_.sundials.formulation == SundialsFormulationMode::Direct;
+
+    if (allow_formulation_recovery) {
+        record_fallback_event(result,
+                              result.total_steps,
+                              0,
+                              result.time.empty() ? options_.tstart : result.time.back(),
+                              0.0,
+                              FallbackReasonCode::BackendFailure,
+                              result.final_status,
+                              "fallback_to_projected_wrapper");
+
+        SimulationOptions recovery_options = options_;
+        recovery_options.sundials.formulation = SundialsFormulationMode::ProjectedWrapper;
+        Vector recovery_x0 = x0;
+        seed_recovery_options(result, recovery_options, recovery_x0);
+
+        SimulationResult recovery = run_sundials_backend(
+            circuit_,
+            recovery_options,
+            recovery_x0,
+            nullptr,
+            nullptr,
+            control,
+            true);
+        finalize_backend_telemetry(recovery, recovery_options);
+        recovery.backend_telemetry.backend_recovery_count =
+            std::max(recovery.backend_telemetry.backend_recovery_count,
+                     result.backend_telemetry.backend_recovery_count + 1);
+        recovery.fallback_trace.insert(
+            recovery.fallback_trace.begin(),
+            result.fallback_trace.begin(),
+            result.fallback_trace.end());
+
+        if (recovery.success || recovery.total_steps > result.total_steps) {
+            result = std::move(recovery);
+        } else {
+            result.backend_telemetry.backend_recovery_count += 1;
+        }
+    }
+
+    const bool allow_family_recovery =
+        !result.success &&
+        options_.transient_backend == TransientBackendMode::Auto &&
+        options_.sundials.enabled &&
+        result.backend_telemetry.solver_family != "arkode";
+
+    if (!allow_family_recovery) {
+        return result;
+    }
+
+    record_fallback_event(result,
+                          result.total_steps,
+                          0,
+                          result.time.empty() ? options_.tstart : result.time.back(),
+                          0.0,
+                          FallbackReasonCode::BackendEscalation,
+                          result.final_status,
+                          "fallback_to_arkode");
+
+    SimulationOptions recovery_options = options_;
+    recovery_options.sundials.family = SundialsSolverFamily::ARKODE;
+    if (result.backend_telemetry.formulation_mode == "projected_wrapper") {
+        recovery_options.sundials.formulation = SundialsFormulationMode::ProjectedWrapper;
+    }
+    recovery_options.sundials.rel_tol = std::max(recovery_options.sundials.rel_tol, Real{1e-5});
+    recovery_options.sundials.abs_tol = std::max(recovery_options.sundials.abs_tol, Real{1e-7});
+    recovery_options.sundials.max_nonlinear_iterations =
+        std::max(recovery_options.sundials.max_nonlinear_iterations, 12);
+
+    Vector recovery_x0 = x0;
+    seed_recovery_options(result, recovery_options, recovery_x0);
+
+    SimulationResult recovery = run_sundials_backend(
+        circuit_,
+        recovery_options,
+        recovery_x0,
+        nullptr,
+        nullptr,
+        control,
+        true);
+    finalize_backend_telemetry(recovery, recovery_options);
+    recovery.backend_telemetry.backend_recovery_count =
+        std::max(recovery.backend_telemetry.backend_recovery_count,
+                 result.backend_telemetry.backend_recovery_count + 1);
+
+    recovery.fallback_trace.insert(
+        recovery.fallback_trace.begin(),
+        result.fallback_trace.begin(),
+        result.fallback_trace.end());
+
+    if (recovery.success || recovery.total_steps > result.total_steps) {
+        return recovery;
+    }
+
+    result.backend_telemetry.backend_recovery_count += 1;
+    return result;
+}
+
 SimulationResult Simulator::run_transient(const Vector& x0,
                                           SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
+    const auto requested_backend = options_.transient_backend;
+
+    if (requested_backend == TransientBackendMode::SundialsOnly) {
+        return run_transient_sundials_impl(
+            x0,
+            std::move(callback),
+            std::move(event_callback),
+            control,
+            false);
+    }
+
+    SimulationResult native_result = run_transient_native_impl(
+        x0,
+        std::move(callback),
+        std::move(event_callback),
+        control);
+
+    native_result.backend_telemetry.requested_backend = backend_mode_to_string(requested_backend);
+    native_result.backend_telemetry.sundials_compiled = sundials_compiled();
+
+    const bool auto_mode = requested_backend == TransientBackendMode::Auto;
+    const bool should_escalate = auto_mode &&
+                                 !native_result.success &&
+                                 options_.fallback_policy.enable_backend_escalation &&
+                                 options_.sundials.enabled &&
+                                 native_result.total_steps <= options_.fallback_policy.backend_escalation_threshold;
+    if (!should_escalate) {
+        if (native_result.backend_telemetry.selected_backend.empty()) {
+            native_result.backend_telemetry.selected_backend = "native";
+        }
+        if (native_result.backend_telemetry.solver_family.empty()) {
+            native_result.backend_telemetry.solver_family = "native";
+        }
+        return native_result;
+    }
+
+    if (!sundials_compiled()) {
+        native_result.backend_telemetry.failure_reason = "sundials_not_compiled";
+        return native_result;
+    }
+
+    record_fallback_event(native_result,
+                          native_result.total_steps,
+                          0,
+                          native_result.time.empty() ? options_.tstart : native_result.time.back(),
+                          0.0,
+                          FallbackReasonCode::BackendEscalation,
+                          native_result.final_status,
+                          "escalate_to_sundials");
+
+    Vector escalation_x0 = x0;
+    Real escalation_tstart = options_.tstart;
+    if (!native_result.states.empty()) {
+        escalation_x0 = native_result.states.back();
+    }
+    if (!native_result.time.empty()) {
+        escalation_tstart = native_result.time.back();
+    }
+    escalation_tstart = std::clamp(escalation_tstart, options_.tstart, options_.tstop);
+
+    SimulationOptions sundials_stage_options = options_;
+    sundials_stage_options.tstart = escalation_tstart;
+    sundials_stage_options.tstop = options_.tstop;
+
+    const Real recovery_window = options_.fallback_policy.sundials_recovery_window;
+    const bool native_reentry_requested =
+        options_.fallback_policy.enable_native_reentry &&
+        std::isfinite(recovery_window) &&
+        recovery_window > 0.0 &&
+        escalation_tstart < options_.tstop;
+    if (native_reentry_requested) {
+        const Real min_window = std::max(options_.dt * 10.0, Real{1e-12});
+        sundials_stage_options.tstop = std::min(options_.tstop, escalation_tstart + std::max(recovery_window, min_window));
+    }
+
+    Simulator sundials_stage_sim(circuit_, sundials_stage_options);
+    SimulationResult sundials_result = sundials_stage_sim.run_transient_sundials_impl(
+        escalation_x0,
+        nullptr,
+        nullptr,
+        control,
+        true);
+
+    SimulationResult escalated_result = native_result;
+    append_simulation_segment(escalated_result, sundials_result);
+    escalated_result.backend_telemetry.requested_backend = backend_mode_to_string(requested_backend);
+    escalated_result.backend_telemetry.sundials_compiled = sundials_compiled();
+
+    if (!sundials_result.success) {
+        record_fallback_event(escalated_result,
+                              escalated_result.total_steps,
+                              0,
+                              escalated_result.time.empty() ? options_.tstart : escalated_result.time.back(),
+                              0.0,
+                              FallbackReasonCode::BackendFailure,
+                              escalated_result.final_status,
+                              "sundials_failed");
+        return escalated_result;
+    }
+
+    if (!native_reentry_requested) {
+        return escalated_result;
+    }
+
+    const Real handoff_t =
+        sundials_result.time.empty() ? sundials_stage_options.tstart : sundials_result.time.back();
+    const Real handoff_tol = std::max(std::abs(options_.tstop) * 1e-12, Real{1e-15});
+    if (handoff_t >= options_.tstop - handoff_tol) {
+        return escalated_result;
+    }
+
+    record_fallback_event(escalated_result,
+                          escalated_result.total_steps,
+                          0,
+                          handoff_t,
+                          0.0,
+                          FallbackReasonCode::BackendEscalation,
+                          SolverStatus::Success,
+                          "reenter_native");
+
+    SimulationOptions native_reentry_options = options_;
+    native_reentry_options.transient_backend = TransientBackendMode::Native;
+    native_reentry_options.tstart = handoff_t;
+    native_reentry_options.tstop = options_.tstop;
+
+    const Vector native_reentry_x0 =
+        !sundials_result.states.empty() ? sundials_result.states.back() : escalation_x0;
+
+    Simulator native_reentry_sim(circuit_, native_reentry_options);
+    SimulationResult native_reentry_result = native_reentry_sim.run_transient_native_impl(
+        native_reentry_x0,
+        nullptr,
+        nullptr,
+        control);
+    native_reentry_result.backend_telemetry.requested_backend = backend_mode_to_string(requested_backend);
+    native_reentry_result.backend_telemetry.sundials_compiled = sundials_compiled();
+
+    append_simulation_segment(escalated_result, native_reentry_result);
+    escalated_result.backend_telemetry.selected_backend = "hybrid_auto";
+    escalated_result.backend_telemetry.solver_family = "native+sundials";
+    escalated_result.backend_telemetry.formulation_mode = "hybrid";
+    escalated_result.backend_telemetry.sundials_used = true;
+    if (native_reentry_result.success) {
+        escalated_result.success = true;
+        escalated_result.final_status = SolverStatus::Success;
+        escalated_result.message = "Hybrid auto completed (native->sundials->native)";
+    } else {
+        record_fallback_event(escalated_result,
+                              escalated_result.total_steps,
+                              0,
+                              escalated_result.time.empty() ? handoff_t : escalated_result.time.back(),
+                              0.0,
+                              FallbackReasonCode::BackendFailure,
+                              escalated_result.final_status,
+                              "native_reentry_failed");
+    }
+
+    return escalated_result;
+}
+
+SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
+                                                      SimulationCallback callback,
+                                                      EventCallback event_callback,
+                                                      SimulationControl* control) {
     SimulationResult result;
     auto start_time = std::chrono::high_resolution_clock::now();
+    result.backend_telemetry.selected_backend = "native";
+    result.backend_telemetry.solver_family = "native";
+    result.backend_telemetry.formulation_mode = "native";
+    result.backend_telemetry.sundials_compiled = sundials_compiled();
 
     initialize_loss_tracking();
     for (const auto& [name, energy] : options_.switching_energy) {

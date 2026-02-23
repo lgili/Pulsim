@@ -38,6 +38,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(PULSIM_BUILD_TESTS "Build tests" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
 option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
+set(PULSIM_SUNDIALS_LIBRARIES "")
 # Note: SuiteSparse/KLU is now a required dependency (default backend for linear solver)
 
 # =============================================================================
@@ -323,7 +324,7 @@ if(PULSIM_USE_SUNDIALS)
         # Configure SUNDIALS build options
         set(SUNDIALS_BUILD_SHARED_LIBS OFF CACHE BOOL "Build static SUNDIALS" FORCE)
         set(BUILD_ARKODE ON CACHE BOOL "Enable ARKODE" FORCE)
-        set(BUILD_CVODE OFF CACHE BOOL "Disable CVODE" FORCE)
+        set(BUILD_CVODE ON CACHE BOOL "Enable CVODE" FORCE)
         set(BUILD_CVODES OFF CACHE BOOL "Disable CVODES" FORCE)
         set(BUILD_IDA ON CACHE BOOL "Enable IDA" FORCE)
         set(BUILD_IDAS OFF CACHE BOOL "Disable IDAS" FORCE)
@@ -334,6 +335,18 @@ if(PULSIM_USE_SUNDIALS)
         set(EXAMPLES_INSTALL OFF CACHE BOOL "Don't install examples" FORCE)
         FetchContent_MakeAvailable(sundials)
     endif()
+
+    foreach(_cand
+            SUNDIALS::ida SUNDIALS::cvode SUNDIALS::arkode
+            SUNDIALS::nvecserial SUNDIALS::sunlinsolspgmr
+            sundials_ida sundials_cvode sundials_arkode
+            sundials_nvecserial sundials_sunlinsolspgmr)
+        if(TARGET ${_cand})
+            list(APPEND PULSIM_SUNDIALS_LIBRARIES ${_cand})
+        endif()
+    endforeach()
+
+    list(REMOVE_DUPLICATES PULSIM_SUNDIALS_LIBRARIES)
     add_compile_definitions(PULSIM_HAS_SUNDIALS)
     message(STATUS "SUNDIALS support enabled")
 endif()

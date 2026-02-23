@@ -76,7 +76,9 @@ enum class FallbackReasonCode {
     EventSplit,
     StiffnessBackoff,
     TransientGminEscalation,
-    MaxRetriesExceeded
+    MaxRetriesExceeded,
+    BackendEscalation,
+    BackendFailure
 };
 
 struct FallbackTraceEntry {
@@ -96,6 +98,62 @@ struct FallbackPolicyOptions {
     Real gmin_initial = 1e-9;
     Real gmin_max = 1e-3;
     Real gmin_growth = 10.0;
+
+    // Backend escalation policy (Native -> SUNDIALS in Auto mode)
+    bool enable_backend_escalation = true;
+    int backend_escalation_threshold = 1;
+
+    // Hybrid policy (SUNDIALS recovery window -> try Native again)
+    bool enable_native_reentry = false;
+    Real sundials_recovery_window = 0.0;
+};
+
+enum class TransientBackendMode {
+    Native,
+    SundialsOnly,
+    Auto
+};
+
+enum class SundialsSolverFamily {
+    IDA,
+    CVODE,
+    ARKODE
+};
+
+enum class SundialsFormulationMode {
+    ProjectedWrapper,
+    Direct
+};
+
+struct SundialsBackendOptions {
+    bool enabled = false;
+    SundialsSolverFamily family = SundialsSolverFamily::IDA;
+    SundialsFormulationMode formulation = SundialsFormulationMode::ProjectedWrapper;
+    bool allow_formulation_fallback = true;
+    Real rel_tol = 1e-6;
+    Real abs_tol = 1e-9;
+    int max_steps = 100000;
+    int max_nonlinear_iterations = 8;
+    bool use_jacobian = true;
+    bool reuse_linear_solver = true;
+};
+
+struct BackendTelemetry {
+    std::string requested_backend = "native";
+    std::string selected_backend = "native";
+    std::string solver_family = "native";
+    std::string formulation_mode = "projected_wrapper";
+    int function_evaluations = 0;
+    int jacobian_evaluations = 0;
+    int nonlinear_iterations = 0;
+    int nonlinear_convergence_failures = 0;
+    int error_test_failures = 0;
+    int escalation_count = 0;
+    int reinitialization_count = 0;
+    int backend_recovery_count = 0;
+    bool sundials_compiled = false;
+    bool sundials_used = false;
+    std::string failure_reason;
 };
 
 struct PeriodicSteadyStateOptions {
@@ -197,6 +255,10 @@ struct SimulationOptions {
     GminConfig gmin_fallback{};
     int max_step_retries = 6;
     FallbackPolicyOptions fallback_policy{};
+
+    // Transient backend selection
+    TransientBackendMode transient_backend = TransientBackendMode::Native;
+    SundialsBackendOptions sundials{};
 };
 
 struct SimulationResult {
@@ -218,6 +280,7 @@ struct SimulationResult {
 
     LinearSolverTelemetry linear_solver_telemetry;
     std::vector<FallbackTraceEntry> fallback_trace;
+    BackendTelemetry backend_telemetry;
 
     SystemLossSummary loss_summary;
     ThermalSummary thermal_summary;
@@ -313,6 +376,19 @@ private:
         Real v_threshold = 0.0;
         bool was_on = false;
     };
+
+    [[nodiscard]] SimulationResult run_transient_native_impl(
+        const Vector& x0,
+        SimulationCallback callback,
+        EventCallback event_callback,
+        SimulationControl* control);
+
+    [[nodiscard]] SimulationResult run_transient_sundials_impl(
+        const Vector& x0,
+        SimulationCallback callback,
+        EventCallback event_callback,
+        SimulationControl* control,
+        bool escalated_from_native);
 
     NewtonResult solve_step(Real t_next, Real dt, const Vector& x_prev);
     NewtonResult solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev);

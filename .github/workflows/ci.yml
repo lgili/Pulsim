@@ -125,6 +125,44 @@ jobs:
           fi
 
   # =============================================================================
+  # SUNDIALS Backend Validation (optional dependency enabled)
+  # =============================================================================
+  sundials-backend:
+    name: Linux SUNDIALS backend
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
+
+      - name: Configure CMake (SUNDIALS ON)
+        env:
+          CC: clang-17
+          CXX: clang++-17
+        run: |
+          cmake -B build-sundials \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang-17 \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DPULSIM_BUILD_TESTS=ON \
+            -DPULSIM_BUILD_PYTHON=OFF \
+            -DPULSIM_USE_HYPRE=OFF \
+            -DPULSIM_USE_SUNDIALS=ON \
+            -DPULSIM_ENABLE_LTO=OFF
+
+      - name: Build SUNDIALS backend tests
+        run: cmake --build build-sundials --target pulsim_simulation_tests --config Release
+
+      - name: Run backend tests
+        run: |
+          build-sundials/core/pulsim_simulation_tests "[v1][backend]" --reporter console
+
+  # =============================================================================
   # Python Tests
   # =============================================================================
   python-tests:
