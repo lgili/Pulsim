@@ -1730,40 +1730,47 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
             return dt_candidate;
         };
+        auto near_switching_threshold = [&](const Vector& state) {
+            if (!options_.enable_events) {
+                return false;
+            }
+            for (const auto& sw : switch_monitors_) {
+                if (sw.ctrl < 0 || sw.ctrl >= state.size()) {
+                    continue;
+                }
+                const Real v_ctrl = state[sw.ctrl];
+                const Real threshold_scale = std::max<Real>(std::abs(sw.v_threshold), Real{1.0});
+                const Real guard_band = std::max<Real>(threshold_scale * 0.05, Real{0.05});
+                if (std::abs(v_ctrl - sw.v_threshold) <= guard_band) {
+                    return true;
+                }
+            }
+            return false;
+        };
 
         if (fixed_step_policy.enabled()) {
             dt = clamp_dt_for_mode(fixed_step_policy.default_dt());
         } else {
             dt = clamp_dt_for_mode(dt);
         }
+        bool discontinuity_adjacent = variable_step_policy.enabled() && near_switching_threshold(x);
+        if (discontinuity_adjacent && options_.stiffness_config.enable && stiffness_cooldown <= 0) {
+            stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
+        }
 
-        if (variable_step_policy.enabled() && options_.enable_events && dt > options_.dt_min * 1.01) {
-            bool near_switching_threshold = false;
-            for (const auto& sw : switch_monitors_) {
-                if (sw.ctrl < 0 || sw.ctrl >= x.size()) {
-                    continue;
-                }
-                const Real v_ctrl = x[sw.ctrl];
-                const Real threshold_scale = std::max<Real>(std::abs(sw.v_threshold), Real{1.0});
-                const Real guard_band = std::max<Real>(threshold_scale * 0.05, Real{0.05});
-                if (std::abs(v_ctrl - sw.v_threshold) <= guard_band) {
-                    near_switching_threshold = true;
-                    break;
-                }
-            }
-            if (near_switching_threshold) {
-                const Real clipped_dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * 0.5));
-                if (clipped_dt < dt) {
-                    record_fallback_event(result,
-                                          result.total_steps,
-                                          0,
-                                          t,
-                                          dt,
-                                          FallbackReasonCode::EventSplit,
-                                          SolverStatus::Success,
-                                          "adaptive_event_clip");
-                    dt = clipped_dt;
-                }
+        if (variable_step_policy.enabled() && options_.enable_events &&
+            discontinuity_adjacent && dt > options_.dt_min * 1.01) {
+            const Real clipped_dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * 0.5));
+            if (clipped_dt < dt) {
+                record_fallback_event(result,
+                                      result.total_steps,
+                                      0,
+                                      t,
+                                      dt,
+                                      FallbackReasonCode::EventSplit,
+                                      SolverStatus::Success,
+                                      "adaptive_event_clip");
+                dt = clipped_dt;
             }
         }
         if (dt < options_.dt_min * 0.1) {
@@ -1796,21 +1803,48 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             };
 
             if (options_.stiffness_config.enable && stiffness_cooldown > 0) {
-                dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff));
-                record_fallback_event(result,
-                                      result.total_steps,
-                                      retries,
-                                      t,
-                                      dt,
-                                      FallbackReasonCode::StiffnessBackoff,
-                                      SolverStatus::Success,
-                                      "dt_backoff");
+                const bool discontinuity_profile = discontinuity_adjacent && retries <= 1;
+                if (!discontinuity_profile) {
+                    dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff));
+                    record_fallback_event(result,
+                                          result.total_steps,
+                                          retries,
+                                          t,
+                                          dt,
+                                          FallbackReasonCode::StiffnessBackoff,
+                                          SolverStatus::Success,
+                                          "dt_backoff");
+                }
                 if (options_.enable_bdf_order_control) {
-                    bdf_controller_.set_order(
-                        std::min(bdf_controller_.current_order(), options_.stiffness_config.max_bdf_order));
+                    const int previous_order = bdf_controller_.current_order();
+                    const int capped_order =
+                        std::min(previous_order, options_.stiffness_config.max_bdf_order);
+                    bdf_controller_.set_order(capped_order);
+                    if (discontinuity_profile && capped_order != previous_order) {
+                        record_fallback_event(result,
+                                              result.total_steps,
+                                              retries,
+                                              t,
+                                              dt,
+                                              FallbackReasonCode::StiffnessBackoff,
+                                              SolverStatus::Success,
+                                              "discontinuity_bdf_profile");
+                    }
                 } else if (options_.stiffness_config.switch_integrator) {
-                    circuit_.set_integration_method(options_.stiffness_config.stiff_integrator);
-                    using_stiff_integrator = true;
+                    if (!using_stiff_integrator) {
+                        circuit_.set_integration_method(options_.stiffness_config.stiff_integrator);
+                        using_stiff_integrator = true;
+                        if (discontinuity_profile) {
+                            record_fallback_event(result,
+                                                  result.total_steps,
+                                                  retries,
+                                                  t,
+                                                  dt,
+                                                  FallbackReasonCode::StiffnessBackoff,
+                                                  SolverStatus::Success,
+                                                  "discontinuity_stiff_profile");
+                        }
+                    }
                 }
             }
 
@@ -1822,7 +1856,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             step_request.dt_min = options_.dt_min;
             step_request.retry_index = retries;
             step_request.max_retries = std::max(1, options_.max_step_retries + 1);
-            step_request.event_adjacent = false;
+            step_request.event_adjacent = discontinuity_adjacent;
             transient_services_.telemetry_collector->on_step_attempt(step_request);
 
             Real t_next = t + dt;
@@ -1990,6 +2024,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                 transient_services_.telemetry_collector->on_step_reject(split_recovery);
                                 if (!fixed_step_policy.enabled()) {
                                     retries++;
+                                }
+                                discontinuity_adjacent = true;
+                                if (options_.stiffness_config.enable && stiffness_cooldown <= 0) {
+                                    stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
                                 }
                                 record_fallback_event(result,
                                                       result.total_steps,
