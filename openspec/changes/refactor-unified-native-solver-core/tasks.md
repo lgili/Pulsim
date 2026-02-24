@@ -21,7 +21,7 @@
 - [x] 3.1 Implement `FixedStepPolicy` with macro-grid determinism.
 - [ ] 3.2 Implement internal substep handling for event alignment and bounded convergence rescue.
 - [x] 3.3 Ensure outputs remain aligned to user macro timestep.
-- [ ] 3.4 Add converter regression tests for fixed-step event accuracy.
+- [x] 3.4 Add converter regression tests for fixed-step event accuracy.
 - [ ] 3.5 Gate: event-time KPI and runtime KPI pass fixed-mode matrix.
 
 ## 4. Variable-step engine

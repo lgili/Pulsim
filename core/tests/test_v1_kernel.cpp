@@ -128,6 +128,78 @@ TEST_CASE("v1 switching loss accumulation", "[v1][losses][regression]") {
     CHECK(summary.total_switching == Approx(expected_total).margin(expected_total * 0.2 + 1e-9));
 }
 
+TEST_CASE("v1 fixed-step buck keeps macro-grid outputs with event-aligned substeps",
+          "[v1][fixed-step][events][converter][regression]") {
+    Circuit circuit;
+
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_vin = circuit.add_node("vin");
+    auto n_sw = circuit.add_node("sw");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vdc", n_vin, Circuit::ground(), 24.0);
+
+    PulseParams pwm;
+    pwm.v_initial = 0.0;
+    pwm.v_pulse = 10.0;
+    pwm.t_delay = 1e-6;
+    pwm.t_rise = 0.2e-6;
+    pwm.t_fall = 0.2e-6;
+    pwm.t_width = 3e-6;
+    pwm.period = 10e-6;
+    circuit.add_pulse_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_vin, n_sw, 5.0, 100.0, 1e-9);
+    circuit.add_diode("D1", Circuit::ground(), n_sw, 100.0, 1e-9);
+    circuit.add_inductor("L1", n_sw, n_out, 100e-6, 0.0);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 47e-6, 0.0);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 10.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 24e-6;
+    opts.dt = 2e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 2e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = true;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("Buck fixed-step status: " << static_cast<int>(result.final_status));
+    INFO("Buck fixed-step message: " << result.message);
+    REQUIRE(result.success);
+    REQUIRE_FALSE(result.events.empty());
+
+    const auto has_on = std::any_of(
+        result.events.begin(), result.events.end(),
+        [](const SimulationEvent& event) { return event.type == SimulationEventType::SwitchOn; });
+    const auto has_off = std::any_of(
+        result.events.begin(), result.events.end(),
+        [](const SimulationEvent& event) { return event.type == SimulationEventType::SwitchOff; });
+    CHECK(has_on);
+    CHECK(has_off);
+
+    const auto has_event_split = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) { return entry.reason == FallbackReasonCode::EventSplit; });
+    CHECK(has_event_split);
+
+    const Real dt_macro = opts.dt;
+    for (Real time_sample : result.time) {
+        const Real steps = std::round(time_sample / dt_macro);
+        CHECK(time_sample == Approx(steps * dt_macro).margin(1e-12));
+    }
+
+    REQUIRE(result.total_steps >= static_cast<int>(result.time.size()) - 1);
+    CHECK(result.total_steps > static_cast<int>(result.time.size()) - 1);
+}
+
 TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][regression]") {
     Circuit circuit;
 
