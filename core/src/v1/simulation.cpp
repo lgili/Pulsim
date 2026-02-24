@@ -289,11 +289,15 @@ public:
         return std::max<Real>(0.0, dt);
     }
 
-    void on_step_accepted(Real t_next) {
+    [[nodiscard]] bool on_step_accepted(Real t_next) {
         if (!enabled_) {
-            return;
+            return true;
         }
+        const Real tol = std::max<Real>(dt_min_ * 1e-3, 1e-15);
+        bool reached_macro_target = t_next >= (current_macro_target_ - tol) ||
+                                    nearly_same_time(t_next, t_stop_);
         advance_macro_cursor(t_next);
+        return reached_macro_target;
     }
 
 private:
@@ -1960,7 +1964,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         update_thermal_state(dt_used);
 
         t += dt_used;
-        fixed_step_policy.on_step_accepted(t);
+        bool emit_sample = true;
+        if (fixed_step_policy.enabled()) {
+            emit_sample = fixed_step_policy.on_step_accepted(t);
+        }
         x = step_result.solution;
         circuit_.update_history(x);
 
@@ -1976,12 +1983,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        result.time.push_back(t);
-        result.states.push_back(x);
-        append_virtual_sample(x, t);
+        if (emit_sample || nearly_same_time(t, options_.tstop)) {
+            result.time.push_back(t);
+            result.states.push_back(x);
+            append_virtual_sample(x, t);
 
-        if (callback) {
-            callback(t, x);
+            if (callback) {
+                callback(t, x);
+            }
         }
 
         result.total_steps++;
