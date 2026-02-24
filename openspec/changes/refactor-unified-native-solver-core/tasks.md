@@ -46,11 +46,11 @@
 - [x] 6.5 Gate: runtime p95 improves or remains within threshold on large/stiff suites.
 
 ## 7. Event scheduler and segmented integration
-- [ ] 7.1 Implement unified event calendar for PWM boundaries, dead-time, and threshold crossings.
-- [ ] 7.2 Implement earliest-event segmentation and local timestamp refinement.
-- [ ] 7.3 Minimize reinitialization scope after event commits.
-- [ ] 7.4 Add switching converter tests for multiple events in a single macro interval.
-- [ ] 7.5 Gate: event-time KPI and stability KPI pass converter stress tiers.
+- [x] 7.1 Implement unified event calendar for PWM boundaries, dead-time, and threshold crossings.
+- [x] 7.2 Implement earliest-event segmentation and local timestamp refinement.
+- [x] 7.3 Minimize reinitialization scope after event commits.
+- [x] 7.4 Add switching converter tests for multiple events in a single macro interval.
+- [x] 7.5 Gate: event-time KPI and stability KPI pass converter stress tiers.
 
 ## 8. User-facing surface simplification
 - [ ] 8.1 Add canonical mode field (`fixed`/`variable`) in YAML and Python runtime surfaces.

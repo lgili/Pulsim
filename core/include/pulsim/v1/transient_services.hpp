@@ -5,6 +5,7 @@
 #include "pulsim/v1/high_performance.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -23,6 +24,9 @@ struct TransientStepRequest {
     Real t_target = 0.0;
     Real dt_candidate = 0.0;
     Real dt_min = 0.0;
+    Real pwm_boundary_time = std::numeric_limits<Real>::quiet_NaN();
+    Real dead_time_boundary_time = std::numeric_limits<Real>::quiet_NaN();
+    Real threshold_crossing_time = std::numeric_limits<Real>::quiet_NaN();
     int retry_index = 0;
     int max_retries = 0;
     bool event_adjacent = false;
