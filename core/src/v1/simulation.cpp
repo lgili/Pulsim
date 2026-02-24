@@ -255,7 +255,11 @@ public:
         : enabled_(true)
         , controller_(&controller)
         , dt_min_(std::max(dt_min, Real{1e-18}))
-        , dt_max_(std::max(dt_max, dt_min_)) {}
+        , dt_max_(std::max(dt_max, dt_min_)) {
+        const auto& cfg = controller.config();
+        min_shrink_factor_ = std::clamp(cfg.shrink_factor, Real{0.05}, Real{1.0});
+        max_growth_factor_ = std::max(cfg.growth_factor, Real{1.0});
+    }
 
     [[nodiscard]] bool enabled() const {
         return enabled_ && controller_ != nullptr;
@@ -284,7 +288,10 @@ public:
 
         AdvancedTimestepDecision decision =
             controller_->compute_combined(lte, newton_iterations, integration_order);
-        decision.dt_new = std::clamp(decision.dt_new, dt_min_, dt_max_);
+        const Real dt_ref = std::clamp(dt_current, dt_min_, dt_max_);
+        const Real dt_guard_min = std::max(dt_min_, dt_ref * min_shrink_factor_);
+        const Real dt_guard_max = std::min(dt_max_, dt_ref * max_growth_factor_);
+        decision.dt_new = std::clamp(decision.dt_new, dt_guard_min, dt_guard_max);
         return decision;
     }
 
@@ -300,6 +307,8 @@ private:
     AdvancedTimestepController* controller_ = nullptr;
     Real dt_min_ = 0.0;
     Real dt_max_ = 0.0;
+    Real min_shrink_factor_ = 0.5;
+    Real max_growth_factor_ = 2.0;
 };
 
 class FixedStepPolicy final {
@@ -1726,6 +1735,36 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             dt = clamp_dt_for_mode(fixed_step_policy.default_dt());
         } else {
             dt = clamp_dt_for_mode(dt);
+        }
+
+        if (variable_step_policy.enabled() && options_.enable_events && dt > options_.dt_min * 1.01) {
+            bool near_switching_threshold = false;
+            for (const auto& sw : switch_monitors_) {
+                if (sw.ctrl < 0 || sw.ctrl >= x.size()) {
+                    continue;
+                }
+                const Real v_ctrl = x[sw.ctrl];
+                const Real threshold_scale = std::max<Real>(std::abs(sw.v_threshold), Real{1.0});
+                const Real guard_band = std::max<Real>(threshold_scale * 0.05, Real{0.05});
+                if (std::abs(v_ctrl - sw.v_threshold) <= guard_band) {
+                    near_switching_threshold = true;
+                    break;
+                }
+            }
+            if (near_switching_threshold) {
+                const Real clipped_dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * 0.5));
+                if (clipped_dt < dt) {
+                    record_fallback_event(result,
+                                          result.total_steps,
+                                          0,
+                                          t,
+                                          dt,
+                                          FallbackReasonCode::EventSplit,
+                                          SolverStatus::Success,
+                                          "adaptive_event_clip");
+                    dt = clipped_dt;
+                }
+            }
         }
         if (dt < options_.dt_min * 0.1) {
             break;
