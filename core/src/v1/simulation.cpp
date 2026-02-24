@@ -251,11 +251,18 @@ class FixedStepPolicy final {
 public:
     FixedStepPolicy() = default;
 
-    FixedStepPolicy(Real t_start, Real t_stop, Real macro_dt, Real dt_min)
+    FixedStepPolicy(Real t_start,
+                    Real t_stop,
+                    Real macro_dt,
+                    Real dt_min,
+                    int max_substeps_per_macro,
+                    int max_recovery_retries_per_macro)
         : enabled_(true)
         , t_stop_(t_stop)
         , dt_min_(std::max(dt_min, Real{1e-18}))
-        , macro_dt_(std::max(macro_dt, dt_min_)) {
+        , macro_dt_(std::max(macro_dt, dt_min_))
+        , max_substeps_per_macro_(std::max(1, max_substeps_per_macro))
+        , max_recovery_retries_per_macro_(std::max(1, max_recovery_retries_per_macro)) {
         current_macro_target_ = std::min(t_stop_, t_start + macro_dt_);
         if (current_macro_target_ <= t_start && t_stop_ > t_start) {
             current_macro_target_ = t_stop_;
@@ -268,6 +275,21 @@ public:
 
     [[nodiscard]] Real default_dt() const {
         return macro_dt_;
+    }
+
+    [[nodiscard]] bool can_take_internal_substep() const {
+        if (!enabled_) {
+            return true;
+        }
+        return substeps_in_current_macro_ < max_substeps_per_macro_;
+    }
+
+    [[nodiscard]] bool register_recovery_retry() {
+        if (!enabled_) {
+            return true;
+        }
+        recovery_retries_in_current_macro_ += 1;
+        return recovery_retries_in_current_macro_ <= max_recovery_retries_per_macro_;
     }
 
     [[nodiscard]] Real clamp_dt(Real t_now, Real dt_candidate) {
@@ -296,6 +318,9 @@ public:
         const Real tol = std::max<Real>(dt_min_ * 1e-3, 1e-15);
         bool reached_macro_target = t_next >= (current_macro_target_ - tol) ||
                                     nearly_same_time(t_next, t_stop_);
+        if (!reached_macro_target) {
+            substeps_in_current_macro_ += 1;
+        }
         advance_macro_cursor(t_next);
         return reached_macro_target;
     }
@@ -306,6 +331,8 @@ private:
         while (current_macro_target_ < t_stop_ &&
                t_now >= current_macro_target_ - tol) {
             current_macro_target_ = std::min(t_stop_, current_macro_target_ + macro_dt_);
+            substeps_in_current_macro_ = 0;
+            recovery_retries_in_current_macro_ = 0;
         }
     }
 
@@ -314,6 +341,10 @@ private:
     Real dt_min_ = 0.0;
     Real macro_dt_ = 0.0;
     Real current_macro_target_ = 0.0;
+    int max_substeps_per_macro_ = 1;
+    int max_recovery_retries_per_macro_ = 1;
+    int substeps_in_current_macro_ = 0;
+    int recovery_retries_in_current_macro_ = 0;
 };
 
 void merge_linear_solver_telemetry(LinearSolverTelemetry& dst, const LinearSolverTelemetry& src) {
@@ -1525,11 +1556,15 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                   !is_fixed_timestep(options_);
     FixedStepPolicy fixed_step_policy;
     if (step_mode == TransientStepMode::Fixed) {
+        const int fixed_substep_budget = std::max(4, options_.max_step_retries + 4);
+        const int fixed_recovery_budget = std::max(8, options_.max_step_retries + 6);
         fixed_step_policy = FixedStepPolicy(
             options_.tstart,
             options_.tstop,
             std::max(options_.dt, options_.dt_min),
-            options_.dt_min);
+            options_.dt_min,
+            fixed_substep_budget,
+            fixed_recovery_budget);
         dt = fixed_step_policy.clamp_dt(t, fixed_step_policy.default_dt());
     }
 
@@ -1634,6 +1669,25 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         Real dt_used = dt;
 
         while (!accepted && retries <= options_.max_step_retries) {
+            auto consume_fixed_recovery_budget = [&](const std::string& action_tag) {
+                if (!fixed_step_policy.enabled()) {
+                    return true;
+                }
+                if (fixed_step_policy.register_recovery_retry()) {
+                    return true;
+                }
+                record_fallback_event(result,
+                                      result.total_steps,
+                                      retries,
+                                      t,
+                                      dt_used,
+                                      FallbackReasonCode::MaxRetriesExceeded,
+                                      step_result.status,
+                                      action_tag);
+                retries = options_.max_step_retries + 1;
+                return false;
+            };
+
             if (options_.stiffness_config.enable && stiffness_cooldown > 0) {
                 dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff));
                 record_fallback_event(result,
@@ -1691,6 +1745,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 dt = clamp_dt_for_mode(std::max(options_.dt_min, recovered_dt));
                 result.timestep_rejections++;
                 retries++;
+                if (!consume_fixed_recovery_budget("fixed_recovery_budget_newton")) {
+                    continue;
+                }
                 record_fallback_event(result,
                                       result.total_steps,
                                       retries,
@@ -1757,6 +1814,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                     transient_services_.telemetry_collector->on_step_reject(lte_recovery);
                     result.timestep_rejections++;
                     retries++;
+                    if (!consume_fixed_recovery_budget("fixed_recovery_budget_lte")) {
+                        continue;
+                    }
                     std::ostringstream action;
                     action << "lte_dt=" << decision.dt_new;
                     record_fallback_event(result,
@@ -1798,6 +1858,18 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                     t + dt_used);
                             Real dt_event = t_segment - t;
                             if (dt_event > options_.dt_min * 1.01 && dt_event < dt_used * 0.999) {
+                                if (fixed_step_policy.enabled() &&
+                                    !fixed_step_policy.can_take_internal_substep()) {
+                                    record_fallback_event(result,
+                                                          result.total_steps,
+                                                          retries,
+                                                          t,
+                                                          dt_used,
+                                                          FallbackReasonCode::MaxRetriesExceeded,
+                                                          step_result.status,
+                                                          "fixed_substep_budget_reached_skip_split");
+                                    break;
+                                }
                                 dt = clamp_dt_for_mode(std::max(options_.dt_min, dt_event));
                                 RecoveryDecision split_recovery;
                                 split_recovery.stage = RecoveryStage::DtBackoff;
@@ -1805,7 +1877,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                 split_recovery.abort = false;
                                 split_recovery.reason = "event_split";
                                 transient_services_.telemetry_collector->on_step_reject(split_recovery);
-                                retries++;
+                                if (!fixed_step_policy.enabled()) {
+                                    retries++;
+                                }
                                 record_fallback_event(result,
                                                       result.total_steps,
                                                       retries,

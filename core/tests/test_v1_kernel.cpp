@@ -189,6 +189,11 @@ TEST_CASE("v1 fixed-step buck keeps macro-grid outputs with event-aligned subste
         result.fallback_trace.begin(), result.fallback_trace.end(),
         [](const FallbackTraceEntry& entry) { return entry.reason == FallbackReasonCode::EventSplit; });
     CHECK(has_event_split);
+    for (const auto& entry : result.fallback_trace) {
+        if (entry.reason == FallbackReasonCode::EventSplit) {
+            CHECK(entry.retry_index == 0);
+        }
+    }
 
     const Real dt_macro = opts.dt;
     for (Real time_sample : result.time) {
