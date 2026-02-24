@@ -24,6 +24,7 @@
 #include <HYPRE_parcsr_ls.h>
 #endif
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <new>
 #include <cstdlib>
@@ -114,10 +115,18 @@ enum class LinearSolverKind {
 
 struct LinearSolverTelemetry {
     int total_solve_calls = 0;
+    int total_analyze_calls = 0;
+    int total_factorize_calls = 0;
     int total_iterations = 0;
     int total_fallbacks = 0;
     int last_iterations = 0;
     Real last_error = 0.0;
+    double total_analyze_time_seconds = 0.0;
+    double total_factorize_time_seconds = 0.0;
+    double total_solve_time_seconds = 0.0;
+    double last_analyze_time_seconds = 0.0;
+    double last_factorize_time_seconds = 0.0;
+    double last_solve_time_seconds = 0.0;
     std::optional<LinearSolverKind> last_solver;
     std::optional<IterativeSolverConfig::PreconditionerKind> last_preconditioner;
 };
@@ -1316,10 +1325,22 @@ public:
         active_kind_.reset();
         primary_order_ = build_order(A, config_.order);
         fallback_order_ = build_fallback_order(A);
+
+        auto timed_analyze_with = [&](LinearSolverKind kind) {
+            const auto start = std::chrono::steady_clock::now();
+            const bool ok = analyze_with(kind, A);
+            const auto end = std::chrono::steady_clock::now();
+            const double dt = std::chrono::duration<double>(end - start).count();
+            telemetry_.total_analyze_calls += 1;
+            telemetry_.total_analyze_time_seconds += dt;
+            telemetry_.last_analyze_time_seconds = dt;
+            return ok;
+        };
+
         for (std::size_t i = 0; i < primary_order_.size(); ++i) {
             auto kind = primary_order_[i];
             if (!is_available(kind)) continue;
-            if (analyze_with(kind, A)) {
+            if (timed_analyze_with(kind)) {
                 active_kind_ = kind;
                 return true;
             }
@@ -1330,9 +1351,20 @@ public:
     bool factorize(const SparseMatrix& A) {
         last_matrix_ = &A;
 
+        auto timed_factorize_with = [&](LinearSolverKind kind) {
+            const auto start = std::chrono::steady_clock::now();
+            const bool ok = factorize_with(kind, A);
+            const auto end = std::chrono::steady_clock::now();
+            const double dt = std::chrono::duration<double>(end - start).count();
+            telemetry_.total_factorize_calls += 1;
+            telemetry_.total_factorize_time_seconds += dt;
+            telemetry_.last_factorize_time_seconds = dt;
+            return ok;
+        };
+
         if (active_kind_) {
             auto kind = *active_kind_;
-            if (is_available(kind) && factorize_with(kind, A)) {
+            if (is_available(kind) && timed_factorize_with(kind)) {
                 return true;
             }
         }
@@ -1346,7 +1378,7 @@ public:
 
         for (auto kind : primary_order_) {
             if (!is_available(kind)) continue;
-            if (factorize_with(kind, A)) {
+            if (timed_factorize_with(kind)) {
                 active_kind_ = kind;
                 return true;
             }
@@ -1357,7 +1389,7 @@ public:
 
         for (auto kind : fallback_order_) {
             if (!is_available(kind)) continue;
-            if (factorize_with(kind, A)) {
+            if (timed_factorize_with(kind)) {
                 active_kind_ = kind;
                 return true;
             }
@@ -1370,8 +1402,18 @@ public:
             return LinearSolveResult::failure("No active linear solver");
         }
 
+        auto timed_solve_with = [&](LinearSolverKind kind) {
+            const auto start = std::chrono::steady_clock::now();
+            auto out = solve_with(kind, b);
+            const auto end = std::chrono::steady_clock::now();
+            const double dt = std::chrono::duration<double>(end - start).count();
+            telemetry_.total_solve_time_seconds += dt;
+            telemetry_.last_solve_time_seconds = dt;
+            return out;
+        };
+
         auto active_kind = *active_kind_;
-        auto result = solve_with(active_kind, b);
+        auto result = timed_solve_with(active_kind);
         update_telemetry(active_kind, result);
         if (result || !config_.allow_fallback || !last_matrix_) {
             return result;
@@ -1388,12 +1430,19 @@ public:
             if (kind == active_kind) continue;
             if (!is_available(kind)) continue;
 
-            if (!factorize_with(kind, *last_matrix_)) {
+            const auto factor_start = std::chrono::steady_clock::now();
+            const bool factor_ok = factorize_with(kind, *last_matrix_);
+            const auto factor_end = std::chrono::steady_clock::now();
+            const double factor_dt = std::chrono::duration<double>(factor_end - factor_start).count();
+            telemetry_.total_factorize_calls += 1;
+            telemetry_.total_factorize_time_seconds += factor_dt;
+            telemetry_.last_factorize_time_seconds = factor_dt;
+            if (!factor_ok) {
                 if (!config_.allow_fallback) break;
                 continue;
             }
 
-            auto retry = solve_with(kind, b);
+            auto retry = timed_solve_with(kind);
             update_telemetry(kind, retry);
             if (retry) {
                 active_kind_ = kind;
@@ -1406,12 +1455,19 @@ public:
             if (kind == active_kind) continue;
             if (!is_available(kind)) continue;
 
-            if (!factorize_with(kind, *last_matrix_)) {
+            const auto factor_start = std::chrono::steady_clock::now();
+            const bool factor_ok = factorize_with(kind, *last_matrix_);
+            const auto factor_end = std::chrono::steady_clock::now();
+            const double factor_dt = std::chrono::duration<double>(factor_end - factor_start).count();
+            telemetry_.total_factorize_calls += 1;
+            telemetry_.total_factorize_time_seconds += factor_dt;
+            telemetry_.last_factorize_time_seconds = factor_dt;
+            if (!factor_ok) {
                 if (!config_.allow_fallback) break;
                 continue;
             }
 
-            auto retry = solve_with(kind, b);
+            auto retry = timed_solve_with(kind);
             update_telemetry(kind, retry);
             if (retry) {
                 active_kind_ = kind;

@@ -48,3 +48,18 @@ The transient controller SHALL support segment-type integrator policies that can
 #### Scenario: Smooth segment
 - **WHEN** the current segment is classified as smooth
 - **THEN** the controller can select a higher-efficiency profile under the same accuracy constraints
+
+### Requirement: Hybrid Segment-Step Selection
+The transient controller SHALL select state-space segment stepping as default and invoke nonlinear DAE fallback only when segment-policy admissibility fails.
+
+#### Scenario: Admissible segment uses segment-step path
+- **GIVEN** a segment with valid topology signature and admissible model classification
+- **WHEN** the controller selects a step method for the segment
+- **THEN** it chooses the state-space segment-step path
+- **AND** records segment-path telemetry as primary
+
+#### Scenario: Non-admissible segment uses DAE fallback
+- **GIVEN** a segment with failed admissibility checks
+- **WHEN** the controller selects a step method for the segment
+- **THEN** it invokes the shared nonlinear DAE fallback path for that segment
+- **AND** stores deterministic fallback reason metadata

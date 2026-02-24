@@ -1127,10 +1127,18 @@ void init_v2_module(py::module_& v2) {
         "Linear solver runtime telemetry")
         .def(py::init<>())
         .def_readwrite("total_solve_calls", &LinearSolverTelemetry::total_solve_calls)
+        .def_readwrite("total_analyze_calls", &LinearSolverTelemetry::total_analyze_calls)
+        .def_readwrite("total_factorize_calls", &LinearSolverTelemetry::total_factorize_calls)
         .def_readwrite("total_iterations", &LinearSolverTelemetry::total_iterations)
         .def_readwrite("total_fallbacks", &LinearSolverTelemetry::total_fallbacks)
         .def_readwrite("last_iterations", &LinearSolverTelemetry::last_iterations)
         .def_readwrite("last_error", &LinearSolverTelemetry::last_error)
+        .def_readwrite("total_analyze_time_seconds", &LinearSolverTelemetry::total_analyze_time_seconds)
+        .def_readwrite("total_factorize_time_seconds", &LinearSolverTelemetry::total_factorize_time_seconds)
+        .def_readwrite("total_solve_time_seconds", &LinearSolverTelemetry::total_solve_time_seconds)
+        .def_readwrite("last_analyze_time_seconds", &LinearSolverTelemetry::last_analyze_time_seconds)
+        .def_readwrite("last_factorize_time_seconds", &LinearSolverTelemetry::last_factorize_time_seconds)
+        .def_readwrite("last_solve_time_seconds", &LinearSolverTelemetry::last_solve_time_seconds)
         .def_readwrite("last_solver", &LinearSolverTelemetry::last_solver)
         .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner);
 
@@ -1231,6 +1239,15 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("escalation_count", &BackendTelemetry::escalation_count)
         .def_readwrite("reinitialization_count", &BackendTelemetry::reinitialization_count)
         .def_readwrite("backend_recovery_count", &BackendTelemetry::backend_recovery_count)
+        .def_readwrite("state_space_primary_steps", &BackendTelemetry::state_space_primary_steps)
+        .def_readwrite("dae_fallback_steps", &BackendTelemetry::dae_fallback_steps)
+        .def_readwrite("segment_non_admissible_steps", &BackendTelemetry::segment_non_admissible_steps)
+        .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
+        .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
+        .def_readwrite("equation_assemble_system_calls", &BackendTelemetry::equation_assemble_system_calls)
+        .def_readwrite("equation_assemble_residual_calls", &BackendTelemetry::equation_assemble_residual_calls)
+        .def_readwrite("equation_assemble_system_time_seconds", &BackendTelemetry::equation_assemble_system_time_seconds)
+        .def_readwrite("equation_assemble_residual_time_seconds", &BackendTelemetry::equation_assemble_residual_time_seconds)
         .def_readwrite("sundials_compiled", &BackendTelemetry::sundials_compiled)
         .def_readwrite("sundials_used", &BackendTelemetry::sundials_used)
         .def_readwrite("failure_reason", &BackendTelemetry::failure_reason);
@@ -1361,17 +1378,7 @@ void init_v2_module(py::module_& v2) {
 
     py::class_<Simulator>(v2, "Simulator", "Runtime simulator interface")
         .def(py::init([](Circuit& circuit, const SimulationOptions& options) {
-                SimulationOptions tuned = options;
-                apply_robust_newton_defaults(tuned.newton_options);
-                apply_robust_linear_solver_defaults(tuned.linear_solver);
-                tuned.max_step_retries = std::max(tuned.max_step_retries, 12);
-                tuned.fallback_policy.trace_retries = true;
-                tuned.fallback_policy.enable_transient_gmin = true;
-                tuned.fallback_policy.gmin_retry_threshold = std::min(tuned.fallback_policy.gmin_retry_threshold, 1);
-                tuned.fallback_policy.gmin_initial = std::max(tuned.fallback_policy.gmin_initial, Real{1e-8});
-                tuned.fallback_policy.gmin_max = std::max(tuned.fallback_policy.gmin_max, Real{1e-3});
-                tuned.fallback_policy.gmin_growth = std::max(tuned.fallback_policy.gmin_growth, Real{10.0});
-                return std::make_unique<Simulator>(circuit, tuned);
+                return std::make_unique<Simulator>(circuit, options);
             }),
              py::arg("circuit"), py::arg("options") = SimulationOptions(),
              py::keep_alive<1, 2>())

@@ -25,6 +25,19 @@ The parser SHALL apply deterministic solver/integrator default profiles derived 
 - **THEN** the parser applies adaptive-mode default solver policies
 - **AND** initializes adaptive controller defaults deterministically
 
+### Requirement: Hybrid Segment-Solver Defaults
+The parser SHALL map canonical timestep modes to hybrid segment-solver defaults without requiring backend-selection fields.
+
+#### Scenario: Fixed mode enables deterministic hybrid profile
+- **WHEN** `simulation.step_mode: fixed` is configured
+- **THEN** runtime options select fixed macro-grid semantics with state-space segment-first policy
+- **AND** nonlinear DAE fallback remains enabled as internal recovery path
+
+#### Scenario: Variable mode enables adaptive hybrid profile
+- **WHEN** `simulation.step_mode: variable` is configured
+- **THEN** runtime options select adaptive semantics with state-space segment-first policy
+- **AND** nonlinear DAE fallback remains enabled as internal recovery path
+
 ### Requirement: Expert Override Namespace
 Advanced solver tuning keys SHALL be accepted under an explicit expert namespace without changing canonical mode semantics.
 
@@ -40,3 +53,16 @@ Legacy transient-backend keys in YAML SHALL produce deterministic migration diag
 - **WHEN** YAML contains deprecated backend-selection keys removed by this change
 - **THEN** parsing fails with a diagnostic that names the deprecated key
 - **AND** suggests `simulation.step_mode` migration mapping
+
+### Requirement: Electrothermal and Loss Configuration Compatibility
+The YAML schema SHALL support losses and thermal configuration in canonical mode-based runs.
+
+#### Scenario: Global thermal policy in canonical mode
+- **WHEN** `simulation.thermal` is provided with canonical `step_mode`
+- **THEN** parser accepts and maps thermal policy fields deterministically
+- **AND** rejects invalid thermal policy names with structured diagnostics
+
+#### Scenario: Per-component loss and thermal parameters
+- **WHEN** a component provides `loss` and/or `thermal` blocks
+- **THEN** parser maps those fields into runtime loss/thermal configuration
+- **AND** runtime enables thermal processing automatically when thermal blocks are present

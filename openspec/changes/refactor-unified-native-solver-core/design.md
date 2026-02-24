@@ -5,12 +5,18 @@ This design defines a from-scratch solver architecture for the supported runtime
 - `fixed`
 - `variable`
 
+The internal mathematical core is hybrid by design:
+- primary path: event-driven state-space segment solving
+- fallback path: shared nonlinear DAE solve with deterministic escalation
+
 All advanced behavior remains internal to a single native core.
 
 ## Goals
 - Maximize switched-converter robustness, precision, and performance in one native architecture.
 - Keep user-facing control minimal (mode selection only in common workflows).
 - Eliminate duplicated mathematical pipelines.
+- Make event-driven state-space the default execution path for converter segments.
+- Keep loss and thermal evolution inside the same accepted-step/event commit model.
 - Enforce phase gates so no implementation phase degrades objective metrics.
 - Provide deterministic behavior and structured diagnostics.
 
@@ -21,9 +27,11 @@ All advanced behavior remains internal to a single native core.
 
 ## Design Principles
 - **Single source of truth for equations**: one residual/Jacobian assembly pipeline.
+- **Hybrid-first execution**: use segmented state-space solve when valid, with deterministic DAE fallback.
 - **One nonlinear engine**: same Newton/globalization/recovery services for all transient modes.
 - **One linear service stack**: common direct/iterative path with deterministic fallback.
 - **Segmented time integration**: events define segment boundaries; integrators solve segments.
+- **Integrated electrothermal accounting**: switching/conduction losses and thermal updates commit on accepted segments/events.
 - **No hidden divergence in code paths**: fixed and variable modes differ by timestep policy, not by equation pipeline.
 - **Performance by design**: cache pattern reuse, minimize allocations, avoid repeated symbolic work.
 - **Validation-first rollout**: each phase blocked by benchmark/parity/stress gates.
@@ -31,20 +39,27 @@ All advanced behavior remains internal to a single native core.
 ## High-Level Architecture
 `TransientOrchestrator` coordinates shared services:
 - `EquationAssembler`
+- `SegmentModelService` (builds `E`, `A`, `B`, `c` for current topology segment)
+- `SegmentStepperService` (state-space segment advance and acceptance hints)
 - `NonlinearSolveEngine`
 - `LinearSolveService`
 - `EventScheduler`
 - `StepPolicy` (`FixedStepPolicy` or `VariableStepPolicy`)
 - `RecoveryManager`
+- `LossService`
+- `ThermalService`
 - `TelemetryCollector`
 
 `TransientOrchestrator` executes this loop:
 1. Query next segment target from `EventScheduler`.
 2. Ask `StepPolicy` for candidate step(s).
-3. Solve implicit step via shared nonlinear/linear services.
-4. Validate acceptance (error/event/convergence criteria).
-5. Commit state/history/cache updates.
-6. Emit deterministic telemetry and output samples.
+3. Build or reuse current segment model (`E/A/B/c`, topology signature).
+4. Attempt segment solve via `SegmentStepperService` (primary path).
+5. If segment solve is not admissible, execute shared nonlinear/linear fallback.
+6. Validate acceptance (error/event/convergence criteria).
+7. Commit state/history/cache updates.
+8. Commit losses and thermal updates.
+9. Emit deterministic telemetry and output samples.
 
 ## Mathematical Core
 ### DAE/MNA Form
@@ -56,6 +71,16 @@ The core solves a unified implicit form:
 - Jacobian assembly
 - optional Jacobian-vector products for Krylov modes
 - event-sensitive stamping updates without branching into separate backends
+
+### Hybrid Segment Form
+For each accepted topology segment `sigma`, the primary path uses:
+- `E_sigma x_dot = A_sigma x + B_sigma u + c_sigma`
+
+Execution policy:
+- **state-space primary** when the segment is piecewise-linear/affine under current model policy
+- **DAE fallback** when nonlinearity, conditioning, or model constraints require implicit nonlinear solve
+
+Fallback transitions are deterministic and telemetry-tagged (reason code + segment signature).
 
 ### Shared State Objects
 - `SystemState`: current unknown vector and derived quantities.
@@ -71,6 +96,7 @@ Behavior:
 - User dt defines macro grid.
 - Internal substeps are allowed only for event alignment and convergence rescue.
 - Output is committed on macro-grid boundaries.
+- Segment path preference: state-space segment solve first, nonlinear fallback only when required.
 - Integrator policy:
   - event-adjacent substeps: stiff-safe low-order profile (e.g., BDF1)
   - smooth segments: higher-accuracy stiff-safe profile (e.g., TRBDF2)
@@ -86,6 +112,7 @@ Behavior:
 - Adaptive step control with LTE and Newton-feedback coupling.
 - Earliest-event clipping before each candidate step.
 - PI-like controller with stability guards for growth/shrink limits.
+- Segment path preference: state-space segment solve first, nonlinear fallback only when required.
 - Integrator policy defaults to stiff-stable methods and can switch order internally.
 
 Guarantees:
@@ -121,6 +148,25 @@ Rules:
 - no infinite retries
 - each escalation increments a typed telemetry counter
 - state rollback uses last accepted state only
+
+## Loss and Electrothermal Core
+`LossService` and `ThermalService` are part of the transient commit path, not post-processing.
+
+### Loss accumulation policy
+- **Switching losses** are committed at event transitions (`Eon`, `Eoff`, `Err` paths).
+- **Conduction losses** are integrated over accepted segments only.
+- Rejected attempts do not double-count energy.
+
+### Thermal coupling policy
+- Thermal states are updated through deterministic RC networks per device.
+- Coupling modes:
+  - one-way (`electrical -> thermal`)
+  - staged two-way (`electrical -> thermal -> parameter refresh on commit windows`)
+- Temperature-dependent electrical parameter refresh is bounded and deterministic.
+
+### Electrothermal consistency
+- Every accepted segment stores electrical energy, dissipated energy, and thermal state deltas.
+- The runtime emits per-device and aggregate electrothermal summaries.
 
 ## Linear Solve Service
 `LinearSolveService` is shared and policy-driven.
@@ -161,12 +207,16 @@ Required fields:
 - event count and event-time refinement statistics
 - runtime wall-clock and phase timings
 - cache hit/miss stats for symbolic/factorization/preconditioner reuse
+- segment-path counters (state-space-primary vs DAE-fallback)
+- per-device and aggregate loss metrics (switching/conduction/total)
+- thermal telemetry (peak temperature, final temperature, coupling mode)
 
 Failure diagnostics must include:
 - terminal reason code
 - last residual metrics
 - last escalation stage
 - topology signature at failure
+- last segment-path classification and electrothermal commit status
 
 ## API and Configuration Surface
 ### Canonical user-facing controls
@@ -209,6 +259,10 @@ Each implementation phase must pass objective gates before proceeding.
 - `event_time_error`
 - `runtime_p50` and `runtime_p95`
 - `recovery_rate` and `mean_retries`
+- `state_space_primary_ratio`
+- `dae_fallback_ratio`
+- `loss_energy_balance_error`
+- `thermal_peak_temperature_delta`
 
 ### Gate policy
 - Phase N cannot start until Phase N-1 KPIs are non-regressive against frozen baseline.
@@ -220,14 +274,18 @@ Each implementation phase must pass objective gates before proceeding.
 - parity RMS regression: max `+5%`
 - runtime p95 regression: max `+5%`
 - event-time error regression: max `+10%`
+- loss-energy-balance regression: max `+5%` on converter matrix
+- thermal peak-temperature regression: max `+5%` on electrothermal matrix
 
 ## Migration Plan
 1. Freeze baseline metrics and artifacts.
 2. Introduce unified services and adapt both modes to shared pipeline.
-3. Migrate YAML/Python surfaces to canonical mode selection.
-4. Remove supported legacy transient backend routing from runtime path.
-5. Run full benchmark/parity/stress gates.
-6. Archive superseded change streams and update docs.
+3. Add segment-model and segment-step services (state-space primary path).
+4. Integrate losses and thermal services into accepted-step/event commits.
+5. Migrate YAML/Python surfaces to canonical mode selection.
+6. Remove supported legacy transient backend routing from runtime path.
+7. Run full benchmark/parity/stress/electrothermal gates.
+8. Archive superseded change streams and update docs.
 
 ## Risks and Mitigations
 - Risk: Early refactor may temporarily reduce convergence on niche topologies.
@@ -236,6 +294,10 @@ Each implementation phase must pass objective gates before proceeding.
   - Mitigation: keep mode-specific `StepPolicy` modules while sharing math services.
 - Risk: Event segmentation cost may reduce throughput.
   - Mitigation: breakpoint coalescing, tolerance windows, and cache-preserving reinit.
+- Risk: Incorrect segment classification may overuse fallback and reduce performance.
+  - Mitigation: deterministic classification rules + KPI guard on state-space primary ratio.
+- Risk: Electrothermal coupling may destabilize difficult nonlinear cases.
+  - Mitigation: staged coupling policy, bounded parameter refresh, and conservative fallback triggers.
 - Risk: Large API simplification may disrupt advanced users.
   - Mitigation: compatibility adapter with clear deprecation diagnostics for one migration window.
 

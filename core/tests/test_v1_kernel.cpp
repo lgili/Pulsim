@@ -4,6 +4,7 @@
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 using namespace pulsim::v1;
@@ -215,6 +216,206 @@ TEST_CASE("v1 switching topologies auto-enable robust transient defaults", "[v1]
     CHECK(tuned.newton_options.max_iterations >= 120);
     CHECK(tuned.linear_solver.allow_fallback);
     CHECK(tuned.linear_solver.order.size() >= 2);
+}
+
+TEST_CASE("v1 simulator wires unified transient service registry", "[v1][architecture][services]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 12.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& services = sim.transient_services();
+
+    REQUIRE(services.complete());
+    CHECK(services.supports_mode(TransientStepMode::Fixed));
+    CHECK(services.supports_mode(TransientStepMode::Variable));
+    REQUIRE(services.segment_model);
+    REQUIRE(services.segment_stepper);
+
+    TransientStepRequest request;
+    request.mode = TransientStepMode::Fixed;
+    request.t_now = 0.0;
+    request.t_target = 5e-7;
+    request.dt_candidate = 1e-6;
+    request.dt_min = 1e-12;
+    request.retry_index = 0;
+    request.max_retries = 4;
+    request.event_adjacent = true;
+
+    const Real segment = services.event_scheduler->next_segment_target(request, opts.tstop);
+    CHECK(segment == Approx(5e-7).margin(1e-12));
+
+    const auto decision = services.recovery_manager->on_step_failure(request);
+    CHECK_FALSE(decision.abort);
+    CHECK(decision.next_dt < request.dt_candidate);
+
+    Vector x0 = Vector::Zero(circuit.system_size());
+    const auto segment_model = services.segment_model->build_model(x0, request);
+    CHECK(segment_model.admissible);
+    CHECK(segment_model.t_target == Approx(request.t_target).margin(1e-12));
+    CHECK(segment_model.topology_signature != 0);
+
+    TransientStepRequest solve_request = request;
+    solve_request.t_target = solve_request.t_now + solve_request.dt_candidate;
+    const auto solve_model = services.segment_model->build_model(x0, solve_request);
+    const auto solve_outcome =
+        services.segment_stepper->try_advance(solve_model, x0, solve_request);
+    CHECK_FALSE(solve_outcome.requires_fallback);
+    CHECK(solve_outcome.result.status == SolverStatus::Success);
+
+    TransientStepRequest variable_request = request;
+    variable_request.mode = TransientStepMode::Variable;
+
+    const Real variable_segment =
+        services.event_scheduler->next_segment_target(variable_request, opts.tstop);
+    CHECK(variable_segment == Approx(segment).margin(1e-12));
+
+    const auto variable_decision = services.recovery_manager->on_step_failure(variable_request);
+    CHECK(variable_decision.stage == decision.stage);
+    CHECK(variable_decision.abort == decision.abort);
+    CHECK(variable_decision.next_dt == Approx(decision.next_dt).margin(1e-15));
+}
+
+TEST_CASE("v1 segment model builds linearized E/A/B/c with topology cache",
+          "[v1][architecture][services][segment-model]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 12.0);
+    circuit.add_resistor("R1", n_in, n_out, 2e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 2e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& services = sim.transient_services();
+    REQUIRE(services.segment_model);
+    REQUIRE(services.equation_assembler);
+
+    TransientStepRequest request;
+    request.mode = TransientStepMode::Fixed;
+    request.t_now = 0.0;
+    request.t_target = 1e-6;
+    request.dt_candidate = 1e-6;
+    request.dt_min = 1e-12;
+    request.retry_index = 0;
+    request.max_retries = 4;
+    request.event_adjacent = false;
+
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    const auto model_first = services.segment_model->build_model(x0, request);
+    const auto model_second = services.segment_model->build_model(x0, request);
+
+    REQUIRE(model_first.admissible);
+    REQUIRE(model_first.linear_model);
+    CHECK_FALSE(model_first.cache_hit);
+    CHECK(model_second.cache_hit);
+
+    const auto& linear = *model_first.linear_model;
+    CHECK(linear.E.rows() == x0.size());
+    CHECK(linear.E.cols() == x0.size());
+    CHECK(linear.A.rows() == x0.size());
+    CHECK(linear.A.cols() == x0.size());
+    CHECK(linear.B.rows() == x0.size());
+    CHECK(linear.B.cols() == 0);
+    CHECK(linear.u.size() == 0);
+    CHECK(linear.c.size() == x0.size());
+
+    SparseMatrix jacobian(x0.size(), x0.size());
+    Vector residual = Vector::Zero(x0.size());
+    services.equation_assembler->assemble_system(x0, request.t_target, request.dt_candidate, jacobian, residual);
+
+    SparseMatrix e_diff = linear.E - jacobian;
+    SparseMatrix a_diff = linear.A - jacobian;
+    e_diff.prune(0.0);
+    a_diff.prune(0.0);
+    CHECK(e_diff.norm() == Approx(0.0).margin(1e-12));
+    CHECK(a_diff.norm() == Approx(0.0).margin(1e-12));
+    CHECK((linear.c + residual).lpNorm<Eigen::Infinity>() == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("v1 segment primary path matches DAE fallback in fixed and variable modes",
+          "[v1][architecture][services][segment-parity]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& services = sim.transient_services();
+    REQUIRE(services.segment_model);
+    REQUIRE(services.segment_stepper);
+    REQUIRE(services.nonlinear_solve);
+
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    const std::array<TransientStepMode, 2> modes{
+        TransientStepMode::Fixed,
+        TransientStepMode::Variable
+    };
+
+    for (TransientStepMode mode : modes) {
+        TransientStepRequest request;
+        request.mode = mode;
+        request.t_now = 0.0;
+        request.t_target = 1e-6;
+        request.dt_candidate = 1e-6;
+        request.dt_min = 1e-12;
+        request.retry_index = 0;
+        request.max_retries = 4;
+        request.event_adjacent = false;
+
+        const auto model = services.segment_model->build_model(x0, request);
+        REQUIRE(model.admissible);
+        REQUIRE(model.linear_model);
+
+        const auto segment = services.segment_stepper->try_advance(model, x0, request);
+        REQUIRE_FALSE(segment.requires_fallback);
+        REQUIRE(segment.result.status == SolverStatus::Success);
+
+        const auto dae = services.nonlinear_solve->solve(x0, request.t_target, request.dt_candidate);
+        REQUIRE(dae.status == SolverStatus::Success);
+
+        const Real solution_diff =
+            (segment.result.solution - dae.solution).lpNorm<Eigen::Infinity>();
+        CHECK(solution_diff == Approx(0.0).margin(1e-9));
+    }
+
+    const auto run = sim.run_transient(x0);
+    REQUIRE(run.success);
+    CHECK(run.backend_telemetry.segment_model_cache_hits >= 1);
+    CHECK((run.backend_telemetry.segment_model_cache_hits +
+           run.backend_telemetry.segment_model_cache_misses) >= 1);
+    CHECK(run.backend_telemetry.state_space_primary_steps >= 1);
 }
 
 TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fallback][recovery]") {

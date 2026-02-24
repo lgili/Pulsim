@@ -11,6 +11,10 @@ This folder contains the YAML benchmark suite and validation runners.
 - `benchmark_ngspice.py` — Pulsim vs external SPICE parity runner (`ngspice` or `ltspice` backends).
 - `stress_suite.py` — tiered stress validation runner (tiers A/B/C + pass criteria).
 - `stress_catalog.yaml` — stress tier definitions, mapped cases, and acceptance criteria.
+- `kpi_gate.py` — regression gate that compares current KPIs against frozen baseline
+  and evaluates runtime quantiles (`p50/p95`) on the case intersection with baseline artifacts.
+- `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
+- `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
 
 ## Running
 
@@ -21,6 +25,11 @@ export PYTHONPATH=build/python
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
+python3 benchmarks/kpi_gate.py \
+  --bench-results benchmarks/out/results.json \
+  --stress-summary benchmarks/stress_out/stress_summary.json \
+  --report-out benchmarks/out/kpi_gate_report.json \
+  --print-report
 
 # Compare Pulsim vs ngspice (manifest mode)
 python3 benchmarks/benchmark_ngspice.py \

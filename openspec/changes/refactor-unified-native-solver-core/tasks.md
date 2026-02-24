@@ -1,20 +1,21 @@
 ## 0. Baseline freeze and guardrails
-- [ ] 0.1 Freeze current benchmark/parity/stress artifacts as baseline for regression comparison.
-- [ ] 0.2 Define KPI thresholds in benchmark configs (`success_rate`, `parity_rms_error`, `event_time_error`, `runtime_p95`).
-- [ ] 0.3 Add CI gate that blocks progression when KPI regression exceeds thresholds.
-- [ ] 0.4 Document baseline hardware/environment fingerprint for fair runtime comparison.
+- [x] 0.1 Freeze current benchmark/parity/stress artifacts as baseline for regression comparison.
+- [x] 0.2 Define KPI thresholds in benchmark configs (`success_rate`, `parity_rms_error`, `event_time_error`, `runtime_p95`).
+- [x] 0.3 Add CI gate that blocks progression when KPI regression exceeds thresholds.
+- [x] 0.4 Document baseline hardware/environment fingerprint for fair runtime comparison.
 
 ## 1. Unified service interfaces
-- [ ] 1.1 Introduce shared interfaces for `EquationAssembler`, `NonlinearSolveEngine`, `LinearSolveService`, `EventScheduler`, `RecoveryManager`, and `TelemetryCollector`.
-- [ ] 1.2 Refactor transient orchestrator to depend only on these interfaces.
-- [ ] 1.3 Add architecture tests ensuring fixed/variable modes call the same nonlinear and linear services.
-- [ ] 1.4 Gate: no KPI regression vs baseline after interface extraction.
+- [x] 1.1 Introduce shared interfaces for `EquationAssembler`, `NonlinearSolveEngine`, `LinearSolveService`, `EventScheduler`, `RecoveryManager`, and `TelemetryCollector`.
+- [x] 1.2 Refactor transient orchestrator to depend only on these interfaces.
+- [x] 1.3 Add architecture tests ensuring fixed/variable modes call the same nonlinear and linear services.
+- [x] 1.4 Gate: no KPI regression vs baseline after interface extraction.
 
-## 2. Shared mathematical pipeline
-- [ ] 2.1 Migrate residual/Jacobian assembly to a single shared pipeline used by both modes.
-- [ ] 2.2 Remove duplicate step solve logic that only differs by wrapper/backend branch.
-- [ ] 2.3 Add unit tests for residual/Jacobian parity across mode contexts.
-- [ ] 2.4 Gate: parity error and convergence success non-regressive.
+## 2. Hybrid mathematical pipeline (state-space + fallback)
+- [x] 2.1 Implement `SegmentModelService` to build/reuse `E/A/B/c` segment models keyed by topology signature.
+- [x] 2.2 Implement `SegmentStepperService` as primary path with deterministic handoff to shared nonlinear DAE fallback.
+- [x] 2.3 Remove duplicate step solve logic that only differs by wrapper/backend branch.
+- [x] 2.4 Add unit tests for residual/Jacobian parity and segment-vs-fallback consistency across mode contexts.
+- [ ] 2.5 Gate: parity error, convergence success, and state-space-primary ratio are non-regressive.
 
 ## 3. Fixed-step engine
 - [ ] 3.1 Implement `FixedStepPolicy` with macro-grid determinism.
@@ -71,3 +72,10 @@
 - [ ] 10.3 Run converter-focused stress tiers and verify convergence and runtime gates.
 - [ ] 10.4 Publish migration guide with before/after configuration examples.
 - [ ] 10.5 Mark all tasks complete only after KPI gates pass and reports are archived.
+
+## 11. Loss and electrothermal integration
+- [ ] 11.1 Implement `LossService` commit hooks for switching losses on events and conduction losses on accepted segments.
+- [ ] 11.2 Implement `ThermalService` RC-network stepping with deterministic coupling modes.
+- [ ] 11.3 Integrate bounded temperature-to-electrical parameter refresh on commit boundaries.
+- [ ] 11.4 Add converter regression tests for per-device losses and peak/final junction temperatures.
+- [ ] 11.5 Gate: loss-energy-balance and thermal-peak KPIs pass without required-metric regression.

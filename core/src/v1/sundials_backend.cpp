@@ -78,19 +78,21 @@ namespace {
     return SolverStatus::NumericalError;
 }
 
-class ProjectedImplicitStepper {
+class SharedImplicitStepperCore {
 public:
-    ProjectedImplicitStepper(const Circuit& source_circuit, const SimulationOptions& options)
+    SharedImplicitStepperCore(const Circuit& source_circuit, const SimulationOptions& options)
         : circuit_(source_circuit)
         , options_(options)
-        , newton_solver_(options_.newton_options) {
+        , newton_solver_(options_.newton_options)
+        , transient_services_(make_default_transient_service_registry(circuit_, options_, newton_solver_)) {
         newton_solver_.linear_solver().set_config(options_.linear_solver);
         circuit_.set_integration_method(Integrator::BDF1);
     }
 
     void initialize_history(const Vector& x0, Real t0, Real dt0) {
+        const Real dt_safe = std::max(dt0, options_.dt_min);
         circuit_.set_current_time(t0);
-        circuit_.set_timestep(dt0);
+        circuit_.set_timestep(dt_safe);
         circuit_.set_integration_method(Integrator::BDF1);
         circuit_.update_history(x0, true);
     }
@@ -103,10 +105,61 @@ public:
         circuit_.update_history(state, true);
     }
 
+    [[nodiscard]] NewtonResult solve_shared_step(Real t_next, Real dt, const Vector& x_guess) {
+        const Real dt_safe = std::max(dt, options_.dt_min);
+        circuit_.set_current_time(t_next);
+        circuit_.set_timestep(dt_safe);
+        circuit_.set_integration_method(Integrator::BDF1);
+        circuit_.set_integration_order(1);
+        transient_services_.equation_assembler->set_transient_gmin(0.0);
+
+        TransientStepRequest request;
+        request.mode = TransientStepMode::Variable;
+        request.t_now = t_next - dt_safe;
+        request.t_target = t_next;
+        request.dt_candidate = dt_safe;
+        request.dt_min = options_.dt_min;
+        request.retry_index = 0;
+        request.max_retries = 1;
+        request.event_adjacent = false;
+
+        const auto segment_model = transient_services_.segment_model->build_model(x_guess, request);
+        const auto segment_outcome =
+            transient_services_.segment_stepper->try_advance(segment_model, x_guess, request);
+        if (!segment_outcome.requires_fallback) {
+            return segment_outcome.result;
+        }
+        return transient_services_.nonlinear_solve->solve(x_guess, t_next, dt_safe);
+    }
+
+    [[nodiscard]] const SimulationOptions& options() const {
+        return options_;
+    }
+
+private:
+    Circuit circuit_;
+    SimulationOptions options_;
+    NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
+    TransientServiceRegistry transient_services_;
+};
+
+class ProjectedImplicitStepper {
+public:
+    ProjectedImplicitStepper(const Circuit& source_circuit, const SimulationOptions& options)
+        : shared_(source_circuit, options) {}
+
+    void initialize_history(const Vector& x0, Real t0, Real dt0) {
+        shared_.initialize_history(x0, t0, dt0);
+    }
+
+    void accept_state(const Vector& state, Real t, Real dt) {
+        shared_.accept_state(state, t, dt);
+    }
+
     [[nodiscard]] bool project_rhs(Real t, const Vector& state, Vector& rhs, std::string& error) {
         const Real dt = projection_dt();
         const Real t_next = t + dt;
-        const NewtonResult step = solve_projection_step(t_next, dt, state);
+        const NewtonResult step = shared_.solve_shared_step(t_next, dt, state);
         if (step.status == SolverStatus::Success) {
             rhs = (step.solution - state) / dt;
             return true;
@@ -117,32 +170,14 @@ public:
 
 private:
     [[nodiscard]] Real projection_dt() const {
-        const Real dt_floor = std::max(options_.dt_min, Real{1e-12});
-        const Real dt_guess = clamp_positive(options_.dt, dt_floor);
-        const Real dt_ceiling = std::max(options_.dt_max, dt_floor);
+        const auto& options = shared_.options();
+        const Real dt_floor = std::max(options.dt_min, Real{1e-12});
+        const Real dt_guess = clamp_positive(options.dt, dt_floor);
+        const Real dt_ceiling = std::max(options.dt_max, dt_floor);
         return std::clamp(dt_guess, dt_floor, dt_ceiling);
     }
 
-    [[nodiscard]] NewtonResult solve_projection_step(Real t_next, Real dt, const Vector& x_guess) {
-        circuit_.set_current_time(t_next);
-        circuit_.set_timestep(dt);
-        circuit_.set_integration_method(Integrator::BDF1);
-        circuit_.set_integration_order(1);
-
-        auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit_.assemble_jacobian(J, f, x);
-        };
-
-        auto residual_func = [this](const Vector& x, Vector& f) {
-            circuit_.assemble_residual(f, x);
-        };
-
-        return newton_solver_.solve(x_guess, system_func, residual_func);
-    }
-
-    Circuit circuit_;
-    SimulationOptions options_;
-    NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
+    SharedImplicitStepperCore shared_;
 };
 
 class DirectResidualAssembler {
@@ -202,36 +237,25 @@ private:
 class DirectRhsStepper {
 public:
     DirectRhsStepper(const Circuit& source_circuit, const SimulationOptions& options)
-        : circuit_(source_circuit)
-        , options_(options)
-        , newton_solver_(options_.newton_options) {
-        newton_solver_.linear_solver().set_config(options_.linear_solver);
-        circuit_.set_integration_method(Integrator::BDF1);
-    }
+        : shared_(source_circuit, options) {}
 
     void initialize_history(const Vector& x0, Real t0, Real dt0) {
-        const Real dt_safe = std::max(dt0, options_.dt_min);
-        circuit_.set_current_time(t0);
-        circuit_.set_timestep(dt_safe);
-        circuit_.set_integration_method(Integrator::BDF1);
-        circuit_.update_history(x0, true);
+        const Real dt_safe = std::max(dt0, shared_.options().dt_min);
+        shared_.initialize_history(x0, t0, dt_safe);
         last_eval_time_ = t0;
         last_step_dt_ = dt_safe;
     }
 
     void accept_state(const Vector& state, Real t, Real dt) {
-        const Real dt_safe = std::max(dt, options_.dt_min);
-        circuit_.set_current_time(t);
-        circuit_.set_timestep(dt_safe);
-        circuit_.set_integration_method(Integrator::BDF1);
-        circuit_.update_history(state, true);
+        const Real dt_safe = std::max(dt, shared_.options().dt_min);
+        shared_.accept_state(state, t, dt_safe);
         last_step_dt_ = dt_safe;
     }
 
     [[nodiscard]] bool rhs_from_implicit_step(Real t, const Vector& state, Vector& rhs, std::string& error) {
         const Real dt = projection_dt(t);
         const Real t_next = t + dt;
-        const NewtonResult step = solve_step(t_next, dt, state);
+        const NewtonResult step = shared_.solve_shared_step(t_next, dt, state);
         if (step.status == SolverStatus::Success) {
             rhs = (step.solution - state) / dt;
             last_eval_time_ = t;
@@ -244,9 +268,10 @@ public:
 
 private:
     [[nodiscard]] Real projection_dt(Real t_now) const {
-        const Real dt_floor = std::max(options_.dt_min, Real{1e-12});
-        const Real dt_ceiling = std::max(options_.dt_max, dt_floor);
-        Real dt_guess = clamp_positive(last_step_dt_, clamp_positive(options_.dt * 0.5, dt_floor));
+        const auto& options = shared_.options();
+        const Real dt_floor = std::max(options.dt_min, Real{1e-12});
+        const Real dt_ceiling = std::max(options.dt_max, dt_floor);
+        Real dt_guess = clamp_positive(last_step_dt_, clamp_positive(options.dt * 0.5, dt_floor));
         if (std::isfinite(last_eval_time_)) {
             const Real eval_dt = std::abs(t_now - last_eval_time_);
             if (std::isfinite(eval_dt) && eval_dt > dt_floor * 0.1) {
@@ -256,26 +281,7 @@ private:
         return std::clamp(dt_guess, dt_floor, dt_ceiling);
     }
 
-    [[nodiscard]] NewtonResult solve_step(Real t_next, Real dt, const Vector& x_guess) {
-        circuit_.set_current_time(t_next);
-        circuit_.set_timestep(dt);
-        circuit_.set_integration_method(Integrator::BDF1);
-        circuit_.set_integration_order(1);
-
-        auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit_.assemble_jacobian(J, f, x);
-        };
-
-        auto residual_func = [this](const Vector& x, Vector& f) {
-            circuit_.assemble_residual(f, x);
-        };
-
-        return newton_solver_.solve(x_guess, system_func, residual_func);
-    }
-
-    Circuit circuit_;
-    SimulationOptions options_;
-    NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
+    SharedImplicitStepperCore shared_;
     Real last_eval_time_ = std::numeric_limits<Real>::quiet_NaN();
     Real last_step_dt_ = std::numeric_limits<Real>::quiet_NaN();
 };

@@ -6,8 +6,10 @@
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/losses.hpp"
+#include "pulsim/v1/transient_services.hpp"
 #include "pulsim/simulation_control.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -151,6 +153,15 @@ struct BackendTelemetry {
     int escalation_count = 0;
     int reinitialization_count = 0;
     int backend_recovery_count = 0;
+    int state_space_primary_steps = 0;
+    int dae_fallback_steps = 0;
+    int segment_non_admissible_steps = 0;
+    int segment_model_cache_hits = 0;
+    int segment_model_cache_misses = 0;
+    int equation_assemble_system_calls = 0;
+    int equation_assemble_residual_calls = 0;
+    double equation_assemble_system_time_seconds = 0.0;
+    double equation_assemble_residual_time_seconds = 0.0;
     bool sundials_compiled = false;
     bool sundials_used = false;
     std::string failure_reason;
@@ -351,8 +362,16 @@ public:
     // Accessors
     [[nodiscard]] const SimulationOptions& options() const { return options_; }
     void set_options(const SimulationOptions& options) { options_ = options; }
+    [[nodiscard]] const TransientServiceRegistry& transient_services() const {
+        return transient_services_;
+    }
 
 private:
+    enum class StepSolvePath {
+        SegmentPrimary,
+        DaeFallback
+    };
+
     struct DeviceLossState {
         LossAccumulator accumulator;
         LossBreakdown switching_energy{};  // Use fields as energy buckets (J)
@@ -420,8 +439,6 @@ private:
                                FallbackReasonCode reason,
                                SolverStatus solver_status,
                                const std::string& action);
-    void apply_transient_gmin(SparseMatrix& J, Vector& f, const Vector& x) const;
-    void apply_transient_gmin_residual(Vector& f, const Vector& x) const;
 
     Circuit& circuit_;
     SimulationOptions options_;
@@ -439,6 +456,15 @@ private:
     AdvancedTimestepController timestep_controller_;
     AdaptiveLTEEstimator lte_estimator_;
     BDFOrderController bdf_controller_;
+    TransientServiceRegistry transient_services_;
+    StepSolvePath last_step_solve_path_ = StepSolvePath::DaeFallback;
+    std::string last_step_solve_reason_ = "init";
+    bool last_step_segment_cache_hit_ = false;
+    bool segment_primary_disabled_for_run_ = false;
+    std::uint64_t direct_assemble_system_calls_ = 0;
+    std::uint64_t direct_assemble_residual_calls_ = 0;
+    double direct_assemble_system_time_seconds_ = 0.0;
+    double direct_assemble_residual_time_seconds_ = 0.0;
 };
 
 }  // namespace pulsim::v1

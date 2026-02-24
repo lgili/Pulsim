@@ -365,10 +365,18 @@ class LinearSolverStackConfig:
 
 class LinearSolverTelemetry:
     total_solve_calls: int
+    total_analyze_calls: int
+    total_factorize_calls: int
     total_iterations: int
     total_fallbacks: int
     last_iterations: int
     last_error: float
+    total_analyze_time_seconds: float
+    total_factorize_time_seconds: float
+    total_solve_time_seconds: float
+    last_analyze_time_seconds: float
+    last_factorize_time_seconds: float
+    last_solve_time_seconds: float
     last_solver: Optional[LinearSolverKind]
     last_preconditioner: Optional[PreconditionerKind]
 
@@ -459,6 +467,15 @@ class BackendTelemetry:
     escalation_count: int
     reinitialization_count: int
     backend_recovery_count: int
+    state_space_primary_steps: int
+    dae_fallback_steps: int
+    segment_non_admissible_steps: int
+    segment_model_cache_hits: int
+    segment_model_cache_misses: int
+    equation_assemble_system_calls: int
+    equation_assemble_residual_calls: int
+    equation_assemble_system_time_seconds: float
+    equation_assemble_residual_time_seconds: float
     sundials_compiled: bool
     sundials_used: bool
     failure_reason: str

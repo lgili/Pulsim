@@ -102,17 +102,76 @@ def _reshape_hb_solution(solution: Sequence[float], state_size: int) -> List[Lis
 
 def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional[float]]:
     linear = getattr(result, "linear_solver_telemetry", None)
+    backend = getattr(result, "backend_telemetry", None)
+
+    state_space_primary_steps = (
+        float(getattr(backend, "state_space_primary_steps", 0.0)) if backend is not None else None
+    )
+    dae_fallback_steps = (
+        float(getattr(backend, "dae_fallback_steps", 0.0)) if backend is not None else None
+    )
+    segment_non_admissible_steps = (
+        float(getattr(backend, "segment_non_admissible_steps", 0.0)) if backend is not None else None
+    )
+    segment_model_cache_hits = (
+        float(getattr(backend, "segment_model_cache_hits", 0.0)) if backend is not None else None
+    )
+    segment_model_cache_misses = (
+        float(getattr(backend, "segment_model_cache_misses", 0.0)) if backend is not None else None
+    )
+
+    state_space_primary_ratio: Optional[float]
+    if state_space_primary_steps is None or dae_fallback_steps is None:
+        state_space_primary_ratio = None
+    else:
+        total_path_steps = state_space_primary_steps + dae_fallback_steps
+        state_space_primary_ratio = (
+            state_space_primary_steps / total_path_steps if total_path_steps > 0.0 else None
+        )
 
     return {
         "newton_iterations": float(getattr(result, "newton_iterations_total", 0)),
         "linear_iterations": float(getattr(linear, "total_iterations", 0)) if linear is not None else None,
         "linear_solve_calls": float(getattr(linear, "total_solve_calls", 0)) if linear is not None else None,
         "linear_fallbacks": float(getattr(linear, "total_fallbacks", 0)) if linear is not None else None,
+        "linear_analyze_calls": float(getattr(linear, "total_analyze_calls", 0)) if linear is not None else None,
+        "linear_factorize_calls": float(getattr(linear, "total_factorize_calls", 0)) if linear is not None else None,
+        "linear_analyze_time_s": float(getattr(linear, "total_analyze_time_seconds", 0.0))
+        if linear is not None
+        else None,
+        "linear_factorize_time_s": float(getattr(linear, "total_factorize_time_seconds", 0.0))
+        if linear is not None
+        else None,
+        "linear_solve_time_s": float(getattr(linear, "total_solve_time_seconds", 0.0))
+        if linear is not None
+        else None,
         "residual_norm": None,
         "timestep_rejections": float(getattr(result, "timestep_rejections", 0)),
         "runtime_kernel_s": float(getattr(result, "total_time_seconds", 0.0)),
         "runtime_s": float(runtime_s),
         "steps": float(getattr(result, "total_steps", 0)),
+        "state_space_primary_steps": state_space_primary_steps,
+        "dae_fallback_steps": dae_fallback_steps,
+        "segment_non_admissible_steps": segment_non_admissible_steps,
+        "segment_model_cache_hits": segment_model_cache_hits,
+        "segment_model_cache_misses": segment_model_cache_misses,
+        "state_space_primary_ratio": state_space_primary_ratio,
+        "equation_assemble_system_calls": float(getattr(backend, "equation_assemble_system_calls", 0))
+        if backend is not None
+        else None,
+        "equation_assemble_residual_calls": float(getattr(backend, "equation_assemble_residual_calls", 0))
+        if backend is not None
+        else None,
+        "equation_assemble_system_time_s": float(
+            getattr(backend, "equation_assemble_system_time_seconds", 0.0)
+        )
+        if backend is not None
+        else None,
+        "equation_assemble_residual_time_s": float(
+            getattr(backend, "equation_assemble_residual_time_seconds", 0.0)
+        )
+        if backend is not None
+        else None,
         "python_backend": 1.0,
     }
 

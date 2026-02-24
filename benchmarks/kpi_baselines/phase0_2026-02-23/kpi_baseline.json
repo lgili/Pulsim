@@ -1,0 +1,23 @@
+{
+  "schema_version": "pulsim-kpi-baseline-v1",
+  "baseline_id": "phase0_2026-02-23",
+  "captured_at_utc": "2026-02-23T10:27:20Z",
+  "source_artifacts_root": "benchmarks/phase8_artifacts",
+  "metrics": {
+    "convergence_success_rate": 1.0,
+    "runtime_p50": 0.020824584004003555,
+    "runtime_p95": 0.21907356639276224,
+    "state_space_primary_ratio": 0.0,
+    "parity_rms_error_ltspice": 0.0022381726201627684,
+    "parity_rms_error_ngspice": 0.002220472285308209,
+    "stress_tier_failure_count": 0,
+    "stress_overall_pass": true
+  },
+  "environment": {
+    "os": "macOS-26.4-arm64-arm-64bit-Mach-O",
+    "python": "Python 3.13.5",
+    "cmake": "cmake version 4.2.3",
+    "clang": "Homebrew clang version 21.1.2",
+    "cc": "Apple clang version 17.0.0 (clang-1700.6.3.2)"
+  }
+}

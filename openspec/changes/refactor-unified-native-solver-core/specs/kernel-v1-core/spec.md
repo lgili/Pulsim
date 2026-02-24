@@ -12,6 +12,19 @@ The v1 kernel SHALL execute transient simulation through a single native mathema
 - **THEN** the solver does not route through an alternate backend-specific transient engine
 - **AND** telemetry identifies the native core as the selected runtime path
 
+### Requirement: Hybrid Segment-First Solve Path
+The v1 kernel SHALL execute switched-converter transients using an event-driven hybrid policy: state-space segment solve as primary path and shared nonlinear DAE solve as deterministic fallback.
+
+#### Scenario: Segment model solved on primary path
+- **WHEN** the current interval is classified as segment-linear under the active topology signature
+- **THEN** the kernel advances state through the segment solve path without invoking nonlinear fallback
+- **AND** telemetry records the segment as `state_space_primary`
+
+#### Scenario: Deterministic fallback on non-admissible segment
+- **WHEN** segment admissibility checks fail due to nonlinearity, conditioning, or policy guardrails
+- **THEN** the kernel executes the shared nonlinear DAE fallback for that interval
+- **AND** telemetry records the fallback reason code and topology signature
+
 ### Requirement: Dual-Mode User Semantics
 The v1 kernel SHALL support two canonical timestep semantics: deterministic fixed-step execution and adaptive variable-step execution.
 
@@ -50,6 +63,19 @@ The v1 kernel SHALL segment integration intervals at switching-relevant boundari
 - **WHEN** a threshold crossing is detected inside a segment
 - **THEN** the event timestamp is refined within configured tolerance
 - **AND** the event is emitted with consistent state values and transition metadata
+
+### Requirement: Integrated Loss and Electrothermal Commit Model
+The v1 kernel SHALL integrate switching/conduction losses and thermal state updates into the accepted-step/event commit path.
+
+#### Scenario: Switching loss commit on event transition
+- **WHEN** a switching event is committed
+- **THEN** the kernel accumulates switching energy for the device on that event
+- **AND** rejected attempts do not contribute duplicate switching loss
+
+#### Scenario: Electrothermal update on accepted segment
+- **WHEN** a segment step is accepted
+- **THEN** conduction losses are integrated for that segment and thermal RC states are advanced
+- **AND** optional temperature-to-electrical parameter feedback is applied using deterministic bounded rules
 
 ### Requirement: Shared DC/Transient Nonlinear Services
 The v1 kernel SHALL reuse nonlinear globalization and convergence-checking services across DC and transient contexts.

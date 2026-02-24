@@ -30,3 +30,16 @@ Benchmark tooling SHALL support baseline freeze snapshots and automated comparis
 - **WHEN** a phase benchmark run completes
 - **THEN** the report compares current KPIs against the frozen baseline snapshot
 - **AND** flags pass/fail status per configured regression threshold
+
+### Requirement: Hybrid Path and Electrothermal KPI Gates
+Benchmark and stress tooling SHALL track and gate hybrid-path usage plus electrothermal regression metrics for converter-focused phases.
+
+#### Scenario: Hybrid-path KPI emission
+- **WHEN** converter-focused benchmark suites complete
+- **THEN** reports include at least `state_space_primary_ratio` and `dae_fallback_ratio`
+- **AND** required-threshold regressions in these KPIs fail the phase gate
+
+#### Scenario: Electrothermal KPI emission and gating
+- **WHEN** electrothermal-enabled benchmark suites complete
+- **THEN** reports include at least `loss_energy_balance_error` and `thermal_peak_temperature_delta`
+- **AND** required-threshold regressions fail the phase gate

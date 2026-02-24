@@ -68,3 +68,22 @@ PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py
 - stress: `stress_results.csv`, `stress_results.json`, `stress_summary.json`
 
 Esses artefatos são o caminho recomendado para validação contínua (CI) e comparação de regressão.
+
+## Gate de KPI para refactor do solver
+
+Para bloquear regressões por fase do refactor do core, use:
+
+```bash
+python3 benchmarks/kpi_gate.py \
+  --bench-results benchmarks/out/results.json \
+  --stress-summary benchmarks/stress_out/stress_summary.json \
+  --report-out benchmarks/out/kpi_gate_report.json \
+  --print-report
+```
+
+Configuração:
+
+- baseline congelado: `benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json`
+- thresholds: `benchmarks/kpi_thresholds.yaml`
+- `runtime_p50`/`runtime_p95`: avaliados no escopo comum entre baseline e execução atual
+  (interseção `benchmark_id` + `scenario`) quando os artefatos de baseline estão disponíveis.

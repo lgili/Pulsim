@@ -12,6 +12,14 @@ Python bindings SHALL expose a canonical transient mode selection equivalent to 
 - **THEN** the transient run executes with adaptive-step semantics
 - **AND** telemetry includes adaptive acceptance/rejection metrics
 
+### Requirement: Hybrid Segment Runtime Semantics in Python
+Python bindings SHALL map canonical mode selection to hybrid segment-first runtime behavior without requiring legacy backend selectors.
+
+#### Scenario: Canonical mode uses segment-first runtime
+- **WHEN** Python config selects either `fixed` or `variable` canonical mode
+- **THEN** runtime attempts state-space segment solve as primary path
+- **AND** uses nonlinear DAE fallback deterministically when segment admissibility fails
+
 ### Requirement: Expert Override Exposure
 Python bindings SHALL provide explicit expert override controls without requiring them for standard transient use.
 
@@ -31,3 +39,16 @@ Python bindings SHALL provide deterministic migration diagnostics for removed le
 - **WHEN** Python code attempts to use deprecated backend-specific transient controls removed from supported runtime
 - **THEN** bindings raise a structured configuration error
 - **AND** include migration guidance to canonical mode-based controls
+
+### Requirement: Electrothermal and Loss Surface Support
+Python bindings SHALL expose loss and thermal configuration/results in canonical mode workflows.
+
+#### Scenario: Configure electrothermal options from Python
+- **WHEN** Python config enables losses and thermal coupling on a canonical mode run
+- **THEN** runtime accepts the configuration without requiring legacy backend controls
+- **AND** simulation results include `loss_summary` and `thermal_summary`
+
+#### Scenario: Invalid electrothermal override values
+- **WHEN** Python config provides invalid thermal/loss override values
+- **THEN** bindings raise structured configuration errors
+- **AND** preserve deterministic error messaging

@@ -142,6 +142,11 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     if (!options.linear_solver.allow_fallback) {
         return;
     }
+    // Respect explicit fixed-step selection from user/scenario.
+    // Auto profile can tune adaptive runs, but must not silently flip fixed -> variable.
+    if (!options.adaptive_timestep) {
+        return;
+    }
 
     const auto hints = analyze_circuit_robustness(circuit);
     const bool switching_topology =
@@ -244,8 +249,16 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
 
 void merge_linear_solver_telemetry(LinearSolverTelemetry& dst, const LinearSolverTelemetry& src) {
     dst.total_solve_calls += src.total_solve_calls;
+    dst.total_analyze_calls += src.total_analyze_calls;
+    dst.total_factorize_calls += src.total_factorize_calls;
     dst.total_iterations += src.total_iterations;
     dst.total_fallbacks += src.total_fallbacks;
+    dst.total_analyze_time_seconds += src.total_analyze_time_seconds;
+    dst.total_factorize_time_seconds += src.total_factorize_time_seconds;
+    dst.total_solve_time_seconds += src.total_solve_time_seconds;
+    dst.last_analyze_time_seconds = src.last_analyze_time_seconds;
+    dst.last_factorize_time_seconds = src.last_factorize_time_seconds;
+    dst.last_solve_time_seconds = src.last_solve_time_seconds;
     dst.last_iterations = src.last_iterations;
     dst.last_error = src.last_error;
     if (src.last_solver.has_value()) {
@@ -361,6 +374,8 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     options_.newton_options.num_branches = circuit_.num_branches();
     newton_solver_.set_options(options_.newton_options);
     newton_solver_.linear_solver().set_config(options_.linear_solver);
+    transient_services_ =
+        make_default_transient_service_registry(circuit_, options_, newton_solver_);
 
     // Ensure timestep controller limits align with simulation options
     auto cfg = options_.timestep_config;
@@ -439,25 +454,6 @@ void Simulator::record_fallback_event(SimulationResult& result,
     result.fallback_trace.push_back(std::move(entry));
 }
 
-void Simulator::apply_transient_gmin(SparseMatrix& J, Vector& f, const Vector& x) const {
-    if (transient_gmin_ <= 0.0) {
-        return;
-    }
-    for (Index i = 0; i < circuit_.num_nodes(); ++i) {
-        J.coeffRef(i, i) += transient_gmin_;
-        f[i] += transient_gmin_ * x[i];
-    }
-}
-
-void Simulator::apply_transient_gmin_residual(Vector& f, const Vector& x) const {
-    if (transient_gmin_ <= 0.0) {
-        return;
-    }
-    for (Index i = 0; i < circuit_.num_nodes(); ++i) {
-        f[i] += transient_gmin_ * x[i];
-    }
-}
-
 void Simulator::initialize_thermal_tracking() {
     const auto& devices = circuit_.devices();
     const auto& conns = circuit_.connections();
@@ -532,6 +528,8 @@ DCAnalysisResult Simulator::dc_operating_point() {
 }
 
 NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
+    last_step_segment_cache_hit_ = false;
+
     Integrator method = options_.enable_bdf_order_control
         ? (bdf_controller_.current_order() == 1 ? Integrator::BDF1 : Integrator::Trapezoidal)
         : circuit_.integration_method();
@@ -551,28 +549,93 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
         circuit_.set_integration_order(std::clamp(bdf_controller_.current_order(), 1, 2));
     }
 
-    auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
-        circuit_.assemble_jacobian(J, f, x);
-        apply_transient_gmin(J, f, x);
+    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
+
+    auto solve_dae_fallback = [this, &x_prev]() {
+        auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
+            const auto start = std::chrono::steady_clock::now();
+            circuit_.assemble_jacobian(J, f, x);
+            if (transient_gmin_ <= 0.0) {
+                const auto end = std::chrono::steady_clock::now();
+                direct_assemble_system_calls_ += 1;
+                direct_assemble_system_time_seconds_ +=
+                    std::chrono::duration<double>(end - start).count();
+                return;
+            }
+            for (Index i = 0; i < circuit_.num_nodes(); ++i) {
+                J.coeffRef(i, i) += transient_gmin_;
+                f[i] += transient_gmin_ * x[i];
+            }
+            const auto end = std::chrono::steady_clock::now();
+            direct_assemble_system_calls_ += 1;
+            direct_assemble_system_time_seconds_ +=
+                std::chrono::duration<double>(end - start).count();
+        };
+
+        auto residual_func = [this](const Vector& x, Vector& f) {
+            const auto start = std::chrono::steady_clock::now();
+            circuit_.assemble_residual(f, x);
+            if (transient_gmin_ <= 0.0) {
+                const auto end = std::chrono::steady_clock::now();
+                direct_assemble_residual_calls_ += 1;
+                direct_assemble_residual_time_seconds_ +=
+                    std::chrono::duration<double>(end - start).count();
+                return;
+            }
+            for (Index i = 0; i < circuit_.num_nodes(); ++i) {
+                f[i] += transient_gmin_ * x[i];
+            }
+            const auto end = std::chrono::steady_clock::now();
+            direct_assemble_residual_calls_ += 1;
+            direct_assemble_residual_time_seconds_ +=
+                std::chrono::duration<double>(end - start).count();
+        };
+
+        return newton_solver_.solve(x_prev, system_func, residual_func);
     };
 
-    auto residual_func = [this](const Vector& x, Vector& f) {
-        circuit_.assemble_residual(f, x);
-        apply_transient_gmin_residual(f, x);
-    };
+    TransientStepRequest request;
+    request.mode = (options_.adaptive_timestep && !is_fixed_timestep(options_))
+        ? TransientStepMode::Variable
+        : TransientStepMode::Fixed;
+    request.t_now = t_next - dt;
+    request.t_target = t_next;
+    request.dt_candidate = dt;
+    request.dt_min = options_.dt_min;
+    request.retry_index = 0;
+    request.max_retries = std::max(1, options_.max_step_retries + 1);
+    request.event_adjacent = false;
 
-    return newton_solver_.solve(x_prev, system_func, residual_func);
+    if (segment_primary_disabled_for_run_) {
+        last_step_solve_path_ = StepSolvePath::DaeFallback;
+        last_step_solve_reason_ = "segment_disabled_cached_non_admissible";
+        return solve_dae_fallback();
+    }
+
+    const auto segment_model = transient_services_.segment_model->build_model(x_prev, request);
+    last_step_segment_cache_hit_ = segment_model.cache_hit;
+    if (!segment_model.admissible &&
+        segment_model.classification == "segment_not_admissible_nonlinear_device") {
+        segment_primary_disabled_for_run_ = true;
+    }
+    const auto segment_outcome =
+        transient_services_.segment_stepper->try_advance(segment_model, x_prev, request);
+    if (!segment_outcome.requires_fallback) {
+        last_step_solve_path_ = StepSolvePath::SegmentPrimary;
+        last_step_solve_reason_ = segment_outcome.reason;
+        return segment_outcome.result;
+    }
+
+    last_step_solve_path_ = StepSolvePath::DaeFallback;
+    last_step_solve_reason_ = segment_outcome.reason.empty()
+        ? "segment_not_admissible"
+        : segment_outcome.reason;
+    return solve_dae_fallback();
 }
 
 NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev) {
-    auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
-        circuit_.assemble_jacobian(J, f, x);
-        apply_transient_gmin(J, f, x);
-    };
-    auto residual_func = [this](const Vector& x, Vector& f) {
-        circuit_.assemble_residual(f, x);
-        apply_transient_gmin_residual(f, x);
-    };
+    last_step_solve_path_ = StepSolvePath::DaeFallback;
+    last_step_solve_reason_ = "trbdf2_multistage";
 
     const Real gamma = TRBDF2Coeffs::gamma;
     const Real h1 = gamma * dt;
@@ -590,7 +653,8 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
     circuit_.set_current_time(t_next - h2);
     circuit_.set_timestep(h1);
 
-    NewtonResult stage1 = newton_solver_.solve(x_prev, system_func, residual_func);
+    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
+    NewtonResult stage1 = transient_services_.nonlinear_solve->solve(x_prev, t_next - h2, h1);
     if (stage1.status != SolverStatus::Success) {
         circuit_.set_integration_method(Integrator::TRBDF2);
         circuit_.clear_stage_context();
@@ -603,7 +667,8 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
     circuit_.set_current_time(t_next);
     circuit_.set_timestep(dt);
 
-    NewtonResult stage2 = newton_solver_.solve(stage1.solution, system_func, residual_func);
+    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
+    NewtonResult stage2 = transient_services_.nonlinear_solve->solve(stage1.solution, t_next, dt);
     if (stage2.status != SolverStatus::Success) {
         circuit_.clear_stage_context();
     }
@@ -611,14 +676,8 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
 }
 
 NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_prev, Integrator method) {
-    auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
-        circuit_.assemble_jacobian(J, f, x);
-        apply_transient_gmin(J, f, x);
-    };
-    auto residual_func = [this](const Vector& x, Vector& f) {
-        circuit_.assemble_residual(f, x);
-        apply_transient_gmin_residual(f, x);
-    };
+    last_step_solve_path_ = StepSolvePath::DaeFallback;
+    last_step_solve_reason_ = "sdirk2_multistage";
 
     // RosenbrockW shares SDIRK2 stage coefficients (implicit solve per stage).
     const Real a11 = SDIRK2Coeffs::a11;
@@ -639,7 +698,11 @@ NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_
     circuit_.set_current_time(t_next - (1.0 - SDIRK2Coeffs::c1) * h);
     circuit_.set_timestep(h1);
 
-    NewtonResult stage1 = newton_solver_.solve(x_prev, system_func, residual_func);
+    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
+    NewtonResult stage1 = transient_services_.nonlinear_solve->solve(
+        x_prev,
+        t_next - (1.0 - SDIRK2Coeffs::c1) * h,
+        h1);
     if (stage1.status != SolverStatus::Success) {
         circuit_.set_integration_method(method);
         circuit_.clear_stage_context();
@@ -652,7 +715,8 @@ NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_
     circuit_.set_current_time(t_next);
     circuit_.set_timestep(dt);
 
-    NewtonResult stage2 = newton_solver_.solve(stage1.solution, system_func, residual_func);
+    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
+    NewtonResult stage2 = transient_services_.nonlinear_solve->solve(stage1.solution, t_next, dt);
     if (stage2.status != SolverStatus::Success) {
         circuit_.clear_stage_context();
     }
@@ -1360,6 +1424,11 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     }
     lte_estimator_.reset();
     transient_gmin_ = 0.0;
+    direct_assemble_system_calls_ = 0;
+    direct_assemble_residual_calls_ = 0;
+    direct_assemble_system_time_seconds_ = 0.0;
+    direct_assemble_residual_time_seconds_ = 0.0;
+    transient_services_.equation_assembler->reset_telemetry();
     const Integrator base_integrator = options_.integrator;
     bool using_stiff_integrator = false;
 
@@ -1378,6 +1447,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     int stiffness_cooldown = 0;
     int global_recovery_attempts = 0;
     bool auto_recovery_attempted = false;
+    const TransientStepMode step_mode =
+        (options_.adaptive_timestep && !is_fixed_timestep(options_))
+            ? TransientStepMode::Variable
+            : TransientStepMode::Fixed;
     const bool can_auto_recover = options_.adaptive_timestep &&
                                   options_.linear_solver.allow_fallback &&
                                   !is_fixed_timestep(options_);
@@ -1494,14 +1567,42 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 }
             }
 
+            TransientStepRequest step_request;
+            step_request.mode = step_mode;
+            step_request.t_now = t;
+            step_request.t_target = t + dt;
+            step_request.dt_candidate = dt;
+            step_request.dt_min = options_.dt_min;
+            step_request.retry_index = retries;
+            step_request.max_retries = std::max(1, options_.max_step_retries + 1);
+            step_request.event_adjacent = false;
+            transient_services_.telemetry_collector->on_step_attempt(step_request);
+
             Real t_next = t + dt;
             dt_used = dt;
 
             step_result = solve_step(t_next, dt_used, x);
+            if (last_step_segment_cache_hit_) {
+                result.backend_telemetry.segment_model_cache_hits += 1;
+            } else {
+                result.backend_telemetry.segment_model_cache_misses += 1;
+            }
+            if (last_step_solve_path_ == StepSolvePath::SegmentPrimary) {
+                result.backend_telemetry.state_space_primary_steps += 1;
+            } else {
+                result.backend_telemetry.dae_fallback_steps += 1;
+                if (last_step_solve_reason_.find("segment_not_admissible") != std::string::npos) {
+                    result.backend_telemetry.segment_non_admissible_steps += 1;
+                }
+            }
 
             if (step_result.status != SolverStatus::Success) {
                 circuit_.clear_stage_context();
-                dt = std::max(options_.dt_min, dt * 0.5);
+                RecoveryDecision recovery = transient_services_.recovery_manager->on_step_failure(step_request);
+                transient_services_.telemetry_collector->on_step_reject(recovery);
+                const Real recovered_dt =
+                    recovery.next_dt > 0.0 ? recovery.next_dt : (step_request.dt_candidate * 0.5);
+                dt = std::max(options_.dt_min, recovered_dt);
                 result.timestep_rejections++;
                 retries++;
                 record_fallback_event(result,
@@ -1511,7 +1612,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                       dt_used,
                                       FallbackReasonCode::NewtonFailure,
                                       step_result.status,
-                                      "halve_dt");
+                                      recovery.reason.empty() ? "recover_dt" : recovery.reason);
                 rejection_streak++;
                 high_iter_streak = 0;
                 if (options_.stiffness_config.enable &&
@@ -1541,6 +1642,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 if (options_.enable_bdf_order_control) {
                     (void)bdf_controller_.reduce_on_failure();
                 }
+                if (recovery.abort) {
+                    retries = options_.max_step_retries + 1;
+                }
                 continue;
             }
 
@@ -1559,6 +1663,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 if (!decision.accepted) {
                     circuit_.clear_stage_context();
                     dt = decision.dt_new;
+                    RecoveryDecision lte_recovery;
+                    lte_recovery.stage = RecoveryStage::DtBackoff;
+                    lte_recovery.next_dt = decision.dt_new;
+                    lte_recovery.abort = false;
+                    lte_recovery.reason = "lte_rejection";
+                    transient_services_.telemetry_collector->on_step_reject(lte_recovery);
                     result.timestep_rejections++;
                     retries++;
                     std::ostringstream action;
@@ -1593,9 +1703,22 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                         Real t_event = t + dt_used;
                         Vector x_event = step_result.solution;
                         if (find_switch_event_time(sw, t, t + dt_used, x, t_event, x_event)) {
-                            Real dt_event = t_event - t;
+                            TransientStepRequest event_request = step_request;
+                            event_request.event_adjacent = true;
+                            event_request.t_target = t_event;
+                            const Real t_segment =
+                                transient_services_.event_scheduler->next_segment_target(
+                                    event_request,
+                                    t + dt_used);
+                            Real dt_event = t_segment - t;
                             if (dt_event > options_.dt_min * 1.01 && dt_event < dt_used * 0.999) {
                                 dt = std::max(options_.dt_min, dt_event);
+                                RecoveryDecision split_recovery;
+                                split_recovery.stage = RecoveryStage::DtBackoff;
+                                split_recovery.next_dt = dt;
+                                split_recovery.abort = false;
+                                split_recovery.reason = "event_split";
+                                transient_services_.telemetry_collector->on_step_reject(split_recovery);
                                 retries++;
                                 record_fallback_event(result,
                                                       result.total_steps,
@@ -1621,6 +1744,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         if (!accepted) {
+            RecoveryDecision abort_recovery;
+            abort_recovery.stage = RecoveryStage::Abort;
+            abort_recovery.next_dt = dt_used;
+            abort_recovery.abort = true;
+            abort_recovery.reason = "max_retries_exceeded";
+            transient_services_.telemetry_collector->on_step_reject(abort_recovery);
             record_fallback_event(result,
                                   result.total_steps,
                                   retries,
@@ -1640,14 +1769,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 high_iter_streak = 0;
                 stiffness_cooldown = std::max(stiffness_cooldown, options_.stiffness_config.cooldown_steps);
 
-                NewtonOptions tuned_newton = newton_solver_.options();
+                NewtonOptions tuned_newton = transient_services_.nonlinear_solve->options();
                 apply_robust_newton_defaults(tuned_newton);
                 tuned_newton.max_iterations = std::max(tuned_newton.max_iterations, 200);
-                newton_solver_.set_options(tuned_newton);
+                transient_services_.nonlinear_solve->set_options(tuned_newton);
 
                 LinearSolverStackConfig tuned_linear = options_.linear_solver;
                 apply_robust_linear_solver_defaults(tuned_linear);
-                newton_solver_.linear_solver().set_config(tuned_linear);
+                transient_services_.linear_solve->solver().set_config(tuned_linear);
 
                 if (options_.fallback_policy.enable_transient_gmin) {
                     Real next_gmin = transient_gmin_ > 0.0
@@ -1692,6 +1821,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         result.newton_iterations_total += step_result.iterations;
+        transient_services_.telemetry_collector->on_step_accept(t + dt_used, step_result.solution);
         rejection_streak = 0;
         global_recovery_attempts = 0;
         transient_gmin_ = 0.0;
@@ -1708,7 +1838,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
 
             if (options_.stiffness_config.monitor_conditioning) {
-                auto telemetry = newton_solver_.linear_solver().telemetry();
+                auto telemetry = transient_services_.linear_solve->solver().telemetry();
                 if (telemetry.last_error > options_.stiffness_config.conditioning_error_threshold) {
                     stiffness_cooldown = options_.stiffness_config.cooldown_steps;
                 }
@@ -1786,7 +1916,21 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     finalize_loss_summary(result);
     finalize_thermal_summary(result);
 
-    result.linear_solver_telemetry = newton_solver_.linear_solver().telemetry();
+    result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
+    const EquationAssemblerTelemetry assembler_telemetry =
+        transient_services_.equation_assembler->telemetry();
+    auto saturating_int = [](std::uint64_t value) {
+        constexpr std::uint64_t max_int = static_cast<std::uint64_t>(std::numeric_limits<int>::max());
+        return static_cast<int>(std::min(value, max_int));
+    };
+    result.backend_telemetry.equation_assemble_system_calls =
+        saturating_int(assembler_telemetry.system_calls + direct_assemble_system_calls_);
+    result.backend_telemetry.equation_assemble_residual_calls =
+        saturating_int(assembler_telemetry.residual_calls + direct_assemble_residual_calls_);
+    result.backend_telemetry.equation_assemble_system_time_seconds =
+        assembler_telemetry.system_time_seconds + direct_assemble_system_time_seconds_;
+    result.backend_telemetry.equation_assemble_residual_time_seconds =
+        assembler_telemetry.residual_time_seconds + direct_assemble_residual_time_seconds_;
 
     return result;
 }
