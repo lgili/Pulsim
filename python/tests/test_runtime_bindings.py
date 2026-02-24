@@ -1489,6 +1489,62 @@ def test_fallback_trace_records_retry_reasons() -> None:
     assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons
 
 
+def test_recovery_ladder_stages_are_deterministic() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 1e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.max_step_retries = 5
+    opts.linear_solver.order = [ps.LinearSolverKind.CG]
+    opts.linear_solver.allow_fallback = False
+    opts.linear_solver.auto_select = False
+    opts.fallback_policy.trace_retries = True
+    opts.fallback_policy.enable_transient_gmin = True
+    opts.fallback_policy.gmin_retry_threshold = 1
+    opts.fallback_policy.gmin_initial = 1e-8
+    opts.fallback_policy.gmin_max = 1e-4
+
+    x0 = [0.0] * (circuit.num_nodes() + circuit.num_branches())
+    result_a = ps.Simulator(circuit, opts).run_transient(x0)
+    result_b = ps.Simulator(circuit, opts).run_transient(x0)
+
+    assert not result_a.success
+    assert not result_b.success
+
+    stage_actions_a = [entry.action for entry in result_a.fallback_trace if entry.action.startswith("recovery_stage_")]
+    stage_actions_b = [entry.action for entry in result_b.fallback_trace if entry.action.startswith("recovery_stage_")]
+    assert stage_actions_a == stage_actions_b
+
+    expected_prefixes = [
+        "recovery_stage_dt_backoff",
+        "recovery_stage_globalization",
+        "recovery_stage_stiff_profile",
+        "recovery_stage_regularization",
+    ]
+
+    first_index: dict[str, int] = {}
+    for prefix in expected_prefixes:
+        matches = [idx for idx, action in enumerate(stage_actions_a) if action.startswith(prefix)]
+        assert matches, f"missing stage action prefix: {prefix}"
+        first_index[prefix] = matches[0]
+
+    assert first_index["recovery_stage_dt_backoff"] < first_index["recovery_stage_globalization"]
+    assert first_index["recovery_stage_globalization"] < first_index["recovery_stage_stiff_profile"]
+    assert first_index["recovery_stage_stiff_profile"] < first_index["recovery_stage_regularization"]
+
+
 def test_sundials_only_backend_reports_availability() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")

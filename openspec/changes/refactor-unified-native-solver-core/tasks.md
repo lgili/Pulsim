@@ -32,11 +32,11 @@
 - [x] 4.5 Gate: accuracy/runtime KPI pass variable-mode matrix.
 
 ## 5. Deterministic recovery ladder
-- [ ] 5.1 Implement ordered recovery stages (dt backoff, globalization escalation, stiffness profile downgrade, transient regularization).
-- [ ] 5.2 Enforce bounded retry budgets and rollback-to-last-accepted semantics.
-- [ ] 5.3 Emit typed fallback trace entries for each stage.
-- [ ] 5.4 Add failure-path tests that validate deterministic reason codes.
-- [ ] 5.5 Gate: convergence success KPI improves or remains non-regressive on hard converter set.
+- [x] 5.1 Implement ordered recovery stages (dt backoff, globalization escalation, stiffness profile downgrade, transient regularization).
+- [x] 5.2 Enforce bounded retry budgets and rollback-to-last-accepted semantics.
+- [x] 5.3 Emit typed fallback trace entries for each stage.
+- [x] 5.4 Add failure-path tests that validate deterministic reason codes.
+- [x] 5.5 Gate: convergence success KPI improves or remains non-regressive on hard converter set.
 
 ## 6. Linear solver consolidation and caching
 - [ ] 6.1 Consolidate direct/iterative policy into one runtime linear service.
