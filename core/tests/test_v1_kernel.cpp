@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 using namespace pulsim::v1;
 using Catch::Approx;
@@ -203,6 +204,119 @@ TEST_CASE("v1 fixed-step buck keeps macro-grid outputs with event-aligned subste
 
     REQUIRE(result.total_steps >= static_cast<int>(result.time.size()) - 1);
     CHECK(result.total_steps > static_cast<int>(result.time.size()) - 1);
+}
+
+TEST_CASE("v1 event scheduler applies unified calendar ordering", "[v1][events][scheduler][regression]") {
+    Circuit circuit;
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_out = circuit.add_node("out");
+
+    PWMParams pwm;
+    pwm.v_low = 0.0;
+    pwm.v_high = 10.0;
+    pwm.frequency = 100e3;   // T = 10 us
+    pwm.duty = 0.5;
+    pwm.dead_time = 1e-6;    // Effective turn-off boundary: 4 us
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+    circuit.add_resistor("Rload", n_ctrl, n_out, 1e3);
+    circuit.add_resistor("Rref", n_out, Circuit::ground(), 1e3);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 20e-6;
+    opts.dt = 1e-6;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& scheduler = sim.transient_services().event_scheduler;
+    REQUIRE(scheduler);
+
+    TransientStepRequest request;
+    request.mode = TransientStepMode::Fixed;
+    request.t_now = 1e-6;
+    request.t_target = 9e-6;
+    request.dt_candidate = request.t_target - request.t_now;
+    request.dt_min = 1e-12;
+    request.max_retries = 4;
+    request.threshold_crossing_time = 2e-6;
+
+    const Real from_threshold = scheduler->next_segment_target(request, request.t_target);
+    CHECK(from_threshold == Approx(2e-6).margin(1e-12));
+
+    request.threshold_crossing_time = std::numeric_limits<Real>::quiet_NaN();
+    const Real from_pwm_dead_time = scheduler->next_segment_target(request, request.t_target);
+    CHECK(from_pwm_dead_time == Approx(4e-6).margin(1e-12));
+}
+
+TEST_CASE("v1 fixed-step resolves multiple switching events inside one macro interval",
+          "[v1][fixed-step][events][scheduler][converter][regression]") {
+    Circuit circuit;
+
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_vin = circuit.add_node("vin");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vdc", n_vin, Circuit::ground(), 12.0);
+
+    PulseParams pwm;
+    pwm.v_initial = 0.0;
+    pwm.v_pulse = 10.0;
+    pwm.t_delay = 0.5e-6;
+    pwm.t_rise = 0.1e-6;
+    pwm.t_fall = 0.1e-6;
+    pwm.t_width = 1.0e-6;
+    pwm.period = 6.0e-6;
+    circuit.add_pulse_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_vin, n_out, 5.0, 200.0, 1e-9);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 10.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 10e-6;
+    opts.dt = 4e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 4e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = true;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("multi-event fixed-step status: " << static_cast<int>(result.final_status));
+    INFO("multi-event fixed-step message: " << result.message);
+    REQUIRE(result.success);
+    REQUIRE(result.events.size() >= 4);
+
+    CHECK(result.events[0].type == SimulationEventType::SwitchOn);
+    CHECK(result.events[1].type == SimulationEventType::SwitchOff);
+
+    const Real expected_on_1 = pwm.t_delay + pwm.t_rise * 0.5;
+    const Real expected_off_1 = pwm.t_delay + pwm.t_rise + pwm.t_width + pwm.t_fall * 0.5;
+    const Real expected_on_2 = expected_on_1 + pwm.period;
+    const Real expected_off_2 = expected_off_1 + pwm.period;
+
+    CHECK(result.events[0].time == Approx(expected_on_1).margin(5e-7));
+    CHECK(result.events[1].time == Approx(expected_off_1).margin(5e-7));
+    CHECK(result.events[2].time == Approx(expected_on_2).margin(5e-7));
+    CHECK(result.events[3].time == Approx(expected_off_2).margin(5e-7));
+
+    for (std::size_t i = 1; i < result.events.size(); ++i) {
+        CHECK(result.events[i].time > result.events[i - 1].time);
+    }
+
+    const auto has_calendar_clip = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::EventSplit &&
+                   entry.action == "event_calendar_clip";
+        });
+    CHECK(has_calendar_clip);
 }
 
 TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][regression]") {
