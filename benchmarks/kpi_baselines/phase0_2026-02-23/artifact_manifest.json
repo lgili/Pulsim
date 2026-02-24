@@ -1,0 +1,47 @@
+{
+  "schema_version": "pulsim-kpi-baseline-manifest-v1",
+  "baseline_id": "phase0_2026-02-23",
+  "captured_at_utc": "2026-02-23T10:27:20Z",
+  "files": [
+    {
+      "path": "benchmarks/phase8_artifacts/benchmarks/results.json",
+      "sha256": "56c48a6d3259457baebdddad08beaee2367aa6b927fa607198b2c2bc3b6a71d8",
+      "size_bytes": 9649
+    },
+    {
+      "path": "benchmarks/phase8_artifacts/benchmarks/summary.json",
+      "sha256": "5117ef74ad025dd723ffda84404aecec2cce295596a0ecd236d8d01b049716a3",
+      "size_bytes": 81
+    },
+    {
+      "path": "benchmarks/phase8_artifacts/parity_ltspice/parity_results.json",
+      "sha256": "be9521418252b4d7f0e717ea39c40fdf56b27c0f2792d7354e9e122ad42a5b39",
+      "size_bytes": 12059
+    },
+    {
+      "path": "benchmarks/phase8_artifacts/parity_ltspice/parity_summary.json",
+      "sha256": "006158ca816a7fa31a6d70a6a69dff8b510605763b4eddc37e545560c02934c3",
+      "size_bytes": 152
+    },
+    {
+      "path": "benchmarks/phase8_artifacts/parity_ngspice/parity_results.json",
+      "sha256": "56b19e110dde6507a5cbd7326e601a75c7f8faa15cfe5a5faa10dca9c7349ece",
+      "size_bytes": 12012
+    },
+    {
+      "path": "benchmarks/phase8_artifacts/parity_ngspice/parity_summary.json",
+      "sha256": "98a33115d73e9ef8a8302f260e94de19e3509390e63f4ea1eb88a225d56096c3",
+      "size_bytes": 152
+    },
+    {
+      "path": "benchmarks/phase8_artifacts/stress/stress_results.json",
+      "sha256": "6bddce0b87867d5987004ae12401affe5506d65d51f7dd6b4c30b3d8b69fb1de",
+      "size_bytes": 12815
+    },
+    {
+      "path": "benchmarks/phase8_artifacts/stress/stress_summary.json",
+      "sha256": "697dd717d32f161458cc0671a2737ec4593b3fcdf4be234921322b6872794767",
+      "size_bytes": 1358
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+schema: pulsim-kpi-gates-v1
+version: 1
+metrics:
+  convergence_success_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.005
+    required: true
+  runtime_p95:
+    direction: lower_is_better
+    max_regression_rel: 0.05
+    required: true
+  state_space_primary_ratio:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: true
+  parity_rms_error_ltspice:
+    direction: lower_is_better
+    max_regression_rel: 0.05
+    required: false
+  parity_rms_error_ngspice:
+    direction: lower_is_better
+    max_regression_rel: 0.05
+    required: false
+  stress_tier_failure_count:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true

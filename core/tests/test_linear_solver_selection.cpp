@@ -341,6 +341,8 @@ simulation:
     gmin_initial: 1e-8
     gmin_max: 1e-4
     gmin_growth: 5
+    enable_native_reentry: true
+    sundials_recovery_window: 5e-6
 components:
   - type: resistor
     name: R1
@@ -358,6 +360,56 @@ components:
     CHECK(options.fallback_policy.gmin_initial == Approx(1e-8));
     CHECK(options.fallback_policy.gmin_max == Approx(1e-4));
     CHECK(options.fallback_policy.gmin_growth == Approx(5.0));
+    CHECK(options.fallback_policy.enable_native_reentry);
+    CHECK(options.fallback_policy.sundials_recovery_window == Approx(5e-6));
+    CHECK(circuit.num_devices() == 1);
+}
+
+TEST_CASE("YAML parser maps backend and sundials controls", "[v1][yaml][backend]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  backend: auto
+  sundials:
+    enabled: true
+    family: ida
+    formulation: direct
+    allow_formulation_fallback: false
+    rel_tol: 1e-5
+    abs_tol: 1e-8
+    max_steps: 50000
+    max_nonlinear_iterations: 10
+    use_jacobian: true
+    reuse_linear_solver: false
+  fallback:
+    enable_backend_escalation: true
+    backend_escalation_threshold: 3
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(yaml);
+    REQUIRE(parser.errors().empty());
+    CHECK(options.transient_backend == TransientBackendMode::Auto);
+    CHECK(options.sundials.enabled);
+    CHECK(options.sundials.family == SundialsSolverFamily::IDA);
+    CHECK(options.sundials.formulation == SundialsFormulationMode::Direct);
+    CHECK_FALSE(options.sundials.allow_formulation_fallback);
+    CHECK(options.sundials.rel_tol == Approx(1e-5));
+    CHECK(options.sundials.abs_tol == Approx(1e-8));
+    CHECK(options.sundials.max_steps == 50000);
+    CHECK(options.sundials.max_nonlinear_iterations == 10);
+    CHECK(options.sundials.use_jacobian);
+    CHECK_FALSE(options.sundials.reuse_linear_solver);
+    CHECK(options.fallback_policy.enable_backend_escalation);
+    CHECK(options.fallback_policy.backend_escalation_threshold == 3);
+    CHECK(SimulationOptions{}.sundials.allow_formulation_fallback);
     CHECK(circuit.num_devices() == 1);
 }
 
