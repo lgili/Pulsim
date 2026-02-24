@@ -693,6 +693,8 @@ DCAnalysisResult Simulator::dc_operating_point() {
 
 NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     last_step_segment_cache_hit_ = false;
+    last_step_linear_factor_cache_hit_ = false;
+    last_step_linear_factor_cache_miss_ = false;
 
     Integrator method = options_.enable_bdf_order_control
         ? (bdf_controller_.current_order() == 1 ? Integrator::BDF1 : Integrator::Trapezoidal)
@@ -784,6 +786,8 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     }
     const auto segment_outcome =
         transient_services_.segment_stepper->try_advance(segment_model, x_prev, request);
+    last_step_linear_factor_cache_hit_ = segment_outcome.linear_factor_cache_hit;
+    last_step_linear_factor_cache_miss_ = segment_outcome.linear_factor_cache_miss;
     if (!segment_outcome.requires_fallback) {
         last_step_solve_path_ = StepSolvePath::SegmentPrimary;
         last_step_solve_reason_ = segment_outcome.reason;
@@ -1869,6 +1873,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 result.backend_telemetry.segment_model_cache_hits += 1;
             } else {
                 result.backend_telemetry.segment_model_cache_misses += 1;
+            }
+            if (last_step_linear_factor_cache_hit_) {
+                result.backend_telemetry.linear_factor_cache_hits += 1;
+            }
+            if (last_step_linear_factor_cache_miss_) {
+                result.backend_telemetry.linear_factor_cache_misses += 1;
             }
             if (last_step_solve_path_ == StepSolvePath::SegmentPrimary) {
                 result.backend_telemetry.state_space_primary_steps += 1;

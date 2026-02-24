@@ -39,11 +39,11 @@
 - [x] 5.5 Gate: convergence success KPI improves or remains non-regressive on hard converter set.
 
 ## 6. Linear solver consolidation and caching
-- [ ] 6.1 Consolidate direct/iterative policy into one runtime linear service.
-- [ ] 6.2 Implement topology-signature keyed symbolic/factorization reuse.
-- [ ] 6.3 Implement deterministic preconditioner lifecycle and invalidation rules.
-- [ ] 6.4 Add telemetry for cache hit/miss and fallback transitions.
-- [ ] 6.5 Gate: runtime p95 improves or remains within threshold on large/stiff suites.
+- [x] 6.1 Consolidate direct/iterative policy into one runtime linear service.
+- [x] 6.2 Implement topology-signature keyed symbolic/factorization reuse.
+- [x] 6.3 Implement deterministic preconditioner lifecycle and invalidation rules.
+- [x] 6.4 Add telemetry for cache hit/miss and fallback transitions.
+- [x] 6.5 Gate: runtime p95 improves or remains within threshold on large/stiff suites.
 
 ## 7. Event scheduler and segmented integration
 - [ ] 7.1 Implement unified event calendar for PWM boundaries, dead-time, and threshold crossings.

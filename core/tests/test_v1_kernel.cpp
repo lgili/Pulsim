@@ -492,6 +492,8 @@ TEST_CASE("v1 segment primary path matches DAE fallback in fixed and variable mo
     CHECK(run.backend_telemetry.segment_model_cache_hits >= 1);
     CHECK((run.backend_telemetry.segment_model_cache_hits +
            run.backend_telemetry.segment_model_cache_misses) >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_misses >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_hits >= 1);
     CHECK(run.backend_telemetry.state_space_primary_steps >= 1);
 }
 

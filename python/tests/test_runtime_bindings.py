@@ -1545,6 +1545,36 @@ def test_recovery_ladder_stages_are_deterministic() -> None:
     assert first_index["recovery_stage_stiff_profile"] < first_index["recovery_stage_regularization"]
 
 
+def test_linear_factor_cache_telemetry_is_exposed() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-6
+    opts.dt = 1e-6
+    opts.dt_min = 1e-12
+    opts.dt_max = 1e-6
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+
+    x0 = [0.0] * (circuit.num_nodes() + circuit.num_branches())
+    result = ps.Simulator(circuit, opts).run_transient(x0)
+    assert result.success
+    assert result.backend_telemetry.state_space_primary_steps >= 1
+    assert result.backend_telemetry.linear_factor_cache_misses >= 1
+    assert result.backend_telemetry.linear_factor_cache_hits >= 1
+    assert (
+        result.backend_telemetry.linear_factor_cache_hits
+        + result.backend_telemetry.linear_factor_cache_misses
+    ) >= result.backend_telemetry.state_space_primary_steps
+
+
 def test_sundials_only_backend_reports_availability() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")

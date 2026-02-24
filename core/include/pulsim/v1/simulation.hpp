@@ -158,6 +158,8 @@ struct BackendTelemetry {
     int segment_non_admissible_steps = 0;
     int segment_model_cache_hits = 0;
     int segment_model_cache_misses = 0;
+    int linear_factor_cache_hits = 0;
+    int linear_factor_cache_misses = 0;
     int equation_assemble_system_calls = 0;
     int equation_assemble_residual_calls = 0;
     double equation_assemble_system_time_seconds = 0.0;
@@ -460,6 +462,8 @@ private:
     StepSolvePath last_step_solve_path_ = StepSolvePath::DaeFallback;
     std::string last_step_solve_reason_ = "init";
     bool last_step_segment_cache_hit_ = false;
+    bool last_step_linear_factor_cache_hit_ = false;
+    bool last_step_linear_factor_cache_miss_ = false;
     bool segment_primary_disabled_for_run_ = false;
     std::uint64_t direct_assemble_system_calls_ = 0;
     std::uint64_t direct_assemble_residual_calls_ = 0;

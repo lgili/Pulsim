@@ -119,6 +119,12 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
     segment_model_cache_misses = (
         float(getattr(backend, "segment_model_cache_misses", 0.0)) if backend is not None else None
     )
+    linear_factor_cache_hits = (
+        float(getattr(backend, "linear_factor_cache_hits", 0.0)) if backend is not None else None
+    )
+    linear_factor_cache_misses = (
+        float(getattr(backend, "linear_factor_cache_misses", 0.0)) if backend is not None else None
+    )
 
     state_space_primary_ratio: Optional[float]
     if state_space_primary_steps is None or dae_fallback_steps is None:
@@ -155,6 +161,8 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         "segment_non_admissible_steps": segment_non_admissible_steps,
         "segment_model_cache_hits": segment_model_cache_hits,
         "segment_model_cache_misses": segment_model_cache_misses,
+        "linear_factor_cache_hits": linear_factor_cache_hits,
+        "linear_factor_cache_misses": linear_factor_cache_misses,
         "state_space_primary_ratio": state_space_primary_ratio,
         "equation_assemble_system_calls": float(getattr(backend, "equation_assemble_system_calls", 0))
         if backend is not None
