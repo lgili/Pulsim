@@ -80,6 +80,10 @@ class TimestepMethod(Enum):
     StepDoubling = ...
     Richardson = ...
 
+class StepMode(Enum):
+    Fixed = ...
+    Variable = ...
+
 # =============================================================================
 # Device Classes
 # =============================================================================
@@ -553,6 +557,7 @@ class SimulationOptions:
     dc_config: DCConvergenceConfig
     linear_solver: LinearSolverStackConfig
     adaptive_timestep: bool
+    step_mode: StepMode
     timestep_config: AdvancedTimestepConfig
     lte_config: RichardsonLTEConfig
     integrator: Integrator

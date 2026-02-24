@@ -300,7 +300,9 @@ components:
     nodes: [in, 0]
     value: 1k
 """
-    parser = ps.YamlParser()
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+    parser = ps.YamlParser(parser_opts)
     _, options = parser.load_string(content)
     assert parser.errors == []
     assert options.transient_backend == ps.TransientBackendMode.Auto
@@ -319,6 +321,61 @@ components:
     assert ps.SimulationOptions().sundials.allow_formulation_fallback
     assert ps.SimulationOptions().fallback_policy.enable_native_reentry is False
     assert ps.SimulationOptions().fallback_policy.sundials_recovery_window == 0.0
+
+
+def test_yaml_parser_maps_canonical_step_mode_and_advanced_overrides() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  step_mode: fixed
+  advanced:
+    solver:
+      order: [klu]
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert options.step_mode == ps.StepMode.Fixed
+    assert options.adaptive_timestep is False
+    assert options.linear_solver.order == [ps.LinearSolverKind.KLU]
+    assert options.integrator == ps.Integrator.TRBDF2
+
+    options.step_mode = ps.StepMode.Variable
+    assert options.step_mode == ps.StepMode.Variable
+    assert options.adaptive_timestep is True
+
+    options.adaptive_timestep = False
+    assert options.step_mode == ps.StepMode.Fixed
+    assert options.adaptive_timestep is False
+
+
+def test_yaml_parser_reports_migration_error_for_legacy_backend_keys_in_strict_mode() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  backend: auto
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+    assert parser.errors
+    assert any("simulation.backend" in msg for msg in parser.errors)
+    assert any("simulation.step_mode" in msg for msg in parser.errors)
 
 
 def test_sundials_formulation_enum_and_telemetry_binding() -> None:
