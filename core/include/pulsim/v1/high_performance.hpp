@@ -802,6 +802,7 @@ private:
     HypreAMGSolver hypre_amg_;
 #endif
     bool computed_ = false;
+    SparseMatrix matrix_storage_;
     SparseMatrix scaled_matrix_;
     Vector row_scale_;
     bool scaled_ready_ = false;
@@ -862,22 +863,26 @@ private:
     }
 
     bool compute_with(const SparseMatrix& A) {
+        // Eigen iterative solvers can retain matrix references internally.
+        // Keep a stable storage copy to avoid dangling-reference crashes when callers
+        // provide temporaries or short-lived assembly buffers.
+        matrix_storage_ = A;
         switch (config_.preconditioner) {
             case IterativeSolverConfig::PreconditionerKind::None:
-                solver_identity_.compute(A);
+                solver_identity_.compute(matrix_storage_);
                 return solver_identity_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::Jacobi:
-                solver_jacobi_.compute(A);
+                solver_jacobi_.compute(matrix_storage_);
                 return solver_jacobi_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::ILU0:
-                solver_ilu0_.compute(A);
+                solver_ilu0_.compute(matrix_storage_);
                 return solver_ilu0_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::ILUT:
-                solver_ilut_.compute(A);
+                solver_ilut_.compute(matrix_storage_);
                 return solver_ilut_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::AMG:
 #ifdef PULSIM_HAS_HYPRE
-                return hypre_amg_.setup(A, config_, HypreAMGSolver::KrylovKind::GMRES);
+                return hypre_amg_.setup(matrix_storage_, config_, HypreAMGSolver::KrylovKind::GMRES);
 #else
                 return false;
 #endif
@@ -985,6 +990,7 @@ private:
     HypreAMGSolver hypre_amg_;
 #endif
     bool computed_ = false;
+    SparseMatrix matrix_storage_;
     SparseMatrix scaled_matrix_;
     Vector row_scale_;
     bool scaled_ready_ = false;
@@ -1041,22 +1047,23 @@ private:
     }
 
     bool compute_with(const SparseMatrix& A) {
+        matrix_storage_ = A;
         switch (config_.preconditioner) {
             case IterativeSolverConfig::PreconditionerKind::None:
-                solver_identity_.compute(A);
+                solver_identity_.compute(matrix_storage_);
                 return solver_identity_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::Jacobi:
-                solver_jacobi_.compute(A);
+                solver_jacobi_.compute(matrix_storage_);
                 return solver_jacobi_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::ILU0:
-                solver_ilu0_.compute(A);
+                solver_ilu0_.compute(matrix_storage_);
                 return solver_ilu0_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::ILUT:
-                solver_ilut_.compute(A);
+                solver_ilut_.compute(matrix_storage_);
                 return solver_ilut_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::AMG:
 #ifdef PULSIM_HAS_HYPRE
-                return hypre_amg_.setup(A, config_, HypreAMGSolver::KrylovKind::BiCGSTAB);
+                return hypre_amg_.setup(matrix_storage_, config_, HypreAMGSolver::KrylovKind::BiCGSTAB);
 #else
                 return false;
 #endif
@@ -1174,6 +1181,7 @@ private:
     HypreAMGSolver hypre_amg_;
 #endif
     bool computed_ = false;
+    SparseMatrix matrix_storage_;
     SparseMatrix scaled_matrix_;
     Vector row_scale_;
     bool scaled_ready_ = false;
@@ -1230,22 +1238,23 @@ private:
     }
 
     bool compute_with(const SparseMatrix& A) {
+        matrix_storage_ = A;
         switch (config_.preconditioner) {
             case IterativeSolverConfig::PreconditionerKind::None:
-                solver_identity_.compute(A);
+                solver_identity_.compute(matrix_storage_);
                 return solver_identity_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::Jacobi:
-                solver_jacobi_.compute(A);
+                solver_jacobi_.compute(matrix_storage_);
                 return solver_jacobi_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::ILU0:
-                solver_ilu0_.compute(A);
+                solver_ilu0_.compute(matrix_storage_);
                 return solver_ilu0_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::ILUT:
-                solver_ilut_.compute(A);
+                solver_ilut_.compute(matrix_storage_);
                 return solver_ilut_.info() == Eigen::Success;
             case IterativeSolverConfig::PreconditionerKind::AMG:
 #ifdef PULSIM_HAS_HYPRE
-                return hypre_amg_.setup(A, config_, HypreAMGSolver::KrylovKind::CG);
+                return hypre_amg_.setup(matrix_storage_, config_, HypreAMGSolver::KrylovKind::CG);
 #else
                 return false;
 #endif
