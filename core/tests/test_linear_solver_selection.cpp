@@ -192,6 +192,40 @@ TEST_CASE("ILUT preconditioner is applied and tracked", "[v1][solver][ilut]") {
     CHECK(*telemetry.last_preconditioner == IterativeSolverConfig::PreconditionerKind::ILUT);
 }
 
+TEST_CASE("GMRES solve is stable after factorize with temporary matrix",
+          "[v1][solver][gmres][lifetime]") {
+    LinearSolverStackConfig cfg;
+    cfg.order = {LinearSolverKind::GMRES};
+    cfg.fallback_order = {};
+    cfg.auto_select = false;
+    cfg.allow_fallback = false;
+    cfg.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::None;
+    cfg.iterative_config.max_iterations = 64;
+    cfg.iterative_config.tolerance = 1e-10;
+    cfg.iterative_config.restart = 8;
+
+    RuntimeLinearSolver solver(cfg);
+
+    auto make_matrix = []() {
+        SparseMatrix A(2, 2);
+        A.insert(0, 0) = 4.0;
+        A.insert(0, 1) = 1.0;
+        A.insert(1, 0) = 2.0;
+        A.insert(1, 1) = 3.0;
+        A.makeCompressed();
+        return A;
+    };
+
+    Vector b(2);
+    b << 1.0, 2.0;
+
+    REQUIRE(solver.factorize(make_matrix()));
+    auto result = solver.solve(b);
+    REQUIRE(result);
+    REQUIRE(result.solution.has_value());
+    CHECK(result.solution->size() == 2);
+}
+
 TEST_CASE("AMG preconditioner is feature-flagged and unavailable by default", "[v1][solver][amg]") {
     LinearSolverStackConfig cfg;
     cfg.order = {LinearSolverKind::GMRES};
