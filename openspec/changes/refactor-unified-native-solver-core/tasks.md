@@ -15,10 +15,10 @@
 - [x] 2.2 Implement `SegmentStepperService` as primary path with deterministic handoff to shared nonlinear DAE fallback.
 - [x] 2.3 Remove duplicate step solve logic that only differs by wrapper/backend branch.
 - [x] 2.4 Add unit tests for residual/Jacobian parity and segment-vs-fallback consistency across mode contexts.
-- [ ] 2.5 Gate: parity error, convergence success, and state-space-primary ratio are non-regressive.
+- [x] 2.5 Gate: parity error, convergence success, and state-space-primary ratio are non-regressive.
 
 ## 3. Fixed-step engine
-- [ ] 3.1 Implement `FixedStepPolicy` with macro-grid determinism.
+- [x] 3.1 Implement `FixedStepPolicy` with macro-grid determinism.
 - [ ] 3.2 Implement internal substep handling for event alignment and bounded convergence rescue.
 - [ ] 3.3 Ensure outputs remain aligned to user macro timestep.
 - [ ] 3.4 Add converter regression tests for fixed-step event accuracy.

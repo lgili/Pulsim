@@ -247,6 +247,71 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     return std::abs(a - b) <= scale * Real{1e-12};
 }
 
+class FixedStepPolicy final {
+public:
+    FixedStepPolicy() = default;
+
+    FixedStepPolicy(Real t_start, Real t_stop, Real macro_dt, Real dt_min)
+        : enabled_(true)
+        , t_stop_(t_stop)
+        , dt_min_(std::max(dt_min, Real{1e-18}))
+        , macro_dt_(std::max(macro_dt, dt_min_)) {
+        current_macro_target_ = std::min(t_stop_, t_start + macro_dt_);
+        if (current_macro_target_ <= t_start && t_stop_ > t_start) {
+            current_macro_target_ = t_stop_;
+        }
+    }
+
+    [[nodiscard]] bool enabled() const {
+        return enabled_;
+    }
+
+    [[nodiscard]] Real default_dt() const {
+        return macro_dt_;
+    }
+
+    [[nodiscard]] Real clamp_dt(Real t_now, Real dt_candidate) {
+        if (!enabled_) {
+            return dt_candidate;
+        }
+
+        advance_macro_cursor(t_now);
+        Real dt = std::max(dt_min_, dt_candidate);
+
+        const Real target = std::min(t_stop_, current_macro_target_);
+        const Real remaining = target - t_now;
+        if (remaining > dt_min_ * 0.1) {
+            dt = std::min(dt, remaining);
+        } else {
+            const Real t_stop_remaining = t_stop_ - t_now;
+            dt = t_stop_remaining > 0.0 ? std::min(dt, t_stop_remaining) : 0.0;
+        }
+        return std::max<Real>(0.0, dt);
+    }
+
+    void on_step_accepted(Real t_next) {
+        if (!enabled_) {
+            return;
+        }
+        advance_macro_cursor(t_next);
+    }
+
+private:
+    void advance_macro_cursor(Real t_now) {
+        const Real tol = std::max<Real>(dt_min_ * 1e-3, 1e-15);
+        while (current_macro_target_ < t_stop_ &&
+               t_now >= current_macro_target_ - tol) {
+            current_macro_target_ = std::min(t_stop_, current_macro_target_ + macro_dt_);
+        }
+    }
+
+    bool enabled_ = false;
+    Real t_stop_ = 0.0;
+    Real dt_min_ = 0.0;
+    Real macro_dt_ = 0.0;
+    Real current_macro_target_ = 0.0;
+};
+
 void merge_linear_solver_telemetry(LinearSolverTelemetry& dst, const LinearSolverTelemetry& src) {
     dst.total_solve_calls += src.total_solve_calls;
     dst.total_analyze_calls += src.total_analyze_calls;
@@ -1454,6 +1519,15 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     const bool can_auto_recover = options_.adaptive_timestep &&
                                   options_.linear_solver.allow_fallback &&
                                   !is_fixed_timestep(options_);
+    FixedStepPolicy fixed_step_policy;
+    if (step_mode == TransientStepMode::Fixed) {
+        fixed_step_policy = FixedStepPolicy(
+            options_.tstart,
+            options_.tstop,
+            std::max(options_.dt, options_.dt_min),
+            options_.dt_min);
+        dt = fixed_step_policy.clamp_dt(t, fixed_step_policy.default_dt());
+    }
 
     circuit_.set_current_time(t);
     circuit_.set_timestep(dt);
@@ -1535,11 +1609,19 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        if (t + dt > options_.tstop) {
+        auto clamp_dt_for_mode = [&](Real dt_candidate) {
+            return fixed_step_policy.enabled()
+                ? fixed_step_policy.clamp_dt(t, dt_candidate)
+                : dt_candidate;
+        };
+
+        if (fixed_step_policy.enabled()) {
+            dt = clamp_dt_for_mode(fixed_step_policy.default_dt());
+        } else if (t + dt > options_.tstop) {
             dt = options_.tstop - t;
-            if (dt < options_.dt_min * 0.1) {
-                break;
-            }
+        }
+        if (dt < options_.dt_min * 0.1) {
+            break;
         }
 
         bool accepted = false;
@@ -1549,7 +1631,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         while (!accepted && retries <= options_.max_step_retries) {
             if (options_.stiffness_config.enable && stiffness_cooldown > 0) {
-                dt = std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff);
+                dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff));
                 record_fallback_event(result,
                                       result.total_steps,
                                       retries,
@@ -1602,7 +1684,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 transient_services_.telemetry_collector->on_step_reject(recovery);
                 const Real recovered_dt =
                     recovery.next_dt > 0.0 ? recovery.next_dt : (step_request.dt_candidate * 0.5);
-                dt = std::max(options_.dt_min, recovered_dt);
+                dt = clamp_dt_for_mode(std::max(options_.dt_min, recovered_dt));
                 result.timestep_rejections++;
                 retries++;
                 record_fallback_event(result,
@@ -1662,7 +1744,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
                 if (!decision.accepted) {
                     circuit_.clear_stage_context();
-                    dt = decision.dt_new;
+                    dt = clamp_dt_for_mode(decision.dt_new);
                     RecoveryDecision lte_recovery;
                     lte_recovery.stage = RecoveryStage::DtBackoff;
                     lte_recovery.next_dt = decision.dt_new;
@@ -1690,7 +1772,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                     continue;
                 }
 
-                dt = decision.dt_new;
+                dt = clamp_dt_for_mode(decision.dt_new);
             }
 
             // Event-aligned step splitting for hard switching edges
@@ -1712,7 +1794,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                     t + dt_used);
                             Real dt_event = t_segment - t;
                             if (dt_event > options_.dt_min * 1.01 && dt_event < dt_used * 0.999) {
-                                dt = std::max(options_.dt_min, dt_event);
+                                dt = clamp_dt_for_mode(std::max(options_.dt_min, dt_event));
                                 RecoveryDecision split_recovery;
                                 split_recovery.stage = RecoveryStage::DtBackoff;
                                 split_recovery.next_dt = dt;
@@ -1764,7 +1846,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 auto_recovery_attempted = true;
 
                 circuit_.clear_stage_context();
-                dt = std::max(options_.dt_min, dt_used * (global_recovery_attempts == 1 ? Real{0.25} : Real{0.1}));
+                dt = clamp_dt_for_mode(std::max(options_.dt_min, dt_used * (
+                    global_recovery_attempts == 1 ? Real{0.25} : Real{0.1})));
                 rejection_streak = 0;
                 high_iter_streak = 0;
                 stiffness_cooldown = std::max(stiffness_cooldown, options_.stiffness_config.cooldown_steps);
@@ -1877,6 +1960,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         update_thermal_state(dt_used);
 
         t += dt_used;
+        fixed_step_policy.on_step_accepted(t);
         x = step_result.solution;
         circuit_.update_history(x);
 
