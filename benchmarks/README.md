@@ -24,6 +24,7 @@ export PYTHONPATH=build/python
 
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
+python3 benchmarks/variable_mode_matrix.py --output-dir benchmarks/out_variable_matrix
 python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
 python3 benchmarks/kpi_gate.py \
   --bench-results benchmarks/out/results.json \
@@ -54,6 +55,8 @@ Benchmark runners are Python-first and execute through `pulsim` runtime bindings
 (`YamlParser` + `Simulator`).
 When a benchmark netlist omits `simulation.adaptive_timestep`, runners default to
 fixed-step mode (`adaptive_timestep: false`) for deterministic comparisons.
+Use `variable_mode_matrix.py` when you need the adaptive-variable benchmark gate.
+Current default scope is the stiff-variable set (`stiff_rlc` scenarios) and can be expanded with `--only`.
 
 Generate missing reference baselines:
 

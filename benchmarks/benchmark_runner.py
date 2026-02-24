@@ -329,6 +329,9 @@ def run_benchmarks(
     selected: Optional[List[str]] = None,
     matrix: bool = False,
     generate_baselines: bool = False,
+    simulation_overrides: Optional[Dict[str, Any]] = None,
+    scenario_filter: Optional[List[str]] = None,
+    adaptive_dt_max_factor: Optional[float] = None,
 ) -> List[ScenarioResult]:
     manifest = load_yaml(benchmarks_path)
     scenarios = manifest.get("scenarios", {})
@@ -343,6 +346,11 @@ def run_benchmarks(
             continue
 
         scenario_names = list(scenarios.keys()) if matrix else entry.get("scenarios", ["default"])
+        if scenario_filter:
+            allow = set(scenario_filter)
+            scenario_names = [name for name in scenario_names if name in allow]
+            if not scenario_names:
+                continue
         if "default" in scenario_names and "default" not in scenarios:
             scenarios["default"] = {}
 
@@ -352,7 +360,30 @@ def run_benchmarks(
             preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
             normalize_periodic_mode(scenario_netlist, preferred_mode)
             apply_runtime_defaults(scenario_netlist)
+            if simulation_overrides:
+                sim_cfg = scenario_netlist.get("simulation", {})
+                if not isinstance(sim_cfg, dict):
+                    sim_cfg = {}
+                scenario_netlist["simulation"] = deep_merge(sim_cfg, simulation_overrides)
             simulation_cfg = scenario_netlist.get("simulation", {})
+            if (
+                adaptive_dt_max_factor is not None
+                and isinstance(simulation_cfg, dict)
+                and bool(simulation_cfg.get("adaptive_timestep", False))
+                and simulation_cfg.get("dt") is not None
+            ):
+                try:
+                    dt_value = parse_value(simulation_cfg.get("dt"))
+                    dt_limit = max(dt_value * float(adaptive_dt_max_factor), dt_value)
+                    current_dt_max = (
+                        parse_value(simulation_cfg.get("dt_max"))
+                        if simulation_cfg.get("dt_max") is not None
+                        else None
+                    )
+                    if current_dt_max is None or current_dt_max > dt_limit:
+                        simulation_cfg["dt_max"] = dt_limit
+                except Exception:
+                    pass
             use_initial_conditions = bool(
                 simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
             )
@@ -550,6 +581,8 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run")
     parser.add_argument("--matrix", action="store_true", help="Run full validation matrix")
     parser.add_argument("--generate-baselines", action="store_true", help="Generate missing reference baselines")
+    parser.add_argument("--force-adaptive", action="store_true", help="Force simulation.adaptive_timestep=true")
+    parser.add_argument("--scenario-filter", nargs="*", help="Run only selected scenarios")
     args = parser.parse_args()
 
     if yaml is None:
@@ -567,6 +600,8 @@ def main() -> int:
         selected=args.only,
         matrix=args.matrix,
         generate_baselines=args.generate_baselines,
+        simulation_overrides={"adaptive_timestep": True} if args.force_adaptive else None,
+        scenario_filter=args.scenario_filter,
     )
     write_results(args.output_dir, results)
 
