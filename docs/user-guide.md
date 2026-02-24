@@ -35,6 +35,7 @@ circuit, options = parser.load("benchmarks/circuits/rc_step.yaml")
 
 options.newton_options.num_nodes = int(circuit.num_nodes())
 options.newton_options.num_branches = int(circuit.num_branches())
+options.step_mode = ps.StepMode.Variable
 
 sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
@@ -42,6 +43,11 @@ result = sim.run_transient(circuit.initial_state())
 print("ok:", result.success, "steps:", result.total_steps)
 print("capabilities:", ps.backend_capabilities())
 ```
+
+Fluxo canônico de transiente:
+
+- escolha apenas `options.step_mode = ps.StepMode.Fixed` ou `ps.StepMode.Variable`;
+- backend legado (`transient_backend`/`sundials`) não faz parte do caminho suportado.
 
 ## Onde continuar
 

@@ -11,6 +11,7 @@ simulation:
   tstart: 0.0
   tstop: 1e-3
   dt: 1e-6
+  step_mode: variable
 components:
   - type: voltage_source
     name: V1
@@ -135,13 +136,17 @@ simulation:
   tstart: 0.0
   tstop: 1e-3
   dt: 1e-6
+  step_mode: variable    # fixed | variable
   dt_min: 1e-12
   dt_max: 1e-3
-  adaptive_timestep: true
+  adaptive_timestep: true # override avançado; prefira step_mode
   enable_events: true
   enable_losses: true
   integrator: trbdf2   # trapezoidal, bdf1, bdf2, trbdf2, rosenbrockw, sdirk2
 ```
+
+`simulation.backend` e `simulation.sundials` são chaves legadas e não fazem parte
+da superfície suportada de transiente.
 
 ### Solver Configuration
 

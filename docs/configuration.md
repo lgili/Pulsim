@@ -11,17 +11,23 @@ simulation:
   tstart: 0.0
   tstop: 2e-3
   dt: 1e-6
+  step_mode: variable   # fixed | variable
   dt_min: 1e-10
   dt_max: 1e-4
-  adaptive_timestep: true
   integrator: trbdf2
 ```
 
 Campos práticos:
 
 - `tstop`, `dt`: resolução e duração.
-- `adaptive_timestep`: `true` para produtividade, `false` para baseline determinístico.
+- `step_mode`: `fixed` para grade determinística; `variable` para adaptação automática.
+- `adaptive_timestep`: override avançado (evite no fluxo canônico; prefira `step_mode`).
 - `integrator`: `trapezoidal`, `bdf1..bdf5`, `trbdf2`, `rosenbrockw`, `sdirk2`.
+
+Observação de migração:
+
+- `simulation.backend` e `simulation.sundials` são campos legados para transiente e não
+  fazem parte do caminho suportado; use `simulation.step_mode`.
 
 ## Solver linear em runtime
 
@@ -105,13 +111,13 @@ Saídas relevantes:
 
 ### Debug rápido
 
-- `adaptive_timestep: false`
+- `step_mode: fixed`
 - `integrator: trapezoidal`
 - `order: [sparselu]`
 
 ### Produção robusta
 
-- `adaptive_timestep: true`
+- `step_mode: variable`
 - `integrator: trbdf2` ou `rosenbrockw`
 - `order: [klu, gmres]`
 - `fallback_order: [sparselu]`

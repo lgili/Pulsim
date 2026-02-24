@@ -60,10 +60,10 @@
 - [x] 8.5 Add parser and binding tests for canonical mode selection and migration errors.
 
 ## 9. Legacy path decommissioning
-- [ ] 9.1 Remove supported runtime routing through legacy alternate transient-backend branches.
-- [ ] 9.2 Remove duplicate projected-wrapper/transient wrapper code from supported execution path.
-- [ ] 9.3 Delete dead configuration branches and stale tests tied only to removed paths.
-- [ ] 9.4 Update docs to reflect single native core and dual-mode user choice.
+- [x] 9.1 Remove supported runtime routing through legacy alternate transient-backend branches.
+- [x] 9.2 Remove duplicate projected-wrapper/transient wrapper code from supported execution path.
+- [x] 9.3 Delete dead configuration branches and stale tests tied only to removed paths.
+- [x] 9.4 Update docs to reflect single native core and dual-mode user choice.
 - [ ] 9.5 Gate: full benchmark/parity/stress suite passes with no unsupported legacy-path dependency.
 
 ## 10. Final validation and rollout

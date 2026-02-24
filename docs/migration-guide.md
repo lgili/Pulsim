@@ -54,6 +54,16 @@ sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
 ```
 
+### Legacy transient backend keys
+
+No runtime suportado, a escolha de caminho transiente é canônica por modo:
+
+- `simulation.step_mode: fixed`
+- `simulation.step_mode: variable`
+
+As chaves legadas `simulation.backend` / `simulation.sundials` (e equivalentes em
+`simulation.advanced`) são tratadas apenas para diagnóstico de migração.
+
 ## 4. Removed API/Workflow Mapping
 
 | Removed workflow | Replacement |

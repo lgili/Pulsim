@@ -408,13 +408,6 @@ private:
         EventCallback event_callback,
         SimulationControl* control);
 
-    [[nodiscard]] SimulationResult run_transient_sundials_impl(
-        const Vector& x0,
-        SimulationCallback callback,
-        EventCallback event_callback,
-        SimulationControl* control,
-        bool escalated_from_native);
-
     NewtonResult solve_step(Real t_next, Real dt, const Vector& x_prev);
     NewtonResult solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev);
     NewtonResult solve_sdirk2_step(Real t_next, Real dt, const Vector& x_prev, Integrator method);

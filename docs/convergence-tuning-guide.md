@@ -27,7 +27,9 @@ print(ps.backend_capabilities())
 # {'klu': True, 'hypre_amg': True/False, 'sundials': True/False}
 ```
 
-Observação: `sundials=True` indica suporte compilado, mas use primeiro o pipeline robusto padrão (`run_transient`) e o YAML v1 com fallback de solver para casos de chaveamento.
+Observação: `sundials=True` indica apenas suporte compilado opcional. No caminho
+suportado de transiente, use o core nativo com `simulation.step_mode`
+(`fixed|variable`), sem seleção de backend legado.
 
 ## Exemplo de configuração robusta
 
@@ -38,9 +40,10 @@ simulation:
   tstart: 0.0
   tstop: 2e-3
   dt: 1e-6
+  step_mode: variable
   dt_min: 1e-10
   dt_max: 5e-5
-  adaptive_timestep: true
+  adaptive_timestep: true  # override avançado
   integrator: trbdf2
 
   solver:
