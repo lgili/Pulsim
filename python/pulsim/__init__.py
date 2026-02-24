@@ -20,6 +20,7 @@ from ._pulsim import (
     SIMDLevel,
     Integrator,
     TimestepMethod,
+    StepMode,
 
     # Device Classes - Linear
     Resistor,
@@ -478,6 +479,7 @@ __all__ = [
     "SIMDLevel",
     "Integrator",
     "TimestepMethod",
+    "StepMode",
 
     # Device Classes - Linear
     "Resistor",

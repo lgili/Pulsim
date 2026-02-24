@@ -53,11 +53,11 @@
 - [x] 7.5 Gate: event-time KPI and stability KPI pass converter stress tiers.
 
 ## 8. User-facing surface simplification
-- [ ] 8.1 Add canonical mode field (`fixed`/`variable`) in YAML and Python runtime surfaces.
-- [ ] 8.2 Map canonical mode to internal solver profiles with deterministic defaults.
-- [ ] 8.3 Keep expert overrides under explicit advanced sections.
-- [ ] 8.4 Add migration diagnostics for deprecated legacy transient-backend keys.
-- [ ] 8.5 Add parser and binding tests for canonical mode selection and migration errors.
+- [x] 8.1 Add canonical mode field (`fixed`/`variable`) in YAML and Python runtime surfaces.
+- [x] 8.2 Map canonical mode to internal solver profiles with deterministic defaults.
+- [x] 8.3 Keep expert overrides under explicit advanced sections.
+- [x] 8.4 Add migration diagnostics for deprecated legacy transient-backend keys.
+- [x] 8.5 Add parser and binding tests for canonical mode selection and migration errors.
 
 ## 9. Legacy path decommissioning
 - [ ] 9.1 Remove supported runtime routing through legacy alternate transient-backend branches.

@@ -238,6 +238,10 @@ struct SimulationOptions {
 
     // Adaptive timestep + LTE
     bool adaptive_timestep = true;
+    // Canonical timestep mode selection. When explicitly set through runtime/YAML
+    // surfaces, this field defines fixed vs variable semantics.
+    TransientStepMode step_mode = TransientStepMode::Variable;
+    bool step_mode_explicit = false;
     AdvancedTimestepConfig timestep_config = AdvancedTimestepConfig::for_power_electronics();
     RichardsonLTEConfig lte_config = RichardsonLTEConfig::defaults();
 

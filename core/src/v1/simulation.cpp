@@ -131,10 +131,28 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     return hints;
 }
 
-[[nodiscard]] bool is_fixed_timestep(const SimulationOptions& options) {
+[[nodiscard]] bool legacy_fixed_timestep_heuristic(const SimulationOptions& options) {
     const Real span = std::abs(options.dt_max - options.dt_min);
     const Real scale = std::max<Real>({Real{1.0}, std::abs(options.dt), std::abs(options.dt_max)});
     return span <= scale * Real{1e-12};
+}
+
+[[nodiscard]] TransientStepMode resolve_step_mode(const SimulationOptions& options) {
+    if (options.step_mode_explicit) {
+        return options.step_mode;
+    }
+    if (!options.adaptive_timestep) {
+        return TransientStepMode::Fixed;
+    }
+    return legacy_fixed_timestep_heuristic(options) ? TransientStepMode::Fixed
+                                                    : TransientStepMode::Variable;
+}
+
+void enforce_explicit_step_mode(SimulationOptions& options) {
+    if (!options.step_mode_explicit) {
+        return;
+    }
+    options.adaptive_timestep = (options.step_mode == TransientStepMode::Variable);
 }
 
 void apply_auto_transient_profile(SimulationOptions& options, const Circuit& circuit) {
@@ -144,7 +162,7 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     }
     // Respect explicit fixed-step selection from user/scenario.
     // Auto profile can tune adaptive runs, but must not silently flip fixed -> variable.
-    if (!options.adaptive_timestep) {
+    if (resolve_step_mode(options) == TransientStepMode::Fixed) {
         return;
     }
 
@@ -155,7 +173,7 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
         return;
     }
 
-    const bool fixed_step = is_fixed_timestep(options);
+    const bool fixed_step = resolve_step_mode(options) == TransientStepMode::Fixed;
     if (!fixed_step) {
         options.adaptive_timestep = true;
         options.timestep_config = AdvancedTimestepConfig::for_power_electronics();
@@ -533,7 +551,9 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
 
     options_.newton_options.num_nodes = circuit_.num_nodes();
     options_.newton_options.num_branches = circuit_.num_branches();
+    enforce_explicit_step_mode(options_);
     apply_auto_transient_profile(options_, circuit_);
+    enforce_explicit_step_mode(options_);
     options_.newton_options.num_nodes = circuit_.num_nodes();
     options_.newton_options.num_branches = circuit_.num_branches();
     newton_solver_.set_options(options_.newton_options);
@@ -761,9 +781,7 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     };
 
     TransientStepRequest request;
-    request.mode = (options_.adaptive_timestep && !is_fixed_timestep(options_))
-        ? TransientStepMode::Variable
-        : TransientStepMode::Fixed;
+    request.mode = resolve_step_mode(options_);
     request.t_now = t_next - dt;
     request.t_target = t_next;
     request.dt_candidate = dt;
@@ -1615,13 +1633,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     int stiffness_cooldown = 0;
     int global_recovery_attempts = 0;
     bool auto_recovery_attempted = false;
-    const TransientStepMode step_mode =
-        (options_.adaptive_timestep && !is_fixed_timestep(options_))
-            ? TransientStepMode::Variable
-            : TransientStepMode::Fixed;
-    const bool can_auto_recover = options_.adaptive_timestep &&
-                                  options_.linear_solver.allow_fallback &&
-                                  !is_fixed_timestep(options_);
+    const TransientStepMode step_mode = resolve_step_mode(options_);
+    const bool can_auto_recover = (step_mode == TransientStepMode::Variable) &&
+                                  options_.linear_solver.allow_fallback;
     VariableStepPolicy variable_step_policy;
     if (step_mode == TransientStepMode::Variable) {
         variable_step_policy = VariableStepPolicy(
@@ -2283,7 +2297,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         x = step_result.solution;
         circuit_.update_history(x);
 
-        if (options_.adaptive_timestep) {
+        if (variable_step_policy.enabled()) {
             lte_estimator_.record_solution(x, t, dt_used);
 
             if (options_.enable_bdf_order_control && lte_estimator_.has_sufficient_history()) {

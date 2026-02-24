@@ -24,6 +24,8 @@ constexpr const char* kDiagInvalidPinCount = "PULSIM_YAML_E_PIN_COUNT";
 constexpr const char* kDiagInvalidParameter = "PULSIM_YAML_E_PARAM_INVALID";
 constexpr const char* kDiagVirtualComponent = "PULSIM_YAML_W_COMPONENT_VIRTUAL";
 constexpr const char* kDiagSurrogateComponent = "PULSIM_YAML_W_COMPONENT_SURROGATE";
+constexpr const char* kDiagLegacyTransientBackend = "PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND";
+constexpr const char* kDiagInvalidStepMode = "PULSIM_YAML_E_STEP_MODE_INVALID";
 
 Real parse_real_string(const std::string& raw);
 
@@ -58,6 +60,66 @@ void push_error(std::vector<std::string>& errors, const std::string& code, const
 
 void push_warning(std::vector<std::string>& warnings, const std::string& code, const std::string& message) {
     warnings.push_back(with_diag_code(code, message));
+}
+
+void apply_mode_derived_defaults(SimulationOptions& options,
+                                 TransientStepMode mode,
+                                 bool dt_min_explicit,
+                                 bool dt_max_explicit) {
+    options.step_mode = mode;
+    options.step_mode_explicit = true;
+    options.adaptive_timestep = (mode == TransientStepMode::Variable);
+
+    // Canonical mode defaults to native hybrid runtime without external backend routing.
+    options.transient_backend = TransientBackendMode::Native;
+    options.sundials.enabled = false;
+    options.fallback_policy.enable_backend_escalation = false;
+    options.fallback_policy.enable_native_reentry = false;
+
+    // Deterministic robust defaults shared by canonical modes.
+    options.integrator = Integrator::TRBDF2;
+    options.stiffness_config.enable = true;
+    options.stiffness_config.switch_integrator = true;
+    options.stiffness_config.stiff_integrator = Integrator::BDF1;
+    options.max_step_retries = std::max(options.max_step_retries, 6);
+
+    if (!dt_min_explicit) {
+        options.dt_min = std::max<Real>(1e-12, options.dt * 1e-3);
+    }
+    if (!dt_max_explicit) {
+        options.dt_max = std::max<Real>(options.dt * 20.0, options.dt);
+    }
+
+    options.timestep_config = AdvancedTimestepConfig::for_power_electronics();
+    options.timestep_config.dt_initial = std::max<Real>(options.dt, 1e-18);
+    options.timestep_config.dt_min = std::max<Real>(options.dt_min, 1e-12);
+    options.timestep_config.dt_max = std::max<Real>(options.dt_max, options.timestep_config.dt_min);
+
+    if (mode == TransientStepMode::Fixed) {
+        options.enable_bdf_order_control = false;
+    } else {
+        options.enable_bdf_order_control = true;
+        options.bdf_config.min_order = 1;
+        options.bdf_config.max_order = 2;
+        options.bdf_config.initial_order = 1;
+        options.lte_config = RichardsonLTEConfig::defaults();
+    }
+}
+
+void enforce_mode_semantics(SimulationOptions& options) {
+    if (!options.step_mode_explicit) {
+        return;
+    }
+    options.adaptive_timestep = (options.step_mode == TransientStepMode::Variable);
+}
+
+void push_legacy_backend_migration_error(std::vector<std::string>& errors, const std::string& key_path) {
+    push_error(
+        errors,
+        kDiagLegacyTransientBackend,
+        "Deprecated transient backend key '" + key_path +
+            "' is unsupported in strict mode. Use 'simulation.step_mode: fixed|variable' "
+            "and move expert backend overrides under 'simulation.advanced'.");
 }
 
 const std::unordered_map<std::string, std::string>& component_alias_map() {
@@ -477,39 +539,92 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
     // Simulation options
     if (root["simulation"]) {
         YAML::Node sim = root["simulation"];
-          validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "adaptive_timestep",
-                        "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
-                        "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
-                        "max_step_retries", "fallback", "backend", "sundials"},
+        validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "step_mode", "adaptive_timestep",
+                            "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
+                            "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
+                            "max_step_retries", "fallback", "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
+
+        YAML::Node advanced = sim["advanced"];
+        if (advanced) {
+            validate_keys(advanced, {"adaptive_timestep", "integrator", "integration", "newton", "timestep",
+                                     "lte", "bdf", "solver", "fallback", "backend", "sundials"},
+                          "simulation.advanced", errors_, options_.strict);
+        }
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);
         if (sim["tstop"]) options.tstop = parse_real(sim["tstop"], "simulation.tstop", errors_);
         if (sim["dt"]) options.dt = parse_real(sim["dt"], "simulation.dt", errors_);
+        const bool dt_min_explicit = static_cast<bool>(sim["dt_min"]);
+        const bool dt_max_explicit = static_cast<bool>(sim["dt_max"]);
         if (sim["dt_min"]) options.dt_min = parse_real(sim["dt_min"], "simulation.dt_min", errors_);
         if (sim["dt_max"]) options.dt_max = parse_real(sim["dt_max"], "simulation.dt_max", errors_);
-        if (sim["adaptive_timestep"]) options.adaptive_timestep = sim["adaptive_timestep"].as<bool>();
+
+        if (sim["step_mode"]) {
+            try {
+                const std::string mode = normalize_key(sim["step_mode"].as<std::string>());
+                if (mode == "fixed") {
+                    apply_mode_derived_defaults(
+                        options, TransientStepMode::Fixed, dt_min_explicit, dt_max_explicit);
+                } else if (mode == "variable" || mode == "adaptive") {
+                    apply_mode_derived_defaults(
+                        options, TransientStepMode::Variable, dt_min_explicit, dt_max_explicit);
+                } else {
+                    push_error(errors_,
+                               kDiagInvalidStepMode,
+                               "Invalid simulation.step_mode: " + sim["step_mode"].as<std::string>() +
+                                   " (expected 'fixed' or 'variable')");
+                }
+            } catch (...) {
+                push_error(errors_,
+                           kDiagInvalidStepMode,
+                           "Invalid simulation.step_mode (expected 'fixed' or 'variable')");
+            }
+        }
+
+        auto expert_node = [&](const char* key) -> YAML::Node {
+            if (advanced && advanced[key]) {
+                return advanced[key];
+            }
+            return sim[key];
+        };
+
+        YAML::Node adaptive_timestep = expert_node("adaptive_timestep");
+        if (adaptive_timestep) options.adaptive_timestep = adaptive_timestep.as<bool>();
         if (sim["enable_events"]) options.enable_events = sim["enable_events"].as<bool>();
         if (sim["enable_losses"]) options.enable_losses = sim["enable_losses"].as<bool>();
         if (sim["max_step_retries"]) options.max_step_retries = sim["max_step_retries"].as<int>();
-        if (sim["backend"]) {
-            const std::string backend = normalize_key(sim["backend"].as<std::string>());
-            if (backend == "native") {
-                options.transient_backend = TransientBackendMode::Native;
-            } else if (backend == "sundials" || backend == "sundialsonly") {
-                options.transient_backend = TransientBackendMode::SundialsOnly;
-            } else if (backend == "auto") {
-                options.transient_backend = TransientBackendMode::Auto;
-            } else {
-                errors_.push_back("Invalid simulation.backend: " + sim["backend"].as<std::string>());
+
+        if (options_.strict) {
+            if (sim["backend"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.backend");
+            }
+            if (sim["sundials"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.sundials");
             }
         }
-        if (sim["sundials"]) {
-            YAML::Node sundials = sim["sundials"];
+
+        YAML::Node backend = expert_node("backend");
+        if (backend) {
+            const std::string backend_value = normalize_key(backend.as<std::string>());
+            if (backend_value == "native") {
+                options.transient_backend = TransientBackendMode::Native;
+            } else if (backend_value == "sundials" || backend_value == "sundialsonly") {
+                options.transient_backend = TransientBackendMode::SundialsOnly;
+            } else if (backend_value == "auto") {
+                options.transient_backend = TransientBackendMode::Auto;
+            } else {
+                errors_.push_back("Invalid simulation.advanced.backend: " + backend.as<std::string>());
+            }
+        }
+
+        YAML::Node sundials_node = expert_node("sundials");
+        if (sundials_node) {
+            YAML::Node sundials = sundials_node;
             validate_keys(sundials, {"enabled", "family", "formulation", "rel_tol", "abs_tol", "max_steps",
                                      "max_nonlinear_iterations", "use_jacobian", "reuse_linear_solver",
                                      "allow_formulation_fallback"},
-                          "simulation.sundials", errors_, options_.strict);
+                          "simulation.advanced.sundials", errors_, options_.strict);
             if (sundials["enabled"]) options.sundials.enabled = sundials["enabled"].as<bool>();
             if (sundials["family"]) {
                 const std::string family = normalize_key(sundials["family"].as<std::string>());
@@ -555,6 +670,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     sundials["allow_formulation_fallback"].as<bool>();
             }
         }
+
         if (sim["thermal"]) {
             YAML::Node thermal = sim["thermal"];
             validate_keys(thermal, {"enabled", "ambient", "policy", "default_rth", "default_cth"},
@@ -576,14 +692,16 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 }
             }
         }
-        if (sim["fallback"]) {
-            YAML::Node fallback = sim["fallback"];
+
+        YAML::Node fallback_root = expert_node("fallback");
+        if (fallback_root) {
+            YAML::Node fallback = fallback_root;
             validate_keys(fallback, {"trace_retries", "enable_transient_gmin",
                                      "gmin_retry_threshold", "gmin_initial",
                                      "gmin_max", "gmin_growth",
                                      "enable_backend_escalation", "backend_escalation_threshold",
                                      "enable_native_reentry", "sundials_recovery_window"},
-                          "simulation.fallback", errors_, options_.strict);
+                          "simulation.advanced.fallback", errors_, options_.strict);
             if (fallback["trace_retries"]) {
                 options.fallback_policy.trace_retries = fallback["trace_retries"].as<bool>();
             }
@@ -619,7 +737,10 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        YAML::Node integrator_node = sim["integrator"] ? sim["integrator"] : sim["integration"];
+        YAML::Node integrator_node = expert_node("integrator");
+        if (!integrator_node) {
+            integrator_node = expert_node("integration");
+        }
         if (integrator_node) {
             std::string method = normalize_key(integrator_node.as<std::string>());
             if (method == "trapezoidal" || method == "tr") {
@@ -647,8 +768,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        if (sim["newton"]) {
-            YAML::Node n = sim["newton"];
+        YAML::Node newton = expert_node("newton");
+        if (newton) {
+            YAML::Node n = newton;
             validate_keys(n, {"max_iterations", "initial_damping", "min_damping", "auto_damping",
                               "enable_anderson", "anderson_depth", "anderson_beta",
                               "enable_broyden", "broyden_max_size", "enable_newton_krylov",
@@ -679,8 +801,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        if (sim["timestep"]) {
-            YAML::Node t = sim["timestep"];
+        YAML::Node timestep = expert_node("timestep");
+        if (timestep) {
+            YAML::Node t = timestep;
             validate_keys(t, {"preset", "dt_min", "dt_max", "error_tolerance", "target_newton_iterations"},
                           "simulation.timestep", errors_, options_.strict);
             auto apply_base = [&](const TimestepConfig& base) {
@@ -711,8 +834,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (t["target_newton_iterations"]) options.timestep_config.target_newton_iterations = t["target_newton_iterations"].as<int>();
         }
 
-        if (sim["lte"]) {
-            YAML::Node l = sim["lte"];
+        YAML::Node lte = expert_node("lte");
+        if (lte) {
+            YAML::Node l = lte;
             validate_keys(l, {"method", "voltage_tolerance", "current_tolerance"},
                           "simulation.lte", errors_, options_.strict);
             if (l["method"]) {
@@ -724,8 +848,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (l["current_tolerance"]) options.lte_config.current_tolerance = parse_real(l["current_tolerance"], "lte.current_tolerance", errors_);
         }
 
-        if (sim["bdf"]) {
-            YAML::Node b = sim["bdf"];
+        YAML::Node bdf = expert_node("bdf");
+        if (bdf) {
+            YAML::Node b = bdf;
             validate_keys(b, {"enable", "min_order", "max_order", "initial_order"},
                           "simulation.bdf", errors_, options_.strict);
             if (b["enable"]) options.enable_bdf_order_control = b["enable"].as<bool>();
@@ -734,8 +859,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (b["initial_order"]) options.bdf_config.initial_order = b["initial_order"].as<int>();
         }
 
-        if (sim["solver"]) {
-            YAML::Node s = sim["solver"];
+        YAML::Node solver = expert_node("solver");
+        if (solver) {
+            YAML::Node s = solver;
             validate_keys(s, {"linear", "iterative", "nonlinear", "order", "fallback_order",
                               "allow_fallback", "auto_select", "size_threshold", "nnz_threshold",
                               "diag_min_threshold", "preconditioner", "ilut_drop_tolerance",
@@ -906,6 +1032,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 }
             }
         }
+
+        enforce_mode_semantics(options);
 
         if (sim["shooting"]) {
             YAML::Node sh = sim["shooting"];

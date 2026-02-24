@@ -393,7 +393,9 @@ components:
     value: 1k
 )";
 
-    parser::YamlParser parser;
+    parser::YamlParserOptions parser_options;
+    parser_options.strict = false;
+    parser::YamlParser parser(parser_options);
     auto [circuit, options] = parser.load_string(yaml);
     REQUIRE(parser.errors().empty());
     CHECK(options.transient_backend == TransientBackendMode::Auto);
@@ -411,6 +413,80 @@ components:
     CHECK(options.fallback_policy.backend_escalation_threshold == 3);
     CHECK(SimulationOptions{}.sundials.allow_formulation_fallback);
     CHECK(circuit.num_devices() == 1);
+}
+
+TEST_CASE("YAML parser applies canonical step_mode and advanced overrides",
+          "[v1][yaml][step-mode]") {
+    const std::string yaml_fixed = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  step_mode: fixed
+  advanced:
+    solver:
+      order: [klu]
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    auto [circuit_fixed, options_fixed] = parser.load_string(yaml_fixed);
+    REQUIRE(parser.errors().empty());
+    CHECK(options_fixed.step_mode == TransientStepMode::Fixed);
+    CHECK(options_fixed.step_mode_explicit);
+    CHECK_FALSE(options_fixed.adaptive_timestep);
+    REQUIRE(options_fixed.linear_solver.order.size() == 1);
+    CHECK(options_fixed.linear_solver.order.front() == LinearSolverKind::KLU);
+    CHECK(circuit_fixed.num_devices() == 1);
+
+    const std::string yaml_variable = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  step_mode: variable
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    auto [circuit_var, options_var] = parser.load_string(yaml_variable);
+    REQUIRE(parser.errors().empty());
+    CHECK(options_var.step_mode == TransientStepMode::Variable);
+    CHECK(options_var.step_mode_explicit);
+    CHECK(options_var.adaptive_timestep);
+    CHECK(options_var.enable_bdf_order_control);
+    CHECK(options_var.integrator == Integrator::TRBDF2);
+    CHECK(circuit_var.num_devices() == 1);
+}
+
+TEST_CASE("YAML parser emits strict migration diagnostics for legacy backend keys",
+          "[v1][yaml][migration]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  backend: auto
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    parser.load_string(yaml);
+    REQUIRE_FALSE(parser.errors().empty());
+    const auto joined = parser.errors().front();
+    CHECK(joined.find("simulation.backend") != std::string::npos);
+    CHECK(joined.find("simulation.step_mode") != std::string::npos);
 }
 
 TEST_CASE("YAML parser accepts GUI parity slice with virtual and surrogate components",

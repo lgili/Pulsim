@@ -1167,6 +1167,12 @@ void init_v2_module(py::module_& v2) {
         .value("LossWithTemperatureScaling", ThermalCouplingPolicy::LossWithTemperatureScaling)
         .export_values();
 
+    py::enum_<TransientStepMode>(v2, "StepMode",
+        "Canonical transient timestep mode")
+        .value("Fixed", TransientStepMode::Fixed)
+        .value("Variable", TransientStepMode::Variable)
+        .export_values();
+
     py::enum_<TransientBackendMode>(v2, "TransientBackendMode",
         "Transient backend selection mode")
         .value("Native", TransientBackendMode::Native)
@@ -1311,7 +1317,26 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("newton_options", &SimulationOptions::newton_options)
         .def_readwrite("dc_config", &SimulationOptions::dc_config)
         .def_readwrite("linear_solver", &SimulationOptions::linear_solver)
-        .def_readwrite("adaptive_timestep", &SimulationOptions::adaptive_timestep)
+        .def_property(
+            "adaptive_timestep",
+            [](const SimulationOptions& options) {
+                return options.adaptive_timestep;
+            },
+            [](SimulationOptions& options, bool adaptive) {
+                options.adaptive_timestep = adaptive;
+                options.step_mode = adaptive ? TransientStepMode::Variable : TransientStepMode::Fixed;
+                options.step_mode_explicit = false;
+            })
+        .def_property(
+            "step_mode",
+            [](const SimulationOptions& options) {
+                return options.step_mode;
+            },
+            [](SimulationOptions& options, TransientStepMode mode) {
+                options.step_mode = mode;
+                options.step_mode_explicit = true;
+                options.adaptive_timestep = (mode == TransientStepMode::Variable);
+            })
         .def_readwrite("timestep_config", &SimulationOptions::timestep_config)
         .def_readwrite("lte_config", &SimulationOptions::lte_config)
         .def_readwrite("integrator", &SimulationOptions::integrator)
