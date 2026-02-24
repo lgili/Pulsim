@@ -1640,6 +1640,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     } else if (variable_step_policy.enabled()) {
         dt = variable_step_policy.clamp_dt(t, dt, options_.tstop);
     }
+    const NewtonOptions baseline_newton_options = transient_services_.nonlinear_solve->options();
 
     circuit_.set_current_time(t);
     circuit_.set_timestep(dt);
@@ -1781,6 +1782,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         int retries = 0;
         NewtonResult step_result;
         Real dt_used = dt;
+        const Vector step_anchor_state = x;
 
         while (!accepted && retries <= options_.max_step_retries) {
             auto consume_fixed_recovery_budget = [&](const std::string& action_tag) {
@@ -1887,41 +1889,65 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 result.timestep_rejections++;
                 retries++;
                 if (!consume_fixed_recovery_budget("fixed_recovery_budget_newton")) {
+                    x = step_anchor_state;
                     continue;
                 }
+
+                FallbackReasonCode recovery_reason_code = FallbackReasonCode::NewtonFailure;
+                std::string recovery_action =
+                    recovery.reason.empty() ? std::string("recover_dt") : recovery.reason;
+
+                if (recovery.stage == RecoveryStage::GlobalizationEscalation) {
+                    NewtonOptions tuned_newton = transient_services_.nonlinear_solve->options();
+                    tuned_newton.auto_damping = true;
+                    tuned_newton.enable_trust_region = true;
+                    tuned_newton.max_iterations = std::max(tuned_newton.max_iterations, 120);
+                    tuned_newton.min_damping = std::min(tuned_newton.min_damping, Real{1e-5});
+                    tuned_newton.initial_damping = std::min(tuned_newton.initial_damping, Real{0.7});
+                    tuned_newton.trust_radius = std::max(Real{1.0}, tuned_newton.trust_radius * Real{0.5});
+                    transient_services_.nonlinear_solve->set_options(tuned_newton);
+                } else if (recovery.stage == RecoveryStage::StiffProfile) {
+                    recovery_reason_code = FallbackReasonCode::StiffnessBackoff;
+                    if (options_.enable_bdf_order_control) {
+                        bdf_controller_.set_order(
+                            std::min(bdf_controller_.current_order(), options_.stiffness_config.max_bdf_order));
+                        circuit_.set_integration_order(std::clamp(bdf_controller_.current_order(), 1, 2));
+                    } else if (options_.stiffness_config.switch_integrator) {
+                        circuit_.set_integration_method(options_.stiffness_config.stiff_integrator);
+                        using_stiff_integrator = true;
+                    }
+                    stiffness_cooldown = std::max(stiffness_cooldown, options_.stiffness_config.cooldown_steps);
+                } else if (recovery.stage == RecoveryStage::Regularization) {
+                    if (options_.fallback_policy.enable_transient_gmin) {
+                        Real next_gmin = transient_gmin_ > 0.0
+                            ? transient_gmin_ * options_.fallback_policy.gmin_growth
+                            : options_.fallback_policy.gmin_initial;
+                        transient_gmin_ = std::min(options_.fallback_policy.gmin_max,
+                                                   std::max(next_gmin, options_.fallback_policy.gmin_initial));
+                        recovery_reason_code = FallbackReasonCode::TransientGminEscalation;
+                        std::ostringstream action;
+                        action << "recovery_stage_regularization_gmin=" << transient_gmin_;
+                        recovery_action = action.str();
+                    } else {
+                        recovery_action = "recovery_stage_regularization_disabled";
+                    }
+                } else if (recovery.stage == RecoveryStage::Abort) {
+                    recovery_reason_code = FallbackReasonCode::MaxRetriesExceeded;
+                }
+
                 record_fallback_event(result,
                                       result.total_steps,
                                       retries,
                                       t,
                                       dt_used,
-                                      FallbackReasonCode::NewtonFailure,
+                                      recovery_reason_code,
                                       step_result.status,
-                                      recovery.reason.empty() ? "recover_dt" : recovery.reason);
+                                      recovery_action);
                 rejection_streak++;
                 high_iter_streak = 0;
                 if (options_.stiffness_config.enable &&
                     rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
                     stiffness_cooldown = options_.stiffness_config.cooldown_steps;
-                }
-                if (options_.fallback_policy.enable_transient_gmin &&
-                    retries >= options_.fallback_policy.gmin_retry_threshold) {
-                    Real next_gmin = transient_gmin_ > 0.0
-                        ? transient_gmin_ * options_.fallback_policy.gmin_growth
-                        : options_.fallback_policy.gmin_initial;
-                    next_gmin = std::min(options_.fallback_policy.gmin_max, next_gmin);
-                    if (next_gmin > transient_gmin_) {
-                        transient_gmin_ = next_gmin;
-                        std::ostringstream action;
-                        action << "gmin=" << transient_gmin_;
-                        record_fallback_event(result,
-                                              result.total_steps,
-                                              retries,
-                                              t,
-                                              dt_used,
-                                              FallbackReasonCode::TransientGminEscalation,
-                                              step_result.status,
-                                              action.str());
-                    }
                 }
                 if (options_.enable_bdf_order_control) {
                     (void)bdf_controller_.reduce_on_failure();
@@ -1929,6 +1955,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 if (recovery.abort) {
                     retries = options_.max_step_retries + 1;
                 }
+                x = step_anchor_state;
                 continue;
             }
 
@@ -2135,6 +2162,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         rejection_streak = 0;
         global_recovery_attempts = 0;
         transient_gmin_ = 0.0;
+        transient_services_.nonlinear_solve->set_options(baseline_newton_options);
 
         if (options_.stiffness_config.enable) {
             if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {

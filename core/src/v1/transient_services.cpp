@@ -435,10 +435,38 @@ public:
             return decision;
         }
 
-        decision.stage = RecoveryStage::DtBackoff;
-        decision.next_dt = std::max(request.dt_candidate * backoff_, request.dt_min);
+        const int failure_index = std::max(0, request.retry_index);
+        if (failure_index == 0) {
+            decision.stage = RecoveryStage::DtBackoff;
+            decision.next_dt = std::max(request.dt_candidate * backoff_, request.dt_min);
+            decision.abort = false;
+            decision.reason = "recovery_stage_dt_backoff";
+            return decision;
+        }
+
+        if (failure_index == 1) {
+            decision.stage = RecoveryStage::GlobalizationEscalation;
+            decision.next_dt = std::max(request.dt_candidate * std::min(backoff_, Real{0.85}),
+                                        request.dt_min);
+            decision.abort = false;
+            decision.reason = "recovery_stage_globalization";
+            return decision;
+        }
+
+        if (failure_index == 2) {
+            decision.stage = RecoveryStage::StiffProfile;
+            decision.next_dt = std::max(request.dt_candidate * std::min(backoff_, Real{0.75}),
+                                        request.dt_min);
+            decision.abort = false;
+            decision.reason = "recovery_stage_stiff_profile";
+            return decision;
+        }
+
+        decision.stage = RecoveryStage::Regularization;
+        decision.next_dt = std::max(request.dt_candidate * std::min(backoff_, Real{0.65}),
+                                    request.dt_min);
         decision.abort = false;
-        decision.reason = "dt_backoff";
+        decision.reason = "recovery_stage_regularization";
         return decision;
     }
 
