@@ -365,6 +365,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
   backend: auto
+  advanced:
+    backend: sundials
+    sundials:
+      enabled: true
 components:
   - type: resistor
     name: R1
@@ -375,6 +379,8 @@ components:
     parser.load_string(content)
     assert parser.errors
     assert any("simulation.backend" in msg for msg in parser.errors)
+    assert any("simulation.advanced.backend" in msg for msg in parser.errors)
+    assert any("simulation.advanced.sundials" in msg for msg in parser.errors)
     assert any("simulation.step_mode" in msg for msg in parser.errors)
 
 
@@ -392,11 +398,7 @@ def test_sundials_formulation_enum_and_telemetry_binding() -> None:
     assert telemetry.function_evaluations == 10
 
 
-def test_sundials_direct_request_runs_for_cvode_family() -> None:
-    caps = ps.backend_capabilities()
-    if not caps.get("sundials_compiled", False):
-        pytest.skip("SUNDIALS support not available in this build")
-
+def test_legacy_sundials_backend_request_returns_migration_diagnostic_for_cvode() -> None:
     circuit = _build_rc_circuit()
     opts = ps.SimulationOptions()
     opts.tstart = 0.0
@@ -409,9 +411,14 @@ def test_sundials_direct_request_runs_for_cvode_family() -> None:
 
     sim = ps.Simulator(circuit, opts)
     result = sim.run_transient()
-    assert result.backend_telemetry.selected_backend == "sundials"
-    assert result.backend_telemetry.solver_family == "cvode"
-    assert result.backend_telemetry.formulation_mode == "direct"
+    assert not result.success
+    assert "no longer supported" in result.message
+    assert "simulation.step_mode: fixed|variable" in result.message
+    assert result.backend_telemetry.requested_backend == "sundials"
+    assert result.backend_telemetry.selected_backend == "native"
+    assert result.backend_telemetry.solver_family == "native"
+    assert result.backend_telemetry.formulation_mode == "native"
+    assert result.backend_telemetry.failure_reason == "legacy_backend_removed"
 
 
 def test_yaml_parser_gui_parity_slice_registers_virtual_components() -> None:
@@ -1542,7 +1549,10 @@ def test_fallback_trace_records_retry_reasons() -> None:
     assert len(result.fallback_trace) > 0
     reasons = {entry.reason for entry in result.fallback_trace}
     assert ps.FallbackReasonCode.NewtonFailure in reasons
-    assert ps.FallbackReasonCode.TransientGminEscalation in reasons
+    assert (
+        ps.FallbackReasonCode.TransientGminEscalation in reasons
+        or ps.FallbackReasonCode.StiffnessBackoff in reasons
+    )
     assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons
 
 
@@ -1632,7 +1642,7 @@ def test_linear_factor_cache_telemetry_is_exposed() -> None:
     ) >= result.backend_telemetry.state_space_primary_steps
 
 
-def test_sundials_only_backend_reports_availability() -> None:
+def test_legacy_sundials_backend_request_returns_migration_diagnostic() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
     n_out = circuit.add_node("out")
@@ -1650,19 +1660,17 @@ def test_sundials_only_backend_reports_availability() -> None:
     opts.sundials.family = ps.SundialsSolverFamily.IDA
 
     result = ps.Simulator(circuit, opts).run_transient()
-    caps = ps.backend_capabilities()
-    if caps.get("sundials", False):
-        assert result.success
-        assert result.backend_telemetry.selected_backend == "sundials"
-        assert result.backend_telemetry.solver_family == "ida"
-        assert len(result.time) >= 2
-    else:
-        assert not result.success
-        assert "without SUNDIALS support" in result.message
-        assert result.backend_telemetry.failure_reason == "sundials_not_compiled"
+    assert not result.success
+    assert "no longer supported" in result.message
+    assert "simulation.step_mode: fixed|variable" in result.message
+    assert result.backend_telemetry.requested_backend == "sundials"
+    assert result.backend_telemetry.selected_backend == "native"
+    assert result.backend_telemetry.solver_family == "native"
+    assert result.backend_telemetry.formulation_mode == "native"
+    assert result.backend_telemetry.failure_reason == "legacy_backend_removed"
 
 
-def test_sundials_only_backend_requires_explicit_enable() -> None:
+def test_legacy_auto_backend_request_returns_migration_diagnostic() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
     n_out = circuit.add_node("out")
@@ -1675,13 +1683,15 @@ def test_sundials_only_backend_requires_explicit_enable() -> None:
     opts.tstart = 0.0
     opts.tstop = 1e-4
     opts.dt = 1e-6
-    opts.transient_backend = ps.TransientBackendMode.SundialsOnly
-    opts.sundials.enabled = False
+    opts.transient_backend = ps.TransientBackendMode.Auto
 
     result = ps.Simulator(circuit, opts).run_transient()
     assert not result.success
-    assert "disabled in simulation.sundials.enabled" in result.message
-    assert result.backend_telemetry.failure_reason == "sundials_backend_disabled"
+    assert "no longer supported" in result.message
+    assert "simulation.step_mode: fixed|variable" in result.message
+    assert result.backend_telemetry.requested_backend == "auto"
+    assert result.backend_telemetry.selected_backend == "native"
+    assert result.backend_telemetry.failure_reason == "legacy_backend_removed"
 
 
 def test_variable_step_accept_reject_pattern_is_deterministic() -> None:

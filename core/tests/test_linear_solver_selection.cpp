@@ -474,6 +474,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
   backend: auto
+  advanced:
+    backend: sundials
+    sundials:
+      enabled: true
 components:
   - type: resistor
     name: R1
@@ -484,8 +488,14 @@ components:
     parser::YamlParser parser;
     parser.load_string(yaml);
     REQUIRE_FALSE(parser.errors().empty());
-    const auto joined = parser.errors().front();
+    std::string joined;
+    for (const auto& err : parser.errors()) {
+        joined += err;
+        joined.push_back('\n');
+    }
     CHECK(joined.find("simulation.backend") != std::string::npos);
+    CHECK(joined.find("simulation.advanced.backend") != std::string::npos);
+    CHECK(joined.find("simulation.advanced.sundials") != std::string::npos);
     CHECK(joined.find("simulation.step_mode") != std::string::npos);
 }
 

@@ -33,6 +33,7 @@ options.newton_options.num_nodes = int(circuit.num_nodes())
 options.newton_options.num_branches = int(circuit.num_branches())
 options.linear_solver = ps.LinearSolverStackConfig.defaults()
 options.integrator = ps.Integrator.TRBDF2
+options.step_mode = ps.StepMode.Variable
 
 sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
@@ -86,10 +87,15 @@ times, states, ok, msg = ps.run_transient(
 
 ### Timestep e integrador
 
+- `SimulationOptions.step_mode` (`StepMode.Fixed` ou `StepMode.Variable`)
 - `SimulationOptions.integrator`
 - `SimulationOptions.adaptive_timestep`
 - `SimulationOptions.timestep_config`
 - `SimulationOptions.lte_config`
+
+`SimulationOptions.transient_backend` e `SimulationOptions.sundials` permanecem
+apenas para migração/diagnóstico de legado; o caminho suportado usa core nativo
+com `step_mode`.
 
 ### Térmico e perdas
 

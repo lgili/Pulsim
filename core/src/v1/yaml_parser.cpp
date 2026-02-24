@@ -119,7 +119,7 @@ void push_legacy_backend_migration_error(std::vector<std::string>& errors, const
         kDiagLegacyTransientBackend,
         "Deprecated transient backend key '" + key_path +
             "' is unsupported in strict mode. Use 'simulation.step_mode: fixed|variable' "
-            "and move expert backend overrides under 'simulation.advanced'.");
+            "with the native core.");
 }
 
 const std::unordered_map<std::string, std::string>& component_alias_map() {
@@ -601,6 +601,12 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
             if (sim["sundials"]) {
                 push_legacy_backend_migration_error(errors_, "simulation.sundials");
+            }
+            if (advanced && advanced["backend"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.advanced.backend");
+            }
+            if (advanced && advanced["sundials"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.advanced.sundials");
             }
         }
 
