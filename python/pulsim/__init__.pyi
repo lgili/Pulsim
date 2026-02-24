@@ -472,6 +472,8 @@ class BackendTelemetry:
     segment_non_admissible_steps: int
     segment_model_cache_hits: int
     segment_model_cache_misses: int
+    linear_factor_cache_hits: int
+    linear_factor_cache_misses: int
     equation_assemble_system_calls: int
     equation_assemble_residual_calls: int
     equation_assemble_system_time_seconds: float

@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 namespace pulsim::v1 {
@@ -24,6 +26,22 @@ constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 inline void hash_mix(std::uint64_t& seed, std::uint64_t value) {
     seed ^= value;
     seed *= kFnvPrime;
+}
+
+[[nodiscard]] std::uint64_t hash_sparse_numeric_signature(const SparseMatrix& matrix) {
+    std::uint64_t hash = kFnvOffset;
+    hash_mix(hash, static_cast<std::uint64_t>(matrix.rows()));
+    hash_mix(hash, static_cast<std::uint64_t>(matrix.cols()));
+    hash_mix(hash, static_cast<std::uint64_t>(matrix.nonZeros()));
+    for (Index col = 0; col < matrix.outerSize(); ++col) {
+        for (SparseMatrix::InnerIterator it(matrix, col); it; ++it) {
+            hash_mix(hash, static_cast<std::uint64_t>(it.row() + 1));
+            hash_mix(hash, static_cast<std::uint64_t>(it.col() + 1));
+            const auto value_hash = static_cast<std::uint64_t>(std::hash<Real>{}(it.value()));
+            hash_mix(hash, value_hash);
+        }
+    }
+    return hash;
 }
 
 class DefaultEquationAssemblerService final : public EquationAssemblerService {
@@ -304,17 +322,44 @@ public:
         }
 
         auto& linear = linear_solve_->solver();
-        if (!linear.analyze(linear_model.E) || !linear.factorize(linear_model.E)) {
-            outcome.requires_fallback = true;
-            outcome.reason = "segment_linear_factorization_failed";
-            return outcome;
+        const std::uint64_t matrix_hash = hash_sparse_numeric_signature(linear_model.E);
+        const bool can_reuse_factorization =
+            factorization_valid_ &&
+            cached_topology_signature_ == model.topology_signature &&
+            cached_matrix_hash_ == matrix_hash &&
+            cached_state_size_ == linear_model.E.rows();
+
+        LinearSolveResult x_next_result = LinearSolveResult::failure("segment_linear_not_attempted");
+        if (can_reuse_factorization) {
+            x_next_result = linear.solve(rhs);
+            if (x_next_result.has_value()) {
+                outcome.linear_factor_cache_hit = true;
+            } else {
+                factorization_valid_ = false;
+            }
         }
 
-        const auto x_next_result = linear.solve(rhs);
-        if (!x_next_result) {
-            outcome.requires_fallback = true;
-            outcome.reason = "segment_linear_solve_failed";
-            return outcome;
+        if (!x_next_result.has_value()) {
+            outcome.linear_factor_cache_miss = true;
+            if (!linear.analyze(linear_model.E) || !linear.factorize(linear_model.E)) {
+                factorization_valid_ = false;
+                outcome.requires_fallback = true;
+                outcome.reason = "segment_linear_factorization_failed";
+                return outcome;
+            }
+
+            x_next_result = linear.solve(rhs);
+            if (!x_next_result) {
+                factorization_valid_ = false;
+                outcome.requires_fallback = true;
+                outcome.reason = "segment_linear_solve_failed";
+                return outcome;
+            }
+
+            factorization_valid_ = true;
+            cached_topology_signature_ = model.topology_signature;
+            cached_matrix_hash_ = matrix_hash;
+            cached_state_size_ = linear_model.E.rows();
         }
 
         Vector x_next = x_next_result.value();
@@ -347,13 +392,19 @@ public:
         outcome.result.final_residual = r1;
         outcome.result.final_weighted_error = (outcome.result.solution - x_now).lpNorm<Eigen::Infinity>();
         outcome.requires_fallback = false;
-        outcome.reason = "state_space_linearized_step";
+        outcome.reason = outcome.linear_factor_cache_hit
+            ? "state_space_linearized_step_cache_hit"
+            : "state_space_linearized_step_cache_miss";
         return outcome;
     }
 
 private:
     std::shared_ptr<EquationAssemblerService> assembler_;
     std::shared_ptr<LinearSolveService> linear_solve_;
+    bool factorization_valid_ = false;
+    std::uint64_t cached_topology_signature_ = 0;
+    std::uint64_t cached_matrix_hash_ = 0;
+    Index cached_state_size_ = 0;
 };
 
 class DefaultNonlinearSolveService final : public NonlinearSolveService {

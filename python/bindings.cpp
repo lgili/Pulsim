@@ -1244,6 +1244,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("segment_non_admissible_steps", &BackendTelemetry::segment_non_admissible_steps)
         .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
         .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
+        .def_readwrite("linear_factor_cache_hits", &BackendTelemetry::linear_factor_cache_hits)
+        .def_readwrite("linear_factor_cache_misses", &BackendTelemetry::linear_factor_cache_misses)
         .def_readwrite("equation_assemble_system_calls", &BackendTelemetry::equation_assemble_system_calls)
         .def_readwrite("equation_assemble_residual_calls", &BackendTelemetry::equation_assemble_residual_calls)
         .def_readwrite("equation_assemble_system_time_seconds", &BackendTelemetry::equation_assemble_system_time_seconds)

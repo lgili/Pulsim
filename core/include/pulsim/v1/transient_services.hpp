@@ -63,6 +63,8 @@ struct SegmentStepOutcome {
     NewtonResult result;
     SegmentSolvePath path = SegmentSolvePath::DaeFallback;
     bool requires_fallback = true;
+    bool linear_factor_cache_hit = false;
+    bool linear_factor_cache_miss = false;
     std::string reason;
 };
 
