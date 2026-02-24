@@ -27,8 +27,8 @@
 ## 4. Variable-step engine
 - [x] 4.1 Implement `VariableStepPolicy` with LTE + Newton-feedback coupled control.
 - [x] 4.2 Implement growth/shrink guards and event clipping in adaptive controller.
-- [ ] 4.3 Integrate stiff-profile switching policy near discontinuities.
-- [ ] 4.4 Add regression tests for adaptive acceptance/rejection determinism.
+- [x] 4.3 Integrate stiff-profile switching policy near discontinuities.
+- [x] 4.4 Add regression tests for adaptive acceptance/rejection determinism.
 - [ ] 4.5 Gate: accuracy/runtime KPI pass variable-mode matrix.
 
 ## 5. Deterministic recovery ladder

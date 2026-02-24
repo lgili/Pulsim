@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pulsim as ps
 import pytest
 
@@ -1537,3 +1539,41 @@ def test_sundials_only_backend_requires_explicit_enable() -> None:
     assert not result.success
     assert "disabled in simulation.sundials.enabled" in result.message
     assert result.backend_telemetry.failure_reason == "sundials_backend_disabled"
+
+
+def test_variable_step_accept_reject_pattern_is_deterministic() -> None:
+    root = Path(__file__).resolve().parents[2]
+    case_path = root / "benchmarks" / "circuits" / "diode_rectifier.yaml"
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+
+    def run_once() -> ps.SimulationResult:
+        parser = ps.YamlParser(parser_opts)
+        circuit, opts = parser.load(str(case_path))
+        assert parser.errors == []
+
+        opts.adaptive_timestep = True
+        opts.enable_bdf_order_control = False
+        opts.fallback_policy.trace_retries = True
+        opts.max_step_retries = max(opts.max_step_retries, 6)
+        opts.dt_min = min(opts.dt_min, max(opts.dt * 0.02, 1e-9))
+        opts.dt_max = max(opts.dt_max, opts.dt * 8.0)
+
+        return ps.Simulator(circuit, opts).run_transient()
+
+    result_a = run_once()
+    result_b = run_once()
+
+    assert result_a.success == result_b.success
+    assert result_a.final_status == result_b.final_status
+    assert result_a.total_steps == result_b.total_steps
+    assert result_a.timestep_rejections == result_b.timestep_rejections
+    assert result_a.timestep_rejections > 0
+
+    trace_a = [(entry.reason, entry.action) for entry in result_a.fallback_trace]
+    trace_b = [(entry.reason, entry.action) for entry in result_b.fallback_trace]
+    assert trace_a == trace_b
+
+    assert len(result_a.time) == len(result_b.time)
+    for ta, tb in zip(result_a.time, result_b.time):
+        assert ta == pytest.approx(tb, abs=1e-15)
