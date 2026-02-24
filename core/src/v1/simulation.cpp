@@ -247,6 +247,61 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     return std::abs(a - b) <= scale * Real{1e-12};
 }
 
+class VariableStepPolicy final {
+public:
+    VariableStepPolicy() = default;
+
+    VariableStepPolicy(AdvancedTimestepController& controller, Real dt_min, Real dt_max)
+        : enabled_(true)
+        , controller_(&controller)
+        , dt_min_(std::max(dt_min, Real{1e-18}))
+        , dt_max_(std::max(dt_max, dt_min_)) {}
+
+    [[nodiscard]] bool enabled() const {
+        return enabled_ && controller_ != nullptr;
+    }
+
+    [[nodiscard]] Real clamp_dt(Real t_now, Real dt_candidate, Real t_stop) const {
+        Real dt = std::clamp(dt_candidate, dt_min_, dt_max_);
+        if (t_now + dt > t_stop) {
+            dt = t_stop - t_now;
+        }
+        return std::max<Real>(0.0, dt);
+    }
+
+    [[nodiscard]] AdvancedTimestepDecision evaluate(Real lte,
+                                                    int newton_iterations,
+                                                    int integration_order,
+                                                    Real dt_current) const {
+        if (!enabled() || !std::isfinite(lte) || lte < 0.0) {
+            AdvancedTimestepDecision passthrough;
+            passthrough.accepted = true;
+            passthrough.dt_new = std::clamp(dt_current, dt_min_, dt_max_);
+            passthrough.error_ratio = 0.0;
+            passthrough.newton_iterations = newton_iterations;
+            return passthrough;
+        }
+
+        AdvancedTimestepDecision decision =
+            controller_->compute_combined(lte, newton_iterations, integration_order);
+        decision.dt_new = std::clamp(decision.dt_new, dt_min_, dt_max_);
+        return decision;
+    }
+
+    void on_step_accepted(Real dt_used) {
+        if (!enabled()) {
+            return;
+        }
+        controller_->accept(std::clamp(dt_used, dt_min_, dt_max_));
+    }
+
+private:
+    bool enabled_ = false;
+    AdvancedTimestepController* controller_ = nullptr;
+    Real dt_min_ = 0.0;
+    Real dt_max_ = 0.0;
+};
+
 class FixedStepPolicy final {
 public:
     FixedStepPolicy() = default;
@@ -1554,6 +1609,13 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     const bool can_auto_recover = options_.adaptive_timestep &&
                                   options_.linear_solver.allow_fallback &&
                                   !is_fixed_timestep(options_);
+    VariableStepPolicy variable_step_policy;
+    if (step_mode == TransientStepMode::Variable) {
+        variable_step_policy = VariableStepPolicy(
+            timestep_controller_,
+            options_.dt_min,
+            options_.dt_max);
+    }
     FixedStepPolicy fixed_step_policy;
     if (step_mode == TransientStepMode::Fixed) {
         const int fixed_substep_budget = std::max(4, options_.max_step_retries + 4);
@@ -1566,6 +1628,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             fixed_substep_budget,
             fixed_recovery_budget);
         dt = fixed_step_policy.clamp_dt(t, fixed_step_policy.default_dt());
+    } else if (variable_step_policy.enabled()) {
+        dt = variable_step_policy.clamp_dt(t, dt, options_.tstop);
     }
 
     circuit_.set_current_time(t);
@@ -1649,15 +1713,19 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         auto clamp_dt_for_mode = [&](Real dt_candidate) {
-            return fixed_step_policy.enabled()
-                ? fixed_step_policy.clamp_dt(t, dt_candidate)
-                : dt_candidate;
+            if (fixed_step_policy.enabled()) {
+                return fixed_step_policy.clamp_dt(t, dt_candidate);
+            }
+            if (variable_step_policy.enabled()) {
+                return variable_step_policy.clamp_dt(t, dt_candidate, options_.tstop);
+            }
+            return dt_candidate;
         };
 
         if (fixed_step_policy.enabled()) {
             dt = clamp_dt_for_mode(fixed_step_policy.default_dt());
-        } else if (t + dt > options_.tstop) {
-            dt = options_.tstop - t;
+        } else {
+            dt = clamp_dt_for_mode(dt);
         }
         if (dt < options_.dt_min * 0.1) {
             break;
@@ -1792,16 +1860,20 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
 
             Real lte = -1.0;
-            if (options_.adaptive_timestep && lte_estimator_.has_sufficient_history()) {
+            if (variable_step_policy.enabled() && lte_estimator_.has_sufficient_history()) {
                 lte = lte_estimator_.compute(step_result.solution,
                                              circuit_.num_nodes(),
                                              circuit_.num_branches());
             }
 
-            if (options_.adaptive_timestep && lte >= 0.0) {
-                auto decision = timestep_controller_.compute_combined(
-                    lte, step_result.iterations,
-                    options_.enable_bdf_order_control ? bdf_controller_.current_order() : 2);
+            if (variable_step_policy.enabled() && lte >= 0.0) {
+                const int integration_order =
+                    options_.enable_bdf_order_control ? bdf_controller_.current_order() : 2;
+                auto decision = variable_step_policy.evaluate(
+                    lte,
+                    step_result.iterations,
+                    integration_order,
+                    dt_used);
 
                 if (!decision.accepted) {
                     circuit_.clear_stage_context();
@@ -2038,6 +2110,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         update_thermal_state(dt_used);
 
         t += dt_used;
+        variable_step_policy.on_step_accepted(dt_used);
         bool emit_sample = true;
         if (fixed_step_policy.enabled()) {
             emit_sample = fixed_step_policy.on_step_accepted(t);

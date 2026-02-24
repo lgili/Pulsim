@@ -25,7 +25,7 @@
 - [x] 3.5 Gate: event-time KPI and runtime KPI pass fixed-mode matrix.
 
 ## 4. Variable-step engine
-- [ ] 4.1 Implement `VariableStepPolicy` with LTE + Newton-feedback coupled control.
+- [x] 4.1 Implement `VariableStepPolicy` with LTE + Newton-feedback coupled control.
 - [ ] 4.2 Implement growth/shrink guards and event clipping in adaptive controller.
 - [ ] 4.3 Integrate stiff-profile switching policy near discontinuities.
 - [ ] 4.4 Add regression tests for adaptive acceptance/rejection determinism.
