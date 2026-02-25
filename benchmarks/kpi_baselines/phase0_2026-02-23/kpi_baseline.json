@@ -19,8 +19,10 @@
   "environment": {
     "os": "macOS-26.4-arm64-arm-64bit-Mach-O",
     "python": "Python 3.13.5",
+    "machine_class": "unknown",
     "cmake": "cmake version 4.2.3",
     "clang": "Homebrew clang version 21.1.2",
-    "cc": "Apple clang version 17.0.0 (clang-1700.6.3.2)"
+    "cc": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
+    "cxx_flags": "unknown"
   }
 }

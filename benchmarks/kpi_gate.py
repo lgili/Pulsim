@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,273 @@ def _load_thresholds(path: Path) -> Dict[str, Any]:
         raise RuntimeError("PyYAML is required to load non-JSON thresholds")
     with open(path, "r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _parse_utc_timestamp(raw: Any) -> Optional[datetime]:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    normalized = raw.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def validate_threshold_policy(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    checks: Dict[str, Any] = {}
+
+    schema = payload.get("schema")
+    if schema is not None and schema != "pulsim-kpi-gates-v1":
+        errors.append("threshold policy has unsupported schema value")
+    checks["schema"] = schema
+
+    version = payload.get("version")
+    if version is not None and not isinstance(version, int):
+        errors.append("threshold policy version must be an integer when provided")
+    checks["version"] = version
+
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict) or not metrics:
+        errors.append("threshold policy must define a non-empty metrics mapping")
+        checks["metrics_count"] = 0
+    else:
+        checks["metrics_count"] = len(metrics)
+        for metric_name, rules in metrics.items():
+            if not isinstance(metric_name, str) or not metric_name:
+                errors.append("threshold metric names must be non-empty strings")
+                continue
+            if not isinstance(rules, dict):
+                errors.append(f"threshold rules for metric '{metric_name}' must be an object")
+                continue
+            direction = rules.get("direction", "lower_is_better")
+            if direction not in ("lower_is_better", "higher_is_better"):
+                errors.append(
+                    f"threshold metric '{metric_name}' has invalid direction '{direction}'"
+                )
+            for key in ("max_regression_abs", "max_regression_rel"):
+                value = rules.get(key)
+                if value is None:
+                    continue
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"threshold metric '{metric_name}' field '{key}' must be numeric"
+                    )
+                    continue
+                if numeric < 0.0:
+                    errors.append(
+                        f"threshold metric '{metric_name}' field '{key}' must be >= 0"
+                    )
+            if "max_regression_abs" not in rules and "max_regression_rel" not in rules:
+                warnings.append(
+                    f"threshold metric '{metric_name}' has no regression bound and will never fail"
+                )
+
+    return {
+        "status": "failed" if errors else "passed",
+        "errors": errors,
+        "warnings": warnings,
+        "checks": checks,
+    }
+
+
+def validate_baseline_provenance(
+    baseline_payload: Dict[str, Any],
+    baseline_path: Path,
+) -> Dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    checks: Dict[str, Any] = {
+        "baseline_path": str(baseline_path),
+    }
+
+    schema_version = baseline_payload.get("schema_version")
+    if schema_version != "pulsim-kpi-baseline-v1":
+        errors.append("baseline schema_version must be 'pulsim-kpi-baseline-v1'")
+    checks["schema_version"] = schema_version
+
+    baseline_id = baseline_payload.get("baseline_id")
+    if not isinstance(baseline_id, str) or not baseline_id.strip():
+        errors.append("baseline_id must be a non-empty string")
+    checks["baseline_id"] = baseline_id
+
+    captured_at = baseline_payload.get("captured_at_utc")
+    captured_at_ts = _parse_utc_timestamp(captured_at)
+    if captured_at_ts is None:
+        errors.append("captured_at_utc must be a valid ISO-8601 timestamp")
+    checks["captured_at_utc"] = captured_at
+
+    metrics = baseline_payload.get("metrics")
+    if not isinstance(metrics, dict) or not metrics:
+        errors.append("baseline metrics must be a non-empty object")
+        checks["metrics_count"] = 0
+    else:
+        checks["metrics_count"] = len(metrics)
+
+    environment = baseline_payload.get("environment")
+    if not isinstance(environment, dict):
+        errors.append("baseline environment fingerprint is required")
+        checks["environment_keys"] = []
+    else:
+        env_keys = sorted(str(key) for key in environment.keys())
+        checks["environment_keys"] = env_keys
+        for required in ("os", "python"):
+            value = environment.get(required)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"baseline environment field '{required}' is required")
+        recommended_keys = ("machine_class", "compiler", "cmake", "cxx_flags")
+        for recommended in recommended_keys:
+            value = environment.get(recommended)
+            if not isinstance(value, str) or not value.strip():
+                warnings.append(
+                    f"baseline environment field '{recommended}' is recommended for stronger provenance"
+                )
+
+    manifest_path = baseline_path.with_name("artifact_manifest.json")
+    checks["manifest_path"] = str(manifest_path)
+    if not manifest_path.is_file():
+        errors.append("artifact_manifest.json is required beside kpi_baseline.json")
+        return {
+            "status": "failed",
+            "errors": errors,
+            "warnings": warnings,
+            "checks": checks,
+        }
+
+    manifest_payload = _load_json(manifest_path)
+    manifest_schema = manifest_payload.get("schema_version")
+    if manifest_schema != "pulsim-kpi-baseline-manifest-v1":
+        errors.append("manifest schema_version must be 'pulsim-kpi-baseline-manifest-v1'")
+    checks["manifest_schema_version"] = manifest_schema
+
+    manifest_baseline_id = manifest_payload.get("baseline_id")
+    if manifest_baseline_id != baseline_id:
+        errors.append("baseline_id mismatch between baseline and manifest")
+    checks["manifest_baseline_id"] = manifest_baseline_id
+
+    manifest_captured = manifest_payload.get("captured_at_utc")
+    manifest_captured_ts = _parse_utc_timestamp(manifest_captured)
+    if manifest_captured_ts is None:
+        errors.append("manifest captured_at_utc must be a valid ISO-8601 timestamp")
+    elif captured_at_ts is not None and manifest_captured_ts != captured_at_ts:
+        errors.append("captured_at_utc mismatch between baseline and manifest")
+    checks["manifest_captured_at_utc"] = manifest_captured
+
+    files = manifest_payload.get("files")
+    if not isinstance(files, list) or not files:
+        errors.append("manifest files must be a non-empty array")
+        checks["manifest_file_count"] = 0
+        return {
+            "status": "failed",
+            "errors": errors,
+            "warnings": warnings,
+            "checks": checks,
+        }
+    checks["manifest_file_count"] = len(files)
+
+    source_bench_results = baseline_payload.get("source_bench_results")
+    source_bench_results_resolved: Optional[Path] = None
+    if isinstance(source_bench_results, str) and source_bench_results.strip():
+        source_bench_results_resolved = _resolve_existing_path(
+            source_bench_results.strip(),
+            baseline_path,
+        )
+    checks["source_bench_results"] = source_bench_results
+    checks["source_bench_results_resolved"] = (
+        str(source_bench_results_resolved)
+        if source_bench_results_resolved is not None
+        else None
+    )
+
+    verified_files = 0
+    missing_files = 0
+    digest_mismatches = 0
+    size_mismatches = 0
+    bench_results_declared = 0
+
+    for idx, entry in enumerate(files):
+        if not isinstance(entry, dict):
+            errors.append(f"manifest file entry {idx} must be an object")
+            continue
+        path_value = entry.get("path")
+        sha_value = entry.get("sha256")
+        size_value = entry.get("size_bytes")
+
+        if not isinstance(path_value, str) or not path_value.strip():
+            errors.append(f"manifest file entry {idx} path must be a non-empty string")
+            continue
+        if path_value.endswith("benchmarks/results.json"):
+            bench_results_declared += 1
+
+        if not isinstance(sha_value, str) or not re.fullmatch(r"[0-9a-f]{64}", sha_value):
+            errors.append(f"manifest file entry {idx} has invalid sha256 value")
+            continue
+
+        if not isinstance(size_value, int) or size_value < 0:
+            errors.append(f"manifest file entry {idx} size_bytes must be a non-negative integer")
+            continue
+
+        resolved = _resolve_existing_path(path_value, baseline_path)
+        if resolved is None or not resolved.is_file():
+            errors.append(f"manifest file entry {idx} does not resolve to an existing file")
+            missing_files += 1
+            continue
+
+        actual_size = resolved.stat().st_size
+        if actual_size != size_value:
+            errors.append(
+                f"manifest file entry {idx} size mismatch for '{path_value}' "
+                f"(expected={size_value}, actual={actual_size})"
+            )
+            size_mismatches += 1
+            continue
+
+        actual_sha = _sha256_file(resolved)
+        if actual_sha != sha_value:
+            errors.append(
+                f"manifest file entry {idx} sha256 mismatch for '{path_value}'"
+            )
+            digest_mismatches += 1
+            continue
+
+        verified_files += 1
+
+    checks["verified_files"] = verified_files
+    checks["missing_files"] = missing_files
+    checks["digest_mismatches"] = digest_mismatches
+    checks["size_mismatches"] = size_mismatches
+    checks["bench_results_declared"] = bench_results_declared
+
+    if bench_results_declared == 0:
+        if source_bench_results_resolved is None:
+            errors.append(
+                "baseline must provide a resolvable source_bench_results when "
+                "manifest lacks benchmarks/results.json"
+            )
+        else:
+            warnings.append(
+                "manifest does not include a benchmarks/results.json artifact entry; "
+                "runtime scope uses source_bench_results"
+            )
+
+    return {
+        "status": "failed" if errors else "passed",
+        "errors": errors,
+        "warnings": warnings,
+        "checks": checks,
+    }
 
 
 def _case_key(row: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -190,7 +459,7 @@ def compute_metrics(
     executed = [
         row
         for row in bench_results
-        if row.get("status") in ("passed", "failed")
+        if isinstance(row, dict) and row.get("status") in ("passed", "failed")
     ]
 
     passed = sum(1 for row in executed if row.get("status") == "passed")
@@ -414,16 +683,39 @@ def run_gate(
     parity_ltspice_results_path: Optional[Path],
     parity_ngspice_results_path: Optional[Path],
     stress_summary_path: Optional[Path],
+    strict_provenance: bool = True,
 ) -> Dict[str, Any]:
     baseline_payload = _load_json(baseline_path)
     threshold_payload = _load_thresholds(thresholds_path)
-    runtime_case_filter, runtime_scope = resolve_runtime_scope(
+    baseline_provenance = validate_baseline_provenance(
         baseline_payload=baseline_payload,
         baseline_path=baseline_path,
-        bench_results_path=bench_results_path,
+    )
+    threshold_provenance = validate_threshold_policy(threshold_payload)
+    blocked_by_provenance = (
+        baseline_provenance["status"] == "failed" or threshold_provenance["status"] == "failed"
     )
 
+    runtime_case_filter: Optional[Set[Tuple[str, str]]] = None
+    runtime_scope: Dict[str, Any] = {
+        "mode": "all_executed",
+        "reason": "provenance_gate_blocked",
+        "executed_total": 0,
+        "executed_with_ids": 0,
+        "baseline_scope_total": 0,
+        "comparable_total": 0,
+        "baseline_results_path": None,
+    }
+    if not blocked_by_provenance or not strict_provenance:
+        runtime_case_filter, runtime_scope = resolve_runtime_scope(
+            baseline_payload=baseline_payload,
+            baseline_path=baseline_path,
+            bench_results_path=bench_results_path,
+        )
+
     baseline_metrics = baseline_payload.get("metrics", {})
+    if not isinstance(baseline_metrics, dict):
+        baseline_metrics = {}
     current_metrics = compute_metrics(
         bench_results_path=bench_results_path,
         parity_ltspice_results_path=parity_ltspice_results_path,
@@ -433,36 +725,41 @@ def run_gate(
     )
 
     metric_rules = threshold_payload.get("metrics", {})
+    if not isinstance(metric_rules, dict):
+        metric_rules = {}
     comparisons: Dict[str, Dict[str, Any]] = {}
 
     failed_required = 0
     skipped_optional = 0
 
-    for metric_name, rules in metric_rules.items():
-        cmp = compare_metric(
-            name=metric_name,
-            current_value=current_metrics.get(metric_name),
-            baseline_value=baseline_metrics.get(metric_name),
-            rules=rules or {},
-        )
-        comparisons[metric_name] = {
-            "status": cmp.status,
-            "message": cmp.message,
-            "current": cmp.current,
-            "baseline": cmp.baseline,
-            "direction": cmp.direction,
-            "regression_abs": cmp.regression_abs,
-            "regression_rel": cmp.regression_rel,
-            "max_regression_abs": cmp.max_regression_abs,
-            "max_regression_rel": cmp.max_regression_rel,
-            "required": cmp.required,
-        }
-        if cmp.status == "failed" and cmp.required:
-            failed_required += 1
-        if cmp.status == "skipped" and not cmp.required:
-            skipped_optional += 1
+    if not (blocked_by_provenance and strict_provenance):
+        for metric_name, rules in metric_rules.items():
+            cmp = compare_metric(
+                name=metric_name,
+                current_value=current_metrics.get(metric_name),
+                baseline_value=baseline_metrics.get(metric_name),
+                rules=rules or {},
+            )
+            comparisons[metric_name] = {
+                "status": cmp.status,
+                "message": cmp.message,
+                "current": cmp.current,
+                "baseline": cmp.baseline,
+                "direction": cmp.direction,
+                "regression_abs": cmp.regression_abs,
+                "regression_rel": cmp.regression_rel,
+                "max_regression_abs": cmp.max_regression_abs,
+                "max_regression_rel": cmp.max_regression_rel,
+                "required": cmp.required,
+            }
+            if cmp.status == "failed" and cmp.required:
+                failed_required += 1
+            if cmp.status == "skipped" and not cmp.required:
+                skipped_optional += 1
 
     overall_status = "failed" if failed_required > 0 else "passed"
+    if blocked_by_provenance and strict_provenance:
+        overall_status = "failed"
 
     report = {
         "schema_version": "pulsim-kpi-gate-report-v1",
@@ -474,6 +771,12 @@ def run_gate(
         "current_metrics": current_metrics,
         "runtime_scope": runtime_scope,
         "comparisons": comparisons,
+        "blocked_by_provenance": blocked_by_provenance and strict_provenance,
+        "provenance": {
+            "strict_mode": strict_provenance,
+            "baseline": baseline_provenance,
+            "thresholds": threshold_provenance,
+        },
     }
     return report
 
@@ -496,6 +799,11 @@ def main() -> int:
     parser.add_argument("--stress-summary", type=Path)
     parser.add_argument("--report-out", type=Path)
     parser.add_argument("--print-report", action="store_true")
+    parser.add_argument(
+        "--no-strict-provenance",
+        action="store_true",
+        help="Allow metric comparison even when baseline/threshold provenance checks fail",
+    )
     args = parser.parse_args()
 
     report = run_gate(
@@ -505,6 +813,7 @@ def main() -> int:
         parity_ltspice_results_path=args.parity_ltspice_results,
         parity_ngspice_results_path=args.parity_ngspice_results,
         stress_summary_path=args.stress_summary,
+        strict_provenance=not args.no_strict_provenance,
     )
 
     if args.report_out is not None:

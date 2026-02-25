@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -18,6 +19,57 @@ def _write_yaml(path: Path, payload: dict) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_baseline_with_manifest(
+    baseline_path: Path,
+    baseline_id: str,
+    source_bench_results: Path,
+    metrics: dict,
+    source_artifacts_root: Path | None = None,
+) -> None:
+    captured_at = "2026-02-25T00:00:00Z"
+    baseline = {
+        "schema_version": "pulsim-kpi-baseline-v1",
+        "baseline_id": baseline_id,
+        "captured_at_utc": captured_at,
+        "source_bench_results": str(source_bench_results.resolve()),
+        "metrics": metrics,
+        "environment": {
+            "os": "test-os",
+            "python": "Python 3.13",
+            "machine_class": "ci",
+            "compiler": "clang test",
+            "cc": "clang test",
+            "cmake": "cmake test",
+            "cxx_flags": "-O3",
+        },
+    }
+    if source_artifacts_root is not None:
+        baseline["source_artifacts_root"] = str(source_artifacts_root.resolve())
+    _write_json(baseline_path, baseline)
+
+    manifest = {
+        "schema_version": "pulsim-kpi-baseline-manifest-v1",
+        "baseline_id": baseline_id,
+        "captured_at_utc": captured_at,
+        "files": [
+            {
+                "path": str(source_bench_results.resolve()),
+                "sha256": _sha256_file(source_bench_results.resolve()),
+                "size_bytes": source_bench_results.resolve().stat().st_size,
+            }
+        ],
+    }
+    _write_json(baseline_path.with_name("artifact_manifest.json"), manifest)
+
+
 def test_kpi_gate_passes_with_non_regressive_metrics(tmp_path: Path) -> None:
     bench_results = {
         "results": [
@@ -26,13 +78,10 @@ def test_kpi_gate_passes_with_non_regressive_metrics(tmp_path: Path) -> None:
             {"status": "passed", "runtime_s": 0.21},
         ]
     }
-    baseline = {
-        "baseline_id": "phase0",
-        "metrics": {
-            "convergence_success_rate": 1.0,
-            "runtime_p95": 0.25,
-            "stress_tier_failure_count": 0.0,
-        },
+    baseline_metrics = {
+        "convergence_success_rate": 1.0,
+        "runtime_p95": 0.25,
+        "stress_tier_failure_count": 0.0,
     }
     thresholds = {
         "metrics": {
@@ -56,12 +105,17 @@ def test_kpi_gate_passes_with_non_regressive_metrics(tmp_path: Path) -> None:
     stress_summary = {"tiers_failed": 0}
 
     bench_path = tmp_path / "bench.json"
-    baseline_path = tmp_path / "baseline.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
     thresholds_path = tmp_path / "thresholds.yaml"
     stress_path = tmp_path / "stress_summary.json"
 
     _write_json(bench_path, bench_results)
-    _write_json(baseline_path, baseline)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
     _write_yaml(thresholds_path, thresholds)
     _write_json(stress_path, stress_summary)
 
@@ -86,12 +140,9 @@ def test_kpi_gate_fails_on_runtime_regression(tmp_path: Path) -> None:
             {"status": "passed", "runtime_s": 0.80},
         ]
     }
-    baseline = {
-        "baseline_id": "phase0",
-        "metrics": {
-            "convergence_success_rate": 1.0,
-            "runtime_p95": 0.20,
-        },
+    baseline_metrics = {
+        "convergence_success_rate": 1.0,
+        "runtime_p95": 0.20,
     }
     thresholds = {
         "metrics": {
@@ -114,11 +165,16 @@ def test_kpi_gate_fails_on_runtime_regression(tmp_path: Path) -> None:
     }
 
     bench_path = tmp_path / "bench.json"
-    baseline_path = tmp_path / "baseline.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
     thresholds_path = tmp_path / "thresholds.yaml"
 
     _write_json(bench_path, bench_results)
-    _write_json(baseline_path, baseline)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
     _write_yaml(thresholds_path, thresholds)
 
     report = kpi_gate.run_gate(
@@ -251,11 +307,7 @@ def test_run_gate_uses_baseline_case_intersection_for_runtime(tmp_path: Path) ->
         ]
     }
     baseline = {
-        "baseline_id": "phase0",
-        "source_artifacts_root": str(source_root),
-        "metrics": {
-            "runtime_p95": 0.25,
-        },
+        "runtime_p95": 0.25,
     }
     thresholds = {
         "metrics": {
@@ -268,11 +320,17 @@ def test_run_gate_uses_baseline_case_intersection_for_runtime(tmp_path: Path) ->
     }
 
     bench_path = tmp_path / "bench.json"
-    baseline_path = tmp_path / "baseline.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
     thresholds_path = tmp_path / "thresholds.yaml"
 
     _write_json(bench_path, bench_results)
-    _write_json(baseline_path, baseline)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=source_bench_results,
+        source_artifacts_root=source_root,
+        metrics=baseline,
+    )
     _write_yaml(thresholds_path, thresholds)
 
     report = kpi_gate.run_gate(
@@ -287,3 +345,96 @@ def test_run_gate_uses_baseline_case_intersection_for_runtime(tmp_path: Path) ->
     assert report["overall_status"] == "passed"
     assert report["runtime_scope"]["mode"] == "baseline_intersection"
     assert report["runtime_scope"]["comparable_total"] == 2
+
+
+def test_kpi_gate_blocks_on_manifest_hash_mismatch(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {"status": "passed", "runtime_s": 0.10},
+            {"status": "passed", "runtime_s": 0.12},
+        ]
+    }
+    thresholds = {
+        "metrics": {
+            "runtime_p95": {
+                "direction": "lower_is_better",
+                "max_regression_rel": 0.10,
+                "required": True,
+            },
+        }
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics={"runtime_p95": 0.20},
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    manifest_path = baseline_path.with_name("artifact_manifest.json")
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_payload["files"][0]["sha256"] = "0" * 64
+    _write_json(manifest_path, manifest_payload)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+
+    assert report["overall_status"] == "failed"
+    assert report["blocked_by_provenance"] is True
+    assert report["comparisons"] == {}
+    assert report["provenance"]["baseline"]["status"] == "failed"
+
+
+def test_kpi_gate_can_continue_when_strict_provenance_is_disabled(tmp_path: Path) -> None:
+    bench_results = {"results": [{"status": "passed", "runtime_s": 0.10}]}
+    thresholds = {
+        "metrics": {
+            "runtime_p95": {
+                "direction": "lower_is_better",
+                "max_regression_rel": 0.10,
+                "required": True,
+            },
+        }
+    }
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics={"runtime_p95": 0.20},
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    # Corrupt manifest and run in compatibility mode.
+    manifest_path = baseline_path.with_name("artifact_manifest.json")
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_payload["files"][0]["sha256"] = "f" * 64
+    _write_json(manifest_path, manifest_payload)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        strict_provenance=False,
+    )
+
+    assert report["blocked_by_provenance"] is False
+    assert report["comparisons"]["runtime_p95"]["status"] == "passed"

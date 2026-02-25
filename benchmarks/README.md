@@ -15,6 +15,8 @@ This folder contains the YAML benchmark suite and validation runners.
 - `electrothermal_stress_catalog.yaml` — stress criteria for electrothermal KPI coverage.
 - `kpi_gate.py` — regression gate that compares current KPIs against frozen baseline
   and evaluates runtime quantiles (`p50/p95`) on the case intersection with baseline artifacts.
+- `freeze_kpi_baseline.py` — creates `kpi_baseline.json` + `artifact_manifest.json`
+  with environment fingerprint and artifact hashes for provenance-safe gating.
 - `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
 - `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
 - `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
@@ -34,6 +36,13 @@ python3 benchmarks/kpi_gate.py \
   --stress-summary benchmarks/stress_out/stress_summary.json \
   --report-out benchmarks/out/kpi_gate_report.json \
   --print-report
+
+# Freeze a new baseline snapshot from a validated run
+python3 benchmarks/freeze_kpi_baseline.py \
+  --baseline-id phase0_2026-02-25 \
+  --bench-results benchmarks/out/results.json \
+  --stress-summary benchmarks/stress_out/stress_summary.json \
+  --source-artifacts-root benchmarks/out
 
 # Electrothermal focused matrix + stress
 python3 benchmarks/benchmark_runner.py \
@@ -69,6 +78,10 @@ When a benchmark netlist omits `simulation.adaptive_timestep`, runners default t
 fixed-step mode (`adaptive_timestep: false`) for deterministic comparisons.
 Use `variable_mode_matrix.py` when you need the adaptive-variable benchmark gate.
 Current default scope is the stiff-variable set (`stiff_rlc` scenarios) and can be expanded with `--only`.
+
+`kpi_gate.py` validates baseline/manifest provenance in strict mode by default
+and fails early when metadata or artifact hashes are inconsistent.
+Use `--no-strict-provenance` only for local debugging.
 
 Generate missing reference baselines:
 

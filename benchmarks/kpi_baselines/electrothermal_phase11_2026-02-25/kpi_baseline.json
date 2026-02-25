@@ -3,6 +3,15 @@
   "baseline_id": "electrothermal_phase11_2026-02-25",
   "captured_at_utc": "2026-02-25T00:46:07.824908+00:00",
   "source_artifacts_root": "benchmarks/phase11_electrothermal_artifacts",
+  "environment": {
+    "os": "unknown",
+    "python": "unknown",
+    "machine_class": "unknown",
+    "compiler": "unknown",
+    "cc": "unknown",
+    "cmake": "unknown",
+    "cxx_flags": "unknown"
+  },
   "metrics": {
     "convergence_success_rate": 1.0,
     "runtime_p50": 0.010769208514830098,
