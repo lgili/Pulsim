@@ -5,14 +5,13 @@
 #include <cmath>
 #include <limits>
 #include <sstream>
-#include <span>
 
 namespace pulsim::v1 {
 
 namespace {
-constexpr int kMaxBisections = 12;
 constexpr int kMaxGlobalRecoveryAttempts = 2;
 constexpr int kLteEventGraceSteps = 2;
+constexpr int kMaxDtMinHoldAdvances = 128;
 
 struct CircuitRobustnessHints {
     int switching_devices = 0;
@@ -430,30 +429,6 @@ private:
     int recovery_retries_in_current_macro_ = 0;
 };
 
-Matrix spectral_diff_matrix(int samples, Real period) {
-    Matrix D = Matrix::Zero(samples, samples);
-    if (samples <= 1 || period <= 0.0) {
-        return D;
-    }
-    const Real pi = Real{3.14159265358979323846};
-    const Real scale = (2.0 * pi) / period;
-    const bool even = (samples % 2) == 0;
-
-    for (int j = 0; j < samples; ++j) {
-        for (int k = 0; k < samples; ++k) {
-            if (j == k) continue;
-            const int diff = j - k;
-            const Real sign = (diff % 2 == 0) ? 1.0 : -1.0;
-            const Real angle = pi * static_cast<Real>(diff) / static_cast<Real>(samples);
-            if (even) {
-                D(j, k) = 0.5 * sign / std::tan(angle);
-            } else {
-                D(j, k) = 0.5 * sign / std::sin(angle);
-            }
-        }
-    }
-    return D * scale;
-}
 }
 
 Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
@@ -570,382 +545,6 @@ DCAnalysisResult Simulator::dc_operating_point() {
     return solver.solve(x0, circuit_.num_nodes(), circuit_.num_branches(), system_func, nullptr);
 }
 
-NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
-    last_step_segment_cache_hit_ = false;
-    last_step_linear_factor_cache_hit_ = false;
-    last_step_linear_factor_cache_miss_ = false;
-
-    Integrator method = options_.enable_bdf_order_control
-        ? (bdf_controller_.current_order() == 1 ? Integrator::BDF1 : Integrator::Trapezoidal)
-        : circuit_.integration_method();
-
-    if (!options_.enable_bdf_order_control) {
-        if (method == Integrator::TRBDF2) {
-            return solve_trbdf2_step(t_next, dt, x_prev);
-        }
-        if (method == Integrator::RosenbrockW || method == Integrator::SDIRK2) {
-            return solve_sdirk2_step(t_next, dt, x_prev, method);
-        }
-    }
-
-    circuit_.set_current_time(t_next);
-    circuit_.set_timestep(dt);
-    if (options_.enable_bdf_order_control) {
-        circuit_.set_integration_order(std::clamp(bdf_controller_.current_order(), 1, 2));
-    }
-
-    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
-
-    auto solve_dae_fallback = [this, &x_prev]() {
-        auto system_func = [this](const Vector& x, Vector& f, SparseMatrix& J) {
-            const auto start = std::chrono::steady_clock::now();
-            circuit_.assemble_jacobian(J, f, x);
-            if (transient_gmin_ <= 0.0) {
-                const auto end = std::chrono::steady_clock::now();
-                direct_assemble_system_calls_ += 1;
-                direct_assemble_system_time_seconds_ +=
-                    std::chrono::duration<double>(end - start).count();
-                return;
-            }
-            for (Index i = 0; i < circuit_.num_nodes(); ++i) {
-                J.coeffRef(i, i) += transient_gmin_;
-                f[i] += transient_gmin_ * x[i];
-            }
-            const auto end = std::chrono::steady_clock::now();
-            direct_assemble_system_calls_ += 1;
-            direct_assemble_system_time_seconds_ +=
-                std::chrono::duration<double>(end - start).count();
-        };
-
-        auto residual_func = [this](const Vector& x, Vector& f) {
-            const auto start = std::chrono::steady_clock::now();
-            circuit_.assemble_residual(f, x);
-            if (transient_gmin_ <= 0.0) {
-                const auto end = std::chrono::steady_clock::now();
-                direct_assemble_residual_calls_ += 1;
-                direct_assemble_residual_time_seconds_ +=
-                    std::chrono::duration<double>(end - start).count();
-                return;
-            }
-            for (Index i = 0; i < circuit_.num_nodes(); ++i) {
-                f[i] += transient_gmin_ * x[i];
-            }
-            const auto end = std::chrono::steady_clock::now();
-            direct_assemble_residual_calls_ += 1;
-            direct_assemble_residual_time_seconds_ +=
-                std::chrono::duration<double>(end - start).count();
-        };
-
-        return newton_solver_.solve(x_prev, system_func, residual_func);
-    };
-
-    TransientStepRequest request;
-    request.mode = resolve_step_mode(options_);
-    request.t_now = t_next - dt;
-    request.t_target = t_next;
-    request.dt_candidate = dt;
-    request.dt_min = options_.dt_min;
-    request.retry_index = 0;
-    request.max_retries = std::max(1, options_.max_step_retries + 1);
-    request.event_adjacent = false;
-
-    if (segment_primary_disabled_for_run_) {
-        last_step_solve_path_ = StepSolvePath::DaeFallback;
-        last_step_solve_reason_ = "segment_disabled_cached_non_admissible";
-        return solve_dae_fallback();
-    }
-
-    const auto segment_model = transient_services_.segment_model->build_model(x_prev, request);
-    last_step_segment_cache_hit_ = segment_model.cache_hit;
-    if (!segment_model.admissible &&
-        segment_model.classification == "segment_not_admissible_nonlinear_device") {
-        segment_primary_disabled_for_run_ = true;
-    }
-    const auto segment_outcome =
-        transient_services_.segment_stepper->try_advance(segment_model, x_prev, request);
-    last_step_linear_factor_cache_hit_ = segment_outcome.linear_factor_cache_hit;
-    last_step_linear_factor_cache_miss_ = segment_outcome.linear_factor_cache_miss;
-    if (!segment_outcome.requires_fallback) {
-        last_step_solve_path_ = StepSolvePath::SegmentPrimary;
-        last_step_solve_reason_ = segment_outcome.reason;
-        return segment_outcome.result;
-    }
-
-    last_step_solve_path_ = StepSolvePath::DaeFallback;
-    last_step_solve_reason_ = segment_outcome.reason.empty()
-        ? "segment_not_admissible"
-        : segment_outcome.reason;
-    return solve_dae_fallback();
-}
-
-NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev) {
-    last_step_solve_path_ = StepSolvePath::DaeFallback;
-    last_step_solve_reason_ = "trbdf2_multistage";
-
-    const Real gamma = TRBDF2Coeffs::gamma;
-    const Real h1 = gamma * dt;
-    const Real h2 = dt - h1;
-
-    if (h1 <= 0.0 || h2 <= 0.0) {
-        NewtonResult result;
-        result.status = SolverStatus::NumericalError;
-        result.error_message = "TR-BDF2 invalid timestep split";
-        return result;
-    }
-
-    circuit_.clear_stage_context();
-    circuit_.set_integration_method(Integrator::Trapezoidal);
-    circuit_.set_current_time(t_next - h2);
-    circuit_.set_timestep(h1);
-
-    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
-    NewtonResult stage1 = transient_services_.nonlinear_solve->solve(x_prev, t_next - h2, h1);
-    if (stage1.status != SolverStatus::Success) {
-        circuit_.set_integration_method(Integrator::TRBDF2);
-        circuit_.clear_stage_context();
-        return stage1;
-    }
-
-    circuit_.capture_trbdf2_stage1(stage1.solution);
-    circuit_.begin_trbdf2_stage2(h1, h2);
-    circuit_.set_integration_method(Integrator::TRBDF2);
-    circuit_.set_current_time(t_next);
-    circuit_.set_timestep(dt);
-
-    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
-    NewtonResult stage2 = transient_services_.nonlinear_solve->solve(stage1.solution, t_next, dt);
-    if (stage2.status != SolverStatus::Success) {
-        circuit_.clear_stage_context();
-    }
-    return stage2;
-}
-
-NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_prev, Integrator method) {
-    last_step_solve_path_ = StepSolvePath::DaeFallback;
-    last_step_solve_reason_ = "sdirk2_multistage";
-
-    // RosenbrockW shares SDIRK2 stage coefficients (implicit solve per stage).
-    const Real a11 = SDIRK2Coeffs::a11;
-    const Real a21 = SDIRK2Coeffs::a21;
-    const Real a22 = SDIRK2Coeffs::a22;
-    const Real h = dt;
-    const Real h1 = a11 * h;
-
-    if (h1 <= 0.0) {
-        NewtonResult result;
-        result.status = SolverStatus::NumericalError;
-        result.error_message = "SDIRK2 invalid timestep split";
-        return result;
-    }
-
-    circuit_.clear_stage_context();
-    circuit_.set_integration_method(Integrator::BDF1);
-    circuit_.set_current_time(t_next - (1.0 - SDIRK2Coeffs::c1) * h);
-    circuit_.set_timestep(h1);
-
-    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
-    NewtonResult stage1 = transient_services_.nonlinear_solve->solve(
-        x_prev,
-        t_next - (1.0 - SDIRK2Coeffs::c1) * h,
-        h1);
-    if (stage1.status != SolverStatus::Success) {
-        circuit_.set_integration_method(method);
-        circuit_.clear_stage_context();
-        return stage1;
-    }
-
-    circuit_.capture_sdirk_stage1(stage1.solution, h, a11);
-    circuit_.begin_sdirk_stage2(method, h, a11, a21, a22);
-    circuit_.set_integration_method(method);
-    circuit_.set_current_time(t_next);
-    circuit_.set_timestep(dt);
-
-    transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
-    NewtonResult stage2 = transient_services_.nonlinear_solve->solve(stage1.solution, t_next, dt);
-    if (stage2.status != SolverStatus::Success) {
-        circuit_.clear_stage_context();
-    }
-    return stage2;
-}
-
-bool Simulator::find_switch_event_time(const SwitchMonitor& sw,
-                                       Real t_start, Real t_end,
-                                       const Vector& x_start,
-                                       Real& t_event, Vector& x_event) {
-    if (t_end <= t_start) return false;
-
-    Real t_lo = t_start;
-    Real t_hi = t_end;
-    Vector x_lo = x_start;
-    Vector x_hi;
-
-    // Initial solve at t_hi
-    auto result_hi = solve_step(t_hi, t_hi - t_lo, x_lo);
-    circuit_.clear_stage_context();
-    if (result_hi.status != SolverStatus::Success) {
-        return false;
-    }
-    x_hi = result_hi.solution;
-
-    auto ctrl_value = [&](const Vector& x) -> Real {
-        return (sw.ctrl >= 0) ? x[sw.ctrl] : 0.0;
-    };
-
-    Real v_lo = ctrl_value(x_lo) - sw.v_threshold;
-
-    if (v_lo == 0.0) {
-        t_event = t_lo;
-        x_event = x_lo;
-        return true;
-    }
-
-    for (int i = 0; i < kMaxBisections && (t_hi - t_lo) > options_.dt_min; ++i) {
-        Real t_mid = 0.5 * (t_lo + t_hi);
-        auto result_mid = solve_step(t_mid, t_mid - t_lo, x_lo);
-        circuit_.clear_stage_context();
-        if (result_mid.status != SolverStatus::Success) {
-            t_hi = t_mid;
-            continue;
-        }
-
-        Vector x_mid = result_mid.solution;
-        Real v_mid = ctrl_value(x_mid) - sw.v_threshold;
-
-        if ((v_lo > 0 && v_mid > 0) || (v_lo < 0 && v_mid < 0)) {
-            t_lo = t_mid;
-            x_lo = x_mid;
-            v_lo = v_mid;
-        } else {
-            t_hi = t_mid;
-            x_hi = x_mid;
-        }
-    }
-
-    t_event = t_hi;
-    x_event = x_hi;
-    return true;
-}
-
-void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
-                                    const Vector& x_state, bool new_state,
-                                    SimulationResult& result, EventCallback event_callback) {
-    // Compute switch voltage and current
-    Real v_switch = 0.0;
-    if (sw.t1 >= 0) v_switch += x_state[sw.t1];
-    if (sw.t2 >= 0) v_switch -= x_state[sw.t2];
-
-    // Use discrete g_on/g_off based on state for loss estimates
-    Real g_on = 1e3;
-    Real g_off = 1e-9;
-
-    const auto& devices = circuit_.devices();
-    auto idx_it = device_index_.find(sw.name);
-    if (idx_it != device_index_.end()) {
-        const auto* dev = std::get_if<VoltageControlledSwitch>(&devices[idx_it->second]);
-        if (dev) {
-            g_on = dev->g_on();
-            g_off = dev->g_off();
-        }
-    }
-
-    Real g = new_state ? g_on : g_off;
-    Real i_switch = g * v_switch;
-
-    SimulationEvent evt;
-    evt.time = time;
-    evt.type = new_state ? SimulationEventType::SwitchOn : SimulationEventType::SwitchOff;
-    evt.component = sw.name;
-    evt.description = sw.name + (new_state ? " on" : " off");
-    evt.value1 = v_switch;
-    evt.value2 = i_switch;
-    result.events.push_back(evt);
-
-    if (event_callback) {
-        SwitchEvent se;
-        se.switch_name = sw.name;
-        se.time = time;
-        se.new_state = new_state;
-        se.voltage = v_switch;
-        se.current = i_switch;
-        event_callback(se);
-    }
-
-    // Accumulate switching energy if configured
-    const auto it = options_.switching_energy.find(sw.name);
-    if (it != options_.switching_energy.end()) {
-        const Real e = new_state ? it->second.eon : it->second.eoff;
-        accumulate_switching_loss(sw.name, new_state, e);
-    }
-}
-
-void Simulator::accumulate_switching_loss(const std::string& name, bool turning_on, Real energy) {
-    if (!transient_services_.loss_service) {
-        return;
-    }
-    transient_services_.loss_service->commit_switching_event(name, turning_on, energy);
-}
-
-void Simulator::accumulate_reverse_recovery_loss(const std::string& name, Real energy) {
-    if (!transient_services_.loss_service) {
-        return;
-    }
-    transient_services_.loss_service->commit_reverse_recovery_event(name, energy);
-}
-
-void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
-    if (!transient_services_.loss_service || !transient_services_.thermal_service) {
-        return;
-    }
-    transient_services_.loss_service->commit_accepted_segment(
-        x,
-        dt,
-        transient_services_.thermal_service->thermal_scale_vector());
-}
-
-void Simulator::update_thermal_state(Real dt) {
-    if (!transient_services_.thermal_service || !transient_services_.loss_service) {
-        return;
-    }
-    transient_services_.thermal_service->commit_accepted_segment(
-        dt,
-        transient_services_.loss_service->last_device_power());
-}
-
-void Simulator::finalize_loss_summary(SimulationResult& result) {
-    if (!transient_services_.loss_service) {
-        return;
-    }
-
-    Real duration = 0.0;
-    if (result.time.size() >= 2) {
-        duration = result.time.back() - result.time.front();
-    }
-    result.loss_summary = transient_services_.loss_service->finalize(duration);
-}
-
-void Simulator::finalize_thermal_summary(SimulationResult& result) {
-    if (!transient_services_.thermal_service) {
-        return;
-    }
-
-    const ThermalServiceSummary service_summary = transient_services_.thermal_service->finalize();
-    ThermalSummary summary;
-    summary.enabled = service_summary.enabled;
-    summary.ambient = service_summary.ambient;
-    summary.max_temperature = service_summary.max_temperature;
-    summary.device_temperatures.reserve(service_summary.device_temperatures.size());
-    for (const auto& item : service_summary.device_temperatures) {
-        DeviceThermalTelemetry telemetry;
-        telemetry.device_name = item.device_name;
-        telemetry.enabled = item.enabled;
-        telemetry.final_temperature = item.final_temperature;
-        telemetry.peak_temperature = item.peak_temperature;
-        telemetry.average_temperature = item.average_temperature;
-        summary.device_temperatures.push_back(std::move(telemetry));
-    }
-    result.thermal_summary = std::move(summary);
-}
-
 SimulationResult Simulator::run_transient(SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
@@ -1040,6 +639,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     int high_iter_streak = 0;
     int stiffness_cooldown = 0;
     int global_recovery_attempts = 0;
+    int dt_min_hold_advances = 0;
     bool auto_recovery_attempted = false;
     const TransientStepMode step_mode = resolve_step_mode(options_);
     const bool can_auto_recover = (step_mode == TransientStepMode::Variable) &&
@@ -1162,7 +762,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         auto min_event_substep_dt = [&](Real dt_reference) {
             const Real dt_ref = std::max(std::abs(dt_reference), options_.dt_min);
             const Real profile_floor = std::max(std::abs(options_.dt) * Real{1e-4}, Real{1e-12});
-            return std::max(options_.dt_min * Real{8.0},
+            return std::max(options_.dt_min,
                             std::max(profile_floor, dt_ref * Real{1e-3}));
         };
         auto near_switching_threshold = [&](const Vector& state) {
@@ -1494,6 +1094,25 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                         dt_used);
 
                     if (!decision.accepted) {
+                        const bool lte_at_min_floor =
+                            decision.at_minimum || decision.dt_new <= options_.dt_min * Real{1.001};
+                        if (lte_at_min_floor) {
+                            // Avoid deadlock loops when LTE remains high at dt_min.
+                            // Accept the step and let event/stiffness policies move
+                            // the trajectory forward instead of exhausting retries.
+                            accepted_step_lte_guarded = true;
+                            const Real recovered_dt =
+                                std::max(options_.dt_min, dt_used * Real{1.25});
+                            dt = clamp_dt_for_mode(std::min(recovered_dt, options_.dt_max));
+                            record_fallback_event(result,
+                                                  result.total_steps,
+                                                  retries,
+                                                  t,
+                                                  dt_used,
+                                                  FallbackReasonCode::LTERejection,
+                                                  step_result.status,
+                                                  "lte_min_floor_accept");
+                        } else {
                         circuit_.clear_stage_context();
                         dt = clamp_dt_for_mode(decision.dt_new);
                         RecoveryDecision lte_recovery;
@@ -1524,6 +1143,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             stiffness_cooldown = options_.stiffness_config.cooldown_steps;
                         }
                         continue;
+                        }
                     }
 
                     dt = clamp_dt_for_mode(decision.dt_new);
@@ -1613,6 +1233,49 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         if (!accepted) {
+            const bool at_dt_min_floor = dt_used <= options_.dt_min * Real{1.001};
+            if (variable_step_policy.enabled() && at_dt_min_floor &&
+                dt_min_hold_advances < kMaxDtMinHoldAdvances) {
+                // Last-resort progress safeguard for hard switching points where
+                // Newton repeatedly fails at dt_min. Advance with state hold to
+                // cross the pathological instant instead of aborting.
+                dt_min_hold_advances++;
+                circuit_.clear_stage_context();
+                record_fallback_event(result,
+                                      result.total_steps,
+                                      retries,
+                                      t,
+                                      dt_used,
+                                      FallbackReasonCode::MaxRetriesExceeded,
+                                      step_result.status,
+                                      "dt_min_hold_advance");
+
+                rejection_streak = 0;
+                high_iter_streak = 0;
+                global_recovery_attempts = 0;
+                transient_gmin_ = 0.0;
+                transient_services_.nonlinear_solve->set_options(baseline_newton_options);
+
+                accumulate_conduction_losses(step_anchor_state, dt_used);
+                update_thermal_state(dt_used);
+
+                t += dt_used;
+                variable_step_policy.on_step_accepted(dt_used);
+                x = step_anchor_state;
+                circuit_.update_history(x);
+                lte_estimator_.record_solution(x, t, dt_used);
+
+                result.time.push_back(t);
+                result.states.push_back(x);
+                append_virtual_sample(x, t);
+                if (callback) {
+                    callback(t, x);
+                }
+                result.total_steps++;
+
+                continue;
+            }
+
             RecoveryDecision abort_recovery;
             abort_recovery.stage = RecoveryStage::Abort;
             abort_recovery.next_dt = dt_used;
@@ -1693,6 +1356,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         result.newton_iterations_total += step_result.iterations;
         transient_services_.telemetry_collector->on_step_accept(t + dt_used, step_result.solution);
         rejection_streak = 0;
+        dt_min_hold_advances = 0;
         global_recovery_attempts = 0;
         transient_gmin_ = 0.0;
         transient_services_.nonlinear_solve->set_options(baseline_newton_options);
@@ -1884,249 +1548,6 @@ SimulationResult Simulator::run_transient_with_progress(
         progress_config.callback(progress);
     }
 
-    return result;
-}
-
-PeriodicSteadyStateResult Simulator::run_periodic_shooting(const PeriodicSteadyStateOptions& options) {
-    auto dc = dc_operating_point();
-    if (!dc.success) {
-        PeriodicSteadyStateResult result;
-        result.success = false;
-        result.message = "DC operating point failed: " + dc.message;
-        return result;
-    }
-
-    return run_periodic_shooting(dc.newton_result.solution, options);
-}
-
-PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
-                                                          const PeriodicSteadyStateOptions& options) {
-    PeriodicSteadyStateResult result;
-
-    if (options.period <= 0.0) {
-        result.message = "Periodic shooting requires a positive period";
-        return result;
-    }
-    if (x0.size() == 0) {
-        result.message = "Initial state is empty";
-        return result;
-    }
-
-    SimulationOptions local = options_;
-    local.tstart = 0.0;
-    local.tstop = options.period;
-    if (local.dt <= 0.0) {
-        local.dt = options.period / 100.0;
-    }
-    if (local.dt > options.period) {
-        local.dt = options.period;
-    }
-
-    Simulator shooting_sim(circuit_, local);
-
-    Vector guess = x0;
-    Vector residual;
-    for (int iter = 0; iter < options.max_iterations; ++iter) {
-        SimulationResult cycle = shooting_sim.run_transient(guess);
-        if (!cycle.success || cycle.states.empty()) {
-            result.success = false;
-            result.message = "Shooting cycle failed: " + cycle.message;
-            result.last_cycle = cycle;
-            return result;
-        }
-
-        Vector xT = cycle.states.back();
-        residual = xT - guess;
-        Real rms = std::sqrt(residual.squaredNorm() / static_cast<Real>(residual.size()));
-
-        result.iterations = iter + 1;
-        result.residual_norm = rms;
-        if (options.store_last_transient) {
-            result.last_cycle = cycle;
-        }
-
-        if (rms <= options.tolerance) {
-            result.success = true;
-            result.steady_state = xT;
-            result.message = "Periodic steady-state converged";
-            return result;
-        }
-
-        guess = guess + options.relaxation * residual;
-    }
-
-    result.success = false;
-    result.steady_state = guess;
-    result.message = "Periodic steady-state did not converge within max iterations";
-    return result;
-}
-
-HarmonicBalanceResult Simulator::run_harmonic_balance(const HarmonicBalanceOptions& options) {
-    auto dc = dc_operating_point();
-    if (!dc.success) {
-        HarmonicBalanceResult result;
-        result.success = false;
-        result.message = "DC operating point failed: " + dc.message;
-        return result;
-    }
-
-    return run_harmonic_balance(dc.newton_result.solution, options);
-}
-
-HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
-                                                     const HarmonicBalanceOptions& options) {
-    HarmonicBalanceResult result;
-    const int n = static_cast<int>(circuit_.system_size());
-    const int samples = std::max(3, options.num_samples);
-
-    if (options.period <= 0.0) {
-        result.message = "Harmonic balance requires a positive period";
-        return result;
-    }
-    if (x0.size() != n) {
-        result.message = "Initial state size mismatch";
-        return result;
-    }
-
-    Matrix D = spectral_diff_matrix(samples, options.period);
-    Matrix Dt = D.transpose();
-    if (D.size() == 0) {
-        result.message = "Failed to build spectral differentiation matrix";
-        return result;
-    }
-
-    std::vector<Real> times;
-    times.reserve(samples);
-    const Real dt_sample = options.period / static_cast<Real>(samples);
-    for (int k = 0; k < samples; ++k) {
-        times.push_back(dt_sample * static_cast<Real>(k));
-    }
-    result.sample_times = times;
-
-    Vector X = Vector::Zero(n * samples);
-    if (options.initialize_from_transient) {
-        SimulationOptions init_opts = options_;
-        init_opts.tstart = 0.0;
-        init_opts.tstop = options.period;
-        init_opts.dt = dt_sample;
-        init_opts.dt_min = dt_sample;
-        init_opts.dt_max = dt_sample;
-        init_opts.adaptive_timestep = false;
-        init_opts.enable_bdf_order_control = false;
-        init_opts.newton_options.num_nodes = circuit_.num_nodes();
-        init_opts.newton_options.num_branches = circuit_.num_branches();
-
-        Simulator init_sim(circuit_, init_opts);
-        auto init_result = init_sim.run_transient(x0);
-        if (init_result.success && init_result.states.size() >= static_cast<std::size_t>(samples)) {
-            for (int k = 0; k < samples; ++k) {
-                X.segment(k * n, n) = init_result.states[k];
-            }
-        } else {
-            for (int k = 0; k < samples; ++k) {
-                X.segment(k * n, n) = x0;
-            }
-        }
-    } else {
-        for (int k = 0; k < samples; ++k) {
-            X.segment(k * n, n) = x0;
-        }
-    }
-
-    Matrix dX(n, samples);
-
-    auto residual_func = [&](const Vector& state, Vector& f_out) {
-        f_out.setZero(state.size());
-        const int nodes = static_cast<int>(circuit_.num_nodes());
-        const int branches = static_cast<int>(circuit_.num_branches());
-
-        Eigen::Map<const Matrix> X_mat(state.data(), n, samples);
-        dX.noalias() = X_mat * Dt;
-
-        for (int k = 0; k < samples; ++k) {
-            Eigen::Map<const Vector> xk(state.data() + k * n, n);
-            Vector fk(n);
-            fk.setZero();
-            const Real* col = dX.col(k).data();
-            circuit_.assemble_residual_hb(fk, xk, times[k],
-                                          std::span<const Real>(col, nodes),
-                                          std::span<const Real>(col + nodes, branches));
-            f_out.segment(k * n, n) = fk;
-        }
-    };
-
-    NewtonOptions hb_newton = options_.newton_options;
-    hb_newton.max_iterations = options.max_iterations;
-    hb_newton.initial_damping = options.relaxation;
-    hb_newton.min_damping = options.relaxation;
-    hb_newton.auto_damping = false;
-    hb_newton.tolerances.residual_tol = options.tolerance;
-    hb_newton.krylov_residual_cache_tolerance = 1e-3;
-    hb_newton.krylov_tolerance = std::max(options.tolerance * 0.1, Real{1e-10});
-    hb_newton.krylov_residual_cache_tolerance = -1.0;
-    hb_newton.enable_newton_krylov = true;
-    hb_newton.reuse_jacobian_pattern = false;
-    hb_newton.num_nodes = circuit_.num_nodes();
-    hb_newton.num_branches = circuit_.num_branches();
-
-    NewtonRaphsonSolver<RuntimeLinearSolver> hb_solver(hb_newton);
-    LinearSolverStackConfig hb_linear = options_.linear_solver;
-    hb_linear.auto_select = false;
-    hb_linear.allow_fallback = true;
-    hb_linear.order = {LinearSolverKind::GMRES};
-    hb_linear.fallback_order = {LinearSolverKind::BiCGSTAB, LinearSolverKind::SparseLU};
-    hb_linear.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::ILUT;
-    hb_linear.iterative_config.tolerance = hb_newton.krylov_tolerance;
-    hb_linear.iterative_config.restart = std::max(hb_linear.iterative_config.restart, 40);
-    hb_linear.iterative_config.max_iterations = std::max(hb_linear.iterative_config.max_iterations, 300);
-    hb_solver.linear_solver().set_config(hb_linear);
-
-    auto system_func = [&](const Vector& state, Vector& f, SparseMatrix& J) {
-        residual_func(state, f);
-        const Index size = state.size();
-        const Real eps_base = std::max(options_.newton_options.krylov_fd_epsilon, Real{1e-12});
-        std::vector<Eigen::Triplet<Real>> triplets;
-        triplets.reserve(static_cast<std::size_t>(size) * 4);
-
-        Vector x_pert = state;
-        Vector f_pert(size);
-
-        for (Index col = 0; col < size; ++col) {
-            Real step = eps_base * std::max(Real{1.0}, std::abs(state[col]));
-            x_pert[col] = state[col] + step;
-            residual_func(x_pert, f_pert);
-            x_pert[col] = state[col];
-
-            for (Index row = 0; row < size; ++row) {
-                Real val = (f_pert[row] - f[row]) / step;
-                if (std::abs(val) > 1e-12) {
-                    triplets.emplace_back(row, col, val);
-                }
-            }
-        }
-
-        J.resize(size, size);
-        if (!triplets.empty()) {
-            J.setFromTriplets(triplets.begin(), triplets.end());
-        } else {
-            J.setZero();
-        }
-    };
-
-    NewtonResult solve_result = hb_solver.solve(X, system_func, residual_func);
-    result.iterations = solve_result.iterations;
-    result.residual_norm = solve_result.final_residual;
-
-    if (solve_result.status != SolverStatus::Success) {
-        result.success = false;
-        result.message = "HB solver failed: " + solve_result.error_message;
-        result.solution = solve_result.solution;
-        return result;
-    }
-
-    result.success = true;
-    result.solution = solve_result.solution;
-    result.message = "Harmonic balance converged";
     return result;
 }
 
