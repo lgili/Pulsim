@@ -1,0 +1,51 @@
+{
+  "overall_status": "passed",
+  "schema_version": "pulsim-stress-v1",
+  "tier_evaluations": {
+    "tier_a": {
+      "failed": 0,
+      "max_max_error_observed": 0.04975041850831907,
+      "max_runtime_s_observed": 0.06789424997987226,
+      "max_timestep_rejections_observed": 0.0,
+      "message": "tier criteria satisfied",
+      "missing_telemetry_rows": 0,
+      "pass_rate": 1.0,
+      "passed": 6,
+      "skipped": 0,
+      "status": "passed",
+      "tier": "tier_a",
+      "total": 6
+    },
+    "tier_b": {
+      "failed": 0,
+      "max_max_error_observed": 0.10041351799999987,
+      "max_runtime_s_observed": 0.20464812504360452,
+      "max_timestep_rejections_observed": 0.0,
+      "message": "tier criteria satisfied",
+      "missing_telemetry_rows": 0,
+      "pass_rate": 1.0,
+      "passed": 6,
+      "skipped": 0,
+      "status": "passed",
+      "tier": "tier_b",
+      "total": 6
+    },
+    "tier_c": {
+      "failed": 0,
+      "max_max_error_observed": 0.0024538900000052877,
+      "max_runtime_s_observed": 0.2560638750437647,
+      "max_timestep_rejections_observed": 0.0,
+      "message": "tier criteria satisfied",
+      "missing_telemetry_rows": 0,
+      "pass_rate": 1.0,
+      "passed": 7,
+      "skipped": 0,
+      "status": "passed",
+      "tier": "tier_c",
+      "total": 7
+    }
+  },
+  "tiers_failed": 0,
+  "tiers_passed": 3,
+  "tiers_total": 3
+}

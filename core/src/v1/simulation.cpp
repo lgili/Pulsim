@@ -486,25 +486,20 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     }
 
     initialize_loss_tracking();
-
-    for (const auto& [name, energy] : options_.switching_energy) {
-        set_switching_energy(name, energy);
-    }
 }
 
 void Simulator::initialize_loss_tracking() {
-    const auto& devices = circuit_.devices();
-    loss_states_.assign(devices.size(), DeviceLossState{});
-    switching_energy_.assign(devices.size(), std::nullopt);
-    diode_conducting_.assign(devices.size(), false);
-    last_device_power_.assign(devices.size(), 0.0);
+    if (transient_services_.loss_service) {
+        transient_services_.loss_service->reset();
+    }
     initialize_thermal_tracking();
 }
 
 void Simulator::set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy) {
-    auto it = device_index_.find(device_name);
-    if (it == device_index_.end()) return;
-    switching_energy_[it->second] = energy;
+    options_.switching_energy[device_name] = energy;
+    if (transient_services_.loss_service) {
+        transient_services_.loss_service->reset();
+    }
 }
 
 void Simulator::record_fallback_event(SimulationResult& result,
@@ -530,60 +525,9 @@ void Simulator::record_fallback_event(SimulationResult& result,
 }
 
 void Simulator::initialize_thermal_tracking() {
-    const auto& devices = circuit_.devices();
-    const auto& conns = circuit_.connections();
-
-    thermal_states_.assign(devices.size(), DeviceThermalState{});
-    if (!options_.thermal.enable) {
-        return;
+    if (transient_services_.thermal_service) {
+        transient_services_.thermal_service->reset();
     }
-
-    for (std::size_t i = 0; i < devices.size(); ++i) {
-        bool supports_thermal = false;
-        std::visit([&](const auto& dev) {
-            using T = std::decay_t<decltype(dev)>;
-            supports_thermal = device_traits<T>::has_thermal_model;
-        }, devices[i]);
-
-        if (!supports_thermal) {
-            continue;
-        }
-
-        auto& state = thermal_states_[i];
-        state.enabled = true;
-        state.config.enabled = true;
-        state.config.rth = options_.thermal.default_rth;
-        state.config.cth = options_.thermal.default_cth;
-        state.config.temp_init = options_.thermal.ambient;
-        state.config.temp_ref = options_.thermal.ambient;
-
-        auto cfg_it = options_.thermal_devices.find(conns[i].name);
-        if (cfg_it != options_.thermal_devices.end()) {
-            state.config = cfg_it->second;
-        }
-
-        state.enabled = state.config.enabled;
-        state.temperature = state.config.temp_init;
-        state.peak_temperature = state.temperature;
-        state.sum_temperature = 0.0;
-        state.samples = 0;
-    }
-}
-
-Real Simulator::thermal_scale_factor(std::size_t device_index) const {
-    if (!options_.thermal.enable ||
-        options_.thermal.policy == ThermalCouplingPolicy::LossOnly ||
-        device_index >= thermal_states_.size()) {
-        return 1.0;
-    }
-
-    const auto& state = thermal_states_[device_index];
-    if (!state.enabled) {
-        return 1.0;
-    }
-
-    Real scale = 1.0 + state.config.alpha * (state.temperature - state.config.temp_ref);
-    return std::max<Real>(0.05, scale);
 }
 
 DCAnalysisResult Simulator::dc_operating_point() {
@@ -903,256 +847,78 @@ void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
     }
 
     // Accumulate switching energy if configured
-    auto it = device_index_.find(sw.name);
-    if (it != device_index_.end()) {
-        const auto& energy_opt = switching_energy_[it->second];
-        if (energy_opt) {
-            Real e = new_state ? energy_opt->eon : energy_opt->eoff;
-            accumulate_switching_loss(sw.name, new_state, e);
-        }
+    const auto it = options_.switching_energy.find(sw.name);
+    if (it != options_.switching_energy.end()) {
+        const Real e = new_state ? it->second.eon : it->second.eoff;
+        accumulate_switching_loss(sw.name, new_state, e);
     }
 }
 
 void Simulator::accumulate_switching_loss(const std::string& name, bool turning_on, Real energy) {
-    if (energy <= 0.0) return;
-    auto it = device_index_.find(name);
-    if (it == device_index_.end()) return;
-
-    auto& state = loss_states_[it->second];
-    state.accumulator.add_switching_event(energy);
-    if (turning_on) {
-        state.switching_energy.turn_on += energy;
-    } else {
-        state.switching_energy.turn_off += energy;
+    if (!transient_services_.loss_service) {
+        return;
     }
+    transient_services_.loss_service->commit_switching_event(name, turning_on, energy);
 }
 
 void Simulator::accumulate_reverse_recovery_loss(const std::string& name, Real energy) {
-    if (energy <= 0.0) return;
-    auto it = device_index_.find(name);
-    if (it == device_index_.end()) return;
-
-    auto& state = loss_states_[it->second];
-    state.accumulator.add_switching_event(energy);
-    state.switching_energy.reverse_recovery += energy;
+    if (!transient_services_.loss_service) {
+        return;
+    }
+    transient_services_.loss_service->commit_reverse_recovery_event(name, energy);
 }
 
 void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
-    if (!options_.enable_losses) return;
-
-    const auto& devices = circuit_.devices();
-    const auto& conns = circuit_.connections();
-    if (last_device_power_.size() != devices.size()) {
-        last_device_power_.assign(devices.size(), 0.0);
-    } else {
-        std::fill(last_device_power_.begin(), last_device_power_.end(), 0.0);
+    if (!transient_services_.loss_service || !transient_services_.thermal_service) {
+        return;
     }
-
-    for (std::size_t i = 0; i < devices.size(); ++i) {
-        const auto& conn = conns[i];
-        Real p_cond = 0.0;
-
-        std::visit([&](const auto& dev) {
-            using T = std::decay_t<decltype(dev)>;
-
-            auto node_voltage = [&](Index n) -> Real {
-                return (n >= 0) ? x[n] : 0.0;
-            };
-
-            if constexpr (std::is_same_v<T, Resistor>) {
-                Real v = node_voltage(conn.nodes[0]) - node_voltage(conn.nodes[1]);
-                p_cond = (v * v) / dev.resistance();
-            }
-            else if constexpr (std::is_same_v<T, IdealSwitch>) {
-                Real g = dev.is_closed() ? dev.g_on() : dev.g_off();
-                Real v = node_voltage(conn.nodes[0]) - node_voltage(conn.nodes[1]);
-                Real i = g * v;
-                p_cond = std::abs(v * i);
-            }
-            else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
-                Real v_ctrl = node_voltage(conn.nodes[0]);
-                bool on = v_ctrl > dev.v_threshold();
-                Real g = on ? dev.g_on() : dev.g_off();
-                Real v = node_voltage(conn.nodes[1]) - node_voltage(conn.nodes[2]);
-                Real i = g * v;
-                p_cond = std::abs(v * i);
-            }
-            else if constexpr (std::is_same_v<T, IdealDiode>) {
-                Real v = node_voltage(conn.nodes[0]) - node_voltage(conn.nodes[1]);
-                Real g = dev.is_conducting() ? dev.g_on() : dev.g_off();
-                Real i = g * v;
-                p_cond = std::max<Real>(0.0, v * i);
-
-                bool conducting = dev.is_conducting();
-                if (diode_conducting_[i] && !conducting) {
-                    const auto& energy_opt = switching_energy_[i];
-                    if (energy_opt && energy_opt->err > 0.0) {
-                        accumulate_reverse_recovery_loss(conn.name, energy_opt->err);
-                    }
-                }
-                diode_conducting_[i] = conducting;
-            }
-            else if constexpr (std::is_same_v<T, MOSFET>) {
-                Real vg = node_voltage(conn.nodes[0]);
-                Real vd = node_voltage(conn.nodes[1]);
-                Real vs = node_voltage(conn.nodes[2]);
-                auto params = dev.params();
-
-                Real sign = params.is_nmos ? 1.0 : -1.0;
-                Real vgs = sign * (vg - vs);
-                Real vds = sign * (vd - vs);
-
-                Real id = 0.0;
-                if (vgs <= params.vth) {
-                    id = params.g_off * vds;
-                } else if (vds < vgs - params.vth) {
-                    Real vov = vgs - params.vth;
-                    id = params.kp * (vov * vds - 0.5 * vds * vds) * (1.0 + params.lambda * vds);
-                } else {
-                    Real vov = vgs - params.vth;
-                    id = 0.5 * params.kp * vov * vov * (1.0 + params.lambda * vds);
-                }
-
-                id *= sign;
-                p_cond = std::abs((vd - vs) * id);
-            }
-            else if constexpr (std::is_same_v<T, IGBT>) {
-                Real vg = node_voltage(conn.nodes[0]);
-                Real vc = node_voltage(conn.nodes[1]);
-                Real ve = node_voltage(conn.nodes[2]);
-                auto params = dev.params();
-
-                Real vge = vg - ve;
-                Real vce = vc - ve;
-                bool on = (vge > params.vth) && (vce > 0);
-                Real g = on ? params.g_on : params.g_off;
-                Real i = g * vce;
-                p_cond = std::abs(vce * i);
-            }
-        }, devices[i]);
-
-        p_cond *= thermal_scale_factor(i);
-        last_device_power_[i] = std::max<Real>(0.0, p_cond);
-
-        if (p_cond > 0.0) {
-            auto& state = loss_states_[i];
-            state.accumulator.add_sample(p_cond, dt);
-            state.peak_power = std::max(state.peak_power, p_cond);
-        }
-    }
+    transient_services_.loss_service->commit_accepted_segment(
+        x,
+        dt,
+        transient_services_.thermal_service->thermal_scale_vector());
 }
 
 void Simulator::update_thermal_state(Real dt) {
-    if (!options_.thermal.enable || dt <= 0.0) {
+    if (!transient_services_.thermal_service || !transient_services_.loss_service) {
         return;
     }
-
-    if (thermal_states_.size() != last_device_power_.size()) {
-        return;
-    }
-
-    for (std::size_t i = 0; i < thermal_states_.size(); ++i) {
-        auto& state = thermal_states_[i];
-        if (!state.enabled) {
-            continue;
-        }
-
-        const Real power = std::max<Real>(0.0, last_device_power_[i]);
-        const Real ambient = options_.thermal.ambient;
-        const Real rth = std::max<Real>(state.config.rth, 1e-12);
-        const Real cth = state.config.cth;
-
-        if (cth <= 0.0) {
-            state.temperature = ambient + power * rth;
-        } else {
-            const Real tau = std::max<Real>(rth * cth, 1e-12);
-            const Real delta = state.temperature - ambient;
-            const Real delta_dot = (power * rth - delta) / tau;
-            state.temperature = ambient + delta + dt * delta_dot;
-        }
-
-        state.peak_temperature = std::max(state.peak_temperature, state.temperature);
-        state.sum_temperature += state.temperature;
-        state.samples += 1;
-    }
+    transient_services_.thermal_service->commit_accepted_segment(
+        dt,
+        transient_services_.loss_service->last_device_power());
 }
 
 void Simulator::finalize_loss_summary(SimulationResult& result) {
-    if (!options_.enable_losses) return;
-
-    SystemLossSummary summary;
-    const auto& conns = circuit_.connections();
+    if (!transient_services_.loss_service) {
+        return;
+    }
 
     Real duration = 0.0;
     if (result.time.size() >= 2) {
         duration = result.time.back() - result.time.front();
     }
-
-    for (std::size_t i = 0; i < loss_states_.size(); ++i) {
-        const auto& state = loss_states_[i];
-        if (state.accumulator.num_samples() == 0 &&
-            state.accumulator.switching_energy() == 0.0) {
-            continue;
-        }
-
-        LossResult res;
-        res.device_name = conns[i].name;
-        res.total_energy = state.accumulator.total_energy();
-        res.average_power = duration > 0 ? res.total_energy / duration : 0.0;
-        res.peak_power = state.peak_power;
-
-        Real conduction_energy = state.accumulator.conduction_energy();
-        Real switching_energy = state.accumulator.switching_energy();
-
-        res.breakdown.conduction = duration > 0 ? conduction_energy / duration : 0.0;
-        res.breakdown.turn_on = duration > 0 ? state.switching_energy.turn_on / duration : 0.0;
-        res.breakdown.turn_off = duration > 0 ? state.switching_energy.turn_off / duration : 0.0;
-        res.breakdown.reverse_recovery = duration > 0 ? state.switching_energy.reverse_recovery / duration : 0.0;
-
-        if (res.breakdown.turn_on == 0.0 &&
-            res.breakdown.turn_off == 0.0 &&
-            res.breakdown.reverse_recovery == 0.0) {
-            res.breakdown.turn_on = duration > 0 ? switching_energy / duration : 0.0;
-        }
-
-        summary.device_losses.push_back(res);
-    }
-
-    summary.compute_totals();
-    result.loss_summary = summary;
+    result.loss_summary = transient_services_.loss_service->finalize(duration);
 }
 
 void Simulator::finalize_thermal_summary(SimulationResult& result) {
-    ThermalSummary summary;
-    summary.enabled = options_.thermal.enable;
-    summary.ambient = options_.thermal.ambient;
-    summary.max_temperature = options_.thermal.ambient;
-
-    if (!options_.thermal.enable) {
-        result.thermal_summary = summary;
+    if (!transient_services_.thermal_service) {
         return;
     }
 
-    const auto& conns = circuit_.connections();
-    for (std::size_t i = 0; i < thermal_states_.size() && i < conns.size(); ++i) {
-        const auto& state = thermal_states_[i];
-        if (!state.enabled) {
-            continue;
-        }
-
+    const ThermalServiceSummary service_summary = transient_services_.thermal_service->finalize();
+    ThermalSummary summary;
+    summary.enabled = service_summary.enabled;
+    summary.ambient = service_summary.ambient;
+    summary.max_temperature = service_summary.max_temperature;
+    summary.device_temperatures.reserve(service_summary.device_temperatures.size());
+    for (const auto& item : service_summary.device_temperatures) {
         DeviceThermalTelemetry telemetry;
-        telemetry.device_name = conns[i].name;
-        telemetry.enabled = true;
-        telemetry.final_temperature = state.temperature;
-        telemetry.peak_temperature = state.peak_temperature;
-        telemetry.average_temperature =
-            (state.samples > 0) ? (state.sum_temperature / static_cast<Real>(state.samples))
-                                : state.temperature;
-
-        summary.max_temperature = std::max(summary.max_temperature, telemetry.peak_temperature);
+        telemetry.device_name = item.device_name;
+        telemetry.enabled = item.enabled;
+        telemetry.final_temperature = item.final_temperature;
+        telemetry.peak_temperature = item.peak_temperature;
+        telemetry.average_temperature = item.average_temperature;
         summary.device_temperatures.push_back(std::move(telemetry));
     }
-
     result.thermal_summary = std::move(summary);
 }
 
@@ -1226,9 +992,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     result.backend_telemetry.sundials_compiled = sundials_compiled();
 
     initialize_loss_tracking();
-    for (const auto& [name, energy] : options_.switching_energy) {
-        set_switching_energy(name, energy);
-    }
     lte_estimator_.reset();
     transient_gmin_ = 0.0;
     direct_assemble_system_calls_ = 0;
@@ -1502,7 +1265,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             step_request.max_retries = std::max(1, options_.max_step_retries + 1);
             step_request.event_adjacent = discontinuity_adjacent;
 
-            if (options_.enable_events && dt > options_.dt_min * 1.01) {
+            const bool allow_event_calendar_clipping =
+                options_.enable_events &&
+                (variable_step_policy.enabled() || !switch_monitors_.empty());
+            if (allow_event_calendar_clipping && dt > options_.dt_min * 1.01) {
                 const Real t_segment_target =
                     transient_services_.event_scheduler->next_segment_target(step_request, t + dt);
                 Real dt_segment = t_segment_target - t;

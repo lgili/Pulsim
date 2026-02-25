@@ -8,10 +8,13 @@
     "runtime_p50": 0.020824584004003555,
     "runtime_p95": 0.21907356639276224,
     "state_space_primary_ratio": 0.0,
+    "dae_fallback_ratio": 1.0,
     "parity_rms_error_ltspice": 0.0022381726201627684,
     "parity_rms_error_ngspice": 0.002220472285308209,
     "stress_tier_failure_count": 0,
-    "stress_overall_pass": true
+    "stress_overall_pass": true,
+    "loss_energy_balance_error": null,
+    "thermal_peak_temperature_delta": null
   },
   "environment": {
     "os": "macOS-26.4-arm64-arm-64bit-Mach-O",

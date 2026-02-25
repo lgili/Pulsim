@@ -53,6 +53,19 @@ PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
   --output-dir benchmarks/stress_out
 ```
 
+## Suíte eletrotérmica (perdas + temperatura)
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
+  --output-dir benchmarks/out_electrothermal
+
+PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
+  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
+  --catalog benchmarks/electrothermal_stress_catalog.yaml \
+  --output-dir benchmarks/stress_out_electrothermal
+```
+
 ## Gate de paridade GUI -> backend
 
 ```bash
@@ -87,3 +100,10 @@ Configuração:
 - thresholds: `benchmarks/kpi_thresholds.yaml`
 - `runtime_p50`/`runtime_p95`: avaliados no escopo comum entre baseline e execução atual
   (interseção `benchmark_id` + `scenario`) quando os artefatos de baseline estão disponíveis.
+
+KPIs híbridos/eletrotérmicos emitidos no `results.json`:
+
+- `state_space_primary_ratio`
+- `dae_fallback_ratio`
+- `loss_energy_balance_error`
+- `thermal_peak_temperature_delta`

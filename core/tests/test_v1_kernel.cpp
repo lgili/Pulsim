@@ -319,6 +319,61 @@ TEST_CASE("v1 fixed-step resolves multiple switching events inside one macro int
     CHECK(has_calendar_clip);
 }
 
+TEST_CASE("v1 fixed-step source-only circuits skip event calendar clipping",
+          "[v1][fixed-step][events][scheduler][regression]") {
+    Circuit circuit;
+
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    PulseParams pulse;
+    pulse.v_initial = 0.0;
+    pulse.v_pulse = 5.0;
+    pulse.t_delay = 0.0;
+    pulse.t_rise = 1e-9;
+    pulse.t_fall = 1e-9;
+    pulse.t_width = 20e-6;
+    pulse.period = 40e-6;
+    circuit.add_pulse_voltage_source("Vpulse", n_in, Circuit::ground(), pulse);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = true;
+    opts.integrator = Integrator::RosenbrockW;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("source-only fixed-step status: " << static_cast<int>(result.final_status));
+    INFO("source-only fixed-step message: " << result.message);
+    REQUIRE(result.success);
+    REQUIRE(result.time.size() >= 2);
+
+    const auto has_calendar_clip = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::EventSplit &&
+                   entry.action == "event_calendar_clip";
+        });
+    CHECK_FALSE(has_calendar_clip);
+    CHECK(result.backend_telemetry.state_space_primary_steps == 0);
+    CHECK(result.backend_telemetry.dae_fallback_steps >= 1);
+
+    const Real v_out_t1 = result.states[1][n_out];
+    CHECK(v_out_t1 == Approx(4.9975e-3).margin(5e-4));
+}
+
 TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][regression]") {
     Circuit circuit;
 
@@ -364,9 +419,25 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
     Simulator sim(circuit, opts);
     auto result = sim.run_transient();
     REQUIRE(result.success);
+    const auto loss_it = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "M1"; });
+    REQUIRE(loss_it != result.loss_summary.device_losses.end());
+    CHECK(loss_it->total_energy > 0.0);
+    CHECK(loss_it->breakdown.conduction > 0.0);
+
     REQUIRE(result.thermal_summary.enabled);
     CHECK(result.thermal_summary.max_temperature >= result.thermal_summary.ambient);
     CHECK_FALSE(result.thermal_summary.device_temperatures.empty());
+    const auto thermal_it = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "M1"; });
+    REQUIRE(thermal_it != result.thermal_summary.device_temperatures.end());
+    CHECK(thermal_it->final_temperature >= result.thermal_summary.ambient);
+    CHECK(thermal_it->peak_temperature >= thermal_it->final_temperature);
+    CHECK(thermal_it->average_temperature >= result.thermal_summary.ambient);
 }
 
 TEST_CASE("v1 switching topologies auto-enable robust transient defaults", "[v1][robust][autoprofile]") {
@@ -433,6 +504,8 @@ TEST_CASE("v1 simulator wires unified transient service registry", "[v1][archite
     CHECK(services.supports_mode(TransientStepMode::Variable));
     REQUIRE(services.segment_model);
     REQUIRE(services.segment_stepper);
+    REQUIRE(services.loss_service);
+    REQUIRE(services.thermal_service);
 
     TransientStepRequest request;
     request.mode = TransientStepMode::Fixed;

@@ -1,0 +1,27 @@
+benchmarks:
+  - path: circuits/buck_electrothermal.yaml
+    scenarios: [fixed_mode, variable_mode]
+scenarios:
+  fixed_mode:
+    simulation:
+      step_mode: fixed
+      adaptive_timestep: false
+      dt: 0.2e-6
+      dt_max: 0.8e-6
+  variable_mode:
+    simulation:
+      step_mode: variable
+      adaptive_timestep: true
+      dt: 0.05e-6
+      dt_min: 1e-9
+      dt_max: 0.2e-6
+      integrator: rosenbrockw
+      max_step_retries: 12
+      newton:
+        max_iterations: 260
+        initial_damping: 0.3
+        min_damping: 1e-6
+        auto_damping: true
+        enable_trust_region: true
+      solver:
+        order: [klu]

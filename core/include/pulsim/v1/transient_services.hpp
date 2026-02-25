@@ -3,11 +3,13 @@
 #include "pulsim/v1/runtime_circuit.hpp"
 #include "pulsim/v1/solver.hpp"
 #include "pulsim/v1/high_performance.hpp"
+#include "pulsim/v1/losses.hpp"
 
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace pulsim::v1 {
 
@@ -173,6 +175,50 @@ public:
     virtual void on_step_reject(const RecoveryDecision& decision) = 0;
 };
 
+struct ThermalDeviceSummaryEntry {
+    std::string device_name;
+    bool enabled = false;
+    Real final_temperature = 25.0;
+    Real peak_temperature = 25.0;
+    Real average_temperature = 25.0;
+};
+
+struct ThermalServiceSummary {
+    bool enabled = false;
+    Real ambient = 25.0;
+    Real max_temperature = 25.0;
+    std::vector<ThermalDeviceSummaryEntry> device_temperatures;
+};
+
+class LossService {
+public:
+    virtual ~LossService() = default;
+
+    virtual void reset() = 0;
+    virtual void commit_switching_event(const std::string& name,
+                                        bool turning_on,
+                                        Real energy) = 0;
+    virtual void commit_reverse_recovery_event(const std::string& name,
+                                               Real energy) = 0;
+    virtual void commit_accepted_segment(const Vector& x,
+                                         Real dt,
+                                         const std::vector<Real>& thermal_scale) = 0;
+    [[nodiscard]] virtual const std::vector<Real>& last_device_power() const = 0;
+    [[nodiscard]] virtual SystemLossSummary finalize(Real duration) const = 0;
+};
+
+class ThermalService {
+public:
+    virtual ~ThermalService() = default;
+
+    virtual void reset() = 0;
+    [[nodiscard]] virtual Real thermal_scale_factor(std::size_t device_index) const = 0;
+    [[nodiscard]] virtual const std::vector<Real>& thermal_scale_vector() const = 0;
+    virtual void commit_accepted_segment(Real dt,
+                                         const std::vector<Real>& device_power) = 0;
+    [[nodiscard]] virtual ThermalServiceSummary finalize() const = 0;
+};
+
 struct TransientServiceRegistry {
     std::shared_ptr<EquationAssemblerService> equation_assembler;
     std::shared_ptr<SegmentModelService> segment_model;
@@ -182,6 +228,8 @@ struct TransientServiceRegistry {
     std::shared_ptr<EventSchedulerService> event_scheduler;
     std::shared_ptr<RecoveryManagerService> recovery_manager;
     std::shared_ptr<TelemetryCollectorService> telemetry_collector;
+    std::shared_ptr<LossService> loss_service;
+    std::shared_ptr<ThermalService> thermal_service;
 
     bool supports_fixed_mode = true;
     bool supports_variable_mode = true;
@@ -189,7 +237,8 @@ struct TransientServiceRegistry {
     [[nodiscard]] bool complete() const {
         return equation_assembler && segment_model && segment_stepper &&
                nonlinear_solve && linear_solve &&
-               event_scheduler && recovery_manager && telemetry_collector;
+               event_scheduler && recovery_manager && telemetry_collector &&
+               loss_service && thermal_service;
     }
 
     [[nodiscard]] bool supports_mode(TransientStepMode mode) const {
