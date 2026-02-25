@@ -12,6 +12,7 @@ namespace pulsim::v1 {
 namespace {
 constexpr int kMaxBisections = 12;
 constexpr int kMaxGlobalRecoveryAttempts = 2;
+constexpr int kLteEventGraceSteps = 2;
 
 struct CircuitRobustnessHints {
     int switching_devices = 0;
@@ -171,6 +172,11 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     if (!switching_topology) {
         return;
     }
+    const SimulationOptions default_options{};
+    auto nearly_equal = [](Real lhs, Real rhs) {
+        const Real scale = std::max<Real>({Real{1.0}, std::abs(lhs), std::abs(rhs)});
+        return std::abs(lhs - rhs) <= scale * Real{1e-12};
+    };
 
     const bool fixed_step = resolve_step_mode(options) == TransientStepMode::Fixed;
     if (!fixed_step) {
@@ -180,12 +186,30 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
         options.timestep_config.dt_min = std::max(options.dt_min, Real{1e-12});
         options.timestep_config.dt_max = std::max(options.timestep_config.dt_max, options.dt * 20.0);
         options.timestep_config.error_tolerance =
-            std::max(options.timestep_config.error_tolerance, Real{5e-3});
+            std::min(options.timestep_config.error_tolerance, Real{1e-3});
 
         options.enable_bdf_order_control = true;
         options.bdf_config.min_order = 1;
         options.bdf_config.max_order = 2;
         options.bdf_config.initial_order = 1;
+    }
+
+    // In strongly switching nonlinear circuits, unconstrained default dt_min/dt_max
+    // can create pathological picosecond retries. Keep a conservative adaptive window
+    // unless the user explicitly configured these bounds.
+    const bool nonlinear_switching = hints.switching_devices > 0 && hints.nonlinear_devices > 0;
+    if (!fixed_step && nonlinear_switching) {
+        if (nearly_equal(options.dt_max, default_options.dt_max)) {
+            options.dt_max = std::max(options.dt, options.dt_min);
+        }
+        if (nearly_equal(options.dt_min, default_options.dt_min)) {
+            options.dt_min = std::max(options.dt_min, options.dt * Real{5e-3});
+        }
+        if (options.dt_min > options.dt_max) {
+            options.dt_min = options.dt_max;
+        }
+        options.timestep_config.dt_min = std::max(options.timestep_config.dt_min, options.dt_min);
+        options.timestep_config.dt_max = std::min(options.timestep_config.dt_max, options.dt_max);
     }
 
     if (options.integrator == Integrator::Trapezoidal) {
@@ -1109,6 +1133,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         sw.was_on = v_ctrl > sw.v_threshold;
     }
 
+    int lte_discontinuity_grace_steps = 0;
+
     while (t < options_.tstop) {
         if (control) {
             if (control->should_stop()) {
@@ -1132,6 +1158,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 return variable_step_policy.clamp_dt(t, dt_candidate, options_.tstop);
             }
             return dt_candidate;
+        };
+        auto min_event_substep_dt = [&](Real dt_reference) {
+            const Real dt_ref = std::max(std::abs(dt_reference), options_.dt_min);
+            const Real profile_floor = std::max(std::abs(options_.dt) * Real{1e-4}, Real{1e-12});
+            return std::max(options_.dt_min * Real{8.0},
+                            std::max(profile_floor, dt_ref * Real{1e-3}));
         };
         auto near_switching_threshold = [&](const Vector& state) {
             if (!options_.enable_events) {
@@ -1174,6 +1206,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                       SolverStatus::Success,
                                       "adaptive_event_clip");
                 dt = clipped_dt;
+                lte_discontinuity_grace_steps =
+                    std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps);
             }
         }
         if (dt < options_.dt_min * 0.1) {
@@ -1185,6 +1219,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         NewtonResult step_result;
         Real dt_used = dt;
         const Vector step_anchor_state = x;
+        const bool post_event_lte_grace_active = lte_discontinuity_grace_steps > 0;
+        bool accepted_step_event_adjacent = false;
+        bool accepted_step_lte_guarded = false;
+        bool split_encountered_this_step = false;
 
         while (!accepted && retries <= options_.max_step_retries) {
             auto consume_fixed_recovery_budget = [&](const std::string& action_tag) {
@@ -1208,7 +1246,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
             if (options_.stiffness_config.enable && stiffness_cooldown > 0) {
                 const bool discontinuity_profile = discontinuity_adjacent && retries <= 1;
-                if (!discontinuity_profile) {
+                if (!discontinuity_profile && retries > 0) {
                     dt = clamp_dt_for_mode(std::max(options_.dt_min, dt * options_.stiffness_config.dt_backoff));
                     record_fallback_event(result,
                                           result.total_steps,
@@ -1264,42 +1302,57 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             step_request.retry_index = retries;
             step_request.max_retries = std::max(1, options_.max_step_retries + 1);
             step_request.event_adjacent = discontinuity_adjacent;
+            bool calendar_event_clipped = false;
 
-            const bool allow_event_calendar_clipping =
-                options_.enable_events &&
-                (variable_step_policy.enabled() || !switch_monitors_.empty());
-            if (allow_event_calendar_clipping && dt > options_.dt_min * 1.01) {
+            bool has_calendar_boundary_in_step = false;
+            Real dt_segment = 0.0;
+            if (options_.enable_events && dt > options_.dt_min * 1.01) {
                 const Real t_segment_target =
                     transient_services_.event_scheduler->next_segment_target(step_request, t + dt);
-                Real dt_segment = t_segment_target - t;
-                if (dt_segment > options_.dt_min * 1.01 && dt_segment < dt * 0.999) {
-                    if (fixed_step_policy.enabled() && !fixed_step_policy.can_take_internal_substep()) {
-                        record_fallback_event(result,
-                                              result.total_steps,
-                                              retries,
-                                              t,
-                                              dt,
-                                              FallbackReasonCode::MaxRetriesExceeded,
-                                              SolverStatus::Success,
-                                              "fixed_substep_budget_reached_skip_calendar_clip");
-                    } else {
-                        dt = clamp_dt_for_mode(std::max(options_.dt_min, dt_segment));
-                        step_request.t_target = t + dt;
-                        step_request.dt_candidate = dt;
-                        step_request.event_adjacent = true;
-                        discontinuity_adjacent = true;
-                        if (options_.stiffness_config.enable && stiffness_cooldown <= 0) {
-                            stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
-                        }
-                        record_fallback_event(result,
-                                              result.total_steps,
-                                              retries,
-                                              t,
-                                              dt_segment,
-                                              FallbackReasonCode::EventSplit,
-                                              SolverStatus::Success,
-                                              "event_calendar_clip");
+                dt_segment = t_segment_target - t;
+                const Real min_calendar_clip_dt = min_event_substep_dt(dt);
+                has_calendar_boundary_in_step =
+                    dt_segment > min_calendar_clip_dt && dt_segment < dt * 0.999;
+            }
+
+            if (variable_step_policy.enabled() && has_calendar_boundary_in_step) {
+                step_request.event_adjacent = true;
+                discontinuity_adjacent = true;
+                if (options_.stiffness_config.enable && stiffness_cooldown <= 0) {
+                    stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
+                }
+            }
+
+            const bool allow_event_calendar_clipping =
+                options_.enable_events && fixed_step_policy.enabled();
+            if (allow_event_calendar_clipping && has_calendar_boundary_in_step) {
+                if (fixed_step_policy.enabled() && !fixed_step_policy.can_take_internal_substep()) {
+                    record_fallback_event(result,
+                                          result.total_steps,
+                                          retries,
+                                          t,
+                                          dt,
+                                          FallbackReasonCode::MaxRetriesExceeded,
+                                          SolverStatus::Success,
+                                          "fixed_substep_budget_reached_skip_calendar_clip");
+                } else {
+                    dt = clamp_dt_for_mode(std::max(options_.dt_min, dt_segment));
+                    step_request.t_target = t + dt;
+                    step_request.dt_candidate = dt;
+                    step_request.event_adjacent = true;
+                    calendar_event_clipped = true;
+                    discontinuity_adjacent = true;
+                    if (options_.stiffness_config.enable && stiffness_cooldown <= 0) {
+                        stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
                     }
+                    record_fallback_event(result,
+                                          result.total_steps,
+                                          retries,
+                                          t,
+                                          dt_segment,
+                                          FallbackReasonCode::EventSplit,
+                                          SolverStatus::Success,
+                                          "event_calendar_clip");
                 }
             }
 
@@ -1417,48 +1470,64 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
 
             if (variable_step_policy.enabled() && lte >= 0.0) {
-                const int integration_order =
-                    options_.enable_bdf_order_control ? bdf_controller_.current_order() : 2;
-                auto decision = variable_step_policy.evaluate(
-                    lte,
-                    step_result.iterations,
-                    integration_order,
-                    dt_used);
+                const bool lte_guard_window =
+                    step_request.event_adjacent || calendar_event_clipped ||
+                    post_event_lte_grace_active || split_encountered_this_step;
+                if (lte_guard_window) {
+                    // LTE estimators are unreliable across switching discontinuities.
+                    // In these windows we keep advancing and let event clipping/recovery
+                    // control the step, instead of feeding repeated LTE rejections back
+                    // into the adaptive controller state.
+                    accepted_step_lte_guarded =
+                        lte > options_.timestep_config.error_tolerance;
+                    const Real guard_growth =
+                        (step_request.event_adjacent || calendar_event_clipped) ? Real{1.0} : Real{2.0};
+                    const Real dt_recovered = std::max(options_.dt_min, dt_used * guard_growth);
+                    dt = clamp_dt_for_mode(std::min(dt_recovered, options_.dt_max));
+                } else {
+                    const int integration_order =
+                        options_.enable_bdf_order_control ? bdf_controller_.current_order() : 2;
+                    auto decision = variable_step_policy.evaluate(
+                        lte,
+                        step_result.iterations,
+                        integration_order,
+                        dt_used);
 
-                if (!decision.accepted) {
-                    circuit_.clear_stage_context();
-                    dt = clamp_dt_for_mode(decision.dt_new);
-                    RecoveryDecision lte_recovery;
-                    lte_recovery.stage = RecoveryStage::DtBackoff;
-                    lte_recovery.next_dt = decision.dt_new;
-                    lte_recovery.abort = false;
-                    lte_recovery.reason = "lte_rejection";
-                    transient_services_.telemetry_collector->on_step_reject(lte_recovery);
-                    result.timestep_rejections++;
-                    retries++;
-                    if (!consume_fixed_recovery_budget("fixed_recovery_budget_lte")) {
+                    if (!decision.accepted) {
+                        circuit_.clear_stage_context();
+                        dt = clamp_dt_for_mode(decision.dt_new);
+                        RecoveryDecision lte_recovery;
+                        lte_recovery.stage = RecoveryStage::DtBackoff;
+                        lte_recovery.next_dt = decision.dt_new;
+                        lte_recovery.abort = false;
+                        lte_recovery.reason = "lte_rejection";
+                        transient_services_.telemetry_collector->on_step_reject(lte_recovery);
+                        result.timestep_rejections++;
+                        retries++;
+                        if (!consume_fixed_recovery_budget("fixed_recovery_budget_lte")) {
+                            continue;
+                        }
+                        std::ostringstream action;
+                        action << "lte_dt=" << decision.dt_new;
+                        record_fallback_event(result,
+                                              result.total_steps,
+                                              retries,
+                                              t,
+                                              dt_used,
+                                              FallbackReasonCode::LTERejection,
+                                              step_result.status,
+                                              action.str());
+                        rejection_streak++;
+                        high_iter_streak = 0;
+                        if (options_.stiffness_config.enable &&
+                            rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
+                            stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+                        }
                         continue;
                     }
-                    std::ostringstream action;
-                    action << "lte_dt=" << decision.dt_new;
-                    record_fallback_event(result,
-                                          result.total_steps,
-                                          retries,
-                                          t,
-                                          dt_used,
-                                          FallbackReasonCode::LTERejection,
-                                          step_result.status,
-                                          action.str());
-                    rejection_streak++;
-                    high_iter_streak = 0;
-                    if (options_.stiffness_config.enable &&
-                        rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
-                        stiffness_cooldown = options_.stiffness_config.cooldown_steps;
-                    }
-                    continue;
-                }
 
-                dt = clamp_dt_for_mode(decision.dt_new);
+                    dt = clamp_dt_for_mode(decision.dt_new);
+                }
             }
 
             // Event-aligned step splitting for hard switching edges
@@ -1492,7 +1561,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             event_request,
                             t + dt_used);
                     Real dt_event = t_segment - t;
-                    if (dt_event > options_.dt_min * 1.01 && dt_event < dt_used * 0.999) {
+                    const Real min_event_split_dt = min_event_substep_dt(dt_used);
+                    if (dt_event > min_event_split_dt && dt_event < dt_used * 0.999) {
                         if (fixed_step_policy.enabled() &&
                             !fixed_step_policy.can_take_internal_substep()) {
                             record_fallback_event(result,
@@ -1511,9 +1581,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             split_recovery.abort = false;
                             split_recovery.reason = "event_split";
                             transient_services_.telemetry_collector->on_step_reject(split_recovery);
-                            if (!fixed_step_policy.enabled()) {
-                                retries++;
-                            }
                             discontinuity_adjacent = true;
                             if (options_.stiffness_config.enable && stiffness_cooldown <= 0) {
                                 stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
@@ -1526,6 +1593,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                                   FallbackReasonCode::EventSplit,
                                                   step_result.status,
                                                   "split_to_earliest_event");
+                            lte_discontinuity_grace_steps =
+                                std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps);
+                            split_encountered_this_step = true;
                             split_for_event = true;
                         }
                     }
@@ -1537,6 +1607,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 }
             }
 
+            accepted_step_event_adjacent =
+                step_request.event_adjacent || calendar_event_clipped || split_encountered_this_step;
             accepted = true;
         }
 
@@ -1624,6 +1696,15 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         global_recovery_attempts = 0;
         transient_gmin_ = 0.0;
         transient_services_.nonlinear_solve->set_options(baseline_newton_options);
+
+        if (variable_step_policy.enabled()) {
+            if (accepted_step_event_adjacent || accepted_step_lte_guarded) {
+                lte_discontinuity_grace_steps =
+                    std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps);
+            } else if (lte_discontinuity_grace_steps > 0) {
+                lte_discontinuity_grace_steps--;
+            }
+        }
 
         if (options_.stiffness_config.enable) {
             if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {
