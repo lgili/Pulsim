@@ -15,6 +15,7 @@ target_compile_features(pulsim_core INTERFACE cxx_std_23)
 target_link_libraries(pulsim_core
     INTERFACE
         Eigen3::Eigen
+        yaml-cpp
         ${PULSIM_KLU_LIBRARIES}
         ${PULSIM_HYPRE_LIBRARIES}
 )
@@ -27,6 +28,8 @@ add_library(pulsim::core ALIAS pulsim_core)
 # =============================================================================
 add_library(pulsim STATIC
     src/v1/simulation.cpp
+    src/v1/simulation_periodic.cpp
+    src/v1/simulation_step.cpp
     src/v1/transient_services.cpp
     src/v1/sundials_backend.cpp
     src/v1/yaml_parser.cpp

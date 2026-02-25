@@ -5,7 +5,7 @@
 
 ## 1. Architecture decomposition
 - [x] 1.1 Define target module map (`domain-model`, `equation-services`, `solve-services`, `runtime-orchestrator`, `adapters`).
-- [ ] 1.2 Split monolithic headers/sources into module-owned units without behavior changes.
+- [x] 1.2 Split monolithic headers/sources into module-owned units without behavior changes.
 - [x] 1.3 Add dependency-boundary checks to prevent forbidden layer coupling.
 - [x] 1.4 Add architecture tests ensuring fixed/variable modes share the same solve-service contracts.
 
