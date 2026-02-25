@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <string>
 
 using namespace pulsim::v1;
 using Catch::Approx;
@@ -204,6 +205,253 @@ TEST_CASE("v1 fixed-step buck keeps macro-grid outputs with event-aligned subste
 
     REQUIRE(result.total_steps >= static_cast<int>(result.time.size()) - 1);
     CHECK(result.total_steps > static_cast<int>(result.time.size()) - 1);
+}
+
+TEST_CASE("v1 variable-step switched buck remains stable around pwm edges",
+          "[v1][variable-step][events][converter][regression]") {
+    Circuit circuit;
+
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_in = circuit.add_node("vin");
+    auto n_sw = circuit.add_node("sw");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 24.0);
+
+    PulseParams pwm;
+    pwm.v_initial = 0.0;
+    pwm.v_pulse = 10.0;
+    pwm.t_delay = 1e-6;
+    pwm.t_rise = 0.2e-6;
+    pwm.t_fall = 0.2e-6;
+    pwm.t_width = 3e-6;
+    pwm.period = 10e-6;
+    circuit.add_pulse_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_sw, 5.0, 100.0, 1e-9);
+    circuit.add_diode("D1", Circuit::ground(), n_sw, 100.0, 1e-9);
+    circuit.add_inductor("L1", n_sw, n_out, 220e-6, 0.0);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 220e-6, 0.0);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 8.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 24e-6;
+    opts.dt = 2e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 6e-6;
+    opts.step_mode = TransientStepMode::Variable;
+    opts.step_mode_explicit = true;
+    opts.adaptive_timestep = true;
+    opts.enable_events = true;
+    opts.enable_bdf_order_control = true;
+    opts.max_step_retries = 20;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.max_iterations = 120;
+    opts.newton_options.auto_damping = true;
+    opts.linear_solver.allow_fallback = true;
+    opts.linear_solver.auto_select = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("VCS buck variable-step status: " << static_cast<int>(result.final_status));
+    INFO("VCS buck variable-step message: " << result.message);
+    INFO("Buck variable-step steps: " << result.total_steps
+         << " rejections: " << result.timestep_rejections
+         << " fallback_trace: " << result.fallback_trace.size());
+    const int lte_rejections = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::LTERejection;
+        }));
+    const int newton_failures = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::NewtonFailure;
+        }));
+    const int stiffness_backoffs = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::StiffnessBackoff;
+        }));
+    const int max_retry_events = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::MaxRetriesExceeded;
+        }));
+    const int lte_guard_accepts = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.action.find("lte_guard_accept_dt=") != std::string::npos;
+        }));
+    INFO("Buck variable-step reasons: lte=" << lte_rejections
+         << " guard_accept=" << lte_guard_accepts
+         << " newton=" << newton_failures
+         << " stiffness=" << stiffness_backoffs
+         << " max_retry=" << max_retry_events);
+
+    REQUIRE(result.success);
+    CHECK(result.total_steps >= static_cast<int>(result.time.size()) - 1);
+    CHECK_FALSE(result.events.empty());
+    CHECK(result.total_steps < 500);
+    CHECK(result.timestep_rejections == 0);
+
+    const bool has_abort = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::MaxRetriesExceeded &&
+                   entry.action == "abort_step";
+        });
+    CHECK_FALSE(has_abort);
+}
+
+TEST_CASE("v1 variable-step mosfet buck stays close to fixed-step reference",
+          "[v1][variable-step][converter][accuracy][regression]") {
+    struct BuckMetrics {
+        bool success = false;
+        std::string message;
+        int total_steps = 0;
+        int timestep_rejections = 0;
+        Real vout_final = 0.0;
+        Real vout_mean_tail = 0.0;
+        Real vout_ripple_tail = 0.0;
+    };
+
+    auto run_case = [](TransientStepMode mode) -> BuckMetrics {
+        Circuit circuit;
+        auto n_in = circuit.add_node("vin");
+        auto n_gate = circuit.add_node("gate");
+        auto n_sw = circuit.add_node("sw");
+        auto n_out = circuit.add_node("out");
+        const auto gnd = Circuit::ground();
+
+        circuit.add_voltage_source("Vin", n_in, gnd, 24.0);
+
+        PWMParams pwm;
+        pwm.v_high = 120.0;
+        pwm.v_low = 0.0;
+        pwm.frequency = 100e3;
+        pwm.duty = 0.5;
+        pwm.rise_time = 2e-6;
+        pwm.fall_time = 2e-6;
+        circuit.add_pwm_voltage_source("Vgate", n_gate, gnd, pwm);
+
+        MOSFET::Params mosfet;
+        mosfet.vth = 2.0;
+        mosfet.kp = 0.02;
+        mosfet.g_off = 1e-4;
+        mosfet.lambda = 0.0;
+        circuit.add_mosfet("M1", n_gate, n_in, n_sw, mosfet);
+
+        circuit.add_diode("D1", gnd, n_sw, 20.0, 1e-5);
+        circuit.add_inductor("L1", n_sw, n_out, 220e-6, 0.0);
+        circuit.add_capacitor("C1", n_out, gnd, 220e-6, 0.0);
+        circuit.add_resistor("Rload", n_out, gnd, 8.0);
+        circuit.add_resistor("Rbleed_sw", n_sw, gnd, 1e5);
+
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 4e-3;
+        opts.dt = 2e-6;
+        opts.max_step_retries = 35;
+        opts.newton_options.max_iterations = 220;
+        opts.newton_options.auto_damping = true;
+        opts.linear_solver.allow_fallback = true;
+        opts.linear_solver.auto_select = true;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.step_mode = mode;
+        opts.step_mode_explicit = true;
+
+        if (mode == TransientStepMode::Fixed) {
+            opts.integrator = Integrator::BDF1;
+            opts.dt_min = opts.dt;
+            opts.dt_max = opts.dt;
+        }
+
+        Simulator sim(circuit, opts);
+        const auto result = sim.run_transient(circuit.initial_state());
+
+        BuckMetrics metrics;
+        metrics.success = result.success;
+        metrics.message = result.message;
+        metrics.total_steps = result.total_steps;
+        metrics.timestep_rejections = result.timestep_rejections;
+        if (!result.success || result.states.empty() || result.time.empty()) {
+            return metrics;
+        }
+
+        const auto signal_names = circuit.signal_names();
+        const auto out_it = std::find(signal_names.begin(), signal_names.end(), "V(out)");
+        if (out_it == signal_names.end()) {
+            metrics.success = false;
+            metrics.message = "Missing V(out) signal";
+            return metrics;
+        }
+        const auto out_index = static_cast<std::size_t>(std::distance(signal_names.begin(), out_it));
+
+        std::vector<Real> vout;
+        vout.reserve(result.states.size());
+        for (const auto& state : result.states) {
+            if (out_index >= static_cast<std::size_t>(state.size())) {
+                continue;
+            }
+            vout.push_back(state[static_cast<Index>(out_index)]);
+        }
+
+        if (vout.empty()) {
+            metrics.success = false;
+            metrics.message = "Empty V(out) waveform";
+            return metrics;
+        }
+
+        const std::size_t tail = std::max<std::size_t>(10, vout.size() / 5);
+        const std::size_t tail_start = vout.size() > tail ? vout.size() - tail : 0;
+        Real tail_sum = 0.0;
+        Real tail_min = std::numeric_limits<Real>::infinity();
+        Real tail_max = -std::numeric_limits<Real>::infinity();
+        for (std::size_t i = tail_start; i < vout.size(); ++i) {
+            const Real value = vout[i];
+            tail_sum += value;
+            tail_min = std::min(tail_min, value);
+            tail_max = std::max(tail_max, value);
+        }
+
+        const Real tail_count = static_cast<Real>(vout.size() - tail_start);
+        metrics.vout_final = vout.back();
+        metrics.vout_mean_tail = tail_sum / std::max<Real>(tail_count, 1.0);
+        metrics.vout_ripple_tail = tail_max - tail_min;
+        return metrics;
+    };
+
+    const BuckMetrics fixed = run_case(TransientStepMode::Fixed);
+    const BuckMetrics variable = run_case(TransientStepMode::Variable);
+
+    INFO("MOSFET buck fixed success=" << fixed.success
+         << " message=" << fixed.message
+         << " steps=" << fixed.total_steps
+         << " rejections=" << fixed.timestep_rejections
+         << " vout_mean_tail=" << fixed.vout_mean_tail
+         << " vout_ripple_tail=" << fixed.vout_ripple_tail
+         << " vout_final=" << fixed.vout_final);
+    INFO("MOSFET buck variable success=" << variable.success
+         << " message=" << variable.message
+         << " steps=" << variable.total_steps
+         << " rejections=" << variable.timestep_rejections
+         << " vout_mean_tail=" << variable.vout_mean_tail
+         << " vout_ripple_tail=" << variable.vout_ripple_tail
+         << " vout_final=" << variable.vout_final);
+
+    REQUIRE(fixed.success);
+    REQUIRE(variable.success);
+
+    CHECK(std::abs(variable.vout_mean_tail - fixed.vout_mean_tail) <= 0.3);
+    CHECK(variable.vout_ripple_tail <= fixed.vout_ripple_tail * 1.6 + 1e-6);
+    CHECK(std::abs(variable.vout_final - fixed.vout_final) <= 0.3);
+    CHECK(variable.timestep_rejections <= 2);
 }
 
 TEST_CASE("v1 event scheduler applies unified calendar ordering", "[v1][events][scheduler][regression]") {
