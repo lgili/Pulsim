@@ -4,10 +4,10 @@
 - [x] 0.3 Add CI non-regression gate jobs that block merge on KPI threshold violations.
 
 ## 1. Architecture decomposition
-- [ ] 1.1 Define target module map (`domain-model`, `equation-services`, `solve-services`, `runtime-orchestrator`, `adapters`).
+- [x] 1.1 Define target module map (`domain-model`, `equation-services`, `solve-services`, `runtime-orchestrator`, `adapters`).
 - [ ] 1.2 Split monolithic headers/sources into module-owned units without behavior changes.
-- [ ] 1.3 Add dependency-boundary checks to prevent forbidden layer coupling.
-- [ ] 1.4 Add architecture tests ensuring fixed/variable modes share the same solve-service contracts.
+- [x] 1.3 Add dependency-boundary checks to prevent forbidden layer coupling.
+- [x] 1.4 Add architecture tests ensuring fixed/variable modes share the same solve-service contracts.
 
 ## 2. Modern C++20/23 hardening
 - [ ] 2.1 Replace unsafe ownership patterns in touched modules with RAII/value-semantics contracts.

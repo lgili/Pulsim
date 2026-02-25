@@ -1,0 +1,51 @@
+{
+  "schema": "pulsim-v1-layer-map-v1",
+  "layer_order": [
+    "domain-model",
+    "equation-services",
+    "solve-services",
+    "runtime-orchestrator",
+    "adapters"
+  ],
+  "modules": {
+    "domain-model": {
+      "files": [
+        "core/include/pulsim/v1/cpp23_features.hpp",
+        "core/include/pulsim/v1/concepts.hpp",
+        "core/include/pulsim/v1/type_traits.hpp",
+        "core/include/pulsim/v1/numeric_types.hpp",
+        "core/include/pulsim/v1/device_base.hpp",
+        "core/include/pulsim/v1/losses.hpp",
+        "core/include/pulsim/v1/sources.hpp"
+      ]
+    },
+    "equation-services": {
+      "files": []
+    },
+    "solve-services": {
+      "files": [
+        "core/include/pulsim/v1/solver.hpp",
+        "core/include/pulsim/v1/integration.hpp",
+        "core/include/pulsim/v1/high_performance.hpp",
+        "core/include/pulsim/v1/convergence_aids.hpp"
+      ]
+    },
+    "runtime-orchestrator": {
+      "files": [
+        "core/include/pulsim/v1/runtime_circuit.hpp",
+        "core/include/pulsim/v1/transient_services.hpp",
+        "core/include/pulsim/v1/simulation.hpp",
+        "core/src/v1/transient_services.cpp",
+        "core/src/v1/simulation.cpp",
+        "core/src/v1/sundials_backend.hpp",
+        "core/src/v1/sundials_backend.cpp"
+      ]
+    },
+    "adapters": {
+      "files": [
+        "core/include/pulsim/v1/parser/yaml_parser.hpp",
+        "core/src/v1/yaml_parser.cpp"
+      ]
+    }
+  }
+}
