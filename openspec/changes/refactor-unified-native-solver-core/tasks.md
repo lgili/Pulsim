@@ -64,18 +64,18 @@
 - [x] 9.2 Remove duplicate projected-wrapper/transient wrapper code from supported execution path.
 - [x] 9.3 Delete dead configuration branches and stale tests tied only to removed paths.
 - [x] 9.4 Update docs to reflect single native core and dual-mode user choice.
-- [ ] 9.5 Gate: full benchmark/parity/stress suite passes with no unsupported legacy-path dependency.
+- [x] 9.5 Gate: full benchmark/parity/stress suite passes with no unsupported legacy-path dependency.
 
 ## 10. Final validation and rollout
-- [ ] 10.1 Run full benchmark matrix with frozen baseline comparison report.
-- [ ] 10.2 Run parity suite against ngspice/LTspice and publish KPI deltas.
-- [ ] 10.3 Run converter-focused stress tiers and verify convergence and runtime gates.
-- [ ] 10.4 Publish migration guide with before/after configuration examples.
-- [ ] 10.5 Mark all tasks complete only after KPI gates pass and reports are archived.
+- [x] 10.1 Run full benchmark matrix with frozen baseline comparison report.
+- [x] 10.2 Run parity suite against ngspice/LTspice and publish KPI deltas.
+- [x] 10.3 Run converter-focused stress tiers and verify convergence and runtime gates.
+- [x] 10.4 Publish migration guide with before/after configuration examples.
+- [x] 10.5 Mark all tasks complete only after KPI gates pass and reports are archived.
 
 ## 11. Loss and electrothermal integration
-- [ ] 11.1 Implement `LossService` commit hooks for switching losses on events and conduction losses on accepted segments.
-- [ ] 11.2 Implement `ThermalService` RC-network stepping with deterministic coupling modes.
-- [ ] 11.3 Integrate bounded temperature-to-electrical parameter refresh on commit boundaries.
-- [ ] 11.4 Add converter regression tests for per-device losses and peak/final junction temperatures.
-- [ ] 11.5 Gate: loss-energy-balance and thermal-peak KPIs pass without required-metric regression.
+- [x] 11.1 Implement `LossService` commit hooks for switching losses on events and conduction losses on accepted segments.
+- [x] 11.2 Implement `ThermalService` RC-network stepping with deterministic coupling modes.
+- [x] 11.3 Integrate bounded temperature-to-electrical parameter refresh on commit boundaries.
+- [x] 11.4 Add converter regression tests for per-device losses and peak/final junction temperatures.
+- [x] 11.5 Gate: loss-energy-balance and thermal-peak KPIs pass without required-metric regression.

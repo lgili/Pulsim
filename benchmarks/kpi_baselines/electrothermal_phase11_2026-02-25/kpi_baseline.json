@@ -1,0 +1,18 @@
+{
+  "schema_version": "pulsim-kpi-baseline-v1",
+  "baseline_id": "electrothermal_phase11_2026-02-25",
+  "captured_at_utc": "2026-02-25T00:46:07.824908+00:00",
+  "source_artifacts_root": "benchmarks/phase11_electrothermal_artifacts",
+  "metrics": {
+    "convergence_success_rate": 1.0,
+    "runtime_p50": 0.010769208514830098,
+    "runtime_p95": 0.01788693369308021,
+    "state_space_primary_ratio": 0.0,
+    "dae_fallback_ratio": 1.0,
+    "loss_energy_balance_error": 6.222048161432268e-17,
+    "thermal_peak_temperature_delta": 0.09118796214326075,
+    "parity_rms_error_ltspice": null,
+    "parity_rms_error_ngspice": null,
+    "stress_tier_failure_count": 0.0
+  }
+}

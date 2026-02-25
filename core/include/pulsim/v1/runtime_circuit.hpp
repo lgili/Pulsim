@@ -1600,7 +1600,7 @@ public:
                 if constexpr (std::is_same_v<T, Resistor>) {
                     return;
                 } else {
-                    stamp_device_dc(dev, conn, triplets, b);
+                    stamp_device_dc(dev, conn, i, triplets, b);
                 }
             }, devices_[i]);
         }
@@ -1807,6 +1807,39 @@ public:
     /// Get all connections (for conversion to IR circuit)
     [[nodiscard]] const std::vector<DeviceConnection>& connections() const { return connections_; }
 
+    /// Update per-device electrothermal electrical scaling for the next accepted segment.
+    void set_device_temperature_scale(std::size_t device_index, Real scale) {
+        ensure_device_temperature_scale_storage();
+        if (device_index >= device_temperature_scale_.size()) {
+            return;
+        }
+        device_temperature_scale_[device_index] = std::clamp(scale, Real{0.05}, Real{4.0});
+    }
+
+    /// Update all per-device electrothermal electrical scales in one commit.
+    void set_device_temperature_scales(const std::vector<Real>& scales) {
+        ensure_device_temperature_scale_storage();
+        const std::size_t n = device_temperature_scale_.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            const Real value = i < scales.size() ? scales[i] : 1.0;
+            device_temperature_scale_[i] = std::clamp(value, Real{0.05}, Real{4.0});
+        }
+    }
+
+    /// Reset all electrothermal electrical scaling to unity.
+    void reset_device_temperature_scales() {
+        ensure_device_temperature_scale_storage();
+        std::fill(device_temperature_scale_.begin(), device_temperature_scale_.end(), 1.0);
+    }
+
+    /// Get current electrothermal electrical scale for a device index.
+    [[nodiscard]] Real device_temperature_scale(std::size_t device_index) const {
+        if (device_index >= device_temperature_scale_.size()) {
+            return 1.0;
+        }
+        return std::clamp(device_temperature_scale_[device_index], Real{0.05}, Real{4.0});
+    }
+
 private:
     enum class StageScheme {
         None,
@@ -1839,6 +1872,12 @@ private:
             stage_ind_i_.assign(devices_.size(), 0.0);
             stage_cap_vdot_.assign(devices_.size(), 0.0);
             stage_ind_idot_.assign(devices_.size(), 0.0);
+        }
+    }
+
+    void ensure_device_temperature_scale_storage() {
+        if (device_temperature_scale_.size() != devices_.size()) {
+            device_temperature_scale_.assign(devices_.size(), 1.0);
         }
     }
 
@@ -2250,6 +2289,7 @@ private:
     std::unordered_map<std::string, std::deque<Real>> transfer_input_history_;
     std::unordered_map<std::string, std::deque<Real>> transfer_output_history_;
     std::vector<DeviceConnection> connections_;
+    std::vector<Real> device_temperature_scale_;
     std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index> node_map_;
     std::vector<std::string> node_names_;
@@ -2275,6 +2315,7 @@ private:
 
     template<typename Device>
     void stamp_device_dc(const Device& dev, const DeviceConnection& conn,
+                         std::size_t device_index,
                          std::vector<Eigen::Triplet<Real>>& triplets, Vector& b) const {
         using T = std::decay_t<Device>;
 
@@ -2312,7 +2353,10 @@ private:
         else if constexpr (std::is_same_v<T, MOSFET> || std::is_same_v<T, IGBT>) {
             // Initial: off-state conductance
             auto params = dev.params();
-            stamp_resistor(1.0 / params.g_off, {conn.nodes[1], conn.nodes[2]}, triplets);
+            const Real scale = device_temperature_scale(device_index);
+            const Real g_off = std::max<Real>(params.g_off / std::max<Real>(scale, Real{0.05}),
+                                              Real{1e-18});
+            stamp_resistor(1.0 / g_off, {conn.nodes[1], conn.nodes[2]}, triplets);
         }
         else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
             // DC: use voltage at t=0
@@ -2498,10 +2542,10 @@ private:
             if (n2 >= 0) f[n2] -= i_br;
         }
         else if constexpr (std::is_same_v<T, MOSFET>) {
-            stamp_mosfet_jacobian(dev, conn.nodes, triplets, f, x);
+            stamp_mosfet_jacobian(dev, conn.nodes, device_index, triplets, f, x);
         }
         else if constexpr (std::is_same_v<T, IGBT>) {
-            stamp_igbt_jacobian(dev, conn.nodes, triplets, f, x);
+            stamp_igbt_jacobian(dev, conn.nodes, device_index, triplets, f, x);
         }
         else if constexpr (std::is_same_v<T, PWMVoltageSource> ||
                            std::is_same_v<T, SineVoltageSource> ||
@@ -2656,6 +2700,7 @@ private:
 
     template<typename Triplets>
     void stamp_mosfet_jacobian(const MOSFET& dev, const std::vector<Index>& nodes,
+                               std::size_t device_index,
                                Triplets& triplets,
                                Vector& f, const Vector& x) const {
         Index n_gate = nodes[0];
@@ -2667,6 +2712,10 @@ private:
         Real vs = (n_source >= 0) ? x[n_source] : 0.0;
 
         const auto& p = dev.params();
+        const Real scale = device_temperature_scale(device_index);
+        const Real inv_scale = 1.0 / std::max<Real>(scale, Real{0.05});
+        const Real kp_eff = p.kp * inv_scale;
+        const Real g_off_eff = p.g_off * inv_scale;
         Real sign = p.is_nmos ? 1.0 : -1.0;
         Real vgs = sign * (vg - vs);
         Real vds = sign * (vd - vs);
@@ -2675,21 +2724,21 @@ private:
 
         if (vgs <= p.vth) {
             // Cutoff
-            id = p.g_off * vds;
-            gds = p.g_off;
+            id = g_off_eff * vds;
+            gds = g_off_eff;
         } else if (vds < vgs - p.vth) {
             // Linear
             Real vov = vgs - p.vth;
-            id = p.kp * (vov * vds - 0.5 * vds * vds) * (1.0 + p.lambda * vds);
-            gm = p.kp * vds * (1.0 + p.lambda * vds);
-            gds = p.kp * (vov - vds) * (1.0 + p.lambda * vds) +
-                  p.kp * (vov * vds - 0.5 * vds * vds) * p.lambda;
+            id = kp_eff * (vov * vds - 0.5 * vds * vds) * (1.0 + p.lambda * vds);
+            gm = kp_eff * vds * (1.0 + p.lambda * vds);
+            gds = kp_eff * (vov - vds) * (1.0 + p.lambda * vds) +
+                  kp_eff * (vov * vds - 0.5 * vds * vds) * p.lambda;
         } else {
             // Saturation
             Real vov = vgs - p.vth;
-            id = 0.5 * p.kp * vov * vov * (1.0 + p.lambda * vds);
-            gm = p.kp * vov * (1.0 + p.lambda * vds);
-            gds = 0.5 * p.kp * vov * vov * p.lambda;
+            id = 0.5 * kp_eff * vov * vov * (1.0 + p.lambda * vds);
+            gm = kp_eff * vov * (1.0 + p.lambda * vds);
+            gds = 0.5 * kp_eff * vov * vov * p.lambda;
         }
 
         id *= sign;
@@ -2714,6 +2763,7 @@ private:
 
     template<typename Triplets>
     void stamp_igbt_jacobian(const IGBT& dev, const std::vector<Index>& nodes,
+                             std::size_t device_index,
                              Triplets& triplets,
                              Vector& f, const Vector& x) const {
         Index n_gate = nodes[0];
@@ -2725,11 +2775,15 @@ private:
         Real ve = (n_emitter >= 0) ? x[n_emitter] : 0.0;
 
         const auto& p = dev.params();
+        const Real scale = device_temperature_scale(device_index);
+        const Real inv_scale = 1.0 / std::max<Real>(scale, Real{0.05});
+        const Real g_on_eff = p.g_on * inv_scale;
+        const Real g_off_eff = p.g_off * inv_scale;
         Real vge = vg - ve;
         Real vce = vc - ve;
 
         bool is_on = (vge > p.vth) && (vce > 0);
-        Real g = is_on ? p.g_on : p.g_off;
+        Real g = is_on ? g_on_eff : g_off_eff;
         Real ic = g * vce;
 
         // Simple model without saturation for now

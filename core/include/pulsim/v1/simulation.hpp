@@ -378,21 +378,6 @@ private:
         DaeFallback
     };
 
-    struct DeviceLossState {
-        LossAccumulator accumulator;
-        LossBreakdown switching_energy{};  // Use fields as energy buckets (J)
-        Real peak_power = 0.0;
-    };
-
-    struct DeviceThermalState {
-        bool enabled = false;
-        ThermalDeviceConfig config{};
-        Real temperature = 25.0;
-        Real peak_temperature = 25.0;
-        Real sum_temperature = 0.0;
-        int samples = 0;
-    };
-
     struct SwitchMonitor {
         std::string name;
         Index ctrl = -1;
@@ -427,7 +412,6 @@ private:
     void initialize_loss_tracking();
     void finalize_loss_summary(SimulationResult& result);
     void initialize_thermal_tracking();
-    [[nodiscard]] Real thermal_scale_factor(std::size_t device_index) const;
     void update_thermal_state(Real dt);
     void finalize_thermal_summary(SimulationResult& result);
     void record_fallback_event(SimulationResult& result,
@@ -444,12 +428,7 @@ private:
     NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
 
     std::vector<SwitchMonitor> switch_monitors_;
-    std::vector<DeviceLossState> loss_states_;
-    std::vector<std::optional<SwitchingEnergy>> switching_energy_;
-    std::vector<bool> diode_conducting_;
     std::unordered_map<std::string, std::size_t> device_index_;
-    std::vector<DeviceThermalState> thermal_states_;
-    std::vector<Real> last_device_power_;
     Real transient_gmin_ = 0.0;
 
     AdvancedTimestepController timestep_controller_;

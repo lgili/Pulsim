@@ -13,6 +13,10 @@ metrics:
     direction: higher_is_better
     max_regression_abs: 0.01
     required: true
+  dae_fallback_ratio:
+    direction: lower_is_better
+    max_regression_abs: 0.01
+    required: true
   parity_rms_error_ltspice:
     direction: lower_is_better
     max_regression_rel: 0.05
@@ -25,3 +29,11 @@ metrics:
     direction: lower_is_better
     max_regression_abs: 0.0
     required: true
+  loss_energy_balance_error:
+    direction: lower_is_better
+    max_regression_rel: 0.05
+    required: false
+  thermal_peak_temperature_delta:
+    direction: lower_is_better
+    max_regression_rel: 0.05
+    required: false

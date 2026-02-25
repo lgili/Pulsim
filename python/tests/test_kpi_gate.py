@@ -171,6 +171,41 @@ def test_compute_metrics_includes_state_space_primary_ratio(tmp_path: Path) -> N
     assert metrics["state_space_primary_ratio"] == 14.0 / 25.0
 
 
+def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "state_space_primary_steps": 8.0,
+                    "dae_fallback_steps": 2.0,
+                    "loss_energy_balance_error": 0.012,
+                    "thermal_peak_temperature_delta": 18.0,
+                },
+            },
+            {
+                "status": "passed",
+                "runtime_s": 0.12,
+                "telemetry": {
+                    "state_space_primary_steps": 6.0,
+                    "dae_fallback_steps": 4.0,
+                    "loss_energy_balance_error": 0.008,
+                    "thermal_peak_temperature_delta": 22.0,
+                },
+            },
+        ]
+    }
+    bench_path = tmp_path / "bench.json"
+    _write_json(bench_path, bench_results)
+
+    metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
+    assert metrics["state_space_primary_ratio"] == 14.0 / 20.0
+    assert metrics["dae_fallback_ratio"] == 6.0 / 20.0
+    assert metrics["loss_energy_balance_error"] == 0.01
+    assert metrics["thermal_peak_temperature_delta"] == 20.0
+
+
 def test_compute_metrics_runtime_quantiles_can_use_case_filter(tmp_path: Path) -> None:
     bench_results = {
         "results": [

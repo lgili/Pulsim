@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -213,6 +214,7 @@ def compute_metrics(
     metrics["runtime_p95"] = _quantile(runtimes, 0.95)
 
     state_space_primary_sum = 0.0
+    dae_fallback_sum = 0.0
     state_space_total_sum = 0.0
     for row in executed:
         telemetry = row.get("telemetry")
@@ -227,12 +229,38 @@ def compute_metrics(
         if not (primary_f >= 0.0 and fallback_f >= 0.0):
             continue
         state_space_primary_sum += primary_f
+        dae_fallback_sum += fallback_f
         state_space_total_sum += primary_f + fallback_f
     metrics["state_space_primary_ratio"] = (
         state_space_primary_sum / state_space_total_sum
         if state_space_total_sum > 0.0
         else None
     )
+    metrics["dae_fallback_ratio"] = (
+        dae_fallback_sum / state_space_total_sum
+        if state_space_total_sum > 0.0
+        else None
+    )
+
+    def telemetry_mean(metric_name: str) -> Optional[float]:
+        values: list[float] = []
+        for row in executed:
+            telemetry = row.get("telemetry")
+            if not isinstance(telemetry, dict):
+                continue
+            value = telemetry.get(metric_name)
+            if value is None:
+                continue
+            numeric = float(value)
+            if not math.isfinite(numeric):
+                continue
+            values.append(numeric)
+        if not values:
+            return None
+        return float(sum(values) / len(values))
+
+    metrics["loss_energy_balance_error"] = telemetry_mean("loss_energy_balance_error")
+    metrics["thermal_peak_temperature_delta"] = telemetry_mean("thermal_peak_temperature_delta")
 
     def parity_mean_rms(path: Optional[Path]) -> Optional[float]:
         if path is None:

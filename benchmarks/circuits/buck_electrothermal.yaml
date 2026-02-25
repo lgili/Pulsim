@@ -1,0 +1,64 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: buck_electrothermal
+  category: electrothermal
+  observables:
+    - column: V(source)
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 100e-6
+  dt: 1e-6
+  dt_min: 1e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  step_mode: fixed
+  uic: true
+  integrator: bdf1
+  enable_events: false
+  enable_losses: true
+  thermal:
+    enabled: true
+    ambient: 25.0
+    policy: loss_with_temperature_scaling
+    default_rth: 0.5
+    default_cth: 1e-4
+components:
+  - type: voltage_source
+    name: Vg
+    nodes: [gate, 0]
+    waveform:
+      type: dc
+      value: 10.0
+
+  - type: voltage_source
+    name: Vd
+    nodes: [drain, 0]
+    waveform:
+      type: dc
+      value: 20.0
+
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    vth: 2.5
+    kp: 0.01
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      eon: 1.0e-6
+      eoff: 1.0e-6
+    thermal:
+      enabled: true
+      rth: 0.5
+      cth: 1e-4
+      temp_init: 25.0
+      temp_ref: 25.0
+      alpha: 0.004
+
+  - type: resistor
+    name: Rload
+    nodes: [source, 0]
+    value: 100.0

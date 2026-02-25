@@ -64,6 +64,72 @@ No runtime suportado, a escolha de caminho transiente é canônica por modo:
 As chaves legadas `simulation.backend` / `simulation.sundials` (e equivalentes em
 `simulation.advanced`) são tratadas apenas para diagnóstico de migração.
 
+### Before/After: legacy backend -> canonical mode
+
+Before (legacy, removed in strict migration path):
+
+```yaml
+simulation:
+  backend: auto
+  sundials:
+    enabled: true
+    family: ida
+  adaptive_timestep: true
+  dt: 1e-7
+```
+
+After (canonical fixed-step native core):
+
+```yaml
+simulation:
+  step_mode: fixed
+  dt: 1e-7
+  dt_min: 1e-9
+  dt_max: 1e-7
+```
+
+After (canonical variable-step native core):
+
+```yaml
+simulation:
+  step_mode: variable
+  dt: 1e-7
+  dt_min: 1e-9
+  dt_max: 2e-6
+  timestep:
+    preset: power_electronics
+```
+
+If `strict = True`, legacy backend keys produce parser diagnostic
+`PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND`.
+
+### Before/After: expert override location
+
+Before (mixed top-level knobs):
+
+```yaml
+simulation:
+  step_mode: variable
+  integrator: trbdf2
+  solver:
+    order: [gmres]
+```
+
+After (canonical mode + explicit expert section):
+
+```yaml
+simulation:
+  step_mode: variable
+  advanced:
+    integrator: trbdf2
+    solver:
+      order: [gmres]
+      iterative:
+        preconditioner: ilut
+        max_iterations: 300
+        tolerance: 1e-8
+```
+
 ## 4. Removed API/Workflow Mapping
 
 | Removed workflow | Replacement |
