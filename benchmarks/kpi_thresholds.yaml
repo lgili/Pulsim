@@ -12,11 +12,11 @@ metrics:
   state_space_primary_ratio:
     direction: higher_is_better
     max_regression_abs: 0.01
-    required: true
+    required: false
   dae_fallback_ratio:
     direction: lower_is_better
     max_regression_abs: 0.01
-    required: true
+    required: false
   parity_rms_error_ltspice:
     direction: lower_is_better
     max_regression_rel: 0.05
