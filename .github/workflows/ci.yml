@@ -240,6 +240,12 @@ jobs:
         run: |
           ruff check python/
 
+      - name: Check v1 layer boundaries
+        run: |
+          python3 scripts/check_v1_layer_boundaries.py \
+            --map core/v1_layer_map.json \
+            --strict
+
   # =============================================================================
   # Benchmark KPI Gate (PR/push gate + optional manual trigger)
   # =============================================================================
