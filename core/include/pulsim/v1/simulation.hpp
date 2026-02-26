@@ -161,6 +161,8 @@ struct BackendTelemetry {
     int segment_model_cache_misses = 0;
     int linear_factor_cache_hits = 0;
     int linear_factor_cache_misses = 0;
+    int linear_factor_cache_invalidations = 0;
+    std::string linear_factor_cache_last_invalidation_reason;
     int equation_assemble_system_calls = 0;
     int equation_assemble_residual_calls = 0;
     double equation_assemble_system_time_seconds = 0.0;
@@ -466,6 +468,7 @@ private:
     bool last_step_segment_cache_hit_ = false;
     bool last_step_linear_factor_cache_hit_ = false;
     bool last_step_linear_factor_cache_miss_ = false;
+    std::string last_step_linear_factor_cache_invalidation_reason_;
     bool segment_primary_disabled_for_run_ = false;
     std::uint64_t direct_assemble_system_calls_ = 0;
     std::uint64_t direct_assemble_residual_calls_ = 0;

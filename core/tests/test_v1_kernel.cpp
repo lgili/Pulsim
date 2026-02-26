@@ -934,6 +934,50 @@ TEST_CASE("v1 segment primary path matches DAE fallback in fixed and variable mo
     CHECK(run.backend_telemetry.state_space_primary_steps >= 1);
 }
 
+TEST_CASE("v1 backend telemetry reports topology-driven linear cache invalidation",
+          "[v1][performance][cache][telemetry]") {
+    Circuit circuit;
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_vin = circuit.add_node("vin");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vdc", n_vin, Circuit::ground(), 12.0);
+
+    PulseParams pulse;
+    pulse.v_initial = 0.0;
+    pulse.v_pulse = 10.0;
+    pulse.t_delay = 2e-6;
+    pulse.t_rise = 2e-7;
+    pulse.t_fall = 2e-7;
+    pulse.t_width = 2e-6;
+    pulse.period = 6e-6;
+    circuit.add_pulse_voltage_source("Vctrl", n_ctrl, Circuit::ground(), pulse);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_vin, n_out, 5.0, 200.0, 1e-9);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 20.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 12e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto run = sim.run_transient();
+    REQUIRE(run.success);
+
+    CHECK(run.backend_telemetry.linear_factor_cache_hits >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_misses >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_invalidations >= 1);
+    CHECK((run.backend_telemetry.linear_factor_cache_last_invalidation_reason == "topology_changed" ||
+           run.backend_telemetry.linear_factor_cache_last_invalidation_reason == "numeric_instability"));
+}
+
 TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fallback][recovery]") {
     Circuit circuit;
     auto n_in = circuit.add_node("in");

@@ -1095,6 +1095,11 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
             if (last_step_linear_factor_cache_miss_) {
                 result.backend_telemetry.linear_factor_cache_misses += 1;
+                if (!last_step_linear_factor_cache_invalidation_reason_.empty()) {
+                    result.backend_telemetry.linear_factor_cache_invalidations += 1;
+                    result.backend_telemetry.linear_factor_cache_last_invalidation_reason =
+                        last_step_linear_factor_cache_invalidation_reason_;
+                }
             }
             if (last_step_solve_path_ == StepSolvePath::SegmentPrimary) {
                 result.backend_telemetry.state_space_primary_steps += 1;

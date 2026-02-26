@@ -333,6 +333,16 @@ public:
             cached_matrix_hash_ == matrix_hash &&
             cached_state_size_ == linear_model.E.rows();
 
+        if (factorization_valid_ && !can_reuse_factorization) {
+            if (cached_topology_signature_ != model.topology_signature ||
+                cached_state_size_ != linear_model.E.rows()) {
+                outcome.cache_invalidation_reason = "topology_changed";
+            } else if (cached_matrix_hash_ != matrix_hash) {
+                outcome.cache_invalidation_reason = "numeric_instability";
+            }
+            factorization_valid_ = false;
+        }
+
         LinearSolveResult x_next_result = LinearSolveResult::failure("segment_linear_not_attempted");
         if (can_reuse_factorization) {
             x_next_result = linear.solve(rhs);
@@ -340,6 +350,7 @@ public:
                 outcome.linear_factor_cache_hit = true;
             } else {
                 factorization_valid_ = false;
+                outcome.cache_invalidation_reason = "numeric_instability";
             }
         }
 
@@ -347,6 +358,9 @@ public:
             outcome.linear_factor_cache_miss = true;
             if (!linear.analyze(linear_model.E) || !linear.factorize(linear_model.E)) {
                 factorization_valid_ = false;
+                if (outcome.cache_invalidation_reason.empty()) {
+                    outcome.cache_invalidation_reason = "numeric_instability";
+                }
                 outcome.requires_fallback = true;
                 outcome.reason = "segment_linear_factorization_failed";
                 return outcome;
@@ -355,6 +369,9 @@ public:
             x_next_result = linear.solve(rhs);
             if (!x_next_result) {
                 factorization_valid_ = false;
+                if (outcome.cache_invalidation_reason.empty()) {
+                    outcome.cache_invalidation_reason = "numeric_instability";
+                }
                 outcome.requires_fallback = true;
                 outcome.reason = "segment_linear_solve_failed";
                 return outcome;

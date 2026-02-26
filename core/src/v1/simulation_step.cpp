@@ -125,6 +125,7 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     request.retry_index = 0;
     request.max_retries = std::max(1, options_.max_step_retries + 1);
     request.event_adjacent = false;
+    last_step_linear_factor_cache_invalidation_reason_.clear();
 
     if (segment_primary_disabled_for_run_) {
         last_step_solve_path_ = StepSolvePath::DaeFallback;
@@ -142,6 +143,7 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
         transient_services_.segment_stepper->try_advance(segment_model, x_prev, request);
     last_step_linear_factor_cache_hit_ = segment_outcome.linear_factor_cache_hit;
     last_step_linear_factor_cache_miss_ = segment_outcome.linear_factor_cache_miss;
+    last_step_linear_factor_cache_invalidation_reason_ = segment_outcome.cache_invalidation_reason;
     if (!segment_outcome.requires_fallback) {
         last_step_solve_path_ = StepSolvePath::SegmentPrimary;
         last_step_solve_reason_ = segment_outcome.reason;
