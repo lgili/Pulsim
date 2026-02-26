@@ -52,6 +52,9 @@ target_link_libraries(pulsim
         ${PULSIM_KLU_LIBRARIES}
         ${PULSIM_HYPRE_LIBRARIES}
 )
+if(COMMAND pulsim_apply_target_defaults)
+    pulsim_apply_target_defaults(pulsim)
+endif()
 
 # Alias for cleaner usage
 add_library(pulsim::pulsim ALIAS pulsim)
@@ -73,6 +76,9 @@ if(PULSIM_BUILD_TESTS)
             pulsim::core
             Catch2::Catch2WithMain
     )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_tests)
+    endif()
 
     # Enable profiling for benchmark tests in Debug builds
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -98,6 +104,9 @@ if(PULSIM_BUILD_TESTS)
             pulsim::core
             Catch2::Catch2WithMain
     )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_simulation_tests)
+    endif()
 
     catch_discover_tests(pulsim_simulation_tests)
 
