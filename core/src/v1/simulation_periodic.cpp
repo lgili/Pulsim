@@ -41,6 +41,7 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const PeriodicSteadyS
     if (!dc.success) {
         PeriodicSteadyStateResult result;
         result.success = false;
+        result.diagnostic = SimulationDiagnosticCode::DcOperatingPointFailure;
         result.message = "DC operating point failed: " + dc.message;
         return result;
     }
@@ -54,14 +55,17 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
     const Index expected_size = static_cast<Index>(circuit_.system_size());
 
     if (!std::isfinite(options.period) || options.period <= 0.0) {
+        result.diagnostic = SimulationDiagnosticCode::PeriodicInvalidPeriod;
         result.message = "Periodic shooting requires a positive finite period";
         return result;
     }
     if (x0.size() != expected_size) {
+        result.diagnostic = SimulationDiagnosticCode::PeriodicInvalidInitialState;
         result.message = "Initial state size mismatch";
         return result;
     }
     if (!x0.allFinite()) {
+        result.diagnostic = SimulationDiagnosticCode::PeriodicInvalidInitialState;
         result.message = "Initial state contains non-finite values";
         return result;
     }
@@ -84,6 +88,7 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
         SimulationResult cycle = shooting_sim.run_transient(guess);
         if (!cycle.success || cycle.states.empty()) {
             result.success = false;
+            result.diagnostic = SimulationDiagnosticCode::PeriodicCycleFailure;
             result.message = "Shooting cycle failed: " + cycle.message;
             result.last_cycle = std::move(cycle);
             return result;
@@ -110,6 +115,7 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
     }
 
     result.success = false;
+    result.diagnostic = SimulationDiagnosticCode::PeriodicNoConvergence;
     result.steady_state = guess;
     result.message = "Periodic steady-state did not converge within max iterations";
     return result;
@@ -120,6 +126,7 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const HarmonicBalanceOptio
     if (!dc.success) {
         HarmonicBalanceResult result;
         result.success = false;
+        result.diagnostic = SimulationDiagnosticCode::DcOperatingPointFailure;
         result.message = "DC operating point failed: " + dc.message;
         return result;
     }
@@ -134,14 +141,17 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
     const int samples = std::max(3, options.num_samples);
 
     if (!std::isfinite(options.period) || options.period <= 0.0) {
+        result.diagnostic = SimulationDiagnosticCode::HarmonicInvalidPeriod;
         result.message = "Harmonic balance requires a positive finite period";
         return result;
     }
     if (x0.size() != n) {
+        result.diagnostic = SimulationDiagnosticCode::HarmonicInvalidInitialState;
         result.message = "Initial state size mismatch";
         return result;
     }
     if (!x0.allFinite()) {
+        result.diagnostic = SimulationDiagnosticCode::HarmonicInvalidInitialState;
         result.message = "Initial state contains non-finite values";
         return result;
     }
@@ -149,6 +159,7 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
     Matrix D = spectral_diff_matrix(samples, options.period);
     Matrix Dt = D.transpose();
     if (D.size() == 0) {
+        result.diagnostic = SimulationDiagnosticCode::HarmonicDifferentiationFailure;
         result.message = "Failed to build spectral differentiation matrix";
         return result;
     }
@@ -288,6 +299,7 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
 
     if (solve_result.status != SolverStatus::Success) {
         result.success = false;
+        result.diagnostic = SimulationDiagnosticCode::HarmonicSolverFailure;
         result.message = "HB solver failed: " + solve_result.error_message;
         result.solution = solve_result.solution;
         return result;
