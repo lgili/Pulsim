@@ -247,6 +247,46 @@ jobs:
             --strict
 
   # =============================================================================
+  # Static Analysis (clang-tidy) for v1 core modules
+  # =============================================================================
+  static-analysis:
+    name: Static Analysis (clang-tidy)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang-17 clang-tidy-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
+
+      - name: Configure CMake
+        env:
+          CC: clang-17
+          CXX: clang++-17
+        run: |
+          cmake -B build-tidy \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang-17 \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DPULSIM_BUILD_TESTS=OFF \
+            -DPULSIM_BUILD_PYTHON=OFF \
+            -DPULSIM_ENABLE_LTO=OFF
+
+      - name: Build core target for compilation database validity
+        run: cmake --build build-tidy --target pulsim --config Debug -j2
+
+      - name: Run clang-tidy (clang-analyzer checks)
+        run: |
+          clang-tidy-17 -p build-tidy -checks='-*,clang-analyzer-*' \
+            core/src/v1/simulation.cpp \
+            core/src/v1/simulation_step.cpp \
+            core/src/v1/simulation_periodic.cpp \
+            core/src/v1/transient_services.cpp
+
+  # =============================================================================
   # Benchmark KPI Gate (PR/push gate + optional manual trigger)
   # =============================================================================
   benchmark:

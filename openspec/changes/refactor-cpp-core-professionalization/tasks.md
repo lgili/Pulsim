@@ -23,7 +23,7 @@
 
 ## 4. Safety hardening
 - [x] 4.1 Add finite-value, bounds, and dimensional guards at service boundaries.
-- [ ] 4.2 Enable sanitizer/static-analysis CI jobs for touched core modules.
+- [x] 4.2 Enable sanitizer/static-analysis CI jobs for touched core modules.
 - [ ] 4.3 Add regression tests for malformed netlists/options and hard nonlinear failure containment.
 
 ## 5. Performance hardening
