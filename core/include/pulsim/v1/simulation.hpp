@@ -163,6 +163,10 @@ struct BackendTelemetry {
     int linear_factor_cache_misses = 0;
     int linear_factor_cache_invalidations = 0;
     std::string linear_factor_cache_last_invalidation_reason;
+    int reserved_output_samples = 0;
+    int time_series_reallocations = 0;
+    int state_series_reallocations = 0;
+    int virtual_channel_reallocations = 0;
     int equation_assemble_system_calls = 0;
     int equation_assemble_residual_calls = 0;
     double equation_assemble_system_time_seconds = 0.0;

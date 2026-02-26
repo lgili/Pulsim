@@ -58,6 +58,10 @@ def test_fixed_and_variable_modes_share_solver_service_contracts() -> None:
         assert backend.linear_factor_cache_hits >= 0
         assert backend.linear_factor_cache_misses >= 0
         assert backend.linear_factor_cache_invalidations >= 0
+        assert backend.reserved_output_samples >= 0
+        assert backend.time_series_reallocations >= 0
+        assert backend.state_series_reallocations >= 0
+        assert backend.virtual_channel_reallocations >= 0
 
     linear_contract_fields = (
         "total_solve_calls",
@@ -75,6 +79,10 @@ def test_fixed_and_variable_modes_share_solver_service_contracts() -> None:
         "linear_factor_cache_misses",
         "linear_factor_cache_invalidations",
         "linear_factor_cache_last_invalidation_reason",
+        "reserved_output_samples",
+        "time_series_reallocations",
+        "state_series_reallocations",
+        "virtual_channel_reallocations",
     )
 
     for field in linear_contract_fields:

@@ -1276,6 +1276,10 @@ void init_v2_module(py::module_& v2) {
                        &BackendTelemetry::linear_factor_cache_invalidations)
         .def_readwrite("linear_factor_cache_last_invalidation_reason",
                        &BackendTelemetry::linear_factor_cache_last_invalidation_reason)
+        .def_readwrite("reserved_output_samples", &BackendTelemetry::reserved_output_samples)
+        .def_readwrite("time_series_reallocations", &BackendTelemetry::time_series_reallocations)
+        .def_readwrite("state_series_reallocations", &BackendTelemetry::state_series_reallocations)
+        .def_readwrite("virtual_channel_reallocations", &BackendTelemetry::virtual_channel_reallocations)
         .def_readwrite("equation_assemble_system_calls", &BackendTelemetry::equation_assemble_system_calls)
         .def_readwrite("equation_assemble_residual_calls", &BackendTelemetry::equation_assemble_residual_calls)
         .def_readwrite("equation_assemble_system_time_seconds", &BackendTelemetry::equation_assemble_system_time_seconds)
