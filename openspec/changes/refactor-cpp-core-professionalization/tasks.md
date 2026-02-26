@@ -30,7 +30,7 @@
 - [x] 5.1 Enforce allocation discipline in hot paths (zero dynamic allocations in steady-state stepping loops).
 - [x] 5.2 Implement deterministic cache reuse/invalidation for symbolic/factorization/preconditioner state.
 - [x] 5.3 Add performance telemetry fields and cache hit/miss observability in results.
-- [ ] 5.4 Run matrix benchmarks and confirm runtime/convergence KPIs remain non-regressive.
+- [x] 5.4 Run matrix benchmarks and confirm runtime/convergence KPIs remain non-regressive.
 
 ## 6. Compatibility and migration
 - [x] 6.1 Add YAML schema-evolution policy checks and strict migration diagnostics.
@@ -39,6 +39,6 @@
 - [x] 6.4 Publish migration guidance with before/after examples.
 
 ## 7. Final validation
-- [ ] 7.1 Run full benchmark + parity + stress suites and publish KPI delta report.
-- [ ] 7.2 Verify no KPI regression against frozen baseline under approved thresholds.
-- [ ] 7.3 Mark task completion only after all gates pass.
+- [x] 7.1 Run full benchmark + parity + stress suites and publish KPI delta report.
+- [x] 7.2 Verify no KPI regression against frozen baseline under approved thresholds.
+- [x] 7.3 Mark task completion only after all gates pass.

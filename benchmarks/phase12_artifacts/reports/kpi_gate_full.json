@@ -1,0 +1,188 @@
+{
+  "baseline_id": "phase0_2026-02-23",
+  "blocked_by_provenance": false,
+  "comparisons": {
+    "convergence_success_rate": {
+      "baseline": 1.0,
+      "current": 1.0,
+      "direction": "higher_is_better",
+      "max_regression_abs": 0.005,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    },
+    "dae_fallback_ratio": {
+      "baseline": 1.0,
+      "current": 0.7004109077325364,
+      "direction": "lower_is_better",
+      "max_regression_abs": 0.01,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": false,
+      "status": "passed"
+    },
+    "loss_energy_balance_error": {
+      "baseline": null,
+      "current": 1.3328019322558833e-17,
+      "direction": "lower_is_better",
+      "max_regression_abs": null,
+      "max_regression_rel": 0.05,
+      "message": "baseline metric unavailable",
+      "regression_abs": null,
+      "regression_rel": null,
+      "required": false,
+      "status": "skipped"
+    },
+    "parity_rms_error_ltspice": {
+      "baseline": 0.0022381726201627684,
+      "current": 0.0022381726201669604,
+      "direction": "lower_is_better",
+      "max_regression_abs": null,
+      "max_regression_rel": 0.05,
+      "message": "within threshold",
+      "regression_abs": 4.191959279697954e-15,
+      "regression_rel": 1.8729383256386627e-12,
+      "required": false,
+      "status": "passed"
+    },
+    "parity_rms_error_ngspice": {
+      "baseline": 0.002220472285308209,
+      "current": 0.002220472285312273,
+      "direction": "lower_is_better",
+      "max_regression_abs": null,
+      "max_regression_rel": 0.05,
+      "message": "within threshold",
+      "regression_abs": 4.064023423344665e-15,
+      "regression_rel": 1.830251811848471e-12,
+      "required": false,
+      "status": "passed"
+    },
+    "runtime_p95": {
+      "baseline": 0.21907356639276224,
+      "current": 0.11670239200102497,
+      "direction": "lower_is_better",
+      "max_regression_abs": null,
+      "max_regression_rel": 0.05,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    },
+    "state_space_primary_ratio": {
+      "baseline": 0.0,
+      "current": 0.29958909226746355,
+      "direction": "higher_is_better",
+      "max_regression_abs": 0.01,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": false,
+      "status": "passed"
+    },
+    "stress_tier_failure_count": {
+      "baseline": 0,
+      "current": 0.0,
+      "direction": "lower_is_better",
+      "max_regression_abs": 0.0,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    },
+    "thermal_peak_temperature_delta": {
+      "baseline": null,
+      "current": 0.0,
+      "direction": "lower_is_better",
+      "max_regression_abs": null,
+      "max_regression_rel": 0.05,
+      "message": "baseline metric unavailable",
+      "regression_abs": null,
+      "regression_rel": null,
+      "required": false,
+      "status": "skipped"
+    }
+  },
+  "current_metrics": {
+    "convergence_success_rate": 1.0,
+    "dae_fallback_ratio": 0.7004109077325364,
+    "loss_energy_balance_error": 1.3328019322558833e-17,
+    "parity_rms_error_ltspice": 0.0022381726201669604,
+    "parity_rms_error_ngspice": 0.002220472285312273,
+    "runtime_p50": 0.006292792000749614,
+    "runtime_p95": 0.11670239200102497,
+    "state_space_primary_ratio": 0.29958909226746355,
+    "stress_tier_failure_count": 0.0,
+    "thermal_peak_temperature_delta": 0.0
+  },
+  "evaluated_at_utc": "2026-02-26T02:02:46.193778+00:00",
+  "failed_required_metrics": 0,
+  "overall_status": "passed",
+  "provenance": {
+    "baseline": {
+      "checks": {
+        "baseline_id": "phase0_2026-02-23",
+        "baseline_path": "benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json",
+        "bench_results_declared": 1,
+        "captured_at_utc": "2026-02-23T10:27:20Z",
+        "digest_mismatches": 0,
+        "environment_keys": [
+          "cc",
+          "clang",
+          "cmake",
+          "cxx_flags",
+          "machine_class",
+          "os",
+          "python"
+        ],
+        "manifest_baseline_id": "phase0_2026-02-23",
+        "manifest_captured_at_utc": "2026-02-23T10:27:20Z",
+        "manifest_file_count": 8,
+        "manifest_path": "benchmarks/kpi_baselines/phase0_2026-02-23/artifact_manifest.json",
+        "manifest_schema_version": "pulsim-kpi-baseline-manifest-v1",
+        "metrics_count": 11,
+        "missing_files": 0,
+        "schema_version": "pulsim-kpi-baseline-v1",
+        "size_mismatches": 0,
+        "source_bench_results": null,
+        "source_bench_results_resolved": null,
+        "verified_files": 8
+      },
+      "errors": [],
+      "status": "passed",
+      "warnings": [
+        "baseline environment field 'compiler' is recommended for stronger provenance"
+      ]
+    },
+    "strict_mode": true,
+    "thresholds": {
+      "checks": {
+        "metrics_count": 9,
+        "schema": "pulsim-kpi-gates-v1",
+        "version": 1
+      },
+      "errors": [],
+      "status": "passed",
+      "warnings": []
+    }
+  },
+  "runtime_scope": {
+    "baseline_results_path": "/Users/lgili/Documents/01 - Codes/01 - Github/PulsimCore/benchmarks/phase8_artifacts/benchmarks/results.json",
+    "baseline_scope_total": 13,
+    "comparable_total": 13,
+    "executed_total": 20,
+    "executed_with_ids": 20,
+    "mode": "baseline_intersection",
+    "reason": "using_baseline_case_intersection"
+  },
+  "schema_version": "pulsim-kpi-gate-report-v1",
+  "skipped_optional_metrics": 2
+}

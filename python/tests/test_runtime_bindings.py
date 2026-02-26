@@ -1813,3 +1813,4 @@ def test_variable_step_accept_reject_pattern_is_deterministic() -> None:
     assert len(result_a.time) == len(result_b.time)
     for ta, tb in zip(result_a.time, result_b.time):
         assert ta == pytest.approx(tb, abs=1e-15)
+
