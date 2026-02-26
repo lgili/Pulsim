@@ -5,6 +5,7 @@
 #include "pulsim/v1/high_performance.hpp"
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/integration.hpp"
+#include "pulsim/v1/extensions.hpp"
 #include "pulsim/v1/losses.hpp"
 #include "pulsim/v1/transient_services.hpp"
 #include "pulsim/simulation_control.hpp"
@@ -392,6 +393,9 @@ public:
     void set_options(const SimulationOptions& options) { options_ = options; }
     [[nodiscard]] const TransientServiceRegistry& transient_services() const {
         return transient_services_;
+    }
+    [[nodiscard]] const ExtensionRegistry& extension_registry() const {
+        return kernel_extension_registry();
     }
 
 private:

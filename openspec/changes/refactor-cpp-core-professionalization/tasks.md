@@ -17,9 +17,9 @@
 - [x] 2.5 Enforce target-level warnings (`-Wall -Wextra -Wpedantic`) and keep compile options target-scoped in CMake.
 
 ## 3. Extensibility framework
-- [ ] 3.1 Define device/solver/integrator extension contracts with required metadata and telemetry fields.
-- [ ] 3.2 Implement registry and validation hooks for extension loading and compatibility checks.
-- [ ] 3.3 Add contract tests proving new feature classes can be added without orchestrator edits.
+- [x] 3.1 Define device/solver/integrator extension contracts with required metadata and telemetry fields.
+- [x] 3.2 Implement registry and validation hooks for extension loading and compatibility checks.
+- [x] 3.3 Add contract tests proving new feature classes can be added without orchestrator edits.
 
 ## 4. Safety hardening
 - [x] 4.1 Add finite-value, bounds, and dimensional guards at service boundaries.
