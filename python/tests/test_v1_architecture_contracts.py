@@ -55,6 +55,9 @@ def test_fixed_and_variable_modes_share_solver_service_contracts() -> None:
         assert backend.solver_family == "native"
         assert backend.equation_assemble_system_calls >= 1
         assert backend.equation_assemble_residual_calls >= 1
+        assert backend.linear_factor_cache_hits >= 0
+        assert backend.linear_factor_cache_misses >= 0
+        assert backend.linear_factor_cache_invalidations >= 0
 
     linear_contract_fields = (
         "total_solve_calls",
@@ -68,6 +71,10 @@ def test_fixed_and_variable_modes_share_solver_service_contracts() -> None:
         "solver_family",
         "equation_assemble_system_calls",
         "equation_assemble_residual_calls",
+        "linear_factor_cache_hits",
+        "linear_factor_cache_misses",
+        "linear_factor_cache_invalidations",
+        "linear_factor_cache_last_invalidation_reason",
     )
 
     for field in linear_contract_fields:

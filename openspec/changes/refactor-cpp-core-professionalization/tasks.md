@@ -28,8 +28,8 @@
 
 ## 5. Performance hardening
 - [ ] 5.1 Enforce allocation discipline in hot paths (zero dynamic allocations in steady-state stepping loops).
-- [ ] 5.2 Implement deterministic cache reuse/invalidation for symbolic/factorization/preconditioner state.
-- [ ] 5.3 Add performance telemetry fields and cache hit/miss observability in results.
+- [x] 5.2 Implement deterministic cache reuse/invalidation for symbolic/factorization/preconditioner state.
+- [x] 5.3 Add performance telemetry fields and cache hit/miss observability in results.
 - [ ] 5.4 Run matrix benchmarks and confirm runtime/convergence KPIs remain non-regressive.
 
 ## 6. Compatibility and migration
