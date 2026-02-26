@@ -73,6 +73,10 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
     SimulationOptions local = options_;
     local.tstart = 0.0;
     local.tstop = options.period;
+    // Shooting solves a periodic fixed-point on one full cycle; disabling
+    // event-calendar clipping keeps cycle trajectories stable for reference
+    // parity and avoids phase perturbation from transient event splits.
+    local.enable_events = false;
     if (local.dt <= 0.0) {
         local.dt = options.period / 100.0;
     }
