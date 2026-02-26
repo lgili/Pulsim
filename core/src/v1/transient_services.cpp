@@ -11,6 +11,7 @@
 #include <memory>
 #include <numbers>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -488,7 +489,7 @@ public:
         }
     }
 
-    void commit_switching_event(const std::string& name,
+    void commit_switching_event(std::string_view name,
                                 bool turning_on,
                                 Real energy) override {
         if (!options_.enable_losses || energy <= 0.0) {
@@ -509,7 +510,7 @@ public:
         }
     }
 
-    void commit_reverse_recovery_event(const std::string& name,
+    void commit_reverse_recovery_event(std::string_view name,
                                        Real energy) override {
         if (!options_.enable_losses || energy <= 0.0) {
             return;
@@ -527,7 +528,7 @@ public:
 
     void commit_accepted_segment(const Vector& x,
                                  Real dt,
-                                 const std::vector<Real>& thermal_scale) override {
+                                 std::span<const Real> thermal_scale) override {
         if (!options_.enable_losses || dt <= 0.0) {
             return;
         }
@@ -641,7 +642,7 @@ public:
         }
     }
 
-    [[nodiscard]] const std::vector<Real>& last_device_power() const override {
+    [[nodiscard]] std::span<const Real> last_device_power() const override {
         return last_device_power_;
     }
 
@@ -694,7 +695,15 @@ private:
         Real peak_power = 0.0;
     };
 
-    [[nodiscard]] std::optional<std::size_t> index_for(const std::string& name) const {
+    struct TransparentStringHash {
+        using is_transparent = void;
+
+        [[nodiscard]] std::size_t operator()(std::string_view value) const noexcept {
+            return std::hash<std::string_view>{}(value);
+        }
+    };
+
+    [[nodiscard]] std::optional<std::size_t> index_for(std::string_view name) const {
         const auto it = name_to_index_.find(name);
         if (it == name_to_index_.end()) {
             return std::nullopt;
@@ -707,7 +716,7 @@ private:
     std::vector<DeviceLossState> states_;
     std::vector<std::optional<SwitchingEnergy>> switching_energy_;
     std::vector<bool> diode_conducting_;
-    std::unordered_map<std::string, std::size_t> name_to_index_;
+    std::unordered_map<std::string, std::size_t, TransparentStringHash, std::equal_to<>> name_to_index_;
     std::vector<Real> last_device_power_;
 };
 
@@ -773,12 +782,12 @@ public:
         return thermal_scale_[device_index];
     }
 
-    [[nodiscard]] const std::vector<Real>& thermal_scale_vector() const override {
+    [[nodiscard]] std::span<const Real> thermal_scale_vector() const override {
         return thermal_scale_;
     }
 
     void commit_accepted_segment(Real dt,
-                                 const std::vector<Real>& device_power) override {
+                                 std::span<const Real> device_power) override {
         if (!options_.thermal.enable || dt <= 0.0) {
             return;
         }

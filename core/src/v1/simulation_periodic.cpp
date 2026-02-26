@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 namespace pulsim::v1 {
@@ -50,13 +51,18 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const PeriodicSteadyS
 PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
                                                           const PeriodicSteadyStateOptions& options) {
     PeriodicSteadyStateResult result;
+    const Index expected_size = static_cast<Index>(circuit_.system_size());
 
-    if (options.period <= 0.0) {
-        result.message = "Periodic shooting requires a positive period";
+    if (!std::isfinite(options.period) || options.period <= 0.0) {
+        result.message = "Periodic shooting requires a positive finite period";
         return result;
     }
-    if (x0.size() == 0) {
-        result.message = "Initial state is empty";
+    if (x0.size() != expected_size) {
+        result.message = "Initial state size mismatch";
+        return result;
+    }
+    if (!x0.allFinite()) {
+        result.message = "Initial state contains non-finite values";
         return result;
     }
 
@@ -79,7 +85,7 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
         if (!cycle.success || cycle.states.empty()) {
             result.success = false;
             result.message = "Shooting cycle failed: " + cycle.message;
-            result.last_cycle = cycle;
+            result.last_cycle = std::move(cycle);
             return result;
         }
 
@@ -90,7 +96,7 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
         result.iterations = iter + 1;
         result.residual_norm = rms;
         if (options.store_last_transient) {
-            result.last_cycle = cycle;
+            result.last_cycle = std::move(cycle);
         }
 
         if (rms <= options.tolerance) {
@@ -100,7 +106,7 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
             return result;
         }
 
-        guess = guess + options.relaxation * residual;
+        guess += options.relaxation * residual;
     }
 
     result.success = false;
@@ -127,12 +133,16 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
     const int n = static_cast<int>(circuit_.system_size());
     const int samples = std::max(3, options.num_samples);
 
-    if (options.period <= 0.0) {
-        result.message = "Harmonic balance requires a positive period";
+    if (!std::isfinite(options.period) || options.period <= 0.0) {
+        result.message = "Harmonic balance requires a positive finite period";
         return result;
     }
     if (x0.size() != n) {
         result.message = "Initial state size mismatch";
+        return result;
+    }
+    if (!x0.allFinite()) {
+        result.message = "Initial state contains non-finite values";
         return result;
     }
 
@@ -143,13 +153,12 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
         return result;
     }
 
-    std::vector<Real> times;
-    times.reserve(samples);
+    result.sample_times.resize(samples);
     const Real dt_sample = options.period / static_cast<Real>(samples);
     for (int k = 0; k < samples; ++k) {
-        times.push_back(dt_sample * static_cast<Real>(k));
+        result.sample_times[static_cast<std::size_t>(k)] = dt_sample * static_cast<Real>(k);
     }
-    result.sample_times = times;
+    const auto& sample_times = result.sample_times;
 
     Vector X = Vector::Zero(n * samples);
     if (options.initialize_from_transient) {
@@ -182,24 +191,29 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
     }
 
     Matrix dX(n, samples);
+    Vector residual_sample = Vector::Zero(n);
+    const int nodes = static_cast<int>(circuit_.num_nodes());
+    const int branches = static_cast<int>(circuit_.num_branches());
 
     auto residual_func = [&](const Vector& state, Vector& f_out) {
-        f_out.setZero(state.size());
-        const int nodes = static_cast<int>(circuit_.num_nodes());
-        const int branches = static_cast<int>(circuit_.num_branches());
+        if (f_out.size() != state.size()) {
+            f_out.resize(state.size());
+        }
+        f_out.setZero();
 
         Eigen::Map<const Matrix> X_mat(state.data(), n, samples);
         dX.noalias() = X_mat * Dt;
 
         for (int k = 0; k < samples; ++k) {
             Eigen::Map<const Vector> xk(state.data() + k * n, n);
-            Vector fk(n);
-            fk.setZero();
             const Real* col = dX.col(k).data();
-            circuit_.assemble_residual_hb(fk, xk, times[k],
-                                          std::span<const Real>(col, nodes),
-                                          std::span<const Real>(col + nodes, branches));
-            f_out.segment(k * n, n) = fk;
+            circuit_.assemble_residual_hb(
+                residual_sample,
+                xk,
+                sample_times[static_cast<std::size_t>(k)],
+                std::span<const Real>(col, nodes),
+                std::span<const Real>(col + nodes, branches));
+            f_out.segment(k * n, n) = residual_sample;
         }
     };
 
@@ -228,16 +242,23 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
     hb_linear.iterative_config.restart = std::max(hb_linear.iterative_config.restart, 40);
     hb_linear.iterative_config.max_iterations = std::max(hb_linear.iterative_config.max_iterations, 300);
     hb_solver.linear_solver().set_config(hb_linear);
+    std::vector<Eigen::Triplet<Real>> triplets;
+    Vector x_pert = X;
+    Vector f_pert = Vector::Zero(X.size());
 
     auto system_func = [&](const Vector& state, Vector& f, SparseMatrix& J) {
         residual_func(state, f);
         const Index size = state.size();
         const Real eps_base = std::max(options_.newton_options.krylov_fd_epsilon, Real{1e-12});
-        std::vector<Eigen::Triplet<Real>> triplets;
-        triplets.reserve(static_cast<std::size_t>(size) * 4);
-
-        Vector x_pert = state;
-        Vector f_pert(size);
+        const std::size_t min_triplet_capacity = static_cast<std::size_t>(size) * 4;
+        if (triplets.capacity() < min_triplet_capacity) {
+            triplets.reserve(min_triplet_capacity);
+        }
+        triplets.clear();
+        x_pert = state;
+        if (f_pert.size() != size) {
+            f_pert.resize(size);
+        }
 
         for (Index col = 0; col < size; ++col) {
             Real step = eps_base * std::max(Real{1.0}, std::abs(state[col]));
