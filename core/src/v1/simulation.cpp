@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <sstream>
 
 namespace pulsim::v1 {
@@ -258,6 +259,65 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
             return "auto";
     }
     return "native";
+}
+
+struct TransientInputIssue {
+    std::string message;
+    std::string failure_reason;
+};
+
+[[nodiscard]] std::optional<TransientInputIssue> validate_transient_inputs(
+    const Circuit& circuit,
+    const SimulationOptions& options,
+    const Vector& x0) {
+    if (x0.size() == 0) {
+        return TransientInputIssue{
+            "Transient simulation requires a non-empty initial state",
+            "invalid_initial_state"
+        };
+    }
+
+    const Index expected_size = static_cast<Index>(circuit.system_size());
+    if (x0.size() != expected_size) {
+        std::ostringstream message;
+        message << "Initial state size mismatch: expected " << expected_size
+                << ", got " << x0.size();
+        return TransientInputIssue{message.str(), "invalid_initial_state"};
+    }
+
+    if (!x0.allFinite()) {
+        return TransientInputIssue{
+            "Initial state contains non-finite values",
+            "invalid_initial_state"
+        };
+    }
+
+    const bool finite_time_window = std::isfinite(options.tstart) && std::isfinite(options.tstop);
+    if (!finite_time_window || options.tstop < options.tstart) {
+        return TransientInputIssue{
+            "Invalid simulation time window: tstop must be finite and >= tstart",
+            "invalid_time_window"
+        };
+    }
+
+    const bool finite_timesteps = std::isfinite(options.dt) &&
+                                  std::isfinite(options.dt_min) &&
+                                  std::isfinite(options.dt_max);
+    if (!finite_timesteps) {
+        return TransientInputIssue{
+            "Invalid timestep configuration: dt, dt_min, and dt_max must be finite",
+            "invalid_timestep"
+        };
+    }
+
+    if (options.dt <= 0.0 || options.dt_min <= 0.0 || options.dt_max < options.dt_min) {
+        return TransientInputIssue{
+            "Invalid timestep bounds: require dt > 0, dt_min > 0, and dt_max >= dt_min",
+            "invalid_timestep"
+        };
+    }
+
+    return std::nullopt;
 }
 
 [[nodiscard]] bool nearly_same_time(Real a, Real b) {
@@ -580,6 +640,20 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         result.backend_telemetry.formulation_mode = "native";
         result.backend_telemetry.sundials_compiled = sundials_compiled();
         result.backend_telemetry.failure_reason = "legacy_backend_removed";
+        return result;
+    }
+
+    if (const auto input_issue = validate_transient_inputs(circuit_, options_, x0)) {
+        SimulationResult result;
+        result.success = false;
+        result.final_status = SolverStatus::NumericalError;
+        result.message = input_issue->message;
+        result.backend_telemetry.requested_backend = "native";
+        result.backend_telemetry.selected_backend = "native";
+        result.backend_telemetry.solver_family = "native";
+        result.backend_telemetry.formulation_mode = "native";
+        result.backend_telemetry.sundials_compiled = sundials_compiled();
+        result.backend_telemetry.failure_reason = input_issue->failure_reason;
         return result;
     }
 

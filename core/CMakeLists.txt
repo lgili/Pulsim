@@ -86,6 +86,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_main.cpp
         tests/test_linear_solver_selection.cpp
         tests/test_newton_krylov.cpp
+        tests/test_v1_input_validation.cpp
         tests/test_v1_kernel.cpp
         tests/test_stress_simulation.cpp
     )
