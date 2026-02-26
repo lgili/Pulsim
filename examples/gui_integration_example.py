@@ -63,9 +63,6 @@ def run_transient(ckt: ps.Circuit) -> ps.SimulationResult:
     opts.integrator = ps.Integrator.Trapezoidal
     opts.enable_events = False
 
-    # Keep GUI backend path explicit (native runtime as default)
-    opts.transient_backend = ps.TransientBackendMode.Native
-
     sim = ps.Simulator(ckt, opts)
     return sim.run_transient(ckt.initial_state())
 
@@ -134,7 +131,6 @@ def print_summary(result: ps.SimulationResult, ckt: ps.Circuit) -> None:
 
     bt = result.backend_telemetry
     print("backend:", bt.selected_backend, "family:", bt.solver_family, "form:", bt.formulation_mode)
-    print("backend_used_sundials:", bt.sundials_used)
 
 
 def main() -> None:

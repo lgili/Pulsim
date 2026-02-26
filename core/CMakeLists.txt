@@ -31,7 +31,6 @@ add_library(pulsim STATIC
     src/v1/simulation_periodic.cpp
     src/v1/simulation_step.cpp
     src/v1/transient_services.cpp
-    src/v1/sundials_backend.cpp
     src/v1/yaml_parser.cpp
     src/simulation_control.cpp
 )
@@ -48,7 +47,6 @@ target_link_libraries(pulsim
     PUBLIC
         Eigen3::Eigen
         yaml-cpp
-        ${PULSIM_SUNDIALS_LIBRARIES}
         ${PULSIM_KLU_LIBRARIES}
         ${PULSIM_HYPRE_LIBRARIES}
 )

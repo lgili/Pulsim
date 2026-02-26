@@ -399,22 +399,6 @@ class FallbackReasonCode(Enum):
     StiffnessBackoff = ...
     TransientGminEscalation = ...
     MaxRetriesExceeded = ...
-    BackendEscalation = ...
-    BackendFailure = ...
-
-class TransientBackendMode(Enum):
-    Native = ...
-    SundialsOnly = ...
-    Auto = ...
-
-class SundialsSolverFamily(Enum):
-    IDA = ...
-    CVODE = ...
-    ARKODE = ...
-
-class SundialsFormulationMode(Enum):
-    ProjectedWrapper = ...
-    Direct = ...
 
 class ThermalCouplingPolicy(Enum):
     LossOnly = ...
@@ -437,24 +421,6 @@ class FallbackPolicyOptions:
     gmin_initial: float
     gmin_max: float
     gmin_growth: float
-    enable_backend_escalation: bool
-    backend_escalation_threshold: int
-    enable_native_reentry: bool
-    sundials_recovery_window: float
-
-    def __init__(self) -> None: ...
-
-class SundialsBackendOptions:
-    enabled: bool
-    family: SundialsSolverFamily
-    formulation: SundialsFormulationMode
-    rel_tol: float
-    abs_tol: float
-    max_steps: int
-    max_nonlinear_iterations: int
-    use_jacobian: bool
-    reuse_linear_solver: bool
-    allow_formulation_fallback: bool
 
     def __init__(self) -> None: ...
 
@@ -482,8 +448,6 @@ class BackendTelemetry:
     equation_assemble_residual_calls: int
     equation_assemble_system_time_seconds: float
     equation_assemble_residual_time_seconds: float
-    sundials_compiled: bool
-    sundials_used: bool
     failure_reason: str
 
     def __init__(self) -> None: ...
@@ -576,8 +540,6 @@ class SimulationOptions:
     gmin_fallback: GminConfig
     max_step_retries: int
     fallback_policy: FallbackPolicyOptions
-    transient_backend: TransientBackendMode
-    sundials: SundialsBackendOptions
 
     def __init__(self) -> None: ...
 

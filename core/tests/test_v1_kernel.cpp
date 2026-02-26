@@ -1055,60 +1055,6 @@ TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fall
                       }));
 }
 
-TEST_CASE("v1 decommissioned sundials backend request returns migration diagnostic",
-          "[v1][backend][decommission]") {
-    Circuit circuit;
-    auto n_in = circuit.add_node("in");
-    auto n_out = circuit.add_node("out");
-    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
-    circuit.add_resistor("R1", n_in, n_out, 1e3);
-    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
-
-    SimulationOptions opts;
-    opts.tstart = 0.0;
-    opts.tstop = 1e-4;
-    opts.dt = 1e-6;
-    opts.transient_backend = TransientBackendMode::SundialsOnly;
-    opts.sundials.enabled = true;
-
-    Simulator sim(circuit, opts);
-    auto result = sim.run_transient();
-
-    REQUIRE_FALSE(result.success);
-    CHECK(result.message.find("no longer supported") != std::string::npos);
-    CHECK(result.message.find("simulation.step_mode: fixed|variable") != std::string::npos);
-    CHECK(result.backend_telemetry.requested_backend == "sundials");
-    CHECK(result.backend_telemetry.selected_backend == "native");
-    CHECK(result.backend_telemetry.solver_family == "native");
-    CHECK(result.backend_telemetry.formulation_mode == "native");
-    CHECK(result.backend_telemetry.failure_reason == "legacy_backend_removed");
-}
-
-TEST_CASE("v1 decommissioned auto backend request returns migration diagnostic",
-          "[v1][backend][decommission]") {
-    Circuit circuit;
-    auto n_in = circuit.add_node("in");
-    auto n_out = circuit.add_node("out");
-    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
-    circuit.add_resistor("R1", n_in, n_out, 1e3);
-    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
-
-    SimulationOptions opts;
-    opts.tstart = 0.0;
-    opts.tstop = 1e-4;
-    opts.dt = 1e-6;
-    opts.transient_backend = TransientBackendMode::Auto;
-
-    Simulator sim(circuit, opts);
-    auto result = sim.run_transient();
-
-    REQUIRE_FALSE(result.success);
-    CHECK(result.message.find("no longer supported") != std::string::npos);
-    CHECK(result.backend_telemetry.requested_backend == "auto");
-    CHECK(result.backend_telemetry.selected_backend == "native");
-    CHECK(result.backend_telemetry.failure_reason == "legacy_backend_removed");
-}
-
 TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
     Circuit circuit;
 

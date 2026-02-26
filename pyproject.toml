@@ -33,11 +33,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-grpc = [
-    "grpcio>=1.50.0",
-    "grpcio-tools>=1.50.0",
-    "protobuf>=4.0.0",
-]
 jupyter = [
     "ipywidgets>=8.0",
     "matplotlib>=3.5",
@@ -60,7 +55,7 @@ docs = [
     "pymdown-extensions>=10.9,<11.0",
 ]
 all = [
-    "pulsim[grpc,jupyter,data,dev]",
+    "pulsim[jupyter,data,dev]",
 ]
 
 [project.urls]
@@ -110,13 +105,6 @@ exclude_lines = [
     "pragma: no cover",
     "def __repr__",
     "raise NotImplementedError",
-]
-
-[tool.ruff]
-exclude = [
-    "python/pulsim/remote/simulator_pb2.py",
-    "python/pulsim/remote/simulator_pb2.pyi",
-    "python/pulsim/remote/simulator_pb2_grpc.py",
 ]
 
 [tool.ruff.lint]

@@ -274,34 +274,12 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     apply_robust_linear_solver_defaults(options.linear_solver, false);
 }
 
-[[nodiscard]] bool sundials_compiled() {
-#ifdef PULSIM_HAS_SUNDIALS
-    return true;
-#else
-    return false;
-#endif
-}
-
-[[nodiscard]] std::string backend_mode_to_string(TransientBackendMode mode) {
-    switch (mode) {
-        case TransientBackendMode::Native:
-            return "native";
-        case TransientBackendMode::SundialsOnly:
-            return "sundials";
-        case TransientBackendMode::Auto:
-            return "auto";
-    }
-    return "native";
-}
-
 [[nodiscard]] std::string_view diagnostic_code_to_reason(SimulationDiagnosticCode code) {
     switch (code) {
         case SimulationDiagnosticCode::None:
             return "";
         case SimulationDiagnosticCode::DcOperatingPointFailure:
             return "dc_operating_point_failure";
-        case SimulationDiagnosticCode::LegacyBackendUnsupported:
-            return "legacy_backend_removed";
         case SimulationDiagnosticCode::InvalidInitialState:
             return "invalid_initial_state";
         case SimulationDiagnosticCode::InvalidTimeWindow:
@@ -700,26 +678,6 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                                           SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
-    const auto requested_backend = options_.transient_backend;
-
-    if (requested_backend != TransientBackendMode::Native) {
-        SimulationResult result;
-        result.success = false;
-        result.final_status = SolverStatus::NumericalError;
-        result.diagnostic = SimulationDiagnosticCode::LegacyBackendUnsupported;
-        result.message =
-            "Legacy transient backend selection '" + backend_mode_to_string(requested_backend) +
-            "' is no longer supported. Use the native core with simulation.step_mode: fixed|variable.";
-        result.backend_telemetry.requested_backend = backend_mode_to_string(requested_backend);
-        result.backend_telemetry.selected_backend = "native";
-        result.backend_telemetry.solver_family = "native";
-        result.backend_telemetry.formulation_mode = "native";
-        result.backend_telemetry.sundials_compiled = sundials_compiled();
-        result.backend_telemetry.failure_reason =
-            std::string(diagnostic_code_to_reason(result.diagnostic));
-        return result;
-    }
-
     if (const auto input_issue = validate_transient_inputs(circuit_, options_, x0)) {
         SimulationResult result;
         result.success = false;
@@ -730,7 +688,6 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         result.backend_telemetry.selected_backend = "native";
         result.backend_telemetry.solver_family = "native";
         result.backend_telemetry.formulation_mode = "native";
-        result.backend_telemetry.sundials_compiled = sundials_compiled();
         result.backend_telemetry.failure_reason =
             std::string(diagnostic_code_to_reason(result.diagnostic));
         return result;
@@ -743,7 +700,6 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         control);
 
     native_result.backend_telemetry.requested_backend = "native";
-    native_result.backend_telemetry.sundials_compiled = sundials_compiled();
     if (native_result.backend_telemetry.selected_backend.empty()) {
         native_result.backend_telemetry.selected_backend = "native";
     }
@@ -765,7 +721,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     result.backend_telemetry.selected_backend = "native";
     result.backend_telemetry.solver_family = "native";
     result.backend_telemetry.formulation_mode = "native";
-    result.backend_telemetry.sundials_compiled = sundials_compiled();
     const std::size_t sample_reserve = estimate_output_sample_reserve(options_);
     result.backend_telemetry.reserved_output_samples =
         saturating_int(static_cast<std::uint64_t>(sample_reserve));
