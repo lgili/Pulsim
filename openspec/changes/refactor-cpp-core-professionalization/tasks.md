@@ -22,7 +22,7 @@
 - [ ] 3.3 Add contract tests proving new feature classes can be added without orchestrator edits.
 
 ## 4. Safety hardening
-- [ ] 4.1 Add finite-value, bounds, and dimensional guards at service boundaries.
+- [x] 4.1 Add finite-value, bounds, and dimensional guards at service boundaries.
 - [ ] 4.2 Enable sanitizer/static-analysis CI jobs for touched core modules.
 - [ ] 4.3 Add regression tests for malformed netlists/options and hard nonlinear failure containment.
 
