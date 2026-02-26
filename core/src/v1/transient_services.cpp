@@ -1268,51 +1268,83 @@ public:
     void on_step_reject(const RecoveryDecision& /*decision*/) override {}
 };
 
+class DefaultTransientServiceBuilder final {
+public:
+    [[nodiscard]] bool supports_fixed_mode(const SimulationOptions& /*options*/) const {
+        return true;
+    }
+
+    [[nodiscard]] bool supports_variable_mode(const SimulationOptions& /*options*/) const {
+        return true;
+    }
+
+    [[nodiscard]] std::shared_ptr<EquationAssemblerService> make_equation_assembler(
+        Circuit& circuit,
+        const SimulationOptions& options) const {
+        return std::make_shared<DefaultEquationAssemblerService>(circuit, options);
+    }
+
+    [[nodiscard]] std::shared_ptr<NonlinearSolveService> make_nonlinear_solve(
+        NewtonRaphsonSolver<RuntimeLinearSolver>& newton_solver,
+        std::shared_ptr<EquationAssemblerService> equation_assembler) const {
+        return std::make_shared<DefaultNonlinearSolveService>(newton_solver,
+                                                              std::move(equation_assembler));
+    }
+
+    [[nodiscard]] std::shared_ptr<SegmentModelService> make_segment_model(
+        Circuit& circuit,
+        std::shared_ptr<EquationAssemblerService> equation_assembler) const {
+        return std::make_shared<DefaultSegmentModelService>(circuit, std::move(equation_assembler));
+    }
+
+    [[nodiscard]] std::shared_ptr<LinearSolveService> make_linear_solve(
+        RuntimeLinearSolver& solver) const {
+        return std::make_shared<DefaultLinearSolveService>(solver);
+    }
+
+    [[nodiscard]] std::shared_ptr<SegmentStepperService> make_segment_stepper(
+        std::shared_ptr<EquationAssemblerService> equation_assembler,
+        std::shared_ptr<LinearSolveService> linear_solve) const {
+        return std::make_shared<DefaultSegmentStepperService>(std::move(equation_assembler),
+                                                              std::move(linear_solve));
+    }
+
+    [[nodiscard]] std::shared_ptr<EventSchedulerService> make_event_scheduler(
+        Circuit& circuit,
+        const SimulationOptions& options) const {
+        return std::make_shared<DefaultEventSchedulerService>(circuit, options);
+    }
+
+    [[nodiscard]] std::shared_ptr<RecoveryManagerService> make_recovery_manager(
+        const SimulationOptions& options) const {
+        return std::make_shared<DefaultRecoveryManagerService>(options.stiffness_config.dt_backoff);
+    }
+
+    [[nodiscard]] std::shared_ptr<TelemetryCollectorService> make_telemetry_collector() const {
+        return std::make_shared<DefaultTelemetryCollectorService>();
+    }
+
+    [[nodiscard]] std::shared_ptr<LossService> make_loss_service(
+        Circuit& circuit,
+        const SimulationOptions& options) const {
+        return std::make_shared<DefaultLossService>(circuit, options);
+    }
+
+    [[nodiscard]] std::shared_ptr<ThermalService> make_thermal_service(
+        Circuit& circuit,
+        const SimulationOptions& options) const {
+        return std::make_shared<DefaultThermalService>(circuit, options);
+    }
+};
+
 }  // namespace
 
 TransientServiceRegistry make_default_transient_service_registry(
     Circuit& circuit,
     const SimulationOptions& options,
     NewtonRaphsonSolver<RuntimeLinearSolver>& newton_solver) {
-
-    TransientServiceRegistry registry;
-    registry.supports_fixed_mode = true;
-    registry.supports_variable_mode = true;
-
-    registry.equation_assembler =
-        std::make_shared<DefaultEquationAssemblerService>(circuit, options);
-
-    registry.nonlinear_solve =
-        std::make_shared<DefaultNonlinearSolveService>(newton_solver,
-                                                       registry.equation_assembler);
-
-    registry.segment_model =
-        std::make_shared<DefaultSegmentModelService>(circuit, registry.equation_assembler);
-
-    registry.linear_solve =
-        std::make_shared<DefaultLinearSolveService>(newton_solver.linear_solver());
-
-    registry.segment_stepper =
-        std::make_shared<DefaultSegmentStepperService>(
-            registry.equation_assembler,
-            registry.linear_solve);
-
-    registry.event_scheduler =
-        std::make_shared<DefaultEventSchedulerService>(circuit, options);
-
-    registry.recovery_manager =
-        std::make_shared<DefaultRecoveryManagerService>(options.stiffness_config.dt_backoff);
-
-    registry.telemetry_collector =
-        std::make_shared<DefaultTelemetryCollectorService>();
-
-    registry.thermal_service =
-        std::make_shared<DefaultThermalService>(circuit, options);
-
-    registry.loss_service =
-        std::make_shared<DefaultLossService>(circuit, options);
-
-    return registry;
+    DefaultTransientServiceBuilder builder;
+    return make_transient_service_registry(circuit, options, newton_solver, builder);
 }
 
 }  // namespace pulsim::v1
