@@ -14,6 +14,38 @@ namespace {
 constexpr int kMaxGlobalRecoveryAttempts = 2;
 constexpr int kLteEventGraceSteps = 2;
 constexpr int kMaxDtMinHoldAdvances = 128;
+constexpr std::size_t kMaxSampleReserve = 1'000'000;
+constexpr std::size_t kMaxFallbackReserve = 2'000'000;
+
+[[nodiscard]] int saturating_int(std::uint64_t value) {
+    constexpr std::uint64_t max_int = static_cast<std::uint64_t>(std::numeric_limits<int>::max());
+    return static_cast<int>(std::min(value, max_int));
+}
+
+[[nodiscard]] std::size_t estimate_output_sample_reserve(const SimulationOptions& options) {
+    if (!std::isfinite(options.tstart) || !std::isfinite(options.tstop) || options.tstop <= options.tstart) {
+        return 0;
+    }
+
+    Real dt_nominal = std::max(options.dt, options.dt_min);
+    if (!std::isfinite(dt_nominal) || dt_nominal <= 0.0) {
+        return 0;
+    }
+
+    const long double span = static_cast<long double>(options.tstop - options.tstart);
+    const long double step = static_cast<long double>(dt_nominal);
+    if (!(span > 0.0L && step > 0.0L)) {
+        return 0;
+    }
+
+    const long double estimate = std::ceil(span / step) + 2.0L;
+    if (!(estimate > 0.0L)) {
+        return 0;
+    }
+
+    const long double capped = std::min(estimate, static_cast<long double>(kMaxSampleReserve));
+    return static_cast<std::size_t>(capped);
+}
 
 struct CircuitRobustnessHints {
     int switching_devices = 0;
@@ -734,6 +766,29 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     result.backend_telemetry.solver_family = "native";
     result.backend_telemetry.formulation_mode = "native";
     result.backend_telemetry.sundials_compiled = sundials_compiled();
+    const std::size_t sample_reserve = estimate_output_sample_reserve(options_);
+    result.backend_telemetry.reserved_output_samples =
+        saturating_int(static_cast<std::uint64_t>(sample_reserve));
+    if (sample_reserve > 0) {
+        result.time.reserve(sample_reserve);
+        result.states.reserve(sample_reserve);
+    }
+    if (options_.fallback_policy.trace_retries) {
+        const std::size_t retries_per_step =
+            static_cast<std::size_t>(std::max(1, options_.max_step_retries + 1));
+        const std::size_t fallback_reserve =
+            std::min<std::size_t>(sample_reserve * retries_per_step, kMaxFallbackReserve);
+        if (fallback_reserve > 0) {
+            result.fallback_trace.reserve(fallback_reserve);
+        }
+    }
+    if (options_.enable_events && sample_reserve > 0 && !switch_monitors_.empty()) {
+        const std::size_t event_reserve =
+            std::min<std::size_t>(sample_reserve * switch_monitors_.size(), sample_reserve * 2);
+        if (event_reserve > 0) {
+            result.events.reserve(event_reserve);
+        }
+    }
 
     initialize_loss_tracking();
     lte_estimator_.reset();
@@ -804,6 +859,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         if (result.virtual_channel_metadata.empty()) {
             result.virtual_channel_metadata = circuit_.virtual_channel_metadata();
+            result.virtual_channels.reserve(result.virtual_channel_metadata.size());
         }
 
         auto mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
@@ -813,19 +869,30 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         const std::size_t sample_count = result.time.size();
         const Real nan = std::numeric_limits<Real>::quiet_NaN();
+        auto append_series_value = [&](std::vector<Real>& series, Real value) {
+            const std::size_t capacity_before = series.capacity();
+            series.push_back(value);
+            if (series.capacity() != capacity_before) {
+                result.backend_telemetry.virtual_channel_reallocations += 1;
+            }
+        };
 
         for (auto& [channel, series] : result.virtual_channels) {
             while (series.size() + 1 < sample_count) {
-                series.push_back(nan);
+                append_series_value(series, nan);
             }
         }
 
         for (const auto& [channel, value] : mixed_step.channel_values) {
-            auto& series = result.virtual_channels[channel];
-            while (series.size() + 1 < sample_count) {
-                series.push_back(nan);
+            auto [it, inserted] = result.virtual_channels.try_emplace(channel);
+            auto& series = it->second;
+            if (inserted && sample_reserve > 0) {
+                series.reserve(sample_reserve);
             }
-            series.push_back(value);
+            while (series.size() + 1 < sample_count) {
+                append_series_value(series, nan);
+            }
+            append_series_value(series, value);
 
             if (!result.virtual_channel_metadata.contains(channel)) {
                 result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
@@ -836,14 +903,26 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         for (auto& [channel, series] : result.virtual_channels) {
             if (series.size() < sample_count) {
-                series.push_back(nan);
+                append_series_value(series, nan);
             }
         }
     };
 
-    result.time.push_back(t);
-    result.states.push_back(x);
-    append_virtual_sample(x, t);
+    auto append_sample = [&](Real sample_time, const Vector& state) {
+        const std::size_t time_capacity_before = result.time.capacity();
+        const std::size_t state_capacity_before = result.states.capacity();
+        result.time.push_back(sample_time);
+        result.states.push_back(state);
+        if (result.time.capacity() != time_capacity_before) {
+            result.backend_telemetry.time_series_reallocations += 1;
+        }
+        if (result.states.capacity() != state_capacity_before) {
+            result.backend_telemetry.state_series_reallocations += 1;
+        }
+        append_virtual_sample(state, sample_time);
+    };
+
+    append_sample(t, x);
 
     if (callback) {
         callback(t, x);
@@ -1393,9 +1472,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 circuit_.update_history(x);
                 lte_estimator_.record_solution(x, t, dt_used);
 
-                result.time.push_back(t);
-                result.states.push_back(x);
-                append_virtual_sample(x, t);
+                append_sample(t, x);
                 if (callback) {
                     callback(t, x);
                 }
@@ -1573,9 +1650,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         if (emit_sample || nearly_same_time(t, options_.tstop)) {
-            result.time.push_back(t);
-            result.states.push_back(x);
-            append_virtual_sample(x, t);
+            append_sample(t, x);
 
             if (callback) {
                 callback(t, x);
@@ -1605,10 +1680,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
     const EquationAssemblerTelemetry assembler_telemetry =
         transient_services_.equation_assembler->telemetry();
-    auto saturating_int = [](std::uint64_t value) {
-        constexpr std::uint64_t max_int = static_cast<std::uint64_t>(std::numeric_limits<int>::max());
-        return static_cast<int>(std::min(value, max_int));
-    };
     result.backend_telemetry.equation_assemble_system_calls =
         saturating_int(assembler_telemetry.system_calls + direct_assemble_system_calls_);
     result.backend_telemetry.equation_assemble_residual_calls =

@@ -978,6 +978,39 @@ TEST_CASE("v1 backend telemetry reports topology-driven linear cache invalidatio
            run.backend_telemetry.linear_factor_cache_last_invalidation_reason == "numeric_instability"));
 }
 
+TEST_CASE("v1 fixed-step transient pre-reserves output buffers in steady-state loop",
+          "[v1][performance][allocation]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-6;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = false;
+    opts.enable_losses = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto run = sim.run_transient();
+    REQUIRE(run.success);
+    REQUIRE(run.time.size() == 6);
+
+    CHECK(run.backend_telemetry.reserved_output_samples >= static_cast<int>(run.time.size()));
+    CHECK(run.backend_telemetry.time_series_reallocations == 0);
+    CHECK(run.backend_telemetry.state_series_reallocations == 0);
+    CHECK(run.backend_telemetry.virtual_channel_reallocations == 0);
+}
+
 TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fallback][recovery]") {
     Circuit circuit;
     auto n_in = circuit.add_node("in");
