@@ -533,6 +533,81 @@ components:
     CHECK(joined.find("simulation.step_mode") != std::string::npos);
 }
 
+TEST_CASE("YAML parser emits coded unknown-field diagnostics with field paths",
+          "[v1][yaml][diagnostic]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  unknown_field: 123
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    parser.load_string(yaml);
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& msg) {
+                          return msg.find("PULSIM_YAML_E_UNKNOWN_FIELD") != std::string::npos &&
+                                 msg.find("simulation.unknown_field") != std::string::npos;
+                      }));
+}
+
+TEST_CASE("YAML parser emits typed mismatch diagnostics for known fields",
+          "[v1][yaml][diagnostic]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  dt: {invalid: true}
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    parser.load_string(yaml);
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& msg) {
+                          return msg.find("PULSIM_YAML_E_TYPE_MISMATCH") != std::string::npos &&
+                                 msg.find("simulation.dt") != std::string::npos &&
+                                 msg.find("expected number") != std::string::npos;
+                      }));
+}
+
+TEST_CASE("YAML parser emits migration-window warnings for deprecated canonical aliases",
+          "[v1][yaml][migration]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  adaptive_timestep: true
+  tstop: 1e-5
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParserOptions parser_options;
+    parser_options.strict = false;
+    parser::YamlParser parser(parser_options);
+    parser.load_string(yaml);
+    REQUIRE(parser.errors().empty());
+    CHECK(std::any_of(parser.warnings().begin(), parser.warnings().end(),
+                      [](const std::string& msg) {
+                          return msg.find("PULSIM_YAML_W_DEPRECATED_FIELD") != std::string::npos &&
+                                 msg.find("simulation.adaptive_timestep") != std::string::npos &&
+                                 msg.find("simulation.step_mode") != std::string::npos;
+                      }));
+}
+
 TEST_CASE("YAML parser accepts GUI parity slice with virtual and surrogate components",
           "[v1][yaml][gui-parity]") {
     const std::string yaml = R"(schema: pulsim-v1
