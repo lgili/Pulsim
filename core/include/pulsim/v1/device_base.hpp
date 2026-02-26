@@ -823,11 +823,12 @@ public:
         // Smooth switching function using tanh
         // g = g_off + (g_on - g_off) * sigmoid((v_ctrl - v_th) / hysteresis)
         Scalar v_norm = (v_ctrl - v_threshold_) / hysteresis_;
-        Scalar sigmoid = 0.5 * (1.0 + std::tanh(v_norm));
+        const Scalar tanh_val = std::tanh(v_norm);
+        Scalar sigmoid = 0.5 * (1.0 + tanh_val);
         Scalar g = g_off_ + (g_on_ - g_off_) * sigmoid;
 
         // Derivative of g with respect to v_ctrl
-        Scalar dsigmoid = 0.5 / hysteresis_ * (1.0 - std::tanh(v_norm) * std::tanh(v_norm));
+        Scalar dsigmoid = 0.5 / hysteresis_ * (1.0 - tanh_val * tanh_val);
         Scalar dg_dvctrl = (g_on_ - g_off_) * dsigmoid;
 
         // Current through switch: i = g * (v_t1 - v_t2)
@@ -849,9 +850,6 @@ public:
         }
 
         // Current residuals
-        Scalar i_eq = i_sw - g * v_sw - dg_dvctrl * v_sw * v_ctrl;  // Linearized at operating point
-        // Actually for Newton: f = i_calculated, and we subtract Jacobian*x
-        // Residual contribution: f[n] += i_into_node
         if (n_t1 >= 0) f[n_t1] += i_sw;
         if (n_t2 >= 0) f[n_t2] -= i_sw;
     }
