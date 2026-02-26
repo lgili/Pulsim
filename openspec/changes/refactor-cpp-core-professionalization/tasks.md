@@ -10,7 +10,7 @@
 - [x] 1.4 Add architecture tests ensuring fixed/variable modes share the same solve-service contracts.
 
 ## 2. Modern C++20/23 hardening
-- [ ] 2.1 Replace unsafe ownership patterns in touched modules with RAII/value-semantics contracts.
+- [x] 2.1 Replace unsafe ownership patterns in touched modules with RAII/value-semantics contracts.
 - [x] 2.2 Standardize non-owning interface views (`std::span`, `std::string_view`) and remove avoidable copies on hot paths.
 - [ ] 2.3 Add concepts/compile-time constraints for extension contracts where interfaces are template-based.
 - [x] 2.4 Consolidate typed deterministic error model and remove text-only control flow in recovery logic.

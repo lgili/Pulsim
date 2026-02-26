@@ -25,6 +25,26 @@ constexpr int kMaxBisections = 12;
     return legacy_fixed_timestep_heuristic(options) ? TransientStepMode::Fixed
                                                     : TransientStepMode::Variable;
 }
+
+class ScopedStageContext final {
+public:
+    explicit ScopedStageContext(Circuit& circuit)
+        : circuit_(&circuit) {
+        circuit_->clear_stage_context();
+    }
+
+    ScopedStageContext(const ScopedStageContext&) = delete;
+    ScopedStageContext& operator=(const ScopedStageContext&) = delete;
+
+    ~ScopedStageContext() {
+        if (circuit_ != nullptr) {
+            circuit_->clear_stage_context();
+        }
+    }
+
+private:
+    Circuit* circuit_ = nullptr;
+};
 }  // namespace
 
 NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
@@ -150,7 +170,7 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
         return result;
     }
 
-    circuit_.clear_stage_context();
+    ScopedStageContext stage_scope(circuit_);
     circuit_.set_integration_method(Integrator::Trapezoidal);
     circuit_.set_current_time(t_next - h2);
     circuit_.set_timestep(h1);
@@ -159,7 +179,6 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
     NewtonResult stage1 = transient_services_.nonlinear_solve->solve(x_prev, t_next - h2, h1);
     if (stage1.status != SolverStatus::Success) {
         circuit_.set_integration_method(Integrator::TRBDF2);
-        circuit_.clear_stage_context();
         return stage1;
     }
 
@@ -171,9 +190,6 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
 
     transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
     NewtonResult stage2 = transient_services_.nonlinear_solve->solve(stage1.solution, t_next, dt);
-    if (stage2.status != SolverStatus::Success) {
-        circuit_.clear_stage_context();
-    }
     return stage2;
 }
 
@@ -195,7 +211,7 @@ NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_
         return result;
     }
 
-    circuit_.clear_stage_context();
+    ScopedStageContext stage_scope(circuit_);
     circuit_.set_integration_method(Integrator::BDF1);
     circuit_.set_current_time(t_next - (1.0 - SDIRK2Coeffs::c1) * h);
     circuit_.set_timestep(h1);
@@ -207,7 +223,6 @@ NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_
         h1);
     if (stage1.status != SolverStatus::Success) {
         circuit_.set_integration_method(method);
-        circuit_.clear_stage_context();
         return stage1;
     }
 
@@ -219,9 +234,6 @@ NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_
 
     transient_services_.equation_assembler->set_transient_gmin(transient_gmin_);
     NewtonResult stage2 = transient_services_.nonlinear_solve->solve(stage1.solution, t_next, dt);
-    if (stage2.status != SolverStatus::Success) {
-        circuit_.clear_stage_context();
-    }
     return stage2;
 }
 

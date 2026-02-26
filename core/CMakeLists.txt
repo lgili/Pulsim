@@ -95,6 +95,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_v1_diagnostics.cpp
         tests/test_v1_input_validation.cpp
         tests/test_v1_periodic_validation.cpp
+        tests/test_v1_stage_context_raii.cpp
         tests/test_v1_kernel.cpp
         tests/test_stress_simulation.cpp
     )
