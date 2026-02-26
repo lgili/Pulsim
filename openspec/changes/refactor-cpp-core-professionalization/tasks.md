@@ -14,7 +14,7 @@
 - [x] 2.2 Standardize non-owning interface views (`std::span`, `std::string_view`) and remove avoidable copies on hot paths.
 - [ ] 2.3 Add concepts/compile-time constraints for extension contracts where interfaces are template-based.
 - [ ] 2.4 Consolidate typed deterministic error model and remove text-only control flow in recovery logic.
-- [ ] 2.5 Enforce target-level warnings (`-Wall -Wextra -Wpedantic`) and keep compile options target-scoped in CMake.
+- [x] 2.5 Enforce target-level warnings (`-Wall -Wextra -Wpedantic`) and keep compile options target-scoped in CMake.
 
 ## 3. Extensibility framework
 - [ ] 3.1 Define device/solver/integrator extension contracts with required metadata and telemetry fields.
