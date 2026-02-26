@@ -10,6 +10,129 @@
 using namespace pulsim::v1;
 using Catch::Approx;
 
+namespace {
+
+struct MockTransientServiceBuilder {
+    [[nodiscard]] bool supports_fixed_mode(const SimulationOptions& /*options*/) const { return true; }
+    [[nodiscard]] bool supports_variable_mode(const SimulationOptions& /*options*/) const { return true; }
+
+    [[nodiscard]] std::shared_ptr<EquationAssemblerService> make_equation_assembler(
+        Circuit& /*circuit*/,
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<NonlinearSolveService> make_nonlinear_solve(
+        NewtonRaphsonSolver<RuntimeLinearSolver>& /*newton_solver*/,
+        std::shared_ptr<EquationAssemblerService> /*equation_assembler*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<SegmentModelService> make_segment_model(
+        Circuit& /*circuit*/,
+        std::shared_ptr<EquationAssemblerService> /*equation_assembler*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<LinearSolveService> make_linear_solve(
+        RuntimeLinearSolver& /*solver*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<SegmentStepperService> make_segment_stepper(
+        std::shared_ptr<EquationAssemblerService> /*equation_assembler*/,
+        std::shared_ptr<LinearSolveService> /*linear_solve*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<EventSchedulerService> make_event_scheduler(
+        Circuit& /*circuit*/,
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<RecoveryManagerService> make_recovery_manager(
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<TelemetryCollectorService> make_telemetry_collector() const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<LossService> make_loss_service(
+        Circuit& /*circuit*/,
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<ThermalService> make_thermal_service(
+        Circuit& /*circuit*/,
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+};
+
+struct IncompleteTransientServiceBuilder {
+    [[nodiscard]] bool supports_fixed_mode(const SimulationOptions& /*options*/) const { return true; }
+    [[nodiscard]] bool supports_variable_mode(const SimulationOptions& /*options*/) const { return true; }
+
+    [[nodiscard]] std::shared_ptr<EquationAssemblerService> make_equation_assembler(
+        Circuit& /*circuit*/,
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<NonlinearSolveService> make_nonlinear_solve(
+        NewtonRaphsonSolver<RuntimeLinearSolver>& /*newton_solver*/,
+        std::shared_ptr<EquationAssemblerService> /*equation_assembler*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<SegmentModelService> make_segment_model(
+        Circuit& /*circuit*/,
+        std::shared_ptr<EquationAssemblerService> /*equation_assembler*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<LinearSolveService> make_linear_solve(
+        RuntimeLinearSolver& /*solver*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<SegmentStepperService> make_segment_stepper(
+        std::shared_ptr<EquationAssemblerService> /*equation_assembler*/,
+        std::shared_ptr<LinearSolveService> /*linear_solve*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<EventSchedulerService> make_event_scheduler(
+        Circuit& /*circuit*/,
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<RecoveryManagerService> make_recovery_manager(
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<TelemetryCollectorService> make_telemetry_collector() const {
+        return {};
+    }
+
+    [[nodiscard]] std::shared_ptr<ThermalService> make_thermal_service(
+        Circuit& /*circuit*/,
+        const SimulationOptions& /*options*/) const {
+        return {};
+    }
+};
+
+static_assert(TransientServiceBuilder<MockTransientServiceBuilder>);
+static_assert(!TransientServiceBuilder<IncompleteTransientServiceBuilder>);
+
+}  // namespace
+
 TEST_CASE("API concepts compilation", "[concepts]") {
     SECTION("Device traits for Resistor") {
         REQUIRE(device_traits<Resistor>::type == DeviceType::Resistor);
@@ -31,6 +154,11 @@ TEST_CASE("API concepts compilation", "[concepts]") {
         REQUIRE(is_linear_device_v<Capacitor> == true);
         REQUIRE(is_dynamic_device_v<Capacitor> == true);
     }
+}
+
+TEST_CASE("API transient service extension contract concepts", "[concepts][architecture][services]") {
+    REQUIRE(TransientServiceBuilder<MockTransientServiceBuilder>);
+    REQUIRE_FALSE(TransientServiceBuilder<IncompleteTransientServiceBuilder>);
 }
 
 TEST_CASE("API CRTP Resistor", "[api][crtp][resistor]") {
