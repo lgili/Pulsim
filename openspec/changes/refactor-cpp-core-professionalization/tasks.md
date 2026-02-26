@@ -33,10 +33,10 @@
 - [ ] 5.4 Run matrix benchmarks and confirm runtime/convergence KPIs remain non-regressive.
 
 ## 6. Compatibility and migration
-- [ ] 6.1 Add YAML schema-evolution policy checks and strict migration diagnostics.
-- [ ] 6.2 Maintain Python procedural compatibility while exposing canonical class/runtime surfaces.
-- [ ] 6.3 Add compatibility tests for previous YAML/Python usage patterns.
-- [ ] 6.4 Publish migration guidance with before/after examples.
+- [x] 6.1 Add YAML schema-evolution policy checks and strict migration diagnostics.
+- [x] 6.2 Maintain Python procedural compatibility while exposing canonical class/runtime surfaces.
+- [x] 6.3 Add compatibility tests for previous YAML/Python usage patterns.
+- [x] 6.4 Publish migration guidance with before/after examples.
 
 ## 7. Final validation
 - [ ] 7.1 Run full benchmark + parity + stress suites and publish KPI delta report.

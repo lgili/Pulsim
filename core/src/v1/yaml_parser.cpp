@@ -9,6 +9,7 @@
 #include <functional>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -26,6 +27,9 @@ constexpr const char* kDiagVirtualComponent = "PULSIM_YAML_W_COMPONENT_VIRTUAL";
 constexpr const char* kDiagSurrogateComponent = "PULSIM_YAML_W_COMPONENT_SURROGATE";
 constexpr const char* kDiagLegacyTransientBackend = "PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND";
 constexpr const char* kDiagInvalidStepMode = "PULSIM_YAML_E_STEP_MODE_INVALID";
+constexpr const char* kDiagUnknownField = "PULSIM_YAML_E_UNKNOWN_FIELD";
+constexpr const char* kDiagTypeMismatch = "PULSIM_YAML_E_TYPE_MISMATCH";
+constexpr const char* kDiagDeprecatedField = "PULSIM_YAML_W_DEPRECATED_FIELD";
 
 Real parse_real_string(const std::string& raw);
 
@@ -60,6 +64,97 @@ void push_error(std::vector<std::string>& errors, const std::string& code, const
 
 void push_warning(std::vector<std::string>& warnings, const std::string& code, const std::string& message) {
     warnings.push_back(with_diag_code(code, message));
+}
+
+std::string yaml_node_class(const YAML::Node& node) {
+    if (!node || node.IsNull()) {
+        return "null";
+    }
+    if (node.IsScalar()) {
+        return "scalar";
+    }
+    if (node.IsSequence()) {
+        return "sequence";
+    }
+    if (node.IsMap()) {
+        return "map";
+    }
+    return "unknown";
+}
+
+void push_type_mismatch_error(std::vector<std::string>& errors,
+                              const std::string& path,
+                              const std::string& expected,
+                              const YAML::Node& received) {
+    push_error(
+        errors,
+        kDiagTypeMismatch,
+        "Type mismatch at '" + path + "' (expected " + expected +
+            ", got " + yaml_node_class(received) + ")");
+}
+
+std::optional<bool> parse_bool_scalar(const YAML::Node& node,
+                                      const std::string& path,
+                                      std::vector<std::string>& errors) {
+    if (!node) {
+        return std::nullopt;
+    }
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, path, "boolean", node);
+        return std::nullopt;
+    }
+    try {
+        return node.as<bool>();
+    } catch (...) {
+        push_type_mismatch_error(errors, path, "boolean", node);
+        return std::nullopt;
+    }
+}
+
+std::optional<int> parse_int_scalar(const YAML::Node& node,
+                                    const std::string& path,
+                                    std::vector<std::string>& errors) {
+    if (!node) {
+        return std::nullopt;
+    }
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, path, "integer", node);
+        return std::nullopt;
+    }
+    try {
+        return node.as<int>();
+    } catch (...) {
+        push_type_mismatch_error(errors, path, "integer", node);
+        return std::nullopt;
+    }
+}
+
+std::optional<std::string> parse_string_scalar(const YAML::Node& node,
+                                               const std::string& path,
+                                               std::vector<std::string>& errors) {
+    if (!node) {
+        return std::nullopt;
+    }
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, path, "string", node);
+        return std::nullopt;
+    }
+    try {
+        return node.as<std::string>();
+    } catch (...) {
+        push_type_mismatch_error(errors, path, "string", node);
+        return std::nullopt;
+    }
+}
+
+void push_deprecated_field_migration_warning(std::vector<std::string>& warnings,
+                                             const std::string& key_path,
+                                             const std::string& replacement) {
+    push_warning(
+        warnings,
+        kDiagDeprecatedField,
+        "Deprecated field '" + key_path + "' remains accepted in schema v1 migration window; use '" +
+            replacement + "' instead.");
 }
 
 void apply_mode_derived_defaults(SimulationOptions& options,
@@ -117,8 +212,8 @@ void push_legacy_backend_migration_error(std::vector<std::string>& errors, const
     push_error(
         errors,
         kDiagLegacyTransientBackend,
-        "Deprecated transient backend key '" + key_path +
-            "' is unsupported in strict mode. Use 'simulation.step_mode: fixed|variable' "
+        "Removed transient backend key '" + key_path +
+            "' is unsupported in strict mode. Migrate to 'simulation.step_mode: fixed|variable' "
             "with the native core.");
 }
 
@@ -350,7 +445,9 @@ void validate_keys(const YAML::Node& node,
     for (const auto& it : node) {
         const std::string key = it.first.as<std::string>();
         if (!is_known_key(key, allowed)) {
-            errors.push_back("Unknown field '" + key + "' in " + context);
+            push_error(errors,
+                       kDiagUnknownField,
+                       "Unknown field at '" + context + "." + key + "'");
         }
     }
 }
@@ -409,18 +506,20 @@ Real parse_real_string(const std::string& raw) {
 Real parse_real(const YAML::Node& node,
                 const std::string& context,
                 std::vector<std::string>& errors) {
-    if (!node) {
-        errors.push_back("Missing value in " + context);
+    if (!node || node.IsNull()) {
+        return 0.0;
+    }
+
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, context, "number", node);
         return 0.0;
     }
 
     try {
-        if (node.IsScalar()) {
-            const std::string raw = node.as<std::string>();
-            return parse_real_string(raw);
-        }
+        const std::string raw = node.as<std::string>();
+        return parse_real_string(raw);
     } catch (...) {
-        errors.push_back("Invalid numeric value in " + context);
+        push_type_mismatch_error(errors, context, "number", node);
     }
 
     return 0.0;
@@ -431,7 +530,11 @@ std::vector<std::string> parse_nodes(const YAML::Node& node,
                                      std::vector<std::string>& errors) {
     std::vector<std::string> nodes;
     if (!node || !node.IsSequence()) {
-        errors.push_back("Missing or invalid nodes in " + context);
+        if (!node) {
+            push_error(errors, kDiagInvalidPinCount, "Missing nodes in component '" + context + "'");
+        } else {
+            push_type_mismatch_error(errors, context + ".nodes", "sequence", node);
+        }
         return nodes;
     }
 
@@ -524,15 +627,22 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         return;
     }
 
-    std::string schema = root["schema"].as<std::string>();
-    if (schema != kSchemaId) {
-        errors_.push_back("Unsupported schema: " + schema);
+    const std::optional<std::string> schema = parse_string_scalar(root["schema"], "root.schema", errors_);
+    if (!schema) {
+        return;
+    }
+    if (*schema != kSchemaId) {
+        errors_.push_back("Unsupported schema: " + *schema);
         return;
     }
 
-    int version = root["version"].as<int>();
-    if (version != 1) {
-        errors_.push_back("Unsupported schema version: " + std::to_string(version));
+    const std::optional<int> version = parse_int_scalar(root["version"], "root.version", errors_);
+    if (!version) {
+        return;
+    }
+    const int schema_version = *version;
+    if (schema_version != 1) {
+        errors_.push_back("Unsupported schema version: " + std::to_string(schema_version));
         return;
     }
 
@@ -562,7 +672,12 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
 
         if (sim["step_mode"]) {
             try {
-                const std::string mode = normalize_key(sim["step_mode"].as<std::string>());
+                const std::optional<std::string> step_mode_raw =
+                    parse_string_scalar(sim["step_mode"], "simulation.step_mode", errors_);
+                if (!step_mode_raw) {
+                    throw std::runtime_error("invalid_step_mode_type");
+                }
+                const std::string mode = normalize_key(*step_mode_raw);
                 if (mode == "fixed") {
                     apply_mode_derived_defaults(
                         options, TransientStepMode::Fixed, dt_min_explicit, dt_max_explicit);
@@ -576,9 +691,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                                    " (expected 'fixed' or 'variable')");
                 }
             } catch (...) {
-                push_error(errors_,
-                           kDiagInvalidStepMode,
-                           "Invalid simulation.step_mode (expected 'fixed' or 'variable')");
+                if (std::none_of(errors_.begin(), errors_.end(), [](const std::string& err) {
+                        return err.find("simulation.step_mode") != std::string::npos &&
+                               err.find(kDiagTypeMismatch) != std::string::npos;
+                    })) {
+                    push_error(errors_,
+                               kDiagInvalidStepMode,
+                               "Invalid simulation.step_mode (expected 'fixed' or 'variable')");
+                }
             }
         }
 
@@ -590,10 +710,36 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         };
 
         YAML::Node adaptive_timestep = expert_node("adaptive_timestep");
-        if (adaptive_timestep) options.adaptive_timestep = adaptive_timestep.as<bool>();
-        if (sim["enable_events"]) options.enable_events = sim["enable_events"].as<bool>();
-        if (sim["enable_losses"]) options.enable_losses = sim["enable_losses"].as<bool>();
-        if (sim["max_step_retries"]) options.max_step_retries = sim["max_step_retries"].as<int>();
+        if (adaptive_timestep) {
+            const std::string adaptive_path =
+                (advanced && advanced["adaptive_timestep"])
+                    ? "simulation.advanced.adaptive_timestep"
+                    : "simulation.adaptive_timestep";
+            if (!sim["step_mode"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    adaptive_path,
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (const auto adaptive = parse_bool_scalar(adaptive_timestep, adaptive_path, errors_)) {
+                options.adaptive_timestep = *adaptive;
+            }
+        }
+        if (sim["enable_events"]) {
+            if (const auto value = parse_bool_scalar(sim["enable_events"], "simulation.enable_events", errors_)) {
+                options.enable_events = *value;
+            }
+        }
+        if (sim["enable_losses"]) {
+            if (const auto value = parse_bool_scalar(sim["enable_losses"], "simulation.enable_losses", errors_)) {
+                options.enable_losses = *value;
+            }
+        }
+        if (sim["max_step_retries"]) {
+            if (const auto value = parse_int_scalar(sim["max_step_retries"], "simulation.max_step_retries", errors_)) {
+                options.max_step_retries = *value;
+            }
+        }
 
         if (options_.strict) {
             if (sim["backend"]) {
@@ -607,6 +753,31 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
             if (advanced && advanced["sundials"]) {
                 push_legacy_backend_migration_error(errors_, "simulation.advanced.sundials");
+            }
+        } else {
+            if (sim["backend"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.backend",
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (sim["sundials"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.sundials",
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (advanced && advanced["backend"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.advanced.backend",
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (advanced && advanced["sundials"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.advanced.sundials",
+                    "simulation.step_mode: fixed|variable");
             }
         }
 

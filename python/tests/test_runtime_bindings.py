@@ -41,6 +41,42 @@ def test_simulator_with_simulation_options_runs_transient() -> None:
     assert result.newton_iterations_total >= 0
 
 
+def test_procedural_run_transient_remains_compatible_with_canonical_simulator_surface() -> None:
+    circuit = _build_rc_circuit()
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+
+    x0 = circuit.initial_state()
+    canonical = ps.Simulator(circuit, opts).run_transient(x0)
+    proc_time, proc_states, proc_ok, _ = ps.run_transient(
+        circuit,
+        opts.tstart,
+        opts.tstop,
+        opts.dt,
+        x0,
+        opts.newton_options,
+        opts.linear_solver,
+        robust=False,
+        auto_regularize=False,
+    )
+
+    assert canonical.success is True
+    assert proc_ok is True
+    assert len(proc_time) > 2
+    assert len(canonical.time) > 2
+    assert abs(float(proc_time[-1]) - opts.tstop) < 1e-12
+    assert abs(float(canonical.time[-1]) - opts.tstop) < 1e-12
+    assert abs(float(proc_states[-1][1]) - float(canonical.states[-1][1])) < 5e-3
+
+
 def test_yaml_parser_load_string_returns_circuit_and_options() -> None:
     content = """
 schema: pulsim-v1
@@ -96,7 +132,54 @@ components:
     parser = ps.YamlParser(options)
     parser.load_string(content)
 
-    assert any("unknown_field" in msg for msg in parser.errors)
+    assert any("PULSIM_YAML_E_UNKNOWN_FIELD" in msg for msg in parser.errors)
+    assert any("simulation.unknown_field" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_reports_type_mismatch_with_expected_and_received_classes() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  dt: {invalid: true}
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_TYPE_MISMATCH" in msg for msg in parser.errors)
+    assert any("simulation.dt" in msg for msg in parser.errors)
+    assert any("expected number" in msg and "got map" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_warns_deprecated_adaptive_timestep_alias_in_non_strict_mode() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  adaptive_timestep: true
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    options = ps.YamlParserOptions()
+    options.strict = False
+    parser = ps.YamlParser(options)
+    _, parsed_options = parser.load_string(content)
+
+    assert parser.errors == []
+    assert parsed_options.adaptive_timestep is True
+    assert any("PULSIM_YAML_W_DEPRECATED_FIELD" in msg for msg in parser.warnings)
+    assert any("simulation.adaptive_timestep" in msg for msg in parser.warnings)
+    assert any("simulation.step_mode" in msg for msg in parser.warnings)
 
 
 def test_yaml_parser_supports_legacy_si_suffix_words() -> None:

@@ -21,6 +21,13 @@ A superfície suportada para usuários é a API Python do módulo `pulsim`.
 
 As APIs de transiente em Python (`Simulator.run_transient`, `run_transient_streaming`, `run_transient_shared` e `ps.run_transient`) aplicam perfil robusto por padrão para reduzir falhas de convergência.
 
+## Compatibilidade de migração
+
+- `ps.run_transient(...)` permanece disponível para compatibilidade procedural.
+- A superfície canônica para novas integrações é `YamlParser` + `SimulationOptions` + `Simulator`.
+- Em casos de migração YAML, prefira `simulation.step_mode` em vez de
+  `simulation.adaptive_timestep`/`simulation.backend`.
+
 ## Exemplo completo
 
 ```python

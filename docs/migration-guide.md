@@ -103,6 +103,46 @@ simulation:
 If `strict = True`, legacy backend keys produce parser diagnostic
 `PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND`.
 
+### Schema Evolution Policy (v1)
+
+- Deprecated (migration window): `simulation.adaptive_timestep`
+  - Accepted in schema `pulsim-v1`, but emits warning
+    `PULSIM_YAML_W_DEPRECATED_FIELD` with replacement guidance to
+    `simulation.step_mode: fixed|variable`.
+- Removed (strict migration path): `simulation.backend`,
+  `simulation.sundials`, `simulation.advanced.backend`,
+  `simulation.advanced.sundials`
+  - In strict mode, parser fails deterministically with
+    `PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND` and migration guidance.
+
+### Before/After: procedural compatibility and canonical runtime
+
+Before (procedural path, still supported in migration window):
+
+```python
+import pulsim as ps
+
+times, states, ok, msg = ps.run_transient(
+    circuit, 0.0, 1e-3, 1e-6, circuit.initial_state()
+)
+```
+
+After (canonical class/runtime surface):
+
+```python
+import pulsim as ps
+
+opts = ps.SimulationOptions()
+opts.tstart = 0.0
+opts.tstop = 1e-3
+opts.dt = 1e-6
+
+sim = ps.Simulator(circuit, opts)
+result = sim.run_transient(circuit.initial_state())
+```
+
+Both paths share the same v1 kernel semantics; prefer `Simulator` for new code.
+
 ### Before/After: expert override location
 
 Before (mixed top-level knobs):
