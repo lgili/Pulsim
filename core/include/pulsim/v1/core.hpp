@@ -22,6 +22,7 @@
 #include "pulsim/v1/solver.hpp"
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/high_performance.hpp"
+#include "pulsim/v1/extensions.hpp"
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/validation.hpp"
 #include "pulsim/v1/runtime_circuit.hpp"
