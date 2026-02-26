@@ -106,7 +106,7 @@ public:
     /// Execute Gmin stepping (5.1.4)
     [[nodiscard]] NewtonResult execute(
         const Vector& x0,
-        Index num_nodes,
+        [[maybe_unused]] Index num_nodes,
         SolveFunction solve_func) {
 
         reset();
@@ -376,7 +376,7 @@ public:
     /// Execute pseudo-transient continuation (5.3.4)
     [[nodiscard]] PseudoTransientResult execute(
         const Vector& x0,
-        Index num_nodes,
+        [[maybe_unused]] Index num_nodes,
         NewtonSolveFunction newton_solve) {
 
         PseudoTransientResult result;

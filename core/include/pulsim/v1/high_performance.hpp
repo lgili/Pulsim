@@ -1716,7 +1716,7 @@ private:
         return true;
     }
 
-    void update_telemetry(LinearSolverKind kind, const LinearSolveResult& result) {
+    void update_telemetry(LinearSolverKind kind, [[maybe_unused]] const LinearSolveResult& result) {
         telemetry_.total_solve_calls += 1;
         telemetry_.last_solver = kind;
         telemetry_.last_preconditioner.reset();

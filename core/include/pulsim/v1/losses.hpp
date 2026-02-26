@@ -98,7 +98,7 @@ struct DiodeLossParams {
     }
 
     /// Calculate reverse recovery energy
-    [[nodiscard]] Real Err(Real If, Real Vr, Real /*T*/) const {
+    [[nodiscard]] Real Err([[maybe_unused]] Real If, Real Vr, Real /*T*/) const {
         // Simplified: Err ≈ Qrr * Vr * factor
         // More accurate: Err = 0.5 * Qrr * Vr * (Irr/If)^factor
         return Err_factor * Qrr * Vr;

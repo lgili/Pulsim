@@ -1590,7 +1590,7 @@ public:
     [[nodiscard]] std::size_t size() const { return entries_.size(); }
 
     /// Check if we have enough history for Richardson extrapolation
-    [[nodiscard]] bool has_sufficient_history(int order = 2) const {
+    [[nodiscard]] bool has_sufficient_history([[maybe_unused]] int order = 2) const {
         // Need at least 2 points for linear extrapolation (minimum for any LTE estimate)
         // Quadratic extrapolation (order >= 2) ideally needs 3 points, but can fall back to linear
         return entries_.size() >= 2;

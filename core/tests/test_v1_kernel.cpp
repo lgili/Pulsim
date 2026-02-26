@@ -7,7 +7,9 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 using namespace pulsim::v1;
 using Catch::Approx;
@@ -2041,4 +2043,40 @@ TEST_CASE("v1 buck closed-loop callback tracks reference without divergence",
     CHECK(std::abs(vout_last - vout_prev) <= 2.0);
     CHECK(duty >= 0.30);
     CHECK(duty <= 0.70);
+}
+
+TEST_CASE("v1 runtime circuit supports string_view name lookups", "[v1][runtime][lookup]") {
+    Circuit circuit;
+
+    CHECK(circuit.add_node("GND") == Circuit::ground());
+    CHECK(circuit.get_node(std::string_view{"gNd"}) == Circuit::ground());
+
+    const auto n_ctrl = circuit.add_node(std::string_view{"ctrl"});
+    const auto n_out = circuit.add_node(std::string_view{"out"});
+
+    circuit.add_switch("S1", n_out, Circuit::ground(), false, 1e3, 1e-9);
+
+    PWMParams pwm;
+    pwm.v_high = 10.0;
+    pwm.v_low = 0.0;
+    pwm.frequency = 100e3;
+    pwm.duty = 0.5;
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    REQUIRE_NOTHROW(circuit.set_switch_state(std::string_view{"S1"}, true));
+    REQUIRE_NOTHROW(circuit.set_pwm_duty(std::string_view{"Vpwm"}, 0.25));
+    REQUIRE_NOTHROW(circuit.set_pwm_duty_callback(std::string_view{"Vpwm"}, [](Real /*time*/) { return 0.4; }));
+    REQUIRE_NOTHROW(circuit.clear_pwm_duty_callback(std::string_view{"Vpwm"}));
+    CHECK(circuit.get_pwm_state(std::string_view{"Vpwm"}));
+}
+
+TEST_CASE("v1 runtime circuit rejects invalid timesteps", "[v1][runtime][safety]") {
+    Circuit circuit;
+
+    REQUIRE_THROWS_AS(circuit.set_timestep(0.0), std::invalid_argument);
+    REQUIRE_THROWS_AS(circuit.set_timestep(-1e-6), std::invalid_argument);
+    REQUIRE_THROWS_AS(circuit.set_timestep(std::numeric_limits<Real>::quiet_NaN()), std::invalid_argument);
+
+    REQUIRE_NOTHROW(circuit.set_timestep(2e-6));
+    CHECK(circuit.timestep() == Approx(2e-6));
 }

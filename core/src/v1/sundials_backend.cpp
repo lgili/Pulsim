@@ -1016,12 +1016,6 @@ SimulationResult run_sundials_backend(Circuit& circuit,
         options.sundials.family == SundialsSolverFamily::IDA ||
         options.sundials.family == SundialsSolverFamily::CVODE ||
         options.sundials.family == SundialsSolverFamily::ARKODE;
-    const bool use_direct_ida =
-        direct_requested && options.sundials.family == SundialsSolverFamily::IDA;
-    const bool use_direct_rhs =
-        direct_requested &&
-        (options.sundials.family == SundialsSolverFamily::CVODE ||
-         options.sundials.family == SundialsSolverFamily::ARKODE);
     if (direct_requested && !direct_supported) {
         // Keep deterministic behavior if a future/unknown family is requested.
         result.backend_telemetry.formulation_mode = "direct_requested_projected_wrapper";
@@ -1042,6 +1036,12 @@ SimulationResult run_sundials_backend(Circuit& circuit,
     return result;
 #else
     auto wall_start = std::chrono::high_resolution_clock::now();
+    const bool use_direct_ida =
+        direct_requested && options.sundials.family == SundialsSolverFamily::IDA;
+    const bool use_direct_rhs =
+        direct_requested &&
+        (options.sundials.family == SundialsSolverFamily::CVODE ||
+         options.sundials.family == SundialsSolverFamily::ARKODE);
 
     const std::size_t n = static_cast<std::size_t>(x0.size());
     if (n == 0) {

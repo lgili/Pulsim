@@ -17,6 +17,7 @@
 #include <cctype>
 #include <cmath>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <variant>
 #include <unordered_map>
@@ -24,11 +25,28 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <stdexcept>
 
 namespace pulsim::v1 {
+
+struct TransparentStringHash {
+    using is_transparent = void;
+
+    [[nodiscard]] std::size_t operator()(std::string_view value) const noexcept {
+        return std::hash<std::string_view>{}(value);
+    }
+};
+
+struct TransparentStringEqual {
+    using is_transparent = void;
+
+    [[nodiscard]] bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
+        return lhs == rhs;
+    }
+};
 
 // =============================================================================
 // Device Variant Type
@@ -99,15 +117,15 @@ public:
     // Node Management
     // =========================================================================
 
-    /// Add a named node and return its index
-    Index add_node(const std::string& name) {
-        if (name == "0" || name == "gnd" || name == "GND") {
+    /// Add a named node and return its index.
+    Index add_node(std::string_view name) {
+        if (is_ground_name(name)) {
             return ground_node;
         }
-        auto it = node_map_.find(name);
-        if (it != node_map_.end()) {
+        if (const auto it = node_map_.find(name); it != node_map_.end()) {
             return it->second;
         }
+
         if (num_branches_ > 0) {
             for (auto& conn : connections_) {
                 if (conn.branch_index >= 0) {
@@ -133,22 +151,22 @@ public:
                 }, devices_[i]);
             }
         }
-        Index idx = static_cast<Index>(node_names_.size());
-        node_map_[name] = idx;
-        node_names_.push_back(name);
+
+        const Index idx = static_cast<Index>(node_names_.size());
+        node_names_.emplace_back(name);
+        node_map_.emplace(node_names_.back(), idx);
         return idx;
     }
 
     /// Get node index by name (-1 for ground)
-    [[nodiscard]] Index get_node(const std::string& name) const {
-        if (name == "0" || name == "gnd" || name == "GND") {
+    [[nodiscard]] Index get_node(std::string_view name) const {
+        if (is_ground_name(name)) {
             return ground_node;
         }
-        auto it = node_map_.find(name);
-        if (it == node_map_.end()) {
-            throw std::runtime_error("Node not found: " + name);
+        if (const auto it = node_map_.find(name); it != node_map_.end()) {
+            return it->second;
         }
-        return it->second;
+        throw std::runtime_error("Node not found: " + std::string{name});
     }
 
     /// Get ground node index
@@ -348,12 +366,14 @@ public:
     void add_resistor(const std::string& name, Index n1, Index n2, Real R) {
         devices_.emplace_back(Resistor(R, name));
         connections_.push_back({name, {n1, n2}, -1});
+        register_connection_name(connections_.size() - 1);
         resistor_cache_.push_back({n1, n2, R == 0.0 ? 0.0 : 1.0 / R});
     }
 
     void add_capacitor(const std::string& name, Index n1, Index n2, Real C, Real ic = 0.0) {
         devices_.emplace_back(Capacitor(C, ic, name));
         connections_.push_back({name, {n1, n2}, -1});
+        register_connection_name(connections_.size() - 1);
     }
 
     /// Add RC snubber branch (R and C in parallel across the same two nodes).
@@ -366,6 +386,7 @@ public:
         Index br = num_nodes() + num_branches_;
         devices_.emplace_back(Inductor(L, ic, name));
         connections_.push_back({name, {n1, n2}, br});
+        register_connection_name(connections_.size() - 1);
         num_branches_++;
     }
 
@@ -375,24 +396,28 @@ public:
         vs.set_branch_index(br);
         devices_.emplace_back(std::move(vs));
         connections_.push_back({name, {npos, nneg}, br});
+        register_connection_name(connections_.size() - 1);
         num_branches_++;
     }
 
     void add_current_source(const std::string& name, Index npos, Index nneg, Real I) {
         devices_.emplace_back(CurrentSource(I, name));
         connections_.push_back({name, {npos, nneg}, -1});
+        register_connection_name(connections_.size() - 1);
     }
 
     void add_diode(const std::string& name, Index anode, Index cathode,
                    Real g_on = 1e3, Real g_off = 1e-9) {
         devices_.emplace_back(IdealDiode(g_on, g_off, name));
         connections_.push_back({name, {anode, cathode}, -1});
+        register_connection_name(connections_.size() - 1);
     }
 
     void add_switch(const std::string& name, Index n1, Index n2,
                     bool closed = false, Real g_on = 1e6, Real g_off = 1e-12) {
         devices_.emplace_back(IdealSwitch(g_on, g_off, closed, name));
         connections_.push_back({name, {n1, n2}, -1});
+        register_connection_name(connections_.size() - 1);
     }
 
     /// Add voltage-controlled switch (controlled by a PWM source)
@@ -401,18 +426,21 @@ public:
                       Real v_threshold = 2.5, Real g_on = 1e3, Real g_off = 1e-9) {
         devices_.emplace_back(VoltageControlledSwitch(v_threshold, g_on, g_off, name));
         connections_.push_back({name, {ctrl, t1, t2}, -1});
+        register_connection_name(connections_.size() - 1);
     }
 
     void add_mosfet(const std::string& name, Index gate, Index drain, Index source,
                     const MOSFET::Params& params = MOSFET::Params{}) {
         devices_.emplace_back(MOSFET(params, name));
         connections_.push_back({name, {gate, drain, source}, -1});
+        register_connection_name(connections_.size() - 1);
     }
 
     void add_igbt(const std::string& name, Index gate, Index collector, Index emitter,
                   const IGBT::Params& params = IGBT::Params{}) {
         devices_.emplace_back(IGBT(params, name));
         connections_.push_back({name, {gate, collector, emitter}, -1});
+        register_connection_name(connections_.size() - 1);
     }
 
     /// Add transformer with turns ratio N:1 (primary:secondary)
@@ -431,6 +459,7 @@ public:
         xfmr.set_branch_indices(br_p, br_s);
         devices_.emplace_back(std::move(xfmr));
         connections_.push_back({name, {p1, p2, s1, s2}, br_p, br_s});
+        register_connection_name(connections_.size() - 1);
         num_branches_ += 2;  // Transformer uses two branch currents
     }
 
@@ -1249,6 +1278,7 @@ public:
         pwm.set_branch_index(br);
         devices_.emplace_back(std::move(pwm));
         connections_.push_back({name, {npos, nneg}, br});
+        register_connection_name(connections_.size() - 1);
         num_branches_++;
     }
 
@@ -1269,6 +1299,7 @@ public:
         sine.set_branch_index(br);
         devices_.emplace_back(std::move(sine));
         connections_.push_back({name, {npos, nneg}, br});
+        register_connection_name(connections_.size() - 1);
         num_branches_++;
     }
 
@@ -1288,6 +1319,7 @@ public:
         pulse.set_branch_index(br);
         devices_.emplace_back(std::move(pulse));
         connections_.push_back({name, {npos, nneg}, br});
+        register_connection_name(connections_.size() - 1);
         num_branches_++;
     }
 
@@ -1296,55 +1328,39 @@ public:
     // =========================================================================
 
     /// Set fixed duty cycle for a PWM source
-    void set_pwm_duty(const std::string& name, Real duty) {
-        for (std::size_t i = 0; i < devices_.size(); ++i) {
-            if (connections_[i].name == name) {
-                if (auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
-                    pwm->set_duty(duty);
-                    return;
-                }
-            }
+    void set_pwm_duty(std::string_view name, Real duty) {
+        if (auto* pwm = find_device<PWMVoltageSource>(name)) {
+            pwm->set_duty(duty);
+            return;
         }
-        throw std::runtime_error("PWM source not found: " + name);
+        throw std::runtime_error("PWM source not found: " + std::string{name});
     }
 
     /// Set duty callback for a PWM source
-    void set_pwm_duty_callback(const std::string& name,
-                                std::function<Real(Real)> callback) {
-        for (std::size_t i = 0; i < devices_.size(); ++i) {
-            if (connections_[i].name == name) {
-                if (auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
-                    pwm->set_duty_callback(std::move(callback));
-                    return;
-                }
-            }
+    void set_pwm_duty_callback(std::string_view name,
+                               std::function<Real(Real)> callback) {
+        if (auto* pwm = find_device<PWMVoltageSource>(name)) {
+            pwm->set_duty_callback(std::move(callback));
+            return;
         }
-        throw std::runtime_error("PWM source not found: " + name);
+        throw std::runtime_error("PWM source not found: " + std::string{name});
     }
 
     /// Clear duty callback (use fixed duty)
-    void clear_pwm_duty_callback(const std::string& name) {
-        for (std::size_t i = 0; i < devices_.size(); ++i) {
-            if (connections_[i].name == name) {
-                if (auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
-                    pwm->clear_duty_callback();
-                    return;
-                }
-            }
+    void clear_pwm_duty_callback(std::string_view name) {
+        if (auto* pwm = find_device<PWMVoltageSource>(name)) {
+            pwm->clear_duty_callback();
+            return;
         }
-        throw std::runtime_error("PWM source not found: " + name);
+        throw std::runtime_error("PWM source not found: " + std::string{name});
     }
 
     /// Get PWM state (ON/OFF) at current time
-    [[nodiscard]] bool get_pwm_state(const std::string& name) const {
-        for (std::size_t i = 0; i < devices_.size(); ++i) {
-            if (connections_[i].name == name) {
-                if (const auto* pwm = std::get_if<PWMVoltageSource>(&devices_[i])) {
-                    return pwm->state_at(current_time_);
-                }
-            }
+    [[nodiscard]] bool get_pwm_state(std::string_view name) const {
+        if (const auto* pwm = find_device<PWMVoltageSource>(name)) {
+            return pwm->state_at(current_time_);
         }
-        throw std::runtime_error("PWM source not found: " + name);
+        throw std::runtime_error("PWM source not found: " + std::string{name});
     }
 
     // =========================================================================
@@ -1373,16 +1389,12 @@ public:
     // Set Switch States
     // =========================================================================
 
-    void set_switch_state(const std::string& name, bool closed) {
-        for (std::size_t i = 0; i < devices_.size(); ++i) {
-            if (connections_[i].name == name) {
-                if (auto* sw = std::get_if<IdealSwitch>(&devices_[i])) {
-                    sw->set_state(closed);
-                    return;
-                }
-            }
+    void set_switch_state(std::string_view name, bool closed) {
+        if (auto* sw = find_device<IdealSwitch>(name)) {
+            sw->set_state(closed);
+            return;
         }
-        throw std::runtime_error("Switch not found: " + name);
+        throw std::runtime_error("Switch not found: " + std::string{name});
     }
 
     // =========================================================================
@@ -1390,6 +1402,10 @@ public:
     // =========================================================================
 
     void set_timestep(Real dt) {
+        if (!(std::isfinite(dt) && dt > 0.0)) {
+            throw std::invalid_argument("Timestep must be finite and > 0");
+        }
+
         for (auto& dev : devices_) {
             std::visit([dt](auto& d) {
                 using T = std::decay_t<decltype(d)>;
@@ -1866,6 +1882,30 @@ private:
         Real g = 0.0;
     };
 
+    [[nodiscard]] static constexpr char ascii_lower(char value) noexcept {
+        return (value >= 'A' && value <= 'Z')
+            ? static_cast<char>(value - 'A' + 'a')
+            : value;
+    }
+
+    [[nodiscard]] static constexpr bool ascii_iequals(
+        std::string_view lhs,
+        std::string_view rhs) noexcept {
+        if (lhs.size() != rhs.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < lhs.size(); ++i) {
+            if (ascii_lower(lhs[i]) != ascii_lower(rhs[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] static constexpr bool is_ground_name(std::string_view name) noexcept {
+        return name == "0" || ascii_iequals(name, "gnd");
+    }
+
     void ensure_stage_storage() {
         if (stage_cap_v_.size() != devices_.size()) {
             stage_cap_v_.assign(devices_.size(), 0.0);
@@ -1887,20 +1927,42 @@ private:
         }
     }
 
-    [[nodiscard]] const DeviceConnection* find_connection(const std::string& name) const {
+    void register_connection_name(std::size_t index) {
+        if (index >= connections_.size()) {
+            return;
+        }
+        connection_name_to_index_.try_emplace(connections_[index].name, index);
+    }
+
+    [[nodiscard]] const DeviceConnection* find_connection(std::string_view name) const {
         if (const auto index = find_connection_index(name); index.has_value()) {
             return &connections_[*index];
         }
         return nullptr;
     }
 
-    [[nodiscard]] std::optional<std::size_t> find_connection_index(const std::string& name) const {
-        for (std::size_t i = 0; i < connections_.size(); ++i) {
-            if (connections_[i].name == name) {
-                return i;
-            }
+    [[nodiscard]] std::optional<std::size_t> find_connection_index(std::string_view name) const {
+        if (const auto it = connection_name_to_index_.find(name);
+            it != connection_name_to_index_.end()) {
+            return it->second;
         }
         return std::nullopt;
+    }
+
+    template<typename Device>
+    [[nodiscard]] Device* find_device(std::string_view name) {
+        if (const auto index = find_connection_index(name); index.has_value()) {
+            return std::get_if<Device>(&devices_[*index]);
+        }
+        return nullptr;
+    }
+
+    template<typename Device>
+    [[nodiscard]] const Device* find_device(std::string_view name) const {
+        if (const auto index = find_connection_index(name); index.has_value()) {
+            return std::get_if<Device>(&devices_[*index]);
+        }
+        return nullptr;
     }
 
     [[nodiscard]] static Real get_param_value(
@@ -2289,9 +2351,11 @@ private:
     std::unordered_map<std::string, std::deque<Real>> transfer_input_history_;
     std::unordered_map<std::string, std::deque<Real>> transfer_output_history_;
     std::vector<DeviceConnection> connections_;
+    std::unordered_map<std::string, std::size_t, TransparentStringHash, TransparentStringEqual>
+        connection_name_to_index_;
     std::vector<Real> device_temperature_scale_;
     std::vector<ResistorStamp> resistor_cache_;
-    std::unordered_map<std::string, Index> node_map_;
+    std::unordered_map<std::string, Index, TransparentStringHash, TransparentStringEqual> node_map_;
     std::vector<std::string> node_names_;
     Index num_branches_ = 0;
     Real timestep_ = 1e-6;
@@ -2670,11 +2734,11 @@ private:
         Real hysteresis = 0.5;  // Smooth transition width
 
         Real v_norm = (v_ctrl - v_th) / hysteresis;
-        Real sigmoid = 0.5 * (1.0 + std::tanh(v_norm));
+        const Real tanh_val = std::tanh(v_norm);
+        Real sigmoid = 0.5 * (1.0 + tanh_val);
         Real g = g_off + (g_on - g_off) * sigmoid;
 
         // Derivative of g w.r.t. v_ctrl
-        Real tanh_val = std::tanh(v_norm);
         Real dsigmoid = 0.5 / hysteresis * (1.0 - tanh_val * tanh_val);
         Real dg_dvctrl = (g_on - g_off) * dsigmoid;
 
