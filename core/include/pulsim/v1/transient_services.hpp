@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulsim::v1 {
@@ -195,15 +197,15 @@ public:
     virtual ~LossService() = default;
 
     virtual void reset() = 0;
-    virtual void commit_switching_event(const std::string& name,
+    virtual void commit_switching_event(std::string_view name,
                                         bool turning_on,
                                         Real energy) = 0;
-    virtual void commit_reverse_recovery_event(const std::string& name,
+    virtual void commit_reverse_recovery_event(std::string_view name,
                                                Real energy) = 0;
     virtual void commit_accepted_segment(const Vector& x,
                                          Real dt,
-                                         const std::vector<Real>& thermal_scale) = 0;
-    [[nodiscard]] virtual const std::vector<Real>& last_device_power() const = 0;
+                                         std::span<const Real> thermal_scale) = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_power() const = 0;
     [[nodiscard]] virtual SystemLossSummary finalize(Real duration) const = 0;
 };
 
@@ -213,9 +215,9 @@ public:
 
     virtual void reset() = 0;
     [[nodiscard]] virtual Real thermal_scale_factor(std::size_t device_index) const = 0;
-    [[nodiscard]] virtual const std::vector<Real>& thermal_scale_vector() const = 0;
+    [[nodiscard]] virtual std::span<const Real> thermal_scale_vector() const = 0;
     virtual void commit_accepted_segment(Real dt,
-                                         const std::vector<Real>& device_power) = 0;
+                                         std::span<const Real> device_power) = 0;
     [[nodiscard]] virtual ThermalServiceSummary finalize() const = 0;
 };
 
