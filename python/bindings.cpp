@@ -1193,6 +1193,26 @@ void init_v2_module(py::module_& v2) {
         .value("Direct", SundialsFormulationMode::Direct)
         .export_values();
 
+    py::enum_<SimulationDiagnosticCode>(v2, "SimulationDiagnosticCode",
+        "Typed simulation diagnostic code")
+        .value("None", SimulationDiagnosticCode::None)
+        .value("DcOperatingPointFailure", SimulationDiagnosticCode::DcOperatingPointFailure)
+        .value("LegacyBackendUnsupported", SimulationDiagnosticCode::LegacyBackendUnsupported)
+        .value("InvalidInitialState", SimulationDiagnosticCode::InvalidInitialState)
+        .value("InvalidTimeWindow", SimulationDiagnosticCode::InvalidTimeWindow)
+        .value("InvalidTimestep", SimulationDiagnosticCode::InvalidTimestep)
+        .value("UserStopRequested", SimulationDiagnosticCode::UserStopRequested)
+        .value("TransientStepFailure", SimulationDiagnosticCode::TransientStepFailure)
+        .value("PeriodicInvalidPeriod", SimulationDiagnosticCode::PeriodicInvalidPeriod)
+        .value("PeriodicInvalidInitialState", SimulationDiagnosticCode::PeriodicInvalidInitialState)
+        .value("PeriodicCycleFailure", SimulationDiagnosticCode::PeriodicCycleFailure)
+        .value("PeriodicNoConvergence", SimulationDiagnosticCode::PeriodicNoConvergence)
+        .value("HarmonicInvalidPeriod", SimulationDiagnosticCode::HarmonicInvalidPeriod)
+        .value("HarmonicInvalidInitialState", SimulationDiagnosticCode::HarmonicInvalidInitialState)
+        .value("HarmonicDifferentiationFailure", SimulationDiagnosticCode::HarmonicDifferentiationFailure)
+        .value("HarmonicSolverFailure", SimulationDiagnosticCode::HarmonicSolverFailure)
+        .export_values();
+
     py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
         .def(py::init<>())
         .def_readwrite("time", &SimulationEvent::time)
@@ -1368,6 +1388,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("virtual_channel_metadata", &SimulationResult::virtual_channel_metadata)
         .def_readwrite("success", &SimulationResult::success)
         .def_readwrite("final_status", &SimulationResult::final_status)
+        .def_readwrite("diagnostic", &SimulationResult::diagnostic)
         .def_readwrite("message", &SimulationResult::message)
         .def_readwrite("total_steps", &SimulationResult::total_steps)
         .def_readwrite("newton_iterations_total", &SimulationResult::newton_iterations_total)
@@ -1389,6 +1410,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("success", &PeriodicSteadyStateResult::success)
         .def_readwrite("iterations", &PeriodicSteadyStateResult::iterations)
         .def_readwrite("residual_norm", &PeriodicSteadyStateResult::residual_norm)
+        .def_readwrite("diagnostic", &PeriodicSteadyStateResult::diagnostic)
         .def_readwrite("steady_state", &PeriodicSteadyStateResult::steady_state)
         .def_readwrite("last_cycle", &PeriodicSteadyStateResult::last_cycle)
         .def_readwrite("message", &PeriodicSteadyStateResult::message);
@@ -1399,6 +1421,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("success", &HarmonicBalanceResult::success)
         .def_readwrite("iterations", &HarmonicBalanceResult::iterations)
         .def_readwrite("residual_norm", &HarmonicBalanceResult::residual_norm)
+        .def_readwrite("diagnostic", &HarmonicBalanceResult::diagnostic)
         .def_readwrite("solution", &HarmonicBalanceResult::solution)
         .def_readwrite("sample_times", &HarmonicBalanceResult::sample_times)
         .def_readwrite("message", &HarmonicBalanceResult::message);

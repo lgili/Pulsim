@@ -169,6 +169,25 @@ struct BackendTelemetry {
     std::string failure_reason;
 };
 
+enum class SimulationDiagnosticCode {
+    None,
+    DcOperatingPointFailure,
+    LegacyBackendUnsupported,
+    InvalidInitialState,
+    InvalidTimeWindow,
+    InvalidTimestep,
+    UserStopRequested,
+    TransientStepFailure,
+    PeriodicInvalidPeriod,
+    PeriodicInvalidInitialState,
+    PeriodicCycleFailure,
+    PeriodicNoConvergence,
+    HarmonicInvalidPeriod,
+    HarmonicInvalidInitialState,
+    HarmonicDifferentiationFailure,
+    HarmonicSolverFailure
+};
+
 struct PeriodicSteadyStateOptions {
     Real period = 0.0;
     int max_iterations = 20;
@@ -288,6 +307,7 @@ struct SimulationResult {
 
     bool success = true;
     SolverStatus final_status = SolverStatus::Success;
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     std::string message;
 
     int total_steps = 0;
@@ -307,6 +327,7 @@ struct PeriodicSteadyStateResult {
     bool success = false;
     int iterations = 0;
     Real residual_norm = 0.0;
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     Vector steady_state;
     SimulationResult last_cycle;
     std::string message;
@@ -316,6 +337,7 @@ struct HarmonicBalanceResult {
     bool success = false;
     int iterations = 0;
     Real residual_norm = 0.0;
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     Vector solution;
     std::vector<Real> sample_times;
     std::string message;

@@ -6,6 +6,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <string_view>
 
 namespace pulsim::v1 {
 
@@ -261,9 +262,47 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     return "native";
 }
 
+[[nodiscard]] std::string_view diagnostic_code_to_reason(SimulationDiagnosticCode code) {
+    switch (code) {
+        case SimulationDiagnosticCode::None:
+            return "";
+        case SimulationDiagnosticCode::DcOperatingPointFailure:
+            return "dc_operating_point_failure";
+        case SimulationDiagnosticCode::LegacyBackendUnsupported:
+            return "legacy_backend_removed";
+        case SimulationDiagnosticCode::InvalidInitialState:
+            return "invalid_initial_state";
+        case SimulationDiagnosticCode::InvalidTimeWindow:
+            return "invalid_time_window";
+        case SimulationDiagnosticCode::InvalidTimestep:
+            return "invalid_timestep";
+        case SimulationDiagnosticCode::UserStopRequested:
+            return "user_stop_requested";
+        case SimulationDiagnosticCode::TransientStepFailure:
+            return "transient_step_failure";
+        case SimulationDiagnosticCode::PeriodicInvalidPeriod:
+            return "periodic_invalid_period";
+        case SimulationDiagnosticCode::PeriodicInvalidInitialState:
+            return "periodic_invalid_initial_state";
+        case SimulationDiagnosticCode::PeriodicCycleFailure:
+            return "periodic_cycle_failure";
+        case SimulationDiagnosticCode::PeriodicNoConvergence:
+            return "periodic_no_convergence";
+        case SimulationDiagnosticCode::HarmonicInvalidPeriod:
+            return "harmonic_invalid_period";
+        case SimulationDiagnosticCode::HarmonicInvalidInitialState:
+            return "harmonic_invalid_initial_state";
+        case SimulationDiagnosticCode::HarmonicDifferentiationFailure:
+            return "harmonic_diff_matrix_failure";
+        case SimulationDiagnosticCode::HarmonicSolverFailure:
+            return "harmonic_solver_failure";
+    }
+    return "";
+}
+
 struct TransientInputIssue {
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     std::string message;
-    std::string failure_reason;
 };
 
 [[nodiscard]] std::optional<TransientInputIssue> validate_transient_inputs(
@@ -272,8 +311,8 @@ struct TransientInputIssue {
     const Vector& x0) {
     if (x0.size() == 0) {
         return TransientInputIssue{
-            "Transient simulation requires a non-empty initial state",
-            "invalid_initial_state"
+            SimulationDiagnosticCode::InvalidInitialState,
+            "Transient simulation requires a non-empty initial state"
         };
     }
 
@@ -282,21 +321,24 @@ struct TransientInputIssue {
         std::ostringstream message;
         message << "Initial state size mismatch: expected " << expected_size
                 << ", got " << x0.size();
-        return TransientInputIssue{message.str(), "invalid_initial_state"};
+        return TransientInputIssue{
+            SimulationDiagnosticCode::InvalidInitialState,
+            message.str()
+        };
     }
 
     if (!x0.allFinite()) {
         return TransientInputIssue{
-            "Initial state contains non-finite values",
-            "invalid_initial_state"
+            SimulationDiagnosticCode::InvalidInitialState,
+            "Initial state contains non-finite values"
         };
     }
 
     const bool finite_time_window = std::isfinite(options.tstart) && std::isfinite(options.tstop);
     if (!finite_time_window || options.tstop < options.tstart) {
         return TransientInputIssue{
-            "Invalid simulation time window: tstop must be finite and >= tstart",
-            "invalid_time_window"
+            SimulationDiagnosticCode::InvalidTimeWindow,
+            "Invalid simulation time window: tstop must be finite and >= tstart"
         };
     }
 
@@ -305,15 +347,15 @@ struct TransientInputIssue {
                                   std::isfinite(options.dt_max);
     if (!finite_timesteps) {
         return TransientInputIssue{
-            "Invalid timestep configuration: dt, dt_min, and dt_max must be finite",
-            "invalid_timestep"
+            SimulationDiagnosticCode::InvalidTimestep,
+            "Invalid timestep configuration: dt, dt_min, and dt_max must be finite"
         };
     }
 
     if (options.dt <= 0.0 || options.dt_min <= 0.0 || options.dt_max < options.dt_min) {
         return TransientInputIssue{
-            "Invalid timestep bounds: require dt > 0, dt_min > 0, and dt_max >= dt_min",
-            "invalid_timestep"
+            SimulationDiagnosticCode::InvalidTimestep,
+            "Invalid timestep bounds: require dt > 0, dt_min > 0, and dt_max >= dt_min"
         };
     }
 
@@ -613,6 +655,7 @@ SimulationResult Simulator::run_transient(SimulationCallback callback,
         SimulationResult result;
         result.success = false;
         result.final_status = dc.newton_result.status;
+        result.diagnostic = SimulationDiagnosticCode::DcOperatingPointFailure;
         result.message = "DC operating point failed: " + dc.message;
         result.linear_solver_telemetry = dc.linear_solver_telemetry;
         return result;
@@ -631,6 +674,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         SimulationResult result;
         result.success = false;
         result.final_status = SolverStatus::NumericalError;
+        result.diagnostic = SimulationDiagnosticCode::LegacyBackendUnsupported;
         result.message =
             "Legacy transient backend selection '" + backend_mode_to_string(requested_backend) +
             "' is no longer supported. Use the native core with simulation.step_mode: fixed|variable.";
@@ -639,7 +683,8 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         result.backend_telemetry.solver_family = "native";
         result.backend_telemetry.formulation_mode = "native";
         result.backend_telemetry.sundials_compiled = sundials_compiled();
-        result.backend_telemetry.failure_reason = "legacy_backend_removed";
+        result.backend_telemetry.failure_reason =
+            std::string(diagnostic_code_to_reason(result.diagnostic));
         return result;
     }
 
@@ -647,13 +692,15 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         SimulationResult result;
         result.success = false;
         result.final_status = SolverStatus::NumericalError;
+        result.diagnostic = input_issue->diagnostic;
         result.message = input_issue->message;
         result.backend_telemetry.requested_backend = "native";
         result.backend_telemetry.selected_backend = "native";
         result.backend_telemetry.solver_family = "native";
         result.backend_telemetry.formulation_mode = "native";
         result.backend_telemetry.sundials_compiled = sundials_compiled();
-        result.backend_telemetry.failure_reason = input_issue->failure_reason;
+        result.backend_telemetry.failure_reason =
+            std::string(diagnostic_code_to_reason(result.diagnostic));
         return result;
     }
 
@@ -813,6 +860,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         if (control) {
             if (control->should_stop()) {
                 result.message = "Simulation stopped by user";
+                result.diagnostic = SimulationDiagnosticCode::UserStopRequested;
                 break;
             }
             while (control->should_pause() && !control->should_stop()) {
@@ -820,6 +868,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
             if (control->should_stop()) {
                 result.message = "Simulation stopped by user";
+                result.diagnostic = SimulationDiagnosticCode::UserStopRequested;
                 break;
             }
         }
@@ -1419,11 +1468,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
             result.success = false;
             result.final_status = step_result.status;
+            result.diagnostic = SimulationDiagnosticCode::TransientStepFailure;
             result.message = "Transient failed at t=" + std::to_string(t + dt_used) +
                              ": " + step_result.error_message;
             if (auto_recovery_attempted) {
                 result.message += " (automatic regularization attempted)";
             }
+            result.backend_telemetry.failure_reason =
+                std::string(diagnostic_code_to_reason(result.diagnostic));
             break;
         }
 
@@ -1536,6 +1588,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         if (result.message.empty()) {
             result.message = "Transient completed";
         }
+    } else if (result.backend_telemetry.failure_reason.empty() &&
+               result.diagnostic != SimulationDiagnosticCode::None) {
+        result.backend_telemetry.failure_reason =
+            std::string(diagnostic_code_to_reason(result.diagnostic));
     }
 
     finalize_loss_summary(result);
