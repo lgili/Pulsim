@@ -350,7 +350,7 @@ else()
     else()
         # Network fallback uses archive download (no git credentials required).
         set(PULSIM_EIGEN_ARCHIVE_URL
-            "https://codeload.github.com/libeigen/eigen/tar.gz/refs/tags/3.4.0"
+            "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz"
             CACHE STRING "Eigen source archive URL"
         )
         message(STATUS "Eigen3: system package not found, downloading ${PULSIM_EIGEN_ARCHIVE_URL}")
