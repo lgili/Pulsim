@@ -313,44 +313,36 @@ include(FetchContent)
 # Note: We don't set BUILD_TESTING OFF globally as it would disable our own tests.
 
 # Eigen - header-only dependency
-if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28")
-    FetchContent_Declare(
-        eigen
-        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-        GIT_TAG 3.4.0
-        GIT_SHALLOW TRUE
-        EXCLUDE_FROM_ALL
-    )
+# Prefer system package in CI to avoid network flakiness, then fall back to fetch.
+find_package(Eigen3 3.4 QUIET NO_MODULE)
+if(TARGET Eigen3::Eigen)
+    message(STATUS "Eigen3: using system package")
 else()
-    FetchContent_Declare(
-        eigen
-        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-        GIT_TAG 3.4.0
-        GIT_SHALLOW TRUE
-    )
-endif()
-# Avoid building Eigen's own tests/docs while still using modern FetchContent
-# population path (more reliable in isolated CI environments, especially Windows).
-set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
-set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
-set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(EIGEN_LEAVE_TEST_IN_ALL_TARGET OFF CACHE BOOL "" FORCE)
+    set(PULSIM_EIGEN_GIT_REPOSITORY "https://github.com/libeigen/eigen.git" CACHE STRING "Eigen git repository")
+    message(STATUS "Eigen3: system package not found, fetching from ${PULSIM_EIGEN_GIT_REPOSITORY}")
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28")
+        FetchContent_Declare(
+            eigen
+            GIT_REPOSITORY ${PULSIM_EIGEN_GIT_REPOSITORY}
+            GIT_TAG 3.4.0
+            GIT_SHALLOW TRUE
+            EXCLUDE_FROM_ALL
+        )
+    else()
+        FetchContent_Declare(
+            eigen
+            GIT_REPOSITORY ${PULSIM_EIGEN_GIT_REPOSITORY}
+            GIT_TAG 3.4.0
+            GIT_SHALLOW TRUE
+        )
+    endif()
 
-set(_pulsim_saved_build_testing "")
-if(DEFINED BUILD_TESTING)
-    set(_pulsim_saved_build_testing "${BUILD_TESTING}")
-endif()
-set(BUILD_TESTING OFF CACHE BOOL "Temporarily disable dependency tests while fetching Eigen" FORCE)
-FetchContent_MakeAvailable(eigen)
-if(_pulsim_saved_build_testing STREQUAL "")
-    unset(BUILD_TESTING CACHE)
-else()
-    set(BUILD_TESTING "${_pulsim_saved_build_testing}" CACHE BOOL "Restore project BUILD_TESTING value" FORCE)
-endif()
-unset(_pulsim_saved_build_testing)
+    # Use populate-only mode so Eigen's own CMake targets/tests are never added.
+    FetchContent_GetProperties(eigen)
+    if(NOT eigen_POPULATED)
+        FetchContent_Populate(eigen)
+    endif()
 
-# Fallback alias for older Eigen layouts where target may not be exported.
-if(NOT TARGET Eigen3::Eigen)
     add_library(Eigen3::Eigen INTERFACE IMPORTED)
     set_target_properties(Eigen3::Eigen PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${eigen_SOURCE_DIR}"
