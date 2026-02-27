@@ -29,6 +29,15 @@ benchmarks:
   - path: circuits/ll10_full_bridge_inverter_lc.yaml
     difficulty: 7-inverter_complex
     scenarios: [fixed_long, variable_long]
+  - path: circuits/ll11_llc_resonant_converter.yaml
+    difficulty: 8-resonant_converter
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll12_pfc_boost_continuous.yaml
+    difficulty: 8-pfc_boost
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll13_active_clamp_forward.yaml
+    difficulty: 8-active_clamp
+    scenarios: [fixed_long, variable_long]
 
 scenarios:
   fixed_long:

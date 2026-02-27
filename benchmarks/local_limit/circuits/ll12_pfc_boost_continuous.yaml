@@ -1,0 +1,98 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll12_pfc_boost_continuous
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 0.25e-6
+components:
+  - type: voltage_source
+    name: Vac
+    nodes: [vac_p, vac_n]
+    waveform:
+      type: sine
+      amplitude: 170.0
+      frequency: 60.0
+      phase: 0.0
+      offset: 0.0
+
+  - type: resistor
+    name: Rline
+    nodes: [vac_p, line_p]
+    value: 0.1
+  - type: resistor
+    name: Rneutral
+    nodes: [vac_n, line_n]
+    value: 0.1
+  
+  # Bridge Rectifier
+  - type: diode
+    name: D_rec1
+    nodes: [line_p, rec_pos]
+    is: 1e-12
+    n: 1.5
+  - type: diode
+    name: D_rec2
+    nodes: [line_n, rec_pos]
+    is: 1e-12
+    n: 1.5
+  - type: diode
+    name: D_rec3
+    nodes: [0, line_p]
+    is: 1e-12
+    n: 1.5
+  - type: diode
+    name: D_rec4
+    nodes: [0, line_n]
+    is: 1e-12
+    n: 1.5
+
+  - type: capacitor
+    name: Cin
+    nodes: [rec_pos, 0]
+    value: 1u
+  
+  # Boost PFC Stage
+  - type: inductor
+    name: Lboost
+    nodes: [rec_pos, sw_node]
+    value: 500u
+  
+  - type: voltage_source
+    name: Vpwm
+    nodes: [ctrl, 0]
+    waveform:
+      type: pwm
+      v_high: 12.0
+      v_low: 0.0
+      frequency: 65000
+      duty: 0.7  # Static duty cycle for test simplicity
+      dead_time: 0.0
+      phase: 0.0
+
+  - type: vcswitch
+    name: S_boost
+    nodes: [ctrl, sw_node, 0]
+    v_threshold: 5.0
+    ron: 0.05
+    roff: 1e7
+
+  - type: diode
+    name: D_boost
+    nodes: [sw_node, vout]
+    is: 1e-12
+    n: 1.5
+    
+  - type: capacitor
+    name: Cout
+    nodes: [vout, 0]
+    value: 470u
+  
+  - type: resistor
+    name: Rload
+    nodes: [vout, 0]
+    value: 100.0
