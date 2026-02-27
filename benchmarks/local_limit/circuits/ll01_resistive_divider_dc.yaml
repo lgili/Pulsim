@@ -1,0 +1,31 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll01_resistive_divider_dc
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 8e-3
+  dt: 2e-6
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 48.0
+  - type: resistor
+    name: Rtop
+    nodes: [vin, out]
+    value: 4.7k
+  - type: resistor
+    name: Rbot
+    nodes: [out, 0]
+    value: 1.0k
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 4.7u
+    ic: 0.0

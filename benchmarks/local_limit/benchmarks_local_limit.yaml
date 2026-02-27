@@ -1,0 +1,39 @@
+benchmarks:
+  - path: circuits/ll01_resistive_divider_dc.yaml
+    difficulty: 1-basic
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll02_rc_pulse_charge.yaml
+    difficulty: 1-basic
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll03_rl_step.yaml
+    difficulty: 2-linear_dynamic
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll04_rlc_underdamped.yaml
+    difficulty: 2-linear_dynamic
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll05_diode_rectifier_filter.yaml
+    difficulty: 3-nonlinear
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll06_buck_vcswitch.yaml
+    difficulty: 4-switching
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll07_boost_vcswitch.yaml
+    difficulty: 4-switching
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll08_buck_mosfet.yaml
+    difficulty: 5-power_semiconductor
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll09_half_bridge_inverter_leg.yaml
+    difficulty: 6-inverter
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll10_full_bridge_inverter_lc.yaml
+    difficulty: 7-inverter_complex
+    scenarios: [fixed_long, variable_long]
+
+scenarios:
+  fixed_long:
+    simulation:
+      step_mode: fixed
+  variable_long:
+    simulation:
+      step_mode: variable

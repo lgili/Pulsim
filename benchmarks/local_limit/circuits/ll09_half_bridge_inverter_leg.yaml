@@ -1,0 +1,72 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll09_half_bridge_inverter_leg
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 3e-3
+  dt: 0.25e-6
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 100.0
+  - type: voltage_source
+    name: Vpwm_hi
+    nodes: [ctrl_hi, 0]
+    waveform:
+      type: pwm
+      v_high: 15.0
+      v_low: 0.0
+      frequency: 20000
+      duty: 0.5
+      dead_time: 1e-6
+      phase: 0.0
+  - type: voltage_source
+    name: Vpwm_lo
+    nodes: [ctrl_lo, 0]
+    waveform:
+      type: pwm
+      v_high: 15.0
+      v_low: 0.0
+      frequency: 20000
+      duty: 0.5
+      dead_time: 1e-6
+      phase: 0.5
+  - type: resistor
+    name: Rmid1
+    nodes: [vcc, mid]
+    value: 100k
+  - type: resistor
+    name: Rmid2
+    nodes: [mid, 0]
+    value: 100k
+  - type: vcswitch
+    name: S_hi
+    nodes: [ctrl_hi, vcc, out]
+    v_threshold: 7.5
+    ron: 0.05
+    roff: 1e8
+  - type: vcswitch
+    name: S_lo
+    nodes: [ctrl_lo, out, 0]
+    v_threshold: 7.5
+    ron: 0.05
+    roff: 1e8
+  - type: resistor
+    name: Rload
+    nodes: [out, load_mid]
+    value: 12.0
+  - type: inductor
+    name: Lload
+    nodes: [load_mid, mid]
+    value: 1m
+  - type: resistor
+    name: Rbleed
+    nodes: [out, 0]
+    value: 1e6

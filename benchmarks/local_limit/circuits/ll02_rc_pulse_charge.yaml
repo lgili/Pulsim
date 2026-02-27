@@ -1,0 +1,33 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll02_rc_pulse_charge
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 12e-3
+  dt: 2e-6
+components:
+  - type: voltage_source
+    name: Vpulse
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 24.0
+      t_delay: 0.0
+      t_rise: 200e-9
+      t_fall: 200e-9
+      t_width: 6e-3
+      period: 12e-3
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 2.2k
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 10u
+    ic: 0.0

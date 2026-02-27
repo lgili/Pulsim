@@ -70,6 +70,16 @@ python3 benchmarks/benchmark_ngspice.py \
   --pulsim-netlist benchmarks/circuits/rc_step.yaml \
   --spice-netlist benchmarks/ngspice/rc_step.cir \
   --output-dir benchmarks/ngspice_single
+
+# Local limit suite (10 circuits, fixed + variable)
+python3 benchmarks/local_limit_suite.py \
+  --manifest benchmarks/local_limit/benchmarks_local_limit.yaml \
+  --output-dir benchmarks/out_local_limit \
+  --mode both \
+  --duration-scale 1.0
+
+# Same flow via Makefile
+make benchmark-local-limit BUILD_DIR=build
 ```
 
 Benchmark runners are Python-first and execute through `pulsim` runtime bindings
@@ -82,6 +92,13 @@ Current default scope is the stiff-variable set (`stiff_rlc` scenarios) and can 
 `kpi_gate.py` validates baseline/manifest provenance in strict mode by default
 and fails early when metadata or artifact hashes are inconsistent.
 Use `--no-strict-provenance` only for local debugging.
+
+`local_limit_suite.py` is intended for PC-local stress discovery and reports
+exact failure reasons per circuit/scenario. It always supports:
+- `--mode fixed|variable|both`
+- `--duration-scale <factor>` to run longer than the base `tstop`
+- `--only <benchmark_id ...>` to focus specific circuits
+- `--max-runtime-s <seconds>` to fail runs above a runtime budget
 
 Generate missing reference baselines:
 
@@ -117,6 +134,12 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
 - `stress_results.csv` — per scenario stress execution rows with telemetry columns.
 - `stress_results.json` — tier criteria + per-tier evaluation + scenario records.
 - `stress_summary.json` — overall pass/fail and per-tier status.
+
+`local_limit_suite.py` emits:
+
+- `results.csv` — one row per circuit/scenario with `pass/fail`, runtime, steps, completion ratio and failure message.
+- `results.json` — full machine-readable payload with telemetry and run settings.
+- `summary.json` — totals, per-scenario/per-difficulty split, and grouped failure reasons.
 
 ## Adding Benchmarks
 
