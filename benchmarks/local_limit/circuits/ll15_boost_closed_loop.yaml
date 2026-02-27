@@ -1,0 +1,88 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll15_boost_closed_loop
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 0.5e-6
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 12.0
+
+  - type: voltage_source
+    name: Vref
+    nodes: [vref, 0]
+    waveform:
+      type: dc
+      value: 24.0
+
+  # Power Stage
+  - type: inductor
+    name: L_boost
+    nodes: [vin, sw]
+    value: 50u
+
+  - type: vcswitch
+    name: S_boost
+    nodes: [pwm_gate, sw, 0]
+    v_threshold: 1.0
+    ron: 0.02
+    roff: 1e7
+
+  - type: diode
+    name: D_boost
+    nodes: [sw, vout]
+    is: 1e-12
+    n: 1.2
+
+  - type: capacitor
+    name: Cout
+    nodes: [vout, 0]
+    value: 100u
+
+  - type: resistor
+    name: Rload
+    nodes: [vout, 0]
+    value: 20.0
+
+  # Control Loop
+  - type: math_block
+    name: ErrorCalc
+    nodes: [vref, vout]
+    operation: sub
+
+  - type: pi_controller
+    name: PI1
+    nodes: [ErrorCalc, vref, pi_out_dummy_node]
+    kp: 0.005
+    ki: 10.0
+    output_min: 0.05
+    output_max: 0.85
+    anti_windup: 1.0
+
+  - type: pwm_generator
+    name: PWM1
+    nodes: [PI1]
+    frequency: 200000.0
+    duty_min: 0.05
+    duty_max: 0.90
+    v_high: 5.0
+    v_low: 0.0
+
+  # Route PWM to gate via stiff resistor
+  - type: resistor
+    name: Rgate
+    nodes: [PWM1, pwm_gate]
+    value: 1.0
+  - type: resistor
+    name: Rgate_gnd
+    nodes: [pwm_gate, 0]
+    value: 10k

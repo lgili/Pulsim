@@ -1,0 +1,99 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll16_flyback_closed_loop
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 2e-3
+  dt: 0.25e-6
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 48.0
+
+  - type: voltage_source
+    name: Vref
+    nodes: [vref, 0]
+    waveform:
+      type: dc
+      value: 12.0
+
+  # Power Stage - Flyback Transformer T-Model Equivalent
+  # Ratio Np/Ns = 4. Lm_pri = 160u.
+  - type: inductor
+    name: Lm_core
+    nodes: [drain, 0]
+    value: 158u
+
+  - type: inductor
+    name: Lleak_prim
+    nodes: [vin, drain]
+    value: 2u
+
+  - type: inductor
+    name: Lsec
+    nodes: [0, sec] # Note dot convention inverted for flyback
+    value: 10u
+
+  - type: vcswitch
+    name: S_main
+    nodes: [pwm_gate, drain, 0]
+    v_threshold: 1.0
+    ron: 0.05
+    roff: 1e7
+
+  - type: diode
+    name: D_sec
+    nodes: [sec, vout]
+    is: 1e-12
+    n: 1.2
+
+  - type: capacitor
+    name: Cout
+    nodes: [vout, 0]
+    value: 470u
+
+  - type: resistor
+    name: Rload
+    nodes: [vout, 0]
+    value: 5.0
+
+  # Control Loop
+  - type: math_block
+    name: ErrorCalc
+    nodes: [vref, vout]
+    operation: sub
+
+  - type: pi_controller
+    name: PI1
+    nodes: [ErrorCalc, vref, pi_out_dummy_node]
+    kp: 0.01
+    ki: 20.0
+    output_min: 0.02
+    output_max: 0.50 # Protect flyback duty ratio
+    anti_windup: 1.0
+
+  - type: pwm_generator
+    name: PWM1
+    nodes: [PI1]
+    frequency: 150000.0
+    duty_min: 0.02
+    duty_max: 0.60
+    v_high: 5.0
+    v_low: 0.0
+
+  # Route PWM to gate via stiff resistor
+  - type: resistor
+    name: Rgate
+    nodes: [PWM1, pwm_gate]
+    value: 1.0
+  - type: resistor
+    name: Rgate_gnd
+    nodes: [pwm_gate, 0]
+    value: 10k

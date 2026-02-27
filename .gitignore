@@ -8,7 +8,9 @@ build-ci/
 docs/_build/
 site/
 cmake-build-*/
-
+benchmarks/out_*/
+benchmarks/ltspice/
+.gemini/
 # IDE
 .idea/
 .vscode/

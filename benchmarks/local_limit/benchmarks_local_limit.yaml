@@ -38,6 +38,15 @@ benchmarks:
   - path: circuits/ll13_active_clamp_forward.yaml
     difficulty: 8-active_clamp
     scenarios: [fixed_long, variable_long]
+  - path: circuits/ll14_buck_closed_loop.yaml
+    difficulty: 9-closed_loop
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll15_boost_closed_loop.yaml
+    difficulty: 9-closed_loop
+    scenarios: [fixed_long, variable_long]
+  - path: circuits/ll16_flyback_closed_loop.yaml
+    difficulty: 9-closed_loop
+    scenarios: [fixed_long, variable_long]
 
 scenarios:
   fixed_long:
