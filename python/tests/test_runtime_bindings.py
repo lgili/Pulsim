@@ -333,8 +333,6 @@ simulation:
     gmin_initial: 1e-8
     gmin_max: 1e-4
     gmin_growth: 5
-    enable_native_reentry: true
-    sundials_recovery_window: 5e-6
 components:
   - type: resistor
     name: R1
@@ -351,11 +349,9 @@ components:
     assert abs(options.fallback_policy.gmin_initial - 1e-8) < 1e-16
     assert abs(options.fallback_policy.gmin_max - 1e-4) < 1e-12
     assert abs(options.fallback_policy.gmin_growth - 5.0) < 1e-12
-    assert options.fallback_policy.enable_native_reentry
-    assert abs(options.fallback_policy.sundials_recovery_window - 5e-6) < 1e-14
 
 
-def test_yaml_parser_maps_backend_and_sundials_controls() -> None:
+def test_yaml_parser_emits_migration_warnings_for_legacy_backend_controls() -> None:
     content = """
 schema: pulsim-v1
 version: 1
@@ -365,18 +361,11 @@ simulation:
   backend: auto
   sundials:
     enabled: true
-    family: ida
-    formulation: direct
-    allow_formulation_fallback: false
-    rel_tol: 1e-5
-    abs_tol: 1e-8
-    max_steps: 50000
-    max_nonlinear_iterations: 9
-    use_jacobian: true
-    reuse_linear_solver: false
   fallback:
     enable_backend_escalation: true
     backend_escalation_threshold: 3
+    enable_native_reentry: true
+    sundials_recovery_window: 5e-6
 components:
   - type: resistor
     name: R1
@@ -388,22 +377,15 @@ components:
     parser = ps.YamlParser(parser_opts)
     _, options = parser.load_string(content)
     assert parser.errors == []
-    assert options.transient_backend == ps.TransientBackendMode.Auto
-    assert options.sundials.enabled
-    assert options.sundials.family == ps.SundialsSolverFamily.IDA
-    assert options.sundials.formulation == ps.SundialsFormulationMode.Direct
-    assert not options.sundials.allow_formulation_fallback
-    assert abs(options.sundials.rel_tol - 1e-5) < 1e-14
-    assert abs(options.sundials.abs_tol - 1e-8) < 1e-14
-    assert options.sundials.max_steps == 50000
-    assert options.sundials.max_nonlinear_iterations == 9
-    assert options.sundials.use_jacobian
-    assert not options.sundials.reuse_linear_solver
-    assert options.fallback_policy.enable_backend_escalation
-    assert options.fallback_policy.backend_escalation_threshold == 3
-    assert ps.SimulationOptions().sundials.allow_formulation_fallback
-    assert ps.SimulationOptions().fallback_policy.enable_native_reentry is False
-    assert ps.SimulationOptions().fallback_policy.sundials_recovery_window == 0.0
+    assert options.step_mode == ps.StepMode.Variable
+    assert parser.warnings
+    joined = "\n".join(parser.warnings)
+    assert "simulation.backend" in joined
+    assert "simulation.sundials" in joined
+    assert "simulation.fallback.enable_backend_escalation" in joined
+    assert "simulation.fallback.backend_escalation_threshold" in joined
+    assert "simulation.fallback.enable_native_reentry" in joined
+    assert "simulation.fallback.sundials_recovery_window" in joined
 
 
 def test_yaml_parser_maps_canonical_step_mode_and_advanced_overrides() -> None:
@@ -452,6 +434,8 @@ simulation:
     backend: sundials
     sundials:
       enabled: true
+    fallback:
+      enable_backend_escalation: true
 components:
   - type: resistor
     name: R1
@@ -464,44 +448,16 @@ components:
     assert any("simulation.backend" in msg for msg in parser.errors)
     assert any("simulation.advanced.backend" in msg for msg in parser.errors)
     assert any("simulation.advanced.sundials" in msg for msg in parser.errors)
+    assert any("simulation.advanced.fallback.enable_backend_escalation" in msg for msg in parser.errors)
     assert any("simulation.step_mode" in msg for msg in parser.errors)
 
 
-def test_sundials_formulation_enum_and_telemetry_binding() -> None:
-    options = ps.SimulationOptions()
-    options.sundials.formulation = ps.SundialsFormulationMode.Direct
-    options.sundials.allow_formulation_fallback = False
-    assert options.sundials.formulation == ps.SundialsFormulationMode.Direct
-    assert options.sundials.allow_formulation_fallback is False
-
+def test_backend_telemetry_binding_fields() -> None:
     telemetry = ps.BackendTelemetry()
-    telemetry.formulation_mode = "direct"
+    telemetry.formulation_mode = "native"
     telemetry.function_evaluations = 10
-    assert telemetry.formulation_mode == "direct"
+    assert telemetry.formulation_mode == "native"
     assert telemetry.function_evaluations == 10
-
-
-def test_legacy_sundials_backend_request_returns_migration_diagnostic_for_cvode() -> None:
-    circuit = _build_rc_circuit()
-    opts = ps.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = 1e-4
-    opts.dt = 1e-6
-    opts.transient_backend = ps.TransientBackendMode.SundialsOnly
-    opts.sundials.enabled = True
-    opts.sundials.family = ps.SundialsSolverFamily.CVODE
-    opts.sundials.formulation = ps.SundialsFormulationMode.Direct
-
-    sim = ps.Simulator(circuit, opts)
-    result = sim.run_transient()
-    assert not result.success
-    assert "no longer supported" in result.message
-    assert "simulation.step_mode: fixed|variable" in result.message
-    assert result.backend_telemetry.requested_backend == "sundials"
-    assert result.backend_telemetry.selected_backend == "native"
-    assert result.backend_telemetry.solver_family == "native"
-    assert result.backend_telemetry.formulation_mode == "native"
-    assert result.backend_telemetry.failure_reason == "legacy_backend_removed"
 
 
 def test_yaml_parser_gui_parity_slice_registers_virtual_components() -> None:
@@ -1725,7 +1681,7 @@ def test_linear_factor_cache_telemetry_is_exposed() -> None:
     ) >= result.backend_telemetry.state_space_primary_steps
 
 
-def test_legacy_sundials_backend_request_returns_migration_diagnostic() -> None:
+def test_invalid_time_window_sets_typed_diagnostic() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
     n_out = circuit.add_node("out")
@@ -1736,45 +1692,12 @@ def test_legacy_sundials_backend_request_returns_migration_diagnostic() -> None:
 
     opts = ps.SimulationOptions()
     opts.tstart = 0.0
-    opts.tstop = 1e-4
+    opts.tstop = -1.0
     opts.dt = 1e-6
-    opts.transient_backend = ps.TransientBackendMode.SundialsOnly
-    opts.sundials.enabled = True
-    opts.sundials.family = ps.SundialsSolverFamily.IDA
 
     result = ps.Simulator(circuit, opts).run_transient()
     assert not result.success
-    assert "no longer supported" in result.message
-    assert "simulation.step_mode: fixed|variable" in result.message
-    assert result.backend_telemetry.requested_backend == "sundials"
-    assert result.backend_telemetry.selected_backend == "native"
-    assert result.backend_telemetry.solver_family == "native"
-    assert result.backend_telemetry.formulation_mode == "native"
-    assert result.backend_telemetry.failure_reason == "legacy_backend_removed"
-
-
-def test_legacy_auto_backend_request_returns_migration_diagnostic() -> None:
-    circuit = ps.Circuit()
-    n_in = circuit.add_node("in")
-    n_out = circuit.add_node("out")
-    gnd = circuit.ground()
-    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
-    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
-    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
-
-    opts = ps.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = 1e-4
-    opts.dt = 1e-6
-    opts.transient_backend = ps.TransientBackendMode.Auto
-
-    result = ps.Simulator(circuit, opts).run_transient()
-    assert not result.success
-    assert "no longer supported" in result.message
-    assert "simulation.step_mode: fixed|variable" in result.message
-    assert result.backend_telemetry.requested_backend == "auto"
-    assert result.backend_telemetry.selected_backend == "native"
-    assert result.backend_telemetry.failure_reason == "legacy_backend_removed"
+    assert result.backend_telemetry.failure_reason == "invalid_time_window"
 
 
 def test_variable_step_accept_reject_pattern_is_deterministic() -> None:
@@ -1813,4 +1736,3 @@ def test_variable_step_accept_reject_pattern_is_deterministic() -> None:
     assert len(result_a.time) == len(result_b.time)
     for ta, tb in zip(result_a.time, result_b.time):
         assert ta == pytest.approx(tb, abs=1e-15)
-

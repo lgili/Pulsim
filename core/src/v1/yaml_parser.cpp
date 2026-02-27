@@ -165,12 +165,6 @@ void apply_mode_derived_defaults(SimulationOptions& options,
     options.step_mode_explicit = true;
     options.adaptive_timestep = (mode == TransientStepMode::Variable);
 
-    // Canonical mode defaults to native hybrid runtime without external backend routing.
-    options.transient_backend = TransientBackendMode::Native;
-    options.sundials.enabled = false;
-    options.fallback_policy.enable_backend_escalation = false;
-    options.fallback_policy.enable_native_reentry = false;
-
     // Deterministic robust defaults shared by canonical modes.
     options.integrator = Integrator::TRBDF2;
     options.stiffness_config.enable = true;
@@ -754,6 +748,36 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (advanced && advanced["sundials"]) {
                 push_legacy_backend_migration_error(errors_, "simulation.advanced.sundials");
             }
+            if (sim["fallback"]) {
+                const YAML::Node fallback = sim["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.enable_backend_escalation");
+                }
+                if (fallback["backend_escalation_threshold"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.backend_escalation_threshold");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.enable_native_reentry");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.sundials_recovery_window");
+                }
+            }
+            if (advanced && advanced["fallback"]) {
+                const YAML::Node fallback = advanced["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.enable_backend_escalation");
+                }
+                if (fallback["backend_escalation_threshold"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.backend_escalation_threshold");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.enable_native_reentry");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.sundials_recovery_window");
+                }
+            }
         } else {
             if (sim["backend"]) {
                 push_deprecated_field_migration_warning(
@@ -779,72 +803,59 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     "simulation.advanced.sundials",
                     "simulation.step_mode: fixed|variable");
             }
-        }
-
-        YAML::Node backend = expert_node("backend");
-        if (backend) {
-            const std::string backend_value = normalize_key(backend.as<std::string>());
-            if (backend_value == "native") {
-                options.transient_backend = TransientBackendMode::Native;
-            } else if (backend_value == "sundials" || backend_value == "sundialsonly") {
-                options.transient_backend = TransientBackendMode::SundialsOnly;
-            } else if (backend_value == "auto") {
-                options.transient_backend = TransientBackendMode::Auto;
-            } else {
-                errors_.push_back("Invalid simulation.advanced.backend: " + backend.as<std::string>());
-            }
-        }
-
-        YAML::Node sundials_node = expert_node("sundials");
-        if (sundials_node) {
-            YAML::Node sundials = sundials_node;
-            validate_keys(sundials, {"enabled", "family", "formulation", "rel_tol", "abs_tol", "max_steps",
-                                     "max_nonlinear_iterations", "use_jacobian", "reuse_linear_solver",
-                                     "allow_formulation_fallback"},
-                          "simulation.advanced.sundials", errors_, options_.strict);
-            if (sundials["enabled"]) options.sundials.enabled = sundials["enabled"].as<bool>();
-            if (sundials["family"]) {
-                const std::string family = normalize_key(sundials["family"].as<std::string>());
-                if (family == "ida") {
-                    options.sundials.family = SundialsSolverFamily::IDA;
-                } else if (family == "cvode") {
-                    options.sundials.family = SundialsSolverFamily::CVODE;
-                } else if (family == "arkode") {
-                    options.sundials.family = SundialsSolverFamily::ARKODE;
-                } else {
-                    errors_.push_back("Invalid simulation.sundials.family: " + sundials["family"].as<std::string>());
+            if (sim["fallback"]) {
+                const YAML::Node fallback = sim["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.enable_backend_escalation",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["backend_escalation_threshold"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.backend_escalation_threshold",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.enable_native_reentry",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.sundials_recovery_window",
+                        "simulation.fallback trace_retries/gmin_*");
                 }
             }
-            if (sundials["formulation"]) {
-                const std::string formulation = normalize_key(sundials["formulation"].as<std::string>());
-                if (formulation == "projectedwrapper" ||
-                    formulation == "projected" ||
-                    formulation == "wrapper") {
-                    options.sundials.formulation = SundialsFormulationMode::ProjectedWrapper;
-                } else if (formulation == "direct") {
-                    options.sundials.formulation = SundialsFormulationMode::Direct;
-                } else {
-                    errors_.push_back("Invalid simulation.sundials.formulation: " +
-                                      sundials["formulation"].as<std::string>());
+            if (advanced && advanced["fallback"]) {
+                const YAML::Node fallback = advanced["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.enable_backend_escalation",
+                        "simulation.fallback trace_retries/gmin_*");
                 }
-            }
-            if (sundials["rel_tol"]) {
-                options.sundials.rel_tol = parse_real(sundials["rel_tol"], "simulation.sundials.rel_tol", errors_);
-            }
-            if (sundials["abs_tol"]) {
-                options.sundials.abs_tol = parse_real(sundials["abs_tol"], "simulation.sundials.abs_tol", errors_);
-            }
-            if (sundials["max_steps"]) options.sundials.max_steps = sundials["max_steps"].as<int>();
-            if (sundials["max_nonlinear_iterations"]) {
-                options.sundials.max_nonlinear_iterations = sundials["max_nonlinear_iterations"].as<int>();
-            }
-            if (sundials["use_jacobian"]) options.sundials.use_jacobian = sundials["use_jacobian"].as<bool>();
-            if (sundials["reuse_linear_solver"]) {
-                options.sundials.reuse_linear_solver = sundials["reuse_linear_solver"].as<bool>();
-            }
-            if (sundials["allow_formulation_fallback"]) {
-                options.sundials.allow_formulation_fallback =
-                    sundials["allow_formulation_fallback"].as<bool>();
+                if (fallback["backend_escalation_threshold"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.backend_escalation_threshold",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.enable_native_reentry",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.sundials_recovery_window",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
             }
         }
 
@@ -896,21 +907,6 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
             if (fallback["gmin_growth"]) {
                 options.fallback_policy.gmin_growth = parse_real(fallback["gmin_growth"], "simulation.fallback.gmin_growth", errors_);
-            }
-            if (fallback["enable_backend_escalation"]) {
-                options.fallback_policy.enable_backend_escalation = fallback["enable_backend_escalation"].as<bool>();
-            }
-            if (fallback["backend_escalation_threshold"]) {
-                options.fallback_policy.backend_escalation_threshold = fallback["backend_escalation_threshold"].as<int>();
-            }
-            if (fallback["enable_native_reentry"]) {
-                options.fallback_policy.enable_native_reentry = fallback["enable_native_reentry"].as<bool>();
-            }
-            if (fallback["sundials_recovery_window"]) {
-                options.fallback_policy.sundials_recovery_window =
-                    parse_real(fallback["sundials_recovery_window"],
-                               "simulation.fallback.sundials_recovery_window",
-                               errors_);
             }
         }
 

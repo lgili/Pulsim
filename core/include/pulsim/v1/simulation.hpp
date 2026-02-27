@@ -79,9 +79,7 @@ enum class FallbackReasonCode {
     EventSplit,
     StiffnessBackoff,
     TransientGminEscalation,
-    MaxRetriesExceeded,
-    BackendEscalation,
-    BackendFailure
+    MaxRetriesExceeded
 };
 
 struct FallbackTraceEntry {
@@ -101,51 +99,13 @@ struct FallbackPolicyOptions {
     Real gmin_initial = 1e-9;
     Real gmin_max = 1e-3;
     Real gmin_growth = 10.0;
-
-    // Backend escalation policy (Native -> SUNDIALS in Auto mode)
-    bool enable_backend_escalation = true;
-    int backend_escalation_threshold = 1;
-
-    // Hybrid policy (SUNDIALS recovery window -> try Native again)
-    bool enable_native_reentry = false;
-    Real sundials_recovery_window = 0.0;
-};
-
-enum class TransientBackendMode {
-    Native,
-    SundialsOnly,
-    Auto
-};
-
-enum class SundialsSolverFamily {
-    IDA,
-    CVODE,
-    ARKODE
-};
-
-enum class SundialsFormulationMode {
-    ProjectedWrapper,
-    Direct
-};
-
-struct SundialsBackendOptions {
-    bool enabled = false;
-    SundialsSolverFamily family = SundialsSolverFamily::IDA;
-    SundialsFormulationMode formulation = SundialsFormulationMode::ProjectedWrapper;
-    bool allow_formulation_fallback = true;
-    Real rel_tol = 1e-6;
-    Real abs_tol = 1e-9;
-    int max_steps = 100000;
-    int max_nonlinear_iterations = 8;
-    bool use_jacobian = true;
-    bool reuse_linear_solver = true;
 };
 
 struct BackendTelemetry {
     std::string requested_backend = "native";
     std::string selected_backend = "native";
     std::string solver_family = "native";
-    std::string formulation_mode = "projected_wrapper";
+    std::string formulation_mode = "native";
     int function_evaluations = 0;
     int jacobian_evaluations = 0;
     int nonlinear_iterations = 0;
@@ -171,15 +131,12 @@ struct BackendTelemetry {
     int equation_assemble_residual_calls = 0;
     double equation_assemble_system_time_seconds = 0.0;
     double equation_assemble_residual_time_seconds = 0.0;
-    bool sundials_compiled = false;
-    bool sundials_used = false;
     std::string failure_reason;
 };
 
 enum class SimulationDiagnosticCode {
     None,
     DcOperatingPointFailure,
-    LegacyBackendUnsupported,
     InvalidInitialState,
     InvalidTimeWindow,
     InvalidTimestep,
@@ -298,10 +255,6 @@ struct SimulationOptions {
     GminConfig gmin_fallback{};
     int max_step_retries = 6;
     FallbackPolicyOptions fallback_policy{};
-
-    // Transient backend selection
-    TransientBackendMode transient_backend = TransientBackendMode::Native;
-    SundialsBackendOptions sundials{};
 };
 
 struct SimulationResult {

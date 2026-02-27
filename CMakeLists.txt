@@ -37,8 +37,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
-option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
-set(PULSIM_SUNDIALS_LIBRARIES "")
 # Note: SuiteSparse/KLU is now a required dependency (default backend for linear solver)
 
 # =============================================================================
@@ -341,48 +339,6 @@ if(PULSIM_BUILD_TESTS)
     include(Catch)
 endif()
 
-# SUNDIALS - Advanced ODE/DAE solvers (IDA, CVODE, ARKODE)
-if(PULSIM_USE_SUNDIALS)
-    # First try to find system-installed SUNDIALS
-    find_package(SUNDIALS CONFIG QUIET)
-    if(NOT SUNDIALS_FOUND)
-        message(STATUS "SUNDIALS not found on system, fetching from source...")
-        FetchContent_Declare(
-            sundials
-            GIT_REPOSITORY https://github.com/LLNL/sundials.git
-            GIT_TAG v6.7.0
-            GIT_SHALLOW TRUE
-        )
-        # Configure SUNDIALS build options
-        set(SUNDIALS_BUILD_SHARED_LIBS OFF CACHE BOOL "Build static SUNDIALS" FORCE)
-        set(BUILD_ARKODE ON CACHE BOOL "Enable ARKODE" FORCE)
-        set(BUILD_CVODE ON CACHE BOOL "Enable CVODE" FORCE)
-        set(BUILD_CVODES OFF CACHE BOOL "Disable CVODES" FORCE)
-        set(BUILD_IDA ON CACHE BOOL "Enable IDA" FORCE)
-        set(BUILD_IDAS OFF CACHE BOOL "Disable IDAS" FORCE)
-        set(BUILD_KINSOL OFF CACHE BOOL "Disable KINSOL" FORCE)
-        set(SUNDIALS_BUILD_WITH_MONITORING OFF CACHE BOOL "Disable monitoring" FORCE)
-        set(EXAMPLES_ENABLE_C OFF CACHE BOOL "Disable C examples" FORCE)
-        set(EXAMPLES_ENABLE_CXX OFF CACHE BOOL "Disable C++ examples" FORCE)
-        set(EXAMPLES_INSTALL OFF CACHE BOOL "Don't install examples" FORCE)
-        FetchContent_MakeAvailable(sundials)
-    endif()
-
-    foreach(_cand
-            SUNDIALS::ida SUNDIALS::cvode SUNDIALS::arkode
-            SUNDIALS::nvecserial SUNDIALS::sunlinsolspgmr
-            sundials_ida sundials_cvode sundials_arkode
-            sundials_nvecserial sundials_sunlinsolspgmr)
-        if(TARGET ${_cand})
-            list(APPEND PULSIM_SUNDIALS_LIBRARIES ${_cand})
-        endif()
-    endforeach()
-
-    list(REMOVE_DUPLICATES PULSIM_SUNDIALS_LIBRARIES)
-    add_compile_definitions(PULSIM_HAS_SUNDIALS)
-    message(STATUS "SUNDIALS support enabled")
-endif()
-
 # =============================================================================
 # SuiteSparse KLU - Required dependency for fast sparse LU (circuit-optimized)
 # =============================================================================
@@ -613,7 +569,6 @@ message(STATUS "  PGO Use:           ${PULSIM_ENABLE_PGO_USE}")
 message(STATUS "  Native opts:       ${PULSIM_ENABLE_NATIVE}")
 message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
 message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
-message(STATUS "  SUNDIALS:          ${PULSIM_USE_SUNDIALS}")
 message(STATUS "  KLU (required):    ${PULSIM_KLU_FOUND}")
 message(STATUS "  HYPRE AMG:         ${PULSIM_HYPRE_FOUND}")
 message(STATUS "=========================================")

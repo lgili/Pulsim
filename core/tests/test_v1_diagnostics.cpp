@@ -41,17 +41,17 @@ TEST_CASE("v1 transient sets typed diagnostic for invalid initial state", "[v1][
     CHECK(result.backend_telemetry.failure_reason == "invalid_initial_state");
 }
 
-TEST_CASE("v1 transient sets typed diagnostic for unsupported legacy backend", "[v1][diagnostic]") {
+TEST_CASE("v1 transient sets typed diagnostic for invalid time window", "[v1][diagnostic]") {
     Circuit circuit = make_diag_circuit();
     SimulationOptions opts = make_diag_options(circuit);
-    opts.transient_backend = TransientBackendMode::Auto;
+    opts.tstop = -1.0;
     Simulator sim(circuit, opts);
     Vector x0 = Vector::Zero(static_cast<Index>(circuit.system_size()));
 
     const auto result = sim.run_transient(x0);
     REQUIRE_FALSE(result.success);
-    CHECK(result.diagnostic == SimulationDiagnosticCode::LegacyBackendUnsupported);
-    CHECK(result.backend_telemetry.failure_reason == "legacy_backend_removed");
+    CHECK(result.diagnostic == SimulationDiagnosticCode::InvalidTimeWindow);
+    CHECK(result.backend_telemetry.failure_reason == "invalid_time_window");
 }
 
 TEST_CASE("v1 periodic and HB validations set typed diagnostics", "[v1][diagnostic][steady]") {
