@@ -820,9 +820,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     int global_recovery_attempts = 0;
     int dt_min_hold_advances = 0;
     bool auto_recovery_attempted = false;
+    int model_regularization_escalations = 0;
     std::optional<Real> pending_dt_override;
     const TransientStepMode step_mode = resolve_step_mode(options_);
-    const bool can_auto_recover = options_.linear_solver.allow_fallback;
     VariableStepPolicy variable_step_policy;
     if (step_mode == TransientStepMode::Variable) {
         variable_step_policy = VariableStepPolicy(
@@ -846,6 +846,26 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         dt = variable_step_policy.clamp_dt(t, dt, options_.tstop);
     }
     const NewtonOptions baseline_newton_options = transient_services_.nonlinear_solve->options();
+    const bool switching_recovery_profile = std::any_of(
+        circuit_.devices().begin(),
+        circuit_.devices().end(),
+        [](const auto& device_variant) {
+            return std::visit(
+                [](const auto& dev) {
+                    using T = std::decay_t<decltype(dev)>;
+                    return std::is_same_v<T, IdealSwitch> ||
+                           std::is_same_v<T, VoltageControlledSwitch> ||
+                           std::is_same_v<T, MOSFET> ||
+                           std::is_same_v<T, IGBT> ||
+                           std::is_same_v<T, PWMVoltageSource> ||
+                           std::is_same_v<T, PulseVoltageSource>;
+                },
+                device_variant);
+        });
+    const bool can_auto_recover =
+        options_.linear_solver.allow_fallback || switching_recovery_profile;
+    const int max_global_recovery_attempts =
+        switching_recovery_profile ? (kMaxGlobalRecoveryAttempts + 1) : kMaxGlobalRecoveryAttempts;
 
     circuit_.set_current_time(t);
     circuit_.set_timestep(dt);
@@ -1248,6 +1268,75 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                     const int retry_ordinal = std::max(1, retries);
                     const int gmin_retry_threshold =
                         std::max(1, options_.fallback_policy.gmin_retry_threshold);
+                    const int model_retry_threshold =
+                        std::max(1, options_.model_regularization.retry_threshold);
+                    const int model_max_escalations =
+                        std::max(0, options_.model_regularization.max_escalations);
+
+                    const bool can_apply_model_regularization =
+                        options_.model_regularization.enable_auto &&
+                        retry_ordinal >= model_retry_threshold &&
+                        model_regularization_escalations < model_max_escalations;
+
+                    if (can_apply_model_regularization &&
+                        (!options_.model_regularization.apply_only_in_recovery || retries > 0)) {
+                        const Real stage_factor =
+                            std::max<Real>(1.0, options_.model_regularization.escalation_factor);
+                        const Real stage_scale = std::pow(
+                            stage_factor,
+                            static_cast<Real>(model_regularization_escalations));
+
+                        const Real mosfet_kp_max =
+                            options_.model_regularization.mosfet_kp_max / stage_scale;
+                        const Real mosfet_g_off_min =
+                            options_.model_regularization.mosfet_g_off_min * stage_scale;
+                        const Real diode_g_on_max =
+                            options_.model_regularization.diode_g_on_max / stage_scale;
+                        const Real diode_g_off_min =
+                            options_.model_regularization.diode_g_off_min * stage_scale;
+                        const Real igbt_g_on_max =
+                            options_.model_regularization.igbt_g_on_max / stage_scale;
+                        const Real igbt_g_off_min =
+                            options_.model_regularization.igbt_g_off_min * stage_scale;
+                        const Real switch_g_on_max =
+                            options_.model_regularization.switch_g_on_max / stage_scale;
+                        const Real switch_g_off_min =
+                            options_.model_regularization.switch_g_off_min * stage_scale;
+                        const Real vcswitch_g_on_max =
+                            options_.model_regularization.vcswitch_g_on_max / stage_scale;
+                        const Real vcswitch_g_off_min =
+                            options_.model_regularization.vcswitch_g_off_min * stage_scale;
+
+                        const int changed_devices = circuit_.apply_numerical_regularization(
+                            mosfet_kp_max,
+                            mosfet_g_off_min,
+                            diode_g_on_max,
+                            diode_g_off_min,
+                            igbt_g_on_max,
+                            igbt_g_off_min,
+                            switch_g_on_max,
+                            switch_g_off_min,
+                            vcswitch_g_on_max,
+                            vcswitch_g_off_min);
+
+                        model_regularization_escalations += 1;
+                        const Real intensity = std::min<Real>(
+                            1.0,
+                            static_cast<Real>(model_regularization_escalations) /
+                                static_cast<Real>(std::max(1, model_max_escalations)));
+                        result.backend_telemetry.model_regularization_events += 1;
+                        result.backend_telemetry.model_regularization_last_changed = changed_devices;
+                        result.backend_telemetry.model_regularization_last_intensity = intensity;
+
+                        std::ostringstream model_action;
+                        model_action << "recovery_stage_regularization_model"
+                                     << " changed=" << changed_devices
+                                     << " intensity=" << intensity
+                                     << " escalation=" << model_regularization_escalations
+                                     << "/" << std::max(1, model_max_escalations);
+                        recovery_action = model_action.str();
+                    }
+
                     if (options_.fallback_policy.enable_transient_gmin &&
                         retry_ordinal >= gmin_retry_threshold) {
                         Real next_gmin = transient_gmin_ > 0.0
@@ -1257,15 +1346,35 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                                    std::max(next_gmin, options_.fallback_policy.gmin_initial));
                         recovery_reason_code = FallbackReasonCode::TransientGminEscalation;
                         std::ostringstream action;
-                        action << "recovery_stage_regularization_gmin=" << transient_gmin_;
+                        action << recovery_action << " gmin=" << transient_gmin_;
                         recovery_action = action.str();
                     } else if (options_.fallback_policy.enable_transient_gmin) {
                         std::ostringstream action;
-                        action << "recovery_stage_regularization_wait_threshold="
-                               << gmin_retry_threshold;
+                        action << recovery_action << " gmin_wait_threshold=" << gmin_retry_threshold;
                         recovery_action = action.str();
-                    } else {
+                    } else if (recovery_action == "recover_dt") {
                         recovery_action = "recovery_stage_regularization_disabled";
+                    }
+
+                    if (switching_recovery_profile) {
+                        const Real backoff_factor = retry_ordinal >= 3 ? Real{0.1} : Real{0.25};
+                        const Real dt_before_backoff = dt;
+                        const Real dt_target = std::max(options_.dt_min, dt_before_backoff * backoff_factor);
+                        dt = clamp_dt_for_mode(dt_target);
+
+                        if (options_.enable_bdf_order_control) {
+                            bdf_controller_.set_order(1);
+                            circuit_.set_integration_order(1);
+                        } else if (options_.stiffness_config.switch_integrator) {
+                            circuit_.set_integration_method(options_.stiffness_config.stiff_integrator);
+                            using_stiff_integrator = true;
+                        }
+
+                        std::ostringstream action;
+                        action << recovery_action
+                               << " switching_backoff=" << backoff_factor
+                               << " dt=" << dt_before_backoff << "->" << dt;
+                        recovery_action = action.str();
                     }
                 } else if (recovery.stage == RecoveryStage::Abort) {
                     recovery_reason_code = FallbackReasonCode::MaxRetriesExceeded;
@@ -1475,8 +1584,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 dt_used < fixed_step_policy.default_dt() * Real{0.5};
             const bool fixed_recovery_exhausted =
                 fixed_step_policy.enabled() &&
-                options_.linear_solver.allow_fallback &&
-                global_recovery_attempts >= kMaxGlobalRecoveryAttempts;
+                can_auto_recover &&
+                global_recovery_attempts >= max_global_recovery_attempts;
             const bool allow_dt_hold_advance =
                 ((variable_step_policy.enabled() && at_dt_min_floor) ||
                  fixed_pathological_substep ||
@@ -1566,7 +1675,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                   step_result.status,
                                   "abort_step");
 
-            if (can_auto_recover && global_recovery_attempts < kMaxGlobalRecoveryAttempts) {
+            if (can_auto_recover && global_recovery_attempts < max_global_recovery_attempts) {
                 ++global_recovery_attempts;
                 auto_recovery_attempted = true;
                 result.backend_telemetry.backend_recovery_count += 1;

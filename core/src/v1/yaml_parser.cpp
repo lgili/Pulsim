@@ -646,7 +646,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "step_mode", "adaptive_timestep",
                             "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
-                            "max_step_retries", "fallback", "backend", "sundials", "advanced"},
+                        "max_step_retries", "fallback", "model_regularization", "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
         YAML::Node advanced = sim["advanced"];
@@ -908,6 +908,78 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (fallback["gmin_growth"]) {
                 options.fallback_policy.gmin_growth = parse_real(fallback["gmin_growth"], "simulation.fallback.gmin_growth", errors_);
             }
+        }
+
+        if (sim["model_regularization"]) {
+            YAML::Node reg = sim["model_regularization"];
+            validate_keys(reg,
+                          {"enable_auto", "apply_only_in_recovery", "retry_threshold",
+                           "max_escalations", "escalation_factor", "mosfet_kp_max",
+                           "mosfet_g_off_min", "diode_g_on_max", "diode_g_off_min",
+                           "igbt_g_on_max", "igbt_g_off_min", "switch_g_on_max",
+                           "switch_g_off_min", "vcswitch_g_on_max", "vcswitch_g_off_min"},
+                          "simulation.model_regularization", errors_, options_.strict);
+
+            if (const auto value = parse_bool_scalar(
+                    reg["enable_auto"], "simulation.model_regularization.enable_auto", errors_)) {
+                options.model_regularization.enable_auto = *value;
+            }
+            if (const auto value = parse_bool_scalar(
+                    reg["apply_only_in_recovery"],
+                    "simulation.model_regularization.apply_only_in_recovery",
+                    errors_)) {
+                options.model_regularization.apply_only_in_recovery = *value;
+            }
+            if (const auto value = parse_int_scalar(
+                    reg["retry_threshold"], "simulation.model_regularization.retry_threshold", errors_)) {
+                if (*value < 1) {
+                    push_error(errors_,
+                               kDiagInvalidParameter,
+                               "simulation.model_regularization.retry_threshold must be >= 1");
+                } else {
+                    options.model_regularization.retry_threshold = *value;
+                }
+            }
+            if (const auto value = parse_int_scalar(
+                    reg["max_escalations"], "simulation.model_regularization.max_escalations", errors_)) {
+                if (*value < 0) {
+                    push_error(errors_,
+                               kDiagInvalidParameter,
+                               "simulation.model_regularization.max_escalations must be >= 0");
+                } else {
+                    options.model_regularization.max_escalations = *value;
+                }
+            }
+
+            auto parse_positive_real = [&](const char* key,
+                                           Real& target,
+                                           bool allow_zero = false) {
+                if (!reg[key]) {
+                    return;
+                }
+                const std::string path = std::string("simulation.model_regularization.") + key;
+                const Real value = parse_real(reg[key], path, errors_);
+                const bool valid = allow_zero ? value >= 0.0 : value > 0.0;
+                if (!std::isfinite(value) || !valid) {
+                    push_error(errors_,
+                               kDiagInvalidParameter,
+                               path + (allow_zero ? " must be >= 0" : " must be > 0"));
+                    return;
+                }
+                target = value;
+            };
+
+            parse_positive_real("escalation_factor", options.model_regularization.escalation_factor);
+            parse_positive_real("mosfet_kp_max", options.model_regularization.mosfet_kp_max);
+            parse_positive_real("mosfet_g_off_min", options.model_regularization.mosfet_g_off_min, true);
+            parse_positive_real("diode_g_on_max", options.model_regularization.diode_g_on_max);
+            parse_positive_real("diode_g_off_min", options.model_regularization.diode_g_off_min, true);
+            parse_positive_real("igbt_g_on_max", options.model_regularization.igbt_g_on_max);
+            parse_positive_real("igbt_g_off_min", options.model_regularization.igbt_g_off_min, true);
+            parse_positive_real("switch_g_on_max", options.model_regularization.switch_g_on_max);
+            parse_positive_real("switch_g_off_min", options.model_regularization.switch_g_off_min, true);
+            parse_positive_real("vcswitch_g_on_max", options.model_regularization.vcswitch_g_on_max);
+            parse_positive_real("vcswitch_g_off_min", options.model_regularization.vcswitch_g_off_min, true);
         }
 
         YAML::Node integrator_node = expert_node("integrator");

@@ -101,6 +101,7 @@ public:
     [[nodiscard]] Scalar v_threshold() const { return v_threshold_; }
     [[nodiscard]] Scalar g_on() const { return g_on_; }
     [[nodiscard]] Scalar g_off() const { return g_off_; }
+    [[nodiscard]] Scalar hysteresis() const { return hysteresis_; }
 
 private:
     Scalar v_threshold_ = 2.5;

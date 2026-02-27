@@ -1144,10 +1144,12 @@ public:
         Real diode_g_on_max = 300.0,
         Real diode_g_off_min = 1e-9,
         Real igbt_g_on_max = 5e3,
-        Real igbt_g_off_min = 1e-9) {
+        Real igbt_g_off_min = 1e-9,
+        Real switch_g_on_max = 5e5,
+        Real switch_g_off_min = 1e-9,
+        Real vcswitch_g_on_max = 5e5,
+        Real vcswitch_g_off_min = 1e-9) {
         int changed = 0;
-        constexpr Real switch_g_on_max = 5e5;
-        constexpr Real switch_g_off_min = 1e-9;
         constexpr Real latch_gate_threshold_min = 1e-3;
         constexpr Real latch_holding_current_min = 1e-6;
         constexpr Real latch_g_on_max = 5e5;
@@ -1198,6 +1200,21 @@ public:
                 const Real g_off = std::max(sw->g_off(), switch_g_off_min);
                 if (g_on != sw->g_on() || g_off != sw->g_off()) {
                     device = IdealSwitch(g_on, g_off, sw->is_closed(), conn.name);
+                    ++changed;
+                }
+                continue;
+            }
+
+            if (auto* vc_switch = std::get_if<VoltageControlledSwitch>(&device)) {
+                VoltageControlledSwitch::Params params;
+                params.v_threshold = vc_switch->v_threshold();
+                params.g_on = std::clamp(vc_switch->g_on(), 1.0, vcswitch_g_on_max);
+                params.g_off = std::max(vc_switch->g_off(), vcswitch_g_off_min);
+                params.hysteresis = vc_switch->hysteresis();
+                const bool regularized =
+                    params.g_on != vc_switch->g_on() || params.g_off != vc_switch->g_off();
+                if (regularized) {
+                    device = VoltageControlledSwitch(params, conn.name);
                     ++changed;
                 }
                 continue;
