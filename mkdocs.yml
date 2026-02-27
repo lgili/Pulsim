@@ -50,6 +50,29 @@ plugins:
       version_selector: true
       canonical_version: latest
       alias_type: redirect
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [python]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            inherited_members: false
+            filters:
+              - "!^_"
+            find_stubs_package: true
+            allow_inspection: false
+            load_external_modules: false
 
 markdown_extensions:
   - admonition
@@ -82,7 +105,8 @@ nav:
   - Getting Started: getting-started.md
   - User Guide: user-guide.md
   - Configuration: configuration.md
-  - API Reference: python-api.md
+  - API Reference: api-reference.md
+  - Python API (legacy): python-api.md
   - Netlist YAML: netlist-format.md
   - Examples and Results: examples-and-results.md
   - Benchmarks and Parity: benchmarks-and-parity.md
