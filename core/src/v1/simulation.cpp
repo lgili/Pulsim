@@ -193,11 +193,6 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     if (!options.linear_solver.allow_fallback) {
         return;
     }
-    // Respect explicit fixed-step selection from user/scenario.
-    // Auto profile can tune adaptive runs, but must not silently flip fixed -> variable.
-    if (resolve_step_mode(options) == TransientStepMode::Fixed) {
-        return;
-    }
 
     const auto hints = analyze_circuit_robustness(circuit);
     const bool switching_topology =
@@ -515,6 +510,7 @@ public:
         if (!reached_macro_target) {
             substeps_in_current_macro_ += 1;
         }
+        recovery_retries_in_current_macro_ = 0;
         advance_macro_cursor(t_next);
         return reached_macro_target;
     }
@@ -661,17 +657,62 @@ SimulationResult Simulator::run_transient(SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
     auto dc = dc_operating_point();
-    if (!dc.success) {
-        SimulationResult result;
-        result.success = false;
-        result.final_status = dc.newton_result.status;
-        result.diagnostic = SimulationDiagnosticCode::DcOperatingPointFailure;
-        result.message = "DC operating point failed: " + dc.message;
-        result.linear_solver_telemetry = dc.linear_solver_telemetry;
-        return result;
+    if (dc.success) {
+        return run_transient(dc.newton_result.solution, callback, event_callback, control);
     }
 
-    return run_transient(dc.newton_result.solution, callback, event_callback, control);
+    if (options_.linear_solver.allow_fallback) {
+        SimulationOptions startup_options = options_;
+        startup_options.linear_solver.order.clear();
+        startup_options.linear_solver.fallback_order.clear();
+        startup_options.linear_solver.auto_select = true;
+        apply_robust_newton_defaults(startup_options.newton_options);
+        apply_robust_linear_solver_defaults(startup_options.linear_solver);
+        startup_options.max_step_retries = std::max(startup_options.max_step_retries, 12);
+        startup_options.fallback_policy.trace_retries = true;
+        startup_options.fallback_policy.enable_transient_gmin = true;
+        startup_options.fallback_policy.gmin_retry_threshold =
+            std::max(startup_options.fallback_policy.gmin_retry_threshold, 1);
+
+        Vector startup_state = circuit_.initial_state();
+        const Index expected_size = static_cast<Index>(circuit_.system_size());
+        if (startup_state.size() != expected_size || !startup_state.allFinite()) {
+            startup_state = Vector::Zero(expected_size);
+        }
+
+        Simulator startup_sim(circuit_, startup_options);
+        SimulationResult startup_result = startup_sim.run_transient(
+            startup_state,
+            std::move(callback),
+            std::move(event_callback),
+            control);
+        startup_result.backend_telemetry.backend_recovery_count += 1;
+        startup_result.backend_telemetry.escalation_count += 1;
+
+        if (startup_result.success) {
+            startup_result.message =
+                "Transient completed (startup fallback after DC operating point failure)";
+            return startup_result;
+        }
+
+        if (startup_result.message.empty()) {
+            startup_result.message =
+                "DC operating point failed: " + dc.message + "; startup fallback failed";
+        } else {
+            startup_result.message =
+                "DC operating point failed: " + dc.message +
+                "; startup fallback failed: " + startup_result.message;
+        }
+        return startup_result;
+    }
+
+    SimulationResult result;
+    result.success = false;
+    result.final_status = dc.newton_result.status;
+    result.diagnostic = SimulationDiagnosticCode::DcOperatingPointFailure;
+    result.message = "DC operating point failed: " + dc.message;
+    result.linear_solver_telemetry = dc.linear_solver_telemetry;
+    return result;
 }
 
 SimulationResult Simulator::run_transient(const Vector& x0,
@@ -748,6 +789,13 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     initialize_loss_tracking();
     lte_estimator_.reset();
     transient_gmin_ = 0.0;
+    segment_primary_disabled_for_run_ = false;
+    last_step_solve_path_ = StepSolvePath::DaeFallback;
+    last_step_solve_reason_ = "init";
+    last_step_segment_cache_hit_ = false;
+    last_step_linear_factor_cache_hit_ = false;
+    last_step_linear_factor_cache_miss_ = false;
+    last_step_linear_factor_cache_invalidation_reason_.clear();
     direct_assemble_system_calls_ = 0;
     direct_assemble_residual_calls_ = 0;
     direct_assemble_system_time_seconds_ = 0.0;
@@ -772,9 +820,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     int global_recovery_attempts = 0;
     int dt_min_hold_advances = 0;
     bool auto_recovery_attempted = false;
+    std::optional<Real> pending_dt_override;
     const TransientStepMode step_mode = resolve_step_mode(options_);
-    const bool can_auto_recover = (step_mode == TransientStepMode::Variable) &&
-                                  options_.linear_solver.allow_fallback;
+    const bool can_auto_recover = options_.linear_solver.allow_fallback;
     VariableStepPolicy variable_step_policy;
     if (step_mode == TransientStepMode::Variable) {
         variable_step_policy = VariableStepPolicy(
@@ -940,11 +988,11 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             return false;
         };
 
-        if (fixed_step_policy.enabled()) {
-            dt = clamp_dt_for_mode(fixed_step_policy.default_dt());
-        } else {
-            dt = clamp_dt_for_mode(dt);
-        }
+        const Real dt_candidate = pending_dt_override.has_value()
+            ? *pending_dt_override
+            : (fixed_step_policy.enabled() ? fixed_step_policy.default_dt() : dt);
+        pending_dt_override.reset();
+        dt = clamp_dt_for_mode(dt_candidate);
         bool discontinuity_adjacent = variable_step_policy.enabled() && near_switching_threshold(x);
         if (discontinuity_adjacent && options_.stiffness_config.enable && stiffness_cooldown <= 0) {
             stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
@@ -1062,17 +1110,31 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             bool calendar_event_clipped = false;
 
             bool has_calendar_boundary_in_step = false;
+            bool calendar_boundary_adjacent = false;
             Real dt_segment = 0.0;
             if (options_.enable_events && dt > options_.dt_min * 1.01) {
-                const Real t_segment_target =
-                    transient_services_.event_scheduler->next_segment_target(step_request, t + dt);
-                dt_segment = t_segment_target - t;
                 const Real min_calendar_clip_dt = min_event_substep_dt(dt);
+                const Real segment_probe_stop =
+                    std::min(options_.tstop, t + dt + min_calendar_clip_dt);
+                TransientStepRequest segment_probe_request = step_request;
+                segment_probe_request.t_target = segment_probe_stop;
+                const Real t_segment_target =
+                    transient_services_.event_scheduler->next_segment_target(segment_probe_request,
+                                                                             segment_probe_stop);
+                dt_segment = t_segment_target - t;
                 has_calendar_boundary_in_step =
                     dt_segment > min_calendar_clip_dt && dt_segment < dt * 0.999;
+                const Real boundary_adjacent_tol =
+                    std::max(min_calendar_clip_dt * Real{0.5}, Real{1e-15});
+                calendar_boundary_adjacent =
+                    !has_calendar_boundary_in_step &&
+                    dt_segment > 0.0 &&
+                    dt_segment >= dt * Real{0.999} &&
+                    dt_segment <= dt + boundary_adjacent_tol;
             }
 
-            if (variable_step_policy.enabled() && has_calendar_boundary_in_step) {
+            if (variable_step_policy.enabled() &&
+                (has_calendar_boundary_in_step || calendar_boundary_adjacent)) {
                 step_request.event_adjacent = true;
                 discontinuity_adjacent = true;
                 if (options_.stiffness_config.enable && stiffness_cooldown <= 0) {
@@ -1183,7 +1245,11 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                     }
                     stiffness_cooldown = std::max(stiffness_cooldown, options_.stiffness_config.cooldown_steps);
                 } else if (recovery.stage == RecoveryStage::Regularization) {
-                    if (options_.fallback_policy.enable_transient_gmin) {
+                    const int retry_ordinal = std::max(1, retries);
+                    const int gmin_retry_threshold =
+                        std::max(1, options_.fallback_policy.gmin_retry_threshold);
+                    if (options_.fallback_policy.enable_transient_gmin &&
+                        retry_ordinal >= gmin_retry_threshold) {
                         Real next_gmin = transient_gmin_ > 0.0
                             ? transient_gmin_ * options_.fallback_policy.gmin_growth
                             : options_.fallback_policy.gmin_initial;
@@ -1192,6 +1258,11 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                         recovery_reason_code = FallbackReasonCode::TransientGminEscalation;
                         std::ostringstream action;
                         action << "recovery_stage_regularization_gmin=" << transient_gmin_;
+                        recovery_action = action.str();
+                    } else if (options_.fallback_policy.enable_transient_gmin) {
+                        std::ostringstream action;
+                        action << "recovery_stage_regularization_wait_threshold="
+                               << gmin_retry_threshold;
                         recovery_action = action.str();
                     } else {
                         recovery_action = "recovery_stage_regularization_disabled";
@@ -1396,21 +1467,54 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         if (!accepted) {
             const bool at_dt_min_floor = dt_used <= options_.dt_min * Real{1.001};
-            if (variable_step_policy.enabled() && at_dt_min_floor &&
-                dt_min_hold_advances < kMaxDtMinHoldAdvances) {
+            const Real fixed_hold_threshold =
+                std::max(std::abs(options_.dt) * Real{1e-3}, Real{1e-15});
+            const bool fixed_pathological_substep =
+                fixed_step_policy.enabled() &&
+                dt_used <= fixed_hold_threshold &&
+                dt_used < fixed_step_policy.default_dt() * Real{0.5};
+            const bool fixed_recovery_exhausted =
+                fixed_step_policy.enabled() &&
+                options_.linear_solver.allow_fallback &&
+                global_recovery_attempts >= kMaxGlobalRecoveryAttempts;
+            const bool allow_dt_hold_advance =
+                ((variable_step_policy.enabled() && at_dt_min_floor) ||
+                 fixed_pathological_substep ||
+                 fixed_recovery_exhausted) &&
+                dt_min_hold_advances < kMaxDtMinHoldAdvances;
+
+            if (allow_dt_hold_advance) {
                 // Last-resort progress safeguard for hard switching points where
-                // Newton repeatedly fails at dt_min. Advance with state hold to
-                // cross the pathological instant instead of aborting.
+                // Newton repeatedly fails at pathological dt values. Advance
+                // with state hold to cross the instant instead of aborting.
                 dt_min_hold_advances++;
                 circuit_.clear_stage_context();
+                Real hold_dt = dt_used;
+                std::string hold_action = "dt_min_hold_advance";
+                if (variable_step_policy.enabled() && at_dt_min_floor) {
+                    const Real variable_hold_dt =
+                        clamp_dt_for_mode(std::max(options_.dt, options_.dt_min));
+                    if (variable_hold_dt > 0.0) {
+                        hold_dt = std::max(hold_dt, variable_hold_dt);
+                    }
+                    hold_action = "variable_macro_hold_advance";
+                }
+                if (fixed_step_policy.enabled() &&
+                    (fixed_pathological_substep || fixed_recovery_exhausted)) {
+                    const Real macro_hold_dt = clamp_dt_for_mode(fixed_step_policy.default_dt());
+                    if (macro_hold_dt > 0.0) {
+                        hold_dt = macro_hold_dt;
+                    }
+                    hold_action = "fixed_macro_hold_advance";
+                }
                 record_fallback_event(result,
                                       result.total_steps,
                                       retries,
                                       t,
-                                      dt_used,
+                                      hold_dt,
                                       FallbackReasonCode::MaxRetriesExceeded,
                                       step_result.status,
-                                      "dt_min_hold_advance");
+                                      hold_action);
 
                 rejection_streak = 0;
                 high_iter_streak = 0;
@@ -1418,18 +1522,29 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 transient_gmin_ = 0.0;
                 transient_services_.nonlinear_solve->set_options(baseline_newton_options);
 
-                accumulate_conduction_losses(step_anchor_state, dt_used);
-                update_thermal_state(dt_used);
+                accumulate_conduction_losses(step_anchor_state, hold_dt);
+                update_thermal_state(hold_dt);
 
-                t += dt_used;
-                variable_step_policy.on_step_accepted(dt_used);
+                t += hold_dt;
+                pending_dt_override = hold_dt;
+                if (variable_step_policy.enabled()) {
+                    variable_step_policy.on_step_accepted(hold_dt);
+                }
+                bool emit_sample = true;
+                if (fixed_step_policy.enabled()) {
+                    emit_sample = fixed_step_policy.on_step_accepted(t);
+                }
                 x = step_anchor_state;
                 circuit_.update_history(x);
-                lte_estimator_.record_solution(x, t, dt_used);
+                if (variable_step_policy.enabled()) {
+                    lte_estimator_.record_solution(x, t, hold_dt);
+                }
 
-                append_sample(t, x);
-                if (callback) {
-                    callback(t, x);
+                if (emit_sample || nearly_same_time(t, options_.tstop)) {
+                    append_sample(t, x);
+                    if (callback) {
+                        callback(t, x);
+                    }
                 }
                 result.total_steps++;
 
@@ -1454,10 +1569,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             if (can_auto_recover && global_recovery_attempts < kMaxGlobalRecoveryAttempts) {
                 ++global_recovery_attempts;
                 auto_recovery_attempted = true;
+                result.backend_telemetry.backend_recovery_count += 1;
+                result.backend_telemetry.escalation_count += 1;
 
                 circuit_.clear_stage_context();
-                dt = clamp_dt_for_mode(std::max(options_.dt_min, dt_used * (
+                const Real recovered_dt = clamp_dt_for_mode(std::max(options_.dt_min, dt_used * (
                     global_recovery_attempts == 1 ? Real{0.25} : Real{0.1})));
+                dt = recovered_dt;
+                pending_dt_override = recovered_dt;
                 rejection_streak = 0;
                 high_iter_streak = 0;
                 stiffness_cooldown = std::max(stiffness_cooldown, options_.stiffness_config.cooldown_steps);

@@ -1055,6 +1055,64 @@ TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fall
                       }));
 }
 
+TEST_CASE("v1 startup fallback recovers when DC operating point fails",
+          "[v1][fallback][startup]") {
+    auto build_circuit = []() {
+        Circuit circuit;
+        auto n_in = circuit.add_node("in");
+        auto n_out = circuit.add_node("out");
+        circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+        circuit.add_resistor("R1", n_in, n_out, 1e3);
+        circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+        return circuit;
+    };
+
+    auto make_opts = [](const Circuit& circuit) {
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 50e-6;
+        opts.dt = 1e-6;
+        opts.dt_min = 1e-12;
+        opts.dt_max = 1e-3;
+        opts.step_mode = TransientStepMode::Fixed;
+        opts.step_mode_explicit = true;
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
+        opts.max_step_retries = 2;
+        opts.linear_solver.order = {LinearSolverKind::CG};
+        opts.linear_solver.fallback_order = {};
+        opts.linear_solver.auto_select = false;
+        opts.linear_solver.iterative_config.max_iterations = 2;
+        opts.linear_solver.iterative_config.tolerance = 1e-16;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        return opts;
+    };
+
+    {
+        auto circuit = build_circuit();
+        auto opts = make_opts(circuit);
+        opts.linear_solver.allow_fallback = false;
+
+        Simulator sim(circuit, opts);
+        const auto result = sim.run_transient();
+        REQUIRE_FALSE(result.success);
+        CHECK(result.diagnostic == SimulationDiagnosticCode::DcOperatingPointFailure);
+    }
+
+    {
+        auto circuit = build_circuit();
+        auto opts = make_opts(circuit);
+        opts.linear_solver.allow_fallback = true;
+
+        Simulator sim(circuit, opts);
+        const auto result = sim.run_transient();
+        REQUIRE(result.success);
+        CHECK(result.backend_telemetry.backend_recovery_count >= 1);
+        CHECK(result.message.find("startup fallback") != std::string::npos);
+    }
+}
+
 TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
     Circuit circuit;
 
