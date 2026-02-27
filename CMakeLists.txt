@@ -242,12 +242,15 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -Wall -Wextra -Wpedantic -Werror=return-type
         -Wno-c++98-compat -Wno-c++98-compat-pedantic
     )
-    # On Linux, use libc++ instead of libstdc++ for better C++23 support
-    # This avoids ABI issues between Clang and GCC's standard library
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # On Linux, optionally use libc++ for pure C++ builds.
+    # For Python builds (wheels/editable), keep default libstdc++ to avoid
+    # ABI mismatches with dependency/toolchain artifacts in CI.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
         list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -stdlib=libc++)
         list(APPEND PULSIM_TARGET_LINK_OPTIONS -stdlib=libc++ -lc++abi)
         message(STATUS "Using libc++ on Linux for Clang")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(STATUS "Using default libstdc++ on Linux for Python build compatibility")
     endif()
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -g -O0 -fno-omit-frame-pointer)
@@ -308,20 +311,45 @@ endfunction()
 include(FetchContent)
 
 # Note: We don't set BUILD_TESTING OFF globally as it would disable our own tests.
-# Eigen is handled via FetchContent_Populate (not MakeAvailable) to skip its CMakeLists.txt.
 
-# Eigen - header-only, don't process its CMakeLists.txt to avoid test targets
-FetchContent_Declare(
-    eigen
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    GIT_SHALLOW TRUE
-)
-FetchContent_GetProperties(eigen)
-if(NOT eigen_POPULATED)
-    FetchContent_Populate(eigen)
+# Eigen - header-only dependency
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28")
+    FetchContent_Declare(
+        eigen
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+        GIT_TAG 3.4.0
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL
+    )
+else()
+    FetchContent_Declare(
+        eigen
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+        GIT_TAG 3.4.0
+        GIT_SHALLOW TRUE
+    )
 endif()
-# Create Eigen3::Eigen target manually (header-only)
+# Avoid building Eigen's own tests/docs while still using modern FetchContent
+# population path (more reliable in isolated CI environments, especially Windows).
+set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
+set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
+set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(EIGEN_LEAVE_TEST_IN_ALL_TARGET OFF CACHE BOOL "" FORCE)
+
+set(_pulsim_saved_build_testing "")
+if(DEFINED BUILD_TESTING)
+    set(_pulsim_saved_build_testing "${BUILD_TESTING}")
+endif()
+set(BUILD_TESTING OFF CACHE BOOL "Temporarily disable dependency tests while fetching Eigen" FORCE)
+FetchContent_MakeAvailable(eigen)
+if(_pulsim_saved_build_testing STREQUAL "")
+    unset(BUILD_TESTING CACHE)
+else()
+    set(BUILD_TESTING "${_pulsim_saved_build_testing}" CACHE BOOL "Restore project BUILD_TESTING value" FORCE)
+endif()
+unset(_pulsim_saved_build_testing)
+
+# Fallback alias for older Eigen layouts where target may not be exported.
 if(NOT TARGET Eigen3::Eigen)
     add_library(Eigen3::Eigen INTERFACE IMPORTED)
     set_target_properties(Eigen3::Eigen PROPERTIES
@@ -380,7 +408,7 @@ if(PULSIM_BUILD_TESTS)
 
     # Linux Clang sanitizer jobs use libc++; ensure Catch2 is compiled with the
     # same standard library to avoid ABI mismatches (std::__1 vs std::__cxx11).
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
         foreach(_catch_target Catch2 Catch2WithMain)
             if(TARGET ${_catch_target})
                 target_compile_options(${_catch_target} PUBLIC -stdlib=libc++)

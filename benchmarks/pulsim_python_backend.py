@@ -21,8 +21,14 @@ class BackendRunResult:
 
 
 def _import_pulsim():
+    ps, _ = _import_pulsim_with_diagnostics()
+    return ps
+
+
+def _import_pulsim_with_diagnostics() -> tuple[object | None, Optional[str]]:
     repo_root = Path(__file__).resolve().parent.parent
     build_python = repo_root / "build" / "python"
+    last_error: Optional[str] = None
 
     def _clear_pulsim_modules() -> None:
         stale = [name for name in list(sys.modules) if name == "pulsim" or name.startswith("pulsim.")]
@@ -30,11 +36,14 @@ def _import_pulsim():
             sys.modules.pop(name, None)
 
     def _attempt_import() -> object | None:
+        nonlocal last_error
         try:
             import pulsim as ps
 
+            last_error = None
             return ps
-        except Exception:
+        except Exception as exc:
+            last_error = f"{exc.__class__.__name__}: {exc}"
             return None
 
     def _purge_shadow_paths() -> None:
@@ -58,7 +67,7 @@ def _import_pulsim():
     importlib.invalidate_caches()
     ps = _attempt_import()
     if ps is not None:
-        return ps
+        return ps, None
 
     # If import failed due to a shadow package on PYTHONPATH (common in CI),
     # retry after removing build/python-like entries and clearing stale modules.
@@ -67,7 +76,7 @@ def _import_pulsim():
     importlib.invalidate_caches()
     ps = _attempt_import()
     if ps is not None:
-        return ps
+        return ps, None
 
     # Last fallback: explicitly prepend local build/python when available.
     if build_python.exists():
@@ -78,9 +87,9 @@ def _import_pulsim():
         importlib.invalidate_caches()
         ps = _attempt_import()
         if ps is not None:
-            return ps
+            return ps, None
 
-    return None
+    return None, last_error
 
 
 def _has_runtime_api(ps: object) -> bool:
@@ -358,6 +367,15 @@ def _select_mode(options: object, preferred_mode: Optional[str]) -> str:
 def is_available() -> bool:
     ps = _import_pulsim()
     return bool(ps and _has_runtime_api(ps))
+
+
+def availability_error() -> Optional[str]:
+    ps, import_error = _import_pulsim_with_diagnostics()
+    if ps is None:
+        return import_error or "Python package 'pulsim' is not available"
+    if not _has_runtime_api(ps):
+        return "Installed pulsim package does not expose required runtime APIs"
+    return None
 
 
 def run_from_yaml(
