@@ -1043,7 +1043,9 @@ public:
 
         // Phase 4: instrumentation extraction
         const auto probes = evaluate_virtual_signals(x);
-        result.channel_values.insert(probes.begin(), probes.end());
+        for (const auto& [probe_name, probe_value] : probes) {
+            result.channel_values.emplace(probe_name, probe_value);
+        }
         for (const auto& component : virtual_components_) {
             if (component.type == "saturable_inductor") {
                 const auto target_it = component.metadata.find("target_component");
