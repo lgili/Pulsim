@@ -244,9 +244,12 @@ const std::unordered_map<std::string, std::string>& component_alias_map() {
         add_aliases("relay", {"relay"});
         add_aliases("op_amp", {"opamp", "op-amp"});
         add_aliases("comparator", {"comparator"});
-        add_aliases("pi_controller", {"picontroller", "pi-controller"});
+        add_aliases("pi_controller", {"pi", "picontroller", "pi-controller"});
         add_aliases("pid_controller", {"pidcontroller", "pid-controller"});
         add_aliases("math_block", {"mathblock", "math"});
+        add_aliases("gain", {"gainblock", "gain-block"});
+        add_aliases("sum", {"adder", "sumblock", "sum-block"});
+        add_aliases("subtraction", {"subtract", "subtractor", "sub", "subtractionblock", "subtraction-block"});
         add_aliases("pwm_generator", {"pwmgenerator", "pwm"});
         add_aliases("integrator", {"integrator"});
         add_aliases("differentiator", {"differentiator"});
@@ -298,6 +301,9 @@ const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>>& comp
         {"comparator", {3, 3}},
         {"pi_controller", {3, 3}},
         {"pid_controller", {3, 3}},
+        {"gain", {2, 2}},
+        {"sum", {2, 2}},
+        {"subtraction", {2, 2}},
         {"math_block", {2, std::numeric_limits<std::size_t>::max()}},
         {"pwm_generator", {1, 3}},
         {"integrator", {2, 2}},
@@ -330,6 +336,9 @@ const std::unordered_set<std::string>& virtual_component_types() {
         "comparator",
         "pi_controller",
         "pid_controller",
+        "gain",
+        "sum",
+        "subtraction",
         "math_block",
         "pwm_generator",
         "integrator",
@@ -1940,6 +1949,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     continue;
                 }
             } else if (type == "pi_controller" || type == "pid_controller") {
+                if (has_num("output_min") && has_num("output_max")) {
+                    if (get_num("output_min", 0.0) > get_num("output_max", 0.0)) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "output_min must be <= output_max for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "gain" || type == "sum" || type == "subtraction") {
                 if (has_num("output_min") && has_num("output_max")) {
                     if (get_num("output_min", 0.0) > get_num("output_max", 0.0)) {
                         push_error(errors_, kDiagInvalidParameter,

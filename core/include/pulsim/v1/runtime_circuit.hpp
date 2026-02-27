@@ -595,7 +595,8 @@ public:
 
         const std::unordered_set<std::string> control_types = {
             "op_amp", "comparator", "pi_controller", "pid_controller",
-            "math_block", "pwm_generator", "integrator", "differentiator",
+            "math_block", "gain", "sum", "subtraction",
+            "pwm_generator", "integrator", "differentiator",
             "limiter", "rate_limiter", "hysteresis", "lookup_table",
             "transfer_function", "delay_block", "sample_hold",
             "state_machine", "signal_mux", "signal_demux"
@@ -644,6 +645,19 @@ public:
                 const Real offset = get_numeric(component, "offset", 0.0);
                 output = gain * signal + offset;
                 output = maybe_limit_output(output, true);
+            } else if (component.type == "gain") {
+                const Real gain = get_numeric(component, "gain", 1.0);
+                const Real offset = get_numeric(component, "offset", 0.0);
+                output = signal * gain + offset;
+                output = maybe_limit_output(output);
+            } else if (component.type == "sum") {
+                output = in0 + in1;
+                output = get_numeric(component, "gain", 1.0) * output + get_numeric(component, "offset", 0.0);
+                output = maybe_limit_output(output);
+            } else if (component.type == "subtraction") {
+                output = in0 - in1;
+                output = get_numeric(component, "gain", 1.0) * output + get_numeric(component, "offset", 0.0);
+                output = maybe_limit_output(output);
             } else if (component.type == "pi_controller") {
                 const Real kp = get_numeric(component, "kp", get_numeric(component, "gain", 1.0));
                 const Real ki = get_numeric(component, "ki", 0.0);

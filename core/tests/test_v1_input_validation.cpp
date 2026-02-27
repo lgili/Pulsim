@@ -1,13 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "pulsim/v1/parser/yaml_parser.hpp"
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
 #include <limits>
+#include <sstream>
 #include <string>
 
 using namespace pulsim::v1;
+using Catch::Approx;
 
 namespace {
 
@@ -153,4 +156,91 @@ TEST_CASE("v1 transient contains hard nonlinear failure with deterministic diagn
     CHECK(result.backend_telemetry.failure_reason == "transient_step_failure");
     REQUIRE_FALSE(result.fallback_trace.empty());
     CHECK(result.fallback_trace.back().reason == FallbackReasonCode::MaxRetriesExceeded);
+}
+
+TEST_CASE("v1 parser accepts basic control aliases and executes channels",
+                    "[v1][yaml][control][aliases]") {
+                const std::string yaml =
+                        "schema: pulsim-v1\n"
+                        "version: 1\n"
+                        "simulation:\n"
+                        "  tstop: 1e-4\n"
+                        "  dt: 1e-5\n"
+                        "components:\n"
+                        "  - type: voltage_source\n"
+                        "    name: VIN\n"
+                        "    nodes:\n"
+                        "      - in\n"
+                        "      - \"0\"\n"
+                        "    value: 2.0\n"
+                        "  - type: voltage_source\n"
+                        "    name: VREF\n"
+                        "    nodes:\n"
+                        "      - ref\n"
+                        "      - \"0\"\n"
+                        "    value: 1.0\n"
+                        "  - type: gain\n"
+                        "    name: G1\n"
+                        "    nodes:\n"
+                        "      - in\n"
+                        "      - \"0\"\n"
+                        "    gain: 3.0\n"
+                        "  - type: sum\n"
+                        "    name: SUM1\n"
+                        "    nodes:\n"
+                        "      - in\n"
+                        "      - ref\n"
+                        "  - type: subtraction\n"
+                        "    name: SUB1\n"
+                        "    nodes:\n"
+                        "      - in\n"
+                        "      - ref\n"
+                        "  - type: pi\n"
+                        "    name: PI1\n"
+                        "    nodes:\n"
+                        "      - ref\n"
+                        "      - in\n"
+                        "      - ctrl\n"
+                        "    kp: 1.0\n"
+                        "    ki: 0.0\n"
+                        "    output_min: -10.0\n"
+                        "    output_max: 10.0\n"
+                        "  - type: pwm\n"
+                        "    name: PWM1\n"
+                        "    nodes:\n"
+                        "      - ctrl\n"
+                        "    frequency: 1000\n"
+                        "    duty: 0.25\n";
+
+        parser::YamlParser parser;
+        auto [circuit, _options] = parser.load_string(yaml);
+
+        std::ostringstream parser_errors;
+        parser_errors << "YAML errors count=" << parser.errors().size();
+        for (const auto& err : parser.errors()) {
+            parser_errors << "\n" << err;
+        }
+        INFO(parser_errors.str());
+        REQUIRE(parser.errors().empty());
+        CHECK(circuit.num_virtual_components() >= 5);
+
+        Vector x = circuit.initial_state();
+        if (x.size() != circuit.system_size()) {
+                x = Vector::Zero(static_cast<Index>(circuit.system_size()));
+        }
+
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-4);
+        REQUIRE(step.channel_values.contains("G1"));
+        REQUIRE(step.channel_values.contains("SUM1"));
+        REQUIRE(step.channel_values.contains("SUB1"));
+        REQUIRE(step.channel_values.contains("PI1"));
+        REQUIRE(step.channel_values.contains("PWM1"));
+        REQUIRE(step.channel_values.contains("PWM1.duty"));
+
+        CHECK(step.channel_values.at("G1") == Approx(6.0).margin(1e-12));
+        CHECK(step.channel_values.at("SUM1") == Approx(3.0).margin(1e-12));
+        CHECK(step.channel_values.at("SUB1") == Approx(1.0).margin(1e-12));
+        CHECK(step.channel_values.at("PI1") == Approx(-1.0).margin(1e-12));
+        CHECK(step.channel_values.at("PWM1.duty") == Approx(0.25).margin(1e-12));
+        CHECK(step.channel_values.at("PWM1") == Approx(1.0).margin(1e-12));
 }

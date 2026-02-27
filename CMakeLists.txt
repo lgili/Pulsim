@@ -325,6 +325,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(yaml-cpp)
 
+# GCC 14 + libstdc++ in C++23 mode can fail when compiling yaml-cpp internals
+# (tuple-like conversion in std::map::operator[]). Build yaml-cpp with C++17
+# while keeping Pulsim targets on C++23.
+if(TARGET yaml-cpp)
+    set_target_properties(yaml-cpp PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS OFF
+    )
+endif()
+
 # Catch2 for testing (v3.8.0+ required for GCC 14 compatibility)
 if(PULSIM_BUILD_TESTS)
     FetchContent_Declare(

@@ -515,7 +515,7 @@ class TestTransient:
         assert len(states) == len(times)
 
         # Check at t=tau: V should be ~63.2% of final
-        idx_tau = int(tau / (tau/100))
+        idx_tau = next((i for i, t in enumerate(times) if t >= tau), len(times) - 1)
         v_cap = states[idx_tau][1]
         expected = 5.0 * (1 - math.exp(-1))
         assert abs(v_cap - expected) < 0.1
