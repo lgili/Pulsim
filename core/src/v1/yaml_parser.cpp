@@ -1520,6 +1520,13 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         }
         else if (type == "voltage_source") {
             YAML::Node waveform = comp["waveform"];
+            std::string switch_target;
+            if (YAML::Node target = get_param("target_component"); target && target.IsScalar()) {
+                switch_target = target.as<std::string>();
+            } else if (YAML::Node target = get_param("target"); target && target.IsScalar()) {
+                switch_target = target.as<std::string>();
+            }
+
             if (waveform && waveform["type"]) {
                 std::string wtype = to_lower(waveform["type"].as<std::string>());
                 if (wtype == "dc") {
@@ -1551,6 +1558,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     if (waveform["t_width"]) p.t_width = parse_real(waveform["t_width"], name + ".waveform.t_width", errors_);
                     if (waveform["period"]) p.period = parse_real(waveform["period"], name + ".waveform.period", errors_);
                     circuit.add_pulse_voltage_source(name, node_at(0), node_at(1), p);
+                    if (!switch_target.empty()) {
+                        circuit.bind_switch_driver(name, switch_target);
+                    }
                 } else {
                     errors_.push_back("Unsupported waveform type for voltage_source: " + wtype);
                 }

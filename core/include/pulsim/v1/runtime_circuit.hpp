@@ -551,6 +551,9 @@ public:
                 auto control = base;
                 control.domain = "control";
                 metadata.emplace(component.name + ".duty", std::move(control));
+                auto carrier = base;
+                carrier.domain = "control";
+                metadata.emplace(component.name + ".carrier", std::move(carrier));
             } else if (component.type == "saturable_inductor") {
                 auto electrical = base;
                 electrical.domain = "electrical";
@@ -835,8 +838,14 @@ public:
                     duty = std::clamp(duty, duty_max, duty_min);
                 }
                 const Real phase = std::fmod(std::max<Real>(0.0, time * frequency), 1.0);
-                output = (phase < duty) ? 1.0 : 0.0;
+                const Real carrier = (phase <= 0.5) ? (2.0 * phase) : (2.0 * (1.0 - phase));
+                output = (duty > carrier) ? 1.0 : 0.0;
+                if (const auto it = component.metadata.find("target_component");
+                    it != component.metadata.end()) {
+                    set_switch_state(it->second, output > 0.5);
+                }
                 result.channel_values[component.name + ".duty"] = duty;
+                result.channel_values[component.name + ".carrier"] = carrier;
             } else if (component.type == "state_machine") {
                 std::string mode = "toggle";
                 if (const auto it = component.metadata.find("mode"); it != component.metadata.end()) {
@@ -879,6 +888,40 @@ public:
             virtual_last_input_[component.name] = signal;
             virtual_last_time_[component.name] = time;
             result.channel_values[component.name] = output;
+        }
+
+        for (const auto& binding : switch_driver_bindings_) {
+            const auto& driver_name = binding.first;
+            const auto& target_name = binding.second;
+            const auto source_index = find_connection_index(driver_name);
+            if (!source_index.has_value()) {
+                continue;
+            }
+
+            bool apply = false;
+            bool closed = false;
+            std::visit([&](const auto& source) {
+                using T = std::decay_t<decltype(source)>;
+                if constexpr (std::is_same_v<T, PulseVoltageSource>) {
+                    const Real level = source.voltage_at(time);
+                    const auto& p = source.params();
+                    const Real threshold = 0.5 * (p.v_initial + p.v_pulse);
+                    closed = (p.v_pulse >= p.v_initial) ? (level > threshold)
+                                                        : (level < threshold);
+                    apply = true;
+                } else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+                    const Real level = source.voltage_at(time);
+                    const auto& p = source.params();
+                    const Real threshold = 0.5 * (p.v_low + p.v_high);
+                    closed = (p.v_high >= p.v_low) ? (level > threshold)
+                                                   : (level < threshold);
+                    apply = true;
+                }
+            }, devices_[*source_index]);
+
+            if (apply) {
+                set_switch_state(target_name, closed);
+            }
         }
 
         // Phase 3: event-driven transitions
@@ -1043,8 +1086,8 @@ public:
 
         // Phase 4: instrumentation extraction
         const auto probes = evaluate_virtual_signals(x);
-        for (const auto& [probe_name, probe_value] : probes) {
-            result.channel_values.emplace(probe_name, probe_value);
+        for (const auto& probe : probes) {
+            result.channel_values.emplace(probe.first, probe.second);
         }
         for (const auto& component : virtual_components_) {
             if (component.type == "saturable_inductor") {
@@ -1418,15 +1461,45 @@ public:
         return false;
     }
 
+    /// Bind a time-varying source output to a target switch-like component.
+    /// Supported drivers: pulse and pwm voltage sources.
+    void bind_switch_driver(std::string_view source_name, std::string_view target_switch_name) {
+        if (source_name.empty()) {
+            throw std::invalid_argument("Driver source name must not be empty");
+        }
+        if (target_switch_name.empty()) {
+            throw std::invalid_argument("Target switch name must not be empty");
+        }
+        switch_driver_bindings_[std::string(source_name)] = std::string(target_switch_name);
+    }
+
     // =========================================================================
     // Set Switch States
     // =========================================================================
 
     void set_switch_state(std::string_view name, bool closed) {
-        if (auto* sw = find_device<IdealSwitch>(name)) {
+        const auto index = find_connection_index(name);
+        if (!index.has_value()) {
+            throw std::runtime_error("Switch not found: " + std::string{name});
+        }
+
+        auto& device = devices_[*index];
+        if (auto* sw = std::get_if<IdealSwitch>(&device)) {
             sw->set_state(closed);
+            if (*index < forced_switch_state_.size()) {
+                forced_switch_state_[*index] = std::nullopt;
+            }
             return;
         }
+
+        if (std::holds_alternative<VoltageControlledSwitch>(device) ||
+            std::holds_alternative<MOSFET>(device) ||
+            std::holds_alternative<IGBT>(device)) {
+            ensure_forced_switch_state_storage();
+            forced_switch_state_[*index] = closed;
+            return;
+        }
+
         throw std::runtime_error("Switch not found: " + std::string{name});
     }
 
@@ -1965,6 +2038,22 @@ private:
             return;
         }
         connection_name_to_index_.try_emplace(connections_[index].name, index);
+        if (forced_switch_state_.size() < connections_.size()) {
+            forced_switch_state_.resize(connections_.size());
+        }
+    }
+
+    void ensure_forced_switch_state_storage() {
+        if (forced_switch_state_.size() != devices_.size()) {
+            forced_switch_state_.resize(devices_.size());
+        }
+    }
+
+    [[nodiscard]] std::optional<bool> forced_switch_state(std::size_t device_index) const {
+        if (device_index >= forced_switch_state_.size()) {
+            return std::nullopt;
+        }
+        return forced_switch_state_[device_index];
     }
 
     [[nodiscard]] const DeviceConnection* find_connection(std::string_view name) const {
@@ -2387,6 +2476,9 @@ private:
     std::unordered_map<std::string, std::size_t, TransparentStringHash, TransparentStringEqual>
         connection_name_to_index_;
     std::vector<Real> device_temperature_scale_;
+    std::vector<std::optional<bool>> forced_switch_state_;
+    std::unordered_map<std::string, std::string, TransparentStringHash, TransparentStringEqual>
+        switch_driver_bindings_;
     std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index, TransparentStringHash, TransparentStringEqual> node_map_;
     std::vector<std::string> node_names_;
@@ -2444,16 +2536,26 @@ private:
             stamp_resistor(1.0 / g, conn.nodes, triplets);
         }
         else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
-            // Initial: off-state conductance between t1 and t2
-            stamp_resistor(1.0 / dev.g_off(), {conn.nodes[1], conn.nodes[2]}, triplets);
+            const auto forced = forced_switch_state(device_index);
+            const Real g = forced.has_value()
+                ? (*forced ? dev.g_on() : dev.g_off())
+                : dev.g_off();
+            stamp_resistor(1.0 / std::max<Real>(g, 1e-18), {conn.nodes[1], conn.nodes[2]}, triplets);
         }
         else if constexpr (std::is_same_v<T, MOSFET> || std::is_same_v<T, IGBT>) {
-            // Initial: off-state conductance
             auto params = dev.params();
             const Real scale = device_temperature_scale(device_index);
-            const Real g_off = std::max<Real>(params.g_off / std::max<Real>(scale, Real{0.05}),
-                                              Real{1e-18});
-            stamp_resistor(1.0 / g_off, {conn.nodes[1], conn.nodes[2]}, triplets);
+            const Real inv_scale = 1.0 / std::max<Real>(scale, Real{0.05});
+            const auto forced = forced_switch_state(device_index);
+            Real g = std::max<Real>(params.g_off * inv_scale, Real{1e-18});
+            if (forced.has_value() && *forced) {
+                if constexpr (std::is_same_v<T, MOSFET>) {
+                    g = std::max<Real>(params.kp * inv_scale, Real{1e-6});
+                } else {
+                    g = std::max<Real>(params.g_on * inv_scale, Real{1e-6});
+                }
+            }
+            stamp_resistor(1.0 / g, {conn.nodes[1], conn.nodes[2]}, triplets);
         }
         else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
             // DC: use voltage at t=0
@@ -2545,7 +2647,7 @@ private:
             if (n2 >= 0) f[n2] -= i;
         }
         else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
-            stamp_vcswitch_jacobian(dev, conn.nodes, triplets, f, x);
+            stamp_vcswitch_jacobian(dev, conn.nodes, device_index, triplets, f, x);
         }
         else if constexpr (std::is_same_v<T, Capacitor>) {
             Real C = dev.capacitance();
@@ -2750,6 +2852,7 @@ private:
 
     template<typename Triplets>
     void stamp_vcswitch_jacobian(const VoltageControlledSwitch& dev, const std::vector<Index>& nodes,
+                                 std::size_t device_index,
                                  Triplets& triplets,
                                  Vector& f, const Vector& x) const {
         Index n_ctrl = nodes[0];
@@ -2766,14 +2869,19 @@ private:
         Real g_off = dev.g_off();
         Real hysteresis = 0.5;  // Smooth transition width
 
-        Real v_norm = (v_ctrl - v_th) / hysteresis;
-        const Real tanh_val = std::tanh(v_norm);
-        Real sigmoid = 0.5 * (1.0 + tanh_val);
-        Real g = g_off + (g_on - g_off) * sigmoid;
-
-        // Derivative of g w.r.t. v_ctrl
-        Real dsigmoid = 0.5 / hysteresis * (1.0 - tanh_val * tanh_val);
-        Real dg_dvctrl = (g_on - g_off) * dsigmoid;
+        Real g = g_off;
+        Real dg_dvctrl = 0.0;
+        const auto forced = forced_switch_state(device_index);
+        if (forced.has_value()) {
+            g = *forced ? g_on : g_off;
+        } else {
+            const Real v_norm = (v_ctrl - v_th) / hysteresis;
+            const Real tanh_val = std::tanh(v_norm);
+            const Real sigmoid = 0.5 * (1.0 + tanh_val);
+            g = g_off + (g_on - g_off) * sigmoid;
+            const Real dsigmoid = 0.5 / hysteresis * (1.0 - tanh_val * tanh_val);
+            dg_dvctrl = (g_on - g_off) * dsigmoid;
+        }
 
         // Current through switch
         Real v_sw = v_t1 - v_t2;
@@ -2816,6 +2924,10 @@ private:
         Real sign = p.is_nmos ? 1.0 : -1.0;
         Real vgs = sign * (vg - vs);
         Real vds = sign * (vd - vs);
+        const auto forced = forced_switch_state(device_index);
+        if (forced.has_value()) {
+            vgs = *forced ? (p.vth + 5.0) : 0.0;
+        }
 
         Real id = 0.0, gm = 0.0, gds = 0.0;
 
@@ -2880,6 +2992,9 @@ private:
         Real vce = vc - ve;
 
         bool is_on = (vge > p.vth) && (vce > 0);
+        if (const auto forced = forced_switch_state(device_index); forced.has_value()) {
+            is_on = *forced;
+        }
         Real g = is_on ? g_on_eff : g_off_eff;
         Real ic = g * vce;
 
