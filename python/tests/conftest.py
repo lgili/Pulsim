@@ -1,17 +1,38 @@
 """Ensure the locally built pulsim extension is used for all tests."""
 
 import importlib
+import glob
 import os
 import sys
 
 
-def _ensure_pulsim_path() -> None:
+def _build_tree_has_extension(build_path: str) -> bool:
+    package_dir = os.path.join(build_path, "pulsim")
+    if not os.path.isdir(package_dir):
+        return False
+    for pattern in ("_pulsim*.so", "_pulsim*.pyd", "_pulsim*.dylib"):
+        if glob.glob(os.path.join(package_dir, pattern)):
+            return True
+    return False
+
+
+def _clear_cached_pulsim_modules() -> None:
+    for name in list(sys.modules):
+        if name == "pulsim" or name.startswith("pulsim."):
+            del sys.modules[name]
+
+
+def _ensure_pulsim_path() -> tuple[bool, str]:
     build_path = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..", "build", "python")
     )
-    if os.path.exists(build_path):
+    # Prefer local build tree only when native extension is actually present.
+    if _build_tree_has_extension(build_path):
         sys.path = [p for p in sys.path if os.path.abspath(p) != build_path]
         sys.path.insert(0, build_path)
+        return True, build_path
+    sys.path = [p for p in sys.path if os.path.abspath(p) != build_path]
+    return False, build_path
 
 
 def _ensure_benchmarks_path() -> None:
@@ -23,19 +44,27 @@ def _ensure_benchmarks_path() -> None:
         sys.path.insert(0, benchmarks_path)
 
 
-def _reload_pulsim_if_needed() -> None:
+def _reload_pulsim_if_needed(prefer_build_tree: bool, build_path: str) -> None:
     if "pulsim" in sys.modules:
         mod = sys.modules["pulsim"]
         mod_file = os.path.abspath(getattr(mod, "__file__", ""))
-        if mod_file and "build/python" not in mod_file:
-            # Drop cached modules so import uses the build tree.
-            for name in list(sys.modules):
-                if name == "pulsim" or name.startswith("pulsim."):
-                    del sys.modules[name]
+        is_build_mod = "build/python" in mod_file
+        if (prefer_build_tree and not is_build_mod) or (not prefer_build_tree and is_build_mod):
+            _clear_cached_pulsim_modules()
     importlib.invalidate_caches()
-    importlib.import_module("pulsim")
+    try:
+        importlib.import_module("pulsim")
+    except ModuleNotFoundError as exc:
+        # If local build tree became stale, fall back to installed package.
+        if prefer_build_tree and exc.name == "pulsim._pulsim":
+            sys.path = [p for p in sys.path if os.path.abspath(p) != build_path]
+            _clear_cached_pulsim_modules()
+            importlib.invalidate_caches()
+            importlib.import_module("pulsim")
+        else:
+            raise
 
 
-_ensure_pulsim_path()
+_prefer_build_tree, _build_path = _ensure_pulsim_path()
 _ensure_benchmarks_path()
-_reload_pulsim_if_needed()
+_reload_pulsim_if_needed(_prefer_build_tree, _build_path)
