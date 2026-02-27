@@ -713,6 +713,10 @@ void init_v2_module(py::module_& v2) {
              py::arg("diode_g_off_min") = 1e-9,
              py::arg("igbt_g_on_max") = 5e3,
              py::arg("igbt_g_off_min") = 1e-9,
+             py::arg("switch_g_on_max") = 5e5,
+             py::arg("switch_g_off_min") = 1e-9,
+             py::arg("vcswitch_g_on_max") = 5e5,
+             py::arg("vcswitch_g_off_min") = 1e-9,
              "Clamp overly-ideal nonlinear parameters for convergence fallback")
         .def("set_switch_state", &Circuit::set_switch_state,
              py::arg("name"), py::arg("closed"),
@@ -1209,6 +1213,25 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("gmin_max", &FallbackPolicyOptions::gmin_max)
         .def_readwrite("gmin_growth", &FallbackPolicyOptions::gmin_growth);
 
+    py::class_<ModelRegularizationOptions>(v2, "ModelRegularizationOptions",
+        "Bounded numerical model regularization policy for nonlinear/switching devices")
+        .def(py::init<>())
+        .def_readwrite("enable_auto", &ModelRegularizationOptions::enable_auto)
+        .def_readwrite("apply_only_in_recovery", &ModelRegularizationOptions::apply_only_in_recovery)
+        .def_readwrite("retry_threshold", &ModelRegularizationOptions::retry_threshold)
+        .def_readwrite("max_escalations", &ModelRegularizationOptions::max_escalations)
+        .def_readwrite("escalation_factor", &ModelRegularizationOptions::escalation_factor)
+        .def_readwrite("mosfet_kp_max", &ModelRegularizationOptions::mosfet_kp_max)
+        .def_readwrite("mosfet_g_off_min", &ModelRegularizationOptions::mosfet_g_off_min)
+        .def_readwrite("diode_g_on_max", &ModelRegularizationOptions::diode_g_on_max)
+        .def_readwrite("diode_g_off_min", &ModelRegularizationOptions::diode_g_off_min)
+        .def_readwrite("igbt_g_on_max", &ModelRegularizationOptions::igbt_g_on_max)
+        .def_readwrite("igbt_g_off_min", &ModelRegularizationOptions::igbt_g_off_min)
+        .def_readwrite("switch_g_on_max", &ModelRegularizationOptions::switch_g_on_max)
+        .def_readwrite("switch_g_off_min", &ModelRegularizationOptions::switch_g_off_min)
+        .def_readwrite("vcswitch_g_on_max", &ModelRegularizationOptions::vcswitch_g_on_max)
+        .def_readwrite("vcswitch_g_off_min", &ModelRegularizationOptions::vcswitch_g_off_min);
+
     py::class_<BackendTelemetry>(v2, "BackendTelemetry",
         "Backend selection and escalation telemetry")
         .def(py::init<>())
@@ -1243,6 +1266,9 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("equation_assemble_residual_calls", &BackendTelemetry::equation_assemble_residual_calls)
         .def_readwrite("equation_assemble_system_time_seconds", &BackendTelemetry::equation_assemble_system_time_seconds)
         .def_readwrite("equation_assemble_residual_time_seconds", &BackendTelemetry::equation_assemble_residual_time_seconds)
+        .def_readwrite("model_regularization_events", &BackendTelemetry::model_regularization_events)
+        .def_readwrite("model_regularization_last_changed", &BackendTelemetry::model_regularization_last_changed)
+        .def_readwrite("model_regularization_last_intensity", &BackendTelemetry::model_regularization_last_intensity)
         .def_readwrite("failure_reason", &BackendTelemetry::failure_reason);
 
     py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
@@ -1339,7 +1365,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
         .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
-        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy);
+        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy)
+        .def_readwrite("model_regularization", &SimulationOptions::model_regularization);
 
     py::class_<SimulationResult>(v2, "SimulationResult", "Transient simulation result")
         .def(py::init<>())

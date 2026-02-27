@@ -347,12 +347,45 @@ endif()
 
 set(PULSIM_KLU_FOUND FALSE)
 
+function(pulsim_validate_imported_include_dirs target_name result_var)
+    if(NOT TARGET ${target_name})
+        set(${result_var} FALSE PARENT_SCOPE)
+        return()
+    endif()
+
+    get_target_property(_include_dirs ${target_name} INTERFACE_INCLUDE_DIRECTORIES)
+    if(NOT _include_dirs)
+        set(${result_var} TRUE PARENT_SCOPE)
+        return()
+    endif()
+
+    foreach(_include_dir IN LISTS _include_dirs)
+        if("${_include_dir}" MATCHES "^\\$<")
+            continue()
+        endif()
+        if(IS_ABSOLUTE "${_include_dir}" AND NOT EXISTS "${_include_dir}")
+            message(WARNING
+                "Imported target '${target_name}' has missing include directory: ${_include_dir}")
+            set(${result_var} FALSE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+
+    set(${result_var} TRUE PARENT_SCOPE)
+endfunction()
+
 # Method 1: Try to find system-installed SuiteSparse
 find_package(SuiteSparse CONFIG QUIET)
 if(SuiteSparse_FOUND AND TARGET SuiteSparse::KLU)
-    message(STATUS "Found system SuiteSparse with KLU")
-    set(PULSIM_KLU_FOUND TRUE)
-    set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+    pulsim_validate_imported_include_dirs(SuiteSparse::KLU _pulsim_klu_target_valid)
+    if(_pulsim_klu_target_valid)
+        message(STATUS "Found system SuiteSparse with KLU")
+        set(PULSIM_KLU_FOUND TRUE)
+        set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+    else()
+        message(WARNING
+            "Ignoring broken SuiteSparse::KLU imported target and trying alternate discovery methods")
+    endif()
 endif()
 
 # Method 2: Try pkg-config

@@ -140,6 +140,8 @@ TEST_CASE("v1 transient contains hard nonlinear failure with deterministic diagn
     opts.newton_options.max_iterations = 0;
     opts.newton_options.num_nodes = circuit.num_nodes();
     opts.newton_options.num_branches = circuit.num_branches();
+    opts.model_regularization.enable_auto = false;
+    opts.linear_solver.allow_fallback = false;
 
     Simulator sim(circuit, opts);
     Vector x0 = Vector::Zero(static_cast<Index>(circuit.system_size()));

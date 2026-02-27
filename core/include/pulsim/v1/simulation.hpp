@@ -101,6 +101,25 @@ struct FallbackPolicyOptions {
     Real gmin_growth = 10.0;
 };
 
+struct ModelRegularizationOptions {
+    bool enable_auto = false;
+    bool apply_only_in_recovery = true;
+    int retry_threshold = 2;
+    int max_escalations = 4;
+    Real escalation_factor = 2.0;
+
+    Real mosfet_kp_max = 8.0;
+    Real mosfet_g_off_min = 1e-7;
+    Real diode_g_on_max = 300.0;
+    Real diode_g_off_min = 1e-9;
+    Real igbt_g_on_max = 5e3;
+    Real igbt_g_off_min = 1e-9;
+    Real switch_g_on_max = 5e5;
+    Real switch_g_off_min = 1e-9;
+    Real vcswitch_g_on_max = 5e5;
+    Real vcswitch_g_off_min = 1e-9;
+};
+
 struct BackendTelemetry {
     std::string requested_backend = "native";
     std::string selected_backend = "native";
@@ -131,6 +150,9 @@ struct BackendTelemetry {
     int equation_assemble_residual_calls = 0;
     double equation_assemble_system_time_seconds = 0.0;
     double equation_assemble_residual_time_seconds = 0.0;
+    int model_regularization_events = 0;
+    int model_regularization_last_changed = 0;
+    double model_regularization_last_intensity = 0.0;
     std::string failure_reason;
 };
 
@@ -255,6 +277,7 @@ struct SimulationOptions {
     GminConfig gmin_fallback{};
     int max_step_retries = 6;
     FallbackPolicyOptions fallback_policy{};
+    ModelRegularizationOptions model_regularization{};
 };
 
 struct SimulationResult {

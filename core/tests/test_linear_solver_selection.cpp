@@ -395,6 +395,99 @@ components:
     CHECK(circuit.num_devices() == 1);
 }
 
+TEST_CASE("YAML parser maps model_regularization controls with safe defaults",
+          "[v1][yaml][model-regularization]") {
+    const std::string yaml_with_block = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  model_regularization:
+    enable_auto: true
+    apply_only_in_recovery: true
+    retry_threshold: 2
+    max_escalations: 3
+    escalation_factor: 1.5
+    mosfet_kp_max: 6.0
+    mosfet_g_off_min: 1e-8
+    diode_g_on_max: 200.0
+    diode_g_off_min: 1e-10
+    igbt_g_on_max: 4000.0
+    igbt_g_off_min: 1e-10
+    switch_g_on_max: 1e5
+    switch_g_off_min: 1e-10
+    vcswitch_g_on_max: 2e5
+    vcswitch_g_off_min: 1e-10
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    auto [circuit_with_block, options_with_block] = parser.load_string(yaml_with_block);
+    REQUIRE(parser.errors().empty());
+    CHECK(options_with_block.model_regularization.enable_auto);
+    CHECK(options_with_block.model_regularization.apply_only_in_recovery);
+    CHECK(options_with_block.model_regularization.retry_threshold == 2);
+    CHECK(options_with_block.model_regularization.max_escalations == 3);
+    CHECK(options_with_block.model_regularization.escalation_factor == Approx(1.5));
+    CHECK(options_with_block.model_regularization.mosfet_kp_max == Approx(6.0));
+    CHECK(options_with_block.model_regularization.vcswitch_g_on_max == Approx(2e5));
+    CHECK(circuit_with_block.num_devices() == 1);
+
+    const std::string yaml_without_block = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    auto [circuit_without_block, options_without_block] = parser.load_string(yaml_without_block);
+    REQUIRE(parser.errors().empty());
+    CHECK_FALSE(options_without_block.model_regularization.enable_auto);
+    CHECK(options_without_block.model_regularization.retry_threshold == 2);
+    CHECK(options_without_block.model_regularization.max_escalations == 4);
+    CHECK(circuit_without_block.num_devices() == 1);
+}
+
+TEST_CASE("YAML parser rejects invalid model_regularization ranges in strict mode",
+          "[v1][yaml][model-regularization]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  model_regularization:
+    retry_threshold: 0
+    max_escalations: -1
+    escalation_factor: 0
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    parser.load_string(yaml);
+    REQUIRE_FALSE(parser.errors().empty());
+    std::string joined;
+    for (const auto& err : parser.errors()) {
+        joined += err;
+        joined.push_back('\n');
+    }
+    CHECK(joined.find("simulation.model_regularization.retry_threshold") != std::string::npos);
+    CHECK(joined.find("simulation.model_regularization.max_escalations") != std::string::npos);
+    CHECK(joined.find("simulation.model_regularization.escalation_factor") != std::string::npos);
+}
+
 TEST_CASE("YAML parser emits migration warnings for legacy backend controls in non-strict mode",
           "[v1][yaml][backend]") {
     const std::string yaml = R"(schema: pulsim-v1
