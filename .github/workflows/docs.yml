@@ -1,4 +1,4 @@
-name: Docs (Versioned)
+name: Docs
 
 on:
   push:
@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   deploy-versioned-docs:
+    name: Deploy versioned docs (tag)
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     concurrency:
       group: docs-${{ github.ref }}

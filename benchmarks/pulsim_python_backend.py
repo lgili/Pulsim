@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import sys
 import time
 from dataclasses import dataclass
@@ -20,27 +21,75 @@ class BackendRunResult:
 
 
 def _import_pulsim():
-    try:
-        import pulsim as ps
+    ps, _ = _import_pulsim_with_diagnostics()
+    return ps
 
-        return ps
-    except Exception:
-        pass
 
+def _import_pulsim_with_diagnostics() -> tuple[object | None, Optional[str]]:
     repo_root = Path(__file__).resolve().parent.parent
     build_python = repo_root / "build" / "python"
+    last_error: Optional[str] = None
+
+    def _clear_pulsim_modules() -> None:
+        stale = [name for name in list(sys.modules) if name == "pulsim" or name.startswith("pulsim.")]
+        for name in stale:
+            sys.modules.pop(name, None)
+
+    def _attempt_import() -> object | None:
+        nonlocal last_error
+        try:
+            import pulsim as ps
+
+            last_error = None
+            return ps
+        except Exception as exc:
+            last_error = f"{exc.__class__.__name__}: {exc}"
+            return None
+
+    def _purge_shadow_paths() -> None:
+        repo_build_python = str(build_python.resolve()) if build_python.exists() else None
+        cleaned: list[str] = []
+        for path in sys.path:
+            try:
+                resolved = str(Path(path).resolve())
+            except Exception:
+                resolved = path
+
+            normalized = resolved.replace("\\", "/")
+            is_shadow = normalized.endswith("/build/python")
+            if repo_build_python is not None and resolved == repo_build_python:
+                is_shadow = True
+
+            if not is_shadow:
+                cleaned.append(path)
+        sys.path[:] = cleaned
+
+    importlib.invalidate_caches()
+    ps = _attempt_import()
+    if ps is not None:
+        return ps, None
+
+    # If import failed due to a shadow package on PYTHONPATH (common in CI),
+    # retry after removing build/python-like entries and clearing stale modules.
+    _clear_pulsim_modules()
+    _purge_shadow_paths()
+    importlib.invalidate_caches()
+    ps = _attempt_import()
+    if ps is not None:
+        return ps, None
+
+    # Last fallback: explicitly prepend local build/python when available.
     if build_python.exists():
         build_python_str = str(build_python)
         if build_python_str not in sys.path:
             sys.path.insert(0, build_python_str)
-        try:
-            import pulsim as ps
+        _clear_pulsim_modules()
+        importlib.invalidate_caches()
+        ps = _attempt_import()
+        if ps is not None:
+            return ps, None
 
-            return ps
-        except Exception:
-            return None
-
-    return None
+    return None, last_error
 
 
 def _has_runtime_api(ps: object) -> bool:
@@ -318,6 +367,15 @@ def _select_mode(options: object, preferred_mode: Optional[str]) -> str:
 def is_available() -> bool:
     ps = _import_pulsim()
     return bool(ps and _has_runtime_api(ps))
+
+
+def availability_error() -> Optional[str]:
+    ps, import_error = _import_pulsim_with_diagnostics()
+    if ps is None:
+        return import_error or "Python package 'pulsim' is not available"
+    if not _has_runtime_api(ps):
+        return "Installed pulsim package does not expose required runtime APIs"
+    return None
 
 
 def run_from_yaml(

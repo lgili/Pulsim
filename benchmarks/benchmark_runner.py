@@ -18,9 +18,11 @@ except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
 try:
+    from pulsim_python_backend import availability_error as python_backend_error
     from pulsim_python_backend import is_available as python_backend_available
     from pulsim_python_backend import run_from_yaml as run_pulsim_python
 except ImportError:  # pragma: no cover - local import fallback
+    python_backend_error = None
     python_backend_available = None
     run_pulsim_python = None
 
@@ -153,10 +155,19 @@ def run_pulsim(
     preferred_mode: Optional[str] = None,
     use_initial_conditions: bool = False,
 ) -> PulsimRunResult:
-    if run_pulsim_python is None or not can_use_pulsim_python_backend():
+    if run_pulsim_python is None:
+        reason = "benchmark backend module import failed"
+        if python_backend_error is not None:
+            try:
+                backend_reason = python_backend_error()
+                if backend_reason:
+                    reason = backend_reason
+            except Exception:
+                pass
         raise RuntimeError(
             "Pulsim Python runtime backend unavailable. "
-            "Build Python bindings and expose them via build/python or install pulsim package."
+            "Build Python bindings and expose them via build/python or install pulsim package. "
+            f"Reason: {reason}"
         )
 
     raw_result = run_pulsim_python(
@@ -588,10 +599,18 @@ def main() -> int:
     if yaml is None:
         raise SystemExit("PyYAML is required. Install with: pip install pyyaml")
 
-    if not can_use_pulsim_python_backend():
+    backend_reason = None
+    if python_backend_error is not None:
+        try:
+            backend_reason = python_backend_error()
+        except Exception as exc:
+            backend_reason = f"{exc.__class__.__name__}: {exc}"
+
+    if backend_reason is not None:
         raise SystemExit(
             "Pulsim Python runtime backend unavailable. "
-            "Build Python bindings and expose build/python on PYTHONPATH or install pulsim package."
+            "Build Python bindings and expose build/python on PYTHONPATH or install pulsim package. "
+            f"Reason: {backend_reason}"
         )
 
     results = run_benchmarks(

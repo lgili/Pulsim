@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pulsim"
-version = "0.4.1"
+version = "0.5.0"
 description = "High-performance circuit simulator for power electronics"
 readme = "README.md"
 license = {text = "MIT"}
@@ -53,6 +53,8 @@ docs = [
     "mkdocs-material>=9.5,<9.6",
     "mike>=2.1,<3.0",
     "pymdown-extensions>=10.9,<11.0",
+    "mkdocstrings[python]>=1.0",
+    "griffe>=2.0",
 ]
 all = [
     "pulsim[jupyter,data,dev]",
@@ -110,3 +112,7 @@ exclude_lines = [
 [tool.ruff.lint]
 select = ["E", "F", "W"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"python/pulsim/remote/*_pb2.py" = ["E402", "F401"]
+"python/pulsim/remote/*_pb2_grpc.py" = ["F401"]
