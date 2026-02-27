@@ -213,7 +213,9 @@ jobs:
           CC: ${{ runner.os == 'Linux' && 'clang-17' || '' }}
           CXX: ${{ runner.os == 'Linux' && 'clang++-17' || '' }}
         run: |
-          pip install -e ".[dev]"
+          # Use non-editable install in CI to avoid import-time rebuilds with
+          # transient pip build-env paths (Windows runner instability).
+          pip install ".[dev]"
 
       - name: Run Python tests
         run: |
@@ -317,7 +319,7 @@ jobs:
           CC: clang-17
           CXX: clang++-17
         run: |
-          pip install -e ".[dev]"
+          pip install ".[dev]"
 
       - name: Run benchmark suite
         run: |
