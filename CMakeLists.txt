@@ -315,38 +315,64 @@ include(FetchContent)
 # Eigen - header-only dependency
 # Prefer system package in CI to avoid network flakiness, then fall back to fetch.
 find_package(Eigen3 3.4 QUIET NO_MODULE)
+
+# Some CMake/Python build environments miss Homebrew prefixes by default.
+if(NOT TARGET Eigen3::Eigen)
+    find_package(Eigen3 3.4 QUIET NO_MODULE
+        PATHS
+            /opt/homebrew/opt/eigen
+            /usr/local/opt/eigen
+        PATH_SUFFIXES
+            share/eigen3/cmake
+    )
+endif()
+
 if(TARGET Eigen3::Eigen)
     message(STATUS "Eigen3: using system package")
 else()
-    set(PULSIM_EIGEN_GIT_REPOSITORY "https://github.com/libeigen/eigen.git" CACHE STRING "Eigen git repository")
-    message(STATUS "Eigen3: system package not found, fetching from ${PULSIM_EIGEN_GIT_REPOSITORY}")
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28")
-        FetchContent_Declare(
-            eigen
-            GIT_REPOSITORY ${PULSIM_EIGEN_GIT_REPOSITORY}
-            GIT_TAG 3.4.0
-            GIT_SHALLOW TRUE
-            EXCLUDE_FROM_ALL
+    # Last local fallback for environments with headers installed but no CMake config package.
+    find_path(PULSIM_EIGEN3_INCLUDE_DIR
+        NAMES Eigen/Core
+        PATHS
+            /opt/homebrew/include
+            /usr/local/include
+            /usr/include
+        PATH_SUFFIXES
+            eigen3
+    )
+
+    if(PULSIM_EIGEN3_INCLUDE_DIR)
+        message(STATUS "Eigen3: using headers from ${PULSIM_EIGEN3_INCLUDE_DIR}")
+        add_library(Eigen3::Eigen INTERFACE IMPORTED)
+        set_target_properties(Eigen3::Eigen PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${PULSIM_EIGEN3_INCLUDE_DIR}"
         )
     else()
-        FetchContent_Declare(
-            eigen
-            GIT_REPOSITORY ${PULSIM_EIGEN_GIT_REPOSITORY}
-            GIT_TAG 3.4.0
-            GIT_SHALLOW TRUE
+        # Network fallback uses archive download (no git credentials required).
+        set(PULSIM_EIGEN_ARCHIVE_URL
+            "https://codeload.github.com/libeigen/eigen/tar.gz/refs/tags/3.4.0"
+            CACHE STRING "Eigen source archive URL"
+        )
+        message(STATUS "Eigen3: system package not found, downloading ${PULSIM_EIGEN_ARCHIVE_URL}")
+
+        # Use populate-only mode so Eigen's own CMake targets/tests are never added.
+        set(_pulsim_eigen_source_dir "${CMAKE_BINARY_DIR}/_deps/eigen-src")
+        set(_pulsim_eigen_subbuild_dir "${CMAKE_BINARY_DIR}/_deps/eigen-subbuild")
+        if(NOT EXISTS "${_pulsim_eigen_source_dir}/Eigen/Core")
+            FetchContent_Populate(
+                eigen
+                SOURCE_DIR "${_pulsim_eigen_source_dir}"
+                SUBBUILD_DIR "${_pulsim_eigen_subbuild_dir}"
+                URL ${PULSIM_EIGEN_ARCHIVE_URL}
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            )
+        endif()
+
+        add_library(Eigen3::Eigen INTERFACE IMPORTED)
+        set_target_properties(Eigen3::Eigen PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${_pulsim_eigen_source_dir}"
         )
     endif()
-
-    # Use populate-only mode so Eigen's own CMake targets/tests are never added.
-    FetchContent_GetProperties(eigen)
-    if(NOT eigen_POPULATED)
-        FetchContent_Populate(eigen)
-    endif()
-
-    add_library(Eigen3::Eigen INTERFACE IMPORTED)
-    set_target_properties(Eigen3::Eigen PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${eigen_SOURCE_DIR}"
-    )
 endif()
 
 # yaml-cpp - YAML parser
