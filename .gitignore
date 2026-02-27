@@ -11,6 +11,7 @@ cmake-build-*/
 benchmarks/out_*/
 benchmarks/ltspice/
 .gemini/
+.claude/
 # IDE
 .idea/
 .vscode/
