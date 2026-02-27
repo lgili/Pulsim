@@ -95,6 +95,11 @@ LTSPICE_OUT ?= benchmarks/ltspice_out_converters
 LTSPICE_EXE ?= /Applications/LTspice.app/Contents/MacOS/LTspice
 CONVERTER_BENCH_IDS ?= buck_switching boost_switching_complex interleaved_buck_3ph buck_mosfet_nonlinear
 BENCHMARK_TABLE_TITLE ?= Converters: Runtime vs LTspice
+LOCAL_LIMIT_MANIFEST ?= benchmarks/local_limit/benchmarks_local_limit.yaml
+LOCAL_LIMIT_OUT ?= benchmarks/out_local_limit
+LOCAL_LIMIT_MODE ?= both
+LOCAL_LIMIT_DURATION_SCALE ?= 1.0
+LOCAL_LIMIT_MAX_RUNTIME ?=
 
 # =============================================================================
 # PHONY Targets
@@ -103,7 +108,7 @@ BENCHMARK_TABLE_TITLE ?= Converters: Runtime vs LTspice
         lib cli grpc python \
         test test-quick test-converters test-verbose test-list \
         pytest test-all test-coverage \
-        benchmark benchmark-converters benchmark-converters-baselines benchmark-ltspice benchmark-converters-compare benchmark-table \
+        benchmark benchmark-converters benchmark-converters-baselines benchmark-ltspice benchmark-converters-compare benchmark-table benchmark-local-limit \
         clean distclean \
         install uninstall \
         format format-cpp format-python format-check \
@@ -151,6 +156,7 @@ help:
 	@echo "  make benchmark-ltspice              Run LTspice parity for converter benchmarks"
 	@echo "  make benchmark-converters-compare   Run runtime + LTspice parity and print one table"
 	@echo "  make benchmark-table                Print table from existing benchmark outputs"
+	@echo "  make benchmark-local-limit          Run local fixed+variable limit suite (10 progressive circuits)"
 	@echo ""
 	@echo "Install targets:"
 	@echo "  make install        Install to $(PREFIX)"
@@ -370,6 +376,15 @@ benchmark-table:
 		echo "Run: make benchmark-converters or make benchmark-converters-compare"; \
 		exit 1; \
 	fi
+
+benchmark-local-limit: python
+	@echo "Running local limit suite ($(LOCAL_LIMIT_MODE), duration scale=$(LOCAL_LIMIT_DURATION_SCALE))..."
+	@set -e; \
+	CMD="PYTHONPATH=$(BUILD_DIR)/python $(PYTHON) benchmarks/local_limit_suite.py --manifest $(LOCAL_LIMIT_MANIFEST) --output-dir $(LOCAL_LIMIT_OUT) --mode $(LOCAL_LIMIT_MODE) --duration-scale $(LOCAL_LIMIT_DURATION_SCALE)"; \
+	if [ -n "$(LOCAL_LIMIT_MAX_RUNTIME)" ]; then \
+		CMD="$$CMD --max-runtime-s $(LOCAL_LIMIT_MAX_RUNTIME)"; \
+	fi; \
+	eval "$$CMD"
 
 # =============================================================================
 # Install/Uninstall

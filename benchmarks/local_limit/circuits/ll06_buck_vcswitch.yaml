@@ -1,0 +1,59 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll06_buck_vcswitch
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 2e-3
+  dt: 0.2e-6
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 48.0
+  - type: voltage_source
+    name: Vpwm
+    nodes: [ctrl, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.42
+      dead_time: 120e-9
+  - type: vcswitch
+    name: S1
+    nodes: [ctrl, vin, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: resistor
+    name: Rdcr
+    nodes: [sw, n_l]
+    value: 25m
+  - type: inductor
+    name: L1
+    nodes: [n_l, out]
+    value: 68u
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 220u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 6.8
+  - type: resistor
+    name: Rbleed
+    nodes: [sw, 0]
+    value: 1e6

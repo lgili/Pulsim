@@ -1,0 +1,67 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll08_buck_mosfet
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 500e-6
+  dt: 0.2e-6
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 24.0
+
+  - type: voltage_source
+    name: Vgate
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 35.0
+      v_low: 0.0
+      frequency: 80000
+      duty: 0.36
+      dead_time: 80e-9
+
+  - type: mosfet
+    name: M1
+    nodes: [gate, vin, sw]
+    vth: 3.0
+    kp: 0.20
+    lambda: 0.01
+    g_off: 1e-8
+
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    g_on: 150.0
+    g_off: 1e-6
+
+  - type: resistor
+    name: Rdcr
+    nodes: [sw, n_l]
+    value: 20m
+  - type: inductor
+    name: L1
+    nodes: [n_l, out]
+    value: 220u
+
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 220u
+
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 8.0
+
+  - type: resistor
+    name: Rbleed_sw
+    nodes: [sw, 0]
+    value: 1e6
