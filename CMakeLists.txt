@@ -378,6 +378,18 @@ if(PULSIM_BUILD_TESTS)
         )
     endif()
 
+    # Linux Clang sanitizer jobs use libc++; ensure Catch2 is compiled with the
+    # same standard library to avoid ABI mismatches (std::__1 vs std::__cxx11).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        foreach(_catch_target Catch2 Catch2WithMain)
+            if(TARGET ${_catch_target})
+                target_compile_options(${_catch_target} PUBLIC -stdlib=libc++)
+                target_link_options(${_catch_target} INTERFACE -stdlib=libc++ -lc++abi)
+            endif()
+        endforeach()
+        message(STATUS "Catch2: forcing libc++ for Linux Clang ABI compatibility")
+    endif()
+
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(CTest)
     include(Catch)

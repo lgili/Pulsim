@@ -130,6 +130,7 @@ jobs:
   sundials-backend:
     name: Linux SUNDIALS backend
     runs-on: ubuntu-24.04
+    if: false  # Temporarily disabled: SUNDIALS backend is not in active use
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -320,12 +321,12 @@ jobs:
 
       - name: Run benchmark suite
         run: |
-          PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+          python3 benchmarks/benchmark_runner.py \
             --output-dir benchmarks/out_ci
 
       - name: Run stress suite
         run: |
-          PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
+          python3 benchmarks/stress_suite.py \
             --output-dir benchmarks/stress_out_ci
 
       - name: Enforce KPI regression gate

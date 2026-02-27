@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import sys
 import time
 from dataclasses import dataclass
@@ -20,25 +21,64 @@ class BackendRunResult:
 
 
 def _import_pulsim():
-    try:
-        import pulsim as ps
-
-        return ps
-    except Exception:
-        pass
-
     repo_root = Path(__file__).resolve().parent.parent
     build_python = repo_root / "build" / "python"
-    if build_python.exists():
-        build_python_str = str(build_python)
-        if build_python_str not in sys.path:
-            sys.path.insert(0, build_python_str)
+
+    def _clear_pulsim_modules() -> None:
+        stale = [name for name in list(sys.modules) if name == "pulsim" or name.startswith("pulsim.")]
+        for name in stale:
+            sys.modules.pop(name, None)
+
+    def _attempt_import() -> object | None:
         try:
             import pulsim as ps
 
             return ps
         except Exception:
             return None
+
+    def _purge_shadow_paths() -> None:
+        repo_build_python = str(build_python.resolve()) if build_python.exists() else None
+        cleaned: list[str] = []
+        for path in sys.path:
+            try:
+                resolved = str(Path(path).resolve())
+            except Exception:
+                resolved = path
+
+            normalized = resolved.replace("\\", "/")
+            is_shadow = normalized.endswith("/build/python")
+            if repo_build_python is not None and resolved == repo_build_python:
+                is_shadow = True
+
+            if not is_shadow:
+                cleaned.append(path)
+        sys.path[:] = cleaned
+
+    importlib.invalidate_caches()
+    ps = _attempt_import()
+    if ps is not None:
+        return ps
+
+    # If import failed due to a shadow package on PYTHONPATH (common in CI),
+    # retry after removing build/python-like entries and clearing stale modules.
+    _clear_pulsim_modules()
+    _purge_shadow_paths()
+    importlib.invalidate_caches()
+    ps = _attempt_import()
+    if ps is not None:
+        return ps
+
+    # Last fallback: explicitly prepend local build/python when available.
+    if build_python.exists():
+        build_python_str = str(build_python)
+        if build_python_str not in sys.path:
+            sys.path.insert(0, build_python_str)
+        _clear_pulsim_modules()
+        importlib.invalidate_caches()
+        ps = _attempt_import()
+        if ps is not None:
+            return ps
 
     return None
 
