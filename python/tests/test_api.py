@@ -508,14 +508,15 @@ class TestTransient:
 
         # Run transient for 5*tau
         tau = 1e-3  # 1ms
-        times, states, success, msg = ps.run_transient(ckt, 0.0, 5*tau, tau/100)
+        x0 = ckt.initial_state()
+        times, states, success, msg = ps.run_transient(ckt, 0.0, 5*tau, tau/100, x0)
 
         assert success
         assert len(times) > 0
         assert len(states) == len(times)
 
         # Check at t=tau: V should be ~63.2% of final
-        idx_tau = next((i for i, t in enumerate(times) if t >= tau), len(times) - 1)
+        idx_tau = min(range(len(times)), key=lambda i: abs(times[i] - tau))
         v_cap = states[idx_tau][1]
         expected = 5.0 * (1 - math.exp(-1))
         assert abs(v_cap - expected) < 0.1

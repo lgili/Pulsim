@@ -77,13 +77,28 @@ endif()
 
 # LTO (Link-Time Optimization) - significant performance improvement
 if(PULSIM_ENABLE_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
-    if(LTO_SUPPORTED)
-        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-        message(STATUS "LTO: Enabled (interprocedural optimization)")
+    # Some CI/editable-build environments can expose mismatched CMake module
+    # roots (e.g. pip build env cleanup on Windows), making CheckIPOSupported
+    # fail while probing. In that case, disable LTO gracefully.
+    set(_ipo_template "${CMAKE_ROOT}/Modules/CheckIPOSupported/CMakeLists-CXX.txt.in")
+    if(EXISTS "${_ipo_template}")
+        include(CheckIPOSupported)
+        if(COMMAND check_ipo_supported)
+            check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
+            if(LTO_SUPPORTED)
+                set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+                message(STATUS "LTO: Enabled (interprocedural optimization)")
+            else()
+                message(WARNING "LTO: Not supported - ${LTO_ERROR}")
+            endif()
+        else()
+            message(WARNING "LTO: check_ipo_supported() unavailable; disabling LTO for this configure")
+        endif()
     else()
-        message(WARNING "LTO: Not supported - ${LTO_ERROR}")
+        message(WARNING
+            "LTO: IPO template not found at '${_ipo_template}'. "
+            "Disabling LTO for this configure (likely transient CMake module path in CI)."
+        )
     endif()
 endif()
 
@@ -345,6 +360,24 @@ if(PULSIM_BUILD_TESTS)
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Catch2)
+
+    # GCC 14 + libstdc++ can fail compiling Catch2 internals in C++23 mode.
+    # Keep our code on C++23, but build Catch2 itself with C++17.
+    if(TARGET Catch2)
+        set_target_properties(Catch2 PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS OFF
+        )
+    endif()
+    if(TARGET Catch2WithMain)
+        set_target_properties(Catch2WithMain PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS OFF
+        )
+    endif()
+
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(CTest)
     include(Catch)
