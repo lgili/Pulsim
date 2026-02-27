@@ -395,6 +395,14 @@ if(TARGET yaml-cpp)
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS OFF
     )
+
+    # Linux Clang C++ builds use libc++; compile yaml-cpp with the same
+    # standard library to avoid std::__1 vs std::__cxx11 link mismatches.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
+        target_compile_options(yaml-cpp PUBLIC -stdlib=libc++)
+        target_link_options(yaml-cpp PUBLIC -stdlib=libc++ -lc++abi)
+        message(STATUS "yaml-cpp: forcing libc++ for Linux Clang ABI compatibility")
+    endif()
 endif()
 
 # Catch2 for testing (v3.8.0+ required for GCC 14 compatibility)
