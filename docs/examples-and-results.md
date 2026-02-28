@@ -1,8 +1,8 @@
 # Examples and Results
 
-Esta seção mostra como rodar exemplos reais e quais resultados observar para validar a simulação.
+This page focuses on practical backend runs with expected outputs and validation criteria.
 
-## Exemplo 1: RC step (sanity check)
+## Example 1: RC Step (sanity baseline)
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
@@ -10,13 +10,13 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
   --output-dir benchmarks/out_rc
 ```
 
-Sinais esperados:
+Expected behavior:
 
-- `V(out)` sobe exponencialmente;
-- erro analítico baixo (`max_error` pequeno);
-- poucas ou zero rejeições de timestep.
+- `V(out)` rises exponentially.
+- very low analytical error for RC waveform.
+- low rejection count and no unstable fallback loop.
 
-## Exemplo 2: Buck converter
+## Example 2: Buck Converter (switching transient)
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
@@ -24,27 +24,50 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
   --output-dir benchmarks/out_buck
 ```
 
-Checagens:
+Checkpoints:
 
-- regime estacionário no duty esperado;
-- ripple de saída coerente com L/C e frequência;
-- sem explosão de `fallbacks`.
+- output settles around expected duty-dependent value.
+- ripple remains physically plausible for chosen L/C and switching frequency.
+- telemetry does not show runaway fallback escalation.
 
-## Exemplo 3: Electro-thermal
+## Example 3: Closed-Loop Buck (controller + PWM path)
 
-Use um netlist com bloco térmico ativo e perdas habilitadas.
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only buck_mosfet_nonlinear \
+  --output-dir benchmarks/out_cl_buck
+```
 
-Indicadores:
+Checkpoints:
 
-- temperatura sobe com perdas;
-- `thermal_summary.max_temperature` dentro do esperado;
-- eficiência em `loss_summary.efficiency`.
+- duty command remains bounded in `[0, 1]`.
+- output tracks reference without persistent divergence.
+- control path remains deterministic between runs.
 
-## Resultado estruturado
+## Example 4: Electro-Thermal Scenario
 
-`results.json` (benchmark) e `parity_results.json` (paridade) são os arquivos principais para automação.
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
+  --output-dir benchmarks/out_electrothermal
+```
 
-Exemplo simplificado:
+Checkpoints:
+
+- device temperatures increase consistently with losses.
+- `thermal_summary.max_temperature` remains within design envelope.
+- efficiency and loss totals are coherent with operating point.
+
+## Output Artifacts for Automation
+
+Main files used in CI/regression tooling:
+
+- `results.json`: benchmark metrics and telemetry summaries
+- `results.csv`: tabular benchmark export
+- `parity_results.json`: external simulator parity metrics
+- `stress_results.json`: tiered stress evaluation
+
+### Minimal `results.json` shape
 
 ```json
 {
@@ -61,32 +84,13 @@ Exemplo simplificado:
 }
 ```
 
-## Notebooks recomendados
+## Notebook Coverage
 
-- `examples/notebooks/00_notebook_index.ipynb`
-- `examples/notebooks/02_buck_converter.ipynb`
-- `examples/notebooks/forward_converter_design.ipynb`
-- `examples/notebooks/03_thermal_modeling.ipynb`
-- `examples/notebooks/10_benchmarks.ipynb`
+Reference notebooks are under `examples/notebooks` and include:
 
-## Comparação com SPICE
+- first-contact setup
+- converter design scenarios
+- thermal modeling
+- benchmark and validation workflows
 
-```bash
-PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
-  --backend ngspice \
-  --output-dir benchmarks/ngspice_out
-```
-
-```bash
-PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
-  --backend ltspice \
-  --ltspice-exe "/Applications/LTspice.app/Contents/MacOS/LTspice" \
-  --output-dir benchmarks/ltspice_out
-```
-
-Compare:
-
-- `max_error` / `rms_error`
-- erro de fase (`phase_error_deg`)
-- erro em regime permanente (`steady_state_*`)
-- tempo total de execução.
+See [Notebooks](notebooks.md) for execution details.

@@ -1,50 +1,46 @@
 # Docs Versioning and Release
 
-As docs são publicadas por versão usando tags Git e `mike`.
+PulsimCore documentation is published to GitHub Pages using **MkDocs Material + mike**.
 
-## Como publicar uma nova versão
+## Publish Model
 
-1. Atualize código e docs no branch principal.
-2. Atualize a versão em todos os arquivos gerenciados:
+- Pull requests: strict docs build only (no deploy).
+- Push to `main`: deploy documentation snapshot as `dev`.
+- Push of release tags `vX.Y.Z`: deploy versioned docs (`X.Y.Z`) and update `latest`.
+
+This gives fast iteration on `main` and stable, versioned release docs.
+
+## Manual Release Procedure
+
+1. Update project version metadata.
+2. Commit code + docs changes.
+3. Create and push a semantic tag.
 
 ```bash
-python scripts/update_version.py 0.3.4
+python scripts/update_version.py 0.5.2
+git tag v0.5.2
+git push origin main --tags
 ```
 
-3. Crie tag no formato `vX.Y.Z` (semver).
-4. Faça push da tag.
+## Workflow Guarantees
 
-```bash
-git tag v0.3.4
-git push origin v0.3.4
-```
+- `mkdocs build --strict` runs before deploy.
+- invalid tag formats are rejected.
+- version selector remains available in UI through `mike`.
 
-## O que o pipeline faz
+## GitHub Pages Setup
 
-- workflow acionado apenas por `push` de tags de versão (`vX.Y.Z`, com opcional sufixo);
-- build `mkdocs --strict`;
-- deploy em `gh-pages` com:
-  - versão numérica (`0.3.0`);
-  - alias `latest`;
-- mantém versões antigas no branch `gh-pages`.
+In repository settings:
 
-> Não há deploy de docs em push de branch/pull request.
-> Sem tag de release, o site publicado não muda.
+1. Open **Settings -> Pages**.
+2. Set **Source** to **GitHub Actions**.
+3. Keep `gh-pages` branch managed only by docs workflow/mike.
 
-## Seleção de versão na UI
+## Rollback Strategy
 
-A UI usa `Material for MkDocs` + `mike` com seletor de versão habilitado.
+If documentation quality regresses:
 
-Você consegue alternar entre:
+1. fix docs in a patch commit;
+2. publish a new patch tag (`vX.Y.(Z+1)`).
 
-- `latest` (versão padrão);
-- releases antigas (`0.2.0`, `0.2.1`, etc.).
-
-## Rollback simples
-
-Se uma versão publicada ficou ruim:
-
-1. ajuste docs no commit correto;
-2. publique novo patch (`vX.Y.(Z+1)`).
-
-Evite reusar tag já publicada para não quebrar histórico.
+Avoid force-reusing an existing published tag.

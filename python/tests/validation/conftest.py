@@ -3,6 +3,7 @@
 import pytest
 import sys
 import os
+import glob
 
 
 def _ensure_pulsim_path():
@@ -12,9 +13,22 @@ def _ensure_pulsim_path():
         "..", "..", "..", "build", "python"
     )
     build_path = os.path.abspath(build_path)
-    if os.path.exists(build_path):
-        # Remove any existing occurrence then force to the front
-        sys.path = [p for p in sys.path if os.path.abspath(p) != build_path]
+
+    source_python_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..")
+    )
+
+    package_dir = os.path.join(build_path, "pulsim")
+    has_native_extension = any(
+        glob.glob(os.path.join(package_dir, pattern))
+        for pattern in ("_pulsim*.so", "_pulsim*.pyd", "_pulsim*.dylib")
+    )
+
+    # Remove any existing occurrence before deciding which package root to use.
+    sys.path = [p for p in sys.path if os.path.abspath(p) != build_path]
+    sys.path = [p for p in sys.path if os.path.abspath(p) != source_python_path]
+
+    if has_native_extension:
         sys.path.insert(0, build_path)
 
 

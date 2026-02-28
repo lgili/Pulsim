@@ -1,31 +1,28 @@
-# Pulsim User Guide (Python-Only)
+# User Guide
 
-Pulsim é um simulador de eletrônica de potência com kernel unificado v1 e runtime
-suportado em Python.
+PulsimCore exposes a stable backend workflow centered on the Python package `pulsim`.
 
-## Escopo suportado
+## Supported Product Surface
 
-- Python runtime: `import pulsim`
-- Netlist versionado em YAML (`schema: pulsim-v1`)
-- Ferramentas de benchmark/paridade/stress em `benchmarks/`
+Supported:
 
-Não faz parte da superfície suportada:
+- Python runtime (`import pulsim`)
+- YAML netlists with `schema: pulsim-v1`
+- Benchmark/parity/stress tooling under `benchmarks/`
 
-- workflows legacy de CLI
-- gRPC como caminho principal de uso
-- carregamento de netlist JSON
+Not part of the supported product surface:
 
-## Fluxo recomendado
+- Legacy CLI-first workflows
+- Legacy gRPC surface as primary integration path
+- JSON netlist loading as a canonical input format
 
-1. Compile as bindings Python (`cmake ... -DPULSIM_BUILD_PYTHON=ON`).
-2. Exporte `PYTHONPATH=build/python`.
-3. Carregue YAML com `YamlParser`.
-4. Rode `Simulator(...).run_transient(...)`.
-5. Valide com benchmark/paridade/stress.
+## Canonical Backend Workflow
 
-Por padrão, as APIs Python de transiente já aplicam perfil robusto (fallback de solver, damping/trust-region e fallback de gmin) para reduzir falhas de convergência em conversores.
-
-## Exemplo mínimo
+1. Build or install the Python package.
+2. Load a YAML netlist with `YamlParser`.
+3. Validate/update `SimulationOptions`.
+4. Run `Simulator(...).run_transient(...)`.
+5. Consume waveforms and telemetry.
 
 ```python
 import pulsim as ps
@@ -39,20 +36,53 @@ options.step_mode = ps.StepMode.Variable
 
 sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
-
-print("ok:", result.success, "steps:", result.total_steps)
-print("capabilities:", ps.backend_capabilities())
 ```
 
-Fluxo canônico de transiente:
+## Core Concepts
 
-- escolha apenas `options.step_mode = ps.StepMode.Fixed` ou `ps.StepMode.Variable`;
-- backend legado (`transient_backend`/`sundials`) não faz parte do caminho suportado.
+### 1. Circuit and Topology
 
-## Onde continuar
+- `Circuit` holds nodes, devices, virtual channels, and runtime state.
+- Parser-generated circuits are deterministic and suitable for CI reproducibility.
 
-- Formato YAML completo: `netlist-format`
-- API Python: `python-api`
-- Benchmark/paridade/LTspice: `benchmarks-and-parity`
-- Matriz GUI -> backend: `gui-component-parity`
-- Migração e compatibilidade: `migration-guide`
+### 2. Simulation Options
+
+Use `SimulationOptions` to control:
+
+- time window and timestep strategy (`Fixed` vs `Variable`)
+- nonlinear convergence (`NewtonOptions`)
+- linear solver stack and fallback behavior
+- event handling, periodic methods, and thermal coupling
+
+### 3. Telemetry and Diagnostics
+
+The backend reports structured diagnostics such as:
+
+- solver/fallback traces
+- linear solver telemetry
+- event metadata
+- thermal summary / loss metrics
+
+This data should be consumed in CI gates instead of relying on visual-only inspection.
+
+## Recommended Configuration Baseline
+
+For switched converters in production-like runs:
+
+- start with variable timestep
+- keep robust fallback policy enabled
+- monitor rejection ratio and fallback causes
+- add KPI regression thresholds before merging solver changes
+
+## Integration Tips
+
+- Always set `num_nodes` and `num_branches` when manually composing options.
+- Keep YAML netlists as source-of-truth artifacts for reproducibility.
+- Prefer explicit benchmark manifests instead of ad-hoc scripts in CI.
+
+## Where To Go Next
+
+- [Netlist YAML Format](netlist-format.md)
+- [Examples and Results](examples-and-results.md)
+- [Benchmarks and Parity](benchmarks-and-parity.md)
+- [Troubleshooting](troubleshooting.md)

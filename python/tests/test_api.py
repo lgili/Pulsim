@@ -57,10 +57,11 @@ if build_path:
         sys.path.remove(build_path)
     sys.path.insert(0, build_path)
 
-# Remove any cached pulsim modules to ensure we get the right one
-for mod in list(sys.modules.keys()):
-    if mod.startswith('pulsim'):
-        del sys.modules[mod]
+# Only clear cached modules when we actively switched sys.path to a build tree.
+if build_path:
+    for mod in list(sys.modules.keys()):
+        if mod.startswith('pulsim'):
+            del sys.modules[mod]
 
 # Import pulsim
 try:

@@ -1,35 +1,29 @@
 # Notebooks
 
-Os notebooks ficam em `/examples/notebooks` e usam a biblioteca Python (`import pulsim`).
+Jupyter notebooks live in `examples/notebooks` and use the same backend runtime (`import pulsim`) used by scripts and CI.
 
-## Executar um notebook
+## Launch Locally
 
 ```bash
 PYTHONPATH=build/python python3 -m jupyter notebook
 ```
 
-Depois abra, por exemplo:
+Recommended sequence:
 
 - `examples/notebooks/00_notebook_index.ipynb`
 - `examples/notebooks/01_getting_started.ipynb`
 - `examples/notebooks/02_buck_converter.ipynb`
 - `examples/notebooks/03_thermal_modeling.ipynb`
-- `examples/notebooks/forward_converter_design.ipynb`
-- `examples/notebooks/18_buck_mosfet_pwm_block.ipynb`
 - `examples/notebooks/10_benchmarks.ipynb`
-- `examples/notebooks/15_new_components_catalog.ipynb`
-- `examples/notebooks/16_control_blocks_mixed_domain.ipynb`
-- `examples/notebooks/17_protection_magnetics_probes.ipynb`
 
-## Novos notebooks (componentes GUI/backend)
+Advanced catalog/coverage notebooks:
 
-- `00_notebook_index.ipynb`: hub com trilha recomendada (base -> conversores -> componentes novos -> benchmark/validacao).
-- `15_new_components_catalog.ipynb`: valida o parser com todos os componentes novos.
-- `16_control_blocks_mixed_domain.ipynb`: exemplos de blocos de controle e roteamento de sinais.
-- `17_protection_magnetics_probes.ipynb`: eventos de protecao/chaveamento, magneticos e probes.
-- `18_buck_mosfet_pwm_block.ipynb`: buck com MOSFET no estagio de potencia e `pwm_generator` comandando duty.
+- `15_new_components_catalog.ipynb`
+- `16_control_blocks_mixed_domain.ipynb`
+- `17_protection_magnetics_probes.ipynb`
+- `18_buck_mosfet_pwm_block.ipynb`
 
-## Executar em modo não interativo (CI/local)
+## Execute Headless (CI/local automation)
 
 ```bash
 PYTHONPATH=build/python MPLBACKEND=Agg python3 -m nbconvert \
@@ -40,7 +34,8 @@ PYTHONPATH=build/python MPLBACKEND=Agg python3 -m nbconvert \
   examples/pulsim_tutorial.ipynb
 ```
 
-## Dicas
+## Notebook Environment Tips
 
-- Use o mesmo Python ABI do módulo compilado (`cp313`, `cp314`, etc.).
-- Se houver erro de import, confirme o `PYTHONPATH=build/python`.
+- Keep notebook Python ABI aligned with the built extension (e.g., `cp313`, `cp314`).
+- If import fails, validate `PYTHONPATH=build/python` first.
+- Prefer deterministic seeds and fixed benchmark manifests when publishing figures.

@@ -1,5 +1,5 @@
 site_name: PulsimCore
-site_description: Python-first power electronics simulation with YAML netlists
+site_description: High-performance backend for power electronics simulation (Python-first + YAML netlists)
 site_url: https://lgili.github.io/Pulsim/
 repo_url: https://github.com/lgili/Pulsim
 repo_name: lgili/Pulsim
@@ -10,6 +10,9 @@ exclude_docs: |
   __pycache__/
   python/
   refactor-python-only-v1-hardening/
+  cpp-v1-layer-map.md
+  solver-refactor-phase0-baseline.md
+  solver-refactor-phase11-electrothermal-gate.md
   convergence-algorithms.md
   determinism.md
   performance-tuning.md
@@ -17,7 +20,7 @@ exclude_docs: |
 
 theme:
   name: material
-  language: pt-BR
+  language: en
   logo: material/flash
   favicon: null
   palette:
@@ -28,7 +31,7 @@ theme:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: teal
-      accent: lime
+      accent: light blue
   features:
     - navigation.tabs
     - navigation.tabs.sticky
@@ -100,18 +103,25 @@ extra_css:
   - assets/stylesheets/extra.css
 
 nav:
-  - Home: index.md
-  - Getting Started: getting-started.md
-  - User Guide: user-guide.md
-  - Configuration: configuration.md
-  - API Reference: api-reference.md
-  - Python API (legacy): python-api.md
-  - Netlist YAML: netlist-format.md
-  - Examples and Results: examples-and-results.md
-  - Benchmarks and Parity: benchmarks-and-parity.md
-  - GUI Backend Parity: gui-component-parity.md
-  - Notebooks: notebooks.md
-  - Docs Versioning: versioning-and-release.md
-  - Device Models: device-models.md
-  - Convergence Tuning: convergence-tuning-guide.md
-  - Migration Guide: migration-guide.md
+  - Overview:
+      - Documentation Home: index.md
+      - Backend Architecture: backend-architecture.md
+      - Getting Started: getting-started.md
+  - Guides:
+      - User Guide: user-guide.md
+      - Netlist YAML Format: netlist-format.md
+      - Examples and Results: examples-and-results.md
+      - Benchmarks and Parity: benchmarks-and-parity.md
+      - Notebooks: notebooks.md
+      - Convergence Tuning: convergence-tuning-guide.md
+      - Troubleshooting: troubleshooting.md
+  - API:
+      - API Reference: api-reference.md
+      - Python API (Legacy Notes): python-api.md
+  - Compatibility:
+      - GUI Backend Parity: gui-component-parity.md
+      - Migration Guide: migration-guide.md
+      - Device Models: device-models.md
+  - Operations:
+      - Configuration: configuration.md
+      - Docs Versioning and Release: versioning-and-release.md

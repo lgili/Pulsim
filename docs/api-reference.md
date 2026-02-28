@@ -1,13 +1,11 @@
 # API Reference
 
-Documentação gerada automaticamente a partir dos type stubs do módulo `pulsim`.
+This page is generated from the `pulsim` package surface (stubs + public exports).
 
-!!! tip "Uso canônico"
-    A superfície suportada é `import pulsim as ps`. Use `YamlParser` + `SimulationOptions` + `Simulator` para novas integrações.
+!!! tip "Canonical usage"
+    For new integrations, prefer `YamlParser` + `SimulationOptions` + `Simulator`.
 
-## Circuit Builder
-
-Construtores e tipos para montar o circuito antes da simulação.
+## Circuit Runtime
 
 ::: pulsim.Circuit
 
@@ -17,9 +15,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.VirtualChannelMetadata
 
----
-
-## Dispositivos Lineares
+## Linear Devices
 
 ::: pulsim.Resistor
 
@@ -31,9 +27,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.CurrentSource
 
----
-
-## Dispositivos Não-Lineares
+## Nonlinear and Switching Devices
 
 ::: pulsim.IdealDiode
 
@@ -47,9 +41,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.IGBT
 
----
-
-## Fontes Variáveis no Tempo
+## Time-Varying Sources
 
 ::: pulsim.PWMParams
 
@@ -67,9 +59,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.PulseVoltageSource
 
----
-
-## Blocos de Controle
+## Control and Signal Blocks
 
 ::: pulsim.PIController
 
@@ -87,17 +77,11 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.LookupTable1D
 
----
-
-## Simulação Principal
-
-### YAML Parser
+## Parser and Simulation Entry Points
 
 ::: pulsim.YamlParserOptions
 
 ::: pulsim.YamlParser
-
-### Simulador
 
 ::: pulsim.Simulator
 
@@ -105,9 +89,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.SimulationResult
 
----
-
-## Configuração do Solver
+## Solver Configuration
 
 ::: pulsim.Tolerances
 
@@ -127,9 +109,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.LinearSolverTelemetry
 
----
-
-## Integração e Timestep
+## Integration and Timestep
 
 ::: pulsim.Integrator
 
@@ -147,9 +127,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.StiffnessConfig
 
----
-
-## DC e Convergência
+## DC and Convergence
 
 ::: pulsim.DCStrategy
 
@@ -165,9 +143,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.DCAnalysisResult
 
----
-
-## Análise Periódica e Harmônica
+## Periodic and Harmonic Analysis
 
 ::: pulsim.PeriodicSteadyStateOptions
 
@@ -177,9 +153,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.HarmonicBalanceResult
 
----
-
-## Térmica e Perdas
+## Thermal and Loss Modeling
 
 ::: pulsim.ThermalCouplingPolicy
 
@@ -227,9 +201,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.ThermalResult
 
----
-
-## Telemetria e Eventos
+## Events and Backend Telemetry
 
 ::: pulsim.SimulationEventType
 
@@ -243,9 +215,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.BackendTelemetry
 
----
-
-## Convergência — Monitoramento
+## Convergence Monitoring
 
 ::: pulsim.IterationRecord
 
@@ -255,11 +225,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.PerVariableConvergence
 
----
-
-## Validação e Benchmark
-
-### Soluções Analíticas
+## Validation and Benchmarks
 
 ::: pulsim.RCAnalytical
 
@@ -269,8 +235,6 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.RLCDamping
 
-### Comparação de Formas de Onda
-
 ::: pulsim.ValidationResult
 
 ::: pulsim.compare_waveforms
@@ -278,8 +242,6 @@ Construtores e tipos para montar o circuito antes da simulação.
 ::: pulsim.export_validation_csv
 
 ::: pulsim.export_validation_json
-
-### Benchmark
 
 ::: pulsim.BenchmarkTiming
 
@@ -289,9 +251,7 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.export_benchmark_json
 
----
-
-## Netlist Parser (Python puro)
+## Pure-Python Utilities
 
 ::: pulsim.ParsedNetlist
 
@@ -305,9 +265,11 @@ Construtores e tipos para montar o circuito antes da simulação.
 
 ::: pulsim.parse_value
 
----
+::: pulsim.SignalEvaluator
 
-## Utilitários de Alto Desempenho
+::: pulsim.AlgebraicLoopError
+
+## Performance Utilities and Enums
 
 ::: pulsim.SIMDLevel
 
@@ -324,9 +286,3 @@ Construtores e tipos para montar o circuito antes da simulação.
 ::: pulsim.backend_capabilities
 
 ::: pulsim.solver_status_to_string
-
----
-
-## run_transient (atalho com retry automático)
-
-::: pulsim.run_transient

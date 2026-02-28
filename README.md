@@ -1,24 +1,20 @@
 # PulsimCore
 
-High-performance power-electronics simulation with a Python-first runtime.
+High-performance backend for power electronics simulation.
 
-## Supported Product Surface
+PulsimCore combines a C++ simulation kernel with a Python-first runtime so you can build, validate, and ship converter simulations with reproducible YAML netlists.
 
-Pulsim is now **Python-only** for user-facing usage:
+## Why PulsimCore
 
-- Supported: `import pulsim` APIs and YAML netlist workflows.
-- Not supported as product surface: legacy CLI, gRPC server/client docs, JSON netlist loading.
-- Core execution engine: unified `v1` kernel.
-
-See:
-
-- `docs/user-guide.md`
-- `docs/migration-guide.md`
-- `openspec/changes/refactor-python-only-v1-hardening/tasks.md`
+- Python-native workflow: `import pulsim`
+- Versioned YAML netlist schema (`pulsim-v1`)
+- Robust transient flow for switched converters (fallback-aware)
+- Mixed-domain support (control, events, thermal coupling)
+- Built-in benchmark, parity, and stress tooling for CI gates
 
 ## Quick Start
 
-### 1) Build local Python bindings
+### Build local bindings
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -27,71 +23,60 @@ cmake -S . -B build -G Ninja \
 cmake --build build -j
 ```
 
-### 2) Run with Python package from local build
+### Run a first simulation
 
 ```bash
 PYTHONPATH=build/python python3 - <<'PY'
 import pulsim as ps
 
-parser_opts = ps.YamlParserOptions()
-parser = ps.YamlParser(parser_opts)
-circuit, sim_opts = parser.load("benchmarks/circuits/rc_step.yaml")
+parser = ps.YamlParser(ps.YamlParserOptions())
+circuit, options = parser.load("benchmarks/circuits/rc_step.yaml")
 
-sim_opts.newton_options.num_nodes = int(circuit.num_nodes())
-sim_opts.newton_options.num_branches = int(circuit.num_branches())
+options.newton_options.num_nodes = int(circuit.num_nodes())
+options.newton_options.num_branches = int(circuit.num_branches())
 
-sim = ps.Simulator(circuit, sim_opts)
+sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
+
 print("success:", result.success, "steps:", result.total_steps)
 PY
 ```
 
-## Benchmarks and Validation
+## Documentation
+
+- Documentation site: [https://lgili.github.io/Pulsim/](https://lgili.github.io/Pulsim/)
+- Getting started guide: [`docs/getting-started.md`](docs/getting-started.md)
+- API reference: [`docs/api-reference.md`](docs/api-reference.md)
+- Benchmarks and parity: [`docs/benchmarks-and-parity.md`](docs/benchmarks-and-parity.md)
+
+## Validation and Performance Workflows
 
 ```bash
-# Benchmark matrix (Python runtime path)
-PYTHONPATH=build/python python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
+# Python runtime tests
+PYTHONPATH=build/python pytest python/tests -v --ignore=python/tests/validation
 
-# External parity (ngspice)
-PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
-  --backend ngspice \
-  --output-dir benchmarks/ngspice_out
+# C++ kernel tests
+ctest --test-dir build --output-on-failure
 
-# External parity (LTspice, explicit executable path required)
-PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
-  --backend ltspice \
-  --ltspice-exe "/Applications/LTspice.app/Contents/MacOS/LTspice" \
-  --output-dir benchmarks/ltspice_out
-
-# Tiered stress suite (A/B/C)
-PYTHONPATH=build/python python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
+# Benchmark suite
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 ```
 
-## Documentation Site
+## Product Surface
 
-Build docs locally:
+Supported user-facing surface:
 
-```bash
-python3 -m pip install -r docs/requirements.txt
-mkdocs build --strict
-```
+- Python runtime (`import pulsim`)
+- YAML netlists (`schema: pulsim-v1`)
 
-Serve locally:
+Legacy CLI/gRPC/JSON-first paths are not the canonical integration target.
 
-```bash
-mkdocs serve
-```
+## Docs Deployment (GitHub Pages)
 
-Versioned deploy:
+Docs are published by `.github/workflows/docs.yml` using MkDocs Material + mike:
 
-- Workflow: `.github/workflows/docs.yml`
-- Trigger: only when pushing semver tags `vX.Y.Z` (example: `v0.5.1`)
-- Framework: `MkDocs Material` + `mike`
-- Deploy mode: `mike` on `gh-pages` branch with version selector enabled (`latest` alias)
-- Old versions remain published and selectable in the docs UI
+- PR: strict docs build
+- `main`: deploy `dev` docs channel
+- `vX.Y.Z` tag: deploy release docs and update `latest`
 
-## Notes
-
-- YAML schema is `pulsim-v1`.
-- Benchmark/parity artifacts are machine-readable (`results.json`, `parity_results.json`, `stress_results.json`).
-- For migration details (removed APIs and timeline), see `docs/migration-guide.md`.
+In repository settings, set **Pages Source** to **GitHub Actions**.
