@@ -2150,7 +2150,7 @@ public:
 
     /// Get workspace matrix (reuses allocation)
     [[nodiscard]] SparseMatrix& get_workspace_matrix(Index rows, Index cols, std::size_t id = 0) {
-        auto key = std::make_tuple(rows, cols, id);
+        WorkspaceMatrixKey key{rows, cols, id};
         const auto [it, inserted] = workspace_matrices_.try_emplace(key, rows, cols);
         if (!inserted && (it->second.rows() != rows || it->second.cols() != cols)) {
             it->second.resize(rows, cols);
@@ -2179,9 +2179,25 @@ public:
     [[nodiscard]] std::size_t arena_allocated() const { return arena_.total_allocated(); }
 
 private:
+    struct WorkspaceMatrixKey {
+        Index rows = 0;
+        Index cols = 0;
+        std::size_t id = 0;
+
+        friend bool operator<(const WorkspaceMatrixKey& lhs, const WorkspaceMatrixKey& rhs) noexcept {
+            if (lhs.rows != rhs.rows) {
+                return lhs.rows < rhs.rows;
+            }
+            if (lhs.cols != rhs.cols) {
+                return lhs.cols < rhs.cols;
+            }
+            return lhs.id < rhs.id;
+        }
+    };
+
     ArenaAllocator arena_;
     std::map<std::pair<std::size_t, std::size_t>, Vector> workspace_vectors_;
-    std::map<std::tuple<Index, Index, std::size_t>, SparseMatrix> workspace_matrices_;
+    std::map<WorkspaceMatrixKey, SparseMatrix> workspace_matrices_;
 };
 
 // =============================================================================
