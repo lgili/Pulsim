@@ -2141,23 +2141,21 @@ public:
     /// Get workspace vector (reuses allocation across timesteps)
     [[nodiscard]] Vector& get_workspace_vector(std::size_t size, std::size_t id = 0) {
         auto key = std::make_pair(size, id);
-        auto it = workspace_vectors_.find(key);
-        if (it != workspace_vectors_.end()) {
-            return it->second;
+        const auto [it, inserted] = workspace_vectors_.try_emplace(key, static_cast<Index>(size));
+        if (!inserted && static_cast<std::size_t>(it->second.size()) != size) {
+            it->second.resize(static_cast<Index>(size));
         }
-        auto [inserted, _] = workspace_vectors_.emplace(key, Vector(size));
-        return inserted->second;
+        return it->second;
     }
 
     /// Get workspace matrix (reuses allocation)
     [[nodiscard]] SparseMatrix& get_workspace_matrix(Index rows, Index cols, std::size_t id = 0) {
         auto key = std::make_tuple(rows, cols, id);
-        auto it = workspace_matrices_.find(key);
-        if (it != workspace_matrices_.end()) {
-            return it->second;
+        const auto [it, inserted] = workspace_matrices_.try_emplace(key, rows, cols);
+        if (!inserted && (it->second.rows() != rows || it->second.cols() != cols)) {
+            it->second.resize(rows, cols);
         }
-        auto [inserted, _] = workspace_matrices_.emplace(key, SparseMatrix(rows, cols));
-        return inserted->second;
+        return it->second;
     }
 
     /// Reset for new timestep (keeps allocations, clears data)

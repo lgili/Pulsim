@@ -17,6 +17,10 @@ build_patterns = [
 ]
 
 
+def _normalize_path(path: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
 def _is_valid_build_path(path: str) -> bool:
     package_dir = os.path.join(path, "pulsim")
     if not os.path.isdir(package_dir):
@@ -50,11 +54,11 @@ for pattern in build_patterns:
 # Remove any entries that might shadow the build path (like python/)
 if build_path:
     source_python = os.path.join(project_root, 'python')
-    if source_python in sys.path:
-        sys.path.remove(source_python)
+    source_python_norm = _normalize_path(source_python)
+    sys.path = [p for p in sys.path if _normalize_path(p) != source_python_norm]
     # Add build path at the front
-    if build_path in sys.path:
-        sys.path.remove(build_path)
+    build_path_norm = _normalize_path(build_path)
+    sys.path = [p for p in sys.path if _normalize_path(p) != build_path_norm]
     sys.path.insert(0, build_path)
 
 # Only clear cached modules when we actively switched sys.path to a build tree.
