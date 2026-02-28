@@ -182,6 +182,13 @@ from .netlist import (
     ParsedNetlist,
 )
 
+# Signal-Flow Evaluator (Pure Python, no GUI dependency)
+from .signal_evaluator import (
+    SignalEvaluator,
+    AlgebraicLoopError,
+    SIGNAL_TYPES,
+)
+
 
 _AUTO_BLEEDER_CIRCUITS = weakref.WeakSet()
 
@@ -632,4 +639,9 @@ __all__ = [
     "NetlistParseError",
     "NetlistWarning",
     "ParsedNetlist",
+
+    # Signal-Flow Evaluator
+    "SignalEvaluator",
+    "AlgebraicLoopError",
+    "SIGNAL_TYPES",
 ]

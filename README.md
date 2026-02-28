@@ -85,7 +85,7 @@ mkdocs serve
 Versioned deploy:
 
 - Workflow: `.github/workflows/docs.yml`
-- Trigger: only when pushing semver tags `vX.Y.Z` (example: `v0.4.1`)
+- Trigger: only when pushing semver tags `vX.Y.Z` (example: `v0.5.1`)
 - Framework: `MkDocs Material` + `mike`
 - Deploy mode: `mike` on `gh-pages` branch with version selector enabled (`latest` alias)
 - Old versions remain published and selectable in the docs UI
