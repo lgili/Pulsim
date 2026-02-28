@@ -1,19 +1,19 @@
 
 <!doctype html>
-<html lang="pt" class="no-js">
+<html lang="en" class="no-js">
   <head>
     
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Python-first power electronics simulation with YAML netlists">
+        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
       
       
       
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/getting-started/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../backend-architecture/">
       
       
         <link rel="next" href="../user-guide/">
@@ -81,7 +81,7 @@
       
         
         <a href="#getting-started" class="md-skip">
-          Pular para conteúdo
+          Skip to content
         </a>
       
     </div>
@@ -99,7 +99,7 @@
   
 
 <header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
-  <nav class="md-header__inner md-grid" aria-label="Cabeçalho">
+  <nav class="md-header__inner md-grid" aria-label="Header">
     <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
       
   <img src="../material/flash" alt="logo">
@@ -138,7 +138,7 @@
     
     
     
-    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="lime"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="light-blue"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
     
   
 </form>
@@ -157,16 +157,16 @@
   <label class="md-search__overlay" for="__search"></label>
   <div class="md-search__inner" role="search">
     <form class="md-search__form" name="search">
-      <input type="text" class="md-search__input" name="query" aria-label="Buscar" placeholder="Buscar" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
       <label class="md-search__icon md-icon" for="__search">
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
       </label>
-      <nav class="md-search__options" aria-label="Pesquisar">
+      <nav class="md-search__options" aria-label="Search">
         
-        <button type="reset" class="md-search__icon md-icon" title="Limpar" aria-label="Limpar" tabindex="-1">
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
           
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -177,7 +177,7 @@
       <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
         <div class="md-search-result" data-md-component="search-result">
           <div class="md-search-result__meta">
-            Inicializando busca
+            Initializing search
           </div>
           <ol class="md-search-result__list" role="presentation"></ol>
         </div>
@@ -188,7 +188,7 @@
     
     
       <div class="md-header__source">
-        <a href="https://github.com/lgili/Pulsim" title="Ir para repositório" class="md-source" data-md-component="source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
@@ -203,43 +203,27 @@
   
     
       
-<nav class="md-tabs" aria-label="Abas" data-md-component="tabs">
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
   <div class="md-grid">
     <ul class="md-tabs__list">
       
         
   
   
-  
-    <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
-        
-  
-    
-  
-  Home
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
     
   
   
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
-        
-  
     
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href=".." class="md-tabs__link">
+          
   
-  Getting Started
+  Overview
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -247,16 +231,17 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../user-guide/" class="md-tabs__link">
-        
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../user-guide/" class="md-tabs__link">
+          
   
-  User Guide
+  Guides
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -264,16 +249,17 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../configuration/" class="md-tabs__link">
-        
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../api-reference/" class="md-tabs__link">
+          
   
-  Configuration
+  API
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -281,16 +267,17 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../api-reference/" class="md-tabs__link">
-        
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../gui-component-parity/" class="md-tabs__link">
+          
   
-  API Reference
+  Compatibility
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -298,169 +285,17 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../python-api/" class="md-tabs__link">
-        
-  
     
-  
-  Python API (legacy)
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../netlist-format/" class="md-tabs__link">
-        
-  
     
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
   
-  Netlist YAML
+  Operations
 
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../examples-and-results/" class="md-tabs__link">
-        
-  
+        </a>
+      </li>
     
-  
-  Examples and Results
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../benchmarks-and-parity/" class="md-tabs__link">
-        
-  
-    
-  
-  Benchmarks and Parity
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../gui-component-parity/" class="md-tabs__link">
-        
-  
-    
-  
-  GUI Backend Parity
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../notebooks/" class="md-tabs__link">
-        
-  
-    
-  
-  Notebooks
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../versioning-and-release/" class="md-tabs__link">
-        
-  
-    
-  
-  Docs Versioning
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../device-models/" class="md-tabs__link">
-        
-  
-    
-  
-  Device Models
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../convergence-tuning-guide/" class="md-tabs__link">
-        
-  
-    
-  
-  Convergence Tuning
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../migration-guide/" class="md-tabs__link">
-        
-  
-    
-  
-  Migration Guide
-
-      </a>
-    </li>
   
 
       
@@ -490,7 +325,7 @@
   
 
 
-<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navegação" data-md-level="0">
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
     <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
       
@@ -501,7 +336,7 @@
   </label>
   
     <div class="md-nav__source">
-      <a href="https://github.com/lgili/Pulsim" title="Ir para repositório" class="md-source" data-md-component="source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
@@ -518,6 +353,51 @@
       
   
   
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Overview
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
   
   
     <li class="md-nav__item">
@@ -525,7 +405,7 @@
         
   
   <span class="md-ellipsis">
-    Home
+    Documentation Home
   </span>
   
 
@@ -533,9 +413,31 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backend Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
   
   
     
@@ -573,7 +475,7 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Índice">
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
   
@@ -582,41 +484,59 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Índice
+      Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-build-local-das-bindings" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
-      1) Build local das bindings
+      Prerequisites
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-rodar-via-python-usando-o-build-local" class="md-nav__link">
+  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
     <span class="md-ellipsis">
-      2) Rodar via Python usando o build local
+      Option A: Build From Source (Recommended for backend development)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-rodar-testes-principais" class="md-nav__link">
+  <a href="#option-b-install-package" class="md-nav__link">
     <span class="md-ellipsis">
-      3) Rodar testes principais
+      Option B: Install Package
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-proximos-passos" class="md-nav__link">
+  <a href="#first-simulation-rc-step" class="md-nav__link">
     <span class="md-ellipsis">
-      4) Próximos passos
+      First Simulation (RC Step)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-core-validation-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Run Core Validation Commands
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      Next Steps
     </span>
   </a>
   
@@ -629,9 +549,59 @@
     </li>
   
 
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
       
       
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Guides
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
   
   
   
@@ -649,69 +619,10 @@
     </li>
   
 
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Configuration
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api-reference/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    API Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../python-api/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Python API (legacy)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
+              
+            
+              
+                
   
   
   
@@ -721,7 +632,7 @@
         
   
   <span class="md-ellipsis">
-    Netlist YAML
+    Netlist YAML Format
   </span>
   
 
@@ -729,9 +640,10 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
@@ -749,9 +661,10 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
@@ -769,29 +682,10 @@
     </li>
   
 
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../gui-component-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    GUI Backend Parity
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
+              
+            
+              
+                
   
   
   
@@ -809,49 +703,10 @@
     </li>
   
 
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../versioning-and-release/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Docs Versioning
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../device-models/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Device Models
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
+              
+            
+              
+                
   
   
   
@@ -869,9 +724,192 @@
     </li>
   
 
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
       
       
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            API
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Python API (Legacy Notes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Compatibility
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Compatibility
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui-component-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    GUI Backend Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
   
   
   
@@ -889,6 +927,126 @@
     </li>
   
 
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
   </ul>
 </nav>
@@ -903,7 +1061,7 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Índice">
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
   
@@ -912,41 +1070,59 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Índice
+      Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-build-local-das-bindings" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
-      1) Build local das bindings
+      Prerequisites
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-rodar-via-python-usando-o-build-local" class="md-nav__link">
+  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
     <span class="md-ellipsis">
-      2) Rodar via Python usando o build local
+      Option A: Build From Source (Recommended for backend development)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-rodar-testes-principais" class="md-nav__link">
+  <a href="#option-b-install-package" class="md-nav__link">
     <span class="md-ellipsis">
-      3) Rodar testes principais
+      Option B: Install Package
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-proximos-passos" class="md-nav__link">
+  <a href="#first-simulation-rc-step" class="md-nav__link">
     <span class="md-ellipsis">
-      4) Próximos passos
+      First Simulation (RC Step)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-core-validation-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Run Core Validation Commands
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      Next Steps
     </span>
   </a>
   
@@ -967,7 +1143,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Editar esta página" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -976,7 +1152,7 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="Exibir fonte desta página" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
@@ -984,13 +1160,28 @@
 
 
 <h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<h2 id="1-build-local-das-bindings">1) Build local das bindings<a class="headerlink" href="#1-build-local-das-bindings" title="Permanent link">&para;</a></h2>
+<p>This guide takes you from a clean checkout to your first backend simulation.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Python 3.10+</li>
+<li>CMake 3.20+</li>
+<li>Ninja</li>
+<li>A C++ toolchain compatible with project requirements</li>
+</ul>
+<h2 id="option-a-build-from-source-recommended-for-backend-development">Option A: Build From Source (Recommended for backend development)<a class="headerlink" href="#option-a-build-from-source-recommended-for-backend-development" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
 cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
 </code></pre></div>
-<h2 id="2-rodar-via-python-usando-o-build-local">2) Rodar via Python usando o build local<a class="headerlink" href="#2-rodar-via-python-usando-o-build-local" title="Permanent link">&para;</a></h2>
+<p>Confirm that the package is importable from the local build tree:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
+</code></pre></div>
+<h2 id="option-b-install-package">Option B: Install Package<a class="headerlink" href="#option-b-install-package" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
+python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
+</code></pre></div>
+<h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
 <span class="s">import pulsim as ps</span>
 
@@ -999,27 +1190,35 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"
 
 <span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
 <span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
+<span class="s">options.step_mode = ps.StepMode.Variable</span>
 
 <span class="s">sim = ps.Simulator(circuit, options)</span>
 <span class="s">result = sim.run_transient(circuit.initial_state())</span>
 
 <span class="s">print(&quot;success:&quot;, result.success)</span>
 <span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
+<span class="s">print(&quot;samples:&quot;, len(result.time))</span>
 <span class="s">PY</span>
 </code></pre></div>
-<h2 id="3-rodar-testes-principais">3) Rodar testes principais<a class="headerlink" href="#3-rodar-testes-principais" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># C++/kernel tests</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span>build-test<span class="w"> </span>--output-on-failure
-
-<span class="c1"># Python runtime tests</span>
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
-</code></pre></div>
-<h2 id="4-proximos-passos">4) Próximos passos<a class="headerlink" href="#4-proximos-passos" title="Permanent link">&para;</a></h2>
+<p>Expected outcome:</p>
 <ul>
-<li>Veja o formato YAML completo em <code>netlist-format</code>.</li>
-<li>Veja exemplos e notebooks em <code>notebooks</code>.</li>
-<li>Valide fidelidade com SPICE em <code>benchmarks-and-parity</code>.</li>
+<li><code>success: True</code></li>
+<li>non-zero <code>steps</code> and <code>samples</code></li>
+<li>monotonic RC charging behavior on <code>V(out)</code></li>
 </ul>
+<h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
+<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
+
+<span class="c1"># C++ core tests (if build already includes tests)</span>
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
+</code></pre></div>
+<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
+<li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
+<li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
+</ol>
 
 
 
@@ -1043,7 +1242,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build-test<span c
           <button type="button" class="md-top md-icon" data-md-component="top" hidden>
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
-  Voltar para o topo
+  Back to top
 </button>
         
       </main>
@@ -1052,30 +1251,30 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build-test<span c
   
     
       
-      <nav class="md-footer__inner md-grid" aria-label="Rodapé" >
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href=".." class="md-footer__link md-footer__link--prev" aria-label="Anterior: Home">
+          <a href="../backend-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend Architecture">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
             </div>
             <div class="md-footer__title">
               <span class="md-footer__direction">
-                Anterior
+                Previous
               </span>
               <div class="md-ellipsis">
-                Home
+                Backend Architecture
               </div>
             </div>
           </a>
         
         
           
-          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Próximo: User Guide">
+          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: User Guide">
             <div class="md-footer__title">
               <span class="md-footer__direction">
-                Próximo
+                Next
               </span>
               <div class="md-ellipsis">
                 User Guide
@@ -1122,7 +1321,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build-test<span c
     </div>
     
     
-    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copiado para \u00e1rea de transfer\u00eancia", "clipboard.copy": "Copiar para \u00e1rea de transfer\u00eancia", "search.result.more.one": "mais 1 nesta p\u00e1gina", "search.result.more.other": "# mais nesta p\u00e1gina", "search.result.none": "Nenhum documento encontrado", "search.result.one": "1 documento encontrado", "search.result.other": "# documentos encontrados", "search.result.placeholder": "Digite para iniciar a busca", "search.result.term.missing": "Ausente", "select.version": "Selecione a vers\u00e3o"}, "version": {"provider": "mike"}}</script>
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
       <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
