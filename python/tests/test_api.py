@@ -6,19 +6,42 @@ import os
 import glob
 import pytest
 
-# Ensure build path is FIRST in sys.path before importing pulsim
-# This is necessary because pytest may add python/ to path, which has pulsim source
+# Ensure build path is FIRST in sys.path before importing pulsim.
+# This is necessary because pytest may add python/ to path, which has pulsim source.
+# Only accept build paths that include both the native extension and the
+# pure-Python companion modules required by the test suite.
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 build_patterns = [
     os.path.join(project_root, 'build', 'cp*', 'python'),
     os.path.join(project_root, 'build', 'python'),
 ]
 
+
+def _is_valid_build_path(path: str) -> bool:
+    package_dir = os.path.join(path, "pulsim")
+    if not os.path.isdir(package_dir):
+        return False
+
+    has_native = any(
+        glob.glob(os.path.join(package_dir, pattern))
+        for pattern in ("_pulsim*.so", "_pulsim*.pyd", "_pulsim*.dylib")
+    )
+    if not has_native:
+        return False
+
+    required_python_files = (
+        "__init__.py",
+        "netlist.py",
+        "signal_evaluator.py",
+    )
+    return all(os.path.exists(os.path.join(package_dir, name)) for name in required_python_files)
+
+
 # Find the build path
 build_path = None
 for pattern in build_patterns:
-    for path in glob.glob(pattern):
-        if os.path.exists(path):
+    for path in sorted(glob.glob(pattern)):
+        if _is_valid_build_path(path):
             build_path = path
             break
     if build_path:
