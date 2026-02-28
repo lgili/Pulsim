@@ -6,6 +6,15 @@ import os
 import glob
 
 
+def _normalize_path(path: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+def _remove_path(path: str) -> None:
+    target = _normalize_path(path)
+    sys.path = [p for p in sys.path if _normalize_path(p) != target]
+
+
 def _ensure_pulsim_path():
     """Put locally built extension at the front of sys.path before imports."""
     build_path = os.path.join(
@@ -25,8 +34,8 @@ def _ensure_pulsim_path():
     )
 
     # Remove any existing occurrence before deciding which package root to use.
-    sys.path = [p for p in sys.path if os.path.abspath(p) != build_path]
-    sys.path = [p for p in sys.path if os.path.abspath(p) != source_python_path]
+    _remove_path(build_path)
+    _remove_path(source_python_path)
 
     if has_native_extension:
         sys.path.insert(0, build_path)

@@ -6,6 +6,16 @@ import os
 import sys
 
 
+def _normalize_path(path: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+def _is_within(path: str, root: str) -> bool:
+    path_norm = _normalize_path(path)
+    root_norm = _normalize_path(root)
+    return path_norm == root_norm or path_norm.startswith(root_norm + os.sep)
+
+
 def _build_tree_has_extension(build_path: str) -> bool:
     package_dir = os.path.join(build_path, "pulsim")
     if not os.path.isdir(package_dir):
@@ -23,8 +33,8 @@ def _clear_cached_pulsim_modules() -> None:
 
 
 def _remove_path(path: str) -> None:
-    abs_path = os.path.abspath(path)
-    sys.path = [p for p in sys.path if os.path.abspath(p) != abs_path]
+    target = _normalize_path(path)
+    sys.path = [p for p in sys.path if _normalize_path(p) != target]
 
 
 def _ensure_pulsim_path() -> tuple[bool, str, str]:
@@ -52,7 +62,7 @@ def _ensure_benchmarks_path() -> None:
         os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks")
     )
     if os.path.exists(benchmarks_path):
-        sys.path = [p for p in sys.path if os.path.abspath(p) != benchmarks_path]
+        _remove_path(benchmarks_path)
         sys.path.insert(0, benchmarks_path)
 
 
@@ -64,9 +74,10 @@ def _reload_pulsim_if_needed(
     if "pulsim" in sys.modules:
         mod = sys.modules["pulsim"]
         mod_file = os.path.abspath(getattr(mod, "__file__", ""))
-        is_build_mod = "build/python" in mod_file
         source_pkg_path = os.path.join(source_python_path, "pulsim")
-        is_source_mod = mod_file.startswith(source_pkg_path + os.sep)
+        build_pkg_path = os.path.join(build_path, "pulsim")
+        is_build_mod = _is_within(mod_file, build_pkg_path)
+        is_source_mod = _is_within(mod_file, source_pkg_path)
         if (prefer_build_tree and not is_build_mod) or (
             not prefer_build_tree and (is_build_mod or is_source_mod)
         ):
