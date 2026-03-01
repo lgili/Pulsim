@@ -63,10 +63,31 @@ if(APPLE)
             set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
         endif()
     endif()
-    # Use older libc++ ABI for broader macOS compatibility and avoid newer symbols
-    add_compile_definitions(_LIBCPP_ABI_VERSION=1 _LIBCPP_DISABLE_AVAILABILITY)
-    add_compile_options(-stdlib=libc++)
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+    # Use Homebrew LLVM's libc++ which includes __hash_memory
+    set(LLVM_PREFIX "/opt/homebrew/opt/llvm")
+    if(EXISTS "${LLVM_PREFIX}")
+        set(CMAKE_C_COMPILER "${LLVM_PREFIX}/bin/clang")
+        set(CMAKE_CXX_COMPILER "${LLVM_PREFIX}/bin/clang++")
+        # Force use of Homebrew libc++ with explicit paths
+        add_compile_options(
+            -nostdinc++
+            -isystem "${LLVM_PREFIX}/include/c++/v1"
+            -fvisibility=hidden
+            -fvisibility-inlines-hidden
+        )
+        # Link explicitly with Homebrew's libc++ and set rpath
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -nostdlib++ -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lc++ -lc++abi")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -nostdlib++ -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lc++ -lc++abi")
+        set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -nostdlib++ -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lc++ -lc++abi")
+    else()
+        # Fallback for systems without Homebrew LLVM
+        add_compile_definitions(
+            _LIBCPP_ABI_VERSION=1
+            _LIBCPP_DISABLE_AVAILABILITY
+        )
+        add_compile_options(-stdlib=libc++ -fvisibility=hidden -fvisibility-inlines-hidden)
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+    endif()
 endif()
 
 # Prefer pybind11 provided by the build environment (e.g., installed via pip)
