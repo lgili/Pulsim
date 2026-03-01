@@ -98,3 +98,7 @@ Primary hybrid/electro-thermal KPI keys emitted in benchmark outputs:
 - `dae_fallback_ratio`
 - `loss_energy_balance_error`
 - `thermal_peak_temperature_delta`
+- `component_coverage_rate`
+- `component_coverage_gap`
+- `component_loss_summary_consistency_error`
+- `component_thermal_summary_consistency_error`

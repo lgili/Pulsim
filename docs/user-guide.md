@@ -83,6 +83,7 @@ For switched converters in production-like runs:
 ## Where To Go Next
 
 - [Netlist YAML Format](netlist-format.md)
+- [Electrothermal Workflow](electrothermal-workflow.md)
 - [Examples and Results](examples-and-results.md)
 - [Benchmarks and Parity](benchmarks-and-parity.md)
 - [Troubleshooting](troubleshooting.md)

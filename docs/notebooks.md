@@ -14,6 +14,9 @@ Recommended sequence:
 - `examples/notebooks/01_getting_started.ipynb`
 - `examples/notebooks/02_buck_converter.ipynb`
 - `examples/notebooks/03_thermal_modeling.ipynb`
+- `examples/notebooks/28_electrothermal_component_telemetry.ipynb`
+- `examples/notebooks/29_electrothermal_yaml_validation_modes.ipynb`
+- `examples/notebooks/30_electrothermal_kpi_gate_consistency.ipynb`
 - `examples/notebooks/10_benchmarks.ipynb`
 
 Advanced catalog/coverage notebooks:
@@ -22,6 +25,12 @@ Advanced catalog/coverage notebooks:
 - `16_control_blocks_mixed_domain.ipynb`
 - `17_protection_magnetics_probes.ipynb`
 - `18_buck_mosfet_pwm_block.ipynb`
+
+Electrothermal-focused additions:
+
+- `28_electrothermal_component_telemetry.ipynb`
+- `29_electrothermal_yaml_validation_modes.ipynb`
+- `30_electrothermal_kpi_gate_consistency.ipynb`
 
 ## Execute Headless (CI/local automation)
 
