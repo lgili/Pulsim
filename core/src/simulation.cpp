@@ -850,12 +850,19 @@ SimulationResult Simulator::run_transient_with_progress(
         }
 
         // Progress callback with throttling
+        // When a threshold is 0, that criterion is disabled.
+        // When both are non-zero, BOTH conditions must be met.
         if (progress_config.callback) {
             auto now = std::chrono::high_resolution_clock::now();
             double ms_since_last = std::chrono::duration<double, std::milli>(now - last_progress_time).count();
 
-            if (ms_since_last >= progress_config.min_interval_ms ||
-                steps_since_progress >= progress_config.min_steps) {
+            // Treat 0 as "disable this criterion"
+            bool time_ok = (progress_config.min_interval_ms <= 0) ||
+                           (ms_since_last >= progress_config.min_interval_ms);
+            bool steps_ok = (progress_config.min_steps <= 0) ||
+                            (steps_since_progress >= progress_config.min_steps);
+
+            if (time_ok && steps_ok) {
 
                 SimulationProgress progress;
                 progress.current_time = time;
@@ -929,6 +936,21 @@ SimulationResult Simulator::run_transient_with_progress(
 
     auto end_time = std::chrono::high_resolution_clock::now();
     result.total_time_seconds = std::chrono::duration<double>(end_time - start_time).count();
+
+    // Fire final progress callback to ensure at least one callback fires
+    if (progress_config.callback) {
+        SimulationProgress progress;
+        progress.current_time = time;
+        progress.total_time = options_.tstop;
+        progress.progress_percent = 100.0 * (time - options_.tstart) / total_sim_time;
+        progress.steps_completed = step_count;
+        progress.total_steps_estimate = estimated_steps;
+        progress.newton_iterations = 0;
+        progress.convergence_warning = false;
+        progress.elapsed_seconds = result.total_time_seconds;
+        progress.estimated_remaining_seconds = 0.0;
+        progress_config.callback(progress);
+    }
 
     if (step_count > 0) {
         result.average_newton_iterations = static_cast<double>(result.newton_iterations_total) / step_count;

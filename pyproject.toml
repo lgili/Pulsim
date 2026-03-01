@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pulsim"
-version = "0.1.11"
+version = "0.2.0"
 description = "High-performance circuit simulator for power electronics"
 readme = "README.md"
 license = {text = "MIT"}
@@ -83,6 +83,16 @@ CMAKE_BUILD_TYPE = "Release"
 Python3_EXECUTABLE = "{python}"
 Python3_FIND_IMPLEMENTATIONS = "CPython"
 Python3_FIND_STRATEGY = "LOCATION"
+
+# =============================================================================
+# macOS: Force AppleClang for Python ABI compatibility
+# =============================================================================
+# Homebrew's Clang uses a different libc++ than Python, causing runtime errors.
+# We must use AppleClang (/usr/bin/clang++) which matches Python's ABI.
+[[tool.scikit-build.overrides]]
+if.platform-system = "darwin"
+cmake.define.CMAKE_C_COMPILER = "/usr/bin/clang"
+cmake.define.CMAKE_CXX_COMPILER = "/usr/bin/clang++"
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

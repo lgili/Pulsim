@@ -1,168 +1,301 @@
-"""Pulsim - High-performance circuit simulator for power electronics."""
+"""PulsimCore - High-performance circuit simulator for power electronics.
 
-__version__ = "0.1.0"
+This is the API with C++23 features and SIMD optimization.
+"""
+
+__version__ = "0.2.0"
 
 from ._pulsim import (
     # Enums
-    ComponentType,
+    DeviceType,
     SolverStatus,
-    MOSFETType,
-    ThermalNetworkType,
-    SimulationState,
-    IntegrationMethod,
-    DiagnosticSeverity,
-    DiagnosticCode,
-    ParameterType,
-    SimulationEventType,
+    DCStrategy,
+    RLCDamping,
+    DeviceHint,
+    SIMDLevel,
 
-    # Waveforms
-    DCWaveform,
-    PulseWaveform,
-    SineWaveform,
-    PWLWaveform,
-    PWMWaveform,
+    # Device Classes - Linear
+    Resistor,
+    Capacitor,
+    Inductor,
+    VoltageSource,
+    CurrentSource,
 
-    # Component Parameters
-    DiodeParams,
-    SwitchParams,
+    # Device Classes - Nonlinear
+    IdealDiode,
+    IdealSwitch,
     MOSFETParams,
+    MOSFET,
     IGBTParams,
-    TransformerParams,
+    IGBT,
 
-    # Simulation
-    SimulationOptions,
-    SimulationResult,
+    # Time-Varying Sources
+    PWMParams,
+    PWMVoltageSource,
+    SineParams,
+    SineVoltageSource,
+    RampParams,
+    RampGenerator,
+    PulseParams,
+    PulseVoltageSource,
+
+    # Control Blocks
+    PIController,
+    PIDController,
+    Comparator,
+    SampleHold,
+    RateLimiter,
+    MovingAverageFilter,
+    HysteresisController,
+    LookupTable1D,
+
+    # Circuit Builder
     Circuit,
-    Simulator,
-    PowerLosses,
-    SwitchEvent,
-    simulate,
 
-    # Simulation Control (GUI integration)
-    SimulationController,
-    SimulationProgress,
-    ProgressCallbackConfig,
-    StreamingConfig,
+    # DC Solver
+    solve_dc,
+    dc_operating_point,
 
-    # Enhanced Result Types
-    SignalInfo,
-    SolverInfo,
-    SimulationEvent,
+    # Transient Simulation
+    run_transient,
+    run_transient_streaming,
 
-    # Component Metadata (GUI integration)
-    ParameterMetadata,
-    PinMetadata,
-    ComponentMetadata,
-    ComponentRegistry,
+    # Solver Configuration
+    Tolerances,
+    NewtonOptions,
+    NewtonResult,
 
-    # Schematic Position (GUI integration)
-    SchematicPosition,
+    # Convergence Monitoring
+    IterationRecord,
+    ConvergenceHistory,
+    VariableConvergence,
+    PerVariableConvergence,
 
-    # Validation (GUI integration)
-    Diagnostic,
-    ValidationResult,
-    validate_circuit,
-    diagnostic_code_description,
+    # Convergence Aids
+    GminConfig,
+    SourceSteppingConfig,
+    PseudoTransientConfig,
+    InitializationConfig,
+    DCConvergenceConfig,
+    DCAnalysisResult,
 
-    # Parsing
-    parse_netlist_file,
-    parse_netlist_string,
-    circuit_to_json,
+    # Analytical Solutions (Validation)
+    RCAnalytical,
+    RLAnalytical,
+    RLCAnalytical,
 
-    # Thermal
-    ThermalRCStage,
+    # Validation Framework
+    ValidationResult_v2 as ValidationResult,
+    compare_waveforms,
+    export_validation_csv,
+    export_validation_json,
+
+    # Benchmark Framework
+    BenchmarkTiming,
+    BenchmarkResult,
+    export_benchmark_csv,
+    export_benchmark_json,
+
+    # Integration Methods
+    BDFOrderConfig,
+    TimestepConfig,
+
+    # High-Performance Features
+    LinearSolverConfig,
+    detect_simd_level,
+    simd_vector_width,
+    solver_status_to_string,
+
+    # Thermal Simulation
+    FosterStage,
     FosterNetwork,
-    ThermalModel,
-    ThermalState,
-    ThermalWarning,
+    CauerStage,
+    CauerNetwork,
     ThermalSimulator,
-    create_mosfet_thermal,
-    fit_foster_network,
+    ThermalLimitMonitor,
+    ThermalResult,
+    create_mosfet_thermal_model,
+    create_from_datasheet_4param,
+    create_simple_thermal_model,
 
-    # Device Library
-    devices,
+    # Power Loss Calculation
+    MOSFETLossParams,
+    IGBTLossParams,
+    DiodeLossParams,
+    ConductionLoss,
+    SwitchingLoss,
+    LossBreakdown,
+    LossAccumulator,
+    EfficiencyCalculator,
+    LossResult,
+    SystemLossSummary,
+
+    # AC Analysis
+    ACOptions,
+    ACResult,
+    ACAnalyzer,
+    ACSolverStatus,
+    FrequencySweepType,
+    BodeData,
+    run_ac,
+    extract_bode_data,
+    calculate_stability_margins,
+)
+
+# Netlist Parser (Pure Python)
+from .netlist import (
+    parse_netlist,
+    parse_netlist_verbose,
+    parse_value,
+    NetlistParseError,
+    NetlistWarning,
+    ParsedNetlist,
 )
 
 __all__ = [
-    # Enums
-    "ComponentType",
-    "SolverStatus",
-    "MOSFETType",
-    "ThermalNetworkType",
-    "SimulationState",
-    "IntegrationMethod",
-    "DiagnosticSeverity",
-    "DiagnosticCode",
-    "ParameterType",
-    "SimulationEventType",
-
-    # Waveforms
-    "DCWaveform",
-    "PulseWaveform",
-    "SineWaveform",
-    "PWLWaveform",
-    "PWMWaveform",
-
-    # Component Parameters
-    "DiodeParams",
-    "SwitchParams",
-    "MOSFETParams",
-    "IGBTParams",
-    "TransformerParams",
-
-    # Simulation
-    "SimulationOptions",
-    "SimulationResult",
-    "Circuit",
-    "Simulator",
-    "PowerLosses",
-    "SwitchEvent",
-    "simulate",
-
-    # Simulation Control (GUI integration)
-    "SimulationController",
-    "SimulationProgress",
-    "ProgressCallbackConfig",
-    "StreamingConfig",
-
-    # Enhanced Result Types
-    "SignalInfo",
-    "SolverInfo",
-    "SimulationEvent",
-
-    # Component Metadata (GUI integration)
-    "ParameterMetadata",
-    "PinMetadata",
-    "ComponentMetadata",
-    "ComponentRegistry",
-
-    # Schematic Position (GUI integration)
-    "SchematicPosition",
-
-    # Validation (GUI integration)
-    "Diagnostic",
-    "ValidationResult",
-    "validate_circuit",
-    "diagnostic_code_description",
-
-    # Parsing
-    "parse_netlist_file",
-    "parse_netlist_string",
-    "circuit_to_json",
-
-    # Thermal
-    "ThermalRCStage",
-    "FosterNetwork",
-    "ThermalModel",
-    "ThermalState",
-    "ThermalWarning",
-    "ThermalSimulator",
-    "create_mosfet_thermal",
-    "fit_foster_network",
-
-    # Device Library
-    "devices",
-
     # Version
     "__version__",
+
+    # Enums
+    "DeviceType",
+    "SolverStatus",
+    "DCStrategy",
+    "RLCDamping",
+    "DeviceHint",
+    "SIMDLevel",
+
+    # Device Classes - Linear
+    "Resistor",
+    "Capacitor",
+    "Inductor",
+    "VoltageSource",
+    "CurrentSource",
+
+    # Device Classes - Nonlinear
+    "IdealDiode",
+    "IdealSwitch",
+    "MOSFETParams",
+    "MOSFET",
+    "IGBTParams",
+    "IGBT",
+
+    # Time-Varying Sources
+    "PWMParams",
+    "PWMVoltageSource",
+    "SineParams",
+    "SineVoltageSource",
+    "RampParams",
+    "RampGenerator",
+    "PulseParams",
+    "PulseVoltageSource",
+
+    # Control Blocks
+    "PIController",
+    "PIDController",
+    "Comparator",
+    "SampleHold",
+    "RateLimiter",
+    "MovingAverageFilter",
+    "HysteresisController",
+    "LookupTable1D",
+
+    # Circuit Builder
+    "Circuit",
+
+    # DC Solver
+    "solve_dc",
+    "dc_operating_point",
+
+    # Transient Simulation
+    "run_transient",
+    "run_transient_streaming",
+
+    # Solver Configuration
+    "Tolerances",
+    "NewtonOptions",
+    "NewtonResult",
+
+    # Convergence Monitoring
+    "IterationRecord",
+    "ConvergenceHistory",
+    "VariableConvergence",
+    "PerVariableConvergence",
+
+    # Convergence Aids
+    "GminConfig",
+    "SourceSteppingConfig",
+    "PseudoTransientConfig",
+    "InitializationConfig",
+    "DCConvergenceConfig",
+    "DCAnalysisResult",
+
+    # Analytical Solutions (Validation)
+    "RCAnalytical",
+    "RLAnalytical",
+    "RLCAnalytical",
+
+    # Validation Framework
+    "ValidationResult",
+    "compare_waveforms",
+    "export_validation_csv",
+    "export_validation_json",
+
+    # Benchmark Framework
+    "BenchmarkTiming",
+    "BenchmarkResult",
+    "export_benchmark_csv",
+    "export_benchmark_json",
+
+    # Integration Methods
+    "BDFOrderConfig",
+    "TimestepConfig",
+
+    # High-Performance Features
+    "LinearSolverConfig",
+    "detect_simd_level",
+    "simd_vector_width",
+    "solver_status_to_string",
+
+    # Thermal Simulation
+    "FosterStage",
+    "FosterNetwork",
+    "CauerStage",
+    "CauerNetwork",
+    "ThermalSimulator",
+    "ThermalLimitMonitor",
+    "ThermalResult",
+    "create_mosfet_thermal_model",
+    "create_from_datasheet_4param",
+    "create_simple_thermal_model",
+
+    # Power Loss Calculation
+    "MOSFETLossParams",
+    "IGBTLossParams",
+    "DiodeLossParams",
+    "ConductionLoss",
+    "SwitchingLoss",
+    "LossBreakdown",
+    "LossAccumulator",
+    "EfficiencyCalculator",
+    "LossResult",
+    "SystemLossSummary",
+
+    # AC Analysis
+    "ACOptions",
+    "ACResult",
+    "ACAnalyzer",
+    "ACSolverStatus",
+    "FrequencySweepType",
+    "BodeData",
+    "run_ac",
+    "extract_bode_data",
+    "calculate_stability_margins",
+
+    # Netlist Parser
+    "parse_netlist",
+    "parse_netlist_verbose",
+    "parse_value",
+    "NetlistParseError",
+    "NetlistWarning",
+    "ParsedNetlist",
 ]

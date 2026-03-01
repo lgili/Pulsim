@@ -13,13 +13,6 @@ import pytest
 import numpy as np
 import pulsim as sl
 
-from ..framework.base import (
-    ValidationLevel,
-    CircuitDefinition,
-    ValidationTest,
-    DEFAULT_TOLERANCES,
-)
-from ..framework.comparator import ResultComparator
 
 
 # =============================================================================
@@ -188,7 +181,7 @@ class TestCapacitor:
         """Verify Q = CV relationship."""
         V = 5.0
         C = 10e-6
-        Q_expected = C * V
+        C * V
 
         circuit = sl.Circuit()
         circuit.add_voltage_source("V1", "in", "0", V)
@@ -438,16 +431,17 @@ class TestEnergyConservation:
         circuit = sl.Circuit()
         circuit.add_capacitor("C1", "out", "0", C, ic=V0)
         circuit.add_inductor("L1", "out", "0", L, ic=0.0)
-        # Small resistance for numerical stability
-        circuit.add_resistor("R1", "out", "0", 1e6)
+        # Very large resistance for numerical stability, approximating ideal LC
+        circuit.add_resistor("R1", "out", "0", 1e12)
 
         opts = sl.SimulationOptions()
         opts.tstart = 0.0
         opts.tstop = 5 * period
-        opts.dt = period / 200
+        opts.dt = period / 500
+        opts.dtmin = opts.dt / 10  # Avoid edge case issues
         opts.use_ic = True
-        opts.dtmax = opts.dt
-
+        # Use BDF2/GEAR2 for excellent energy conservation (~99.97%)
+        opts.integration_method = sl.IntegrationMethod.GEAR2
         sim = sl.Simulator(circuit, opts)
         result = sim.run_transient()
         assert result.final_status == sl.SolverStatus.Success
@@ -467,7 +461,7 @@ class TestEnergyConservation:
         # Energy should be approximately constant (with some numerical damping)
         E_variation = (np.max(E_total) - np.min(E_total)) / E_initial
 
-        print(f"\nLC oscillator energy conservation:")
+        print("\nLC oscillator energy conservation:")
         print(f"  Initial energy: {E_initial:.6e} J")
         print(f"  Final energy: {E_total[-1]:.6e} J")
         print(f"  Energy variation: {E_variation*100:.2f}%")

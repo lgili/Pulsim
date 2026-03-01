@@ -1,25 +1,230 @@
 cmake_minimum_required(VERSION 3.20)
-project(pulsim VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+# =============================================================================
+# macOS: Force AppleClang for Python bindings (ABI compatibility)
+# =============================================================================
+# When building Python bindings on macOS, we MUST use AppleClang to avoid
+# libc++ ABI mismatches. Homebrew's Clang uses a different libc++ version
+# than the Python interpreter, causing "symbol not found" errors at runtime.
+if(APPLE AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED CMAKE_CXX_COMPILER)
+    # Check if we're building Python bindings (scikit-build-core sets this)
+    if(SKBUILD OR PULSIM_BUILD_PYTHON)
+        # Force AppleClang for Python ABI compatibility
+        find_program(APPLE_CLANG "/usr/bin/clang")
+        find_program(APPLE_CLANGXX "/usr/bin/clang++")
+
+        if(APPLE_CLANG AND APPLE_CLANGXX)
+            set(CMAKE_C_COMPILER "${APPLE_CLANG}" CACHE FILEPATH "C compiler" FORCE)
+            set(CMAKE_CXX_COMPILER "${APPLE_CLANGXX}" CACHE FILEPATH "C++ compiler" FORCE)
+            message(STATUS "macOS Python bindings: Using AppleClang for ABI compatibility")
+        endif()
+    endif()
+endif()
+
+project(pulsim VERSION 0.2.0 LANGUAGES CXX)
+
+# =============================================================================
+# C++ Standard Configuration
+# =============================================================================
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Options
+# =============================================================================
+# Build Options
+# =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
-option(PULSIM_BUILD_CLI "Build CLI application" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
-option(PULSIM_BUILD_GRPC "Build gRPC API server" OFF)
 option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
-option(PULSIM_USE_SUITESPARSE "Use SuiteSparse KLU for faster sparse LU" OFF)
+# Note: SuiteSparse/KLU is now a required dependency (default backend for linear solver)
+
+# =============================================================================
+# Performance Optimization Options
+# =============================================================================
+option(PULSIM_ENABLE_LTO "Enable Link-Time Optimization for Release builds" ON)
+option(PULSIM_ENABLE_NATIVE "Enable native architecture optimizations" OFF)
+option(PULSIM_ENABLE_PGO_GENERATE "Enable PGO instrumentation (generate profile)" OFF)
+option(PULSIM_ENABLE_PGO_USE "Enable PGO optimization (use profile)" OFF)
+set(PULSIM_PGO_PROFILE_DIR "${CMAKE_BINARY_DIR}/pgo-profiles" CACHE PATH "Directory for PGO profile data")
+
+# CI Build Detection - skip timing-sensitive benchmark tests
+# Auto-detect CI environments or allow manual override
+if(DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})
+    option(PULSIM_CI_BUILD "Building in CI environment (skips timing benchmarks)" ON)
+else()
+    option(PULSIM_CI_BUILD "Building in CI environment (skips timing benchmarks)" OFF)
+endif()
+
+if(PULSIM_CI_BUILD)
+    add_compile_definitions(PULSIM_CI_BUILD=1)
+    message(STATUS "CI Build: Timing benchmarks will be skipped")
+endif()
+
+# LTO (Link-Time Optimization) - significant performance improvement
+if(PULSIM_ENABLE_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
+    if(LTO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+        message(STATUS "LTO: Enabled (interprocedural optimization)")
+    else()
+        message(WARNING "LTO: Not supported - ${LTO_ERROR}")
+    endif()
+endif()
+
+# PGO (Profile-Guided Optimization) - requires two-pass build
+# Pass 1: cmake -DPULSIM_ENABLE_PGO_GENERATE=ON .. && make && ./run_benchmarks
+# Pass 2: cmake -DPULSIM_ENABLE_PGO_USE=ON .. && make
+if(PULSIM_ENABLE_PGO_GENERATE AND PULSIM_ENABLE_PGO_USE)
+    message(FATAL_ERROR "Cannot enable both PGO_GENERATE and PGO_USE simultaneously")
+endif()
+
+if(PULSIM_ENABLE_PGO_GENERATE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(-fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
+        add_link_options(-fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
+        message(STATUS "PGO: Instrumentation enabled (profiles -> ${PULSIM_PGO_PROFILE_DIR})")
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fprofile-generate -fprofile-dir=${PULSIM_PGO_PROFILE_DIR})
+        add_link_options(-fprofile-generate)
+        message(STATUS "PGO: Instrumentation enabled (GCC, profiles -> ${PULSIM_PGO_PROFILE_DIR})")
+    elseif(MSVC)
+        add_compile_options(/GL)
+        add_link_options(/LTCG /GENPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
+        message(STATUS "PGO: Instrumentation enabled (MSVC)")
+    endif()
+endif()
+
+if(PULSIM_ENABLE_PGO_USE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Merge profiles first: llvm-profdata merge -output=merged.profdata ${PULSIM_PGO_PROFILE_DIR}/*.profraw
+        set(PULSIM_PGO_MERGED_PROFILE "${PULSIM_PGO_PROFILE_DIR}/merged.profdata" CACHE FILEPATH "Merged PGO profile")
+        if(EXISTS "${PULSIM_PGO_MERGED_PROFILE}")
+            add_compile_options(-fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
+            add_link_options(-fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
+            message(STATUS "PGO: Using profile ${PULSIM_PGO_MERGED_PROFILE}")
+        else()
+            message(WARNING "PGO: Profile not found at ${PULSIM_PGO_MERGED_PROFILE}. Run 'llvm-profdata merge' first.")
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fprofile-use -fprofile-dir=${PULSIM_PGO_PROFILE_DIR} -fprofile-correction)
+        add_link_options(-fprofile-use)
+        message(STATUS "PGO: Using profiles from ${PULSIM_PGO_PROFILE_DIR}")
+    elseif(MSVC)
+        add_compile_options(/GL)
+        add_link_options(/LTCG /USEPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
+        message(STATUS "PGO: Using MSVC profile")
+    endif()
+endif()
+
+# Native architecture optimizations (use with caution for distribution)
+if(PULSIM_ENABLE_NATIVE AND NOT MSVC)
+    add_compile_options(-march=native -mtune=native)
+    message(STATUS "Native optimizations: Enabled (-march=native)")
+endif()
+
+# =============================================================================
+# Ninja Generator Optimization
+# =============================================================================
+# Recommend Ninja for faster parallel builds:
+#   cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+if(CMAKE_GENERATOR STREQUAL "Ninja")
+    message(STATUS "Build system: Ninja (parallel compilation optimized)")
+    # Ninja handles parallelism automatically - no additional configuration needed
+elseif(CMAKE_GENERATOR MATCHES "Makefiles")
+    message(STATUS "Build system: Make (use -jN for parallel builds, or switch to Ninja)")
+    message(STATUS "Tip: For faster builds, use: cmake -G Ninja ...")
+endif()
+
+# =============================================================================
+# Compiler Detection and Verification
+# =============================================================================
+# Verify compiler version for C++23 support
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    # AppleClang versioning: 15.0+ has good C++23 support (ships with Xcode 15+)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "15.0")
+        message(WARNING
+            "AppleClang ${CMAKE_CXX_COMPILER_VERSION} detected. "
+            "Version 15+ (Xcode 15+) is recommended for C++23 support.\n"
+            "Update Xcode via: xcode-select --install"
+        )
+    else()
+        message(STATUS "AppleClang ${CMAKE_CXX_COMPILER_VERSION} - C++23 support OK")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # LLVM Clang: 17+ for full C++23
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "17.0")
+        message(WARNING
+            "Clang ${CMAKE_CXX_COMPILER_VERSION} detected. "
+            "Version 17+ is recommended for full C++23 support.\n"
+            "Consider using the Clang toolchain: cmake -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-clang.cmake ..."
+        )
+    else()
+        message(STATUS "Clang ${CMAKE_CXX_COMPILER_VERSION} - C++23 support OK")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
+        message(WARNING
+            "GCC ${CMAKE_CXX_COMPILER_VERSION} detected. "
+            "Version 13+ is recommended for full C++23 support.\n"
+            "Consider using Clang 17+: cmake -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-clang.cmake ..."
+        )
+    else()
+        message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} - C++23 support OK")
+    endif()
+elseif(MSVC)
+    if(MSVC_VERSION LESS 1937)
+        message(WARNING
+            "MSVC ${MSVC_VERSION} detected. "
+            "Visual Studio 2022 17.7+ is recommended for full C++23 support."
+        )
+    else()
+        message(STATUS "MSVC ${MSVC_VERSION} - C++23 support OK")
+    endif()
+endif()
+
+message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "C++ Standard: C++${CMAKE_CXX_STANDARD}")
 
 # Note: We use FetchContent_Populate for Eigen (header-only) to avoid
 # processing its CMakeLists.txt which includes many test targets.
 # Other dependencies have their test options disabled via cache variables.
 
-# Compiler warnings
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+# =============================================================================
+# Compiler Warnings and Flags
+# =============================================================================
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    # AppleClang (Xcode) - required for Python bindings on macOS
+    add_compile_options(
+        -Wall -Wextra -Wpedantic -Werror=return-type
+        -Wno-c++98-compat -Wno-c++98-compat-pedantic
+    )
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-g -O0 -fno-omit-frame-pointer)
+    else()
+        add_compile_options(-O3 -DNDEBUG)
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # LLVM Clang (Homebrew, etc.) - NOT for Python bindings on macOS
+    add_compile_options(
+        -Wall -Wextra -Wpedantic -Werror=return-type
+        -Wno-c++98-compat -Wno-c++98-compat-pedantic
+    )
+    # On Linux, use libc++ instead of libstdc++ for better C++23 support
+    # This avoids ABI issues between Clang and GCC's standard library
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_compile_options(-stdlib=libc++)
+        add_link_options(-stdlib=libc++ -lc++abi)
+        message(STATUS "Using libc++ on Linux for Clang")
+    endif()
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-g -O0 -fno-omit-frame-pointer)
+    else()
+        add_compile_options(-O3 -DNDEBUG)
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # GCC flags
     add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-g -O0)
@@ -75,12 +280,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
-# Catch2 for testing
+# Catch2 for testing (v3.8.0+ required for GCC 14 compatibility)
 if(PULSIM_BUILD_TESTS)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.5.0
+        GIT_TAG v3.8.0
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Catch2)
@@ -119,76 +324,190 @@ if(PULSIM_USE_SUNDIALS)
     message(STATUS "SUNDIALS support enabled")
 endif()
 
-# SuiteSparse KLU - Fast sparse LU for circuit matrices
-if(PULSIM_USE_SUITESPARSE)
-    # Try to find system-installed SuiteSparse
-    find_package(SuiteSparse CONFIG QUIET)
-    if(SuiteSparse_FOUND)
-        message(STATUS "Found system SuiteSparse")
-        add_compile_definitions(PULSIM_HAS_KLU)
-    else()
-        # Try pkg-config
-        find_package(PkgConfig QUIET)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(KLU QUIET klu)
-            if(KLU_FOUND)
-                message(STATUS "Found KLU via pkg-config")
-                add_compile_definitions(PULSIM_HAS_KLU)
-            else()
-                message(WARNING "SuiteSparse/KLU not found. Install with: brew install suite-sparse (macOS) or apt install libsuitesparse-dev (Linux)")
-            endif()
-        else()
-            message(WARNING "SuiteSparse/KLU not found and pkg-config not available")
+# =============================================================================
+# SuiteSparse KLU - Required dependency for fast sparse LU (circuit-optimized)
+# =============================================================================
+# KLU is the default linear solver backend. We try to find it on the system first,
+# then fall back to building from source via FetchContent.
+
+set(PULSIM_KLU_FOUND FALSE)
+
+# Method 1: Try to find system-installed SuiteSparse
+find_package(SuiteSparse CONFIG QUIET)
+if(SuiteSparse_FOUND AND TARGET SuiteSparse::KLU)
+    message(STATUS "Found system SuiteSparse with KLU")
+    set(PULSIM_KLU_FOUND TRUE)
+    set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+endif()
+
+# Method 2: Try pkg-config
+if(NOT PULSIM_KLU_FOUND)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(KLU QUIET klu)
+        if(KLU_FOUND)
+            message(STATUS "Found KLU via pkg-config: ${KLU_LIBRARY_DIRS}")
+            set(PULSIM_KLU_FOUND TRUE)
+            # Create imported target for KLU
+            # Use IMPORTED_TARGET to get proper linking with full paths
+            add_library(SuiteSparse::KLU INTERFACE IMPORTED)
+            set_target_properties(SuiteSparse::KLU PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${KLU_INCLUDE_DIRS}"
+                INTERFACE_LINK_DIRECTORIES "${KLU_LIBRARY_DIRS}"
+            )
+            # Link with full library path from pkg-config
+            target_link_libraries(SuiteSparse::KLU INTERFACE
+                "${KLU_LIBRARY_DIRS}/libklu.dylib"
+                "${KLU_LIBRARY_DIRS}/libamd.dylib"
+                "${KLU_LIBRARY_DIRS}/libcolamd.dylib"
+                "${KLU_LIBRARY_DIRS}/libbtf.dylib"
+                "${KLU_LIBRARY_DIRS}/libsuitesparseconfig.dylib"
+            )
+            set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
         endif()
     endif()
 endif()
 
-# Core library
-add_subdirectory(core)
+# Method 3: Try direct find_library (common locations)
+if(NOT PULSIM_KLU_FOUND)
+    find_library(KLU_LIBRARY NAMES klu PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_path(KLU_INCLUDE_DIR NAMES klu.h PATHS
+        /usr/local/include
+        /usr/local/include/suitesparse
+        /opt/homebrew/include
+        /opt/homebrew/include/suitesparse
+        /usr/include
+        /usr/include/suitesparse
+    )
+    find_library(AMD_LIBRARY NAMES amd PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_library(COLAMD_LIBRARY NAMES colamd PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_library(BTF_LIBRARY NAMES btf PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
+    find_library(SUITESPARSE_CONFIG_LIBRARY NAMES suitesparseconfig PATHS
+        /usr/local/lib
+        /opt/homebrew/lib
+        /usr/lib
+        /usr/lib/x86_64-linux-gnu
+    )
 
-# gRPC API server (must come before CLI to provide grpc_proto target)
-if(PULSIM_BUILD_GRPC)
-    add_subdirectory(api-grpc)
-endif()
-
-# CLI application
-if(PULSIM_BUILD_CLI)
-    add_subdirectory(cli)
-endif()
-
-# If tests are enabled, ensure the CLI executable is built before running integration
-# tests that invoke it. `pulsim_tests` lives in the `core` subdirectory.
-if(PULSIM_BUILD_TESTS AND PULSIM_BUILD_CLI)
-    if(TARGET pulsim AND TARGET pulsim_tests)
-        add_dependencies(pulsim_tests pulsim)
+    if(KLU_LIBRARY AND KLU_INCLUDE_DIR AND AMD_LIBRARY AND COLAMD_LIBRARY AND BTF_LIBRARY AND SUITESPARSE_CONFIG_LIBRARY)
+        message(STATUS "Found KLU via find_library: ${KLU_LIBRARY}")
+        set(PULSIM_KLU_FOUND TRUE)
+        # Create imported target
+        add_library(SuiteSparse::KLU INTERFACE IMPORTED)
+        set_target_properties(SuiteSparse::KLU PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${KLU_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "${KLU_LIBRARY};${AMD_LIBRARY};${COLAMD_LIBRARY};${BTF_LIBRARY};${SUITESPARSE_CONFIG_LIBRARY}"
+        )
+        set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
     endif()
 endif()
+
+# Method 4: Build from source via FetchContent
+if(NOT PULSIM_KLU_FOUND)
+    message(STATUS "SuiteSparse/KLU not found on system, building from source...")
+
+    # SuiteSparse requires some configuration
+    set(SUITESPARSE_ENABLE_PROJECTS "suitesparse_config;amd;colamd;btf;klu" CACHE STRING "" FORCE)
+    set(SUITESPARSE_USE_CUDA OFF CACHE BOOL "" FORCE)
+    set(SUITESPARSE_USE_FORTRAN OFF CACHE BOOL "" FORCE)
+    set(SUITESPARSE_DEMOS OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        suitesparse
+        GIT_REPOSITORY https://github.com/DrTimothyAldenDavis/SuiteSparse.git
+        GIT_TAG v7.6.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(suitesparse)
+
+    set(PULSIM_KLU_FOUND TRUE)
+    set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+    message(STATUS "Built SuiteSparse/KLU from source")
+endif()
+
+# Define the macro so code knows KLU is available
+if(PULSIM_KLU_FOUND)
+    add_compile_definitions(PULSIM_HAS_KLU)
+    message(STATUS "KLU support: ENABLED")
+else()
+    message(FATAL_ERROR "SuiteSparse/KLU is required but could not be found or built. "
+        "Install with: brew install suite-sparse (macOS) or apt install libsuitesparse-dev (Linux)")
+endif()
+
+# Core library (v2 header-only)
+add_subdirectory(core)
 
 # Python bindings
 if(PULSIM_BUILD_PYTHON)
     add_subdirectory(python)
 endif()
 
-# Custom targets for running examples (only when CLI is built)
-if(PULSIM_BUILD_CLI)
-    add_custom_target(run_buck
-        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/buck_converter.json -o buck_result.csv
-        DEPENDS pulsim
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running buck converter simulation..."
-    )
+# =============================================================================
+# Benchmark Targets
+# =============================================================================
+option(PULSIM_BUILD_BENCHMARKS "Build benchmark targets" OFF)
 
-    add_custom_target(run_rc
-        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/rc_circuit.json -o rc_result.csv
-        DEPENDS pulsim
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running RC circuit simulation..."
-    )
-
-    add_custom_target(run_rlc
-        COMMAND $<TARGET_FILE:pulsim> -v run ${CMAKE_SOURCE_DIR}/examples/rlc_circuit.json -o rlc_result.csv
-        DEPENDS pulsim
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running RLC circuit simulation..."
+if(PULSIM_BUILD_BENCHMARKS)
+    # Compile-time benchmark: measure template instantiation time
+    add_custom_target(benchmark_compile_time
+        COMMAND ${CMAKE_COMMAND} -E echo "=== Compile-Time Benchmark ==="
+        COMMAND ${CMAKE_COMMAND} -E echo "Cleaning build..."
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
+        COMMAND ${CMAKE_COMMAND} -E echo "Timing full rebuild..."
+        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_tests -- -j1
+        COMMENT "Measuring compile time (single-threaded for consistency)"
     )
 endif()
+
+# =============================================================================
+# PGO Workflow Helper Targets
+# =============================================================================
+if(PULSIM_ENABLE_PGO_GENERATE)
+    add_custom_target(pgo_merge_profiles
+        COMMAND ${CMAKE_COMMAND} -E echo "Merging PGO profiles..."
+        COMMAND llvm-profdata merge -output=${PULSIM_PGO_PROFILE_DIR}/merged.profdata ${PULSIM_PGO_PROFILE_DIR}/*.profraw
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Merging LLVM PGO profiles (run after training workload)"
+    )
+endif()
+
+# =============================================================================
+# Build Configuration Summary
+# =============================================================================
+message(STATUS "")
+message(STATUS "=== PulsimCore v2 Build Configuration ===")
+message(STATUS "  Build type:        ${CMAKE_BUILD_TYPE}")
+message(STATUS "  C++ Standard:      C++${CMAKE_CXX_STANDARD}")
+message(STATUS "  Compiler:          ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "  Generator:         ${CMAKE_GENERATOR}")
+message(STATUS "  LTO:               ${PULSIM_ENABLE_LTO}")
+message(STATUS "  PGO Generate:      ${PULSIM_ENABLE_PGO_GENERATE}")
+message(STATUS "  PGO Use:           ${PULSIM_ENABLE_PGO_USE}")
+message(STATUS "  Native opts:       ${PULSIM_ENABLE_NATIVE}")
+message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
+message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
+message(STATUS "  SUNDIALS:          ${PULSIM_USE_SUNDIALS}")
+message(STATUS "  KLU (required):    ${PULSIM_KLU_FOUND}")
+message(STATUS "=========================================")

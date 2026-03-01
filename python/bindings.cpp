@@ -1,1074 +1,2427 @@
+// =============================================================================
+// PulsimCore v2 - Python Bindings for High-Performance API
+// =============================================================================
+// Phase 7: Python Integration
+// - 7.1.1: pybind11 bindings for new API
+// - 7.1.2: Compatibility layer for old API
+// - 7.1.3: New solver configuration options
+// =============================================================================
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/eigen.h>
 #include <pybind11/functional.h>
+#include <pybind11/chrono.h>
 
-#include "pulsim/types.hpp"
+#include "pulsim/v1/core.hpp"
+#include "pulsim/v1/control.hpp"
+#include "pulsim/ac_analysis.hpp"
 #include "pulsim/circuit.hpp"
-#include "pulsim/parser.hpp"
-#include "pulsim/simulation.hpp"
-#include "pulsim/simulation_control.hpp"
-#include "pulsim/metadata.hpp"
-#include "pulsim/validation.hpp"
-#include "pulsim/thermal.hpp"
-#include "pulsim/devices.hpp"
 
 namespace py = pybind11;
-using namespace pulsim;
+using namespace pulsim::v1;
 
-PYBIND11_MODULE(_pulsim, m) {
-    m.doc() = "Pulsim - High-performance circuit simulator for power electronics";
+// =============================================================================
+// Circuit Converter: v1::Circuit -> pulsim::Circuit (IR)
+// =============================================================================
 
-    // --- Enums ---
-    py::enum_<ComponentType>(m, "ComponentType")
-        .value("Resistor", ComponentType::Resistor)
-        .value("Capacitor", ComponentType::Capacitor)
-        .value("Inductor", ComponentType::Inductor)
-        .value("VoltageSource", ComponentType::VoltageSource)
-        .value("CurrentSource", ComponentType::CurrentSource)
-        .value("Diode", ComponentType::Diode)
-        .value("Switch", ComponentType::Switch)
-        .value("MOSFET", ComponentType::MOSFET)
-        .value("Transformer", ComponentType::Transformer)
-        .export_values();
+/// Convert runtime v1::Circuit to IR pulsim::Circuit for AC analysis
+/// Note: Only basic components (R, L, C, V, I) are supported for AC analysis.
+/// Complex devices (switches, MOSFETs, IGBTs) are linearized as resistors.
+pulsim::Circuit convert_to_ir_circuit(const Circuit& v1_circuit) {
+    pulsim::Circuit ir;
 
-    py::enum_<SolverStatus>(m, "SolverStatus")
+    // Helper to get node name from index (GND for -1)
+    auto get_node_name = [&](pulsim::Index idx) -> std::string {
+        if (idx < 0) return "0";  // Ground
+        return v1_circuit.node_name(idx);
+    };
+
+    const auto& devices = v1_circuit.devices();
+    const auto& connections = v1_circuit.connections();
+
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        const auto& conn = connections[i];
+        const auto& dev = devices[i];
+
+        std::visit([&](const auto& d) -> void {
+            using T = std::decay_t<decltype(d)>;
+
+            if constexpr (std::is_same_v<T, Resistor>) {
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    d.resistance());
+            }
+            else if constexpr (std::is_same_v<T, Capacitor>) {
+                ir.add_capacitor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    d.capacitance());
+            }
+            else if constexpr (std::is_same_v<T, Inductor>) {
+                ir.add_inductor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    d.inductance());
+            }
+            else if constexpr (std::is_same_v<T, VoltageSource>) {
+                pulsim::DCWaveform wf{d.voltage()};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, CurrentSource>) {
+                pulsim::DCWaveform wf{d.current()};
+                ir.add_current_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, SineVoltageSource>) {
+                // Convert to DC source with amplitude value for AC analysis
+                pulsim::DCWaveform wf{d.params().amplitude};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, PulseVoltageSource>) {
+                // Use pulse high value as DC equivalent
+                pulsim::DCWaveform wf{d.params().v_pulse};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+                // Use average value for AC analysis
+                const auto& p = d.params();
+                pulsim::DCWaveform wf{p.v_low + (p.v_high - p.v_low) * p.duty};
+                ir.add_voltage_source(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    wf);
+            }
+            else if constexpr (std::is_same_v<T, IdealDiode>) {
+                // Linearize as small resistor (conducting state for AC)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    1e-3);  // 1 mOhm forward resistance
+            }
+            else if constexpr (std::is_same_v<T, IdealSwitch>) {
+                // Linearize as resistor based on state
+                Scalar r = d.is_closed() ? 1e-6 : 1e12;
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    r);
+            }
+            else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                // Linearize as resistor (assume on state)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[1]),
+                    get_node_name(conn.nodes[2]),
+                    1e-3);
+            }
+            else if constexpr (std::is_same_v<T, MOSFET>) {
+                // Linearize MOSFET as resistor (assume on state)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[1]),  // drain
+                    get_node_name(conn.nodes[2]),  // source
+                    1e-3);  // Small on-resistance
+            }
+            else if constexpr (std::is_same_v<T, IGBT>) {
+                // Linearize IGBT as resistor (assume on state)
+                ir.add_resistor(conn.name,
+                    get_node_name(conn.nodes[1]),  // collector
+                    get_node_name(conn.nodes[2]),  // emitter
+                    1e-3);  // Small on-resistance
+            }
+            else if constexpr (std::is_same_v<T, Transformer>) {
+                // Approximate transformer as coupled inductors
+                // For now, use large inductor on primary and ideal ratio
+                const Scalar lp = 1.0;  // 1H primary
+                ir.add_inductor(conn.name + "_Lp",
+                    get_node_name(conn.nodes[0]),
+                    get_node_name(conn.nodes[1]),
+                    lp);
+                // Secondary would need proper coupling - skip for now
+            }
+        }, dev);
+    }
+
+    return ir;
+}
+
+// =============================================================================
+// Helper: Convert Result types to Python (raise exception on error)
+// =============================================================================
+
+template<typename T>
+T unwrap_result(const Result<T>& result, const char* context) {
+    if (!result) {
+        throw std::runtime_error(std::string(context) + ": " + to_string(result.error));
+    }
+    return *result;
+}
+
+template<typename T>
+T unwrap_solve_result(const LinearSolveResult& result, const char* context) {
+    if (!result) {
+        throw std::runtime_error(std::string(context) + ": " + result.error);
+    }
+    return result.value();
+}
+
+// =============================================================================
+// Module Definition
+// =============================================================================
+
+void init_v2_module(py::module_& v2) {
+    v2.doc() = R"pbdoc(
+        PulsimCore v2 - High-Performance Circuit Simulation API
+
+        This module provides the new v2 API with:
+        - C++23 features and modern C++ design
+        - CRTP-based device models for zero-overhead abstraction
+        - Policy-based solver configuration
+        - Advanced convergence aids
+        - Validation and benchmarking utilities
+
+        Example:
+            import pulsim.v2 as pv2
+
+            # Create devices
+            r = pv2.Resistor(1000.0, "R1")
+            c = pv2.Capacitor(1e-6, 0.0, "C1")
+
+            # Configure solver
+            opts = pv2.NewtonOptions()
+            opts.max_iterations = 50
+
+            # Use convergence aids
+            config = pv2.DCConvergenceConfig()
+            config.strategy = pv2.DCStrategy.Auto
+    )pbdoc";
+
+    // =========================================================================
+    // Enums
+    // =========================================================================
+
+    py::enum_<DeviceType>(v2, "DeviceType", "Device type enumeration")
+        .value("Resistor", DeviceType::Resistor)
+        .value("Capacitor", DeviceType::Capacitor)
+        .value("Inductor", DeviceType::Inductor)
+        .value("VoltageSource", DeviceType::VoltageSource)
+        .value("CurrentSource", DeviceType::CurrentSource)
+        .value("Diode", DeviceType::Diode)
+        .value("Switch", DeviceType::Switch)
+        .value("MOSFET", DeviceType::MOSFET)
+        .value("IGBT", DeviceType::IGBT)
+        .value("Transformer", DeviceType::Transformer);
+        // Don't export_values() - conflicts with class names
+
+    py::enum_<SolverStatus>(v2, "SolverStatus", "Newton solver status")
         .value("Success", SolverStatus::Success)
         .value("MaxIterationsReached", SolverStatus::MaxIterationsReached)
         .value("SingularMatrix", SolverStatus::SingularMatrix)
         .value("NumericalError", SolverStatus::NumericalError)
+        .value("ConvergenceStall", SolverStatus::ConvergenceStall)
+        .value("Diverging", SolverStatus::Diverging)
         .export_values();
 
-    py::enum_<MOSFETType>(m, "MOSFETType")
-        .value("NMOS", MOSFETType::NMOS)
-        .value("PMOS", MOSFETType::PMOS)
+    py::enum_<DCStrategy>(v2, "DCStrategy", "DC analysis convergence strategy")
+        .value("Direct", DCStrategy::Direct)
+        .value("GminStepping", DCStrategy::GminStepping)
+        .value("SourceStepping", DCStrategy::SourceStepping)
+        .value("PseudoTransient", DCStrategy::PseudoTransient)
+        .value("Auto", DCStrategy::Auto)
         .export_values();
 
-    py::enum_<ThermalNetworkType>(m, "ThermalNetworkType")
-        .value("Foster", ThermalNetworkType::Foster)
-        .value("Cauer", ThermalNetworkType::Cauer)
-        .value("Simple", ThermalNetworkType::Simple)
+    py::enum_<RLCDamping>(v2, "RLCDamping", "RLC circuit damping type")
+        .value("Underdamped", RLCDamping::Underdamped)
+        .value("Critical", RLCDamping::Critical)
+        .value("Overdamped", RLCDamping::Overdamped)
         .export_values();
 
-    py::enum_<SimulationState>(m, "SimulationState",
-        "Simulation execution states for GUI status display.\n\n"
-        "States:\n"
-        "    Idle: Simulation not started\n"
-        "    Running: Simulation actively executing\n"
-        "    Paused: Simulation paused, can be resumed\n"
-        "    Stopping: Stop requested, finishing current step\n"
-        "    Completed: Simulation finished successfully\n"
-        "    Error: Simulation terminated with error")
-        .value("Idle", SimulationState::Idle)
-        .value("Running", SimulationState::Running)
-        .value("Paused", SimulationState::Paused)
-        .value("Stopping", SimulationState::Stopping)
-        .value("Completed", SimulationState::Completed)
-        .value("Error", SimulationState::Error)
+    py::enum_<DeviceHint>(v2, "DeviceHint", "Node initialization hints")
+        .value("None_", DeviceHint::None)
+        .value("DiodeAnode", DeviceHint::DiodeAnode)
+        .value("DiodeCathode", DeviceHint::DiodeCathode)
+        .value("MOSFETGate", DeviceHint::MOSFETGate)
+        .value("MOSFETDrain", DeviceHint::MOSFETDrain)
+        .value("MOSFETSource", DeviceHint::MOSFETSource)
+        .value("BJTBase", DeviceHint::BJTBase)
+        .value("BJTCollector", DeviceHint::BJTCollector)
+        .value("BJTEmitter", DeviceHint::BJTEmitter)
+        .value("SupplyPositive", DeviceHint::SupplyPositive)
+        .value("SupplyNegative", DeviceHint::SupplyNegative)
+        .value("Ground", DeviceHint::Ground)
         .export_values();
 
-    py::enum_<IntegrationMethod>(m, "IntegrationMethod")
-        .value("BackwardEuler", IntegrationMethod::BackwardEuler)
-        .value("Trapezoidal", IntegrationMethod::Trapezoidal)
-        .value("BDF2", IntegrationMethod::BDF2)
-        .value("GEAR2", IntegrationMethod::GEAR2)
-        .export_values();
+    // =========================================================================
+    // CRTP Devices (7.1.1)
+    // =========================================================================
 
-    py::enum_<DiagnosticSeverity>(m, "DiagnosticSeverity",
-        "Severity levels for circuit validation diagnostics.\n\n"
-        "Levels:\n"
-        "    Error: Must be fixed before simulation can run\n"
-        "    Warning: May cause issues but simulation can proceed\n"
-        "    Info: Informational message only")
-        .value("Error", DiagnosticSeverity::Error)
-        .value("Warning", DiagnosticSeverity::Warning)
-        .value("Info", DiagnosticSeverity::Info)
-        .export_values();
+    py::class_<Resistor>(v2, "Resistor", "CRTP Resistor device")
+        .def(py::init<Real, const std::string&>(),
+             py::arg("resistance"), py::arg("name") = "")
+        .def("resistance", &Resistor::resistance)
+        .def("name", &Resistor::name);
 
-    py::enum_<DiagnosticCode>(m, "DiagnosticCode",
-        "Specific diagnostic codes for programmatic error handling.\n\n"
-        "Errors (E_xxx):\n"
-        "    E_NO_GROUND: No ground reference node\n"
-        "    E_VOLTAGE_SOURCE_LOOP: Voltage sources form a loop\n"
-        "    E_INDUCTOR_LOOP: Inductors/V-sources form a loop\n"
-        "    E_NO_DC_PATH: Node has no DC path to ground\n"
-        "    E_INVALID_PARAMETER: Parameter value out of range\n"
-        "    E_UNKNOWN_NODE: Referenced node doesn't exist\n"
-        "    E_DUPLICATE_NAME: Component name already used\n"
-        "    E_NO_COMPONENTS: Circuit has no components\n\n"
-        "Warnings (W_xxx):\n"
-        "    W_FLOATING_NODE: Node has only one connection\n"
-        "    W_SHORT_CIRCUIT: Very low impedance path detected\n"
-        "    W_HIGH_VOLTAGE: Unusually high voltage expected\n"
-        "    W_MISSING_IC: Capacitor/inductor has no initial condition\n"
-        "    W_LARGE_TIMESTEP: Timestep may be too large\n\n"
-        "Info (I_xxx):\n"
-        "    I_IDEAL_SWITCH: Using ideal switch model\n"
-        "    I_NO_LOSS_MODEL: Power loss calculation not available\n"
-        "    I_PARALLEL_SOURCES: Parallel voltage sources detected")
-        .value("E_NO_GROUND", DiagnosticCode::E_NO_GROUND)
-        .value("E_VOLTAGE_SOURCE_LOOP", DiagnosticCode::E_VOLTAGE_SOURCE_LOOP)
-        .value("E_INDUCTOR_LOOP", DiagnosticCode::E_INDUCTOR_LOOP)
-        .value("E_NO_DC_PATH", DiagnosticCode::E_NO_DC_PATH)
-        .value("E_INVALID_PARAMETER", DiagnosticCode::E_INVALID_PARAMETER)
-        .value("E_UNKNOWN_NODE", DiagnosticCode::E_UNKNOWN_NODE)
-        .value("E_DUPLICATE_NAME", DiagnosticCode::E_DUPLICATE_NAME)
-        .value("E_NO_COMPONENTS", DiagnosticCode::E_NO_COMPONENTS)
-        .value("W_FLOATING_NODE", DiagnosticCode::W_FLOATING_NODE)
-        .value("W_SHORT_CIRCUIT", DiagnosticCode::W_SHORT_CIRCUIT)
-        .value("W_HIGH_VOLTAGE", DiagnosticCode::W_HIGH_VOLTAGE)
-        .value("W_MISSING_IC", DiagnosticCode::W_MISSING_IC)
-        .value("W_LARGE_TIMESTEP", DiagnosticCode::W_LARGE_TIMESTEP)
-        .value("I_IDEAL_SWITCH", DiagnosticCode::I_IDEAL_SWITCH)
-        .value("I_NO_LOSS_MODEL", DiagnosticCode::I_NO_LOSS_MODEL)
-        .value("I_PARALLEL_SOURCES", DiagnosticCode::I_PARALLEL_SOURCES)
-        .export_values();
+    py::class_<Capacitor>(v2, "Capacitor", "CRTP Capacitor device")
+        .def(py::init<Real, Real, const std::string&>(),
+             py::arg("capacitance"), py::arg("initial_voltage") = 0.0,
+             py::arg("name") = "")
+        .def("capacitance", &Capacitor::capacitance)
+        .def("name", &Capacitor::name)
+        .def("set_timestep", &Capacitor::set_timestep);
 
-    py::enum_<ParameterType>(m, "ParameterType",
-        "Data types for component parameters in property editors.\n\n"
-        "Types:\n"
-        "    Real: Floating-point number (use spin box or slider)\n"
-        "    Integer: Integer value (use integer spin box)\n"
-        "    Boolean: True/false (use checkbox)\n"
-        "    Enum: One of several choices (use dropdown)\n"
-        "    String: Text input (e.g., model name)")
-        .value("Real", ParameterType::Real)
-        .value("Integer", ParameterType::Integer)
-        .value("Boolean", ParameterType::Boolean)
-        .value("Enum", ParameterType::Enum)
-        .value("String", ParameterType::String)
-        .export_values();
+    py::class_<Inductor>(v2, "Inductor", "CRTP Inductor device")
+        .def(py::init<Real, Real, const std::string&>(),
+             py::arg("inductance"), py::arg("initial_current") = 0.0,
+             py::arg("name") = "")
+        .def("inductance", &Inductor::inductance)
+        .def("name", &Inductor::name)
+        .def("set_timestep", &Inductor::set_timestep);
 
-    // --- Waveforms ---
-    py::class_<DCWaveform>(m, "DCWaveform")
-        .def(py::init<Real>(), py::arg("value"))
-        .def_readwrite("value", &DCWaveform::value);
+    py::class_<VoltageSource>(v2, "VoltageSource", "CRTP Voltage source")
+        .def(py::init<Real, const std::string&>(),
+             py::arg("voltage"), py::arg("name") = "")
+        .def("voltage", &VoltageSource::voltage)
+        .def("name", &VoltageSource::name);
 
-    py::class_<PulseWaveform>(m, "PulseWaveform")
+    py::class_<CurrentSource>(v2, "CurrentSource", "CRTP Current source")
+        .def(py::init<Real, const std::string&>(),
+             py::arg("current"), py::arg("name") = "")
+        .def("current", &CurrentSource::current)
+        .def("name", &CurrentSource::name);
+
+    // =========================================================================
+    // Nonlinear Devices
+    // =========================================================================
+
+    py::class_<IdealDiode>(v2, "IdealDiode", "Ideal diode with on/off conductance")
+        .def(py::init<Real, Real, std::string>(),
+             py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9, py::arg("name") = "")
+        .def("is_conducting", &IdealDiode::is_conducting)
+        .def("name", &IdealDiode::name);
+
+    py::class_<IdealSwitch>(v2, "IdealSwitch", "Controllable ideal switch")
+        .def(py::init<Real, Real, bool, std::string>(),
+             py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
+             py::arg("closed") = false, py::arg("name") = "")
+        .def("close", &IdealSwitch::close)
+        .def("open", &IdealSwitch::open)
+        .def("set_state", &IdealSwitch::set_state)
+        .def("is_closed", &IdealSwitch::is_closed)
+        .def("name", &IdealSwitch::name);
+
+    // MOSFET parameters
+    py::class_<MOSFET::Params>(v2, "MOSFETParams", "MOSFET Level 1 parameters")
         .def(py::init<>())
-        .def_readwrite("v1", &PulseWaveform::v1)
-        .def_readwrite("v2", &PulseWaveform::v2)
-        .def_readwrite("td", &PulseWaveform::td)
-        .def_readwrite("tr", &PulseWaveform::tr)
-        .def_readwrite("tf", &PulseWaveform::tf)
-        .def_readwrite("pw", &PulseWaveform::pw)
-        .def_readwrite("period", &PulseWaveform::period);
+        .def_readwrite("vth", &MOSFET::Params::vth, "Threshold voltage (V)")
+        .def_readwrite("kp", &MOSFET::Params::kp, "Transconductance (A/V^2)")
+        .def_readwrite("lambda_", &MOSFET::Params::lambda, "Channel-length modulation (1/V)")
+        .def_readwrite("g_off", &MOSFET::Params::g_off, "Off-state conductance")
+        .def_readwrite("is_nmos", &MOSFET::Params::is_nmos, "True for NMOS, False for PMOS");
 
-    py::class_<SineWaveform>(m, "SineWaveform")
+    py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
+        .def(py::init<std::string>(), py::arg("name") = "")
+        .def(py::init<MOSFET::Params, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def(py::init<Real, Real, bool, std::string>(),
+             py::arg("vth"), py::arg("kp"), py::arg("is_nmos") = true, py::arg("name") = "")
+        .def("params", &MOSFET::params, py::return_value_policy::reference_internal)
+        .def("name", &MOSFET::name);
+
+    // IGBT parameters
+    py::class_<IGBT::Params>(v2, "IGBTParams", "IGBT parameters")
         .def(py::init<>())
-        .def_readwrite("offset", &SineWaveform::offset)
-        .def_readwrite("amplitude", &SineWaveform::amplitude)
-        .def_readwrite("frequency", &SineWaveform::frequency)
-        .def_readwrite("delay", &SineWaveform::delay)
-        .def_readwrite("damping", &SineWaveform::damping);
+        .def_readwrite("vth", &IGBT::Params::vth, "Gate threshold voltage (V)")
+        .def_readwrite("g_on", &IGBT::Params::g_on, "On-state conductance (S)")
+        .def_readwrite("g_off", &IGBT::Params::g_off, "Off-state conductance (S)")
+        .def_readwrite("v_ce_sat", &IGBT::Params::v_ce_sat, "Collector-emitter saturation (V)");
 
-    py::class_<PWLWaveform>(m, "PWLWaveform")
+    py::class_<IGBT>(v2, "IGBT", "Simplified IGBT power device model")
+        .def(py::init<std::string>(), py::arg("name") = "")
+        .def(py::init<IGBT::Params, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def(py::init<Real, Real, std::string>(),
+             py::arg("vth"), py::arg("g_on") = 1e4, py::arg("name") = "")
+        .def("is_conducting", &IGBT::is_conducting)
+        .def("params", &IGBT::params, py::return_value_policy::reference_internal)
+        .def("name", &IGBT::name);
+
+    // =========================================================================
+    // Time-Varying Sources
+    // =========================================================================
+
+    py::class_<PWMParams>(v2, "PWMParams", "PWM voltage source parameters")
         .def(py::init<>())
-        .def_readwrite("points", &PWLWaveform::points);
+        .def_readwrite("v_high", &PWMParams::v_high, "High voltage level (V)")
+        .def_readwrite("v_low", &PWMParams::v_low, "Low voltage level (V)")
+        .def_readwrite("frequency", &PWMParams::frequency, "Switching frequency (Hz)")
+        .def_readwrite("duty", &PWMParams::duty, "Duty cycle (0-1)")
+        .def_readwrite("phase", &PWMParams::phase, "Initial phase (rad)")
+        .def_readwrite("dead_time", &PWMParams::dead_time, "Dead time (s)")
+        .def_readwrite("rise_time", &PWMParams::rise_time, "Rise time (s)")
+        .def_readwrite("fall_time", &PWMParams::fall_time, "Fall time (s)");
 
-    py::class_<PWMWaveform>(m, "PWMWaveform")
+    py::class_<SineParams>(v2, "SineParams", "Sine voltage source parameters")
         .def(py::init<>())
-        .def_readwrite("v_off", &PWMWaveform::v_off)
-        .def_readwrite("v_on", &PWMWaveform::v_on)
-        .def_readwrite("frequency", &PWMWaveform::frequency)
-        .def_readwrite("duty", &PWMWaveform::duty)
-        .def_readwrite("dead_time", &PWMWaveform::dead_time)
-        .def_readwrite("phase", &PWMWaveform::phase)
-        .def_readwrite("complementary", &PWMWaveform::complementary)
-        .def("period", &PWMWaveform::period)
-        .def("t_on", &PWMWaveform::t_on);
+        .def_readwrite("amplitude", &SineParams::amplitude, "Peak amplitude (V)")
+        .def_readwrite("offset", &SineParams::offset, "DC offset (V)")
+        .def_readwrite("frequency", &SineParams::frequency, "Frequency (Hz)")
+        .def_readwrite("phase", &SineParams::phase, "Initial phase (rad)");
 
-    // --- Component Parameters ---
-    py::class_<DiodeParams>(m, "DiodeParams")
+    py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
         .def(py::init<>())
-        .def_readwrite("is_", &DiodeParams::is)
-        .def_readwrite("n", &DiodeParams::n)
-        .def_readwrite("rs", &DiodeParams::rs)
-        .def_readwrite("vt", &DiodeParams::vt)
-        .def_readwrite("ideal", &DiodeParams::ideal);
+        .def_readwrite("v_min", &RampParams::v_min, "Minimum voltage")
+        .def_readwrite("v_max", &RampParams::v_max, "Maximum voltage")
+        .def_readwrite("frequency", &RampParams::frequency, "Frequency (Hz)")
+        .def_readwrite("phase", &RampParams::phase, "Initial phase (rad)")
+        .def_readwrite("triangle", &RampParams::triangle, "Triangle (true) or sawtooth (false)");
 
-    py::class_<SwitchParams>(m, "SwitchParams")
+    py::class_<PulseParams>(v2, "PulseParams", "Pulse voltage source parameters")
         .def(py::init<>())
-        .def_readwrite("ron", &SwitchParams::ron)
-        .def_readwrite("roff", &SwitchParams::roff)
-        .def_readwrite("vth", &SwitchParams::vth)
-        .def_readwrite("initial_state", &SwitchParams::initial_state);
+        .def_readwrite("v_initial", &PulseParams::v_initial, "Initial voltage")
+        .def_readwrite("v_pulse", &PulseParams::v_pulse, "Pulse voltage")
+        .def_readwrite("t_delay", &PulseParams::t_delay, "Delay before pulse (s)")
+        .def_readwrite("t_rise", &PulseParams::t_rise, "Rise time (s)")
+        .def_readwrite("t_fall", &PulseParams::t_fall, "Fall time (s)")
+        .def_readwrite("t_width", &PulseParams::t_width, "Pulse width (s)")
+        .def_readwrite("period", &PulseParams::period, "Period (0 = single pulse) (s)");
 
-    py::class_<MOSFETParams>(m, "MOSFETParams")
+    py::class_<PWMVoltageSource>(v2, "PWMVoltageSource", "PWM voltage source")
+        .def(py::init<const PWMParams&, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def(py::init<Real, Real, Real, Real, std::string>(),
+             py::arg("v_high"), py::arg("v_low"), py::arg("frequency"), py::arg("duty"),
+             py::arg("name") = "")
+        .def("params", py::overload_cast<>(&PWMVoltageSource::params, py::const_),
+             py::return_value_policy::reference_internal)
+        .def("frequency", &PWMVoltageSource::frequency)
+        .def("period", &PWMVoltageSource::period)
+        .def("set_duty", &PWMVoltageSource::set_duty, py::arg("duty"))
+        .def("set_duty_callback", &PWMVoltageSource::set_duty_callback, py::arg("callback"))
+        .def("clear_duty_callback", &PWMVoltageSource::clear_duty_callback)
+        .def("duty_at", &PWMVoltageSource::duty_at, py::arg("t"))
+        .def("voltage_at", &PWMVoltageSource::voltage_at, py::arg("t"))
+        .def("state_at", &PWMVoltageSource::state_at, py::arg("t"));
+
+    py::class_<SineVoltageSource>(v2, "SineVoltageSource", "Sinusoidal voltage source")
+        .def(py::init<const SineParams&, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def(py::init<Real, Real, Real, std::string>(),
+             py::arg("amplitude"), py::arg("frequency"), py::arg("offset") = 0.0,
+             py::arg("name") = "")
+        .def("params", &SineVoltageSource::params,
+             py::return_value_policy::reference_internal)
+        .def("voltage_at", &SineVoltageSource::voltage_at, py::arg("t"));
+
+    py::class_<PulseVoltageSource>(v2, "PulseVoltageSource", "Pulse voltage source")
+        .def(py::init<const PulseParams&, std::string>(),
+             py::arg("params"), py::arg("name") = "")
+        .def("params", &PulseVoltageSource::params,
+             py::return_value_policy::reference_internal)
+        .def("voltage_at", &PulseVoltageSource::voltage_at, py::arg("t"));
+
+    py::class_<RampGenerator>(v2, "RampGenerator", "Ramp/triangle waveform generator")
+        .def(py::init<const RampParams&>(),
+             py::arg("params") = RampParams{})
+        .def(py::init<Real, Real, Real, bool>(),
+             py::arg("frequency"), py::arg("v_min") = 0.0, py::arg("v_max") = 1.0,
+             py::arg("triangle") = false)
+        .def("params", py::overload_cast<>(&RampGenerator::params, py::const_),
+             py::return_value_policy::reference_internal)
+        .def("frequency", &RampGenerator::frequency)
+        .def("period", &RampGenerator::period)
+        .def("value_at", &RampGenerator::value_at, py::arg("t"));
+
+    // =========================================================================
+    // Control Blocks
+    // =========================================================================
+
+    py::class_<PIController>(v2, "PIController", "PI controller with anti-windup")
+        .def(py::init<Real, Real, Real, Real>(),
+             py::arg("Kp"), py::arg("Ki"),
+             py::arg("output_min") = 0.0, py::arg("output_max") = 1.0)
+        .def("Kp", &PIController::Kp)
+        .def("Ki", &PIController::Ki)
+        .def("output_min", &PIController::output_min)
+        .def("output_max", &PIController::output_max)
+        .def("set_Kp", &PIController::set_Kp, py::arg("kp"))
+        .def("set_Ki", &PIController::set_Ki, py::arg("ki"))
+        .def("set_output_limits", &PIController::set_output_limits,
+             py::arg("min"), py::arg("max"))
+        .def("integral", &PIController::integral)
+        .def("last_output", &PIController::last_output)
+        .def("update", py::overload_cast<Real, Real>(&PIController::update),
+             py::arg("error"), py::arg("t"))
+        .def("update", py::overload_cast<Real, Real, Real>(&PIController::update),
+             py::arg("reference"), py::arg("feedback"), py::arg("t"))
+        .def("reset", &PIController::reset)
+        .def("set_integral", &PIController::set_integral, py::arg("value"));
+
+    py::class_<PIDController>(v2, "PIDController", "PID controller with anti-windup")
+        .def(py::init<Real, Real, Real, Real, Real, Real>(),
+             py::arg("Kp"), py::arg("Ki"), py::arg("Kd"),
+             py::arg("output_min") = 0.0, py::arg("output_max") = 1.0,
+             py::arg("derivative_filter") = 0.1)
+        .def("Kp", &PIDController::Kp)
+        .def("Ki", &PIDController::Ki)
+        .def("Kd", &PIDController::Kd)
+        .def("set_gains", &PIDController::set_gains,
+             py::arg("kp"), py::arg("ki"), py::arg("kd"))
+        .def("set_output_limits", &PIDController::set_output_limits,
+             py::arg("min"), py::arg("max"))
+        .def("set_derivative_filter", &PIDController::set_derivative_filter, py::arg("alpha"))
+        .def("integral", &PIDController::integral)
+        .def("last_output", &PIDController::last_output)
+        .def("update", py::overload_cast<Real, Real>(&PIDController::update),
+             py::arg("error"), py::arg("t"))
+        .def("update", py::overload_cast<Real, Real, Real>(&PIDController::update),
+             py::arg("reference"), py::arg("feedback"), py::arg("t"))
+        .def("reset", &PIDController::reset);
+
+    py::class_<Comparator>(v2, "Comparator", "Comparator with optional hysteresis")
+        .def(py::init<Real>(), py::arg("hysteresis") = 0.0)
+        .def("hysteresis", &Comparator::hysteresis)
+        .def("set_hysteresis", &Comparator::set_hysteresis, py::arg("h"))
+        .def("compare", &Comparator::compare,
+             py::arg("input"), py::arg("reference"))
+        .def("output", &Comparator::output,
+             py::arg("input"), py::arg("reference"),
+             py::arg("v_high") = 1.0, py::arg("v_low") = 0.0)
+        .def("state", &Comparator::state)
+        .def("reset", &Comparator::reset);
+
+    py::class_<SampleHold>(v2, "SampleHold", "Sample-and-hold block")
+        .def(py::init<Real>(), py::arg("sample_period"))
+        .def("period", &SampleHold::period)
+        .def("frequency", &SampleHold::frequency)
+        .def("set_period", &SampleHold::set_period, py::arg("T"))
+        .def("value", &SampleHold::value)
+        .def("last_sample_time", &SampleHold::last_sample_time)
+        .def("update", &SampleHold::update, py::arg("input"), py::arg("t"))
+        .def("sample_now", &SampleHold::sample_now, py::arg("input"), py::arg("t"))
+        .def("reset", &SampleHold::reset);
+
+    py::class_<RateLimiter>(v2, "RateLimiter", "Limits rate of change of a signal")
+        .def(py::init<Real, Real>(),
+             py::arg("rising_rate"), py::arg("falling_rate"))
+        .def(py::init<Real>(), py::arg("rate"))
+        .def("rising_rate", &RateLimiter::rising_rate)
+        .def("falling_rate", &RateLimiter::falling_rate)
+        .def("set_rates", &RateLimiter::set_rates,
+             py::arg("rising"), py::arg("falling"))
+        .def("value", &RateLimiter::value)
+        .def("update", &RateLimiter::update, py::arg("input"), py::arg("t"))
+        .def("reset", &RateLimiter::reset, py::arg("initial") = 0.0);
+
+    py::class_<MovingAverageFilter>(v2, "MovingAverageFilter", "Exponential moving average filter")
+        .def(py::init<Real>(), py::arg("time_constant"))
+        .def("time_constant", &MovingAverageFilter::time_constant)
+        .def("set_time_constant", &MovingAverageFilter::set_time_constant, py::arg("tau"))
+        .def("value", &MovingAverageFilter::value)
+        .def("update", &MovingAverageFilter::update, py::arg("input"), py::arg("t"))
+        .def("reset", &MovingAverageFilter::reset, py::arg("initial") = 0.0);
+
+    py::class_<HysteresisController>(v2, "HysteresisController", "Bang-bang controller with hysteresis")
+        .def(py::init<Real, Real, Real, Real>(),
+             py::arg("setpoint"), py::arg("band"),
+             py::arg("output_high") = 1.0, py::arg("output_low") = 0.0)
+        .def("setpoint", &HysteresisController::setpoint)
+        .def("band", &HysteresisController::band)
+        .def("set_setpoint", &HysteresisController::set_setpoint, py::arg("sp"))
+        .def("set_band", &HysteresisController::set_band, py::arg("b"))
+        .def("state", &HysteresisController::state)
+        .def("output", &HysteresisController::output)
+        .def("update", &HysteresisController::update, py::arg("feedback"))
+        .def("reset", &HysteresisController::reset);
+
+    py::class_<LookupTable1D>(v2, "LookupTable1D", "1D lookup table with linear interpolation")
         .def(py::init<>())
-        .def_readwrite("type", &MOSFETParams::type)
-        .def_readwrite("vth", &MOSFETParams::vth)
-        .def_readwrite("kp", &MOSFETParams::kp)
-        .def_readwrite("lambda_", &MOSFETParams::lambda)
-        .def_readwrite("w", &MOSFETParams::w)
-        .def_readwrite("l", &MOSFETParams::l)
-        .def_readwrite("body_diode", &MOSFETParams::body_diode)
-        .def_readwrite("rds_on", &MOSFETParams::rds_on)
-        .def("kp_effective", &MOSFETParams::kp_effective);
+        .def(py::init<std::vector<Real>, std::vector<Real>>(),
+             py::arg("x"), py::arg("y"))
+        .def("x_data", &LookupTable1D::x_data)
+        .def("y_data", &LookupTable1D::y_data)
+        .def("size", &LookupTable1D::size)
+        .def("empty", &LookupTable1D::empty)
+        .def("__call__", &LookupTable1D::operator(), py::arg("x"))
+        .def("interpolate", &LookupTable1D::interpolate, py::arg("x"));
 
-    py::class_<IGBTParams>(m, "IGBTParams")
+    // =========================================================================
+    // Runtime Circuit Builder (Phase 3)
+    // =========================================================================
+
+    py::class_<Circuit>(v2, "Circuit", "Runtime circuit builder for simulation")
         .def(py::init<>())
-        .def_readwrite("vth", &IGBTParams::vth)
-        .def_readwrite("vce_sat", &IGBTParams::vce_sat)
-        .def_readwrite("rce_on", &IGBTParams::rce_on)
-        .def_readwrite("rce_off", &IGBTParams::rce_off)
-        .def_readwrite("tf", &IGBTParams::tf)
-        .def_readwrite("tr", &IGBTParams::tr)
-        .def_readwrite("cies", &IGBTParams::cies)
-        .def_readwrite("body_diode", &IGBTParams::body_diode)
-        .def_readwrite("is_diode", &IGBTParams::is_diode)
-        .def_readwrite("n_diode", &IGBTParams::n_diode)
-        .def_readwrite("vf_diode", &IGBTParams::vf_diode);
-
-    py::class_<TransformerParams>(m, "TransformerParams")
-        .def(py::init<>())
-        .def_readwrite("turns_ratio", &TransformerParams::turns_ratio)
-        .def_readwrite("lm", &TransformerParams::lm)
-        .def_readwrite("ll1", &TransformerParams::ll1)
-        .def_readwrite("ll2", &TransformerParams::ll2);
-
-    // --- Simulation Options ---
-    py::class_<SimulationOptions>(m, "SimulationOptions")
-        .def(py::init<>())
-        .def_readwrite("tstart", &SimulationOptions::tstart)
-        .def_readwrite("tstop", &SimulationOptions::tstop)
-        .def_readwrite("dt", &SimulationOptions::dt)
-        .def_readwrite("dtmin", &SimulationOptions::dtmin)
-        .def_readwrite("dtmax", &SimulationOptions::dtmax)
-        .def_readwrite("abstol", &SimulationOptions::abstol)
-        .def_readwrite("reltol", &SimulationOptions::reltol)
-        .def_readwrite("max_newton_iterations", &SimulationOptions::max_newton_iterations)
-        .def_readwrite("damping_factor", &SimulationOptions::damping_factor)
-        .def_readwrite("use_ic", &SimulationOptions::use_ic)
-        .def_readwrite("integration_method", &SimulationOptions::integration_method)
-        .def_readwrite("adaptive_timestep", &SimulationOptions::adaptive_timestep)
-        .def_readwrite("lte_rtol", &SimulationOptions::lte_rtol)
-        .def_readwrite("lte_atol", &SimulationOptions::lte_atol)
-        .def_readwrite("output_signals", &SimulationOptions::output_signals)
-        // Streaming configuration for GUI
-        .def_readwrite("streaming_decimation", &SimulationOptions::streaming_decimation,
-            "Store every Nth point (1 = all points, 10 = every 10th)")
-        .def_readwrite("streaming_rolling_buffer", &SimulationOptions::streaming_rolling_buffer,
-            "If true, keep only the last streaming_max_points")
-        .def_readwrite("streaming_max_points", &SimulationOptions::streaming_max_points,
-            "Maximum points to store when using rolling buffer")
-        // Progress callback throttling
-        .def_readwrite("progress_min_interval_ms", &SimulationOptions::progress_min_interval_ms,
-            "Minimum milliseconds between progress callbacks")
-        .def_readwrite("progress_min_steps", &SimulationOptions::progress_min_steps,
-            "Minimum simulation steps between progress callbacks")
-        .def_readwrite("progress_include_memory", &SimulationOptions::progress_include_memory,
-            "Track memory usage in progress callbacks (slower)");
-
-    // --- Simulation Controller ---
-    py::class_<SimulationController>(m, "SimulationController",
-        "Thread-safe simulation controller for pause/resume/stop operations.\n\n"
-        "Use this class in GUI applications to control long-running simulations\n"
-        "from a separate thread. The controller implements a state machine with\n"
-        "states: Idle -> Running <-> Paused -> Completed/Error\n\n"
-        "Example:\n"
-        "    controller = pulsim.SimulationController()\n\n"
-        "    # In simulation thread:\n"
-        "    result = sim.run_transient_with_progress(\n"
-        "        control=controller,\n"
-        "        progress_callback=lambda p: update_progress(p.progress_percent)\n"
-        "    )\n\n"
-        "    # In GUI thread:\n"
-        "    controller.request_pause()   # Pause button\n"
-        "    controller.request_resume()  # Resume button\n"
-        "    controller.request_stop()    # Stop button")
-        .def(py::init<>())
-        .def_property_readonly("state", &SimulationController::state,
-            "Get the current simulation state (SimulationState enum).")
-        .def("is_idle", &SimulationController::is_idle,
-            "Check if simulation is in Idle state (not started).")
-        .def("is_running", &SimulationController::is_running,
-            "Check if simulation is actively running.")
-        .def("is_paused", &SimulationController::is_paused,
-            "Check if simulation is paused.")
-        .def("is_stopping", &SimulationController::is_stopping,
-            "Check if simulation is stopping (finishing current step).")
-        .def("is_completed", &SimulationController::is_completed,
-            "Check if simulation completed successfully.")
-        .def("is_error", &SimulationController::is_error,
-            "Check if simulation terminated with an error.")
-        .def("request_pause", &SimulationController::request_pause,
-            "Request simulation to pause at next checkpoint.")
-        .def("request_resume", &SimulationController::request_resume,
-            "Request simulation to resume after pause.")
-        .def("request_stop", &SimulationController::request_stop,
-            "Request simulation to stop. Results up to stop point will be available.")
-        .def("reset", &SimulationController::reset,
-            "Reset controller to Idle state before starting a new simulation.")
-        .def("wait_for_state", &SimulationController::wait_for_state,
-             py::arg("target"), py::arg("timeout_ms") = -1,
-            "Wait for simulation to reach a specific state.\n\n"
-            "Args:\n"
-            "    target: The SimulationState to wait for\n"
-            "    timeout_ms: Maximum time to wait (-1 for infinite)\n\n"
-            "Returns:\n"
-            "    True if target state was reached, False if timeout occurred");
-
-    // --- Simulation Progress ---
-    py::class_<SimulationProgress>(m, "SimulationProgress",
-        "Real-time progress information during simulation.\n\n"
-        "Passed to progress callbacks to provide current simulation status.\n"
-        "Use this to update progress bars, show elapsed/remaining time,\n"
-        "display convergence warnings, and monitor memory usage.\n\n"
-        "Attributes:\n"
-        "    current_time: Current simulation time (seconds)\n"
-        "    total_time: Target end time (seconds)\n"
-        "    progress_percent: Progress from 0.0 to 100.0\n"
-        "    steps_completed: Number of timesteps completed\n"
-        "    total_steps_estimate: Estimated total steps (-1 if unknown)\n"
-        "    newton_iterations: Newton iterations for current step\n"
-        "    convergence_warning: True if current step needed >10 iterations\n"
-        "    elapsed_seconds: Wall-clock time elapsed\n"
-        "    estimated_remaining_seconds: Estimated time remaining (-1 if unknown)\n"
-        "    memory_bytes: Current memory usage (-1 if not tracked)")
-        .def(py::init<>())
-        .def_readwrite("current_time", &SimulationProgress::current_time)
-        .def_readwrite("total_time", &SimulationProgress::total_time)
-        .def_readwrite("progress_percent", &SimulationProgress::progress_percent)
-        .def_readwrite("steps_completed", &SimulationProgress::steps_completed)
-        .def_readwrite("total_steps_estimate", &SimulationProgress::total_steps_estimate)
-        .def_readwrite("newton_iterations", &SimulationProgress::newton_iterations)
-        .def_readwrite("convergence_warning", &SimulationProgress::convergence_warning)
-        .def_readwrite("elapsed_seconds", &SimulationProgress::elapsed_seconds)
-        .def_readwrite("estimated_remaining_seconds", &SimulationProgress::estimated_remaining_seconds)
-        .def_readwrite("memory_bytes", &SimulationProgress::memory_bytes)
-        .def("to_dict", [](const SimulationProgress& p) {
-            py::dict result;
-            result["current_time"] = p.current_time;
-            result["total_time"] = p.total_time;
-            result["progress_percent"] = p.progress_percent;
-            result["steps_completed"] = p.steps_completed;
-            result["total_steps_estimate"] = p.total_steps_estimate;
-            result["newton_iterations"] = p.newton_iterations;
-            result["convergence_warning"] = p.convergence_warning;
-            result["elapsed_seconds"] = p.elapsed_seconds;
-            result["estimated_remaining_seconds"] = p.estimated_remaining_seconds;
-            result["memory_bytes"] = p.memory_bytes;
-            return result;
-        }, "Convert progress to dictionary for JSON serialization.");
-
-    // --- Progress Callback Config ---
-    py::class_<ProgressCallbackConfig>(m, "ProgressCallbackConfig",
-        "Configuration for progress callback behavior.\n\n"
-        "Controls how frequently progress callbacks are invoked during simulation.\n"
-        "Callbacks are throttled to avoid excessive overhead while still providing\n"
-        "responsive GUI updates.\n\n"
-        "Attributes:\n"
-        "    min_interval_ms: Minimum milliseconds between callbacks (default 100)\n"
-        "    min_steps: Minimum simulation steps between callbacks (default 100)\n"
-        "    include_memory: Track memory usage in callbacks (slower if True)")
-        .def(py::init<>())
-        .def_readwrite("min_interval_ms", &ProgressCallbackConfig::min_interval_ms,
-            "Minimum milliseconds between callbacks (default 100).")
-        .def_readwrite("min_steps", &ProgressCallbackConfig::min_steps,
-            "Minimum simulation steps between callbacks (default 100).")
-        .def_readwrite("include_memory", &ProgressCallbackConfig::include_memory,
-            "Track memory usage in callbacks (slower if True).");
-
-    // --- Streaming Config ---
-    py::class_<StreamingConfig>(m, "StreamingConfig",
-        "Configuration for memory-efficient result streaming.\n\n"
-        "For long simulations, storing every timestep can consume excessive memory.\n"
-        "StreamingConfig provides options to reduce memory usage:\n"
-        "- Decimation: Store only every Nth point\n"
-        "- Rolling buffer: Keep only the most recent max_points\n\n"
-        "Example:\n"
-        "    opts = pulsim.SimulationOptions()\n"
-        "    opts.streaming_decimation = 10       # Store every 10th point\n"
-        "    opts.streaming_rolling_buffer = True # Enable rolling buffer\n"
-        "    opts.streaming_max_points = 10000    # Keep last 10000 points\n\n"
-        "Attributes:\n"
-        "    decimation_factor: Store every Nth point (1 = all points)\n"
-        "    use_rolling_buffer: If True, keep only last max_points\n"
-        "    max_points: Maximum points when rolling buffer enabled\n"
-        "    callback_interval_ms: Callback throttle (0 = every stored point)")
-        .def(py::init<>())
-        .def_readwrite("decimation_factor", &StreamingConfig::decimation_factor,
-            "Store every Nth point (1 = all points, default).")
-        .def_readwrite("use_rolling_buffer", &StreamingConfig::use_rolling_buffer,
-            "If True, keep only the last max_points.")
-        .def_readwrite("max_points", &StreamingConfig::max_points,
-            "Maximum points to store when using rolling buffer (default 100000).")
-        .def_readwrite("callback_interval_ms", &StreamingConfig::callback_interval_ms,
-            "Callback throttle in ms (0 = every stored point).");
-
-    // --- Signal Info ---
-    py::class_<SignalInfo>(m, "SignalInfo",
-        "Metadata about a signal in simulation results.\n\n"
-        "Use this to build GUI plot selectors and label axes correctly.\n\n"
-        "Attributes:\n"
-        "    name: Signal name (e.g., 'V(out)', 'I(L1)')\n"
-        "    type: Signal type ('voltage' or 'current')\n"
-        "    unit: Unit string ('V' or 'A')\n"
-        "    component: Associated component name (empty for node voltages)\n"
-        "    nodes: List of node names involved")
-        .def(py::init<>())
-        .def_readwrite("name", &SignalInfo::name)
-        .def_readwrite("type", &SignalInfo::type)
-        .def_readwrite("unit", &SignalInfo::unit)
-        .def_readwrite("component", &SignalInfo::component)
-        .def_readwrite("nodes", &SignalInfo::nodes)
-        .def("to_dict", [](const SignalInfo& s) {
-            py::dict result;
-            result["name"] = s.name;
-            result["type"] = s.type;
-            result["unit"] = s.unit;
-            result["component"] = s.component;
-            result["nodes"] = s.nodes;
-            return result;
-        }, "Convert to dictionary for JSON serialization.");
-
-    // --- Solver Info ---
-    py::class_<SolverInfo>(m, "SolverInfo",
-        "Information about solver settings used in simulation.\n\n"
-        "Included in SimulationResult to document how the simulation was run.\n\n"
-        "Attributes:\n"
-        "    method: Integration method name (e.g., 'Trapezoidal', 'BDF2')\n"
-        "    abstol: Absolute tolerance used\n"
-        "    reltol: Relative tolerance used\n"
-        "    adaptive_timestep: Whether adaptive timestep was enabled")
-        .def(py::init<>())
-        .def_readwrite("method", &SolverInfo::method)
-        .def_readwrite("abstol", &SolverInfo::abstol)
-        .def_readwrite("reltol", &SolverInfo::reltol)
-        .def_readwrite("adaptive_timestep", &SolverInfo::adaptive_timestep);
-
-    // --- Simulation Event Type ---
-    py::enum_<SimulationEventType>(m, "SimulationEventType",
-        "Types of events that can occur during simulation.\n\n"
-        "Types:\n"
-        "    SwitchClose: A switch closed\n"
-        "    SwitchOpen: A switch opened\n"
-        "    Convergence: Newton solver had difficulty converging\n"
-        "    TimestepChange: Adaptive timestep changed")
-        .value("SwitchClose", SimulationEventType::SwitchClose)
-        .value("SwitchOpen", SimulationEventType::SwitchOpen)
-        .value("Convergence", SimulationEventType::Convergence)
-        .value("TimestepChange", SimulationEventType::TimestepChange)
-        .export_values();
-
-    // --- Simulation Event ---
-    py::class_<SimulationEvent>(m, "SimulationEvent",
-        "A discrete event that occurred during simulation.\n\n"
-        "Events include switch state changes, convergence issues, and timestep changes.\n"
-        "Use events to build event logs, annotate plots, and debug simulation issues.\n\n"
-        "Attributes:\n"
-        "    time: Simulation time when event occurred (seconds)\n"
-        "    type: Event type (SimulationEventType enum)\n"
-        "    component: Component name involved (empty if not applicable)\n"
-        "    description: Human-readable event description\n"
-        "    value1, value2: Event-specific values (e.g., old/new timestep)")
-        .def(py::init<>())
-        .def_readonly("time", &SimulationEvent::time)
-        .def_readonly("type", &SimulationEvent::type)
-        .def_readonly("component", &SimulationEvent::component)
-        .def_readonly("description", &SimulationEvent::description)
-        .def_readonly("value1", &SimulationEvent::value1)
-        .def_readonly("value2", &SimulationEvent::value2)
-        .def("to_dict", [](const SimulationEvent& e) {
-            py::dict result;
-            result["time"] = e.time;
-            result["type"] = static_cast<int>(e.type);
-            result["component"] = e.component;
-            result["description"] = e.description;
-            result["value1"] = e.value1;
-            result["value2"] = e.value2;
-            return result;
-        }, "Convert to dictionary for JSON serialization.");
-
-    // --- Simulation Result ---
-    py::class_<SimulationResult>(m, "SimulationResult")
-        .def(py::init<>())
-        .def_readonly("time", &SimulationResult::time)
-        .def_readonly("signal_names", &SimulationResult::signal_names)
-        .def_readonly("data", &SimulationResult::data)
-        .def_readonly("total_time_seconds", &SimulationResult::total_time_seconds)
-        .def_readonly("total_steps", &SimulationResult::total_steps)
-        .def_readonly("newton_iterations_total", &SimulationResult::newton_iterations_total)
-        .def_readonly("final_status", &SimulationResult::final_status)
-        .def_readonly("error_message", &SimulationResult::error_message)
-        // New enhanced fields
-        .def_readonly("signal_info", &SimulationResult::signal_info)
-        .def_readonly("solver_info", &SimulationResult::solver_info)
-        .def_readonly("average_newton_iterations", &SimulationResult::average_newton_iterations)
-        .def_readonly("convergence_failures", &SimulationResult::convergence_failures)
-        .def_readonly("timestep_reductions", &SimulationResult::timestep_reductions)
-        .def_readonly("peak_memory_bytes", &SimulationResult::peak_memory_bytes)
-        .def_readonly("events", &SimulationResult::events)
-        .def("num_signals", &SimulationResult::num_signals)
-        .def("num_points", &SimulationResult::num_points)
-        .def("num_events", &SimulationResult::num_events)
-        .def("to_dict", [](const SimulationResult& r) {
-            py::dict result;
-            result["time"] = r.time;
-            result["signal_names"] = r.signal_names;
-            result["total_time_seconds"] = r.total_time_seconds;
-            result["total_steps"] = r.total_steps;
-            result["status"] = static_cast<int>(r.final_status);
-            result["average_newton_iterations"] = r.average_newton_iterations;
-            result["convergence_failures"] = r.convergence_failures;
-            result["timestep_reductions"] = r.timestep_reductions;
-            result["peak_memory_bytes"] = r.peak_memory_bytes;
-
-            // Convert data to dict of signal_name -> values
-            py::dict signals;
-            for (size_t i = 0; i < r.signal_names.size(); ++i) {
-                std::vector<Real> values;
-                values.reserve(r.data.size());
-                for (const auto& state : r.data) {
-                    if (static_cast<Index>(i) < state.size()) {
-                        values.push_back(state(i));
-                    }
-                }
-                signals[py::str(r.signal_names[i])] = values;
-            }
-            result["signals"] = signals;
-            return result;
-        });
-
-    // --- Schematic Position ---
-    py::class_<SchematicPosition>(m, "SchematicPosition",
-        "Schematic position for GUI layout persistence.\n\n"
-        "Stores the visual position and orientation of a component in a schematic\n"
-        "editor. This information can be exported/imported via JSON netlists.\n\n"
-        "Example:\n"
-        "    circuit.add_resistor('R1', 'a', 'b', 1000.0)\n"
-        "    pos = pulsim.SchematicPosition(x=100.0, y=50.0, orientation=90)\n"
-        "    circuit.set_position('R1', pos)\n\n"
-        "    # Export to JSON (positions included)\n"
-        "    json_str = pulsim.circuit_to_json(circuit, include_positions=True)\n\n"
-        "Attributes:\n"
-        "    x: X coordinate in schematic units\n"
-        "    y: Y coordinate in schematic units\n"
-        "    orientation: Rotation in degrees (0, 90, 180, or 270)\n"
-        "    mirrored: True if horizontally mirrored")
-        .def(py::init<>())
-        .def(py::init([](double x, double y, int orientation, bool mirrored) {
-            SchematicPosition pos;
-            pos.x = x;
-            pos.y = y;
-            pos.orientation = orientation;
-            pos.mirrored = mirrored;
-            return pos;
-        }), py::arg("x") = 0.0, py::arg("y") = 0.0,
-             py::arg("orientation") = 0, py::arg("mirrored") = false)
-        .def_readwrite("x", &SchematicPosition::x)
-        .def_readwrite("y", &SchematicPosition::y)
-        .def_readwrite("orientation", &SchematicPosition::orientation)
-        .def_readwrite("mirrored", &SchematicPosition::mirrored)
-        .def("to_dict", [](const SchematicPosition& p) {
-            py::dict result;
-            result["x"] = p.x;
-            result["y"] = p.y;
-            result["orientation"] = p.orientation;
-            result["mirrored"] = p.mirrored;
-            return result;
-        }, "Convert to dictionary for JSON serialization.");
-
-    // --- Diagnostic ---
-    py::class_<Diagnostic>(m, "Diagnostic",
-        "A single diagnostic message with location information.\n\n"
-        "Contains all information needed to display the diagnostic in a GUI,\n"
-        "including the specific location (component, node, parameter) and\n"
-        "related components that should be highlighted.\n\n"
-        "Attributes:\n"
-        "    severity: DiagnosticSeverity (Error, Warning, Info)\n"
-        "    code: DiagnosticCode for programmatic handling\n"
-        "    message: Human-readable error message\n"
-        "    component_name: Component causing the issue (empty if circuit-level)\n"
-        "    node_name: Node involved (empty if component-level)\n"
-        "    parameter_name: Parameter name (empty if not parameter-related)\n"
-        "    related_components: Components to highlight in GUI")
-        .def(py::init<>())
-        .def_readonly("severity", &Diagnostic::severity)
-        .def_readonly("code", &Diagnostic::code)
-        .def_readonly("message", &Diagnostic::message)
-        .def_readonly("component_name", &Diagnostic::component_name)
-        .def_readonly("node_name", &Diagnostic::node_name)
-        .def_readonly("parameter_name", &Diagnostic::parameter_name)
-        .def_readonly("related_components", &Diagnostic::related_components)
-        .def("to_dict", [](const Diagnostic& d) {
-            py::dict result;
-            result["severity"] = static_cast<int>(d.severity);
-            result["code"] = static_cast<int>(d.code);
-            result["message"] = d.message;
-            result["component_name"] = d.component_name;
-            result["node_name"] = d.node_name;
-            result["parameter_name"] = d.parameter_name;
-            result["related_components"] = d.related_components;
-            return result;
-        }, "Convert to dictionary for JSON serialization.");
-
-    // --- Validation Result ---
-    py::class_<ValidationResult>(m, "ValidationResult",
-        "Result of circuit validation containing all diagnostics.\n\n"
-        "Use is_valid to check if simulation can proceed. Even if valid,\n"
-        "check warnings for potential issues.\n\n"
-        "Example:\n"
-        "    result = pulsim.validate_circuit(circuit)\n\n"
-        "    if result.is_valid:\n"
-        "        if result.has_warnings():\n"
-        "            for w in result.warnings():\n"
-        "                print(f'Warning: {w.message}')\n"
-        "        # Can proceed with simulation\n"
-        "    else:\n"
-        "        for e in result.errors():\n"
-        "            highlight_component(e.component_name)\n"
-        "            print(f'Error: {e.message}')\n\n"
-        "Attributes:\n"
-        "    is_valid: True if no errors (warnings OK)\n"
-        "    diagnostics: All diagnostic messages")
-        .def(py::init<>())
-        .def_readonly("is_valid", &ValidationResult::is_valid)
-        .def_readonly("diagnostics", &ValidationResult::diagnostics)
-        .def("has_errors", &ValidationResult::has_errors,
-            "True if any Error-severity diagnostics.")
-        .def("has_warnings", &ValidationResult::has_warnings,
-            "True if any Warning-severity diagnostics.")
-        .def("errors", &ValidationResult::errors,
-            "Get only Error-severity diagnostics.")
-        .def("warnings", &ValidationResult::warnings,
-            "Get only Warning-severity diagnostics.")
-        .def("infos", &ValidationResult::infos,
-            "Get only Info-severity diagnostics.");
-
-    // --- Circuit ---
-    py::class_<Circuit>(m, "Circuit")
-        .def(py::init<>())
+        // Node management
+        .def("add_node", &Circuit::add_node, py::arg("name"),
+             "Add a named node and return its index")
+        .def("get_node", &Circuit::get_node, py::arg("name"),
+             "Get node index by name (-1 for ground)")
+        .def_static("ground", &Circuit::ground,
+             "Get ground node index")
+        .def("num_nodes", &Circuit::num_nodes,
+             "Number of non-ground nodes")
+        .def("num_branches", &Circuit::num_branches,
+             "Number of branch currents (for VS, inductors)")
+        .def("system_size", &Circuit::system_size,
+             "Total system size (nodes + branches)")
+        .def("node_name", &Circuit::node_name, py::arg("index"),
+             "Get node name by index")
+        .def("node_names", &Circuit::node_names,
+             "Get all node names")
+        // Device addition
         .def("add_resistor", &Circuit::add_resistor,
-             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("resistance"))
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
+             "Add resistor between nodes n1 and n2")
         .def("add_capacitor", &Circuit::add_capacitor,
-             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("capacitance"), py::arg("ic") = 0.0)
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("C"),
+             py::arg("ic") = 0.0,
+             "Add capacitor between nodes n1 and n2")
         .def("add_inductor", &Circuit::add_inductor,
-             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("inductance"), py::arg("ic") = 0.0)
-        .def("add_voltage_source", [](Circuit& c, const std::string& name, const std::string& npos,
-                                       const std::string& nneg, Real value) {
-            c.add_voltage_source(name, npos, nneg, DCWaveform{value});
-        }, py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("value"))
-        .def("add_voltage_source", [](Circuit& c, const std::string& name, const std::string& npos,
-                                       const std::string& nneg, const PWMWaveform& pwm) {
-            c.add_voltage_source(name, npos, nneg, pwm);
-        }, py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("pwm"))
-        .def("add_current_source", [](Circuit& c, const std::string& name, const std::string& npos,
-                                       const std::string& nneg, Real value) {
-            c.add_current_source(name, npos, nneg, DCWaveform{value});
-        }, py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("value"))
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("L"),
+             py::arg("ic") = 0.0,
+             "Add inductor between nodes n1 and n2")
+        .def("add_voltage_source", &Circuit::add_voltage_source,
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("V"),
+             "Add voltage source from npos to nneg")
+        .def("add_current_source", &Circuit::add_current_source,
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("I"),
+             "Add current source from npos to nneg")
         .def("add_diode", &Circuit::add_diode,
-             py::arg("name"), py::arg("anode"), py::arg("cathode"), py::arg("params") = DiodeParams{})
+             py::arg("name"), py::arg("anode"), py::arg("cathode"),
+             py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9,
+             "Add ideal diode from anode to cathode")
         .def("add_switch", &Circuit::add_switch,
              py::arg("name"), py::arg("n1"), py::arg("n2"),
-             py::arg("ctrl_pos"), py::arg("ctrl_neg"), py::arg("params") = SwitchParams{})
+             py::arg("closed") = false, py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
+             "Add controllable switch between n1 and n2")
+        .def("add_vcswitch", &Circuit::add_vcswitch,
+             py::arg("name"), py::arg("ctrl"), py::arg("t1"), py::arg("t2"),
+             py::arg("v_threshold") = 2.5, py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9,
+             "Add voltage-controlled switch: ON when V(ctrl) > v_threshold. Ideal for PWM-driven converters.")
         .def("add_mosfet", &Circuit::add_mosfet,
-             py::arg("name"), py::arg("drain"), py::arg("gate"), py::arg("source"),
-             py::arg("params") = MOSFETParams{})
+             py::arg("name"), py::arg("gate"), py::arg("drain"), py::arg("source"),
+             py::arg("params") = MOSFET::Params{},
+             "Add MOSFET with gate, drain, source nodes")
+        .def("add_igbt", &Circuit::add_igbt,
+             py::arg("name"), py::arg("gate"), py::arg("collector"), py::arg("emitter"),
+             py::arg("params") = IGBT::Params{},
+             "Add IGBT with gate, collector, emitter nodes")
         .def("add_transformer", &Circuit::add_transformer,
-             py::arg("name"), py::arg("p1"), py::arg("p2"), py::arg("s1"), py::arg("s2"),
-             py::arg("params") = TransformerParams{})
-        .def("node_count", &Circuit::node_count)
-        .def("branch_count", &Circuit::branch_count)
-        .def("total_variables", &Circuit::total_variables)
-        .def("node_names", &Circuit::node_names)
-        .def("validate", [](const Circuit& c) {
-            std::string error;
-            bool valid = c.validate(error);
-            return py::make_tuple(valid, error);
-        })
-        .def("validate_detailed", [](const Circuit& c) {
-            return validate_circuit(c);
-        })
-        // Schematic position methods
-        .def("set_position", &Circuit::set_position,
-             py::arg("component_name"), py::arg("position"))
-        .def("get_position", &Circuit::get_position,
-             py::arg("component_name"))
-        .def("has_position", &Circuit::has_position,
-             py::arg("component_name"))
-        .def("all_positions", &Circuit::all_positions)
-        .def("set_all_positions", &Circuit::set_all_positions,
-             py::arg("positions"))
-        .def("clear_positions", &Circuit::clear_positions);
+             py::arg("name"), py::arg("p1"), py::arg("p2"),
+             py::arg("s1"), py::arg("s2"), py::arg("turns_ratio") = 1.0,
+             "Add ideal transformer with turns ratio N:1 (p1,p2=primary, s1,s2=secondary)")
+        // Time-varying sources
+        .def("add_pwm_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, const PWMParams&>(
+                 &Circuit::add_pwm_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add PWM voltage source from npos to nneg")
+        .def("add_pwm_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, Real, Real, Real, Real>(
+                 &Circuit::add_pwm_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"),
+             py::arg("v_high"), py::arg("v_low"), py::arg("frequency"), py::arg("duty"),
+             "Add PWM voltage source with simple parameters")
+        .def("add_sine_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, const SineParams&>(
+                 &Circuit::add_sine_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add sinusoidal voltage source")
+        .def("add_sine_voltage_source",
+             py::overload_cast<const std::string&, Index, Index, Real, Real, Real>(
+                 &Circuit::add_sine_voltage_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"),
+             py::arg("amplitude"), py::arg("frequency"), py::arg("offset") = 0.0,
+             "Add sinusoidal voltage source with simple parameters")
+        .def("add_pulse_voltage_source", &Circuit::add_pulse_voltage_source,
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add pulse voltage source")
+        // PWM control
+        .def("set_pwm_duty", &Circuit::set_pwm_duty,
+             py::arg("name"), py::arg("duty"),
+             "Set fixed duty cycle for PWM source")
+        .def("set_pwm_duty_callback", &Circuit::set_pwm_duty_callback,
+             py::arg("name"), py::arg("callback"),
+             "Set duty cycle callback for PWM source")
+        .def("clear_pwm_duty_callback", &Circuit::clear_pwm_duty_callback,
+             py::arg("name"),
+             "Clear duty callback, use fixed duty")
+        .def("get_pwm_state", &Circuit::get_pwm_state,
+             py::arg("name"),
+             "Get PWM state (ON/OFF) at current time")
+        // Time management
+        .def("set_current_time", &Circuit::set_current_time,
+             py::arg("t"),
+             "Set current simulation time")
+        .def("current_time", &Circuit::current_time,
+             "Get current simulation time")
+        .def("has_time_varying", &Circuit::has_time_varying,
+             "Check if circuit has time-varying sources")
+        // State
+        .def("num_devices", &Circuit::num_devices,
+             "Number of devices in circuit")
+        .def("set_switch_state", &Circuit::set_switch_state,
+             py::arg("name"), py::arg("closed"),
+             "Set switch state by name")
+        .def("set_timestep", &Circuit::set_timestep, py::arg("dt"),
+             "Set timestep for dynamic elements")
+        .def("timestep", &Circuit::timestep,
+             "Get current timestep")
+        .def("has_nonlinear", &Circuit::has_nonlinear,
+             "Check if circuit has nonlinear devices")
+        // Matrix assembly
+        .def("assemble_dc", [](const Circuit& ckt) {
+            SparseMatrix G;
+            Vector b;
+            ckt.assemble_dc(G, b);
+            // Convert sparse to dense for easier Python use
+            return std::make_tuple(Eigen::MatrixXd(G), b);
+        }, "Assemble G matrix and b vector for DC analysis")
+        .def("assemble_jacobian", [](const Circuit& ckt, const Vector& x) {
+            SparseMatrix J;
+            Vector f;
+            ckt.assemble_jacobian(J, f, x);
+            return std::make_tuple(Eigen::MatrixXd(J), f);
+        }, py::arg("x"), "Assemble Jacobian J and residual f for Newton iteration");
 
-    // --- Parser ---
-    m.def("parse_netlist_file", [](const std::string& path) {
-        auto result = NetlistParser::parse_file(path);
-        if (!result) {
-            throw std::runtime_error(result.error().to_string());
-        }
-        return result.value();
-    }, py::arg("path"), "Parse a circuit from a JSON netlist file");
+    // =========================================================================
+    // Solver Configuration (7.1.3)
+    // =========================================================================
 
-    m.def("parse_netlist_string", [](const std::string& content) {
-        auto result = NetlistParser::parse_string(content);
-        if (!result) {
-            throw std::runtime_error(result.error().to_string());
-        }
-        return result.value();
-    }, py::arg("content"), "Parse a circuit from a JSON netlist string");
-
-    m.def("circuit_to_json", [](const Circuit& circuit, bool include_positions) {
-        return NetlistParser::to_json(circuit, include_positions);
-    }, py::arg("circuit"), py::arg("include_positions") = true,
-       "Export a circuit to JSON string");
-
-    // --- Simulator ---
-    py::class_<PowerLosses>(m, "PowerLosses")
-        .def_readonly("conduction_loss", &PowerLosses::conduction_loss)
-        .def_readonly("turn_on_loss", &PowerLosses::turn_on_loss)
-        .def_readonly("turn_off_loss", &PowerLosses::turn_off_loss)
-        .def_readonly("reverse_recovery_loss", &PowerLosses::reverse_recovery_loss)
-        .def("switching_loss", &PowerLosses::switching_loss)
-        .def("total_loss", &PowerLosses::total_loss);
-
-    py::class_<SwitchEvent>(m, "SwitchEvent")
-        .def_readonly("switch_name", &SwitchEvent::switch_name)
-        .def_readonly("time", &SwitchEvent::time)
-        .def_readonly("new_state", &SwitchEvent::new_state)
-        .def_readonly("voltage", &SwitchEvent::voltage)
-        .def_readonly("current", &SwitchEvent::current);
-
-    py::class_<Simulator>(m, "Simulator")
-        .def(py::init<const Circuit&, const SimulationOptions&>(),
-             py::arg("circuit"), py::arg("options") = SimulationOptions{})
-        .def("dc_operating_point", [](Simulator& sim) {
-            auto result = sim.dc_operating_point();
-            return py::make_tuple(static_cast<int>(result.status), result.iterations);
-        })
-        .def("run_transient", [](Simulator& sim) {
-            return sim.run_transient();
-        })
-        .def("run_transient_with_callback", [](Simulator& sim, py::function callback) {
-            return sim.run_transient([&callback](Real time, const Vector& state) {
-                callback(time, state);
-            });
-        }, py::arg("callback"))
-        .def("run_transient_with_progress", [](Simulator& sim,
-                                               py::object callback,
-                                               py::object event_callback,
-                                               SimulationController* control,
-                                               py::function progress_callback,
-                                               double min_interval_ms,
-                                               int min_steps) {
-            // Wrap Python callbacks
-            SimulationCallback sim_callback = nullptr;
-            if (!callback.is_none()) {
-                sim_callback = [&callback](Real time, const Vector& state) {
-                    callback(time, state);
-                };
-            }
-
-            EventCallback evt_callback = nullptr;
-            if (!event_callback.is_none()) {
-                evt_callback = [&event_callback](const SwitchEvent& event) {
-                    event_callback(event);
-                };
-            }
-
-            ProgressCallbackConfig config;
-            config.callback = [&progress_callback](const SimulationProgress& p) {
-                progress_callback(p);
-            };
-            config.min_interval_ms = min_interval_ms;
-            config.min_steps = min_steps;
-
-            return sim.run_transient_with_progress(sim_callback, evt_callback, control, config);
-        }, py::arg("callback") = py::none(),
-           py::arg("event_callback") = py::none(),
-           py::arg("control") = nullptr,
-           py::arg("progress_callback") = py::none(),
-           py::arg("min_interval_ms") = 100.0,
-           py::arg("min_steps") = 100)
-        .def("power_losses", &Simulator::power_losses)
-        .def("set_options", &Simulator::set_options);
-
-    // Convenience function
-    m.def("simulate", [](const Circuit& circuit, const SimulationOptions& options) {
-        return simulate(circuit, options);
-    }, py::arg("circuit"), py::arg("options") = SimulationOptions{},
-       "Run a transient simulation on the circuit");
-
-    // --- Component Metadata ---
-    py::class_<ParameterMetadata>(m, "ParameterMetadata",
-        "Metadata for a single component parameter.\n\n"
-        "Contains all information needed to create a property editor field,\n"
-        "including display name, validation constraints, and units.\n\n"
-        "Attributes:\n"
-        "    name: Internal name (e.g., 'resistance')\n"
-        "    display_name: GUI display name (e.g., 'Resistance')\n"
-        "    description: Help text / tooltip\n"
-        "    type: ParameterType (Real, Integer, Boolean, Enum, String)\n"
-        "    default_value: Default value (None if none)\n"
-        "    min_value: Minimum allowed (None if unbounded)\n"
-        "    max_value: Maximum allowed (None if unbounded)\n"
-        "    unit: Unit string (e.g., 'ohm', 'F', 'H')\n"
-        "    enum_values: Valid choices for Enum type\n"
-        "    required: True if parameter must be provided")
+    py::class_<ConvergenceChecker::Tolerances>(v2, "Tolerances",
+        "Convergence tolerance configuration")
         .def(py::init<>())
-        .def_readonly("name", &ParameterMetadata::name)
-        .def_readonly("display_name", &ParameterMetadata::display_name)
-        .def_readonly("description", &ParameterMetadata::description)
-        .def_readonly("type", &ParameterMetadata::type)
-        .def_readonly("default_value", &ParameterMetadata::default_value)
-        .def_readonly("min_value", &ParameterMetadata::min_value)
-        .def_readonly("max_value", &ParameterMetadata::max_value)
-        .def_readonly("unit", &ParameterMetadata::unit)
-        .def_readonly("enum_values", &ParameterMetadata::enum_values)
-        .def_readonly("required", &ParameterMetadata::required)
-        .def("to_dict", [](const ParameterMetadata& p) {
-            py::dict result;
-            result["name"] = p.name;
-            result["display_name"] = p.display_name;
-            result["description"] = p.description;
-            result["type"] = static_cast<int>(p.type);
-            result["default_value"] = p.default_value;
-            result["min_value"] = p.min_value;
-            result["max_value"] = p.max_value;
-            result["unit"] = p.unit;
-            result["enum_values"] = p.enum_values;
-            result["required"] = p.required;
-            return result;
-        }, "Convert to dictionary for JSON serialization.");
+        .def_readwrite("voltage_abstol", &ConvergenceChecker::Tolerances::voltage_abstol)
+        .def_readwrite("voltage_reltol", &ConvergenceChecker::Tolerances::voltage_reltol)
+        .def_readwrite("current_abstol", &ConvergenceChecker::Tolerances::current_abstol)
+        .def_readwrite("current_reltol", &ConvergenceChecker::Tolerances::current_reltol)
+        .def_readwrite("residual_tol", &ConvergenceChecker::Tolerances::residual_tol)
+        .def_static("defaults", &ConvergenceChecker::Tolerances::defaults);
 
-    py::class_<PinMetadata>(m, "PinMetadata",
-        "Metadata for a component pin/terminal.\n\n"
-        "Describes a connection point on a component for GUI display\n"
-        "and netlist generation.\n\n"
-        "Attributes:\n"
-        "    name: Pin name (e.g., 'anode', 'drain', 'gate')\n"
-        "    description: Description (e.g., 'Positive terminal')")
+    py::class_<NewtonOptions>(v2, "NewtonOptions", "Newton solver options")
         .def(py::init<>())
-        .def_readonly("name", &PinMetadata::name)
-        .def_readonly("description", &PinMetadata::description)
-        .def("to_dict", [](const PinMetadata& p) {
-            py::dict result;
-            result["name"] = p.name;
-            result["description"] = p.description;
-            return result;
-        }, "Convert to dictionary for JSON serialization.");
+        .def_readwrite("max_iterations", &NewtonOptions::max_iterations)
+        .def_readwrite("initial_damping", &NewtonOptions::initial_damping)
+        .def_readwrite("min_damping", &NewtonOptions::min_damping)
+        .def_readwrite("auto_damping", &NewtonOptions::auto_damping)
+        .def_readwrite("track_history", &NewtonOptions::track_history)
+        .def_readwrite("check_per_variable", &NewtonOptions::check_per_variable)
+        .def_readwrite("num_nodes", &NewtonOptions::num_nodes)
+        .def_readwrite("num_branches", &NewtonOptions::num_branches)
+        .def_readwrite("tolerances", &NewtonOptions::tolerances)
+        .def_readwrite("max_voltage_step", &NewtonOptions::max_voltage_step,
+            "Max voltage change per iteration [V] (default: 5.0)")
+        .def_readwrite("max_current_step", &NewtonOptions::max_current_step,
+            "Max current change per iteration [A] (default: 10.0)")
+        .def_readwrite("enable_limiting", &NewtonOptions::enable_limiting,
+            "Enable voltage/current limiting (default: True)");
 
-    py::class_<ComponentMetadata>(m, "ComponentMetadata",
-        "Complete metadata for a component type.\n\n"
-        "Contains all information needed to display the component in a palette,\n"
-        "render the component symbol, create property editor fields, and\n"
-        "validate component parameters.\n\n"
-        "Attributes:\n"
-        "    type: ComponentType enum value\n"
-        "    name: Internal name (e.g., 'resistor')\n"
-        "    display_name: GUI display name (e.g., 'Resistor')\n"
-        "    description: Help text / tooltip\n"
-        "    category: Category (e.g., 'Passive', 'Semiconductor', 'Sources')\n"
-        "    pins: List of PinMetadata for component terminals\n"
-        "    parameters: List of ParameterMetadata for editable parameters\n"
-        "    symbol_id: Reference for symbol rendering\n"
-        "    has_loss_model: True if power loss calculation supported\n"
-        "    has_thermal_model: True if thermal simulation supported")
+    // =========================================================================
+    // Convergence History & Monitoring
+    // =========================================================================
+
+    py::class_<IterationRecord>(v2, "IterationRecord", "Single Newton iteration record")
         .def(py::init<>())
-        .def_readonly("type", &ComponentMetadata::type)
-        .def_readonly("name", &ComponentMetadata::name)
-        .def_readonly("display_name", &ComponentMetadata::display_name)
-        .def_readonly("description", &ComponentMetadata::description)
-        .def_readonly("category", &ComponentMetadata::category)
-        .def_readonly("pins", &ComponentMetadata::pins)
-        .def_readonly("parameters", &ComponentMetadata::parameters)
-        .def_readonly("symbol_id", &ComponentMetadata::symbol_id)
-        .def_readonly("has_loss_model", &ComponentMetadata::has_loss_model)
-        .def_readonly("has_thermal_model", &ComponentMetadata::has_thermal_model)
-        .def("to_dict", [](const ComponentMetadata& c) {
-            py::dict result;
-            result["type"] = static_cast<int>(c.type);
-            result["name"] = c.name;
-            result["display_name"] = c.display_name;
-            result["description"] = c.description;
-            result["category"] = c.category;
-            result["symbol_id"] = c.symbol_id;
-            result["has_loss_model"] = c.has_loss_model;
-            result["has_thermal_model"] = c.has_thermal_model;
+        .def_readonly("iteration", &IterationRecord::iteration)
+        .def_readonly("residual_norm", &IterationRecord::residual_norm)
+        .def_readonly("max_voltage_error", &IterationRecord::max_voltage_error)
+        .def_readonly("max_current_error", &IterationRecord::max_current_error)
+        .def_readonly("step_norm", &IterationRecord::step_norm)
+        .def_readonly("damping", &IterationRecord::damping)
+        .def_readonly("converged", &IterationRecord::converged);
 
-            py::list pins;
-            for (const auto& pin : c.pins) {
-                py::dict p;
-                p["name"] = pin.name;
-                p["description"] = pin.description;
-                pins.append(p);
-            }
-            result["pins"] = pins;
+    py::class_<ConvergenceHistory>(v2, "ConvergenceHistory", "Complete convergence history")
+        .def(py::init<>())
+        .def("size", &ConvergenceHistory::size)
+        .def("empty", &ConvergenceHistory::empty)
+        .def("__len__", &ConvergenceHistory::size)
+        .def("__getitem__", [](const ConvergenceHistory& h, std::size_t i) {
+            if (i >= h.size()) throw py::index_error();
+            return h[i];
+        })
+        .def("last", &ConvergenceHistory::last)
+        .def("final_status", &ConvergenceHistory::final_status)
+        .def("is_stalling", &ConvergenceHistory::is_stalling,
+             py::arg("window") = 5, py::arg("threshold") = 0.9)
+        .def("is_diverging", &ConvergenceHistory::is_diverging, py::arg("window") = 3)
+        .def("convergence_rate", &ConvergenceHistory::convergence_rate);
 
-            py::list params;
-            for (const auto& param : c.parameters) {
-                py::dict p;
-                p["name"] = param.name;
-                p["display_name"] = param.display_name;
-                p["description"] = param.description;
-                p["type"] = static_cast<int>(param.type);
-                p["unit"] = param.unit;
-                p["required"] = param.required;
-                params.append(p);
-            }
-            result["parameters"] = params;
+    py::class_<VariableConvergence>(v2, "VariableConvergence", "Per-variable convergence status")
+        .def(py::init<>())
+        .def_readonly("index", &VariableConvergence::index)
+        .def_readonly("value", &VariableConvergence::value)
+        .def_readonly("delta", &VariableConvergence::delta)
+        .def_readonly("tolerance", &VariableConvergence::tolerance)
+        .def_readonly("normalized_error", &VariableConvergence::normalized_error)
+        .def_readonly("converged", &VariableConvergence::converged)
+        .def_readonly("is_voltage", &VariableConvergence::is_voltage);
 
-            return result;
+    py::class_<PerVariableConvergence>(v2, "PerVariableConvergence", "Per-variable convergence tracker")
+        .def(py::init<>())
+        .def("size", &PerVariableConvergence::size)
+        .def("empty", &PerVariableConvergence::empty)
+        .def("__len__", &PerVariableConvergence::size)
+        .def("__getitem__", [](const PerVariableConvergence& p, std::size_t i) {
+            if (i >= p.size()) throw py::index_error();
+            return p[i];
+        })
+        .def("all_converged", &PerVariableConvergence::all_converged)
+        .def("worst", &PerVariableConvergence::worst)
+        .def("max_error", &PerVariableConvergence::max_error)
+        .def("non_converged_count", &PerVariableConvergence::non_converged_count);
+
+    py::class_<NewtonResult>(v2, "NewtonResult", "Newton solver result")
+        .def(py::init<>())
+        .def_readonly("solution", &NewtonResult::solution)
+        .def_readonly("status", &NewtonResult::status)
+        .def_readonly("iterations", &NewtonResult::iterations)
+        .def_readonly("final_residual", &NewtonResult::final_residual)
+        .def_readonly("final_weighted_error", &NewtonResult::final_weighted_error)
+        .def_readonly("history", &NewtonResult::history)
+        .def_readonly("variable_convergence", &NewtonResult::variable_convergence)
+        .def_readonly("error_message", &NewtonResult::error_message)
+        .def("success", &NewtonResult::success);
+
+    // =========================================================================
+    // Newton Solver Execution (Phase 4)
+    // =========================================================================
+
+    // Solve circuit using Newton-Raphson
+    v2.def("solve_dc", [](Circuit& circuit, const Vector& x0, const NewtonOptions& opts) {
+        // Configure options with circuit info
+        NewtonOptions cfg = opts;
+        cfg.num_nodes = circuit.num_nodes();
+        cfg.num_branches = circuit.num_branches();
+
+        // Create solver
+        NewtonRaphsonSolver<SparseLUPolicy> solver(cfg);
+
+        // System function for Newton
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        return solver.solve(x0, system_func);
+    }, py::arg("circuit"), py::arg("x0"), py::arg("options") = NewtonOptions(),
+    R"doc(
+    Solve circuit DC operating point using Newton-Raphson.
+
+    Args:
+        circuit: Circuit object with devices
+        x0: Initial guess vector (size = num_nodes + num_branches)
+        options: Newton solver options
+
+    Returns:
+        NewtonResult with solution and convergence info
+    )doc");
+
+    // Convenience function with automatic initial guess
+    v2.def("solve_dc", [](Circuit& circuit, const NewtonOptions& opts) {
+        // Create zero initial guess
+        Vector x0 = Vector::Zero(circuit.system_size());
+
+        // Configure options with circuit info
+        NewtonOptions cfg = opts;
+        cfg.num_nodes = circuit.num_nodes();
+        cfg.num_branches = circuit.num_branches();
+
+        // Create solver
+        NewtonRaphsonSolver<SparseLUPolicy> solver(cfg);
+
+        // System function for Newton
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        return solver.solve(x0, system_func);
+    }, py::arg("circuit"), py::arg("options") = NewtonOptions(),
+    R"doc(
+    Solve circuit DC operating point using Newton-Raphson with zero initial guess.
+
+    Args:
+        circuit: Circuit object with devices
+        options: Newton solver options
+
+    Returns:
+        NewtonResult with solution and convergence info
+    )doc");
+
+    // =========================================================================
+    // Convergence Aids (Phase 5 exposed)
+    // =========================================================================
+
+    py::class_<GminConfig>(v2, "GminConfig", "Gmin stepping configuration")
+        .def(py::init<>())
+        .def_readwrite("initial_gmin", &GminConfig::initial_gmin)
+        .def_readwrite("final_gmin", &GminConfig::final_gmin)
+        .def_readwrite("reduction_factor", &GminConfig::reduction_factor)
+        .def_readwrite("max_steps", &GminConfig::max_steps)
+        .def_readwrite("enable_logging", &GminConfig::enable_logging)
+        .def("required_steps", &GminConfig::required_steps);
+
+    py::class_<SourceSteppingConfig>(v2, "SourceSteppingConfig",
+        "Source stepping configuration")
+        .def(py::init<>())
+        .def_readwrite("initial_scale", &SourceSteppingConfig::initial_scale)
+        .def_readwrite("final_scale", &SourceSteppingConfig::final_scale)
+        .def_readwrite("initial_step", &SourceSteppingConfig::initial_step)
+        .def_readwrite("min_step", &SourceSteppingConfig::min_step)
+        .def_readwrite("max_step", &SourceSteppingConfig::max_step)
+        .def_readwrite("max_steps", &SourceSteppingConfig::max_steps)
+        .def_readwrite("max_failures", &SourceSteppingConfig::max_failures)
+        .def_readwrite("enable_logging", &SourceSteppingConfig::enable_logging);
+
+    py::class_<PseudoTransientConfig>(v2, "PseudoTransientConfig",
+        "Pseudo-transient continuation configuration")
+        .def(py::init<>())
+        .def_readwrite("initial_dt", &PseudoTransientConfig::initial_dt)
+        .def_readwrite("max_dt", &PseudoTransientConfig::max_dt)
+        .def_readwrite("min_dt", &PseudoTransientConfig::min_dt)
+        .def_readwrite("dt_increase", &PseudoTransientConfig::dt_increase)
+        .def_readwrite("dt_decrease", &PseudoTransientConfig::dt_decrease)
+        .def_readwrite("convergence_threshold", &PseudoTransientConfig::convergence_threshold)
+        .def_readwrite("max_iterations", &PseudoTransientConfig::max_iterations)
+        .def_readwrite("enable_logging", &PseudoTransientConfig::enable_logging);
+
+    py::class_<InitializationConfig>(v2, "InitializationConfig",
+        "Robust initialization configuration")
+        .def(py::init<>())
+        .def_readwrite("default_voltage", &InitializationConfig::default_voltage)
+        .def_readwrite("supply_voltage", &InitializationConfig::supply_voltage)
+        .def_readwrite("diode_forward", &InitializationConfig::diode_forward)
+        .def_readwrite("mosfet_threshold", &InitializationConfig::mosfet_threshold)
+        .def_readwrite("use_zero_init", &InitializationConfig::use_zero_init)
+        .def_readwrite("use_warm_start", &InitializationConfig::use_warm_start)
+        .def_readwrite("max_random_restarts", &InitializationConfig::max_random_restarts)
+        .def_readwrite("random_seed", &InitializationConfig::random_seed)
+        .def_readwrite("random_voltage_range", &InitializationConfig::random_voltage_range);
+
+    py::class_<DCConvergenceConfig>(v2, "DCConvergenceConfig",
+        "DC solver configuration with convergence aids")
+        .def(py::init<>())
+        .def_readwrite("strategy", &DCConvergenceConfig::strategy)
+        .def_readwrite("gmin_config", &DCConvergenceConfig::gmin_config)
+        .def_readwrite("source_config", &DCConvergenceConfig::source_config)
+        .def_readwrite("pseudo_config", &DCConvergenceConfig::pseudo_config)
+        .def_readwrite("init_config", &DCConvergenceConfig::init_config)
+        .def_readwrite("enable_random_restart", &DCConvergenceConfig::enable_random_restart)
+        .def_readwrite("max_strategy_attempts", &DCConvergenceConfig::max_strategy_attempts);
+
+    py::class_<DCAnalysisResult>(v2, "DCAnalysisResult", "DC analysis result")
+        .def(py::init<>())
+        .def_readonly("newton_result", &DCAnalysisResult::newton_result)
+        .def_readonly("strategy_used", &DCAnalysisResult::strategy_used)
+        .def_readonly("random_restarts", &DCAnalysisResult::random_restarts)
+        .def_readonly("total_newton_iterations", &DCAnalysisResult::total_newton_iterations)
+        .def_readonly("success", &DCAnalysisResult::success)
+        .def_readonly("message", &DCAnalysisResult::message);
+
+    // =========================================================================
+    // DC Analysis Function (Phase 5)
+    // =========================================================================
+
+    // High-level DC analysis with automatic strategy selection
+    v2.def("dc_operating_point", [](Circuit& circuit, const DCConvergenceConfig& config) {
+        // For DC analysis, use very large timestep so inductor 2L/dt -> 0 (short circuit)
+        // and capacitor 2C/dt -> 0 (open circuit)
+        circuit.set_timestep(1e6);  // 1 million seconds -> effectively DC
+
+        // Create system function
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        // Initial guess
+        Vector x0 = Vector::Zero(circuit.system_size());
+
+        // Create and run DC solver
+        DCConvergenceSolver<SparseLUPolicy> solver(config);
+        return solver.solve(x0, circuit.num_nodes(), circuit.num_branches(),
+                           system_func, nullptr);
+    }, py::arg("circuit"), py::arg("config") = DCConvergenceConfig(),
+    R"doc(
+    Compute DC operating point with automatic convergence aids.
+
+    This function tries multiple strategies to find the DC solution:
+    - Direct Newton solve
+    - Gmin stepping
+    - Pseudo-transient continuation
+    - Random restarts
+
+    Args:
+        circuit: Circuit object with devices
+        config: DC convergence configuration (strategy, tolerances, etc.)
+
+    Returns:
+        DCAnalysisResult with solution and convergence info
+    )doc");
+
+    // =========================================================================
+    // Transient Simulation (Phase 6)
+    // =========================================================================
+
+    // Transient simulation result structure
+    py::class_<std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>>(v2, "TransientResult",
+        "Transient simulation result")
+        .def_property_readonly("time", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
+            return std::get<0>(r);
+        })
+        .def_property_readonly("states", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
+            return std::get<1>(r);
+        })
+        .def_property_readonly("success", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
+            return std::get<2>(r);
+        })
+        .def_property_readonly("message", [](const std::tuple<std::vector<Real>, std::vector<Vector>, bool, std::string>& r) {
+            return std::get<3>(r);
         });
 
-    py::class_<ComponentRegistry>(m, "ComponentRegistry",
-        "Singleton registry providing metadata for all component types.\n\n"
-        "Use this to build component palettes organized by category and\n"
-        "generate property editors with correct field types and validation.\n\n"
-        "Example:\n"
-        "    registry = pulsim.ComponentRegistry.instance()\n\n"
-        "    # Build component palette by category\n"
-        "    for category in registry.all_categories():\n"
-        "        for comp_type in registry.types_in_category(category):\n"
-        "            meta = registry.get(comp_type)\n"
-        "            add_palette_item(meta.display_name, meta.symbol_id)\n\n"
-        "    # Build property editor for resistor\n"
-        "    meta = registry.get(pulsim.ComponentType.Resistor)\n"
-        "    for param in meta.parameters:\n"
-        "        create_field(param.display_name, param.unit)")
-        .def_static("instance", &ComponentRegistry::instance, py::return_value_policy::reference,
-            "Get the singleton registry instance.")
-        .def("get", &ComponentRegistry::get, py::arg("type"),
-             py::return_value_policy::reference_internal,
-            "Get metadata for a specific component type.")
-        .def("all_types", &ComponentRegistry::all_types,
-            "Get all registered component types.")
-        .def("types_in_category", &ComponentRegistry::types_in_category, py::arg("category"),
-            "Get component types in a specific category.")
-        .def("all_categories", &ComponentRegistry::all_categories,
-            "Get all available categories.");
+    // Transient simulation function with built-in robustness
+    v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
+                                const Vector& x0, const NewtonOptions& newton_opts) {
+        std::vector<Real> times;
+        std::vector<Vector> states;
+        bool success = true;
+        std::string message = "Transient completed";
+        int gmin_fallback_count = 0;
+        int dt_reduction_count = 0;
 
-    // Convenience function for validate_circuit
-    m.def("validate_circuit", &validate_circuit, py::arg("circuit"),
-          "Validate a circuit and return detailed diagnostics.\n\n"
-          "Performs comprehensive validation including:\n"
-          "- Ground reference check\n"
-          "- Voltage source loop detection\n"
-          "- Floating node detection\n"
-          "- Parameter validation\n"
-          "- Duplicate name check\n\n"
-          "Args:\n"
-          "    circuit: The Circuit to validate\n\n"
-          "Returns:\n"
-          "    ValidationResult containing all diagnostics");
+        // Set timestep for dynamic elements
+        Real current_dt = dt;
+        circuit.set_timestep(current_dt);
 
-    m.def("diagnostic_code_description", &diagnostic_code_description, py::arg("code"),
-          "Get human-readable description of a diagnostic code.\n\n"
-          "Useful for displaying help text or tooltips in GUI.\n\n"
-          "Args:\n"
-          "    code: The DiagnosticCode to describe\n\n"
-          "Returns:\n"
-          "    Human-readable description string");
+        // Configure Newton solver (respect user settings)
+        NewtonOptions opts = newton_opts;
+        opts.num_nodes = circuit.num_nodes();
+        opts.num_branches = circuit.num_branches();
+        // Note: enable_limiting defaults to true in NewtonOptions
+        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
 
-    // --- Thermal Simulation ---
-    py::class_<ThermalRCStage>(m, "ThermalRCStage")
+        // Gmin configuration for fallback
+        GminConfig gmin_config;
+        gmin_config.initial_gmin = 0.1;
+        gmin_config.final_gmin = 1e-12;
+        gmin_config.reduction_factor = 10.0;
+        gmin_config.max_steps = 30;
+
+        // System function
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        // Initial state
+        Vector x = x0;
+
+        // Set initial time for time-varying sources
+        circuit.set_current_time(t_start);
+
+        // Initialize dynamic element history
+        circuit.update_history(x, true);
+
+        // Store initial state
+        times.push_back(t_start);
+        states.push_back(x);
+
+        // Time stepping
+        Real t = t_start;
+        int step = 0;
+        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
+        const int max_dt_reductions = 5;
+        const Real dt_reduction_factor = 0.2;
+
+        while (t < t_stop && step < max_steps) {
+            // Advance time
+            Real t_next = t + current_dt;
+            circuit.set_current_time(t_next);
+
+            // Try normal Newton solve first
+            auto result = solver.solve(x, system_func);
+
+            // Fallback 1: Gmin stepping if Newton fails
+            if (!result.success()) {
+                GminStepping gmin_stepper(gmin_config);
+
+                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
+                    Real current_gmin = gmin_stepper.current_gmin();
+                    Index num_nodes = circuit.num_nodes();
+
+                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
+                        circuit.assemble_jacobian(J, f, x_inner);
+                        // Add Gmin to node diagonals
+                        for (Index i = 0; i < num_nodes; ++i) {
+                            J.coeffRef(i, i) += current_gmin;
+                        }
+                    };
+                    return solver.solve(x_start, modified_func);
+                };
+
+                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
+
+                if (result.success()) {
+                    gmin_fallback_count++;
+                }
+            }
+
+            // Fallback 2: Timestep reduction if still failing
+            if (!result.success()) {
+                int reductions = 0;
+                Real temp_dt = current_dt;
+                Vector x_sub = x;
+                Real t_sub = t;
+                bool sub_success = true;
+
+                while (!result.success() && reductions < max_dt_reductions) {
+                    temp_dt *= dt_reduction_factor;
+                    circuit.set_timestep(temp_dt);
+                    reductions++;
+
+                    // Try sub-stepping
+                    x_sub = x;
+                    t_sub = t;
+                    sub_success = true;
+
+                    while (t_sub < t_next - temp_dt * 0.5) {
+                        t_sub += temp_dt;
+                        circuit.set_current_time(t_sub);
+                        result = solver.solve(x_sub, system_func);
+
+                        if (!result.success()) {
+                            sub_success = false;
+                            break;
+                        }
+                        x_sub = result.solution;
+                        circuit.update_history(x_sub);
+                    }
+
+                    if (sub_success) {
+                        result.solution = x_sub;
+                        result.status = SolverStatus::Success;
+                        dt_reduction_count++;
+                        break;
+                    }
+                }
+
+                // Restore original timestep
+                circuit.set_timestep(current_dt);
+            }
+
+            if (!result.success()) {
+                success = false;
+                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
+                break;
+            }
+
+            // Update solution
+            x = result.solution;
+            circuit.update_history(x);
+
+            // Store state
+            t = t_next;
+            step++;
+            times.push_back(t);
+            states.push_back(x);
+        }
+
+        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
+            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
+                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
+        }
+
+        return std::make_tuple(times, states, success, message);
+    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+       py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
+    R"doc(
+    Run transient simulation with automatic convergence aids.
+
+    This function automatically uses fallback strategies when Newton fails:
+    - Gmin stepping: Adds conductances to improve matrix conditioning
+    - Timestep reduction: Uses smaller substeps for difficult transitions
+
+    Args:
+        circuit: Circuit object with devices
+        t_start: Start time (s)
+        t_stop: Stop time (s)
+        dt: Timestep (s)
+        x0: Initial state vector (e.g., from DC operating point)
+        newton_options: Newton solver options
+
+    Returns:
+        Tuple of (times, states, success, message)
+    )doc");
+
+    // Convenience function with zero initial state
+    v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
+                                const NewtonOptions& newton_opts) {
+        Vector x0 = Vector::Zero(circuit.system_size());
+
+        // Call the full version (this is a simplified overload)
+        std::vector<Real> times;
+        std::vector<Vector> states;
+        bool success = true;
+        std::string message = "Transient completed";
+        int gmin_fallback_count = 0;
+        int dt_reduction_count = 0;
+
+        Real current_dt = dt;
+        circuit.set_timestep(current_dt);
+
+        NewtonOptions opts = newton_opts;
+        opts.num_nodes = circuit.num_nodes();
+        opts.num_branches = circuit.num_branches();
+        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
+
+        GminConfig gmin_config;
+        gmin_config.initial_gmin = 0.1;
+        gmin_config.final_gmin = 1e-12;
+        gmin_config.reduction_factor = 10.0;
+        gmin_config.max_steps = 30;
+
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        Vector x = x0;
+        circuit.set_current_time(t_start);
+        circuit.update_history(x, true);
+        times.push_back(t_start);
+        states.push_back(x);
+
+        Real t = t_start;
+        int step = 0;
+        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
+        const int max_dt_reductions = 5;
+        const Real dt_reduction_factor = 0.2;
+
+        while (t < t_stop && step < max_steps) {
+            Real t_next = t + current_dt;
+            circuit.set_current_time(t_next);
+
+            auto result = solver.solve(x, system_func);
+
+            if (!result.success()) {
+                GminStepping gmin_stepper(gmin_config);
+                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
+                    Real current_gmin = gmin_stepper.current_gmin();
+                    Index num_nodes = circuit.num_nodes();
+                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
+                        circuit.assemble_jacobian(J, f, x_inner);
+                        for (Index i = 0; i < num_nodes; ++i) {
+                            J.coeffRef(i, i) += current_gmin;
+                        }
+                    };
+                    return solver.solve(x_start, modified_func);
+                };
+                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
+                if (result.success()) gmin_fallback_count++;
+            }
+
+            if (!result.success()) {
+                int reductions = 0;
+                Real temp_dt = current_dt;
+                Vector x_sub = x;
+                Real t_sub = t;
+                bool sub_success = true;
+
+                while (!result.success() && reductions < max_dt_reductions) {
+                    temp_dt *= dt_reduction_factor;
+                    circuit.set_timestep(temp_dt);
+                    reductions++;
+                    x_sub = x;
+                    t_sub = t;
+                    sub_success = true;
+
+                    while (t_sub < t_next - temp_dt * 0.5) {
+                        t_sub += temp_dt;
+                        circuit.set_current_time(t_sub);
+                        result = solver.solve(x_sub, system_func);
+                        if (!result.success()) { sub_success = false; break; }
+                        x_sub = result.solution;
+                        circuit.update_history(x_sub);
+                    }
+                    if (sub_success) {
+                        result.solution = x_sub;
+                        result.status = SolverStatus::Success;
+                        dt_reduction_count++;
+                        break;
+                    }
+                }
+                circuit.set_timestep(current_dt);
+            }
+
+            if (!result.success()) {
+                success = false;
+                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
+                break;
+            }
+
+            x = result.solution;
+            circuit.update_history(x);
+            t = t_next;
+            step++;
+            times.push_back(t);
+            states.push_back(x);
+        }
+
+        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
+            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
+                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
+        }
+
+        return std::make_tuple(times, states, success, message);
+    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+       py::arg("newton_options") = NewtonOptions(),
+    "Run transient with zero initial state");
+
+    // =========================================================================
+    // Streaming transient simulation (for real-time GUI updates)
+    // =========================================================================
+
+    v2.def("run_transient_streaming", [](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        py::object data_callback,
+        py::object progress_callback,
+        py::object cancel_check,
+        int emit_interval
+    ) {
+        std::vector<Real> times;
+        std::vector<Vector> states;
+        bool success = true;
+        std::string message = "Transient completed";
+        int gmin_fallback_count = 0;
+        int dt_reduction_count = 0;
+
+        // Get node names for data callback
+        std::vector<std::string> node_names;
+        for (Index i = 0; i < circuit.num_nodes(); ++i) {
+            node_names.push_back(circuit.node_name(i));
+        }
+
+        Real current_dt = dt;
+        circuit.set_timestep(current_dt);
+
+        NewtonOptions opts = newton_opts;
+        opts.num_nodes = circuit.num_nodes();
+        opts.num_branches = circuit.num_branches();
+        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
+
+        GminConfig gmin_config;
+        gmin_config.initial_gmin = 0.1;
+        gmin_config.final_gmin = 1e-12;
+        gmin_config.reduction_factor = 10.0;
+        gmin_config.max_steps = 30;
+
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        Vector x = x0;
+        circuit.set_current_time(t_start);
+        circuit.update_history(x, true);
+        times.push_back(t_start);
+        states.push_back(x);
+
+        Real t = t_start;
+        int step = 0;
+        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
+        const int max_dt_reductions = 5;
+        const Real dt_reduction_factor = 0.2;
+        const Real total_duration = t_stop - t_start;
+
+        // Ensure emit_interval is valid
+        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
+
+        while (t < t_stop && step < max_steps) {
+            // Check for cancellation (acquire GIL for Python call)
+            if (!cancel_check.is_none()) {
+                py::gil_scoped_acquire acquire;
+                try {
+                    if (py::cast<bool>(cancel_check())) {
+                        success = false;
+                        message = "Cancelled by user";
+                        break;
+                    }
+                } catch (...) {
+                    // Ignore callback errors
+                }
+            }
+
+            Real t_next = t + current_dt;
+            circuit.set_current_time(t_next);
+
+            auto result = solver.solve(x, system_func);
+
+            // Fallback 1: Gmin stepping if Newton fails
+            if (!result.success()) {
+                GminStepping gmin_stepper(gmin_config);
+                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
+                    Real current_gmin = gmin_stepper.current_gmin();
+                    Index num_nodes = circuit.num_nodes();
+                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
+                        circuit.assemble_jacobian(J, f, x_inner);
+                        for (Index i = 0; i < num_nodes; ++i) {
+                            J.coeffRef(i, i) += current_gmin;
+                        }
+                    };
+                    return solver.solve(x_start, modified_func);
+                };
+                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
+                if (result.success()) {
+                    gmin_fallback_count++;
+                }
+            }
+
+            // Fallback 2: Timestep reduction if still failing
+            if (!result.success()) {
+                int reductions = 0;
+                Real temp_dt = current_dt;
+                Vector x_sub = x;
+                Real t_sub = t;
+                bool sub_success = true;
+
+                while (!result.success() && reductions < max_dt_reductions) {
+                    temp_dt *= dt_reduction_factor;
+                    circuit.set_timestep(temp_dt);
+                    reductions++;
+
+                    x_sub = x;
+                    t_sub = t;
+                    sub_success = true;
+
+                    while (t_sub < t_next - temp_dt * 0.5) {
+                        t_sub += temp_dt;
+                        circuit.set_current_time(t_sub);
+                        result = solver.solve(x_sub, system_func);
+
+                        if (!result.success()) {
+                            sub_success = false;
+                            break;
+                        }
+                        x_sub = result.solution;
+                        circuit.update_history(x_sub);
+                    }
+
+                    if (sub_success) {
+                        result.solution = x_sub;
+                        result.status = SolverStatus::Success;
+                        dt_reduction_count++;
+                        break;
+                    }
+                }
+                circuit.set_timestep(current_dt);
+            }
+
+            if (!result.success()) {
+                success = false;
+                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
+                break;
+            }
+
+            x = result.solution;
+            circuit.update_history(x);
+            t = t_next;
+            step++;
+            times.push_back(t);
+            states.push_back(x);
+
+            // Emit callbacks at specified interval (acquire GIL for Python calls)
+            if (step % actual_emit_interval == 0) {
+                py::gil_scoped_acquire acquire;
+
+                // Data callback with state dictionary
+                if (!data_callback.is_none()) {
+                    try {
+                        py::dict state_dict;
+                        for (size_t i = 0; i < node_names.size(); ++i) {
+                            state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                        }
+                        data_callback(t, state_dict);
+                    } catch (...) {
+                        // Ignore callback errors
+                    }
+                }
+
+                // Progress callback
+                if (!progress_callback.is_none()) {
+                    try {
+                        Real progress = (t - t_start) / total_duration * 100.0;
+                        std::string prog_msg = "Simulating: t=" + std::to_string(t * 1e6) + "us";
+                        progress_callback(progress, prog_msg);
+                    } catch (...) {
+                        // Ignore callback errors
+                    }
+                }
+            }
+        }
+
+        // Final callbacks
+        {
+            py::gil_scoped_acquire acquire;
+            if (!data_callback.is_none() && !times.empty()) {
+                try {
+                    py::dict state_dict;
+                    for (size_t i = 0; i < node_names.size(); ++i) {
+                        state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                    }
+                    data_callback(times.back(), state_dict);
+                } catch (...) {}
+            }
+            if (!progress_callback.is_none()) {
+                try {
+                    progress_callback(100.0, success ? "Complete" : message);
+                } catch (...) {}
+            }
+        }
+
+        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
+            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
+                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
+        }
+
+        return std::make_tuple(times, states, success, message);
+    },
+    py::call_guard<py::gil_scoped_release>(),
+    py::arg("circuit"),
+    py::arg("t_start"),
+    py::arg("t_stop"),
+    py::arg("dt"),
+    py::arg("x0"),
+    py::arg("newton_options") = NewtonOptions(),
+    py::arg("data_callback") = py::none(),
+    py::arg("progress_callback") = py::none(),
+    py::arg("cancel_check") = py::none(),
+    py::arg("emit_interval") = 100,
+    R"doc(
+    Run transient simulation with streaming callbacks for real-time GUI updates.
+
+    This function calls Python callbacks during simulation for progress updates
+    and real-time waveform display. The GIL is released during computation and
+    only acquired for callback invocations.
+
+    Args:
+        circuit: Circuit object with devices
+        t_start: Start time (s)
+        t_stop: Stop time (s)
+        dt: Timestep (s)
+        x0: Initial state vector (e.g., from DC operating point)
+        newton_options: Newton solver options
+        data_callback: Called with (time, state_dict) for waveform updates
+        progress_callback: Called with (percent, message) for progress bar
+        cancel_check: Called to check if simulation should be cancelled
+        emit_interval: Number of steps between callback emissions (default: 100)
+
+    Returns:
+        Tuple of (times, states, success, message)
+    )doc");
+
+    // Convenience version with zero initial state
+    v2.def("run_transient_streaming", [](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const NewtonOptions& newton_opts,
+        py::object data_callback,
+        py::object progress_callback,
+        py::object cancel_check,
+        int emit_interval
+    ) {
+        Vector x0 = Vector::Zero(circuit.system_size());
+        // Forward to full version - need to duplicate logic here for now
+        // (pybind11 doesn't support easy forwarding between overloads)
+
+        std::vector<Real> times;
+        std::vector<Vector> states;
+        bool success = true;
+        std::string message = "Transient completed";
+        int gmin_fallback_count = 0;
+        int dt_reduction_count = 0;
+
+        std::vector<std::string> node_names;
+        for (Index i = 0; i < circuit.num_nodes(); ++i) {
+            node_names.push_back(circuit.node_name(i));
+        }
+
+        Real current_dt = dt;
+        circuit.set_timestep(current_dt);
+
+        NewtonOptions opts = newton_opts;
+        opts.num_nodes = circuit.num_nodes();
+        opts.num_branches = circuit.num_branches();
+        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
+
+        GminConfig gmin_config;
+        gmin_config.initial_gmin = 0.1;
+        gmin_config.final_gmin = 1e-12;
+        gmin_config.reduction_factor = 10.0;
+        gmin_config.max_steps = 30;
+
+        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
+            circuit.assemble_jacobian(J, f, x);
+        };
+
+        Vector x = x0;
+        circuit.set_current_time(t_start);
+        circuit.update_history(x, true);
+        times.push_back(t_start);
+        states.push_back(x);
+
+        Real t = t_start;
+        int step = 0;
+        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
+        const int max_dt_reductions = 5;
+        const Real dt_reduction_factor = 0.2;
+        const Real total_duration = t_stop - t_start;
+        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
+
+        while (t < t_stop && step < max_steps) {
+            if (!cancel_check.is_none()) {
+                py::gil_scoped_acquire acquire;
+                try {
+                    if (py::cast<bool>(cancel_check())) {
+                        success = false;
+                        message = "Cancelled by user";
+                        break;
+                    }
+                } catch (...) {}
+            }
+
+            Real t_next = t + current_dt;
+            circuit.set_current_time(t_next);
+            auto result = solver.solve(x, system_func);
+
+            if (!result.success()) {
+                GminStepping gmin_stepper(gmin_config);
+                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
+                    Real current_gmin = gmin_stepper.current_gmin();
+                    Index num_nodes = circuit.num_nodes();
+                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
+                        circuit.assemble_jacobian(J, f, x_inner);
+                        for (Index i = 0; i < num_nodes; ++i) {
+                            J.coeffRef(i, i) += current_gmin;
+                        }
+                    };
+                    return solver.solve(x_start, modified_func);
+                };
+                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
+                if (result.success()) gmin_fallback_count++;
+            }
+
+            if (!result.success()) {
+                int reductions = 0;
+                Real temp_dt = current_dt;
+                Vector x_sub = x;
+                Real t_sub = t;
+                bool sub_success = true;
+
+                while (!result.success() && reductions < max_dt_reductions) {
+                    temp_dt *= dt_reduction_factor;
+                    circuit.set_timestep(temp_dt);
+                    reductions++;
+                    x_sub = x;
+                    t_sub = t;
+                    sub_success = true;
+
+                    while (t_sub < t_next - temp_dt * 0.5) {
+                        t_sub += temp_dt;
+                        circuit.set_current_time(t_sub);
+                        result = solver.solve(x_sub, system_func);
+                        if (!result.success()) { sub_success = false; break; }
+                        x_sub = result.solution;
+                        circuit.update_history(x_sub);
+                    }
+
+                    if (sub_success) {
+                        result.solution = x_sub;
+                        result.status = SolverStatus::Success;
+                        dt_reduction_count++;
+                        break;
+                    }
+                }
+                circuit.set_timestep(current_dt);
+            }
+
+            if (!result.success()) {
+                success = false;
+                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
+                break;
+            }
+
+            x = result.solution;
+            circuit.update_history(x);
+            t = t_next;
+            step++;
+            times.push_back(t);
+            states.push_back(x);
+
+            if (step % actual_emit_interval == 0) {
+                py::gil_scoped_acquire acquire;
+                if (!data_callback.is_none()) {
+                    try {
+                        py::dict state_dict;
+                        for (size_t i = 0; i < node_names.size(); ++i) {
+                            state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                        }
+                        data_callback(t, state_dict);
+                    } catch (...) {}
+                }
+                if (!progress_callback.is_none()) {
+                    try {
+                        Real progress = (t - t_start) / total_duration * 100.0;
+                        progress_callback(progress, "Simulating...");
+                    } catch (...) {}
+                }
+            }
+        }
+
+        {
+            py::gil_scoped_acquire acquire;
+            if (!data_callback.is_none() && !times.empty()) {
+                try {
+                    py::dict state_dict;
+                    for (size_t i = 0; i < node_names.size(); ++i) {
+                        state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                    }
+                    data_callback(times.back(), state_dict);
+                } catch (...) {}
+            }
+            if (!progress_callback.is_none()) {
+                try {
+                    progress_callback(100.0, success ? "Complete" : message);
+                } catch (...) {}
+            }
+        }
+
+        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
+            message = "Transient completed (Gmin: " + std::to_string(gmin_fallback_count) +
+                      ", dt: " + std::to_string(dt_reduction_count) + ")";
+        }
+
+        return std::make_tuple(times, states, success, message);
+    },
+    py::call_guard<py::gil_scoped_release>(),
+    py::arg("circuit"),
+    py::arg("t_start"),
+    py::arg("t_stop"),
+    py::arg("dt"),
+    py::arg("newton_options") = NewtonOptions(),
+    py::arg("data_callback") = py::none(),
+    py::arg("progress_callback") = py::none(),
+    py::arg("cancel_check") = py::none(),
+    py::arg("emit_interval") = 100,
+    "Run streaming transient with zero initial state");
+
+    // =========================================================================
+    // Validation Framework (Phase 6 exposed)
+    // =========================================================================
+
+    py::class_<RCAnalytical>(v2, "RCAnalytical", "RC circuit analytical solution")
+        .def(py::init<Real, Real, Real, Real>(),
+             py::arg("R"), py::arg("C"), py::arg("V_initial"), py::arg("V_final"))
+        .def("tau", &RCAnalytical::tau)
+        .def("voltage", &RCAnalytical::voltage, py::arg("t"))
+        .def("current", &RCAnalytical::current, py::arg("t"))
+        .def("waveform", &RCAnalytical::waveform,
+             py::arg("t_start"), py::arg("t_end"), py::arg("dt"));
+
+    py::class_<RLAnalytical>(v2, "RLAnalytical", "RL circuit analytical solution")
+        .def(py::init<Real, Real, Real, Real>(),
+             py::arg("R"), py::arg("L"), py::arg("V_source"), py::arg("I_initial"))
+        .def("tau", &RLAnalytical::tau)
+        .def("I_final", &RLAnalytical::I_final)
+        .def("current", &RLAnalytical::current, py::arg("t"))
+        .def("voltage_R", &RLAnalytical::voltage_R, py::arg("t"))
+        .def("voltage_L", &RLAnalytical::voltage_L, py::arg("t"))
+        .def("waveform", &RLAnalytical::waveform,
+             py::arg("t_start"), py::arg("t_end"), py::arg("dt"));
+
+    py::class_<RLCAnalytical>(v2, "RLCAnalytical", "RLC circuit analytical solution")
+        .def(py::init<Real, Real, Real, Real, Real, Real>(),
+             py::arg("R"), py::arg("L"), py::arg("C"),
+             py::arg("V_source"), py::arg("V_initial"), py::arg("I_initial"))
+        .def("omega_0", &RLCAnalytical::omega_0)
+        .def("zeta", &RLCAnalytical::zeta)
+        .def("alpha", &RLCAnalytical::alpha)
+           .def("damping_type", &RLCAnalytical::damping_type)
+           // Backwards-compatible alias expected by tests
+           .def("damping", &RLCAnalytical::damping_type)
+        .def("voltage", &RLCAnalytical::voltage, py::arg("t"))
+        .def("current", &RLCAnalytical::current, py::arg("t"))
+        .def("waveform", &RLCAnalytical::waveform,
+             py::arg("t_start"), py::arg("t_end"), py::arg("dt"));
+
+    py::class_<ValidationResult>(v2, "ValidationResult_v2", "Validation result with metrics")
         .def(py::init<>())
-        .def_readwrite("rth", &ThermalRCStage::rth)
-        .def_readwrite("cth", &ThermalRCStage::cth)
-        .def("tau", &ThermalRCStage::tau);
+        .def_readwrite("test_name", &ValidationResult::test_name)
+        .def_readwrite("passed", &ValidationResult::passed)
+        .def_readwrite("max_error", &ValidationResult::max_error)
+        .def_readwrite("rms_error", &ValidationResult::rms_error)
+        .def_readwrite("max_relative_error", &ValidationResult::max_relative_error)
+        .def_readwrite("mean_error", &ValidationResult::mean_error)
+        .def_readwrite("num_points", &ValidationResult::num_points)
+        .def_readwrite("error_threshold", &ValidationResult::error_threshold)
+        .def("to_string", &ValidationResult::to_string);
 
-    py::class_<FosterNetwork>(m, "FosterNetwork")
+    v2.def("compare_waveforms", &compare_waveforms,
+           py::arg("name"), py::arg("simulated"), py::arg("analytical"),
+           py::arg("threshold") = 0.001,
+           "Compare simulated vs analytical waveforms");
+
+    v2.def("export_validation_csv", &export_validation_csv,
+           py::arg("results"),
+           "Export validation results to CSV");
+
+    v2.def("export_validation_json", &export_validation_json,
+           py::arg("results"),
+           "Export validation results to JSON");
+
+    // =========================================================================
+    // Benchmark Framework
+    // =========================================================================
+
+    py::class_<BenchmarkTiming>(v2, "BenchmarkTiming", "Benchmark timing result")
         .def(py::init<>())
-        .def_readwrite("stages", &FosterNetwork::stages)
-        .def("rth_total", &FosterNetwork::rth_total)
-        .def("zth", &FosterNetwork::zth, py::arg("t"));
+        .def_readwrite("name", &BenchmarkTiming::name)
+        .def_readwrite("iterations", &BenchmarkTiming::iterations)
+        .def("average_ms", &BenchmarkTiming::average_ms)
+        .def("min_ms", &BenchmarkTiming::min_ms)
+        .def("max_ms", &BenchmarkTiming::max_ms)
+        .def("total_ms", &BenchmarkTiming::total_ms);
 
-    py::class_<ThermalModel>(m, "ThermalModel")
+    py::class_<BenchmarkResult>(v2, "BenchmarkResult", "Complete benchmark result")
         .def(py::init<>())
-        .def_readwrite("device_name", &ThermalModel::device_name)
-        .def_readwrite("type", &ThermalModel::type)
-        .def_readwrite("rth_jc", &ThermalModel::rth_jc)
-        .def_readwrite("rth_cs", &ThermalModel::rth_cs)
-        .def_readwrite("rth_sa", &ThermalModel::rth_sa)
-        .def_readwrite("foster", &ThermalModel::foster)
-        .def_readwrite("tj_max", &ThermalModel::tj_max)
-        .def_readwrite("tj_warn", &ThermalModel::tj_warn)
-        .def("rth_ja", &ThermalModel::rth_ja);
+        .def_readwrite("circuit_name", &BenchmarkResult::circuit_name)
+        .def_readwrite("num_nodes", &BenchmarkResult::num_nodes)
+        .def_readwrite("num_devices", &BenchmarkResult::num_devices)
+        .def_readwrite("num_timesteps", &BenchmarkResult::num_timesteps)
+        .def_readwrite("timing", &BenchmarkResult::timing)
+        .def_readwrite("simulation_time", &BenchmarkResult::simulation_time)
+        .def("timesteps_per_second", &BenchmarkResult::timesteps_per_second)
+        .def("to_string", &BenchmarkResult::to_string);
 
-    py::class_<ThermalState>(m, "ThermalState")
+    v2.def("export_benchmark_csv", &export_benchmark_csv,
+           py::arg("results"),
+           "Export benchmark results to CSV");
+
+    v2.def("export_benchmark_json", &export_benchmark_json,
+           py::arg("results"),
+           "Export benchmark results to JSON");
+
+    // =========================================================================
+    // Integration Methods
+    // =========================================================================
+
+    py::class_<BDFOrderConfig>(v2, "BDFOrderConfig", "BDF order controller configuration")
         .def(py::init<>())
-        .def_readonly("device_name", &ThermalState::device_name)
-        .def_readonly("tj", &ThermalState::tj)
-        .def_readonly("tc", &ThermalState::tc)
-        .def_readonly("ts", &ThermalState::ts)
-        .def_readonly("power_in", &ThermalState::power_in)
-        .def_readonly("tj_peak", &ThermalState::tj_peak)
-        .def_readonly("tj_peak_time", &ThermalState::tj_peak_time);
+        .def_readwrite("min_order", &BDFOrderConfig::min_order)
+        .def_readwrite("max_order", &BDFOrderConfig::max_order)
+        .def_readwrite("initial_order", &BDFOrderConfig::initial_order)
+        .def_readwrite("order_increase_threshold", &BDFOrderConfig::order_increase_threshold)
+        .def_readwrite("order_decrease_threshold", &BDFOrderConfig::order_decrease_threshold)
+        .def_readwrite("steps_before_increase", &BDFOrderConfig::steps_before_increase)
+        .def_readwrite("enable_auto_order", &BDFOrderConfig::enable_auto_order);
 
-    py::class_<ThermalSimulator::ThermalWarning>(m, "ThermalWarning")
-        .def_readonly("device_name", &ThermalSimulator::ThermalWarning::device_name)
-        .def_readonly("temperature", &ThermalSimulator::ThermalWarning::temperature)
-        .def_readonly("time", &ThermalSimulator::ThermalWarning::time)
-        .def_readonly("is_failure", &ThermalSimulator::ThermalWarning::is_failure);
-
-    py::class_<ThermalSimulator>(m, "ThermalSimulator")
+    py::class_<TimestepConfig>(v2, "TimestepConfig", "Adaptive timestep controller configuration")
         .def(py::init<>())
-        .def("add_model", &ThermalSimulator::add_model, py::arg("model"))
-        .def("set_ambient", &ThermalSimulator::set_ambient, py::arg("t_amb"))
-        .def("ambient", &ThermalSimulator::ambient)
-        .def("initialize", &ThermalSimulator::initialize)
-        .def("step", &ThermalSimulator::step, py::arg("dt"), py::arg("device_powers"))
-        .def("junction_temp", &ThermalSimulator::junction_temp, py::arg("device_name"))
-        .def("states", &ThermalSimulator::states)
-        .def("warnings", &ThermalSimulator::warnings)
-        .def("adjust_rds_on", &ThermalSimulator::adjust_rds_on,
-             py::arg("rds_on_25c"), py::arg("tj"), py::arg("tc") = 0.004)
-        .def("adjust_vth", &ThermalSimulator::adjust_vth,
-             py::arg("vth_25c"), py::arg("tj"), py::arg("tc") = -0.003);
+        .def_readwrite("dt_min", &TimestepConfig::dt_min)
+        .def_readwrite("dt_max", &TimestepConfig::dt_max)
+        .def_readwrite("dt_initial", &TimestepConfig::dt_initial)
+        .def_readwrite("safety_factor", &TimestepConfig::safety_factor)
+        .def_readwrite("error_tolerance", &TimestepConfig::error_tolerance)
+        .def_readwrite("growth_factor", &TimestepConfig::growth_factor)
+        .def_readwrite("shrink_factor", &TimestepConfig::shrink_factor)
+        .def_readwrite("max_rejections", &TimestepConfig::max_rejections)
+        .def_readwrite("k_p", &TimestepConfig::k_p)
+        .def_readwrite("k_i", &TimestepConfig::k_i)
+        .def_static("defaults", &TimestepConfig::defaults)
+        .def_static("conservative", &TimestepConfig::conservative)
+        .def_static("aggressive", &TimestepConfig::aggressive);
 
-    m.def("create_mosfet_thermal", &create_mosfet_thermal,
-          py::arg("name"), py::arg("rth_jc"), py::arg("rth_cs") = 0.5, py::arg("rth_sa") = 1.0,
-          "Create a typical MOSFET thermal model with 4-stage Foster network");
+    // =========================================================================
+    // High-Performance Features (Phase 4 exposed)
+    // =========================================================================
 
-    m.def("fit_foster_network", &fit_foster_network,
-          py::arg("zth_curve"), py::arg("num_stages") = 4,
-          "Fit a Foster network from Zth curve datasheet points");
+    py::class_<LinearSolverConfig>(v2, "LinearSolverConfig",
+        "Linear solver configuration")
+        .def(py::init<>())
+        .def_readwrite("pivot_tolerance", &LinearSolverConfig::pivot_tolerance)
+        .def_readwrite("reuse_symbolic", &LinearSolverConfig::reuse_symbolic)
+        .def_readwrite("detect_pattern_change", &LinearSolverConfig::detect_pattern_change)
+        .def_readwrite("deterministic_pivoting", &LinearSolverConfig::deterministic_pivoting);
 
-    // --- Device Library ---
-    auto devices_mod = m.def_submodule("devices", "Pre-defined device parameter library");
+    // SIMD detection
+    py::enum_<SIMDLevel>(v2, "SIMDLevel", "SIMD capability level")
+        .value("None_", SIMDLevel::None)
+        .value("SSE2", SIMDLevel::SSE2)
+        .value("SSE4", SIMDLevel::SSE4)
+        .value("AVX", SIMDLevel::AVX)
+        .value("AVX2", SIMDLevel::AVX2)
+        .value("AVX512", SIMDLevel::AVX512)
+        .value("NEON", SIMDLevel::NEON)
+        .export_values();
 
-    // Diodes
-    devices_mod.def("diode_1N4007", &devices::diode_1N4007,
-        "General purpose rectifier diode 1N4007 (1000V, 1A)");
-    devices_mod.def("diode_1N4148", &devices::diode_1N4148,
-        "Small signal fast switching diode 1N4148 (100V)");
-    devices_mod.def("diode_1N5819", &devices::diode_1N5819,
-        "Schottky diode 1N5819 (40V, low forward voltage)");
-    devices_mod.def("diode_MUR860", &devices::diode_MUR860,
-        "Fast recovery diode MUR860 (600V, 8A, 50ns)");
-    devices_mod.def("diode_C3D10065A", &devices::diode_C3D10065A,
-        "SiC Schottky diode C3D10065A (650V, zero recovery)");
+    v2.def("detect_simd_level", &detect_simd_level,
+           "Detect CPU SIMD capability level");
 
-    // MOSFETs
-    devices_mod.def("mosfet_IRF540N", &devices::mosfet_IRF540N,
-        "N-channel MOSFET IRF540N (100V, 33A, 44mOhm)");
-    devices_mod.def("mosfet_IRFZ44N", &devices::mosfet_IRFZ44N,
-        "N-channel MOSFET IRFZ44N (55V, 49A, 17.5mOhm)");
-    devices_mod.def("mosfet_IRF9540", &devices::mosfet_IRF9540,
-        "P-channel MOSFET IRF9540 (-100V, -23A)");
-    devices_mod.def("mosfet_BSC0902NS", &devices::mosfet_BSC0902NS,
-        "High-efficiency MOSFET BSC0902NS (30V, 2.1mOhm)");
-    devices_mod.def("mosfet_EPC2001C", &devices::mosfet_EPC2001C,
-        "GaN FET EPC2001C (100V, 4mOhm, ultra-fast)");
+    v2.def("simd_vector_width", &simd_vector_width,
+           "Get SIMD vector width for current CPU level");
 
-    // IGBTs
-    devices_mod.def("igbt_IRG4PC40UD", &devices::igbt_IRG4PC40UD,
-        "General purpose IGBT IRG4PC40UD (600V, 40A)");
-    devices_mod.def("igbt_IRG4BC30KD", &devices::igbt_IRG4BC30KD,
-        "High-speed IGBT IRG4BC30KD (600V, 30A)");
-    devices_mod.def("igbt_IKW40N120H3", &devices::igbt_IKW40N120H3,
-        "High-voltage IGBT IKW40N120H3 (1200V, 40A)");
+    // =========================================================================
+    // Utility Functions
+    // =========================================================================
 
-    // Switches
-    devices_mod.def("switch_ideal", &devices::switch_ideal,
-        "Ideal switch (1uOhm on, 1TOhm off)");
-    devices_mod.def("switch_relay", &devices::switch_relay,
-        "Mechanical relay model (100mOhm contact)");
-    devices_mod.def("switch_ssr", &devices::switch_ssr,
-        "Solid-state relay model (20mOhm)");
+    v2.def("solver_status_to_string", [](SolverStatus status) {
+               return std::string(to_string(status));
+           },
+           py::arg("status"),
+           "Convert SolverStatus to string");
+
+    // =========================================================================
+    // Thermal Simulation Module
+    // =========================================================================
+
+    py::class_<FosterStage>(v2, "FosterStage",
+        "Single stage of a Foster thermal network (parallel RC)")
+        .def(py::init<Real, Real>(), py::arg("Rth"), py::arg("tau"))
+        .def_readwrite("Rth", &FosterStage::Rth, "Thermal resistance (K/W)")
+        .def_readwrite("tau", &FosterStage::tau, "Time constant (s)")
+        .def("Cth", &FosterStage::Cth, "Compute thermal capacitance from Rth and tau")
+        .def("Zth", &FosterStage::Zth, py::arg("t"),
+             "Thermal impedance at time t for step power")
+        .def("delta_T", &FosterStage::delta_T, py::arg("P"), py::arg("t"),
+             "Temperature rise for constant power P at time t");
+
+    py::class_<FosterNetwork>(v2, "FosterNetwork",
+        R"doc(Foster thermal network representation.
+
+        Total: Zth(t) = sum_i { Rth_i * (1 - exp(-t/tau_i)) }
+
+        Typical use: datasheet provides (Rth_i, tau_i) pairs from Zth curve fitting.
+
+        Example:
+            # Create from Rth and tau lists
+            network = FosterNetwork([0.5, 1.0, 2.0], [0.001, 0.01, 0.1], "MOSFET")
+
+            # Or from stages
+            stages = [FosterStage(0.5, 0.001), FosterStage(1.0, 0.01)]
+            network = FosterNetwork(stages, "IGBT")
+        )doc")
+        .def(py::init<>())
+        .def(py::init<std::vector<FosterStage>, std::string>(),
+             py::arg("stages"), py::arg("name") = "")
+        .def(py::init<const std::vector<Real>&, const std::vector<Real>&, const std::string&>(),
+             py::arg("Rth_values"), py::arg("tau_values"), py::arg("name") = "",
+             "Create from Rth and tau vectors")
+        .def("add_stage", &FosterNetwork::add_stage,
+             py::arg("Rth"), py::arg("tau"), "Add a stage")
+        .def("num_stages", &FosterNetwork::num_stages, "Number of stages")
+        .def("stage", &FosterNetwork::stage, py::arg("i"),
+             "Get stage by index", py::return_value_policy::reference_internal)
+        .def("total_Rth", &FosterNetwork::total_Rth,
+             "Total thermal resistance (steady-state)")
+        .def("Zth", &FosterNetwork::Zth, py::arg("t"),
+             "Thermal impedance at time t")
+        .def("delta_T", &FosterNetwork::delta_T, py::arg("P"), py::arg("t"),
+             "Temperature rise for constant power P at time t")
+        .def("delta_T_ss", &FosterNetwork::delta_T_ss, py::arg("P"),
+             "Steady-state temperature rise for power P")
+        .def("Zth_curve", &FosterNetwork::Zth_curve,
+             py::arg("t_start"), py::arg("t_end"), py::arg("num_points"),
+             "Generate Zth(t) curve")
+        .def("name", &FosterNetwork::name)
+        .def("stages", &FosterNetwork::stages, "Get all stages");
+
+    py::class_<CauerStage>(v2, "CauerStage",
+        "Single stage of a Cauer thermal network (series R, shunt C)")
+        .def(py::init<Real, Real>(), py::arg("Rth"), py::arg("Cth"))
+        .def_readwrite("Rth", &CauerStage::Rth, "Thermal resistance (K/W)")
+        .def_readwrite("Cth", &CauerStage::Cth, "Thermal capacitance (J/K)")
+        .def("tau", &CauerStage::tau, "Time constant of this layer");
+
+    py::class_<CauerNetwork>(v2, "CauerNetwork",
+        R"doc(Cauer thermal network representation (ladder network).
+
+        Physically meaningful: each stage represents a thermal layer
+        (e.g., junction-to-case, case-to-heatsink, heatsink-to-ambient).
+        )doc")
+        .def(py::init<>())
+        .def(py::init<std::vector<CauerStage>, std::string>(),
+             py::arg("stages"), py::arg("name") = "")
+        .def(py::init<const std::vector<Real>&, const std::vector<Real>&, const std::string&>(),
+             py::arg("Rth_values"), py::arg("Cth_values"), py::arg("name") = "",
+             "Create from Rth and Cth vectors")
+        .def("add_stage", &CauerNetwork::add_stage,
+             py::arg("Rth"), py::arg("Cth"), "Add a stage (layer)")
+        .def("num_stages", &CauerNetwork::num_stages, "Number of stages")
+        .def("stage", &CauerNetwork::stage, py::arg("i"),
+             "Get stage by index (0 = junction side)",
+             py::return_value_policy::reference_internal)
+        .def("total_Rth", &CauerNetwork::total_Rth,
+             "Total thermal resistance (steady-state)")
+        .def("total_Cth", &CauerNetwork::total_Cth,
+             "Total thermal capacitance")
+        .def("delta_T_ss", &CauerNetwork::delta_T_ss, py::arg("P"),
+             "Steady-state temperature rise for power P")
+        .def("name", &CauerNetwork::name)
+        .def("stages", &CauerNetwork::stages, "Get all stages");
+
+    py::class_<ThermalSimulator>(v2, "ThermalSimulator",
+        R"doc(Thermal simulator using Foster network model.
+
+        Simulates junction temperature transients given power loss waveform.
+
+        Example:
+            # Create thermal network
+            network = FosterNetwork([0.5, 1.0], [0.001, 0.1], "MOSFET")
+
+            # Create simulator with 25C ambient
+            sim = ThermalSimulator(network, 25.0)
+
+            # Step with 100W for 1ms
+            sim.step(100.0, 0.001)
+            print(f"Tj = {sim.Tj()}C")
+
+            # Or simulate power waveform
+            times = [0.0, 0.001, 0.002, 0.003]
+            powers = [0.0, 100.0, 100.0, 0.0]
+            temps = sim.simulate(times, powers)
+        )doc")
+        .def(py::init<const FosterNetwork&, Real>(),
+             py::arg("network"), py::arg("T_ambient") = 25.0,
+             "Create simulator with Foster network and ambient temperature")
+        .def("reset", &ThermalSimulator::reset, "Reset to ambient temperature")
+        .def("set_ambient", &ThermalSimulator::set_ambient, py::arg("T_amb"),
+             "Set ambient temperature")
+        .def("ambient", &ThermalSimulator::ambient, "Get ambient temperature")
+        .def("junction_temperature", &ThermalSimulator::junction_temperature,
+             "Get current junction temperature")
+        .def("Tj", &ThermalSimulator::Tj, "Alias for junction_temperature")
+        .def("time", &ThermalSimulator::time, "Get current simulation time")
+        .def("network", &ThermalSimulator::network, "Get thermal network",
+             py::return_value_policy::reference_internal)
+        .def("step", &ThermalSimulator::step, py::arg("power"), py::arg("dt"),
+             "Step simulation with constant power for duration dt")
+        .def("steady_state_temperature", &ThermalSimulator::steady_state_temperature,
+             py::arg("power"), "Compute steady-state temperature for given power")
+        .def("simulate", &ThermalSimulator::simulate,
+             py::arg("times"), py::arg("powers"),
+             "Run simulation for power waveform, returns temperature waveform")
+        .def("Zth_curve", &ThermalSimulator::Zth_curve,
+             py::arg("t_end"), py::arg("num_points"), py::arg("P_step") = 1.0,
+             "Compute Zth(t) step response curve")
+        .def("stage_temperatures", &ThermalSimulator::stage_temperatures,
+             "Get per-stage temperature rises");
+
+    py::class_<ThermalLimitMonitor>(v2, "ThermalLimitMonitor",
+        "Monitors junction temperature against limits")
+        .def(py::init<Real, Real>(),
+             py::arg("T_warning") = 125.0, py::arg("T_max") = 150.0,
+             "Create monitor with temperature limits")
+        .def("check", &ThermalLimitMonitor::check, py::arg("Tj"),
+             "Check temperature and return status: 0=OK, 1=warning, 2=exceeded")
+        .def("is_ok", &ThermalLimitMonitor::is_ok, py::arg("Tj"),
+             "Check if temperature is OK")
+        .def("is_warning", &ThermalLimitMonitor::is_warning, py::arg("Tj"),
+             "Check if in warning zone")
+        .def("is_exceeded", &ThermalLimitMonitor::is_exceeded, py::arg("Tj"),
+             "Check if maximum exceeded")
+        .def("T_warning", &ThermalLimitMonitor::T_warning, "Get warning threshold")
+        .def("T_max", &ThermalLimitMonitor::T_max, "Get maximum threshold")
+        .def("set_limits", &ThermalLimitMonitor::set_limits,
+             py::arg("T_warn"), py::arg("T_max"), "Set thresholds");
+
+    py::class_<ThermalResult>(v2, "ThermalResult", "Result of thermal simulation")
+        .def(py::init<>())
+        .def_readwrite("times", &ThermalResult::times, "Time points")
+        .def_readwrite("temperatures", &ThermalResult::temperatures, "Junction temperatures")
+        .def_readwrite("powers", &ThermalResult::powers, "Power loss at each time")
+        .def_readwrite("T_max", &ThermalResult::T_max, "Peak temperature")
+        .def_readwrite("T_avg", &ThermalResult::T_avg, "Average temperature")
+        .def_readwrite("t_max", &ThermalResult::t_max, "Time of peak temperature")
+        .def_readwrite("exceeded_limit", &ThermalResult::exceeded_limit,
+             "True if T_max was exceeded")
+        .def_readwrite("message", &ThermalResult::message)
+        .def("compute_stats", &ThermalResult::compute_stats,
+             "Compute statistics from waveforms");
+
+    // Factory functions for thermal networks
+    v2.def("create_mosfet_thermal_model", &create_mosfet_thermal_model,
+           py::arg("Rth_jc"), py::arg("Rth_cs"), py::arg("Rth_sa"),
+           py::arg("name") = "",
+           R"doc(Create a typical 3-stage Foster network for MOSFET.
+
+           Args:
+               Rth_jc: Junction-to-case thermal resistance (K/W)
+               Rth_cs: Case-to-sink thermal resistance (K/W)
+               Rth_sa: Sink-to-ambient thermal resistance (K/W)
+               name: Optional name for the network
+           )doc");
+
+    v2.def("create_from_datasheet_4param", &create_from_datasheet_4param,
+           py::arg("R1"), py::arg("tau1"),
+           py::arg("R2"), py::arg("tau2"),
+           py::arg("R3"), py::arg("tau3"),
+           py::arg("R4"), py::arg("tau4"),
+           py::arg("name") = "",
+           "Create Foster network from 4-parameter datasheet model");
+
+    v2.def("create_simple_thermal_model", &create_simple_thermal_model,
+           py::arg("Rth_ja"), py::arg("tau") = 1.0, py::arg("name") = "",
+           "Create simple single-stage thermal model");
+
+    // =========================================================================
+    // Power Loss Calculation Module
+    // =========================================================================
+
+    py::class_<MOSFETLossParams>(v2, "MOSFETLossParams",
+        "MOSFET loss model parameters for conduction and switching losses")
+        .def(py::init<>())
+        .def_readwrite("Rds_on", &MOSFETLossParams::Rds_on,
+             "On-state resistance at 25C (Ω)")
+        .def_readwrite("Rds_on_tc", &MOSFETLossParams::Rds_on_tc,
+             "Temperature coefficient (Ω/K)")
+        .def_readwrite("Qg", &MOSFETLossParams::Qg,
+             "Total gate charge (C)")
+        .def_readwrite("Eon_25C", &MOSFETLossParams::Eon_25C,
+             "Turn-on energy at 25C (J)")
+        .def_readwrite("Eoff_25C", &MOSFETLossParams::Eoff_25C,
+             "Turn-off energy at 25C (J)")
+        .def_readwrite("I_ref", &MOSFETLossParams::I_ref,
+             "Reference current for Esw (A)")
+        .def_readwrite("V_ref", &MOSFETLossParams::V_ref,
+             "Reference voltage for Esw (V)")
+        .def_readwrite("T_ref", &MOSFETLossParams::T_ref,
+             "Reference temperature (C)")
+        .def_readwrite("Esw_tc", &MOSFETLossParams::Esw_tc,
+             "Switching energy temp coefficient (1/K)")
+        .def("Rds_on_at_T", &MOSFETLossParams::Rds_on_at_T, py::arg("T"),
+             "Calculate Rds_on at temperature T");
+
+    py::class_<IGBTLossParams>(v2, "IGBTLossParams",
+        "IGBT loss model parameters")
+        .def(py::init<>())
+        .def_readwrite("Vce_sat", &IGBTLossParams::Vce_sat,
+             "Collector-emitter saturation voltage (V)")
+        .def_readwrite("Rce", &IGBTLossParams::Rce,
+             "Collector-emitter resistance (Ω)")
+        .def_readwrite("Vce_tc", &IGBTLossParams::Vce_tc,
+             "Vce temperature coefficient (V/K)")
+        .def_readwrite("Eon_25C", &IGBTLossParams::Eon_25C,
+             "Turn-on energy at 25C (J)")
+        .def_readwrite("Eoff_25C", &IGBTLossParams::Eoff_25C,
+             "Turn-off energy at 25C (J)")
+        .def_readwrite("I_ref", &IGBTLossParams::I_ref,
+             "Reference current (A)")
+        .def_readwrite("V_ref", &IGBTLossParams::V_ref,
+             "Reference voltage (V)")
+        .def_readwrite("T_ref", &IGBTLossParams::T_ref,
+             "Reference temperature (C)")
+        .def_readwrite("Esw_tc", &IGBTLossParams::Esw_tc,
+             "Switching energy temp coefficient (1/K)")
+        .def("Vce_sat_at_T", &IGBTLossParams::Vce_sat_at_T, py::arg("T"),
+             "Calculate Vce_sat at temperature T");
+
+    py::class_<DiodeLossParams>(v2, "DiodeLossParams",
+        "Diode loss model parameters")
+        .def(py::init<>())
+        .def_readwrite("Vf", &DiodeLossParams::Vf,
+             "Forward voltage at 25C (V)")
+        .def_readwrite("Rd", &DiodeLossParams::Rd,
+             "Dynamic resistance (Ω)")
+        .def_readwrite("Vf_tc", &DiodeLossParams::Vf_tc,
+             "Vf temperature coefficient (V/K)")
+        .def_readwrite("Qrr", &DiodeLossParams::Qrr,
+             "Reverse recovery charge (C)")
+        .def_readwrite("trr", &DiodeLossParams::trr,
+             "Reverse recovery time (s)")
+        .def_readwrite("Irr_factor", &DiodeLossParams::Irr_factor,
+             "Irr as fraction of If")
+        .def_readwrite("Err_factor", &DiodeLossParams::Err_factor,
+             "Err factor")
+        .def_readwrite("T_ref", &DiodeLossParams::T_ref,
+             "Reference temperature (C)")
+        .def("Vf_at_T", &DiodeLossParams::Vf_at_T, py::arg("T"),
+             "Calculate Vf at temperature T")
+        .def("Err", &DiodeLossParams::Err,
+             py::arg("If"), py::arg("Vr"), py::arg("T"),
+             "Calculate reverse recovery energy");
+
+    // Conduction loss functions
+    py::class_<ConductionLoss>(v2, "ConductionLoss",
+        "Static methods for conduction loss calculation")
+        .def_static("resistor", &ConductionLoss::resistor,
+             py::arg("I"), py::arg("R"),
+             "Resistor conduction loss: P = I² * R")
+        .def_static("mosfet", &ConductionLoss::mosfet,
+             py::arg("I"), py::arg("params"), py::arg("T"),
+             "MOSFET conduction loss: P = I² * Rds_on(T)")
+        .def_static("igbt", &ConductionLoss::igbt,
+             py::arg("I"), py::arg("params"), py::arg("T"),
+             "IGBT conduction loss: P = Vce_sat * I + Rce * I²")
+        .def_static("diode", &ConductionLoss::diode,
+             py::arg("I"), py::arg("params"), py::arg("T"),
+             "Diode conduction loss: P = Vf * I + Rd * I²");
+
+    // Switching loss functions
+    py::class_<SwitchingLoss>(v2, "SwitchingLoss",
+        "Static methods for switching loss calculation")
+        .def_static("mosfet_Eon", &SwitchingLoss::mosfet_Eon,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "MOSFET turn-on energy")
+        .def_static("mosfet_Eoff", &SwitchingLoss::mosfet_Eoff,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "MOSFET turn-off energy")
+        .def_static("mosfet_total", &SwitchingLoss::mosfet_total,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "MOSFET total switching energy per cycle")
+        .def_static("mosfet_power", &SwitchingLoss::mosfet_power,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
+             "MOSFET switching power at frequency f_sw")
+        .def_static("igbt_Eon", &SwitchingLoss::igbt_Eon,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "IGBT turn-on energy")
+        .def_static("igbt_Eoff", &SwitchingLoss::igbt_Eoff,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "IGBT turn-off energy")
+        .def_static("igbt_total", &SwitchingLoss::igbt_total,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
+             "IGBT total switching energy per cycle")
+        .def_static("igbt_power", &SwitchingLoss::igbt_power,
+             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
+             "IGBT switching power at frequency f_sw")
+        .def_static("diode_Err", &SwitchingLoss::diode_Err,
+             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("params"),
+             "Diode reverse recovery energy")
+        .def_static("diode_power", &SwitchingLoss::diode_power,
+             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
+             "Diode reverse recovery power at frequency f_sw");
+
+    py::class_<LossBreakdown>(v2, "LossBreakdown",
+        "Breakdown of losses by type")
+        .def(py::init<>())
+        .def_readwrite("conduction", &LossBreakdown::conduction, "Conduction loss (W)")
+        .def_readwrite("turn_on", &LossBreakdown::turn_on, "Turn-on switching loss (W)")
+        .def_readwrite("turn_off", &LossBreakdown::turn_off, "Turn-off switching loss (W)")
+        .def_readwrite("reverse_recovery", &LossBreakdown::reverse_recovery,
+             "Diode reverse recovery loss (W)")
+        .def("total", &LossBreakdown::total, "Total loss")
+        .def("switching", &LossBreakdown::switching, "Total switching loss");
+
+    py::class_<LossAccumulator>(v2, "LossAccumulator",
+        "Accumulates losses over time for a device")
+        .def(py::init<>())
+        .def("reset", &LossAccumulator::reset, "Reset accumulated energy")
+        .def("add_sample", &LossAccumulator::add_sample,
+             py::arg("P_cond"), py::arg("dt"),
+             "Add instantaneous power sample")
+        .def("add_switching_event", &LossAccumulator::add_switching_event,
+             py::arg("E_sw"), "Add switching event energy")
+        .def("total_energy", &LossAccumulator::total_energy,
+             "Get total accumulated energy (J)")
+        .def("conduction_energy", &LossAccumulator::conduction_energy,
+             "Get conduction energy (J)")
+        .def("switching_energy", &LossAccumulator::switching_energy,
+             "Get switching energy (J)")
+        .def("average_power", &LossAccumulator::average_power,
+             "Get average power (W)")
+        .def("average_conduction_power", &LossAccumulator::average_conduction_power,
+             "Get average conduction power (W)")
+        .def("average_switching_power", &LossAccumulator::average_switching_power,
+             "Get average switching power (W)")
+        .def("duration", &LossAccumulator::duration, "Get simulation duration")
+        .def("num_samples", &LossAccumulator::num_samples, "Get number of samples");
+
+    py::class_<EfficiencyCalculator>(v2, "EfficiencyCalculator",
+        "Calculate converter efficiency")
+        .def_static("from_power", &EfficiencyCalculator::from_power,
+             py::arg("P_in"), py::arg("P_out"),
+             "Calculate efficiency from input/output power")
+        .def_static("from_losses", &EfficiencyCalculator::from_losses,
+             py::arg("P_out"), py::arg("P_loss"),
+             "Calculate efficiency from output power and losses")
+        .def_static("losses_from_efficiency", &EfficiencyCalculator::losses_from_efficiency,
+             py::arg("eta"), py::arg("P_out"),
+             "Calculate losses from efficiency and output power")
+        .def_static("input_power", &EfficiencyCalculator::input_power,
+             py::arg("eta"), py::arg("P_out"),
+             "Calculate input power from efficiency and output power");
+
+    py::class_<LossResult>(v2, "LossResult", "Complete loss analysis result")
+        .def(py::init<>())
+        .def_readwrite("device_name", &LossResult::device_name)
+        .def_readwrite("breakdown", &LossResult::breakdown)
+        .def_readwrite("total_energy", &LossResult::total_energy)
+        .def_readwrite("average_power", &LossResult::average_power)
+        .def_readwrite("peak_power", &LossResult::peak_power)
+        .def_readwrite("rms_current", &LossResult::rms_current)
+        .def_readwrite("avg_current", &LossResult::avg_current)
+        .def_readwrite("efficiency_contribution", &LossResult::efficiency_contribution)
+        .def_readwrite("power_waveform", &LossResult::power_waveform)
+        .def_readwrite("times", &LossResult::times)
+        .def("compute_stats", &LossResult::compute_stats);
+
+    py::class_<SystemLossSummary>(v2, "SystemLossSummary",
+        "System-wide loss summary")
+        .def(py::init<>())
+        .def_readwrite("device_losses", &SystemLossSummary::device_losses)
+        .def_readwrite("total_loss", &SystemLossSummary::total_loss)
+        .def_readwrite("total_conduction", &SystemLossSummary::total_conduction)
+        .def_readwrite("total_switching", &SystemLossSummary::total_switching)
+        .def_readwrite("input_power", &SystemLossSummary::input_power)
+        .def_readwrite("output_power", &SystemLossSummary::output_power)
+        .def_readwrite("efficiency", &SystemLossSummary::efficiency)
+        .def("compute_totals", &SystemLossSummary::compute_totals);
+
+    // =========================================================================
+    // AC Analysis (Frequency Domain)
+    // =========================================================================
+
+    // Frequency sweep type enum
+    py::enum_<pulsim::FrequencySweepType>(v2, "FrequencySweepType",
+        "Frequency sweep type for AC analysis")
+        .value("Linear", pulsim::FrequencySweepType::Linear)
+        .value("Decade", pulsim::FrequencySweepType::Decade)
+        .value("Octave", pulsim::FrequencySweepType::Octave)
+        .value("List", pulsim::FrequencySweepType::List)
+        .export_values();
+
+    // Solver status enum (pulsim namespace, used by ACResult)
+    py::enum_<pulsim::SolverStatus>(v2, "ACSolverStatus",
+        "Solver status for AC analysis")
+        .value("Success", pulsim::SolverStatus::Success)
+        .value("MaxIterationsReached", pulsim::SolverStatus::MaxIterationsReached)
+        .value("SingularMatrix", pulsim::SolverStatus::SingularMatrix)
+        .value("NumericalError", pulsim::SolverStatus::NumericalError)
+        .export_values();
+
+    // AC analysis options
+    py::class_<pulsim::ACOptions>(v2, "ACOptions", "AC analysis options")
+        .def(py::init<>())
+        .def_readwrite("sweep_type", &pulsim::ACOptions::sweep_type)
+        .def_readwrite("fstart", &pulsim::ACOptions::fstart)
+        .def_readwrite("fstop", &pulsim::ACOptions::fstop)
+        .def_readwrite("npoints", &pulsim::ACOptions::npoints)
+        .def_readwrite("frequency_list", &pulsim::ACOptions::frequency_list)
+        .def("generate_frequencies", &pulsim::ACOptions::generate_frequencies,
+            "Generate frequency points based on options");
+
+    // AC analysis result
+    py::class_<pulsim::ACResult>(v2, "ACResult", "AC analysis result")
+        .def(py::init<>())
+        .def_readonly("frequencies", &pulsim::ACResult::frequencies)
+        .def_readonly("signal_names", &pulsim::ACResult::signal_names)
+        .def_readonly("data", &pulsim::ACResult::data)
+        .def_readonly("status", &pulsim::ACResult::status)
+        .def_readonly("error_message", &pulsim::ACResult::error_message)
+        .def("num_frequencies", &pulsim::ACResult::num_frequencies)
+        .def("num_signals", &pulsim::ACResult::num_signals)
+        .def("magnitude", &pulsim::ACResult::magnitude,
+            py::arg("freq_idx"), py::arg("signal_idx"),
+            "Get magnitude at frequency index for signal index")
+        .def("phase_deg", &pulsim::ACResult::phase_deg,
+            py::arg("freq_idx"), py::arg("signal_idx"),
+            "Get phase in degrees at frequency index for signal index")
+        .def("magnitude_db", &pulsim::ACResult::magnitude_db,
+            py::arg("freq_idx"), py::arg("signal_idx"),
+            "Get magnitude in dB at frequency index for signal index")
+        .def("transfer_magnitude_db", &pulsim::ACResult::transfer_magnitude_db,
+            py::arg("freq_idx"), py::arg("output_idx"), py::arg("input_idx"),
+            "Get transfer function magnitude in dB")
+        .def("transfer_phase_deg", &pulsim::ACResult::transfer_phase_deg,
+            py::arg("freq_idx"), py::arg("output_idx"), py::arg("input_idx"),
+            "Get transfer function phase in degrees");
+
+    // Bode data structure
+    py::class_<pulsim::BodeData>(v2, "BodeData", "Bode plot data")
+        .def(py::init<>())
+        .def_readonly("frequencies", &pulsim::BodeData::frequencies)
+        .def_readonly("magnitude_db", &pulsim::BodeData::magnitude_db)
+        .def_readonly("phase_deg", &pulsim::BodeData::phase_deg)
+        .def_readonly("gain_margin_db", &pulsim::BodeData::gain_margin_db)
+        .def_readonly("phase_margin_deg", &pulsim::BodeData::phase_margin_deg)
+        .def_readonly("gain_crossover_freq", &pulsim::BodeData::gain_crossover_freq)
+        .def_readonly("phase_crossover_freq", &pulsim::BodeData::phase_crossover_freq)
+        .def("has_gain_margin", &pulsim::BodeData::has_gain_margin)
+        .def("has_phase_margin", &pulsim::BodeData::has_phase_margin);
+
+    // Extract Bode data from AC result
+    v2.def("extract_bode_data",
+        py::overload_cast<const pulsim::ACResult&, size_t, size_t>(&pulsim::extract_bode_data),
+        py::arg("result"), py::arg("output_idx"), py::arg("input_idx"),
+        "Extract Bode plot data by signal indices");
+
+    v2.def("extract_bode_data",
+        py::overload_cast<const pulsim::ACResult&, const std::string&, const std::string&>(&pulsim::extract_bode_data),
+        py::arg("result"), py::arg("output_signal"), py::arg("input_signal"),
+        "Extract Bode plot data by signal names");
+
+    v2.def("calculate_stability_margins", &pulsim::calculate_stability_margins,
+        py::arg("bode"), "Calculate gain and phase margins from Bode data");
+
+    // =========================================================================
+    // AC Analysis Functions (with v1::Circuit conversion)
+    // =========================================================================
+
+    // Expose the circuit converter
+    v2.def("convert_to_ir_circuit", &convert_to_ir_circuit,
+        py::arg("circuit"),
+        "Convert v1::Circuit to IR circuit for AC analysis");
+
+    // AC analysis function that takes v1::Circuit
+    v2.def("run_ac",
+        [](const Circuit& circuit, const pulsim::ACOptions& options,
+           const std::optional<pulsim::Vector>& operating_point) {
+            // Convert v1::Circuit to IR circuit
+            pulsim::Circuit ir = convert_to_ir_circuit(circuit);
+
+            // Run AC analysis
+            if (operating_point) {
+                return pulsim::ac_analysis(ir, options, *operating_point);
+            } else {
+                return pulsim::ac_analysis(ir, options);
+            }
+        },
+        py::arg("circuit"), py::arg("options"),
+        py::arg("operating_point") = std::nullopt,
+        "Run AC frequency analysis on a circuit");
+
+    // AC Analyzer class (wraps v1::Circuit)
+    py::class_<pulsim::ACAnalyzer>(v2, "ACAnalyzer",
+        "AC small-signal analyzer for frequency-domain analysis")
+        .def(py::init([](const Circuit& circuit) {
+            return std::make_unique<pulsim::ACAnalyzer>(convert_to_ir_circuit(circuit));
+        }), py::arg("circuit"),
+            "Create AC analyzer from v1::Circuit")
+        .def("set_operating_point", &pulsim::ACAnalyzer::set_operating_point,
+            py::arg("x_op"), "Set DC operating point for linearization")
+        .def("analyze", &pulsim::ACAnalyzer::analyze, py::arg("options"),
+            "Run AC analysis over frequency range")
+        .def("analyze_at_frequency", &pulsim::ACAnalyzer::analyze_at_frequency,
+            py::arg("frequency"), "Analyze at a single frequency");
 
     // Version info
-    m.attr("__version__") = "0.1.0";
+    v2.attr("__version__") = "2.0.0";
+}
+
+// =============================================================================
+// Module Registration
+// =============================================================================
+
+PYBIND11_MODULE(_pulsim, m) {
+    m.doc() = "PulsimCore High-Performance Circuit Simulation (C++ extension)";
+    init_v2_module(m);
 }

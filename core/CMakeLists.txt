@@ -1,86 +1,75 @@
-add_library(pulsim_core
-    src/parser.cpp
+# PulsimCore v2 - Header-only library
+# The v2 API is implemented entirely in headers using C++23 features
+
+# Create an interface (header-only) library
+add_library(pulsim_core INTERFACE)
+
+target_include_directories(pulsim_core
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+
+target_compile_features(pulsim_core INTERFACE cxx_std_23)
+
+target_link_libraries(pulsim_core
+    INTERFACE
+        Eigen3::Eigen
+        nlohmann_json::nlohmann_json
+        ${PULSIM_KLU_LIBRARIES}
+)
+
+# Alias for cleaner usage
+add_library(pulsim::core ALIAS pulsim_core)
+
+# =============================================================================
+# Compiled pulsim library (Circuit, Simulator, MNA, etc.)
+# =============================================================================
+add_library(pulsim STATIC
     src/circuit.cpp
     src/mna.cpp
-    src/solver.cpp
-    src/advanced_solver.cpp
-    src/convergence_aids.cpp
-    src/ac_analysis.cpp
-    src/parallel.cpp
-    src/devices.cpp
     src/simulation.cpp
     src/simulation_control.cpp
+    src/solver.cpp
+    src/devices.cpp
+    src/parser.cpp
+    src/advanced_solver.cpp
+    src/convergence_aids.cpp
     src/thermal.cpp
-    src/parser/spice_parser.cpp
-    src/parser/yaml_parser.cpp
-    src/parser/subcircuit.cpp
-    src/fmu/fmu_export.cpp
-    src/models/mosfet_models.cpp
-    src/models/magnetic_core.cpp
-    src/models/control_blocks.cpp
+    src/ac_analysis.cpp
+    src/parallel.cpp
     src/metadata.cpp
     src/validation.cpp
 )
 
-# Enable position-independent code for linking into shared libraries (Python bindings)
-set_target_properties(pulsim_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-target_include_directories(pulsim_core
+target_include_directories(pulsim
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(pulsim_core
+target_compile_features(pulsim PUBLIC cxx_std_23)
+
+target_link_libraries(pulsim
     PUBLIC
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
+        ${PULSIM_KLU_LIBRARIES}
 )
 
-# Optional SUNDIALS support
-if(PULSIM_USE_SUNDIALS)
-    if(TARGET SUNDIALS::ida)
-        target_link_libraries(pulsim_core PUBLIC SUNDIALS::ida SUNDIALS::arkode)
-    elseif(TARGET sundials_ida_static)
-        target_link_libraries(pulsim_core PUBLIC sundials_ida_static sundials_arkode_static)
-    endif()
-endif()
-
-# Optional SuiteSparse KLU support
-if(PULSIM_USE_SUITESPARSE)
-    if(TARGET SuiteSparse::KLU)
-        target_link_libraries(pulsim_core PUBLIC SuiteSparse::KLU)
-    elseif(KLU_FOUND)
-        target_include_directories(pulsim_core PUBLIC ${KLU_INCLUDE_DIRS})
-        target_link_libraries(pulsim_core PUBLIC ${KLU_LIBRARIES})
-    endif()
-endif()
-
 # Alias for cleaner usage
-add_library(pulsim::core ALIAS pulsim_core)
+add_library(pulsim::pulsim ALIAS pulsim)
 
+# =============================================================================
 # Tests
+# =============================================================================
 if(PULSIM_BUILD_TESTS)
+    # Header-only v1/v2 API tests
     add_executable(pulsim_tests
         tests/test_main.cpp
-        tests/test_parser.cpp
-        tests/test_circuit.cpp
-        tests/test_mna.cpp
-        tests/test_solver.cpp
-        tests/test_simulation.cpp
-        tests/test_power_electronics.cpp
-        tests/test_thermal.cpp
-        tests/test_cli.cpp
-        tests/test_mvp2_validation.cpp
-        tests/test_advanced_solver.cpp
-        tests/test_convergence_aids.cpp
-        tests/test_ac_analysis.cpp
-        tests/test_parallel.cpp
-        tests/test_mosfet_models.cpp
-        tests/test_magnetic_core.cpp
-        tests/test_control_blocks.cpp
-        tests/test_metadata.cpp
-        tests/test_validation.cpp
+        tests/test_concepts.cpp
+        tests/test_richardson_lte.cpp
+        tests/test_benchmarks.cpp
     )
 
     target_link_libraries(pulsim_tests
@@ -89,10 +78,76 @@ if(PULSIM_BUILD_TESTS)
             Catch2::Catch2WithMain
     )
 
-    # Ensure the CLI executable is built before running integration tests that invoke it
-    if(TARGET pulsim)
-        add_dependencies(pulsim_tests pulsim)
+    # Enable profiling for benchmark tests in Debug builds
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_definitions(pulsim_tests PRIVATE PULSIM_ENABLE_PROFILING)
     endif()
 
     catch_discover_tests(pulsim_tests)
+
+    # Compiled library tests (Circuit, Simulator, power electronics)
+    add_executable(pulsim_simulation_tests
+        tests/test_main.cpp
+        tests/test_circuit.cpp
+        tests/test_mna.cpp
+        tests/test_solver.cpp
+        tests/test_simulation.cpp
+        tests/test_power_electronics.cpp
+        tests/test_difficult_converters.cpp
+        tests/test_thermal.cpp
+        tests/test_convergence_aids.cpp
+    )
+
+    target_link_libraries(pulsim_simulation_tests
+        PRIVATE
+            pulsim::pulsim
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+
+    catch_discover_tests(pulsim_simulation_tests)
+
+    # =============================================================================
+    # Custom test targets for convenience
+    # =============================================================================
+
+    # Run all simulation tests
+    add_custom_target(test-all
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running all simulation tests..."
+    )
+
+    # Run only quick tests (converters, etc.)
+    add_custom_target(test-quick
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests "[quick]"
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running quick tests..."
+    )
+
+    # Run converter tests
+    add_custom_target(test-converters
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests "[converter]"
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running converter tests..."
+    )
+
+    # Run tests with verbose output
+    add_custom_target(test-verbose
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests -s -d
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running all tests with verbose output..."
+    )
+
+    # List all available tests
+    add_custom_target(test-list
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/pulsim_simulation_tests --list-tests
+        DEPENDS pulsim_simulation_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Listing all available tests..."
+    )
 endif()

@@ -196,6 +196,7 @@ bool AdvancedLinearSolver::factorize_klu(const SparseMatrix& A) {
             is_singular_ = true;
             return false;
         }
+        symbolic_count_++;
     }
 
     // Numeric factorization
@@ -251,21 +252,77 @@ LinearSolveResult AdvancedLinearSolver::solve_klu(const Vector& b) {
     result.status = SolverStatus::Success;
     return result;
 }
+
+Real AdvancedLinearSolver::estimate_rcond_klu() {
+    if (!klu_numeric_ || !klu_symbolic_) {
+        return 0.0;  // Not factorized
+    }
+
+    // KLU provides rcond estimation via klu_rcond
+    // rcond is the reciprocal of the estimated condition number
+    int ok = klu_rcond(klu_symbolic_, klu_numeric_, &klu_common_);
+    if (!ok) {
+        return 1.0;  // Failed to estimate, assume well-conditioned
+    }
+
+    // klu_common.rcond contains the estimate after klu_rcond call
+    return klu_common_.rcond;
+}
 #endif // PULSIM_HAS_KLU
 
+bool AdvancedLinearSolver::structure_changed(const SparseMatrix& A_new) const {
+    // Check if the sparsity pattern has changed
+    if (!pattern_analyzed_) return true;
+
+    Index n = A_new.rows();
+    Index nnz = A_new.nonZeros();
+
+    // Size check
+    if (stored_outer_index_.size() != static_cast<std::size_t>(n + 1)) return true;
+    if (stored_inner_index_.size() != static_cast<std::size_t>(nnz)) return true;
+
+    // Compare column pointers
+    for (Index j = 0; j <= n; ++j) {
+        if (A_new.outerIndexPtr()[j] != stored_outer_index_[j]) return true;
+    }
+
+    // Compare row indices
+    for (Index k = 0; k < nnz; ++k) {
+        if (A_new.innerIndexPtr()[k] != stored_inner_index_[k]) return true;
+    }
+
+    return false;
+}
+
 void AdvancedLinearSolver::analyze_pattern(const SparseMatrix& A) {
+    Backend backend = effective_backend();
+
 #ifdef PULSIM_HAS_KLU
-    if (options_.backend == Backend::KLU) {
+    if (backend == Backend::KLU) {
         // Pattern analysis is done in factorize_klu
         pattern_analyzed_ = false;  // Will be set true after factorization
         return;
     }
 #endif
 
+    // Store the sparsity pattern for future comparison
+    Index n = A.rows();
+    Index nnz = A.nonZeros();
+    stored_outer_index_.resize(n + 1);
+    stored_inner_index_.resize(nnz);
+
+    for (Index j = 0; j <= n; ++j) {
+        stored_outer_index_[j] = A.outerIndexPtr()[j];
+    }
+    for (Index k = 0; k < nnz; ++k) {
+        stored_inner_index_[k] = A.innerIndexPtr()[k];
+    }
+
     eigen_solver_.analyzePattern(A);
     pattern_analyzed_ = true;
     factorized_ = false;
     reuse_count_ = 0;
+    symbolic_count_++;
 }
 
 bool AdvancedLinearSolver::needs_refactorization(const SparseMatrix& A_new) const {
@@ -274,6 +331,11 @@ bool AdvancedLinearSolver::needs_refactorization(const SparseMatrix& A_new) cons
     }
 
     if (reuse_count_ >= options_.max_reuses) {
+        return true;
+    }
+
+    // Check condition number - force refactor if too ill-conditioned
+    if (options_.monitor_condition && rcond_ < options_.condition_refactor_threshold) {
         return true;
     }
 
@@ -305,17 +367,51 @@ bool AdvancedLinearSolver::needs_refactorization(const SparseMatrix& A_new) cons
 }
 
 bool AdvancedLinearSolver::factorize(const SparseMatrix& A) {
+    Backend backend = effective_backend();
+
 #ifdef PULSIM_HAS_KLU
-    if (options_.backend == Backend::KLU) {
+    if (backend == Backend::KLU) {
+        // Check if structure changed - need new symbolic analysis
+        if (structure_changed(A)) {
+            cleanup_klu();
+            pattern_analyzed_ = false;
+        }
+
         bool success = factorize_klu(A);
         if (success) {
             pattern_analyzed_ = true;
             factorized_ = true;
             A_prev_ = A;
+
+            // Store pattern for future comparison
+            Index n = A.rows();
+            Index nnz = A.nonZeros();
+            stored_outer_index_.resize(n + 1);
+            stored_inner_index_.resize(nnz);
+            for (Index j = 0; j <= n; ++j) {
+                stored_outer_index_[j] = A.outerIndexPtr()[j];
+            }
+            for (Index k = 0; k < nnz; ++k) {
+                stored_inner_index_[k] = A.innerIndexPtr()[k];
+            }
+
+            // Estimate condition number
+            if (options_.monitor_condition) {
+                rcond_ = estimate_rcond_klu();
+                if (rcond_ < options_.condition_warning_threshold) {
+                    std::cerr << "Warning: Matrix is ill-conditioned, rcond = "
+                              << rcond_ << std::endl;
+                }
+            }
         }
         return success;
     }
 #endif
+
+    // Check if structure changed
+    if (structure_changed(A)) {
+        pattern_analyzed_ = false;
+    }
 
     if (!pattern_analyzed_) {
         analyze_pattern(A);
@@ -332,6 +428,7 @@ bool AdvancedLinearSolver::factorize(const SparseMatrix& A) {
 
     if (eigen_solver_.info() != Eigen::Success) {
         is_singular_ = true;
+        rcond_ = 0.0;
         return false;
     }
 
@@ -340,12 +437,17 @@ bool AdvancedLinearSolver::factorize(const SparseMatrix& A) {
     factorization_count_++;
     A_prev_ = A;
 
+    // Eigen SparseLU doesn't provide rcond directly, use default
+    rcond_ = 1.0;
+
     return true;
 }
 
 LinearSolveResult AdvancedLinearSolver::solve(const Vector& b) {
+    Backend backend = effective_backend();
+
 #ifdef PULSIM_HAS_KLU
-    if (options_.backend == Backend::KLU) {
+    if (backend == Backend::KLU) {
         return solve_klu(b);
     }
 #endif

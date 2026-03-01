@@ -14,7 +14,6 @@ from ..framework.base import (
     ValidationTest,
 )
 from ..framework.analytical import AnalyticalSolutions
-from ..framework.comparator import ResultComparator
 
 
 # =============================================================================
@@ -28,6 +27,20 @@ def build_rc_step_circuit(R: float = 1000.0, C: float = 1e-6, V0: float = 5.0):
     circuit.add_resistor("R1", "in", "out", R)
     circuit.add_capacitor("C1", "out", "0", C, ic=0.0)
     return circuit
+
+
+def build_rc_lowpass_sine_circuit(R: float = 1000.0, C: float = 1e-6,
+                                   amplitude: float = 1.0, frequency: float = 100.0):
+    """Build RC lowpass filter with sinusoidal source for Pulsim."""
+    circuit = sl.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_sine_voltage_source("V1", n_in, gnd, amplitude, frequency, 0.0)
+    circuit.add_resistor("R1", n_in, n_out, R)
+    circuit.add_capacitor("C1", n_out, gnd, C, ic=0.0)
+    return circuit, n_out
 
 
 def build_rc_discharge_circuit(R: float = 1000.0, C: float = 1e-6, V0: float = 5.0):
@@ -95,7 +108,7 @@ class RCCircuitDefinitions:
             compare_nodes={"V(out)": "out"},
             circuit_params={"V0": V0, "R": R, "C": C, "V_initial": 0.0},
             analytical_solution=AnalyticalSolutions.rc_step_response,
-            pulsim_options={"use_ic": True, "dtmax": dt},  # Fixed timestep
+            pulsim_options={"use_ic": True, "dtmax": dt, "dtmin": dt / 10},  # Fixed timestep
         )
 
     @staticmethod
@@ -127,7 +140,7 @@ class RCCircuitDefinitions:
             compare_nodes={"V(out)": "out"},
             circuit_params={"V0": V0, "R": R, "C": C},
             analytical_solution=AnalyticalSolutions.rc_discharge,
-            pulsim_options={"use_ic": True, "dtmax": dt},  # Fixed timestep
+            pulsim_options={"use_ic": True, "dtmax": dt, "dtmin": dt / 10},  # Fixed timestep
         )
 
 
@@ -169,11 +182,14 @@ class TestRCStepResponse:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
         time = np.array(result.time)
-        v_out = np.array(result.node_voltages["V(out)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        v_out = signal_data["V(out)"]
 
         # At t = τ, voltage should be V0 * (1 - 1/e) ≈ 0.632 * V0
         V0 = circuit_def.circuit_params["V0"]
@@ -241,10 +257,13 @@ class TestRCDischarge:
         opts.dt = circuit_def.dt
         opts.use_ic = True
 
-        result = sl.run_transient(circuit, opts)
+        result = sl.Simulator(circuit, opts).run_transient()
         assert result.final_status == sl.SolverStatus.Success
 
-        v_out = np.array(result.node_voltages["V(out)"])
+        signal_names = result.signal_names
+        data_matrix = np.array(result.data)
+        signal_data = {name: data_matrix[:, i] for i, name in enumerate(signal_names)}
+        v_out = signal_data["V(out)"]
         V0 = circuit_def.circuit_params["V0"]
 
         # After 5τ, voltage should be < 1% of initial
@@ -264,9 +283,51 @@ class TestRCFrequencyResponse:
         R = 1000.0  # 1kΩ
         C = 1e-6    # 1µF
         f_cutoff = 1.0 / (2 * np.pi * R * C)  # ~159 Hz
+        amplitude = 1.0
 
-        # Test at cutoff frequency - should attenuate to 1/√2 = 0.707
-        # TODO: Implement sinusoidal source test when source types are available
+        # Build circuit with sinusoidal source at cutoff frequency
+        circuit, n_out = build_rc_lowpass_sine_circuit(R, C, amplitude, f_cutoff)
+
+        # Simulate for several periods to reach steady state
+        num_periods = 10
+        tstop = num_periods / f_cutoff
+        dt = 1.0 / (f_cutoff * 50)  # 50 points per period
+
+        opts = sl.SimulationOptions()
+        opts.tstart = 0.0
+        opts.tstop = tstop
+        opts.dt = dt
+        opts.use_ic = True
+
+        sim = sl.Simulator(circuit, opts)
+        result = sim.run_transient()
+
+        assert result.final_status == sl.SolverStatus.Success, f"Simulation failed: {result.error_message}"
+
+        # Get output voltage in the last 2 periods (steady state)
+        time = np.array(result.time)
+        data = np.array(result.data)
+        v_out = data[:, n_out]
+
+        # Find steady state portion (last 2 periods)
+        steady_state_start = (num_periods - 2) / f_cutoff
+        steady_mask = time >= steady_state_start
+        v_out_ss = v_out[steady_mask]
+
+        # Measure peak-to-peak amplitude
+        v_pp = np.max(v_out_ss) - np.min(v_out_ss)
+        measured_gain = v_pp / (2 * amplitude)
+
+        # At cutoff, gain should be 1/√2 ≈ 0.707
+        expected_gain = 1.0 / np.sqrt(2)
+
+        print(f"\nRC Lowpass at cutoff ({f_cutoff:.1f} Hz):")
+        print(f"  Expected gain: {expected_gain:.4f} (-3 dB)")
+        print(f"  Measured gain: {measured_gain:.4f} ({20*np.log10(measured_gain):.2f} dB)")
+
+        # Allow 10% tolerance due to transient settling
+        assert abs(measured_gain - expected_gain) / expected_gain < 0.10, \
+            f"Gain mismatch: expected {expected_gain:.4f}, got {measured_gain:.4f}"
 
     @pytest.mark.parametrize("freq_ratio", [0.1, 0.5, 1.0, 2.0, 10.0])
     def test_rc_lowpass_attenuation(self, freq_ratio):
@@ -274,15 +335,52 @@ class TestRCFrequencyResponse:
         R = 1000.0
         C = 1e-6
         f_cutoff = 1.0 / (2 * np.pi * R * C)
+        frequency = f_cutoff * freq_ratio
+        amplitude = 1.0
 
-        freq = f_cutoff * freq_ratio
+        # Build circuit
+        circuit, n_out = build_rc_lowpass_sine_circuit(R, C, amplitude, frequency)
+
+        # Simulate for several periods (more for low frequencies)
+        num_periods = max(10, int(20 / freq_ratio))
+        tstop = num_periods / frequency
+        dt = 1.0 / (frequency * 50)  # 50 points per period
+
+        opts = sl.SimulationOptions()
+        opts.tstart = 0.0
+        opts.tstop = tstop
+        opts.dt = dt
+        opts.use_ic = True
+
+        sim = sl.Simulator(circuit, opts)
+        result = sim.run_transient()
+
+        assert result.final_status == sl.SolverStatus.Success
+
+        # Get output voltage
+        time = np.array(result.time)
+        data = np.array(result.data)
+        v_out = data[:, n_out]
+
+        # Find steady state portion (last 2 periods)
+        steady_state_start = (num_periods - 2) / frequency
+        steady_mask = time >= steady_state_start
+        v_out_ss = v_out[steady_mask]
+
+        # Measure gain
+        v_pp = np.max(v_out_ss) - np.min(v_out_ss)
+        measured_gain = v_pp / (2 * amplitude)
 
         # Expected attenuation: 1 / sqrt(1 + (f/fc)^2)
         expected_gain = 1.0 / np.sqrt(1 + freq_ratio**2)
 
         print(f"\nf/fc={freq_ratio}: expected gain = {expected_gain:.4f} ({20*np.log10(expected_gain):.2f} dB)")
+        print(f"  Measured gain: {measured_gain:.4f} ({20*np.log10(max(measured_gain, 1e-10)):.2f} dB)")
 
-        # TODO: Implement with sinusoidal source
+        # Allow 15% tolerance (more for high frequency where signal is small)
+        tolerance = 0.15 if freq_ratio <= 2.0 else 0.25
+        assert abs(measured_gain - expected_gain) / max(expected_gain, 0.01) < tolerance, \
+            f"Gain mismatch at f/fc={freq_ratio}: expected {expected_gain:.4f}, got {measured_gain:.4f}"
 
 
 # =============================================================================
