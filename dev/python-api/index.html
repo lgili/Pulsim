@@ -552,6 +552,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../electrothermal-workflow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Electrothermal Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../examples-and-results/" class="md-nav__link">
         
   
@@ -884,6 +905,15 @@
   <a href="#resultados-para-analise" class="md-nav__link">
     <span class="md-ellipsis">
       Resultados para análise
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#electrothermal-result-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      Electrothermal Result Example
     </span>
   </a>
   
@@ -1248,6 +1278,15 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#electrothermal-result-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      Electrothermal Result Example
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1410,7 +1449,16 @@ com <code>step_mode</code>.</p>
 <li><code>newton_iterations_total</code>, <code>timestep_rejections</code></li>
 <li><code>linear_solver_telemetry</code>, <code>fallback_trace</code></li>
 <li><code>loss_summary</code>, <code>thermal_summary</code></li>
+<li><code>component_electrothermal</code> (deterministic per-component loss + temperature telemetry)</li>
 </ul>
+<h2 id="electrothermal-result-example">Electrothermal Result Example<a class="headerlink" href="#electrothermal-result-example" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
+
+<span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">component_electrothermal</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">item</span><span class="o">.</span><span class="n">component_name</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">total_loss</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">peak_temperature</span><span class="p">)</span>
+</code></pre></div>
+<p>For full YAML + Python electrothermal setup (global thermal block, component thermal ports, strict/non-strict parser behavior), see
+<a href="../electrothermal-workflow/">Electrothermal Workflow</a>.</p>
 
 
 
