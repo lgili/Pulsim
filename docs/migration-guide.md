@@ -71,10 +71,57 @@ result = sim.run_transient(circuit.initial_state())
 | `v0.3.0` | Removal | Legacy CLI/gRPC/JSON user-facing guidance removed from primary docs |
 | `v0.4.0` | Enforcement | Supported workflows restricted to Python + YAML + benchmark/parity/stress toolchain |
 
-## 6. Upgrade Checklist
+## 6. Migration Notes: PulsimGui Converter Integration
+
+### Canonicalização de tipos
+
+O conversor do PulsimGui deve emitir tipos que o parser normaliza para IDs
+canônicos (ex.: `OP_AMP` -> `op_amp`, `PI_CONTROLLER` -> `pi_controller`,
+`CIRCUIT_BREAKER` -> `circuit_breaker`).
+
+Recomendação: sempre serializar o tipo canônico em minúsculo para reduzir
+ambiguidade no pipeline GUI -> YAML -> backend.
+
+### Regras de modelagem no backend
+
+- `bjt_npn` e `bjt_pnp`: surrogate interno baseado em `mosfet`.
+- `thyristor`, `triac`, `fuse`, `circuit_breaker`: composição com `switch` e
+  controlador virtual/event-driven.
+- `relay`: composição com dois `switch` (`NO`/`NC`) + controlador virtual da bobina.
+- `saturable_inductor`: `inductor` elétrico + controlador virtual de indutância efetiva.
+- `coupled_inductor`: dois ramos `inductor` + controlador virtual de acoplamento.
+- `voltage_probe/current_probe/power_probe/scope/mux/demux`: componentes
+  virtuais (não estampam MNA).
+
+### Pinagem e validação
+
+Ative strict mode no parser durante integração:
+
+```python
+opts = ps.YamlParserOptions()
+opts.strict = True
+parser = ps.YamlParser(opts)
+```
+
+Isso garante diagnóstico estável para:
+
+- pinagem inválida (ex.: `relay` sem `COM/NO/NC`);
+- parâmetros fora de faixa (ex.: `duty_min > duty_max`);
+- blocos de controle com configuração inconsistente.
+
+### Gate mínimo para CI do conversor
+
+```bash
+PYTHONPATH=build/python pytest -q python/tests/test_gui_component_parity.py
+PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py
+./build-test/core/pulsim_simulation_tests "[v1][yaml][gui-parity]"
+```
+
+## 7. Upgrade Checklist
 
 1. Replace any JSON netlist assets with YAML `pulsim-v1` netlists.
 2. Remove CLI automation and migrate to Python runners.
 3. Remove gRPC-dependent user scripts from active workflows.
 4. Update CI jobs to run Python benchmark/parity/stress scripts.
-5. Validate with `openspec validate refactor-python-only-v1-hardening --strict`.
+5. Add GUI parity regression gate (`test_gui_component_parity.py`) in CI.
+6. Validate with `openspec validate refactor-python-only-v1-hardening --strict`.

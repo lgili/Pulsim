@@ -45,4 +45,5 @@ print("ok:", result.success, "steps:", result.total_steps)
 - Formato YAML completo: `netlist-format`
 - API Python: `python-api`
 - Benchmark/paridade/LTspice: `benchmarks-and-parity`
+- Matriz GUI -> backend: `gui-component-parity`
 - Migração e compatibilidade: `migration-guide`

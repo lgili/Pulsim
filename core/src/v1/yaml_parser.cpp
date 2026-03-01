@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -17,6 +19,13 @@ namespace pulsim::v1::parser {
 namespace {
 
 constexpr const char* kSchemaId = "pulsim-v1";
+constexpr const char* kDiagUnsupportedComponent = "PULSIM_YAML_E_COMPONENT_UNSUPPORTED";
+constexpr const char* kDiagInvalidPinCount = "PULSIM_YAML_E_PIN_COUNT";
+constexpr const char* kDiagInvalidParameter = "PULSIM_YAML_E_PARAM_INVALID";
+constexpr const char* kDiagVirtualComponent = "PULSIM_YAML_W_COMPONENT_VIRTUAL";
+constexpr const char* kDiagSurrogateComponent = "PULSIM_YAML_W_COMPONENT_SURROGATE";
+
+Real parse_real_string(const std::string& raw);
 
 std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -37,6 +46,237 @@ std::string normalize_key(std::string s) {
 
 bool is_known_key(const std::string& key, const std::unordered_set<std::string>& allowed) {
     return allowed.find(key) != allowed.end();
+}
+
+std::string with_diag_code(const std::string& code, const std::string& message) {
+    return "[" + code + "] " + message;
+}
+
+void push_error(std::vector<std::string>& errors, const std::string& code, const std::string& message) {
+    errors.push_back(with_diag_code(code, message));
+}
+
+void push_warning(std::vector<std::string>& warnings, const std::string& code, const std::string& message) {
+    warnings.push_back(with_diag_code(code, message));
+}
+
+const std::unordered_map<std::string, std::string>& component_alias_map() {
+    static const std::unordered_map<std::string, std::string> aliases = [] {
+        std::unordered_map<std::string, std::string> map;
+
+        auto add_aliases = [&](const std::string& canonical, std::initializer_list<const char*> names) {
+            map.emplace(normalize_key(canonical), canonical);
+            for (const char* name : names) {
+                map.emplace(normalize_key(name), canonical);
+            }
+        };
+
+        add_aliases("resistor", {"r"});
+        add_aliases("capacitor", {"c"});
+        add_aliases("inductor", {"l"});
+        add_aliases("voltage_source", {"v", "voltagesource", "source_v", "vsource"});
+        add_aliases("current_source", {"i", "currentsource", "isource"});
+        add_aliases("diode", {"d"});
+        add_aliases("switch", {"s"});
+        add_aliases("vcswitch", {"voltagecontrolledswitch"});
+        add_aliases("mosfet", {"m", "nmos", "pmos"});
+        add_aliases("igbt", {"q"});
+        add_aliases("transformer", {"t"});
+        add_aliases("snubber_rc", {"snubber", "snubberrc"});
+
+        add_aliases("bjt_npn", {"bjtnpn", "bjt-npn"});
+        add_aliases("bjt_pnp", {"bjtpnp", "bjt-pnp"});
+        add_aliases("thyristor", {"scr"});
+        add_aliases("triac", {"triac"});
+        add_aliases("fuse", {"fuse"});
+        add_aliases("circuit_breaker", {"breaker", "circuitbreaker", "circuit-breaker"});
+        add_aliases("relay", {"relay"});
+        add_aliases("op_amp", {"opamp", "op-amp"});
+        add_aliases("comparator", {"comparator"});
+        add_aliases("pi_controller", {"picontroller", "pi-controller"});
+        add_aliases("pid_controller", {"pidcontroller", "pid-controller"});
+        add_aliases("math_block", {"mathblock", "math"});
+        add_aliases("pwm_generator", {"pwmgenerator", "pwm"});
+        add_aliases("integrator", {"integrator"});
+        add_aliases("differentiator", {"differentiator"});
+        add_aliases("limiter", {"limiter"});
+        add_aliases("rate_limiter", {"ratelimiter", "rate-limiter"});
+        add_aliases("hysteresis", {"hysteresis"});
+        add_aliases("lookup_table", {"lookuptable", "lookup-table", "lut"});
+        add_aliases("transfer_function", {"transferfunction", "transfer-function"});
+        add_aliases("delay_block", {"delayblock", "delay"});
+        add_aliases("sample_hold", {"samplehold", "sample-and-hold"});
+        add_aliases("state_machine", {"statemachine", "state-machine"});
+        add_aliases("saturable_inductor", {"saturableinductor", "sat_inductor"});
+        add_aliases("coupled_inductor", {"coupledinductor"});
+        add_aliases("voltage_probe", {"voltageprobe", "vprobe"});
+        add_aliases("current_probe", {"currentprobe", "iprobe"});
+        add_aliases("power_probe", {"powerprobe", "pprobe"});
+        add_aliases("electrical_scope", {"electricalscope", "scope"});
+        add_aliases("thermal_scope", {"thermalscope"});
+        add_aliases("signal_mux", {"signalmux", "mux"});
+        add_aliases("signal_demux", {"signaldemux", "demux"});
+
+        return map;
+    }();
+    return aliases;
+}
+
+const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>>& component_node_arity() {
+    static const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>> arity = {
+        {"resistor", {2, 2}},
+        {"capacitor", {2, 2}},
+        {"inductor", {2, 2}},
+        {"voltage_source", {2, 2}},
+        {"current_source", {2, 2}},
+        {"diode", {2, 2}},
+        {"switch", {2, 2}},
+        {"vcswitch", {3, 3}},
+        {"mosfet", {3, 3}},
+        {"igbt", {3, 3}},
+        {"transformer", {4, 4}},
+        {"snubber_rc", {2, 2}},
+        {"bjt_npn", {3, 3}},
+        {"bjt_pnp", {3, 3}},
+        {"thyristor", {3, 3}},
+        {"triac", {3, 3}},
+        {"fuse", {2, 2}},
+        {"circuit_breaker", {2, 2}},
+        {"relay", {5, 5}},
+        {"op_amp", {3, 3}},
+        {"comparator", {3, 3}},
+        {"pi_controller", {3, 3}},
+        {"pid_controller", {3, 3}},
+        {"math_block", {2, std::numeric_limits<std::size_t>::max()}},
+        {"pwm_generator", {1, 3}},
+        {"integrator", {2, 2}},
+        {"differentiator", {2, 2}},
+        {"limiter", {2, 2}},
+        {"rate_limiter", {2, 2}},
+        {"hysteresis", {2, 2}},
+        {"lookup_table", {2, 2}},
+        {"transfer_function", {2, 2}},
+        {"delay_block", {2, 2}},
+        {"sample_hold", {2, 2}},
+        {"state_machine", {1, std::numeric_limits<std::size_t>::max()}},
+        {"saturable_inductor", {2, 2}},
+        {"coupled_inductor", {4, 4}},
+        {"voltage_probe", {2, 2}},
+        {"current_probe", {2, 2}},
+        {"power_probe", {2, 2}},
+        {"electrical_scope", {1, std::numeric_limits<std::size_t>::max()}},
+        {"thermal_scope", {1, std::numeric_limits<std::size_t>::max()}},
+        {"signal_mux", {2, std::numeric_limits<std::size_t>::max()}},
+        {"signal_demux", {2, std::numeric_limits<std::size_t>::max()}}
+    };
+    return arity;
+}
+
+const std::unordered_set<std::string>& virtual_component_types() {
+    static const std::unordered_set<std::string> types = {
+        "relay",
+        "op_amp",
+        "comparator",
+        "pi_controller",
+        "pid_controller",
+        "math_block",
+        "pwm_generator",
+        "integrator",
+        "differentiator",
+        "limiter",
+        "rate_limiter",
+        "hysteresis",
+        "lookup_table",
+        "transfer_function",
+        "delay_block",
+        "sample_hold",
+        "state_machine",
+        "voltage_probe",
+        "current_probe",
+        "power_probe",
+        "electrical_scope",
+        "thermal_scope",
+        "signal_mux",
+        "signal_demux"
+    };
+    return types;
+}
+
+std::string canonical_component_type(const std::string& raw_type) {
+    const auto key = normalize_key(raw_type);
+    const auto& aliases = component_alias_map();
+    const auto it = aliases.find(key);
+    if (it == aliases.end()) {
+        return {};
+    }
+    return it->second;
+}
+
+bool validate_node_count(const std::string& type,
+                         const std::vector<std::string>& nodes,
+                         std::vector<std::string>& errors,
+                         const std::string& name) {
+    const auto& arity = component_node_arity();
+    const auto it = arity.find(type);
+    if (it == arity.end()) {
+        return true;
+    }
+
+    const auto [min_nodes, max_nodes] = it->second;
+    if (nodes.size() < min_nodes || nodes.size() > max_nodes) {
+        std::ostringstream oss;
+        oss << "Invalid pin count for '" << name << "' (" << type << "): got "
+            << nodes.size() << ", expected ";
+        if (min_nodes == max_nodes) {
+            oss << min_nodes;
+        } else if (max_nodes == std::numeric_limits<std::size_t>::max()) {
+            oss << min_nodes << "+";
+        } else {
+            oss << min_nodes << "-" << max_nodes;
+        }
+        push_error(errors, kDiagInvalidPinCount, oss.str());
+        return false;
+    }
+
+    return true;
+}
+
+void collect_virtual_component_fields(
+    const YAML::Node& component,
+    std::unordered_map<std::string, Real>& numeric_params,
+    std::unordered_map<std::string, std::string>& metadata) {
+    auto ingest_map = [&](const YAML::Node& node, bool include_reserved) {
+        if (!node || !node.IsMap()) return;
+        for (const auto& it : node) {
+            const std::string key = it.first.as<std::string>();
+            if (!include_reserved &&
+                (key == "type" || key == "name" || key == "nodes" || key == "params")) {
+                continue;
+            }
+
+            const YAML::Node value = it.second;
+            if (!value || value.IsNull()) continue;
+
+            if (value.IsScalar()) {
+                try {
+                    const std::string as_text = value.as<std::string>();
+                    numeric_params[key] = parse_real_string(as_text);
+                } catch (...) {
+                    try {
+                        metadata[key] = value.as<std::string>();
+                    } catch (...) {
+                        metadata[key] = YAML::Dump(value);
+                    }
+                }
+                continue;
+            }
+
+            metadata[key] = YAML::Dump(value);
+        }
+    };
+
+    ingest_map(component, false);
+    ingest_map(component["params"], true);
 }
 
 void validate_keys(const YAML::Node& node,
@@ -682,33 +922,88 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "thermal",
              "resistance", "capacitance", "inductance", "ic",
              "g_on", "g_off", "ron", "roff", "v_threshold", "initial_state",
-             "vth", "kp", "lambda", "is_nmos", "v_ce_sat",
-             "turns_ratio", "ratio", "magnetizing_inductance", "lm"},
+             "vth", "kp", "lambda", "lambda_", "is_nmos", "v_ce_sat",
+             "turns_ratio", "ratio", "magnetizing_inductance", "lm",
+             "target_component", "target_device", "target", "operation", "channels", "inputs", "outputs",
+             "x", "y", "num", "den", "delay", "sample_period",
+             "trip_current", "trip_time", "trip", "rating", "blow_i2t", "i2t",
+             "pickup_current", "dropout_current", "pickup_voltage", "dropout_voltage",
+             "contact_resistance", "off_resistance", "target_component_no", "target_component_nc",
+             "beta", "vbe_on", "holding_current", "latch_current", "gate_threshold",
+             "saturation_current", "saturation_inductance", "saturation_exponent",
+             "coupling", "k", "mutual_inductance", "l1", "l2", "ic1", "ic2", "ic_primary", "ic_secondary",
+             "state", "mode", "select_index", "gain", "open_loop_gain", "offset",
+             "kp", "ki", "kd", "threshold", "high", "low",
+             "frequency", "duty", "duty_min", "duty_max", "duty_from_input", "duty_gain", "duty_offset",
+             "alpha", "anti_windup", "min", "max", "output_min", "output_max",
+             "rising_rate", "falling_rate",
+             "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping"},
             "component", errors_, options_.strict);
 
-        if (!comp["type"] || !comp["name"] || !comp["nodes"]) {
-            errors_.push_back("Component missing type, name, or nodes");
+        if (!comp["type"] || !comp["name"]) {
+            errors_.push_back("Component missing type or name");
             continue;
         }
 
-        std::string type = to_lower(comp["type"].as<std::string>());
+        const std::string raw_type = comp["type"].as<std::string>();
+        const std::string normalized_raw_type = normalize_key(raw_type);
+        std::string type = canonical_component_type(raw_type);
+        if (type.empty()) {
+            push_error(errors_, kDiagUnsupportedComponent,
+                       "Unsupported component type: " + raw_type);
+            continue;
+        }
+
         std::string name = comp["name"].as<std::string>();
+        if (!comp["nodes"]) {
+            push_error(errors_, kDiagInvalidPinCount, "Component missing nodes: " + name);
+            continue;
+        }
+
         std::vector<std::string> nodes = parse_nodes(comp["nodes"], name, errors_);
         if (nodes.empty()) continue;
+        if (!validate_node_count(type, nodes, errors_, name)) continue;
 
         const YAML::Node comp_view = comp;
         const YAML::Node params = comp_view["params"];
 
         auto get_param = [&](const std::string& key) -> YAML::Node {
-            YAML::Node top = comp_view[key];
-            if (top.IsDefined() && !top.IsNull()) return top;
-            YAML::Node nested = params ? params[key] : YAML::Node();
-            if (nested.IsDefined() && !nested.IsNull()) return nested;
+            try {
+                YAML::Node top = comp_view[key];
+                if (top.IsDefined() && !top.IsNull()) return top;
+                YAML::Node nested = (params && params.IsMap()) ? params[key] : YAML::Node();
+                if (nested.IsDefined() && !nested.IsNull()) return nested;
+                if (key == "lambda") {
+                    top = comp_view["lambda_"];
+                    if (top.IsDefined() && !top.IsNull()) return top;
+                    nested = (params && params.IsMap()) ? params["lambda_"] : YAML::Node();
+                    if (nested.IsDefined() && !nested.IsNull()) return nested;
+                }
+                if (key == "target_component") {
+                    top = comp_view["target_device"];
+                    if (top.IsDefined() && !top.IsNull()) return top;
+                    nested = (params && params.IsMap()) ? params["target_device"] : YAML::Node();
+                    if (nested.IsDefined() && !nested.IsNull()) return nested;
+                }
+            } catch (const YAML::Exception&) {
+                return YAML::Node();
+            }
             return YAML::Node();
         };
 
         auto idx = [&](const std::string& node_name) {
             return circuit.add_node(node_name);
+        };
+        std::vector<Index> node_indices;
+        node_indices.reserve(nodes.size());
+        for (const auto& node_name : nodes) {
+            node_indices.push_back(idx(node_name));
+        }
+        auto node_at = [&](std::size_t index) -> Index {
+            return node_indices.at(index);
+        };
+        auto is_set = [](const YAML::Node& node) {
+            return node.IsDefined() && !node.IsNull();
         };
 
         // Loss model (switching energy)
@@ -739,35 +1034,35 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        if (type == "resistor" || type == "r") {
+        if (type == "resistor") {
             YAML::Node value_node = get_param("value");
             if (!value_node) value_node = get_param("resistance");
             Real value = parse_real(value_node, name + ".value", errors_);
-            circuit.add_resistor(name, idx(nodes[0]), idx(nodes[1]), value);
+            circuit.add_resistor(name, node_at(0), node_at(1), value);
         }
-        else if (type == "capacitor" || type == "c") {
+        else if (type == "capacitor") {
             YAML::Node value_node = get_param("value");
             if (!value_node) value_node = get_param("capacitance");
             Real value = parse_real(value_node, name + ".value", errors_);
             Real ic = 0.0;
             if (get_param("ic")) ic = parse_real(get_param("ic"), name + ".ic", errors_);
-            circuit.add_capacitor(name, idx(nodes[0]), idx(nodes[1]), value, ic);
+            circuit.add_capacitor(name, node_at(0), node_at(1), value, ic);
         }
-        else if (type == "inductor" || type == "l") {
+        else if (type == "inductor") {
             YAML::Node value_node = get_param("value");
             if (!value_node) value_node = get_param("inductance");
             Real value = parse_real(value_node, name + ".value", errors_);
             Real ic = 0.0;
             if (get_param("ic")) ic = parse_real(get_param("ic"), name + ".ic", errors_);
-            circuit.add_inductor(name, idx(nodes[0]), idx(nodes[1]), value, ic);
+            circuit.add_inductor(name, node_at(0), node_at(1), value, ic);
         }
-        else if (type == "voltage_source" || type == "v") {
+        else if (type == "voltage_source") {
             YAML::Node waveform = comp["waveform"];
             if (waveform && waveform["type"]) {
                 std::string wtype = to_lower(waveform["type"].as<std::string>());
                 if (wtype == "dc") {
                     Real value = parse_real(waveform["value"], name + ".waveform.value", errors_);
-                    circuit.add_voltage_source(name, idx(nodes[0]), idx(nodes[1]), value);
+                    circuit.add_voltage_source(name, node_at(0), node_at(1), value);
                 } else if (wtype == "pwm") {
                     PWMParams p;
                     if (waveform["v_high"]) p.v_high = parse_real(waveform["v_high"], name + ".waveform.v_high", errors_);
@@ -776,14 +1071,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     if (waveform["duty"]) p.duty = parse_real(waveform["duty"], name + ".waveform.duty", errors_);
                     if (waveform["dead_time"]) p.dead_time = parse_real(waveform["dead_time"], name + ".waveform.dead_time", errors_);
                     if (waveform["phase"]) p.phase = parse_real(waveform["phase"], name + ".waveform.phase", errors_);
-                    circuit.add_pwm_voltage_source(name, idx(nodes[0]), idx(nodes[1]), p);
+                    circuit.add_pwm_voltage_source(name, node_at(0), node_at(1), p);
                 } else if (wtype == "sine") {
                     SineParams p;
                     if (waveform["amplitude"]) p.amplitude = parse_real(waveform["amplitude"], name + ".waveform.amplitude", errors_);
                     if (waveform["frequency"]) p.frequency = parse_real(waveform["frequency"], name + ".waveform.frequency", errors_);
                     if (waveform["offset"]) p.offset = parse_real(waveform["offset"], name + ".waveform.offset", errors_);
                     if (waveform["phase"]) p.phase = parse_real(waveform["phase"], name + ".waveform.phase", errors_);
-                    circuit.add_sine_voltage_source(name, idx(nodes[0]), idx(nodes[1]), p);
+                    circuit.add_sine_voltage_source(name, node_at(0), node_at(1), p);
                 } else if (wtype == "pulse") {
                     PulseParams p;
                     if (waveform["v_initial"]) p.v_initial = parse_real(waveform["v_initial"], name + ".waveform.v_initial", errors_);
@@ -793,20 +1088,20 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     if (waveform["t_fall"]) p.t_fall = parse_real(waveform["t_fall"], name + ".waveform.t_fall", errors_);
                     if (waveform["t_width"]) p.t_width = parse_real(waveform["t_width"], name + ".waveform.t_width", errors_);
                     if (waveform["period"]) p.period = parse_real(waveform["period"], name + ".waveform.period", errors_);
-                    circuit.add_pulse_voltage_source(name, idx(nodes[0]), idx(nodes[1]), p);
+                    circuit.add_pulse_voltage_source(name, node_at(0), node_at(1), p);
                 } else {
                     errors_.push_back("Unsupported waveform type for voltage_source: " + wtype);
                 }
             } else {
                 Real value = parse_real(get_param("value"), name + ".value", errors_);
-                circuit.add_voltage_source(name, idx(nodes[0]), idx(nodes[1]), value);
+                circuit.add_voltage_source(name, node_at(0), node_at(1), value);
             }
         }
-        else if (type == "current_source" || type == "i") {
+        else if (type == "current_source") {
             Real value = parse_real(get_param("value"), name + ".value", errors_);
-            circuit.add_current_source(name, idx(nodes[0]), idx(nodes[1]), value);
+            circuit.add_current_source(name, node_at(0), node_at(1), value);
         }
-        else if (type == "diode" || type == "d") {
+        else if (type == "diode") {
             YAML::Node g_on_node = get_param("g_on");
             if (!g_on_node && get_param("ron")) {
                 Real ron = parse_real(get_param("ron"), name + ".ron", errors_);
@@ -819,9 +1114,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
             Real g_on = g_on_node ? parse_real(g_on_node, name + ".g_on", errors_) : 1e3;
             Real g_off = g_off_node ? parse_real(g_off_node, name + ".g_off", errors_) : 1e-9;
-            circuit.add_diode(name, idx(nodes[0]), idx(nodes[1]), g_on, g_off);
+            circuit.add_diode(name, node_at(0), node_at(1), g_on, g_off);
         }
-        else if (type == "switch" || type == "s") {
+        else if (type == "switch") {
             YAML::Node g_on_node = get_param("g_on");
             if (!g_on_node && get_param("ron")) {
                 Real ron = parse_real(get_param("ron"), name + ".ron", errors_);
@@ -838,19 +1133,15 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             bool closed = (initial_state_node.IsDefined() && !initial_state_node.IsNull())
                 ? initial_state_node.as<bool>()
                 : false;
-            circuit.add_switch(name, idx(nodes[0]), idx(nodes[1]), closed, g_on, g_off);
+            circuit.add_switch(name, node_at(0), node_at(1), closed, g_on, g_off);
         }
         else if (type == "vcswitch") {
-            if (nodes.size() < 3) {
-                errors_.push_back("Voltage-controlled switch requires 3 nodes: " + name);
-                continue;
-            }
             Real v_threshold = get_param("v_threshold") ? parse_real(get_param("v_threshold"), name + ".v_threshold", errors_) : 2.5;
             Real g_on = get_param("g_on") ? parse_real(get_param("g_on"), name + ".g_on", errors_) : 1e3;
             Real g_off = get_param("g_off") ? parse_real(get_param("g_off"), name + ".g_off", errors_) : 1e-9;
-            circuit.add_vcswitch(name, idx(nodes[0]), idx(nodes[1]), idx(nodes[2]), v_threshold, g_on, g_off);
+            circuit.add_vcswitch(name, node_at(0), node_at(1), node_at(2), v_threshold, g_on, g_off);
         }
-        else if (type == "mosfet" || type == "nmos" || type == "pmos" || type == "m") {
+        else if (type == "mosfet") {
             MOSFET::Params p;
             if (get_param("vth")) p.vth = parse_real(get_param("vth"), name + ".vth", errors_);
             if (get_param("kp")) p.kp = parse_real(get_param("kp"), name + ".kp", errors_);
@@ -858,29 +1149,506 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (get_param("g_off")) p.g_off = parse_real(get_param("g_off"), name + ".g_off", errors_);
             YAML::Node is_nmos_node = get_param("is_nmos");
             if (is_nmos_node.IsDefined() && !is_nmos_node.IsNull()) p.is_nmos = is_nmos_node.as<bool>();
-            if (type == "pmos") p.is_nmos = false;
-            circuit.add_mosfet(name, idx(nodes[0]), idx(nodes[1]), idx(nodes[2]), p);
+            if (normalized_raw_type == "pmos") p.is_nmos = false;
+            circuit.add_mosfet(name, node_at(0), node_at(1), node_at(2), p);
         }
-        else if (type == "igbt" || type == "q") {
+        else if (type == "igbt") {
             IGBT::Params p;
             if (get_param("vth")) p.vth = parse_real(get_param("vth"), name + ".vth", errors_);
             if (get_param("g_on")) p.g_on = parse_real(get_param("g_on"), name + ".g_on", errors_);
             if (get_param("g_off")) p.g_off = parse_real(get_param("g_off"), name + ".g_off", errors_);
             if (get_param("v_ce_sat")) p.v_ce_sat = parse_real(get_param("v_ce_sat"), name + ".v_ce_sat", errors_);
-            circuit.add_igbt(name, idx(nodes[0]), idx(nodes[1]), idx(nodes[2]), p);
+            circuit.add_igbt(name, node_at(0), node_at(1), node_at(2), p);
         }
-        else if (type == "transformer" || type == "t") {
-            if (nodes.size() < 4) {
-                errors_.push_back("Transformer requires 4 nodes: " + name);
-                continue;
-            }
+        else if (type == "transformer") {
             YAML::Node ratio_node = get_param("turns_ratio");
             if (!ratio_node) ratio_node = get_param("ratio");
             Real turns_ratio = parse_real(ratio_node, name + ".turns_ratio", errors_);
-            circuit.add_transformer(name, idx(nodes[0]), idx(nodes[1]), idx(nodes[2]), idx(nodes[3]), turns_ratio);
+            circuit.add_transformer(name, node_at(0), node_at(1), node_at(2), node_at(3), turns_ratio);
+        }
+        else if (type == "snubber_rc") {
+            YAML::Node r_node = get_param("resistance");
+            if (!r_node) r_node = get_param("value");
+            YAML::Node c_node = get_param("capacitance");
+            Real r_value = parse_real(r_node, name + ".resistance", errors_);
+            Real c_value = parse_real(c_node, name + ".capacitance", errors_);
+            Real ic = 0.0;
+            if (get_param("ic")) ic = parse_real(get_param("ic"), name + ".ic", errors_);
+            circuit.add_snubber_rc(name, node_at(0), node_at(1), r_value, c_value, ic);
+        }
+        else if (type == "bjt_npn" || type == "bjt_pnp") {
+            MOSFET::Params p;
+            p.is_nmos = (type == "bjt_npn");
+            if (get_param("vbe_on")) p.vth = parse_real(get_param("vbe_on"), name + ".vbe_on", errors_);
+            if (get_param("g_off")) p.g_off = parse_real(get_param("g_off"), name + ".g_off", errors_);
+            if (get_param("beta")) {
+                Real beta = parse_real(get_param("beta"), name + ".beta", errors_);
+                if (beta <= 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "beta must be > 0 for " + name);
+                    continue;
+                }
+                // First parity slice: map beta to transconductance proxy.
+                p.kp = std::max<Real>(1e-6, beta * 1e-3);
+            }
+            circuit.add_mosfet(name, node_at(0), node_at(1), node_at(2), p);
+            push_warning(warnings_, kDiagSurrogateComponent,
+                         "Component '" + name + "' (" + type + ") mapped to MOSFET surrogate model");
+        }
+        else if (type == "relay") {
+            bool energized = false;
+            YAML::Node state_node = get_param("initial_state");
+            if (state_node.IsDefined() && !state_node.IsNull()) {
+                if (state_node.IsScalar()) {
+                    try {
+                        energized = state_node.as<bool>();
+                    } catch (...) {
+                        const std::string state = normalize_key(state_node.as<std::string>());
+                        energized = (state == "closed" || state == "energized" || state == "on" || state == "true");
+                    }
+                }
+            }
+
+            Real g_on = 1e4;
+            Real g_off = 1e-9;
+            if (get_param("g_on")) {
+                g_on = parse_real(get_param("g_on"), name + ".g_on", errors_);
+            } else if (get_param("contact_resistance")) {
+                const Real r_on = parse_real(get_param("contact_resistance"), name + ".contact_resistance", errors_);
+                g_on = (r_on > 0.0) ? (1.0 / r_on) : 1e4;
+            } else if (get_param("ron")) {
+                const Real r_on = parse_real(get_param("ron"), name + ".ron", errors_);
+                g_on = (r_on > 0.0) ? (1.0 / r_on) : 1e4;
+            }
+
+            if (get_param("g_off")) {
+                g_off = parse_real(get_param("g_off"), name + ".g_off", errors_);
+            } else if (get_param("off_resistance")) {
+                const Real r_off = parse_real(get_param("off_resistance"), name + ".off_resistance", errors_);
+                g_off = (r_off > 0.0) ? (1.0 / r_off) : 1e-9;
+            } else if (get_param("roff")) {
+                const Real r_off = parse_real(get_param("roff"), name + ".roff", errors_);
+                g_off = (r_off > 0.0) ? (1.0 / r_off) : 1e-9;
+            }
+
+            const std::string no_switch = name + "__no";
+            const std::string nc_switch = name + "__nc";
+            circuit.add_switch(no_switch, node_at(2), node_at(3), energized, g_on, g_off);
+            circuit.add_switch(nc_switch, node_at(2), node_at(4), !energized, g_on, g_off);
+
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["initial_closed"] = energized ? 1.0 : 0.0;
+            numeric_params["g_on"] = g_on;
+            numeric_params["g_off"] = g_off;
+            if (get_param("pickup_current")) {
+                numeric_params["pickup_current"] = parse_real(get_param("pickup_current"), name + ".pickup_current", errors_);
+            }
+            if (get_param("dropout_current")) {
+                numeric_params["dropout_current"] = parse_real(get_param("dropout_current"), name + ".dropout_current", errors_);
+            }
+            if (get_param("pickup_voltage")) {
+                numeric_params["pickup_voltage"] = parse_real(get_param("pickup_voltage"), name + ".pickup_voltage", errors_);
+            }
+            if (get_param("dropout_voltage")) {
+                numeric_params["dropout_voltage"] = parse_real(get_param("dropout_voltage"), name + ".dropout_voltage", errors_);
+            }
+
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = no_switch;
+            metadata["target_component_no"] = no_switch;
+            metadata["target_component_nc"] = nc_switch;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+
+            push_warning(warnings_, kDiagSurrogateComponent,
+                         "Component '" + name + "' (relay) mapped to dual-switch surrogate with event controller");
+        }
+        else if (type == "thyristor" || type == "triac") {
+            Real gate_threshold = get_param("gate_threshold")
+                ? parse_real(get_param("gate_threshold"), name + ".gate_threshold", errors_)
+                : 1.0;
+            Real g_on = get_param("g_on") ? parse_real(get_param("g_on"), name + ".g_on", errors_) : 1e4;
+            Real g_off = get_param("g_off") ? parse_real(get_param("g_off"), name + ".g_off", errors_) : 1e-9;
+            Real holding_current = get_param("holding_current")
+                ? parse_real(get_param("holding_current"), name + ".holding_current", errors_)
+                : 0.05;
+            Real latch_current = get_param("latch_current")
+                ? parse_real(get_param("latch_current"), name + ".latch_current", errors_)
+                : (holding_current * 1.2);
+
+            circuit.add_switch(name, node_at(1), node_at(2), false, g_on, g_off);
+
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["gate_threshold"] = gate_threshold;
+            numeric_params["holding_current"] = holding_current;
+            numeric_params["latch_current"] = latch_current;
+            numeric_params["g_on"] = g_on;
+            numeric_params["g_off"] = g_off;
+            numeric_params["initial_closed"] = 0.0;
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+
+            push_warning(warnings_, kDiagSurrogateComponent,
+                         "Component '" + name + "' (" + type + ") mapped to switch surrogate with latching event controller");
+        }
+        else if (type == "fuse" || type == "circuit_breaker") {
+            Real g_on = get_param("g_on") ? parse_real(get_param("g_on"), name + ".g_on", errors_) : 1e4;
+            Real g_off = get_param("g_off") ? parse_real(get_param("g_off"), name + ".g_off", errors_) : 1e-9;
+            bool closed = true;
+            YAML::Node state_node = get_param("initial_state");
+            if (state_node.IsDefined() && !state_node.IsNull()) {
+                if (state_node.IsScalar()) {
+                    try {
+                        closed = state_node.as<bool>();
+                    } catch (...) {
+                        const std::string state = normalize_key(state_node.as<std::string>());
+                        closed = !(state == "open" || state == "tripped" || state == "blown" || state == "false");
+                    }
+                }
+            }
+            circuit.add_switch(name, node_at(0), node_at(1), closed, g_on, g_off);
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["g_on"] = g_on;
+            numeric_params["g_off"] = g_off;
+            numeric_params["initial_closed"] = closed ? 1.0 : 0.0;
+            if (get_param("rating")) {
+                numeric_params["rating"] = parse_real(get_param("rating"), name + ".rating", errors_);
+            }
+            if (type == "fuse") {
+                YAML::Node blow_i2t = get_param("blow_i2t");
+                if (!blow_i2t) blow_i2t = get_param("i2t");
+                if (blow_i2t) {
+                    numeric_params["blow_i2t"] = parse_real(blow_i2t, name + ".blow_i2t", errors_);
+                }
+            } else {
+                YAML::Node trip_current = get_param("trip_current");
+                if (!trip_current) trip_current = get_param("trip");
+                if (trip_current) {
+                    numeric_params["trip_current"] = parse_real(trip_current, name + ".trip_current", errors_);
+                }
+                if (get_param("trip_time")) {
+                    numeric_params["trip_time"] = parse_real(get_param("trip_time"), name + ".trip_time", errors_);
+                }
+            }
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+            push_warning(warnings_, kDiagSurrogateComponent,
+                         "Component '" + name + "' (" + type + ") mapped to switch surrogate with event controller");
+        }
+        else if (type == "saturable_inductor") {
+            YAML::Node l_node = get_param("inductance");
+            if (!is_set(l_node)) l_node = get_param("value");
+            const Real inductance = parse_real(l_node, name + ".inductance", errors_);
+            if (inductance <= 0.0) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "inductance must be > 0 for " + name);
+                continue;
+            }
+            Real sat_current = get_param("saturation_current")
+                ? parse_real(get_param("saturation_current"), name + ".saturation_current", errors_)
+                : 1.0;
+            if (sat_current <= 0.0) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "saturation_current must be > 0 for " + name);
+                continue;
+            }
+            Real sat_inductance = get_param("saturation_inductance")
+                ? parse_real(get_param("saturation_inductance"), name + ".saturation_inductance", errors_)
+                : (0.2 * inductance);
+            if (sat_inductance <= 0.0 || sat_inductance > inductance) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "saturation_inductance must be in (0, inductance] for " + name);
+                continue;
+            }
+            Real ic = 0.0;
+            if (get_param("ic")) ic = parse_real(get_param("ic"), name + ".ic", errors_);
+            circuit.add_inductor(name, node_at(0), node_at(1), inductance, ic);
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["inductance"] = inductance;
+            numeric_params["saturation_current"] = sat_current;
+            numeric_params["saturation_inductance"] = sat_inductance;
+            if (get_param("saturation_exponent")) {
+                numeric_params["saturation_exponent"] =
+                    parse_real(get_param("saturation_exponent"), name + ".saturation_exponent", errors_);
+            }
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component"] = name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+            push_warning(warnings_, kDiagVirtualComponent,
+                         "Component '" + name + "' (saturable_inductor) registered with nonlinear inductance controller");
+        }
+        else if (type == "coupled_inductor") {
+            Real l1 = get_param("l1")
+                ? parse_real(get_param("l1"), name + ".l1", errors_)
+                : (get_param("inductance") ? parse_real(get_param("inductance"), name + ".inductance", errors_) : 1e-3);
+            Real l2 = get_param("l2")
+                ? parse_real(get_param("l2"), name + ".l2", errors_)
+                : l1;
+
+            if (l1 <= 0.0 || l2 <= 0.0) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "l1 and l2 must be > 0 for " + name);
+                continue;
+            }
+
+            Real k = 0.98;
+            if (get_param("coupling")) {
+                k = parse_real(get_param("coupling"), name + ".coupling", errors_);
+            } else if (get_param("k")) {
+                k = parse_real(get_param("k"), name + ".k", errors_);
+            } else if (get_param("mutual_inductance")) {
+                const Real m = parse_real(get_param("mutual_inductance"), name + ".mutual_inductance", errors_);
+                k = m / std::sqrt(l1 * l2);
+            }
+            if (std::abs(k) > 0.999) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "coupling must satisfy |k| <= 0.999 for " + name);
+                continue;
+            }
+
+            Real ic1 = 0.0;
+            Real ic2 = 0.0;
+            if (get_param("ic1")) ic1 = parse_real(get_param("ic1"), name + ".ic1", errors_);
+            else if (get_param("ic_primary")) ic1 = parse_real(get_param("ic_primary"), name + ".ic_primary", errors_);
+            if (get_param("ic2")) ic2 = parse_real(get_param("ic2"), name + ".ic2", errors_);
+            else if (get_param("ic_secondary")) ic2 = parse_real(get_param("ic_secondary"), name + ".ic_secondary", errors_);
+
+            const std::string l1_name = name + "__L1";
+            const std::string l2_name = name + "__L2";
+            circuit.add_inductor(l1_name, node_at(0), node_at(1), l1, ic1);
+            circuit.add_inductor(l2_name, node_at(2), node_at(3), l2, ic2);
+
+            std::unordered_map<std::string, Real> numeric_params;
+            numeric_params["l1"] = l1;
+            numeric_params["l2"] = l2;
+            numeric_params["coupling"] = k;
+            numeric_params["k"] = k;
+            std::unordered_map<std::string, std::string> metadata;
+            metadata["target_component_1"] = l1_name;
+            metadata["target_component_2"] = l2_name;
+            circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
+
+            push_warning(warnings_, kDiagVirtualComponent,
+                         "Component '" + name + "' (coupled_inductor) expanded to coupled inductor pair");
+        }
+        else if (virtual_component_types().contains(type)) {
+            std::unordered_map<std::string, Real> numeric_params;
+            std::unordered_map<std::string, std::string> metadata;
+            collect_virtual_component_fields(comp, numeric_params, metadata);
+            YAML::Node target = get_param("target_component");
+            if (!target) target = get_param("target");
+            if (target && target.IsScalar()) {
+                metadata["target_component"] = target.as<std::string>();
+            }
+
+            auto has_num = [&](const std::string& key) {
+                return numeric_params.find(key) != numeric_params.end();
+            };
+            auto get_num = [&](const std::string& key, Real fallback) {
+                const auto it = numeric_params.find(key);
+                return (it == numeric_params.end()) ? fallback : it->second;
+            };
+            auto metadata_node = [&](const std::string& key) -> YAML::Node {
+                const auto it = metadata.find(key);
+                if (it == metadata.end()) return YAML::Node();
+                try {
+                    return YAML::Load(it->second);
+                } catch (...) {
+                    return YAML::Node();
+                }
+            };
+            auto metadata_sequence_size = [&](const std::string& key) -> std::size_t {
+                const YAML::Node node = metadata_node(key);
+                if (!node || !node.IsSequence()) return 0;
+                return node.size();
+            };
+
+            if (type == "op_amp") {
+                const Real lo = get_num("rail_low", -15.0);
+                const Real hi = get_num("rail_high", 15.0);
+                if (lo >= hi) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "rail_low must be < rail_high for " + name);
+                    continue;
+                }
+            } else if (type == "comparator" || type == "hysteresis") {
+                const Real hyst = get_num("hysteresis", 0.0);
+                if (hyst < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "hysteresis must be >= 0 for " + name);
+                    continue;
+                }
+                const Real low = get_num("low", 0.0);
+                const Real high = get_num("high", 1.0);
+                if (high < low) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "high must be >= low for " + name);
+                    continue;
+                }
+            } else if (type == "pi_controller" || type == "pid_controller") {
+                if (has_num("output_min") && has_num("output_max")) {
+                    if (get_num("output_min", 0.0) > get_num("output_max", 0.0)) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "output_min must be <= output_max for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "integrator" || type == "limiter") {
+                if (has_num("output_min") && has_num("output_max")) {
+                    if (get_num("output_min", 0.0) > get_num("output_max", 0.0)) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "output_min must be <= output_max for " + name);
+                        continue;
+                    }
+                }
+                if (has_num("min") && has_num("max")) {
+                    if (get_num("min", 0.0) > get_num("max", 0.0)) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "min must be <= max for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "differentiator") {
+                if (has_num("alpha")) {
+                    const Real alpha = get_num("alpha", 0.0);
+                    if (alpha < 0.0 || alpha > 1.0) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "alpha must be in [0, 1] for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "rate_limiter") {
+                if (has_num("rising_rate") && get_num("rising_rate", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "rising_rate must be >= 0 for " + name);
+                    continue;
+                }
+                if (has_num("falling_rate") && get_num("falling_rate", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "falling_rate must be >= 0 for " + name);
+                    continue;
+                }
+            } else if (type == "lookup_table") {
+                const std::size_t x_size = metadata_sequence_size("x");
+                const std::size_t y_size = metadata_sequence_size("y");
+                std::size_t point_count = 0;
+                if (x_size > 0 || y_size > 0) {
+                    if (x_size != y_size || x_size < 2) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "lookup_table requires x and y arrays with the same size >= 2 for " + name);
+                        continue;
+                    }
+                    point_count = x_size;
+                } else {
+                    const YAML::Node table = metadata_node("table");
+                    if (table && table.IsSequence() && table.size() >= 2) {
+                        point_count = table.size();
+                    } else {
+                        const YAML::Node mapping = metadata_node("mapping");
+                        if (mapping && mapping.IsMap() && mapping.size() >= 2) {
+                            point_count = mapping.size();
+                        }
+                    }
+                }
+                if (point_count < 2) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "lookup_table requires at least two points (x/y, table, or mapping) for " + name);
+                    continue;
+                }
+            } else if (type == "transfer_function") {
+                const std::size_t num_size = metadata_sequence_size("num");
+                const std::size_t den_size = metadata_sequence_size("den");
+                if ((num_size > 0) != (den_size > 0)) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "transfer_function requires both num and den arrays for " + name);
+                    continue;
+                }
+                if (den_size > 0) {
+                    const YAML::Node den = metadata_node("den");
+                    if (!den || !den.IsSequence() || den.size() == 0) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "transfer_function den must be a non-empty array for " + name);
+                        continue;
+                    }
+                    bool den0_ok = false;
+                    try {
+                        den0_ok = std::abs(den[0].as<Real>()) > 1e-15;
+                    } catch (...) {
+                        den0_ok = false;
+                    }
+                    if (!den0_ok) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "transfer_function den[0] must be non-zero for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "delay_block") {
+                if (has_num("delay") && get_num("delay", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "delay must be >= 0 for " + name);
+                    continue;
+                }
+            } else if (type == "sample_hold") {
+                if (has_num("sample_period") && get_num("sample_period", 0.0) < 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "sample_period must be >= 0 for " + name);
+                    continue;
+                }
+            } else if (type == "state_machine") {
+                const auto mode_it = metadata.find("mode");
+                if (mode_it != metadata.end()) {
+                    const std::string mode = normalize_key(mode_it->second);
+                    if (mode != "toggle" && mode != "level" &&
+                        mode != "set_reset" && mode != "sr") {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "state_machine mode must be toggle/level/set_reset/sr for " + name);
+                        continue;
+                    }
+                }
+            } else if (type == "pwm_generator") {
+                const Real freq = get_num("frequency", 1e3);
+                if (freq <= 0.0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "frequency must be > 0 for " + name);
+                    continue;
+                }
+                if (has_num("duty")) {
+                    const Real duty = get_num("duty", 0.5);
+                    if (duty < 0.0 || duty > 1.0) {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "duty must be in [0, 1] for " + name);
+                        continue;
+                    }
+                }
+                const Real duty_min = get_num("duty_min", 0.0);
+                const Real duty_max = get_num("duty_max", 1.0);
+                if (duty_min < 0.0 || duty_min > 1.0 ||
+                    duty_max < 0.0 || duty_max > 1.0 || duty_min > duty_max) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "duty_min/duty_max must satisfy 0 <= duty_min <= duty_max <= 1 for " + name);
+                    continue;
+                }
+            } else if (type == "math_block") {
+                const auto op_it = metadata.find("operation");
+                if (op_it != metadata.end()) {
+                    const std::string op = normalize_key(op_it->second);
+                    if (op != "add" && op != "sub" && op != "mul" && op != "div") {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "operation must be add/sub/mul/div for " + name);
+                        continue;
+                    }
+                }
+            }
+
+            circuit.add_virtual_component(type, name, node_indices,
+                                          std::move(numeric_params), std::move(metadata));
+            push_warning(warnings_, kDiagVirtualComponent,
+                         "Component '" + name + "' (" + type + ") registered as virtual runtime node");
         }
         else {
-            errors_.push_back("Unsupported component type: " + type);
+            push_error(errors_, kDiagUnsupportedComponent,
+                       "Unsupported component type: " + type);
         }
     }
 }

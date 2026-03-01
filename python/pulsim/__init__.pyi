@@ -98,8 +98,47 @@ class Circuit:
     def signal_names(self) -> List[str]: ...
     def initial_state(self) -> List[float]: ...
     def num_devices(self) -> int: ...
+    def add_virtual_component(
+        self,
+        type: str,
+        name: str,
+        nodes: List[int],
+        numeric_params: Dict[str, float] = ...,
+        metadata: Dict[str, str] = ...,
+    ) -> None: ...
+    def num_virtual_components(self) -> int: ...
+    def virtual_components(self) -> List["VirtualComponent"]: ...
+    def virtual_component_names(self) -> List[str]: ...
+    def virtual_channel_metadata(self) -> Dict[str, "VirtualChannelMetadata"]: ...
+    @staticmethod
+    def mixed_domain_phase_order() -> List[str]: ...
+    def execute_mixed_domain_step(self, x: List[float], time: float) -> "MixedDomainStepResult": ...
+    def evaluate_virtual_signals(self, x: List[float]) -> Dict[str, float]: ...
     def set_timestep(self, dt: float) -> None: ...
     def timestep(self) -> float: ...
+
+class VirtualComponent:
+    type: str
+    name: str
+    nodes: List[int]
+    numeric_params: Dict[str, float]
+    metadata: Dict[str, str]
+
+    def __init__(self) -> None: ...
+
+class MixedDomainStepResult:
+    phase_order: List[str]
+    channel_values: Dict[str, float]
+
+    def __init__(self) -> None: ...
+
+class VirtualChannelMetadata:
+    component_type: str
+    component_name: str
+    domain: str
+    nodes: List[int]
+
+    def __init__(self) -> None: ...
 
 class Resistor:
     def __init__(self, resistance: float, name: str = "") -> None: ...
@@ -467,6 +506,9 @@ class SimulationResult:
     time: List[float]
     states: List[List[float]]
     events: List[SimulationEvent]
+    mixed_domain_phase_order: List[str]
+    virtual_channels: Dict[str, List[float]]
+    virtual_channel_metadata: Dict[str, VirtualChannelMetadata]
     success: bool
     final_status: SolverStatus
     message: str

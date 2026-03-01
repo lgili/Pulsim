@@ -422,6 +422,29 @@ void init_v2_module(py::module_& v2) {
         .def("__call__", &LookupTable1D::operator(), py::arg("x"))
         .def("interpolate", &LookupTable1D::interpolate, py::arg("x"));
 
+    py::class_<VirtualComponent>(v2, "VirtualComponent",
+        "Non-stamping runtime component descriptor")
+        .def(py::init<>())
+        .def_readwrite("type", &VirtualComponent::type)
+        .def_readwrite("name", &VirtualComponent::name)
+        .def_readwrite("nodes", &VirtualComponent::nodes)
+        .def_readwrite("numeric_params", &VirtualComponent::numeric_params)
+        .def_readwrite("metadata", &VirtualComponent::metadata);
+
+    py::class_<MixedDomainStepResult>(v2, "MixedDomainStepResult",
+        "Mixed-domain scheduler output for one timestep")
+        .def(py::init<>())
+        .def_readwrite("phase_order", &MixedDomainStepResult::phase_order)
+        .def_readwrite("channel_values", &MixedDomainStepResult::channel_values);
+
+    py::class_<VirtualChannelMetadata>(v2, "VirtualChannelMetadata",
+        "Metadata for a mixed-domain channel")
+        .def(py::init<>())
+        .def_readwrite("component_type", &VirtualChannelMetadata::component_type)
+        .def_readwrite("component_name", &VirtualChannelMetadata::component_name)
+        .def_readwrite("domain", &VirtualChannelMetadata::domain)
+        .def_readwrite("nodes", &VirtualChannelMetadata::nodes);
+
     // =========================================================================
     // Runtime Circuit Builder (Phase 3)
     // =========================================================================
@@ -457,6 +480,10 @@ void init_v2_module(py::module_& v2) {
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("C"),
              py::arg("ic") = 0.0,
              "Add capacitor between nodes n1 and n2")
+        .def("add_snubber_rc", &Circuit::add_snubber_rc,
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
+             py::arg("C"), py::arg("ic") = 0.0,
+             "Add RC snubber (parallel R-C) between nodes n1 and n2")
         .def("add_inductor", &Circuit::add_inductor,
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("L"),
              py::arg("ic") = 0.0,
@@ -541,6 +568,34 @@ void init_v2_module(py::module_& v2) {
         // State
         .def("num_devices", &Circuit::num_devices,
              "Number of devices in circuit")
+        .def("add_virtual_component", &Circuit::add_virtual_component,
+             py::arg("type"), py::arg("name"), py::arg("nodes"),
+             py::arg("numeric_params") = std::unordered_map<std::string, Real>{},
+             py::arg("metadata") = std::unordered_map<std::string, std::string>{},
+             "Add mixed-domain virtual component (control/instrumentation/routing)")
+        .def("num_virtual_components", &Circuit::num_virtual_components,
+             "Number of virtual components in circuit")
+        .def("virtual_components", &Circuit::virtual_components,
+             "Get virtual component descriptors")
+        .def("virtual_component_names", &Circuit::virtual_component_names,
+             "Get virtual component names")
+        .def("virtual_channel_metadata", &Circuit::virtual_channel_metadata,
+             "Get metadata for channels produced by virtual components")
+        .def_static("mixed_domain_phase_order", &Circuit::mixed_domain_phase_order,
+             "Get deterministic mixed-domain execution phase order")
+        .def("execute_mixed_domain_step", &Circuit::execute_mixed_domain_step,
+             py::arg("x"), py::arg("time"),
+             "Execute mixed-domain scheduler for one state sample")
+        .def("evaluate_virtual_signals", &Circuit::evaluate_virtual_signals, py::arg("x"),
+             "Evaluate probe-style virtual signals for a state vector")
+        .def("apply_numerical_regularization", &Circuit::apply_numerical_regularization,
+             py::arg("mosfet_kp_max") = 8.0,
+             py::arg("mosfet_g_off_min") = 1e-7,
+             py::arg("diode_g_on_max") = 300.0,
+             py::arg("diode_g_off_min") = 1e-9,
+             py::arg("igbt_g_on_max") = 5e3,
+             py::arg("igbt_g_off_min") = 1e-9,
+             "Clamp overly-ideal nonlinear parameters for convergence fallback")
         .def("set_switch_state", &Circuit::set_switch_state,
              py::arg("name"), py::arg("closed"),
              "Set switch state by name")
@@ -1085,6 +1140,9 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("time", &SimulationResult::time)
         .def_readwrite("states", &SimulationResult::states)
         .def_readwrite("events", &SimulationResult::events)
+        .def_readwrite("mixed_domain_phase_order", &SimulationResult::mixed_domain_phase_order)
+        .def_readwrite("virtual_channels", &SimulationResult::virtual_channels)
+        .def_readwrite("virtual_channel_metadata", &SimulationResult::virtual_channel_metadata)
         .def_readwrite("success", &SimulationResult::success)
         .def_readwrite("final_status", &SimulationResult::final_status)
         .def_readwrite("message", &SimulationResult::message)
