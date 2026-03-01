@@ -114,6 +114,9 @@ jobs:
           cd build
           # Use longer timeout for sanitizer builds (10-20x overhead)
           if [ "${{ matrix.sanitizers }}" = "ON" ]; then
+            # libc++ on Linux can report alloc/dealloc mismatch false positives
+            # for certain std::exception message paths under ASan.
+            export ASAN_OPTIONS="alloc_dealloc_mismatch=0"
             ctest --output-on-failure --timeout 600
           else
             ctest --output-on-failure --timeout 120
