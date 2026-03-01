@@ -13,7 +13,9 @@
 #include <pybind11/functional.h>
 #include <pybind11/chrono.h>
 
+#include <algorithm>
 #include <atomic>
+#include <memory>
 
 #include "pulsim/v1/core.hpp"
 #include "pulsim/v1/control.hpp"
@@ -42,6 +44,122 @@ T unwrap_solve_result(const LinearSolveResult& result, const char* context) {
     }
     return result.value();
 }
+
+namespace {
+
+void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg) {
+    const bool has_default_order =
+        cfg.order.empty() ||
+        (cfg.order.size() == 1 && cfg.order.front() == LinearSolverKind::SparseLU);
+
+    if (has_default_order) {
+        cfg.order = {
+            LinearSolverKind::KLU,
+            LinearSolverKind::EnhancedSparseLU,
+            LinearSolverKind::GMRES,
+            LinearSolverKind::BiCGSTAB
+        };
+    }
+
+    if (cfg.fallback_order.empty()) {
+        cfg.fallback_order = {
+            LinearSolverKind::EnhancedSparseLU,
+            LinearSolverKind::SparseLU,
+            LinearSolverKind::GMRES,
+            LinearSolverKind::BiCGSTAB
+        };
+    }
+
+    cfg.allow_fallback = true;
+    cfg.auto_select = true;
+    cfg.size_threshold = std::min(cfg.size_threshold, 1200);
+    cfg.nnz_threshold = std::min(cfg.nnz_threshold, 120000);
+    cfg.diag_min_threshold = std::max(cfg.diag_min_threshold, Real{1e-12});
+
+    auto& it = cfg.iterative_config;
+    it.max_iterations = std::max(it.max_iterations, 300);
+    it.tolerance = std::min(it.tolerance, Real{1e-8});
+    it.restart = std::max(it.restart, 40);
+    it.enable_scaling = true;
+    it.scaling_floor = std::min(it.scaling_floor, Real{1e-12});
+    if (it.preconditioner == IterativeSolverConfig::PreconditionerKind::None ||
+        it.preconditioner == IterativeSolverConfig::PreconditionerKind::Jacobi) {
+        it.preconditioner = IterativeSolverConfig::PreconditionerKind::ILUT;
+    }
+    it.ilut_drop_tolerance = std::min(it.ilut_drop_tolerance, Real{1e-3});
+    it.ilut_fill_factor = std::max(it.ilut_fill_factor, Real{10.0});
+}
+
+void apply_robust_newton_defaults(NewtonOptions& opts) {
+    opts.max_iterations = std::max(opts.max_iterations, 120);
+    opts.auto_damping = true;
+    opts.min_damping = std::min(opts.min_damping, Real{1e-4});
+    opts.enable_limiting = true;
+    opts.max_voltage_step = std::max(opts.max_voltage_step, Real{10.0});
+    opts.max_current_step = std::max(opts.max_current_step, Real{20.0});
+    opts.enable_trust_region = true;
+    opts.trust_radius = std::max(opts.trust_radius, Real{8.0});
+    opts.trust_shrink = std::min(opts.trust_shrink, Real{0.5});
+    opts.trust_expand = std::max(opts.trust_expand, Real{1.5});
+    opts.detect_stall = false;
+}
+
+SimulationOptions build_robust_transient_options(
+    Circuit& circuit,
+    Real t_start,
+    Real t_stop,
+    Real dt,
+    const NewtonOptions& newton_opts,
+    const LinearSolverStackConfig& linear_solver) {
+
+    SimulationOptions opts;
+    opts.tstart = t_start;
+    opts.tstop = t_stop;
+    opts.dt = dt;
+    opts.newton_options = newton_opts;
+    opts.linear_solver = linear_solver;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    apply_robust_newton_defaults(opts.newton_options);
+    apply_robust_linear_solver_defaults(opts.linear_solver);
+
+    opts.integrator = Integrator::TRBDF2;
+    opts.adaptive_timestep = true;
+    opts.timestep_config = AdvancedTimestepConfig::for_power_electronics();
+    opts.timestep_config.dt_initial = dt;
+    opts.timestep_config.dt_min = std::max<Real>(1e-10, dt * 1e-2);
+    opts.timestep_config.dt_max = std::max<Real>(opts.timestep_config.dt_max, dt * 20.0);
+    opts.timestep_config.error_tolerance = std::max<Real>(opts.timestep_config.error_tolerance, 5e-3);
+    opts.lte_config = RichardsonLTEConfig::defaults();
+    opts.lte_config.voltage_tolerance = 5e-3;
+    opts.lte_config.current_tolerance = 1e-4;
+    opts.lte_config.use_weighted_norm = true;
+    opts.enable_bdf_order_control = true;
+    opts.bdf_config.min_order = 1;
+    opts.bdf_config.max_order = 2;
+    opts.bdf_config.initial_order = 1;
+    opts.max_step_retries = std::max(opts.max_step_retries, 12);
+
+    opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.enable_transient_gmin = true;
+    opts.fallback_policy.gmin_retry_threshold = std::min(opts.fallback_policy.gmin_retry_threshold, 1);
+    opts.fallback_policy.gmin_initial = std::max(opts.fallback_policy.gmin_initial, Real{1e-8});
+    opts.fallback_policy.gmin_max = std::max(opts.fallback_policy.gmin_max, Real{1e-3});
+    opts.fallback_policy.gmin_growth = std::max(opts.fallback_policy.gmin_growth, Real{10.0});
+
+    opts.stiffness_config.enable = true;
+    opts.stiffness_config.switch_integrator = true;
+    opts.stiffness_config.stiff_integrator = Integrator::BDF1;
+    opts.stiffness_config.rejection_streak_threshold = std::min(opts.stiffness_config.rejection_streak_threshold, 2);
+    opts.stiffness_config.newton_iter_threshold = std::min(opts.stiffness_config.newton_iter_threshold, 30);
+    opts.stiffness_config.newton_streak_threshold = std::min(opts.stiffness_config.newton_streak_threshold, 2);
+    opts.stiffness_config.cooldown_steps = std::max(opts.stiffness_config.cooldown_steps, 3);
+
+    return opts;
+}
+
+} // namespace
 
 // =============================================================================
 // Module Definition
@@ -1180,7 +1298,19 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("message", &HarmonicBalanceResult::message);
 
     py::class_<Simulator>(v2, "Simulator", "Runtime simulator interface")
-        .def(py::init<Circuit&, const SimulationOptions&>(),
+        .def(py::init([](Circuit& circuit, const SimulationOptions& options) {
+                SimulationOptions tuned = options;
+                apply_robust_newton_defaults(tuned.newton_options);
+                apply_robust_linear_solver_defaults(tuned.linear_solver);
+                tuned.max_step_retries = std::max(tuned.max_step_retries, 12);
+                tuned.fallback_policy.trace_retries = true;
+                tuned.fallback_policy.enable_transient_gmin = true;
+                tuned.fallback_policy.gmin_retry_threshold = std::min(tuned.fallback_policy.gmin_retry_threshold, 1);
+                tuned.fallback_policy.gmin_initial = std::max(tuned.fallback_policy.gmin_initial, Real{1e-8});
+                tuned.fallback_policy.gmin_max = std::max(tuned.fallback_policy.gmin_max, Real{1e-3});
+                tuned.fallback_policy.gmin_growth = std::max(tuned.fallback_policy.gmin_growth, Real{10.0});
+                return std::make_unique<Simulator>(circuit, tuned);
+            }),
              py::arg("circuit"), py::arg("options") = SimulationOptions(),
              py::keep_alive<1, 2>())
         .def("dc_operating_point", &Simulator::dc_operating_point,
@@ -1281,21 +1411,18 @@ void init_v2_module(py::module_& v2) {
             return std::get<3>(r);
         });
 
+    auto make_robust_transient_options = [&](Circuit& circuit, Real t_start, Real t_stop, Real dt,
+                                             const NewtonOptions& newton_opts,
+                                             const LinearSolverStackConfig& linear_solver) {
+        return build_robust_transient_options(circuit, t_start, t_stop, dt, newton_opts, linear_solver);
+    };
+
     // Transient simulation (simplified API)
-    v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
+    v2.def("run_transient", [&](Circuit& circuit, Real t_start, Real t_stop, Real dt,
                                 const Vector& x0, const NewtonOptions& newton_opts,
                                 const LinearSolverStackConfig& linear_solver) {
-        SimulationOptions opts;
-        opts.tstart = t_start;
-        opts.tstop = t_stop;
-        opts.dt = dt;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-        opts.adaptive_timestep = false;
-        opts.enable_bdf_order_control = false;
-
+        SimulationOptions opts = make_robust_transient_options(
+            circuit, t_start, t_stop, dt, newton_opts, linear_solver);
         Simulator sim(circuit, opts);
         auto result = sim.run_transient(x0);
         return std::make_tuple(result.time, result.states, result.success, result.message);
@@ -1319,24 +1446,13 @@ void init_v2_module(py::module_& v2) {
     )doc");
 
     // Convenience function with zero initial state
-    v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
+    v2.def("run_transient", [&](Circuit& circuit, Real t_start, Real t_stop, Real dt,
                                 const NewtonOptions& newton_opts,
                                 const LinearSolverStackConfig& linear_solver) {
-        Vector x0 = Vector::Zero(circuit.system_size());
-
-        SimulationOptions opts;
-        opts.tstart = t_start;
-        opts.tstop = t_stop;
-        opts.dt = dt;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-        opts.adaptive_timestep = false;
-        opts.enable_bdf_order_control = false;
-
+        SimulationOptions opts = make_robust_transient_options(
+            circuit, t_start, t_stop, dt, newton_opts, linear_solver);
         Simulator sim(circuit, opts);
-        auto result = sim.run_transient(x0);
+        auto result = sim.run_transient();
         return std::make_tuple(result.time, result.states, result.success, result.message);
      }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
          py::arg("newton_options") = NewtonOptions(),
@@ -1347,7 +1463,7 @@ void init_v2_module(py::module_& v2) {
     // Streaming transient simulation (for real-time GUI updates)
     // =========================================================================
 
-    auto run_transient_streaming_impl = [](
+    auto run_transient_streaming_impl = [&](
         Circuit& circuit,
         Real t_start,
         Real t_stop,
@@ -1360,16 +1476,8 @@ void init_v2_module(py::module_& v2) {
         py::object cancel_check,
         int emit_interval
     ) {
-        SimulationOptions opts;
-        opts.tstart = t_start;
-        opts.tstop = t_stop;
-        opts.dt = dt;
-        opts.newton_options = newton_opts;
-        opts.linear_solver = linear_solver;
-        opts.newton_options.num_nodes = circuit.num_nodes();
-        opts.newton_options.num_branches = circuit.num_branches();
-        opts.adaptive_timestep = false;
-        opts.enable_bdf_order_control = false;
+        SimulationOptions opts = make_robust_transient_options(
+            circuit, t_start, t_stop, dt, newton_opts, linear_solver);
 
         Simulator sim(circuit, opts);
 
@@ -1560,7 +1668,7 @@ void init_v2_module(py::module_& v2) {
     // Shared Memory Transient Simulation (Zero-copy real-time display)
     // =========================================================================
 
-    auto run_transient_shared_impl = [](
+    auto run_transient_shared_impl = [&](
         Circuit& circuit,
         Real t_start,
         Real t_stop,
@@ -1595,14 +1703,19 @@ void init_v2_module(py::module_& v2) {
         int gmin_fallback_count = 0;
         int dt_reduction_count = 0;
 
+        circuit.set_integration_method(Integrator::TRBDF2);
+
         Real current_dt = dt;
         circuit.set_timestep(current_dt);
 
         NewtonOptions opts = newton_opts;
+        apply_robust_newton_defaults(opts);
         opts.num_nodes = circuit.num_nodes();
         opts.num_branches = circuit.num_branches();
         NewtonRaphsonSolver<RuntimeLinearSolver> solver(opts);
-        solver.linear_solver().set_config(linear_solver);
+        LinearSolverStackConfig tuned_linear_solver = linear_solver;
+        apply_robust_linear_solver_defaults(tuned_linear_solver);
+        solver.linear_solver().set_config(tuned_linear_solver);
 
         GminConfig gmin_config;
         gmin_config.initial_gmin = 0.1;
@@ -2013,6 +2126,22 @@ void init_v2_module(py::module_& v2) {
 
     v2.def("simd_vector_width", &simd_vector_width,
            "Get SIMD vector width for current CPU level");
+
+    v2.def("backend_capabilities", []() {
+        py::dict caps;
+        caps["klu"] = true;
+#ifdef PULSIM_HAS_HYPRE
+        caps["hypre_amg"] = true;
+#else
+        caps["hypre_amg"] = false;
+#endif
+#ifdef PULSIM_HAS_SUNDIALS
+        caps["sundials"] = true;
+#else
+        caps["sundials"] = false;
+#endif
+        return caps;
+    }, "Return compiled backend capabilities (KLU/HYPRE/SUNDIALS).");
 
     // =========================================================================
     // Utility Functions

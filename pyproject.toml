@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pulsim"
-version = "0.4.0"
+version = "0.4.1"
 description = "High-performance circuit simulator for power electronics"
 readme = "README.md"
 license = {text = "MIT"}
