@@ -1,0 +1,51 @@
+{
+    "name": "RLC Step Response",
+    "description": "Underdamped RLC circuit with step input (capacitor starts at 0V)",
+    "components": [
+        {
+            "type": "voltage_source",
+            "name": "V1",
+            "npos": "in",
+            "nneg": "0",
+            "waveform": {
+                "type": "pulse",
+                "v1": 0.0,
+                "v2": 10.0,
+                "td": 0.0,
+                "tr": 1e-9,
+                "tf": 1e-9,
+                "pw": 10e-3,
+                "period": 20e-3
+            }
+        },
+        {
+            "type": "resistor",
+            "name": "R1",
+            "n1": "in",
+            "n2": "n1",
+            "value": 10
+        },
+        {
+            "type": "inductor",
+            "name": "L1",
+            "n1": "n1",
+            "n2": "out",
+            "value": "1m",
+            "ic": 0.0
+        },
+        {
+            "type": "capacitor",
+            "name": "C1",
+            "n1": "out",
+            "n2": "0",
+            "value": "10u",
+            "ic": 0.0
+        }
+    ],
+    "simulation": {
+        "type": "transient",
+        "tstop": 5e-3,
+        "dt": 1e-6,
+        "uic": true
+    }
+}

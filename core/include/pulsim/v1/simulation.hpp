@@ -5,9 +5,12 @@
 #include "pulsim/v1/high_performance.hpp"
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/integration.hpp"
+#include "pulsim/v1/extensions.hpp"
 #include "pulsim/v1/losses.hpp"
+#include "pulsim/v1/transient_services.hpp"
 #include "pulsim/simulation_control.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -98,6 +101,79 @@ struct FallbackPolicyOptions {
     Real gmin_growth = 10.0;
 };
 
+struct ModelRegularizationOptions {
+    bool enable_auto = false;
+    bool apply_only_in_recovery = true;
+    int retry_threshold = 2;
+    int max_escalations = 4;
+    Real escalation_factor = 2.0;
+
+    Real mosfet_kp_max = 8.0;
+    Real mosfet_g_off_min = 1e-7;
+    Real diode_g_on_max = 300.0;
+    Real diode_g_off_min = 1e-9;
+    Real igbt_g_on_max = 5e3;
+    Real igbt_g_off_min = 1e-9;
+    Real switch_g_on_max = 5e5;
+    Real switch_g_off_min = 1e-9;
+    Real vcswitch_g_on_max = 5e5;
+    Real vcswitch_g_off_min = 1e-9;
+};
+
+struct BackendTelemetry {
+    std::string requested_backend = "native";
+    std::string selected_backend = "native";
+    std::string solver_family = "native";
+    std::string formulation_mode = "native";
+    int function_evaluations = 0;
+    int jacobian_evaluations = 0;
+    int nonlinear_iterations = 0;
+    int nonlinear_convergence_failures = 0;
+    int error_test_failures = 0;
+    int escalation_count = 0;
+    int reinitialization_count = 0;
+    int backend_recovery_count = 0;
+    int state_space_primary_steps = 0;
+    int dae_fallback_steps = 0;
+    int segment_non_admissible_steps = 0;
+    int segment_model_cache_hits = 0;
+    int segment_model_cache_misses = 0;
+    int linear_factor_cache_hits = 0;
+    int linear_factor_cache_misses = 0;
+    int linear_factor_cache_invalidations = 0;
+    std::string linear_factor_cache_last_invalidation_reason;
+    int reserved_output_samples = 0;
+    int time_series_reallocations = 0;
+    int state_series_reallocations = 0;
+    int virtual_channel_reallocations = 0;
+    int equation_assemble_system_calls = 0;
+    int equation_assemble_residual_calls = 0;
+    double equation_assemble_system_time_seconds = 0.0;
+    double equation_assemble_residual_time_seconds = 0.0;
+    int model_regularization_events = 0;
+    int model_regularization_last_changed = 0;
+    double model_regularization_last_intensity = 0.0;
+    std::string failure_reason;
+};
+
+enum class SimulationDiagnosticCode {
+    None,
+    DcOperatingPointFailure,
+    InvalidInitialState,
+    InvalidTimeWindow,
+    InvalidTimestep,
+    UserStopRequested,
+    TransientStepFailure,
+    PeriodicInvalidPeriod,
+    PeriodicInvalidInitialState,
+    PeriodicCycleFailure,
+    PeriodicNoConvergence,
+    HarmonicInvalidPeriod,
+    HarmonicInvalidInitialState,
+    HarmonicDifferentiationFailure,
+    HarmonicSolverFailure
+};
+
 struct PeriodicSteadyStateOptions {
     Real period = 0.0;
     int max_iterations = 20;
@@ -167,6 +243,10 @@ struct SimulationOptions {
 
     // Adaptive timestep + LTE
     bool adaptive_timestep = true;
+    // Canonical timestep mode selection. When explicitly set through runtime/YAML
+    // surfaces, this field defines fixed vs variable semantics.
+    TransientStepMode step_mode = TransientStepMode::Variable;
+    bool step_mode_explicit = false;
     AdvancedTimestepConfig timestep_config = AdvancedTimestepConfig::for_power_electronics();
     RichardsonLTEConfig lte_config = RichardsonLTEConfig::defaults();
 
@@ -197,6 +277,7 @@ struct SimulationOptions {
     GminConfig gmin_fallback{};
     int max_step_retries = 6;
     FallbackPolicyOptions fallback_policy{};
+    ModelRegularizationOptions model_regularization{};
 };
 
 struct SimulationResult {
@@ -209,6 +290,7 @@ struct SimulationResult {
 
     bool success = true;
     SolverStatus final_status = SolverStatus::Success;
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     std::string message;
 
     int total_steps = 0;
@@ -218,6 +300,7 @@ struct SimulationResult {
 
     LinearSolverTelemetry linear_solver_telemetry;
     std::vector<FallbackTraceEntry> fallback_trace;
+    BackendTelemetry backend_telemetry;
 
     SystemLossSummary loss_summary;
     ThermalSummary thermal_summary;
@@ -227,6 +310,7 @@ struct PeriodicSteadyStateResult {
     bool success = false;
     int iterations = 0;
     Real residual_norm = 0.0;
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     Vector steady_state;
     SimulationResult last_cycle;
     std::string message;
@@ -236,6 +320,7 @@ struct HarmonicBalanceResult {
     bool success = false;
     int iterations = 0;
     Real residual_norm = 0.0;
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     Vector solution;
     std::vector<Real> sample_times;
     std::string message;
@@ -288,21 +373,17 @@ public:
     // Accessors
     [[nodiscard]] const SimulationOptions& options() const { return options_; }
     void set_options(const SimulationOptions& options) { options_ = options; }
+    [[nodiscard]] const TransientServiceRegistry& transient_services() const {
+        return transient_services_;
+    }
+    [[nodiscard]] const ExtensionRegistry& extension_registry() const {
+        return kernel_extension_registry();
+    }
 
 private:
-    struct DeviceLossState {
-        LossAccumulator accumulator;
-        LossBreakdown switching_energy{};  // Use fields as energy buckets (J)
-        Real peak_power = 0.0;
-    };
-
-    struct DeviceThermalState {
-        bool enabled = false;
-        ThermalDeviceConfig config{};
-        Real temperature = 25.0;
-        Real peak_temperature = 25.0;
-        Real sum_temperature = 0.0;
-        int samples = 0;
+    enum class StepSolvePath {
+        SegmentPrimary,
+        DaeFallback
     };
 
     struct SwitchMonitor {
@@ -313,6 +394,12 @@ private:
         Real v_threshold = 0.0;
         bool was_on = false;
     };
+
+    [[nodiscard]] SimulationResult run_transient_native_impl(
+        const Vector& x0,
+        SimulationCallback callback,
+        EventCallback event_callback,
+        SimulationControl* control);
 
     NewtonResult solve_step(Real t_next, Real dt, const Vector& x_prev);
     NewtonResult solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev);
@@ -333,7 +420,6 @@ private:
     void initialize_loss_tracking();
     void finalize_loss_summary(SimulationResult& result);
     void initialize_thermal_tracking();
-    [[nodiscard]] Real thermal_scale_factor(std::size_t device_index) const;
     void update_thermal_state(Real dt);
     void finalize_thermal_summary(SimulationResult& result);
     void record_fallback_event(SimulationResult& result,
@@ -344,25 +430,30 @@ private:
                                FallbackReasonCode reason,
                                SolverStatus solver_status,
                                const std::string& action);
-    void apply_transient_gmin(SparseMatrix& J, Vector& f, const Vector& x) const;
-    void apply_transient_gmin_residual(Vector& f, const Vector& x) const;
 
     Circuit& circuit_;
     SimulationOptions options_;
     NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
 
     std::vector<SwitchMonitor> switch_monitors_;
-    std::vector<DeviceLossState> loss_states_;
-    std::vector<std::optional<SwitchingEnergy>> switching_energy_;
-    std::vector<bool> diode_conducting_;
     std::unordered_map<std::string, std::size_t> device_index_;
-    std::vector<DeviceThermalState> thermal_states_;
-    std::vector<Real> last_device_power_;
     Real transient_gmin_ = 0.0;
 
     AdvancedTimestepController timestep_controller_;
     AdaptiveLTEEstimator lte_estimator_;
     BDFOrderController bdf_controller_;
+    TransientServiceRegistry transient_services_;
+    StepSolvePath last_step_solve_path_ = StepSolvePath::DaeFallback;
+    std::string last_step_solve_reason_ = "init";
+    bool last_step_segment_cache_hit_ = false;
+    bool last_step_linear_factor_cache_hit_ = false;
+    bool last_step_linear_factor_cache_miss_ = false;
+    std::string last_step_linear_factor_cache_invalidation_reason_;
+    bool segment_primary_disabled_for_run_ = false;
+    std::uint64_t direct_assemble_system_calls_ = 0;
+    std::uint64_t direct_assemble_residual_calls_ = 0;
+    double direct_assemble_system_time_seconds_ = 0.0;
+    double direct_assemble_residual_time_seconds_ = 0.0;
 };
 
 }  // namespace pulsim::v1

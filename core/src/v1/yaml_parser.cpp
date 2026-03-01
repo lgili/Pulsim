@@ -9,6 +9,7 @@
 #include <functional>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -24,6 +25,11 @@ constexpr const char* kDiagInvalidPinCount = "PULSIM_YAML_E_PIN_COUNT";
 constexpr const char* kDiagInvalidParameter = "PULSIM_YAML_E_PARAM_INVALID";
 constexpr const char* kDiagVirtualComponent = "PULSIM_YAML_W_COMPONENT_VIRTUAL";
 constexpr const char* kDiagSurrogateComponent = "PULSIM_YAML_W_COMPONENT_SURROGATE";
+constexpr const char* kDiagLegacyTransientBackend = "PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND";
+constexpr const char* kDiagInvalidStepMode = "PULSIM_YAML_E_STEP_MODE_INVALID";
+constexpr const char* kDiagUnknownField = "PULSIM_YAML_E_UNKNOWN_FIELD";
+constexpr const char* kDiagTypeMismatch = "PULSIM_YAML_E_TYPE_MISMATCH";
+constexpr const char* kDiagDeprecatedField = "PULSIM_YAML_W_DEPRECATED_FIELD";
 
 Real parse_real_string(const std::string& raw);
 
@@ -58,6 +64,151 @@ void push_error(std::vector<std::string>& errors, const std::string& code, const
 
 void push_warning(std::vector<std::string>& warnings, const std::string& code, const std::string& message) {
     warnings.push_back(with_diag_code(code, message));
+}
+
+std::string yaml_node_class(const YAML::Node& node) {
+    if (!node || node.IsNull()) {
+        return "null";
+    }
+    if (node.IsScalar()) {
+        return "scalar";
+    }
+    if (node.IsSequence()) {
+        return "sequence";
+    }
+    if (node.IsMap()) {
+        return "map";
+    }
+    return "unknown";
+}
+
+void push_type_mismatch_error(std::vector<std::string>& errors,
+                              const std::string& path,
+                              const std::string& expected,
+                              const YAML::Node& received) {
+    push_error(
+        errors,
+        kDiagTypeMismatch,
+        "Type mismatch at '" + path + "' (expected " + expected +
+            ", got " + yaml_node_class(received) + ")");
+}
+
+std::optional<bool> parse_bool_scalar(const YAML::Node& node,
+                                      const std::string& path,
+                                      std::vector<std::string>& errors) {
+    if (!node) {
+        return std::nullopt;
+    }
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, path, "boolean", node);
+        return std::nullopt;
+    }
+    try {
+        return node.as<bool>();
+    } catch (...) {
+        push_type_mismatch_error(errors, path, "boolean", node);
+        return std::nullopt;
+    }
+}
+
+std::optional<int> parse_int_scalar(const YAML::Node& node,
+                                    const std::string& path,
+                                    std::vector<std::string>& errors) {
+    if (!node) {
+        return std::nullopt;
+    }
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, path, "integer", node);
+        return std::nullopt;
+    }
+    try {
+        return node.as<int>();
+    } catch (...) {
+        push_type_mismatch_error(errors, path, "integer", node);
+        return std::nullopt;
+    }
+}
+
+std::optional<std::string> parse_string_scalar(const YAML::Node& node,
+                                               const std::string& path,
+                                               std::vector<std::string>& errors) {
+    if (!node) {
+        return std::nullopt;
+    }
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, path, "string", node);
+        return std::nullopt;
+    }
+    try {
+        return node.as<std::string>();
+    } catch (...) {
+        push_type_mismatch_error(errors, path, "string", node);
+        return std::nullopt;
+    }
+}
+
+void push_deprecated_field_migration_warning(std::vector<std::string>& warnings,
+                                             const std::string& key_path,
+                                             const std::string& replacement) {
+    push_warning(
+        warnings,
+        kDiagDeprecatedField,
+        "Deprecated field '" + key_path + "' remains accepted in schema v1 migration window; use '" +
+            replacement + "' instead.");
+}
+
+void apply_mode_derived_defaults(SimulationOptions& options,
+                                 TransientStepMode mode,
+                                 bool dt_min_explicit,
+                                 bool dt_max_explicit) {
+    options.step_mode = mode;
+    options.step_mode_explicit = true;
+    options.adaptive_timestep = (mode == TransientStepMode::Variable);
+
+    // Deterministic robust defaults shared by canonical modes.
+    options.integrator = Integrator::TRBDF2;
+    options.stiffness_config.enable = true;
+    options.stiffness_config.switch_integrator = true;
+    options.stiffness_config.stiff_integrator = Integrator::BDF1;
+    options.max_step_retries = std::max(options.max_step_retries, 6);
+
+    if (!dt_min_explicit) {
+        options.dt_min = std::max<Real>(1e-12, options.dt * 1e-3);
+    }
+    if (!dt_max_explicit) {
+        options.dt_max = std::max<Real>(options.dt * 20.0, options.dt);
+    }
+
+    options.timestep_config = AdvancedTimestepConfig::for_power_electronics();
+    options.timestep_config.dt_initial = std::max<Real>(options.dt, 1e-18);
+    options.timestep_config.dt_min = std::max<Real>(options.dt_min, 1e-12);
+    options.timestep_config.dt_max = std::max<Real>(options.dt_max, options.timestep_config.dt_min);
+
+    if (mode == TransientStepMode::Fixed) {
+        options.enable_bdf_order_control = false;
+    } else {
+        options.enable_bdf_order_control = true;
+        options.bdf_config.min_order = 1;
+        options.bdf_config.max_order = 2;
+        options.bdf_config.initial_order = 1;
+        options.lte_config = RichardsonLTEConfig::defaults();
+    }
+}
+
+void enforce_mode_semantics(SimulationOptions& options) {
+    if (!options.step_mode_explicit) {
+        return;
+    }
+    options.adaptive_timestep = (options.step_mode == TransientStepMode::Variable);
+}
+
+void push_legacy_backend_migration_error(std::vector<std::string>& errors, const std::string& key_path) {
+    push_error(
+        errors,
+        kDiagLegacyTransientBackend,
+        "Removed transient backend key '" + key_path +
+            "' is unsupported in strict mode. Migrate to 'simulation.step_mode: fixed|variable' "
+            "with the native core.");
 }
 
 const std::unordered_map<std::string, std::string>& component_alias_map() {
@@ -288,7 +439,9 @@ void validate_keys(const YAML::Node& node,
     for (const auto& it : node) {
         const std::string key = it.first.as<std::string>();
         if (!is_known_key(key, allowed)) {
-            errors.push_back("Unknown field '" + key + "' in " + context);
+            push_error(errors,
+                       kDiagUnknownField,
+                       "Unknown field at '" + context + "." + key + "'");
         }
     }
 }
@@ -347,18 +500,20 @@ Real parse_real_string(const std::string& raw) {
 Real parse_real(const YAML::Node& node,
                 const std::string& context,
                 std::vector<std::string>& errors) {
-    if (!node) {
-        errors.push_back("Missing value in " + context);
+    if (!node || node.IsNull()) {
+        return 0.0;
+    }
+
+    if (!node.IsScalar()) {
+        push_type_mismatch_error(errors, context, "number", node);
         return 0.0;
     }
 
     try {
-        if (node.IsScalar()) {
-            const std::string raw = node.as<std::string>();
-            return parse_real_string(raw);
-        }
+        const std::string raw = node.as<std::string>();
+        return parse_real_string(raw);
     } catch (...) {
-        errors.push_back("Invalid numeric value in " + context);
+        push_type_mismatch_error(errors, context, "number", node);
     }
 
     return 0.0;
@@ -369,7 +524,11 @@ std::vector<std::string> parse_nodes(const YAML::Node& node,
                                      std::vector<std::string>& errors) {
     std::vector<std::string> nodes;
     if (!node || !node.IsSequence()) {
-        errors.push_back("Missing or invalid nodes in " + context);
+        if (!node) {
+            push_error(errors, kDiagInvalidPinCount, "Missing nodes in component '" + context + "'");
+        } else {
+            push_type_mismatch_error(errors, context + ".nodes", "sequence", node);
+        }
         return nodes;
     }
 
@@ -462,36 +621,244 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         return;
     }
 
-    std::string schema = root["schema"].as<std::string>();
-    if (schema != kSchemaId) {
-        errors_.push_back("Unsupported schema: " + schema);
+    const std::optional<std::string> schema = parse_string_scalar(root["schema"], "root.schema", errors_);
+    if (!schema) {
+        return;
+    }
+    if (*schema != kSchemaId) {
+        errors_.push_back("Unsupported schema: " + *schema);
         return;
     }
 
-    int version = root["version"].as<int>();
-    if (version != 1) {
-        errors_.push_back("Unsupported schema version: " + std::to_string(version));
+    const std::optional<int> version = parse_int_scalar(root["version"], "root.version", errors_);
+    if (!version) {
+        return;
+    }
+    const int schema_version = *version;
+    if (schema_version != 1) {
+        errors_.push_back("Unsupported schema version: " + std::to_string(schema_version));
         return;
     }
 
     // Simulation options
     if (root["simulation"]) {
         YAML::Node sim = root["simulation"];
-          validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "adaptive_timestep",
-                        "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
-                        "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
-                        "max_step_retries", "fallback"},
+        validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "step_mode", "adaptive_timestep",
+                            "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
+                            "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
+                        "max_step_retries", "fallback", "model_regularization", "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
+
+        YAML::Node advanced = sim["advanced"];
+        if (advanced) {
+            validate_keys(advanced, {"adaptive_timestep", "integrator", "integration", "newton", "timestep",
+                                     "lte", "bdf", "solver", "fallback", "backend", "sundials"},
+                          "simulation.advanced", errors_, options_.strict);
+        }
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);
         if (sim["tstop"]) options.tstop = parse_real(sim["tstop"], "simulation.tstop", errors_);
         if (sim["dt"]) options.dt = parse_real(sim["dt"], "simulation.dt", errors_);
+        const bool dt_min_explicit = static_cast<bool>(sim["dt_min"]);
+        const bool dt_max_explicit = static_cast<bool>(sim["dt_max"]);
         if (sim["dt_min"]) options.dt_min = parse_real(sim["dt_min"], "simulation.dt_min", errors_);
         if (sim["dt_max"]) options.dt_max = parse_real(sim["dt_max"], "simulation.dt_max", errors_);
-        if (sim["adaptive_timestep"]) options.adaptive_timestep = sim["adaptive_timestep"].as<bool>();
-        if (sim["enable_events"]) options.enable_events = sim["enable_events"].as<bool>();
-        if (sim["enable_losses"]) options.enable_losses = sim["enable_losses"].as<bool>();
-        if (sim["max_step_retries"]) options.max_step_retries = sim["max_step_retries"].as<int>();
+
+        if (sim["step_mode"]) {
+            try {
+                const std::optional<std::string> step_mode_raw =
+                    parse_string_scalar(sim["step_mode"], "simulation.step_mode", errors_);
+                if (!step_mode_raw) {
+                    throw std::runtime_error("invalid_step_mode_type");
+                }
+                const std::string mode = normalize_key(*step_mode_raw);
+                if (mode == "fixed") {
+                    apply_mode_derived_defaults(
+                        options, TransientStepMode::Fixed, dt_min_explicit, dt_max_explicit);
+                } else if (mode == "variable" || mode == "adaptive") {
+                    apply_mode_derived_defaults(
+                        options, TransientStepMode::Variable, dt_min_explicit, dt_max_explicit);
+                } else {
+                    push_error(errors_,
+                               kDiagInvalidStepMode,
+                               "Invalid simulation.step_mode: " + sim["step_mode"].as<std::string>() +
+                                   " (expected 'fixed' or 'variable')");
+                }
+            } catch (...) {
+                if (std::none_of(errors_.begin(), errors_.end(), [](const std::string& err) {
+                        return err.find("simulation.step_mode") != std::string::npos &&
+                               err.find(kDiagTypeMismatch) != std::string::npos;
+                    })) {
+                    push_error(errors_,
+                               kDiagInvalidStepMode,
+                               "Invalid simulation.step_mode (expected 'fixed' or 'variable')");
+                }
+            }
+        }
+
+        auto expert_node = [&](const char* key) -> YAML::Node {
+            if (advanced && advanced[key]) {
+                return advanced[key];
+            }
+            return sim[key];
+        };
+
+        YAML::Node adaptive_timestep = expert_node("adaptive_timestep");
+        if (adaptive_timestep) {
+            const std::string adaptive_path =
+                (advanced && advanced["adaptive_timestep"])
+                    ? "simulation.advanced.adaptive_timestep"
+                    : "simulation.adaptive_timestep";
+            if (!sim["step_mode"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    adaptive_path,
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (const auto adaptive = parse_bool_scalar(adaptive_timestep, adaptive_path, errors_)) {
+                options.adaptive_timestep = *adaptive;
+            }
+        }
+        if (sim["enable_events"]) {
+            if (const auto value = parse_bool_scalar(sim["enable_events"], "simulation.enable_events", errors_)) {
+                options.enable_events = *value;
+            }
+        }
+        if (sim["enable_losses"]) {
+            if (const auto value = parse_bool_scalar(sim["enable_losses"], "simulation.enable_losses", errors_)) {
+                options.enable_losses = *value;
+            }
+        }
+        if (sim["max_step_retries"]) {
+            if (const auto value = parse_int_scalar(sim["max_step_retries"], "simulation.max_step_retries", errors_)) {
+                options.max_step_retries = *value;
+            }
+        }
+
+        if (options_.strict) {
+            if (sim["backend"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.backend");
+            }
+            if (sim["sundials"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.sundials");
+            }
+            if (advanced && advanced["backend"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.advanced.backend");
+            }
+            if (advanced && advanced["sundials"]) {
+                push_legacy_backend_migration_error(errors_, "simulation.advanced.sundials");
+            }
+            if (sim["fallback"]) {
+                const YAML::Node fallback = sim["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.enable_backend_escalation");
+                }
+                if (fallback["backend_escalation_threshold"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.backend_escalation_threshold");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.enable_native_reentry");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.fallback.sundials_recovery_window");
+                }
+            }
+            if (advanced && advanced["fallback"]) {
+                const YAML::Node fallback = advanced["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.enable_backend_escalation");
+                }
+                if (fallback["backend_escalation_threshold"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.backend_escalation_threshold");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.enable_native_reentry");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.sundials_recovery_window");
+                }
+            }
+        } else {
+            if (sim["backend"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.backend",
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (sim["sundials"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.sundials",
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (advanced && advanced["backend"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.advanced.backend",
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (advanced && advanced["sundials"]) {
+                push_deprecated_field_migration_warning(
+                    warnings_,
+                    "simulation.advanced.sundials",
+                    "simulation.step_mode: fixed|variable");
+            }
+            if (sim["fallback"]) {
+                const YAML::Node fallback = sim["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.enable_backend_escalation",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["backend_escalation_threshold"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.backend_escalation_threshold",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.enable_native_reentry",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.fallback.sundials_recovery_window",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+            }
+            if (advanced && advanced["fallback"]) {
+                const YAML::Node fallback = advanced["fallback"];
+                if (fallback["enable_backend_escalation"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.enable_backend_escalation",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["backend_escalation_threshold"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.backend_escalation_threshold",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["enable_native_reentry"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.enable_native_reentry",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+                if (fallback["sundials_recovery_window"]) {
+                    push_deprecated_field_migration_warning(
+                        warnings_,
+                        "simulation.advanced.fallback.sundials_recovery_window",
+                        "simulation.fallback trace_retries/gmin_*");
+                }
+            }
+        }
+
         if (sim["thermal"]) {
             YAML::Node thermal = sim["thermal"];
             validate_keys(thermal, {"enabled", "ambient", "policy", "default_rth", "default_cth"},
@@ -513,12 +880,16 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 }
             }
         }
-        if (sim["fallback"]) {
-            YAML::Node fallback = sim["fallback"];
+
+        YAML::Node fallback_root = expert_node("fallback");
+        if (fallback_root) {
+            YAML::Node fallback = fallback_root;
             validate_keys(fallback, {"trace_retries", "enable_transient_gmin",
                                      "gmin_retry_threshold", "gmin_initial",
-                                     "gmin_max", "gmin_growth"},
-                          "simulation.fallback", errors_, options_.strict);
+                                     "gmin_max", "gmin_growth",
+                                     "enable_backend_escalation", "backend_escalation_threshold",
+                                     "enable_native_reentry", "sundials_recovery_window"},
+                          "simulation.advanced.fallback", errors_, options_.strict);
             if (fallback["trace_retries"]) {
                 options.fallback_policy.trace_retries = fallback["trace_retries"].as<bool>();
             }
@@ -539,7 +910,82 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        YAML::Node integrator_node = sim["integrator"] ? sim["integrator"] : sim["integration"];
+        if (sim["model_regularization"]) {
+            YAML::Node reg = sim["model_regularization"];
+            validate_keys(reg,
+                          {"enable_auto", "apply_only_in_recovery", "retry_threshold",
+                           "max_escalations", "escalation_factor", "mosfet_kp_max",
+                           "mosfet_g_off_min", "diode_g_on_max", "diode_g_off_min",
+                           "igbt_g_on_max", "igbt_g_off_min", "switch_g_on_max",
+                           "switch_g_off_min", "vcswitch_g_on_max", "vcswitch_g_off_min"},
+                          "simulation.model_regularization", errors_, options_.strict);
+
+            if (const auto value = parse_bool_scalar(
+                    reg["enable_auto"], "simulation.model_regularization.enable_auto", errors_)) {
+                options.model_regularization.enable_auto = *value;
+            }
+            if (const auto value = parse_bool_scalar(
+                    reg["apply_only_in_recovery"],
+                    "simulation.model_regularization.apply_only_in_recovery",
+                    errors_)) {
+                options.model_regularization.apply_only_in_recovery = *value;
+            }
+            if (const auto value = parse_int_scalar(
+                    reg["retry_threshold"], "simulation.model_regularization.retry_threshold", errors_)) {
+                if (*value < 1) {
+                    push_error(errors_,
+                               kDiagInvalidParameter,
+                               "simulation.model_regularization.retry_threshold must be >= 1");
+                } else {
+                    options.model_regularization.retry_threshold = *value;
+                }
+            }
+            if (const auto value = parse_int_scalar(
+                    reg["max_escalations"], "simulation.model_regularization.max_escalations", errors_)) {
+                if (*value < 0) {
+                    push_error(errors_,
+                               kDiagInvalidParameter,
+                               "simulation.model_regularization.max_escalations must be >= 0");
+                } else {
+                    options.model_regularization.max_escalations = *value;
+                }
+            }
+
+            auto parse_positive_real = [&](const char* key,
+                                           Real& target,
+                                           bool allow_zero = false) {
+                if (!reg[key]) {
+                    return;
+                }
+                const std::string path = std::string("simulation.model_regularization.") + key;
+                const Real value = parse_real(reg[key], path, errors_);
+                const bool valid = allow_zero ? value >= 0.0 : value > 0.0;
+                if (!std::isfinite(value) || !valid) {
+                    push_error(errors_,
+                               kDiagInvalidParameter,
+                               path + (allow_zero ? " must be >= 0" : " must be > 0"));
+                    return;
+                }
+                target = value;
+            };
+
+            parse_positive_real("escalation_factor", options.model_regularization.escalation_factor);
+            parse_positive_real("mosfet_kp_max", options.model_regularization.mosfet_kp_max);
+            parse_positive_real("mosfet_g_off_min", options.model_regularization.mosfet_g_off_min, true);
+            parse_positive_real("diode_g_on_max", options.model_regularization.diode_g_on_max);
+            parse_positive_real("diode_g_off_min", options.model_regularization.diode_g_off_min, true);
+            parse_positive_real("igbt_g_on_max", options.model_regularization.igbt_g_on_max);
+            parse_positive_real("igbt_g_off_min", options.model_regularization.igbt_g_off_min, true);
+            parse_positive_real("switch_g_on_max", options.model_regularization.switch_g_on_max);
+            parse_positive_real("switch_g_off_min", options.model_regularization.switch_g_off_min, true);
+            parse_positive_real("vcswitch_g_on_max", options.model_regularization.vcswitch_g_on_max);
+            parse_positive_real("vcswitch_g_off_min", options.model_regularization.vcswitch_g_off_min, true);
+        }
+
+        YAML::Node integrator_node = expert_node("integrator");
+        if (!integrator_node) {
+            integrator_node = expert_node("integration");
+        }
         if (integrator_node) {
             std::string method = normalize_key(integrator_node.as<std::string>());
             if (method == "trapezoidal" || method == "tr") {
@@ -567,8 +1013,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        if (sim["newton"]) {
-            YAML::Node n = sim["newton"];
+        YAML::Node newton = expert_node("newton");
+        if (newton) {
+            YAML::Node n = newton;
             validate_keys(n, {"max_iterations", "initial_damping", "min_damping", "auto_damping",
                               "enable_anderson", "anderson_depth", "anderson_beta",
                               "enable_broyden", "broyden_max_size", "enable_newton_krylov",
@@ -599,8 +1046,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        if (sim["timestep"]) {
-            YAML::Node t = sim["timestep"];
+        YAML::Node timestep = expert_node("timestep");
+        if (timestep) {
+            YAML::Node t = timestep;
             validate_keys(t, {"preset", "dt_min", "dt_max", "error_tolerance", "target_newton_iterations"},
                           "simulation.timestep", errors_, options_.strict);
             auto apply_base = [&](const TimestepConfig& base) {
@@ -631,8 +1079,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (t["target_newton_iterations"]) options.timestep_config.target_newton_iterations = t["target_newton_iterations"].as<int>();
         }
 
-        if (sim["lte"]) {
-            YAML::Node l = sim["lte"];
+        YAML::Node lte = expert_node("lte");
+        if (lte) {
+            YAML::Node l = lte;
             validate_keys(l, {"method", "voltage_tolerance", "current_tolerance"},
                           "simulation.lte", errors_, options_.strict);
             if (l["method"]) {
@@ -644,8 +1093,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (l["current_tolerance"]) options.lte_config.current_tolerance = parse_real(l["current_tolerance"], "lte.current_tolerance", errors_);
         }
 
-        if (sim["bdf"]) {
-            YAML::Node b = sim["bdf"];
+        YAML::Node bdf = expert_node("bdf");
+        if (bdf) {
+            YAML::Node b = bdf;
             validate_keys(b, {"enable", "min_order", "max_order", "initial_order"},
                           "simulation.bdf", errors_, options_.strict);
             if (b["enable"]) options.enable_bdf_order_control = b["enable"].as<bool>();
@@ -654,8 +1104,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (b["initial_order"]) options.bdf_config.initial_order = b["initial_order"].as<int>();
         }
 
-        if (sim["solver"]) {
-            YAML::Node s = sim["solver"];
+        YAML::Node solver = expert_node("solver");
+        if (solver) {
+            YAML::Node s = solver;
             validate_keys(s, {"linear", "iterative", "nonlinear", "order", "fallback_order",
                               "allow_fallback", "auto_select", "size_threshold", "nnz_threshold",
                               "diag_min_threshold", "preconditioner", "ilut_drop_tolerance",
@@ -826,6 +1277,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 }
             }
         }
+
+        enforce_mode_semantics(options);
 
         if (sim["shooting"]) {
             YAML::Node sh = sim["shooting"];

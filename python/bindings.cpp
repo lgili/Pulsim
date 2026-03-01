@@ -713,6 +713,10 @@ void init_v2_module(py::module_& v2) {
              py::arg("diode_g_off_min") = 1e-9,
              py::arg("igbt_g_on_max") = 5e3,
              py::arg("igbt_g_off_min") = 1e-9,
+             py::arg("switch_g_on_max") = 5e5,
+             py::arg("switch_g_off_min") = 1e-9,
+             py::arg("vcswitch_g_on_max") = 5e5,
+             py::arg("vcswitch_g_off_min") = 1e-9,
              "Clamp overly-ideal nonlinear parameters for convergence fallback")
         .def("set_switch_state", &Circuit::set_switch_state,
              py::arg("name"), py::arg("closed"),
@@ -1127,10 +1131,18 @@ void init_v2_module(py::module_& v2) {
         "Linear solver runtime telemetry")
         .def(py::init<>())
         .def_readwrite("total_solve_calls", &LinearSolverTelemetry::total_solve_calls)
+        .def_readwrite("total_analyze_calls", &LinearSolverTelemetry::total_analyze_calls)
+        .def_readwrite("total_factorize_calls", &LinearSolverTelemetry::total_factorize_calls)
         .def_readwrite("total_iterations", &LinearSolverTelemetry::total_iterations)
         .def_readwrite("total_fallbacks", &LinearSolverTelemetry::total_fallbacks)
         .def_readwrite("last_iterations", &LinearSolverTelemetry::last_iterations)
         .def_readwrite("last_error", &LinearSolverTelemetry::last_error)
+        .def_readwrite("total_analyze_time_seconds", &LinearSolverTelemetry::total_analyze_time_seconds)
+        .def_readwrite("total_factorize_time_seconds", &LinearSolverTelemetry::total_factorize_time_seconds)
+        .def_readwrite("total_solve_time_seconds", &LinearSolverTelemetry::total_solve_time_seconds)
+        .def_readwrite("last_analyze_time_seconds", &LinearSolverTelemetry::last_analyze_time_seconds)
+        .def_readwrite("last_factorize_time_seconds", &LinearSolverTelemetry::last_factorize_time_seconds)
+        .def_readwrite("last_solve_time_seconds", &LinearSolverTelemetry::last_solve_time_seconds)
         .def_readwrite("last_solver", &LinearSolverTelemetry::last_solver)
         .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner);
 
@@ -1157,6 +1169,31 @@ void init_v2_module(py::module_& v2) {
         .value("LossWithTemperatureScaling", ThermalCouplingPolicy::LossWithTemperatureScaling)
         .export_values();
 
+    py::enum_<TransientStepMode>(v2, "StepMode",
+        "Canonical transient timestep mode")
+        .value("Fixed", TransientStepMode::Fixed)
+        .value("Variable", TransientStepMode::Variable)
+        .export_values();
+
+    py::enum_<SimulationDiagnosticCode>(v2, "SimulationDiagnosticCode",
+        "Typed simulation diagnostic code")
+        .value("None", SimulationDiagnosticCode::None)
+        .value("DcOperatingPointFailure", SimulationDiagnosticCode::DcOperatingPointFailure)
+        .value("InvalidInitialState", SimulationDiagnosticCode::InvalidInitialState)
+        .value("InvalidTimeWindow", SimulationDiagnosticCode::InvalidTimeWindow)
+        .value("InvalidTimestep", SimulationDiagnosticCode::InvalidTimestep)
+        .value("UserStopRequested", SimulationDiagnosticCode::UserStopRequested)
+        .value("TransientStepFailure", SimulationDiagnosticCode::TransientStepFailure)
+        .value("PeriodicInvalidPeriod", SimulationDiagnosticCode::PeriodicInvalidPeriod)
+        .value("PeriodicInvalidInitialState", SimulationDiagnosticCode::PeriodicInvalidInitialState)
+        .value("PeriodicCycleFailure", SimulationDiagnosticCode::PeriodicCycleFailure)
+        .value("PeriodicNoConvergence", SimulationDiagnosticCode::PeriodicNoConvergence)
+        .value("HarmonicInvalidPeriod", SimulationDiagnosticCode::HarmonicInvalidPeriod)
+        .value("HarmonicInvalidInitialState", SimulationDiagnosticCode::HarmonicInvalidInitialState)
+        .value("HarmonicDifferentiationFailure", SimulationDiagnosticCode::HarmonicDifferentiationFailure)
+        .value("HarmonicSolverFailure", SimulationDiagnosticCode::HarmonicSolverFailure)
+        .export_values();
+
     py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
         .def(py::init<>())
         .def_readwrite("time", &SimulationEvent::time)
@@ -1175,6 +1212,64 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("gmin_initial", &FallbackPolicyOptions::gmin_initial)
         .def_readwrite("gmin_max", &FallbackPolicyOptions::gmin_max)
         .def_readwrite("gmin_growth", &FallbackPolicyOptions::gmin_growth);
+
+    py::class_<ModelRegularizationOptions>(v2, "ModelRegularizationOptions",
+        "Bounded numerical model regularization policy for nonlinear/switching devices")
+        .def(py::init<>())
+        .def_readwrite("enable_auto", &ModelRegularizationOptions::enable_auto)
+        .def_readwrite("apply_only_in_recovery", &ModelRegularizationOptions::apply_only_in_recovery)
+        .def_readwrite("retry_threshold", &ModelRegularizationOptions::retry_threshold)
+        .def_readwrite("max_escalations", &ModelRegularizationOptions::max_escalations)
+        .def_readwrite("escalation_factor", &ModelRegularizationOptions::escalation_factor)
+        .def_readwrite("mosfet_kp_max", &ModelRegularizationOptions::mosfet_kp_max)
+        .def_readwrite("mosfet_g_off_min", &ModelRegularizationOptions::mosfet_g_off_min)
+        .def_readwrite("diode_g_on_max", &ModelRegularizationOptions::diode_g_on_max)
+        .def_readwrite("diode_g_off_min", &ModelRegularizationOptions::diode_g_off_min)
+        .def_readwrite("igbt_g_on_max", &ModelRegularizationOptions::igbt_g_on_max)
+        .def_readwrite("igbt_g_off_min", &ModelRegularizationOptions::igbt_g_off_min)
+        .def_readwrite("switch_g_on_max", &ModelRegularizationOptions::switch_g_on_max)
+        .def_readwrite("switch_g_off_min", &ModelRegularizationOptions::switch_g_off_min)
+        .def_readwrite("vcswitch_g_on_max", &ModelRegularizationOptions::vcswitch_g_on_max)
+        .def_readwrite("vcswitch_g_off_min", &ModelRegularizationOptions::vcswitch_g_off_min);
+
+    py::class_<BackendTelemetry>(v2, "BackendTelemetry",
+        "Backend selection and escalation telemetry")
+        .def(py::init<>())
+        .def_readwrite("requested_backend", &BackendTelemetry::requested_backend)
+        .def_readwrite("selected_backend", &BackendTelemetry::selected_backend)
+        .def_readwrite("solver_family", &BackendTelemetry::solver_family)
+        .def_readwrite("formulation_mode", &BackendTelemetry::formulation_mode)
+        .def_readwrite("function_evaluations", &BackendTelemetry::function_evaluations)
+        .def_readwrite("jacobian_evaluations", &BackendTelemetry::jacobian_evaluations)
+        .def_readwrite("nonlinear_iterations", &BackendTelemetry::nonlinear_iterations)
+        .def_readwrite("nonlinear_convergence_failures", &BackendTelemetry::nonlinear_convergence_failures)
+        .def_readwrite("error_test_failures", &BackendTelemetry::error_test_failures)
+        .def_readwrite("escalation_count", &BackendTelemetry::escalation_count)
+        .def_readwrite("reinitialization_count", &BackendTelemetry::reinitialization_count)
+        .def_readwrite("backend_recovery_count", &BackendTelemetry::backend_recovery_count)
+        .def_readwrite("state_space_primary_steps", &BackendTelemetry::state_space_primary_steps)
+        .def_readwrite("dae_fallback_steps", &BackendTelemetry::dae_fallback_steps)
+        .def_readwrite("segment_non_admissible_steps", &BackendTelemetry::segment_non_admissible_steps)
+        .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
+        .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
+        .def_readwrite("linear_factor_cache_hits", &BackendTelemetry::linear_factor_cache_hits)
+        .def_readwrite("linear_factor_cache_misses", &BackendTelemetry::linear_factor_cache_misses)
+        .def_readwrite("linear_factor_cache_invalidations",
+                       &BackendTelemetry::linear_factor_cache_invalidations)
+        .def_readwrite("linear_factor_cache_last_invalidation_reason",
+                       &BackendTelemetry::linear_factor_cache_last_invalidation_reason)
+        .def_readwrite("reserved_output_samples", &BackendTelemetry::reserved_output_samples)
+        .def_readwrite("time_series_reallocations", &BackendTelemetry::time_series_reallocations)
+        .def_readwrite("state_series_reallocations", &BackendTelemetry::state_series_reallocations)
+        .def_readwrite("virtual_channel_reallocations", &BackendTelemetry::virtual_channel_reallocations)
+        .def_readwrite("equation_assemble_system_calls", &BackendTelemetry::equation_assemble_system_calls)
+        .def_readwrite("equation_assemble_residual_calls", &BackendTelemetry::equation_assemble_residual_calls)
+        .def_readwrite("equation_assemble_system_time_seconds", &BackendTelemetry::equation_assemble_system_time_seconds)
+        .def_readwrite("equation_assemble_residual_time_seconds", &BackendTelemetry::equation_assemble_residual_time_seconds)
+        .def_readwrite("model_regularization_events", &BackendTelemetry::model_regularization_events)
+        .def_readwrite("model_regularization_last_changed", &BackendTelemetry::model_regularization_last_changed)
+        .def_readwrite("model_regularization_last_intensity", &BackendTelemetry::model_regularization_last_intensity)
+        .def_readwrite("failure_reason", &BackendTelemetry::failure_reason);
 
     py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
         "Structured telemetry entry for each fallback/retry action")
@@ -1233,7 +1328,26 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("newton_options", &SimulationOptions::newton_options)
         .def_readwrite("dc_config", &SimulationOptions::dc_config)
         .def_readwrite("linear_solver", &SimulationOptions::linear_solver)
-        .def_readwrite("adaptive_timestep", &SimulationOptions::adaptive_timestep)
+        .def_property(
+            "adaptive_timestep",
+            [](const SimulationOptions& options) {
+                return options.adaptive_timestep;
+            },
+            [](SimulationOptions& options, bool adaptive) {
+                options.adaptive_timestep = adaptive;
+                options.step_mode = adaptive ? TransientStepMode::Variable : TransientStepMode::Fixed;
+                options.step_mode_explicit = false;
+            })
+        .def_property(
+            "step_mode",
+            [](const SimulationOptions& options) {
+                return options.step_mode;
+            },
+            [](SimulationOptions& options, TransientStepMode mode) {
+                options.step_mode = mode;
+                options.step_mode_explicit = true;
+                options.adaptive_timestep = (mode == TransientStepMode::Variable);
+            })
         .def_readwrite("timestep_config", &SimulationOptions::timestep_config)
         .def_readwrite("lte_config", &SimulationOptions::lte_config)
         .def_readwrite("integrator", &SimulationOptions::integrator)
@@ -1251,7 +1365,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
         .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
-        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy);
+        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy)
+        .def_readwrite("model_regularization", &SimulationOptions::model_regularization);
 
     py::class_<SimulationResult>(v2, "SimulationResult", "Transient simulation result")
         .def(py::init<>())
@@ -1263,6 +1378,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("virtual_channel_metadata", &SimulationResult::virtual_channel_metadata)
         .def_readwrite("success", &SimulationResult::success)
         .def_readwrite("final_status", &SimulationResult::final_status)
+        .def_readwrite("diagnostic", &SimulationResult::diagnostic)
         .def_readwrite("message", &SimulationResult::message)
         .def_readwrite("total_steps", &SimulationResult::total_steps)
         .def_readwrite("newton_iterations_total", &SimulationResult::newton_iterations_total)
@@ -1270,6 +1386,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("total_time_seconds", &SimulationResult::total_time_seconds)
         .def_readwrite("linear_solver_telemetry", &SimulationResult::linear_solver_telemetry)
         .def_readwrite("fallback_trace", &SimulationResult::fallback_trace)
+        .def_readwrite("backend_telemetry", &SimulationResult::backend_telemetry)
         .def_readwrite("loss_summary", &SimulationResult::loss_summary)
         .def_readwrite("thermal_summary", &SimulationResult::thermal_summary)
         // Compatibility alias used by legacy Python tests
@@ -1283,6 +1400,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("success", &PeriodicSteadyStateResult::success)
         .def_readwrite("iterations", &PeriodicSteadyStateResult::iterations)
         .def_readwrite("residual_norm", &PeriodicSteadyStateResult::residual_norm)
+        .def_readwrite("diagnostic", &PeriodicSteadyStateResult::diagnostic)
         .def_readwrite("steady_state", &PeriodicSteadyStateResult::steady_state)
         .def_readwrite("last_cycle", &PeriodicSteadyStateResult::last_cycle)
         .def_readwrite("message", &PeriodicSteadyStateResult::message);
@@ -1293,23 +1411,14 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("success", &HarmonicBalanceResult::success)
         .def_readwrite("iterations", &HarmonicBalanceResult::iterations)
         .def_readwrite("residual_norm", &HarmonicBalanceResult::residual_norm)
+        .def_readwrite("diagnostic", &HarmonicBalanceResult::diagnostic)
         .def_readwrite("solution", &HarmonicBalanceResult::solution)
         .def_readwrite("sample_times", &HarmonicBalanceResult::sample_times)
         .def_readwrite("message", &HarmonicBalanceResult::message);
 
     py::class_<Simulator>(v2, "Simulator", "Runtime simulator interface")
         .def(py::init([](Circuit& circuit, const SimulationOptions& options) {
-                SimulationOptions tuned = options;
-                apply_robust_newton_defaults(tuned.newton_options);
-                apply_robust_linear_solver_defaults(tuned.linear_solver);
-                tuned.max_step_retries = std::max(tuned.max_step_retries, 12);
-                tuned.fallback_policy.trace_retries = true;
-                tuned.fallback_policy.enable_transient_gmin = true;
-                tuned.fallback_policy.gmin_retry_threshold = std::min(tuned.fallback_policy.gmin_retry_threshold, 1);
-                tuned.fallback_policy.gmin_initial = std::max(tuned.fallback_policy.gmin_initial, Real{1e-8});
-                tuned.fallback_policy.gmin_max = std::max(tuned.fallback_policy.gmin_max, Real{1e-3});
-                tuned.fallback_policy.gmin_growth = std::max(tuned.fallback_policy.gmin_growth, Real{10.0});
-                return std::make_unique<Simulator>(circuit, tuned);
+                return std::make_unique<Simulator>(circuit, options);
             }),
              py::arg("circuit"), py::arg("options") = SimulationOptions(),
              py::keep_alive<1, 2>())
@@ -2135,13 +2244,8 @@ void init_v2_module(py::module_& v2) {
 #else
         caps["hypre_amg"] = false;
 #endif
-#ifdef PULSIM_HAS_SUNDIALS
-        caps["sundials"] = true;
-#else
-        caps["sundials"] = false;
-#endif
         return caps;
-    }, "Return compiled backend capabilities (KLU/HYPRE/SUNDIALS).");
+    }, "Return compiled backend capabilities (KLU/HYPRE).");
 
     // =========================================================================
     // Utility Functions

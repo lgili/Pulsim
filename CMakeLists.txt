@@ -22,7 +22,7 @@ if(APPLE AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED CMAKE_CXX_COMPILER)
     endif()
 endif()
 
-project(pulsim VERSION 0.4.1 LANGUAGES CXX)
+project(pulsim VERSION 0.5.0 LANGUAGES CXX)
 
 # =============================================================================
 # C++ Standard Configuration
@@ -37,7 +37,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
-option(PULSIM_USE_SUNDIALS "Use SUNDIALS for advanced ODE/DAE solvers" OFF)
 # Note: SuiteSparse/KLU is now a required dependency (default backend for linear solver)
 
 # =============================================================================
@@ -47,6 +46,7 @@ option(PULSIM_ENABLE_LTO "Enable Link-Time Optimization for Release builds" ON)
 option(PULSIM_ENABLE_NATIVE "Enable native architecture optimizations" OFF)
 option(PULSIM_ENABLE_PGO_GENERATE "Enable PGO instrumentation (generate profile)" OFF)
 option(PULSIM_ENABLE_PGO_USE "Enable PGO optimization (use profile)" OFF)
+option(PULSIM_SANITIZERS "Enable ASan/UBSan for supported compilers" OFF)
 set(PULSIM_PGO_PROFILE_DIR "${CMAKE_BINARY_DIR}/pgo-profiles" CACHE PATH "Directory for PGO profile data")
 
 # Python extension builds link static libraries into a shared module, so
@@ -85,57 +85,6 @@ if(PULSIM_ENABLE_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
     else()
         message(WARNING "LTO: Not supported - ${LTO_ERROR}")
     endif()
-endif()
-
-# PGO (Profile-Guided Optimization) - requires two-pass build
-# Pass 1: cmake -DPULSIM_ENABLE_PGO_GENERATE=ON .. && make && ./run_benchmarks
-# Pass 2: cmake -DPULSIM_ENABLE_PGO_USE=ON .. && make
-if(PULSIM_ENABLE_PGO_GENERATE AND PULSIM_ENABLE_PGO_USE)
-    message(FATAL_ERROR "Cannot enable both PGO_GENERATE and PGO_USE simultaneously")
-endif()
-
-if(PULSIM_ENABLE_PGO_GENERATE)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        add_compile_options(-fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
-        add_link_options(-fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
-        message(STATUS "PGO: Instrumentation enabled (profiles -> ${PULSIM_PGO_PROFILE_DIR})")
-    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        add_compile_options(-fprofile-generate -fprofile-dir=${PULSIM_PGO_PROFILE_DIR})
-        add_link_options(-fprofile-generate)
-        message(STATUS "PGO: Instrumentation enabled (GCC, profiles -> ${PULSIM_PGO_PROFILE_DIR})")
-    elseif(MSVC)
-        add_compile_options(/GL)
-        add_link_options(/LTCG /GENPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
-        message(STATUS "PGO: Instrumentation enabled (MSVC)")
-    endif()
-endif()
-
-if(PULSIM_ENABLE_PGO_USE)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        # Merge profiles first: llvm-profdata merge -output=merged.profdata ${PULSIM_PGO_PROFILE_DIR}/*.profraw
-        set(PULSIM_PGO_MERGED_PROFILE "${PULSIM_PGO_PROFILE_DIR}/merged.profdata" CACHE FILEPATH "Merged PGO profile")
-        if(EXISTS "${PULSIM_PGO_MERGED_PROFILE}")
-            add_compile_options(-fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
-            add_link_options(-fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
-            message(STATUS "PGO: Using profile ${PULSIM_PGO_MERGED_PROFILE}")
-        else()
-            message(WARNING "PGO: Profile not found at ${PULSIM_PGO_MERGED_PROFILE}. Run 'llvm-profdata merge' first.")
-        endif()
-    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        add_compile_options(-fprofile-use -fprofile-dir=${PULSIM_PGO_PROFILE_DIR} -fprofile-correction)
-        add_link_options(-fprofile-use)
-        message(STATUS "PGO: Using profiles from ${PULSIM_PGO_PROFILE_DIR}")
-    elseif(MSVC)
-        add_compile_options(/GL)
-        add_link_options(/LTCG /USEPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
-        message(STATUS "PGO: Using MSVC profile")
-    endif()
-endif()
-
-# Native architecture optimizations (use with caution for distribution)
-if(PULSIM_ENABLE_NATIVE AND NOT MSVC)
-    add_compile_options(-march=native -mtune=native)
-    message(STATUS "Native optimizations: Enabled (-march=native)")
 endif()
 
 # =============================================================================
@@ -206,57 +155,139 @@ message(STATUS "C++ Standard: C++${CMAKE_CXX_STANDARD}")
 # Other dependencies have their test options disabled via cache variables.
 
 # =============================================================================
-# Compiler Warnings and Flags
+# Project-Wide Target-Scoped Build Flags
 # =============================================================================
+# Keep warnings/opts target-scoped so external dependencies are not affected.
+set(PULSIM_TARGET_COMPILE_OPTIONS "")
+set(PULSIM_TARGET_LINK_OPTIONS "")
+
+# PGO (Profile-Guided Optimization) - requires two-pass build
+# Pass 1: cmake -DPULSIM_ENABLE_PGO_GENERATE=ON .. && make && ./run_benchmarks
+# Pass 2: cmake -DPULSIM_ENABLE_PGO_USE=ON .. && make
+if(PULSIM_ENABLE_PGO_GENERATE AND PULSIM_ENABLE_PGO_USE)
+    message(FATAL_ERROR "Cannot enable both PGO_GENERATE and PGO_USE simultaneously")
+endif()
+
+if(PULSIM_ENABLE_PGO_GENERATE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
+        list(APPEND PULSIM_TARGET_LINK_OPTIONS -fprofile-generate=${PULSIM_PGO_PROFILE_DIR})
+        message(STATUS "PGO: Instrumentation enabled (profiles -> ${PULSIM_PGO_PROFILE_DIR})")
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -fprofile-generate -fprofile-dir=${PULSIM_PGO_PROFILE_DIR})
+        list(APPEND PULSIM_TARGET_LINK_OPTIONS -fprofile-generate)
+        message(STATUS "PGO: Instrumentation enabled (GCC, profiles -> ${PULSIM_PGO_PROFILE_DIR})")
+    elseif(MSVC)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS /GL)
+        list(APPEND PULSIM_TARGET_LINK_OPTIONS /LTCG /GENPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
+        message(STATUS "PGO: Instrumentation enabled (MSVC)")
+    endif()
+endif()
+
+if(PULSIM_ENABLE_PGO_USE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Merge profiles first: llvm-profdata merge -output=merged.profdata ${PULSIM_PGO_PROFILE_DIR}/*.profraw
+        set(PULSIM_PGO_MERGED_PROFILE "${PULSIM_PGO_PROFILE_DIR}/merged.profdata" CACHE FILEPATH "Merged PGO profile")
+        if(EXISTS "${PULSIM_PGO_MERGED_PROFILE}")
+            list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
+            list(APPEND PULSIM_TARGET_LINK_OPTIONS -fprofile-use=${PULSIM_PGO_MERGED_PROFILE})
+            message(STATUS "PGO: Using profile ${PULSIM_PGO_MERGED_PROFILE}")
+        else()
+            message(WARNING "PGO: Profile not found at ${PULSIM_PGO_MERGED_PROFILE}. Run 'llvm-profdata merge' first.")
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -fprofile-use -fprofile-dir=${PULSIM_PGO_PROFILE_DIR} -fprofile-correction)
+        list(APPEND PULSIM_TARGET_LINK_OPTIONS -fprofile-use)
+        message(STATUS "PGO: Using profiles from ${PULSIM_PGO_PROFILE_DIR}")
+    elseif(MSVC)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS /GL)
+        list(APPEND PULSIM_TARGET_LINK_OPTIONS /LTCG /USEPROFILE:PGD=${PULSIM_PGO_PROFILE_DIR}/pulsim.pgd)
+        message(STATUS "PGO: Using MSVC profile")
+    endif()
+endif()
+
+# Native architecture optimizations (use with caution for distribution)
+if(PULSIM_ENABLE_NATIVE AND NOT MSVC)
+    list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -march=native -mtune=native)
+    message(STATUS "Native optimizations: Enabled (-march=native)")
+endif()
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    # AppleClang (Xcode) - required for Python bindings on macOS
-    add_compile_options(
+    list(APPEND PULSIM_TARGET_COMPILE_OPTIONS
         -Wall -Wextra -Wpedantic -Werror=return-type
         -Wno-c++98-compat -Wno-c++98-compat-pedantic
     )
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(-g -O0 -fno-omit-frame-pointer)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -g -O0 -fno-omit-frame-pointer)
     else()
-        add_compile_options(-O3 -DNDEBUG)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -O3 -DNDEBUG)
     endif()
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # LLVM Clang (Homebrew, etc.) - NOT for Python bindings on macOS
-    add_compile_options(
+    list(APPEND PULSIM_TARGET_COMPILE_OPTIONS
         -Wall -Wextra -Wpedantic -Werror=return-type
         -Wno-c++98-compat -Wno-c++98-compat-pedantic
     )
     # On Linux, use libc++ instead of libstdc++ for better C++23 support
     # This avoids ABI issues between Clang and GCC's standard library
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        add_compile_options(-stdlib=libc++)
-        add_link_options(-stdlib=libc++ -lc++abi)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -stdlib=libc++)
+        list(APPEND PULSIM_TARGET_LINK_OPTIONS -stdlib=libc++ -lc++abi)
         message(STATUS "Using libc++ on Linux for Clang")
     endif()
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(-g -O0 -fno-omit-frame-pointer)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -g -O0 -fno-omit-frame-pointer)
     else()
-        add_compile_options(-O3 -DNDEBUG)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -O3 -DNDEBUG)
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # GCC flags
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
+    list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -Wall -Wextra -Wpedantic -Werror=return-type)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(-g -O0)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -g -O0)
     else()
-        add_compile_options(-O3 -DNDEBUG)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -O3 -DNDEBUG)
     endif()
 elseif(MSVC)
-    add_compile_options(/W4)
+    list(APPEND PULSIM_TARGET_COMPILE_OPTIONS /W4)
 endif()
 
-# Sanitizers for Debug builds
-if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT MSVC)
-    option(PULSIM_SANITIZERS "Enable sanitizers" OFF)
-    if(PULSIM_SANITIZERS)
-        add_compile_options(-fsanitize=address,undefined)
-        add_link_options(-fsanitize=address,undefined)
+if(PULSIM_SANITIZERS)
+    if(MSVC)
+        message(WARNING "PULSIM_SANITIZERS is enabled, but MSVC sanitizers are not configured in this project.")
+    elseif(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(WARNING "PULSIM_SANITIZERS works best with Debug builds; current build type is '${CMAKE_BUILD_TYPE}'.")
+    endif()
+    if(NOT MSVC)
+        list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -fsanitize=address,undefined)
+        list(APPEND PULSIM_TARGET_LINK_OPTIONS -fsanitize=address,undefined)
     endif()
 endif()
+
+list(REMOVE_DUPLICATES PULSIM_TARGET_COMPILE_OPTIONS)
+list(REMOVE_DUPLICATES PULSIM_TARGET_LINK_OPTIONS)
+
+add_library(pulsim_target_defaults INTERFACE)
+if(PULSIM_TARGET_COMPILE_OPTIONS)
+    target_compile_options(pulsim_target_defaults INTERFACE ${PULSIM_TARGET_COMPILE_OPTIONS})
+endif()
+if(PULSIM_TARGET_LINK_OPTIONS)
+    target_link_options(pulsim_target_defaults INTERFACE ${PULSIM_TARGET_LINK_OPTIONS})
+endif()
+
+function(pulsim_apply_target_defaults target_name)
+    if(NOT TARGET ${target_name})
+        message(FATAL_ERROR "Target '${target_name}' not found for pulsim_apply_target_defaults()")
+    endif()
+    get_target_property(_is_imported ${target_name} IMPORTED)
+    if(_is_imported)
+        return()
+    endif()
+    get_target_property(_target_type ${target_name} TYPE)
+    if(_target_type STREQUAL "INTERFACE_LIBRARY")
+        target_link_libraries(${target_name} INTERFACE pulsim_target_defaults)
+    else()
+        target_link_libraries(${target_name} PRIVATE pulsim_target_defaults)
+    endif()
+endfunction()
 
 # Dependencies via FetchContent
 include(FetchContent)
@@ -308,36 +339,6 @@ if(PULSIM_BUILD_TESTS)
     include(Catch)
 endif()
 
-# SUNDIALS - Advanced ODE/DAE solvers (IDA, CVODE, ARKODE)
-if(PULSIM_USE_SUNDIALS)
-    # First try to find system-installed SUNDIALS
-    find_package(SUNDIALS CONFIG QUIET)
-    if(NOT SUNDIALS_FOUND)
-        message(STATUS "SUNDIALS not found on system, fetching from source...")
-        FetchContent_Declare(
-            sundials
-            GIT_REPOSITORY https://github.com/LLNL/sundials.git
-            GIT_TAG v6.7.0
-            GIT_SHALLOW TRUE
-        )
-        # Configure SUNDIALS build options
-        set(SUNDIALS_BUILD_SHARED_LIBS OFF CACHE BOOL "Build static SUNDIALS" FORCE)
-        set(BUILD_ARKODE ON CACHE BOOL "Enable ARKODE" FORCE)
-        set(BUILD_CVODE OFF CACHE BOOL "Disable CVODE" FORCE)
-        set(BUILD_CVODES OFF CACHE BOOL "Disable CVODES" FORCE)
-        set(BUILD_IDA ON CACHE BOOL "Enable IDA" FORCE)
-        set(BUILD_IDAS OFF CACHE BOOL "Disable IDAS" FORCE)
-        set(BUILD_KINSOL OFF CACHE BOOL "Disable KINSOL" FORCE)
-        set(SUNDIALS_BUILD_WITH_MONITORING OFF CACHE BOOL "Disable monitoring" FORCE)
-        set(EXAMPLES_ENABLE_C OFF CACHE BOOL "Disable C examples" FORCE)
-        set(EXAMPLES_ENABLE_CXX OFF CACHE BOOL "Disable C++ examples" FORCE)
-        set(EXAMPLES_INSTALL OFF CACHE BOOL "Don't install examples" FORCE)
-        FetchContent_MakeAvailable(sundials)
-    endif()
-    add_compile_definitions(PULSIM_HAS_SUNDIALS)
-    message(STATUS "SUNDIALS support enabled")
-endif()
-
 # =============================================================================
 # SuiteSparse KLU - Required dependency for fast sparse LU (circuit-optimized)
 # =============================================================================
@@ -346,12 +347,45 @@ endif()
 
 set(PULSIM_KLU_FOUND FALSE)
 
+function(pulsim_validate_imported_include_dirs target_name result_var)
+    if(NOT TARGET ${target_name})
+        set(${result_var} FALSE PARENT_SCOPE)
+        return()
+    endif()
+
+    get_target_property(_include_dirs ${target_name} INTERFACE_INCLUDE_DIRECTORIES)
+    if(NOT _include_dirs)
+        set(${result_var} TRUE PARENT_SCOPE)
+        return()
+    endif()
+
+    foreach(_include_dir IN LISTS _include_dirs)
+        if("${_include_dir}" MATCHES "^\\$<")
+            continue()
+        endif()
+        if(IS_ABSOLUTE "${_include_dir}" AND NOT EXISTS "${_include_dir}")
+            message(WARNING
+                "Imported target '${target_name}' has missing include directory: ${_include_dir}")
+            set(${result_var} FALSE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+
+    set(${result_var} TRUE PARENT_SCOPE)
+endfunction()
+
 # Method 1: Try to find system-installed SuiteSparse
 find_package(SuiteSparse CONFIG QUIET)
 if(SuiteSparse_FOUND AND TARGET SuiteSparse::KLU)
-    message(STATUS "Found system SuiteSparse with KLU")
-    set(PULSIM_KLU_FOUND TRUE)
-    set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+    pulsim_validate_imported_include_dirs(SuiteSparse::KLU _pulsim_klu_target_valid)
+    if(_pulsim_klu_target_valid)
+        message(STATUS "Found system SuiteSparse with KLU")
+        set(PULSIM_KLU_FOUND TRUE)
+        set(PULSIM_KLU_LIBRARIES SuiteSparse::KLU)
+    else()
+        message(WARNING
+            "Ignoring broken SuiteSparse::KLU imported target and trying alternate discovery methods")
+    endif()
 endif()
 
 # Method 2: Try pkg-config
@@ -568,7 +602,6 @@ message(STATUS "  PGO Use:           ${PULSIM_ENABLE_PGO_USE}")
 message(STATUS "  Native opts:       ${PULSIM_ENABLE_NATIVE}")
 message(STATUS "  Build tests:       ${PULSIM_BUILD_TESTS}")
 message(STATUS "  Build Python:      ${PULSIM_BUILD_PYTHON}")
-message(STATUS "  SUNDIALS:          ${PULSIM_USE_SUNDIALS}")
 message(STATUS "  KLU (required):    ${PULSIM_KLU_FOUND}")
 message(STATUS "  HYPRE AMG:         ${PULSIM_HYPRE_FOUND}")
 message(STATUS "=========================================")

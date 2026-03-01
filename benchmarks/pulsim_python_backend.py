@@ -102,17 +102,154 @@ def _reshape_hb_solution(solution: Sequence[float], state_size: int) -> List[Lis
 
 def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional[float]]:
     linear = getattr(result, "linear_solver_telemetry", None)
+    backend = getattr(result, "backend_telemetry", None)
+
+    state_space_primary_steps = (
+        float(getattr(backend, "state_space_primary_steps", 0.0)) if backend is not None else None
+    )
+    dae_fallback_steps = (
+        float(getattr(backend, "dae_fallback_steps", 0.0)) if backend is not None else None
+    )
+    segment_non_admissible_steps = (
+        float(getattr(backend, "segment_non_admissible_steps", 0.0)) if backend is not None else None
+    )
+    segment_model_cache_hits = (
+        float(getattr(backend, "segment_model_cache_hits", 0.0)) if backend is not None else None
+    )
+    segment_model_cache_misses = (
+        float(getattr(backend, "segment_model_cache_misses", 0.0)) if backend is not None else None
+    )
+    linear_factor_cache_hits = (
+        float(getattr(backend, "linear_factor_cache_hits", 0.0)) if backend is not None else None
+    )
+    linear_factor_cache_misses = (
+        float(getattr(backend, "linear_factor_cache_misses", 0.0)) if backend is not None else None
+    )
+
+    state_space_primary_ratio: Optional[float]
+    if state_space_primary_steps is None or dae_fallback_steps is None:
+        state_space_primary_ratio = None
+        dae_fallback_ratio = None
+    else:
+        total_path_steps = state_space_primary_steps + dae_fallback_steps
+        state_space_primary_ratio = (
+            state_space_primary_steps / total_path_steps if total_path_steps > 0.0 else None
+        )
+        dae_fallback_ratio = (
+            dae_fallback_steps / total_path_steps if total_path_steps > 0.0 else None
+        )
+
+    loss_total_power_w: Optional[float] = None
+    loss_total_energy_j: Optional[float] = None
+    loss_duration_s: Optional[float] = None
+    loss_energy_balance_error: Optional[float] = None
+    loss_summary = getattr(result, "loss_summary", None)
+    if loss_summary is not None:
+        try:
+            loss_total_power_w = float(getattr(loss_summary, "total_loss", 0.0))
+            device_losses = list(getattr(loss_summary, "device_losses", []))
+            loss_total_energy_j = float(
+                sum(float(getattr(item, "total_energy", 0.0)) for item in device_losses)
+            )
+        except Exception:
+            loss_total_power_w = None
+            loss_total_energy_j = None
+
+    times = list(getattr(result, "time", []))
+    if len(times) >= 2:
+        try:
+            loss_duration_s = float(times[-1]) - float(times[0])
+        except Exception:
+            loss_duration_s = None
+    if (
+        loss_total_power_w is not None
+        and loss_total_energy_j is not None
+        and loss_duration_s is not None
+        and loss_duration_s > 0.0
+    ):
+        expected_energy = loss_total_power_w * loss_duration_s
+        denom = max(abs(loss_total_energy_j), abs(expected_energy), 1e-12)
+        loss_energy_balance_error = abs(loss_total_energy_j - expected_energy) / denom
+
+    thermal_enabled: Optional[float] = None
+    thermal_peak_temperature_c: Optional[float] = None
+    thermal_final_temperature_c: Optional[float] = None
+    thermal_peak_temperature_delta: Optional[float] = None
+    thermal_summary = getattr(result, "thermal_summary", None)
+    if thermal_summary is not None:
+        try:
+            ambient = float(getattr(thermal_summary, "ambient", 25.0))
+            thermal_enabled = 1.0 if bool(getattr(thermal_summary, "enabled", False)) else 0.0
+            thermal_peak_temperature_c = float(getattr(thermal_summary, "max_temperature", ambient))
+            device_temperatures = list(getattr(thermal_summary, "device_temperatures", []))
+            if device_temperatures:
+                thermal_final_temperature_c = max(
+                    float(getattr(item, "final_temperature", ambient))
+                    for item in device_temperatures
+                )
+            else:
+                thermal_final_temperature_c = thermal_peak_temperature_c
+            thermal_peak_temperature_delta = thermal_peak_temperature_c - ambient
+        except Exception:
+            thermal_enabled = None
+            thermal_peak_temperature_c = None
+            thermal_final_temperature_c = None
+            thermal_peak_temperature_delta = None
 
     return {
         "newton_iterations": float(getattr(result, "newton_iterations_total", 0)),
         "linear_iterations": float(getattr(linear, "total_iterations", 0)) if linear is not None else None,
         "linear_solve_calls": float(getattr(linear, "total_solve_calls", 0)) if linear is not None else None,
         "linear_fallbacks": float(getattr(linear, "total_fallbacks", 0)) if linear is not None else None,
+        "linear_analyze_calls": float(getattr(linear, "total_analyze_calls", 0)) if linear is not None else None,
+        "linear_factorize_calls": float(getattr(linear, "total_factorize_calls", 0)) if linear is not None else None,
+        "linear_analyze_time_s": float(getattr(linear, "total_analyze_time_seconds", 0.0))
+        if linear is not None
+        else None,
+        "linear_factorize_time_s": float(getattr(linear, "total_factorize_time_seconds", 0.0))
+        if linear is not None
+        else None,
+        "linear_solve_time_s": float(getattr(linear, "total_solve_time_seconds", 0.0))
+        if linear is not None
+        else None,
         "residual_norm": None,
         "timestep_rejections": float(getattr(result, "timestep_rejections", 0)),
         "runtime_kernel_s": float(getattr(result, "total_time_seconds", 0.0)),
         "runtime_s": float(runtime_s),
         "steps": float(getattr(result, "total_steps", 0)),
+        "state_space_primary_steps": state_space_primary_steps,
+        "dae_fallback_steps": dae_fallback_steps,
+        "segment_non_admissible_steps": segment_non_admissible_steps,
+        "segment_model_cache_hits": segment_model_cache_hits,
+        "segment_model_cache_misses": segment_model_cache_misses,
+        "linear_factor_cache_hits": linear_factor_cache_hits,
+        "linear_factor_cache_misses": linear_factor_cache_misses,
+        "state_space_primary_ratio": state_space_primary_ratio,
+        "dae_fallback_ratio": dae_fallback_ratio,
+        "loss_total_power_w": loss_total_power_w,
+        "loss_total_energy_j": loss_total_energy_j,
+        "loss_duration_s": loss_duration_s,
+        "loss_energy_balance_error": loss_energy_balance_error,
+        "thermal_enabled": thermal_enabled,
+        "thermal_peak_temperature_c": thermal_peak_temperature_c,
+        "thermal_final_temperature_c": thermal_final_temperature_c,
+        "thermal_peak_temperature_delta": thermal_peak_temperature_delta,
+        "equation_assemble_system_calls": float(getattr(backend, "equation_assemble_system_calls", 0))
+        if backend is not None
+        else None,
+        "equation_assemble_residual_calls": float(getattr(backend, "equation_assemble_residual_calls", 0))
+        if backend is not None
+        else None,
+        "equation_assemble_system_time_s": float(
+            getattr(backend, "equation_assemble_system_time_seconds", 0.0)
+        )
+        if backend is not None
+        else None,
+        "equation_assemble_residual_time_s": float(
+            getattr(backend, "equation_assemble_residual_time_seconds", 0.0)
+        )
+        if backend is not None
+        else None,
         "python_backend": 1.0,
     }
 

@@ -280,3 +280,23 @@ def test_shooting_uses_warm_start_retry_for_pwm_case(tmp_path: Path) -> None:
     assert result.mode == "shooting"
     assert result.steps > 0
     assert result.telemetry.get("shooting_warm_start_retry", 0.0) >= 1.0
+
+
+def test_periodic_benchmark_shooting_default_keeps_reference_error_bounded(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        tmp_path / "out",
+        selected=["periodic_rc_pwm"],
+        scenario_filter=["shooting_default"],
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.status == "passed"
+    assert result.max_error is not None
+    assert result.max_error <= 0.11

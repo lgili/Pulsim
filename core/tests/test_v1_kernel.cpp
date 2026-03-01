@@ -4,7 +4,12 @@
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 
 using namespace pulsim::v1;
 using Catch::Approx;
@@ -127,6 +132,498 @@ TEST_CASE("v1 switching loss accumulation", "[v1][losses][regression]") {
     CHECK(summary.total_switching == Approx(expected_total).margin(expected_total * 0.2 + 1e-9));
 }
 
+TEST_CASE("v1 fixed-step buck keeps macro-grid outputs with event-aligned substeps",
+          "[v1][fixed-step][events][converter][regression]") {
+    Circuit circuit;
+
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_vin = circuit.add_node("vin");
+    auto n_sw = circuit.add_node("sw");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vdc", n_vin, Circuit::ground(), 24.0);
+
+    PulseParams pwm;
+    pwm.v_initial = 0.0;
+    pwm.v_pulse = 10.0;
+    pwm.t_delay = 1e-6;
+    pwm.t_rise = 0.2e-6;
+    pwm.t_fall = 0.2e-6;
+    pwm.t_width = 3e-6;
+    pwm.period = 10e-6;
+    circuit.add_pulse_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_vin, n_sw, 5.0, 100.0, 1e-9);
+    circuit.add_diode("D1", Circuit::ground(), n_sw, 100.0, 1e-9);
+    circuit.add_inductor("L1", n_sw, n_out, 100e-6, 0.0);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 47e-6, 0.0);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 10.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 24e-6;
+    opts.dt = 2e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 2e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = true;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("Buck fixed-step status: " << static_cast<int>(result.final_status));
+    INFO("Buck fixed-step message: " << result.message);
+    REQUIRE(result.success);
+    REQUIRE_FALSE(result.events.empty());
+
+    const auto has_on = std::any_of(
+        result.events.begin(), result.events.end(),
+        [](const SimulationEvent& event) { return event.type == SimulationEventType::SwitchOn; });
+    const auto has_off = std::any_of(
+        result.events.begin(), result.events.end(),
+        [](const SimulationEvent& event) { return event.type == SimulationEventType::SwitchOff; });
+    CHECK(has_on);
+    CHECK(has_off);
+
+    const auto has_event_split = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) { return entry.reason == FallbackReasonCode::EventSplit; });
+    CHECK(has_event_split);
+    for (const auto& entry : result.fallback_trace) {
+        if (entry.reason == FallbackReasonCode::EventSplit) {
+            CHECK(entry.retry_index == 0);
+        }
+    }
+
+    const Real dt_macro = opts.dt;
+    for (Real time_sample : result.time) {
+        const Real steps = std::round(time_sample / dt_macro);
+        CHECK(time_sample == Approx(steps * dt_macro).margin(1e-12));
+    }
+
+    REQUIRE(result.total_steps >= static_cast<int>(result.time.size()) - 1);
+    CHECK(result.total_steps > static_cast<int>(result.time.size()) - 1);
+}
+
+TEST_CASE("v1 variable-step switched buck remains stable around pwm edges",
+          "[v1][variable-step][events][converter][regression]") {
+    Circuit circuit;
+
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_in = circuit.add_node("vin");
+    auto n_sw = circuit.add_node("sw");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 24.0);
+
+    PulseParams pwm;
+    pwm.v_initial = 0.0;
+    pwm.v_pulse = 10.0;
+    pwm.t_delay = 1e-6;
+    pwm.t_rise = 0.2e-6;
+    pwm.t_fall = 0.2e-6;
+    pwm.t_width = 3e-6;
+    pwm.period = 10e-6;
+    circuit.add_pulse_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_sw, 5.0, 100.0, 1e-9);
+    circuit.add_diode("D1", Circuit::ground(), n_sw, 100.0, 1e-9);
+    circuit.add_inductor("L1", n_sw, n_out, 220e-6, 0.0);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 220e-6, 0.0);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 8.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 24e-6;
+    opts.dt = 2e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 6e-6;
+    opts.step_mode = TransientStepMode::Variable;
+    opts.step_mode_explicit = true;
+    opts.adaptive_timestep = true;
+    opts.enable_events = true;
+    opts.enable_bdf_order_control = true;
+    opts.max_step_retries = 20;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.max_iterations = 120;
+    opts.newton_options.auto_damping = true;
+    opts.linear_solver.allow_fallback = true;
+    opts.linear_solver.auto_select = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("VCS buck variable-step status: " << static_cast<int>(result.final_status));
+    INFO("VCS buck variable-step message: " << result.message);
+    INFO("Buck variable-step steps: " << result.total_steps
+         << " rejections: " << result.timestep_rejections
+         << " fallback_trace: " << result.fallback_trace.size());
+    const int lte_rejections = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::LTERejection;
+        }));
+    const int newton_failures = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::NewtonFailure;
+        }));
+    const int stiffness_backoffs = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::StiffnessBackoff;
+        }));
+    const int max_retry_events = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::MaxRetriesExceeded;
+        }));
+    const int lte_guard_accepts = static_cast<int>(std::count_if(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.action.find("lte_guard_accept_dt=") != std::string::npos;
+        }));
+    INFO("Buck variable-step reasons: lte=" << lte_rejections
+         << " guard_accept=" << lte_guard_accepts
+         << " newton=" << newton_failures
+         << " stiffness=" << stiffness_backoffs
+         << " max_retry=" << max_retry_events);
+
+    REQUIRE(result.success);
+    CHECK(result.total_steps >= static_cast<int>(result.time.size()) - 1);
+    CHECK_FALSE(result.events.empty());
+    CHECK(result.total_steps < 500);
+    CHECK(result.timestep_rejections == 0);
+
+    const bool has_abort = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::MaxRetriesExceeded &&
+                   entry.action == "abort_step";
+        });
+    CHECK_FALSE(has_abort);
+}
+
+TEST_CASE("v1 variable-step mosfet buck stays close to fixed-step reference",
+          "[v1][variable-step][converter][accuracy][regression]") {
+    struct BuckMetrics {
+        bool success = false;
+        std::string message;
+        int total_steps = 0;
+        int timestep_rejections = 0;
+        Real vout_final = 0.0;
+        Real vout_mean_tail = 0.0;
+        Real vout_ripple_tail = 0.0;
+    };
+
+    auto run_case = [](TransientStepMode mode) -> BuckMetrics {
+        Circuit circuit;
+        auto n_in = circuit.add_node("vin");
+        auto n_gate = circuit.add_node("gate");
+        auto n_sw = circuit.add_node("sw");
+        auto n_out = circuit.add_node("out");
+        const auto gnd = Circuit::ground();
+
+        circuit.add_voltage_source("Vin", n_in, gnd, 24.0);
+
+        PWMParams pwm;
+        pwm.v_high = 120.0;
+        pwm.v_low = 0.0;
+        pwm.frequency = 100e3;
+        pwm.duty = 0.5;
+        pwm.rise_time = 2e-6;
+        pwm.fall_time = 2e-6;
+        circuit.add_pwm_voltage_source("Vgate", n_gate, gnd, pwm);
+
+        MOSFET::Params mosfet;
+        mosfet.vth = 2.0;
+        mosfet.kp = 0.02;
+        mosfet.g_off = 1e-4;
+        mosfet.lambda = 0.0;
+        circuit.add_mosfet("M1", n_gate, n_in, n_sw, mosfet);
+
+        circuit.add_diode("D1", gnd, n_sw, 20.0, 1e-5);
+        circuit.add_inductor("L1", n_sw, n_out, 220e-6, 0.0);
+        circuit.add_capacitor("C1", n_out, gnd, 220e-6, 0.0);
+        circuit.add_resistor("Rload", n_out, gnd, 8.0);
+        circuit.add_resistor("Rbleed_sw", n_sw, gnd, 1e5);
+
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 4e-3;
+        opts.dt = 2e-6;
+        opts.max_step_retries = 35;
+        opts.newton_options.max_iterations = 220;
+        opts.newton_options.auto_damping = true;
+        opts.linear_solver.allow_fallback = true;
+        opts.linear_solver.auto_select = true;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.step_mode = mode;
+        opts.step_mode_explicit = true;
+
+        if (mode == TransientStepMode::Fixed) {
+            opts.integrator = Integrator::BDF1;
+            opts.dt_min = opts.dt;
+            opts.dt_max = opts.dt;
+        }
+
+        Simulator sim(circuit, opts);
+        const auto result = sim.run_transient(circuit.initial_state());
+
+        BuckMetrics metrics;
+        metrics.success = result.success;
+        metrics.message = result.message;
+        metrics.total_steps = result.total_steps;
+        metrics.timestep_rejections = result.timestep_rejections;
+        if (!result.success || result.states.empty() || result.time.empty()) {
+            return metrics;
+        }
+
+        const auto signal_names = circuit.signal_names();
+        const auto out_it = std::find(signal_names.begin(), signal_names.end(), "V(out)");
+        if (out_it == signal_names.end()) {
+            metrics.success = false;
+            metrics.message = "Missing V(out) signal";
+            return metrics;
+        }
+        const auto out_index = static_cast<std::size_t>(std::distance(signal_names.begin(), out_it));
+
+        std::vector<Real> vout;
+        vout.reserve(result.states.size());
+        for (const auto& state : result.states) {
+            if (out_index >= static_cast<std::size_t>(state.size())) {
+                continue;
+            }
+            vout.push_back(state[static_cast<Index>(out_index)]);
+        }
+
+        if (vout.empty()) {
+            metrics.success = false;
+            metrics.message = "Empty V(out) waveform";
+            return metrics;
+        }
+
+        const std::size_t tail = std::max<std::size_t>(10, vout.size() / 5);
+        const std::size_t tail_start = vout.size() > tail ? vout.size() - tail : 0;
+        Real tail_sum = 0.0;
+        Real tail_min = std::numeric_limits<Real>::infinity();
+        Real tail_max = -std::numeric_limits<Real>::infinity();
+        for (std::size_t i = tail_start; i < vout.size(); ++i) {
+            const Real value = vout[i];
+            tail_sum += value;
+            tail_min = std::min(tail_min, value);
+            tail_max = std::max(tail_max, value);
+        }
+
+        const Real tail_count = static_cast<Real>(vout.size() - tail_start);
+        metrics.vout_final = vout.back();
+        metrics.vout_mean_tail = tail_sum / std::max<Real>(tail_count, 1.0);
+        metrics.vout_ripple_tail = tail_max - tail_min;
+        return metrics;
+    };
+
+    const BuckMetrics fixed = run_case(TransientStepMode::Fixed);
+    const BuckMetrics variable = run_case(TransientStepMode::Variable);
+
+    INFO("MOSFET buck fixed success=" << fixed.success
+         << " message=" << fixed.message
+         << " steps=" << fixed.total_steps
+         << " rejections=" << fixed.timestep_rejections
+         << " vout_mean_tail=" << fixed.vout_mean_tail
+         << " vout_ripple_tail=" << fixed.vout_ripple_tail
+         << " vout_final=" << fixed.vout_final);
+    INFO("MOSFET buck variable success=" << variable.success
+         << " message=" << variable.message
+         << " steps=" << variable.total_steps
+         << " rejections=" << variable.timestep_rejections
+         << " vout_mean_tail=" << variable.vout_mean_tail
+         << " vout_ripple_tail=" << variable.vout_ripple_tail
+         << " vout_final=" << variable.vout_final);
+
+    REQUIRE(fixed.success);
+    REQUIRE(variable.success);
+
+    CHECK(std::abs(variable.vout_mean_tail - fixed.vout_mean_tail) <= 0.3);
+    CHECK(variable.vout_ripple_tail <= fixed.vout_ripple_tail * 1.6 + 1e-6);
+    CHECK(std::abs(variable.vout_final - fixed.vout_final) <= 0.3);
+    CHECK(variable.timestep_rejections <= 2);
+}
+
+TEST_CASE("v1 event scheduler applies unified calendar ordering", "[v1][events][scheduler][regression]") {
+    Circuit circuit;
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_out = circuit.add_node("out");
+
+    PWMParams pwm;
+    pwm.v_low = 0.0;
+    pwm.v_high = 10.0;
+    pwm.frequency = 100e3;   // T = 10 us
+    pwm.duty = 0.5;
+    pwm.dead_time = 1e-6;    // Effective turn-off boundary: 4 us
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+    circuit.add_resistor("Rload", n_ctrl, n_out, 1e3);
+    circuit.add_resistor("Rref", n_out, Circuit::ground(), 1e3);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 20e-6;
+    opts.dt = 1e-6;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& scheduler = sim.transient_services().event_scheduler;
+    REQUIRE(scheduler);
+
+    TransientStepRequest request;
+    request.mode = TransientStepMode::Fixed;
+    request.t_now = 1e-6;
+    request.t_target = 9e-6;
+    request.dt_candidate = request.t_target - request.t_now;
+    request.dt_min = 1e-12;
+    request.max_retries = 4;
+    request.threshold_crossing_time = 2e-6;
+
+    const Real from_threshold = scheduler->next_segment_target(request, request.t_target);
+    CHECK(from_threshold == Approx(2e-6).margin(1e-12));
+
+    request.threshold_crossing_time = std::numeric_limits<Real>::quiet_NaN();
+    const Real from_pwm_dead_time = scheduler->next_segment_target(request, request.t_target);
+    CHECK(from_pwm_dead_time == Approx(4e-6).margin(1e-12));
+}
+
+TEST_CASE("v1 fixed-step resolves multiple switching events inside one macro interval",
+          "[v1][fixed-step][events][scheduler][converter][regression]") {
+    Circuit circuit;
+
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_vin = circuit.add_node("vin");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vdc", n_vin, Circuit::ground(), 12.0);
+
+    PulseParams pwm;
+    pwm.v_initial = 0.0;
+    pwm.v_pulse = 10.0;
+    pwm.t_delay = 0.5e-6;
+    pwm.t_rise = 0.1e-6;
+    pwm.t_fall = 0.1e-6;
+    pwm.t_width = 1.0e-6;
+    pwm.period = 6.0e-6;
+    circuit.add_pulse_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_vin, n_out, 5.0, 200.0, 1e-9);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 10.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 10e-6;
+    opts.dt = 4e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 4e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = true;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("multi-event fixed-step status: " << static_cast<int>(result.final_status));
+    INFO("multi-event fixed-step message: " << result.message);
+    REQUIRE(result.success);
+    REQUIRE(result.events.size() >= 4);
+
+    CHECK(result.events[0].type == SimulationEventType::SwitchOn);
+    CHECK(result.events[1].type == SimulationEventType::SwitchOff);
+
+    const Real expected_on_1 = pwm.t_delay + pwm.t_rise * 0.5;
+    const Real expected_off_1 = pwm.t_delay + pwm.t_rise + pwm.t_width + pwm.t_fall * 0.5;
+    const Real expected_on_2 = expected_on_1 + pwm.period;
+    const Real expected_off_2 = expected_off_1 + pwm.period;
+
+    CHECK(result.events[0].time == Approx(expected_on_1).margin(5e-7));
+    CHECK(result.events[1].time == Approx(expected_off_1).margin(5e-7));
+    CHECK(result.events[2].time == Approx(expected_on_2).margin(5e-7));
+    CHECK(result.events[3].time == Approx(expected_off_2).margin(5e-7));
+
+    for (std::size_t i = 1; i < result.events.size(); ++i) {
+        CHECK(result.events[i].time > result.events[i - 1].time);
+    }
+
+    const auto has_calendar_clip = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::EventSplit &&
+                   entry.action == "event_calendar_clip";
+        });
+    CHECK(has_calendar_clip);
+}
+
+TEST_CASE("v1 fixed-step source-only circuits skip event calendar clipping",
+          "[v1][fixed-step][events][scheduler][regression]") {
+    Circuit circuit;
+
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    PulseParams pulse;
+    pulse.v_initial = 0.0;
+    pulse.v_pulse = 5.0;
+    pulse.t_delay = 0.0;
+    pulse.t_rise = 1e-9;
+    pulse.t_fall = 1e-9;
+    pulse.t_width = 20e-6;
+    pulse.period = 40e-6;
+    circuit.add_pulse_voltage_source("Vpulse", n_in, Circuit::ground(), pulse);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = true;
+    opts.integrator = Integrator::RosenbrockW;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+
+    INFO("source-only fixed-step status: " << static_cast<int>(result.final_status));
+    INFO("source-only fixed-step message: " << result.message);
+    REQUIRE(result.success);
+    REQUIRE(result.time.size() >= 2);
+
+    const auto has_calendar_clip = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.reason == FallbackReasonCode::EventSplit &&
+                   entry.action == "event_calendar_clip";
+        });
+    CHECK_FALSE(has_calendar_clip);
+    CHECK(result.backend_telemetry.state_space_primary_steps == 0);
+    CHECK(result.backend_telemetry.dae_fallback_steps >= 1);
+
+    const Real v_out_t1 = result.states[1][n_out];
+    CHECK(v_out_t1 == Approx(4.9975e-3).margin(5e-4));
+}
+
 TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][regression]") {
     Circuit circuit;
 
@@ -172,9 +669,25 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
     Simulator sim(circuit, opts);
     auto result = sim.run_transient();
     REQUIRE(result.success);
+    const auto loss_it = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "M1"; });
+    REQUIRE(loss_it != result.loss_summary.device_losses.end());
+    CHECK(loss_it->total_energy > 0.0);
+    CHECK(loss_it->breakdown.conduction > 0.0);
+
     REQUIRE(result.thermal_summary.enabled);
     CHECK(result.thermal_summary.max_temperature >= result.thermal_summary.ambient);
     CHECK_FALSE(result.thermal_summary.device_temperatures.empty());
+    const auto thermal_it = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "M1"; });
+    REQUIRE(thermal_it != result.thermal_summary.device_temperatures.end());
+    CHECK(thermal_it->final_temperature >= result.thermal_summary.ambient);
+    CHECK(thermal_it->peak_temperature >= thermal_it->final_temperature);
+    CHECK(thermal_it->average_temperature >= result.thermal_summary.ambient);
 }
 
 TEST_CASE("v1 switching topologies auto-enable robust transient defaults", "[v1][robust][autoprofile]") {
@@ -215,6 +728,287 @@ TEST_CASE("v1 switching topologies auto-enable robust transient defaults", "[v1]
     CHECK(tuned.newton_options.max_iterations >= 120);
     CHECK(tuned.linear_solver.allow_fallback);
     CHECK(tuned.linear_solver.order.size() >= 2);
+}
+
+TEST_CASE("v1 simulator wires unified transient service registry", "[v1][architecture][services]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 12.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& services = sim.transient_services();
+
+    REQUIRE(services.complete());
+    CHECK(services.supports_mode(TransientStepMode::Fixed));
+    CHECK(services.supports_mode(TransientStepMode::Variable));
+    REQUIRE(services.segment_model);
+    REQUIRE(services.segment_stepper);
+    REQUIRE(services.loss_service);
+    REQUIRE(services.thermal_service);
+
+    TransientStepRequest request;
+    request.mode = TransientStepMode::Fixed;
+    request.t_now = 0.0;
+    request.t_target = 5e-7;
+    request.dt_candidate = 1e-6;
+    request.dt_min = 1e-12;
+    request.retry_index = 0;
+    request.max_retries = 4;
+    request.event_adjacent = true;
+
+    const Real segment = services.event_scheduler->next_segment_target(request, opts.tstop);
+    CHECK(segment == Approx(5e-7).margin(1e-12));
+
+    const auto decision = services.recovery_manager->on_step_failure(request);
+    CHECK_FALSE(decision.abort);
+    CHECK(decision.next_dt < request.dt_candidate);
+
+    Vector x0 = Vector::Zero(circuit.system_size());
+    const auto segment_model = services.segment_model->build_model(x0, request);
+    CHECK(segment_model.admissible);
+    CHECK(segment_model.t_target == Approx(request.t_target).margin(1e-12));
+    CHECK(segment_model.topology_signature != 0);
+
+    TransientStepRequest solve_request = request;
+    solve_request.t_target = solve_request.t_now + solve_request.dt_candidate;
+    const auto solve_model = services.segment_model->build_model(x0, solve_request);
+    const auto solve_outcome =
+        services.segment_stepper->try_advance(solve_model, x0, solve_request);
+    CHECK_FALSE(solve_outcome.requires_fallback);
+    CHECK(solve_outcome.result.status == SolverStatus::Success);
+
+    TransientStepRequest variable_request = request;
+    variable_request.mode = TransientStepMode::Variable;
+
+    const Real variable_segment =
+        services.event_scheduler->next_segment_target(variable_request, opts.tstop);
+    CHECK(variable_segment == Approx(segment).margin(1e-12));
+
+    const auto variable_decision = services.recovery_manager->on_step_failure(variable_request);
+    CHECK(variable_decision.stage == decision.stage);
+    CHECK(variable_decision.abort == decision.abort);
+    CHECK(variable_decision.next_dt == Approx(decision.next_dt).margin(1e-15));
+}
+
+TEST_CASE("v1 segment model builds linearized E/A/B/c with topology cache",
+          "[v1][architecture][services][segment-model]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 12.0);
+    circuit.add_resistor("R1", n_in, n_out, 2e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 2e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-4;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& services = sim.transient_services();
+    REQUIRE(services.segment_model);
+    REQUIRE(services.equation_assembler);
+
+    TransientStepRequest request;
+    request.mode = TransientStepMode::Fixed;
+    request.t_now = 0.0;
+    request.t_target = 1e-6;
+    request.dt_candidate = 1e-6;
+    request.dt_min = 1e-12;
+    request.retry_index = 0;
+    request.max_retries = 4;
+    request.event_adjacent = false;
+
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    const auto model_first = services.segment_model->build_model(x0, request);
+    const auto model_second = services.segment_model->build_model(x0, request);
+
+    REQUIRE(model_first.admissible);
+    REQUIRE(model_first.linear_model);
+    CHECK_FALSE(model_first.cache_hit);
+    CHECK(model_second.cache_hit);
+
+    const auto& linear = *model_first.linear_model;
+    CHECK(linear.E.rows() == x0.size());
+    CHECK(linear.E.cols() == x0.size());
+    CHECK(linear.A.rows() == x0.size());
+    CHECK(linear.A.cols() == x0.size());
+    CHECK(linear.B.rows() == x0.size());
+    CHECK(linear.B.cols() == 0);
+    CHECK(linear.u.size() == 0);
+    CHECK(linear.c.size() == x0.size());
+
+    SparseMatrix jacobian(x0.size(), x0.size());
+    Vector residual = Vector::Zero(x0.size());
+    services.equation_assembler->assemble_system(x0, request.t_target, request.dt_candidate, jacobian, residual);
+
+    SparseMatrix e_diff = linear.E - jacobian;
+    SparseMatrix a_diff = linear.A - jacobian;
+    e_diff.prune(0.0);
+    a_diff.prune(0.0);
+    CHECK(e_diff.norm() == Approx(0.0).margin(1e-12));
+    CHECK(a_diff.norm() == Approx(0.0).margin(1e-12));
+    CHECK((linear.c + residual).lpNorm<Eigen::Infinity>() == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("v1 segment primary path matches DAE fallback in fixed and variable modes",
+          "[v1][architecture][services][segment-parity]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto& services = sim.transient_services();
+    REQUIRE(services.segment_model);
+    REQUIRE(services.segment_stepper);
+    REQUIRE(services.nonlinear_solve);
+
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    const std::array<TransientStepMode, 2> modes{
+        TransientStepMode::Fixed,
+        TransientStepMode::Variable
+    };
+
+    for (TransientStepMode mode : modes) {
+        TransientStepRequest request;
+        request.mode = mode;
+        request.t_now = 0.0;
+        request.t_target = 1e-6;
+        request.dt_candidate = 1e-6;
+        request.dt_min = 1e-12;
+        request.retry_index = 0;
+        request.max_retries = 4;
+        request.event_adjacent = false;
+
+        const auto model = services.segment_model->build_model(x0, request);
+        REQUIRE(model.admissible);
+        REQUIRE(model.linear_model);
+
+        const auto segment = services.segment_stepper->try_advance(model, x0, request);
+        REQUIRE_FALSE(segment.requires_fallback);
+        REQUIRE(segment.result.status == SolverStatus::Success);
+
+        const auto dae = services.nonlinear_solve->solve(x0, request.t_target, request.dt_candidate);
+        REQUIRE(dae.status == SolverStatus::Success);
+
+        const Real solution_diff =
+            (segment.result.solution - dae.solution).lpNorm<Eigen::Infinity>();
+        CHECK(solution_diff == Approx(0.0).margin(1e-9));
+    }
+
+    const auto run = sim.run_transient(x0);
+    REQUIRE(run.success);
+    CHECK(run.backend_telemetry.segment_model_cache_hits >= 1);
+    CHECK((run.backend_telemetry.segment_model_cache_hits +
+           run.backend_telemetry.segment_model_cache_misses) >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_misses >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_hits >= 1);
+    CHECK(run.backend_telemetry.state_space_primary_steps >= 1);
+}
+
+TEST_CASE("v1 backend telemetry reports topology-driven linear cache invalidation",
+          "[v1][performance][cache][telemetry]") {
+    Circuit circuit;
+    auto n_ctrl = circuit.add_node("ctrl");
+    auto n_vin = circuit.add_node("vin");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("Vdc", n_vin, Circuit::ground(), 12.0);
+
+    PulseParams pulse;
+    pulse.v_initial = 0.0;
+    pulse.v_pulse = 10.0;
+    pulse.t_delay = 2e-6;
+    pulse.t_rise = 2e-7;
+    pulse.t_fall = 2e-7;
+    pulse.t_width = 2e-6;
+    pulse.period = 6e-6;
+    circuit.add_pulse_voltage_source("Vctrl", n_ctrl, Circuit::ground(), pulse);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_vin, n_out, 5.0, 200.0, 1e-9);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 20.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 12e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto run = sim.run_transient();
+    REQUIRE(run.success);
+
+    CHECK(run.backend_telemetry.linear_factor_cache_hits >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_misses >= 1);
+    CHECK(run.backend_telemetry.linear_factor_cache_invalidations >= 1);
+    CHECK((run.backend_telemetry.linear_factor_cache_last_invalidation_reason == "topology_changed" ||
+           run.backend_telemetry.linear_factor_cache_last_invalidation_reason == "numeric_instability"));
+}
+
+TEST_CASE("v1 fixed-step transient pre-reserves output buffers in steady-state loop",
+          "[v1][performance][allocation]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-6;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_events = false;
+    opts.enable_losses = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto run = sim.run_transient();
+    REQUIRE(run.success);
+    REQUIRE(run.time.size() == 6);
+
+    CHECK(run.backend_telemetry.reserved_output_samples >= static_cast<int>(run.time.size()));
+    CHECK(run.backend_telemetry.time_series_reallocations == 0);
+    CHECK(run.backend_telemetry.state_series_reallocations == 0);
+    CHECK(run.backend_telemetry.virtual_channel_reallocations == 0);
 }
 
 TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fallback][recovery]") {
@@ -261,6 +1055,64 @@ TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fall
                       }));
 }
 
+TEST_CASE("v1 startup fallback recovers when DC operating point fails",
+          "[v1][fallback][startup]") {
+    auto build_circuit = []() {
+        Circuit circuit;
+        auto n_in = circuit.add_node("in");
+        auto n_out = circuit.add_node("out");
+        circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+        circuit.add_resistor("R1", n_in, n_out, 1e3);
+        circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+        return circuit;
+    };
+
+    auto make_opts = [](const Circuit& circuit) {
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 50e-6;
+        opts.dt = 1e-6;
+        opts.dt_min = 1e-12;
+        opts.dt_max = 1e-3;
+        opts.step_mode = TransientStepMode::Fixed;
+        opts.step_mode_explicit = true;
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
+        opts.max_step_retries = 2;
+        opts.linear_solver.order = {LinearSolverKind::CG};
+        opts.linear_solver.fallback_order = {};
+        opts.linear_solver.auto_select = false;
+        opts.linear_solver.iterative_config.max_iterations = 2;
+        opts.linear_solver.iterative_config.tolerance = 1e-16;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        return opts;
+    };
+
+    {
+        auto circuit = build_circuit();
+        auto opts = make_opts(circuit);
+        opts.linear_solver.allow_fallback = false;
+
+        Simulator sim(circuit, opts);
+        const auto result = sim.run_transient();
+        REQUIRE_FALSE(result.success);
+        CHECK(result.diagnostic == SimulationDiagnosticCode::DcOperatingPointFailure);
+    }
+
+    {
+        auto circuit = build_circuit();
+        auto opts = make_opts(circuit);
+        opts.linear_solver.allow_fallback = true;
+
+        Simulator sim(circuit, opts);
+        const auto result = sim.run_transient();
+        REQUIRE(result.success);
+        CHECK(result.backend_telemetry.backend_recovery_count >= 1);
+        CHECK(result.message.find("startup fallback") != std::string::npos);
+    }
+}
+
 TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
     Circuit circuit;
 
@@ -304,7 +1156,8 @@ TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback
     };
 
     CHECK(has_reason(FallbackReasonCode::NewtonFailure));
-    CHECK(has_reason(FallbackReasonCode::TransientGminEscalation));
+    CHECK((has_reason(FallbackReasonCode::TransientGminEscalation) ||
+           has_reason(FallbackReasonCode::StiffnessBackoff)));
     CHECK(has_reason(FallbackReasonCode::MaxRetriesExceeded));
 }
 
@@ -1271,4 +2124,40 @@ TEST_CASE("v1 buck closed-loop callback tracks reference without divergence",
     CHECK(std::abs(vout_last - vout_prev) <= 2.0);
     CHECK(duty >= 0.30);
     CHECK(duty <= 0.70);
+}
+
+TEST_CASE("v1 runtime circuit supports string_view name lookups", "[v1][runtime][lookup]") {
+    Circuit circuit;
+
+    CHECK(circuit.add_node("GND") == Circuit::ground());
+    CHECK(circuit.get_node(std::string_view{"gNd"}) == Circuit::ground());
+
+    const auto n_ctrl = circuit.add_node(std::string_view{"ctrl"});
+    const auto n_out = circuit.add_node(std::string_view{"out"});
+
+    circuit.add_switch("S1", n_out, Circuit::ground(), false, 1e3, 1e-9);
+
+    PWMParams pwm;
+    pwm.v_high = 10.0;
+    pwm.v_low = 0.0;
+    pwm.frequency = 100e3;
+    pwm.duty = 0.5;
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    REQUIRE_NOTHROW(circuit.set_switch_state(std::string_view{"S1"}, true));
+    REQUIRE_NOTHROW(circuit.set_pwm_duty(std::string_view{"Vpwm"}, 0.25));
+    REQUIRE_NOTHROW(circuit.set_pwm_duty_callback(std::string_view{"Vpwm"}, [](Real /*time*/) { return 0.4; }));
+    REQUIRE_NOTHROW(circuit.clear_pwm_duty_callback(std::string_view{"Vpwm"}));
+    CHECK(circuit.get_pwm_state(std::string_view{"Vpwm"}));
+}
+
+TEST_CASE("v1 runtime circuit rejects invalid timesteps", "[v1][runtime][safety]") {
+    Circuit circuit;
+
+    REQUIRE_THROWS_AS(circuit.set_timestep(0.0), std::invalid_argument);
+    REQUIRE_THROWS_AS(circuit.set_timestep(-1e-6), std::invalid_argument);
+    REQUIRE_THROWS_AS(circuit.set_timestep(std::numeric_limits<Real>::quiet_NaN()), std::invalid_argument);
+
+    REQUIRE_NOTHROW(circuit.set_timestep(2e-6));
+    CHECK(circuit.timestep() == Approx(2e-6));
 }

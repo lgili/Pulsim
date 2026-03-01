@@ -1,0 +1,19 @@
+schema: pulsim-stress-catalog-v1
+version: 1
+tiers:
+  electrothermal_tier:
+    description: Electrothermal converter stability and telemetry coverage
+    criteria:
+      min_pass_rate: 1.0
+      max_runtime_s: 20.0
+      max_timestep_rejections: 400
+      required_telemetry:
+        - runtime_s
+        - steps
+        - newton_iterations
+        - timestep_rejections
+        - loss_energy_balance_error
+        - thermal_peak_temperature_delta
+    cases:
+      - benchmark_id: buck_electrothermal
+        scenarios: [fixed_mode, variable_mode]

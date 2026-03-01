@@ -15,6 +15,7 @@ target_compile_features(pulsim_core INTERFACE cxx_std_23)
 target_link_libraries(pulsim_core
     INTERFACE
         Eigen3::Eigen
+        yaml-cpp
         ${PULSIM_KLU_LIBRARIES}
         ${PULSIM_HYPRE_LIBRARIES}
 )
@@ -27,6 +28,9 @@ add_library(pulsim::core ALIAS pulsim_core)
 # =============================================================================
 add_library(pulsim STATIC
     src/v1/simulation.cpp
+    src/v1/simulation_periodic.cpp
+    src/v1/simulation_step.cpp
+    src/v1/transient_services.cpp
     src/v1/yaml_parser.cpp
     src/simulation_control.cpp
 )
@@ -46,6 +50,9 @@ target_link_libraries(pulsim
         ${PULSIM_KLU_LIBRARIES}
         ${PULSIM_HYPRE_LIBRARIES}
 )
+if(COMMAND pulsim_apply_target_defaults)
+    pulsim_apply_target_defaults(pulsim)
+endif()
 
 # Alias for cleaner usage
 add_library(pulsim::pulsim ALIAS pulsim)
@@ -67,6 +74,9 @@ if(PULSIM_BUILD_TESTS)
             pulsim::core
             Catch2::Catch2WithMain
     )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_tests)
+    endif()
 
     # Enable profiling for benchmark tests in Debug builds
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -80,6 +90,12 @@ if(PULSIM_BUILD_TESTS)
         tests/test_main.cpp
         tests/test_linear_solver_selection.cpp
         tests/test_newton_krylov.cpp
+        tests/test_v1_diagnostics.cpp
+        tests/test_v1_input_validation.cpp
+        tests/test_v1_periodic_validation.cpp
+        tests/test_v1_stage_context_raii.cpp
+        tests/test_extension_registry.cpp
+        tests/test_model_regularization.cpp
         tests/test_v1_kernel.cpp
         tests/test_stress_simulation.cpp
     )
@@ -90,6 +106,9 @@ if(PULSIM_BUILD_TESTS)
             pulsim::core
             Catch2::Catch2WithMain
     )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_simulation_tests)
+    endif()
 
     catch_discover_tests(pulsim_simulation_tests)
 

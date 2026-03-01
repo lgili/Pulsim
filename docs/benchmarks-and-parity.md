@@ -53,6 +53,19 @@ PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
   --output-dir benchmarks/stress_out
 ```
 
+## Suíte eletrotérmica (perdas + temperatura)
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
+  --output-dir benchmarks/out_electrothermal
+
+PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
+  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
+  --catalog benchmarks/electrothermal_stress_catalog.yaml \
+  --output-dir benchmarks/stress_out_electrothermal
+```
+
 ## Gate de paridade GUI -> backend
 
 ```bash
@@ -68,3 +81,29 @@ PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py
 - stress: `stress_results.csv`, `stress_results.json`, `stress_summary.json`
 
 Esses artefatos são o caminho recomendado para validação contínua (CI) e comparação de regressão.
+
+## Gate de KPI para refactor do solver
+
+Para bloquear regressões por fase do refactor do core, use:
+
+```bash
+python3 benchmarks/kpi_gate.py \
+  --bench-results benchmarks/out/results.json \
+  --stress-summary benchmarks/stress_out/stress_summary.json \
+  --report-out benchmarks/out/kpi_gate_report.json \
+  --print-report
+```
+
+Configuração:
+
+- baseline congelado: `benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json`
+- thresholds: `benchmarks/kpi_thresholds.yaml`
+- `runtime_p50`/`runtime_p95`: avaliados no escopo comum entre baseline e execução atual
+  (interseção `benchmark_id` + `scenario`) quando os artefatos de baseline estão disponíveis.
+
+KPIs híbridos/eletrotérmicos emitidos no `results.json`:
+
+- `state_space_primary_ratio`
+- `dae_fallback_ratio`
+- `loss_energy_balance_error`
+- `thermal_peak_temperature_delta`

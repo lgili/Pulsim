@@ -44,12 +44,6 @@ set(Python3_FIND_UNVERSIONED_NAMES "FIRST")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
 
-# On macOS, add visibility and stdlib flags but don't change compiler
-# (changing compiler mid-configure causes CMake to reconfigure and lose options)
-if(APPLE)
-    add_compile_options(-fvisibility=hidden -fvisibility-inlines-hidden)
-endif()
-
 # Prefer pybind11 provided by the build environment (e.g., installed via pip)
 find_package(pybind11 CONFIG QUIET)
 if(NOT pybind11_FOUND)
@@ -74,6 +68,12 @@ target_link_libraries(_pulsim
         pulsim::core
         pulsim::pulsim
 )
+if(APPLE)
+    target_compile_options(_pulsim PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+endif()
+if(COMMAND pulsim_apply_target_defaults)
+    pulsim_apply_target_defaults(_pulsim)
+endif()
 
 # Set the output name to match Python conventions
 set_target_properties(_pulsim PROPERTIES

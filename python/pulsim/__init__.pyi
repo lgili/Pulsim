@@ -80,6 +80,10 @@ class TimestepMethod(Enum):
     StepDoubling = ...
     Richardson = ...
 
+class StepMode(Enum):
+    Fixed = ...
+    Variable = ...
+
 # =============================================================================
 # Device Classes
 # =============================================================================
@@ -365,10 +369,18 @@ class LinearSolverStackConfig:
 
 class LinearSolverTelemetry:
     total_solve_calls: int
+    total_analyze_calls: int
+    total_factorize_calls: int
     total_iterations: int
     total_fallbacks: int
     last_iterations: int
     last_error: float
+    total_analyze_time_seconds: float
+    total_factorize_time_seconds: float
+    total_solve_time_seconds: float
+    last_analyze_time_seconds: float
+    last_factorize_time_seconds: float
+    last_solve_time_seconds: float
     last_solver: Optional[LinearSolverKind]
     last_preconditioner: Optional[PreconditionerKind]
 
@@ -409,6 +421,34 @@ class FallbackPolicyOptions:
     gmin_initial: float
     gmin_max: float
     gmin_growth: float
+
+    def __init__(self) -> None: ...
+
+class BackendTelemetry:
+    requested_backend: str
+    selected_backend: str
+    solver_family: str
+    formulation_mode: str
+    function_evaluations: int
+    jacobian_evaluations: int
+    nonlinear_iterations: int
+    nonlinear_convergence_failures: int
+    error_test_failures: int
+    escalation_count: int
+    reinitialization_count: int
+    backend_recovery_count: int
+    state_space_primary_steps: int
+    dae_fallback_steps: int
+    segment_non_admissible_steps: int
+    segment_model_cache_hits: int
+    segment_model_cache_misses: int
+    linear_factor_cache_hits: int
+    linear_factor_cache_misses: int
+    equation_assemble_system_calls: int
+    equation_assemble_residual_calls: int
+    equation_assemble_system_time_seconds: float
+    equation_assemble_residual_time_seconds: float
+    failure_reason: str
 
     def __init__(self) -> None: ...
 
@@ -481,6 +521,7 @@ class SimulationOptions:
     dc_config: DCConvergenceConfig
     linear_solver: LinearSolverStackConfig
     adaptive_timestep: bool
+    step_mode: StepMode
     timestep_config: AdvancedTimestepConfig
     lte_config: RichardsonLTEConfig
     integrator: Integrator
@@ -518,6 +559,7 @@ class SimulationResult:
     total_time_seconds: float
     linear_solver_telemetry: LinearSolverTelemetry
     fallback_trace: List[FallbackTraceEntry]
+    backend_telemetry: BackendTelemetry
     loss_summary: SystemLossSummary
     thermal_summary: ThermalSummary
     data: List[List[float]]

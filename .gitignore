@@ -1,11 +1,17 @@
 # Build directories
 build/
 build-test/
+build-sundials-local/
+build-sundials/
+build-sundials-py313/
 build-ci/
 docs/_build/
 site/
 cmake-build-*/
-
+benchmarks/out_*/
+benchmarks/ltspice/
+.gemini/
+.claude/
 # IDE
 .idea/
 .vscode/

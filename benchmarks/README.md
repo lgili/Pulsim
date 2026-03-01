@@ -11,6 +11,15 @@ This folder contains the YAML benchmark suite and validation runners.
 - `benchmark_ngspice.py` — Pulsim vs external SPICE parity runner (`ngspice` or `ltspice` backends).
 - `stress_suite.py` — tiered stress validation runner (tiers A/B/C + pass criteria).
 - `stress_catalog.yaml` — stress tier definitions, mapped cases, and acceptance criteria.
+- `electrothermal_benchmarks.yaml` — focused matrix for electrothermal converter validation.
+- `electrothermal_stress_catalog.yaml` — stress criteria for electrothermal KPI coverage.
+- `kpi_gate.py` — regression gate that compares current KPIs against frozen baseline
+  and evaluates runtime quantiles (`p50/p95`) on the case intersection with baseline artifacts.
+- `freeze_kpi_baseline.py` — creates `kpi_baseline.json` + `artifact_manifest.json`
+  with environment fingerprint and artifact hashes for provenance-safe gating.
+- `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
+- `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
+- `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
 
 ## Running
 
@@ -20,7 +29,29 @@ export PYTHONPATH=build/python
 
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
+python3 benchmarks/variable_mode_matrix.py --output-dir benchmarks/out_variable_matrix
 python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
+python3 benchmarks/kpi_gate.py \
+  --bench-results benchmarks/out/results.json \
+  --stress-summary benchmarks/stress_out/stress_summary.json \
+  --report-out benchmarks/out/kpi_gate_report.json \
+  --print-report
+
+# Freeze a new baseline snapshot from a validated run
+python3 benchmarks/freeze_kpi_baseline.py \
+  --baseline-id phase0_2026-02-25 \
+  --bench-results benchmarks/out/results.json \
+  --stress-summary benchmarks/stress_out/stress_summary.json \
+  --source-artifacts-root benchmarks/out
+
+# Electrothermal focused matrix + stress
+python3 benchmarks/benchmark_runner.py \
+  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
+  --output-dir benchmarks/out_electrothermal
+python3 benchmarks/stress_suite.py \
+  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
+  --catalog benchmarks/electrothermal_stress_catalog.yaml \
+  --output-dir benchmarks/stress_out_electrothermal
 
 # Compare Pulsim vs ngspice (manifest mode)
 python3 benchmarks/benchmark_ngspice.py \
@@ -39,12 +70,35 @@ python3 benchmarks/benchmark_ngspice.py \
   --pulsim-netlist benchmarks/circuits/rc_step.yaml \
   --spice-netlist benchmarks/ngspice/rc_step.cir \
   --output-dir benchmarks/ngspice_single
+
+# Local limit suite (10 circuits, fixed + variable)
+python3 benchmarks/local_limit_suite.py \
+  --manifest benchmarks/local_limit/benchmarks_local_limit.yaml \
+  --output-dir benchmarks/out_local_limit \
+  --mode both \
+  --duration-scale 1.0
+
+# Same flow via Makefile
+make benchmark-local-limit BUILD_DIR=build
 ```
 
 Benchmark runners are Python-first and execute through `pulsim` runtime bindings
 (`YamlParser` + `Simulator`).
 When a benchmark netlist omits `simulation.adaptive_timestep`, runners default to
 fixed-step mode (`adaptive_timestep: false`) for deterministic comparisons.
+Use `variable_mode_matrix.py` when you need the adaptive-variable benchmark gate.
+Current default scope is the stiff-variable set (`stiff_rlc` scenarios) and can be expanded with `--only`.
+
+`kpi_gate.py` validates baseline/manifest provenance in strict mode by default
+and fails early when metadata or artifact hashes are inconsistent.
+Use `--no-strict-provenance` only for local debugging.
+
+`local_limit_suite.py` is intended for PC-local stress discovery and reports
+exact failure reasons per circuit/scenario. It always supports:
+- `--mode fixed|variable|both`
+- `--duration-scale <factor>` to run longer than the base `tstop`
+- `--only <benchmark_id ...>` to focus specific circuits
+- `--max-runtime-s <seconds>` to fail runs above a runtime budget
 
 Generate missing reference baselines:
 
@@ -63,6 +117,9 @@ Each run produces:
 Telemetry fields are sourced from structured simulation result objects and included in `results.json`.
 Analytical `max_error` thresholds in `circuits/*.yaml` are calibrated for the current
 Python-first runtime defaults (fixed-step unless explicitly overridden).
+Hybrid/electrothermal KPI fields are emitted per scenario when available:
+`state_space_primary_ratio`, `dae_fallback_ratio`, `loss_energy_balance_error`,
+and `thermal_peak_temperature_delta`.
 
 `benchmark_ngspice.py` also emits:
 
@@ -77,6 +134,12 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
 - `stress_results.csv` — per scenario stress execution rows with telemetry columns.
 - `stress_results.json` — tier criteria + per-tier evaluation + scenario records.
 - `stress_summary.json` — overall pass/fail and per-tier status.
+
+`local_limit_suite.py` emits:
+
+- `results.csv` — one row per circuit/scenario with `pass/fail`, runtime, steps, completion ratio and failure message.
+- `results.json` — full machine-readable payload with telemetry and run settings.
+- `summary.json` — totals, per-scenario/per-difficulty split, and grouped failure reasons.
 
 ## Adding Benchmarks
 

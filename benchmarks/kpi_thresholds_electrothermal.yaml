@@ -1,0 +1,27 @@
+schema: pulsim-kpi-gates-v1
+version: 1
+metrics:
+  convergence_success_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.005
+    required: true
+  runtime_p95:
+    direction: lower_is_better
+    max_regression_rel: 0.10
+    required: true
+  loss_energy_balance_error:
+    direction: lower_is_better
+    max_regression_rel: 0.05
+    required: true
+  thermal_peak_temperature_delta:
+    direction: lower_is_better
+    max_regression_rel: 0.05
+    required: true
+  state_space_primary_ratio:
+    direction: higher_is_better
+    max_regression_abs: 0.05
+    required: false
+  dae_fallback_ratio:
+    direction: lower_is_better
+    max_regression_abs: 0.05
+    required: false

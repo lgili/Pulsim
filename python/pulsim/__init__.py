@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 import weakref
 from typing import Tuple
@@ -20,6 +20,7 @@ from ._pulsim import (
     SIMDLevel,
     Integrator,
     TimestepMethod,
+    StepMode,
 
     # Device Classes - Linear
     Resistor,
@@ -81,6 +82,7 @@ from ._pulsim import (
     FallbackReasonCode,
     FallbackPolicyOptions,
     FallbackTraceEntry,
+    BackendTelemetry,
     ThermalCouplingPolicy,
     ThermalCouplingOptions,
     ThermalDeviceConfig,
@@ -473,6 +475,7 @@ __all__ = [
     "SIMDLevel",
     "Integrator",
     "TimestepMethod",
+    "StepMode",
 
     # Device Classes - Linear
     "Resistor",
@@ -534,6 +537,7 @@ __all__ = [
     "FallbackReasonCode",
     "FallbackPolicyOptions",
     "FallbackTraceEntry",
+    "BackendTelemetry",
     "ThermalCouplingPolicy",
     "ThermalCouplingOptions",
     "ThermalDeviceConfig",

@@ -1,0 +1,42 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll04_rlc_underdamped
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 10e-3
+  dt: 1e-6
+components:
+  - type: voltage_source
+    name: Vstep
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 48.0
+      t_delay: 0.0
+      t_rise: 50e-9
+      t_fall: 50e-9
+      t_width: 8e-3
+      period: 16e-3
+  - type: resistor
+    name: R1
+    nodes: [in, n1]
+    value: 2.0
+  - type: inductor
+    name: L1
+    nodes: [n1, out]
+    value: 1.5m
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 47u
+    ic: 0.0
+  - type: resistor
+    name: Rdamp
+    nodes: [out, 0]
+    value: 56.0

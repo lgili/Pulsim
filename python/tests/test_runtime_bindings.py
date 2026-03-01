@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pulsim as ps
+import pytest
 
 
 def _build_rc_circuit() -> ps.Circuit:
@@ -36,6 +39,42 @@ def test_simulator_with_simulation_options_runs_transient() -> None:
     assert len(result.time) > 2
     assert result.total_steps > 0
     assert result.newton_iterations_total >= 0
+
+
+def test_procedural_run_transient_remains_compatible_with_canonical_simulator_surface() -> None:
+    circuit = _build_rc_circuit()
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+
+    x0 = circuit.initial_state()
+    canonical = ps.Simulator(circuit, opts).run_transient(x0)
+    proc_time, proc_states, proc_ok, _ = ps.run_transient(
+        circuit,
+        opts.tstart,
+        opts.tstop,
+        opts.dt,
+        x0,
+        opts.newton_options,
+        opts.linear_solver,
+        robust=False,
+        auto_regularize=False,
+    )
+
+    assert canonical.success is True
+    assert proc_ok is True
+    assert len(proc_time) > 2
+    assert len(canonical.time) > 2
+    assert abs(float(proc_time[-1]) - opts.tstop) < 1e-12
+    assert abs(float(canonical.time[-1]) - opts.tstop) < 1e-12
+    assert abs(float(proc_states[-1][1]) - float(canonical.states[-1][1])) < 5e-3
 
 
 def test_yaml_parser_load_string_returns_circuit_and_options() -> None:
@@ -93,7 +132,54 @@ components:
     parser = ps.YamlParser(options)
     parser.load_string(content)
 
-    assert any("unknown_field" in msg for msg in parser.errors)
+    assert any("PULSIM_YAML_E_UNKNOWN_FIELD" in msg for msg in parser.errors)
+    assert any("simulation.unknown_field" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_reports_type_mismatch_with_expected_and_received_classes() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  dt: {invalid: true}
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_TYPE_MISMATCH" in msg for msg in parser.errors)
+    assert any("simulation.dt" in msg for msg in parser.errors)
+    assert any("expected number" in msg and "got map" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_warns_deprecated_adaptive_timestep_alias_in_non_strict_mode() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  adaptive_timestep: true
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    options = ps.YamlParserOptions()
+    options.strict = False
+    parser = ps.YamlParser(options)
+    _, parsed_options = parser.load_string(content)
+
+    assert parser.errors == []
+    assert parsed_options.adaptive_timestep is True
+    assert any("PULSIM_YAML_W_DEPRECATED_FIELD" in msg for msg in parser.warnings)
+    assert any("simulation.adaptive_timestep" in msg for msg in parser.warnings)
+    assert any("simulation.step_mode" in msg for msg in parser.warnings)
 
 
 def test_yaml_parser_supports_legacy_si_suffix_words() -> None:
@@ -263,6 +349,115 @@ components:
     assert abs(options.fallback_policy.gmin_initial - 1e-8) < 1e-16
     assert abs(options.fallback_policy.gmin_max - 1e-4) < 1e-12
     assert abs(options.fallback_policy.gmin_growth - 5.0) < 1e-12
+
+
+def test_yaml_parser_emits_migration_warnings_for_legacy_backend_controls() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  backend: auto
+  sundials:
+    enabled: true
+  fallback:
+    enable_backend_escalation: true
+    backend_escalation_threshold: 3
+    enable_native_reentry: true
+    sundials_recovery_window: 5e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+    parser = ps.YamlParser(parser_opts)
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert options.step_mode == ps.StepMode.Variable
+    assert parser.warnings
+    joined = "\n".join(parser.warnings)
+    assert "simulation.backend" in joined
+    assert "simulation.sundials" in joined
+    assert "simulation.fallback.enable_backend_escalation" in joined
+    assert "simulation.fallback.backend_escalation_threshold" in joined
+    assert "simulation.fallback.enable_native_reentry" in joined
+    assert "simulation.fallback.sundials_recovery_window" in joined
+
+
+def test_yaml_parser_maps_canonical_step_mode_and_advanced_overrides() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  step_mode: fixed
+  advanced:
+    solver:
+      order: [klu]
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert options.step_mode == ps.StepMode.Fixed
+    assert options.adaptive_timestep is False
+    assert options.linear_solver.order == [ps.LinearSolverKind.KLU]
+    assert options.integrator == ps.Integrator.TRBDF2
+
+    options.step_mode = ps.StepMode.Variable
+    assert options.step_mode == ps.StepMode.Variable
+    assert options.adaptive_timestep is True
+
+    options.adaptive_timestep = False
+    assert options.step_mode == ps.StepMode.Fixed
+    assert options.adaptive_timestep is False
+
+
+def test_yaml_parser_reports_migration_error_for_legacy_backend_keys_in_strict_mode() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  backend: auto
+  advanced:
+    backend: sundials
+    sundials:
+      enabled: true
+    fallback:
+      enable_backend_escalation: true
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+    assert parser.errors
+    assert any("simulation.backend" in msg for msg in parser.errors)
+    assert any("simulation.advanced.backend" in msg for msg in parser.errors)
+    assert any("simulation.advanced.sundials" in msg for msg in parser.errors)
+    assert any("simulation.advanced.fallback.enable_backend_escalation" in msg for msg in parser.errors)
+    assert any("simulation.step_mode" in msg for msg in parser.errors)
+
+
+def test_backend_telemetry_binding_fields() -> None:
+    telemetry = ps.BackendTelemetry()
+    telemetry.formulation_mode = "native"
+    telemetry.function_evaluations = 10
+    assert telemetry.formulation_mode == "native"
+    assert telemetry.function_evaluations == 10
 
 
 def test_yaml_parser_gui_parity_slice_registers_virtual_components() -> None:
@@ -1393,5 +1588,151 @@ def test_fallback_trace_records_retry_reasons() -> None:
     assert len(result.fallback_trace) > 0
     reasons = {entry.reason for entry in result.fallback_trace}
     assert ps.FallbackReasonCode.NewtonFailure in reasons
-    assert ps.FallbackReasonCode.TransientGminEscalation in reasons
+    assert (
+        ps.FallbackReasonCode.TransientGminEscalation in reasons
+        or ps.FallbackReasonCode.StiffnessBackoff in reasons
+    )
     assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons
+
+
+def test_recovery_ladder_stages_are_deterministic() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 1e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.max_step_retries = 5
+    opts.linear_solver.order = [ps.LinearSolverKind.CG]
+    opts.linear_solver.allow_fallback = False
+    opts.linear_solver.auto_select = False
+    opts.fallback_policy.trace_retries = True
+    opts.fallback_policy.enable_transient_gmin = True
+    opts.fallback_policy.gmin_retry_threshold = 1
+    opts.fallback_policy.gmin_initial = 1e-8
+    opts.fallback_policy.gmin_max = 1e-4
+
+    x0 = [0.0] * (circuit.num_nodes() + circuit.num_branches())
+    result_a = ps.Simulator(circuit, opts).run_transient(x0)
+    result_b = ps.Simulator(circuit, opts).run_transient(x0)
+
+    assert not result_a.success
+    assert not result_b.success
+
+    stage_actions_a = [entry.action for entry in result_a.fallback_trace if entry.action.startswith("recovery_stage_")]
+    stage_actions_b = [entry.action for entry in result_b.fallback_trace if entry.action.startswith("recovery_stage_")]
+    assert stage_actions_a == stage_actions_b
+
+    expected_prefixes = [
+        "recovery_stage_dt_backoff",
+        "recovery_stage_globalization",
+        "recovery_stage_stiff_profile",
+        "recovery_stage_regularization",
+    ]
+
+    first_index: dict[str, int] = {}
+    for prefix in expected_prefixes:
+        matches = [idx for idx, action in enumerate(stage_actions_a) if action.startswith(prefix)]
+        assert matches, f"missing stage action prefix: {prefix}"
+        first_index[prefix] = matches[0]
+
+    assert first_index["recovery_stage_dt_backoff"] < first_index["recovery_stage_globalization"]
+    assert first_index["recovery_stage_globalization"] < first_index["recovery_stage_stiff_profile"]
+    assert first_index["recovery_stage_stiff_profile"] < first_index["recovery_stage_regularization"]
+
+
+def test_linear_factor_cache_telemetry_is_exposed() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-6
+    opts.dt = 1e-6
+    opts.dt_min = 1e-12
+    opts.dt_max = 1e-6
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+
+    x0 = [0.0] * (circuit.num_nodes() + circuit.num_branches())
+    result = ps.Simulator(circuit, opts).run_transient(x0)
+    assert result.success
+    assert result.backend_telemetry.state_space_primary_steps >= 1
+    assert result.backend_telemetry.linear_factor_cache_misses >= 1
+    assert result.backend_telemetry.linear_factor_cache_hits >= 1
+    assert (
+        result.backend_telemetry.linear_factor_cache_hits
+        + result.backend_telemetry.linear_factor_cache_misses
+    ) >= result.backend_telemetry.state_space_primary_steps
+
+
+def test_invalid_time_window_sets_typed_diagnostic() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = -1.0
+    opts.dt = 1e-6
+
+    result = ps.Simulator(circuit, opts).run_transient()
+    assert not result.success
+    assert result.backend_telemetry.failure_reason == "invalid_time_window"
+
+
+def test_variable_step_accept_reject_pattern_is_deterministic() -> None:
+    root = Path(__file__).resolve().parents[2]
+    case_path = root / "benchmarks" / "circuits" / "diode_rectifier.yaml"
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+
+    def run_once() -> ps.SimulationResult:
+        parser = ps.YamlParser(parser_opts)
+        circuit, opts = parser.load(str(case_path))
+        assert parser.errors == []
+
+        opts.adaptive_timestep = True
+        opts.enable_bdf_order_control = False
+        opts.fallback_policy.trace_retries = True
+        opts.max_step_retries = max(opts.max_step_retries, 6)
+        opts.dt_min = min(opts.dt_min, max(opts.dt * 0.02, 1e-9))
+        opts.dt_max = max(opts.dt_max, opts.dt * 8.0)
+
+        return ps.Simulator(circuit, opts).run_transient()
+
+    result_a = run_once()
+    result_b = run_once()
+
+    assert result_a.success == result_b.success
+    assert result_a.final_status == result_b.final_status
+    assert result_a.total_steps == result_b.total_steps
+    assert result_a.timestep_rejections == result_b.timestep_rejections
+    assert result_a.timestep_rejections > 0
+
+    trace_a = [(entry.reason, entry.action) for entry in result_a.fallback_trace]
+    trace_b = [(entry.reason, entry.action) for entry in result_b.fallback_trace]
+    assert trace_a == trace_b
+
+    assert len(result_a.time) == len(result_b.time)
+    for ta, tb in zip(result_a.time, result_b.time):
+        assert ta == pytest.approx(tb, abs=1e-15)

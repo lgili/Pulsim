@@ -54,6 +54,122 @@ sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
 ```
 
+### Legacy transient backend keys
+
+No runtime suportado, a escolha de caminho transiente é canônica por modo:
+
+- `simulation.step_mode: fixed`
+- `simulation.step_mode: variable`
+
+As chaves legadas `simulation.backend` / `simulation.sundials` (e equivalentes em
+`simulation.advanced`) são tratadas apenas para diagnóstico de migração.
+
+### Before/After: legacy backend -> canonical mode
+
+Before (legacy, removed in strict migration path):
+
+```yaml
+simulation:
+  backend: auto
+  sundials:
+    enabled: true
+    family: ida
+  adaptive_timestep: true
+  dt: 1e-7
+```
+
+After (canonical fixed-step native core):
+
+```yaml
+simulation:
+  step_mode: fixed
+  dt: 1e-7
+  dt_min: 1e-9
+  dt_max: 1e-7
+```
+
+After (canonical variable-step native core):
+
+```yaml
+simulation:
+  step_mode: variable
+  dt: 1e-7
+  dt_min: 1e-9
+  dt_max: 2e-6
+  timestep:
+    preset: power_electronics
+```
+
+If `strict = True`, legacy backend keys produce parser diagnostic
+`PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND`.
+
+### Schema Evolution Policy (v1)
+
+- Deprecated (migration window): `simulation.adaptive_timestep`
+  - Accepted in schema `pulsim-v1`, but emits warning
+    `PULSIM_YAML_W_DEPRECATED_FIELD` with replacement guidance to
+    `simulation.step_mode: fixed|variable`.
+- Removed (strict migration path): `simulation.backend`,
+  `simulation.sundials`, `simulation.advanced.backend`,
+  `simulation.advanced.sundials`
+  - In strict mode, parser fails deterministically with
+    `PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND` and migration guidance.
+
+### Before/After: procedural compatibility and canonical runtime
+
+Before (procedural path, still supported in migration window):
+
+```python
+import pulsim as ps
+
+times, states, ok, msg = ps.run_transient(
+    circuit, 0.0, 1e-3, 1e-6, circuit.initial_state()
+)
+```
+
+After (canonical class/runtime surface):
+
+```python
+import pulsim as ps
+
+opts = ps.SimulationOptions()
+opts.tstart = 0.0
+opts.tstop = 1e-3
+opts.dt = 1e-6
+
+sim = ps.Simulator(circuit, opts)
+result = sim.run_transient(circuit.initial_state())
+```
+
+Both paths share the same v1 kernel semantics; prefer `Simulator` for new code.
+
+### Before/After: expert override location
+
+Before (mixed top-level knobs):
+
+```yaml
+simulation:
+  step_mode: variable
+  integrator: trbdf2
+  solver:
+    order: [gmres]
+```
+
+After (canonical mode + explicit expert section):
+
+```yaml
+simulation:
+  step_mode: variable
+  advanced:
+    integrator: trbdf2
+    solver:
+      order: [gmres]
+      iterative:
+        preconditioner: ilut
+        max_iterations: 300
+        tolerance: 1e-8
+```
+
 ## 4. Removed API/Workflow Mapping
 
 | Removed workflow | Replacement |

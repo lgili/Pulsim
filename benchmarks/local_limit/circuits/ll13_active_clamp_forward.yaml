@@ -1,0 +1,101 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ll13_active_clamp_forward
+  category: local_limit
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 50e-6
+  dt: 0.05e-6
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 48.0
+
+  - type: voltage_source
+    name: Vpwm_main
+    nodes: [ctrl_main, 0]
+    waveform:
+      type: pwm
+      v_high: 12.0
+      v_low: 0.0
+      frequency: 250000
+      duty: 0.4
+      dead_time: 0.1e-6
+      phase: 0.0
+  - type: voltage_source
+    name: Vpwm_clamp
+    nodes: [ctrl_clamp, 0]
+    waveform:
+      type: pwm
+      v_high: 12.0
+      v_low: 0.0
+      frequency: 250000
+      duty: 0.4
+      dead_time: 0.1e-6
+      phase: 0.5  # Rough complementary for test simplification
+
+  - type: vcswitch
+    name: S_main
+    nodes: [ctrl_main, drain, 0]
+    v_threshold: 6.0
+    ron: 0.02
+    roff: 1e7
+  
+  - type: capacitor
+    name: C_clamp
+    nodes: [vin, clamp_node]
+    value: 1u
+  - type: vcswitch
+    name: S_clamp
+    nodes: [ctrl_clamp, clamp_node, drain]
+    v_threshold: 6.0
+    ron: 0.05
+    roff: 1e7
+
+  # Transformer Model (Tx1) - T-Model equivalent
+  - type: inductor
+    name: Lm_core
+    nodes: [drain, 0]
+    value: 99u
+  
+  - type: inductor
+    name: Lleak_prim
+    nodes: [vin, drain]
+    value: 1u
+
+  - type: inductor
+    name: Lsec
+    nodes: [drain, sec]
+    value: 4u
+
+  # Synchronous Rectification (Simplified with diodes for stress)
+  - type: diode
+    name: D_fwd
+    nodes: [sec, sw_out]
+    is: 1e-12
+    n: 1.2
+  - type: diode
+    name: D_free
+    nodes: [0, sw_out]
+    is: 1e-12
+    n: 1.2
+  
+  - type: inductor
+    name: Lout
+    nodes: [sw_out, vout]
+    value: 2.2u
+  - type: capacitor
+    name: Cout
+    nodes: [vout, 0]
+    value: 47u
+  
+  - type: resistor
+    name: Rload
+    nodes: [vout, 0]
+    value: 1.0
