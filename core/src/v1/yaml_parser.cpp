@@ -30,6 +30,10 @@ constexpr const char* kDiagInvalidStepMode = "PULSIM_YAML_E_STEP_MODE_INVALID";
 constexpr const char* kDiagUnknownField = "PULSIM_YAML_E_UNKNOWN_FIELD";
 constexpr const char* kDiagTypeMismatch = "PULSIM_YAML_E_TYPE_MISMATCH";
 constexpr const char* kDiagDeprecatedField = "PULSIM_YAML_W_DEPRECATED_FIELD";
+constexpr const char* kDiagThermalUnsupportedComponent = "PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT";
+constexpr const char* kDiagThermalMissingRequired = "PULSIM_YAML_E_THERMAL_MISSING_REQUIRED";
+constexpr const char* kDiagThermalInvalidRange = "PULSIM_YAML_E_THERMAL_RANGE_INVALID";
+constexpr const char* kDiagThermalDefaultApplied = "PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED";
 
 Real parse_real_string(const std::string& raw);
 
@@ -52,6 +56,13 @@ std::string normalize_key(std::string s) {
 
 bool is_known_key(const std::string& key, const std::unordered_set<std::string>& allowed) {
     return allowed.find(key) != allowed.end();
+}
+
+[[nodiscard]] bool component_type_supports_thermal(const std::string& canonical_type) {
+    return canonical_type == "mosfet" ||
+           canonical_type == "igbt" ||
+           canonical_type == "bjt_npn" ||
+           canonical_type == "bjt_pnp";
 }
 
 std::string with_diag_code(const std::string& code, const std::string& message) {
@@ -873,10 +884,25 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             validate_keys(thermal, {"enabled", "ambient", "policy", "default_rth", "default_cth"},
                           "simulation.thermal", errors_, options_.strict);
             options.thermal.enable = true;
-            if (thermal["enabled"]) options.thermal.enable = thermal["enabled"].as<bool>();
+            if (const auto enabled = parse_bool_scalar(
+                    thermal["enabled"], "simulation.thermal.enabled", errors_)) {
+                options.thermal.enable = *enabled;
+            }
             if (thermal["ambient"]) options.thermal.ambient = parse_real(thermal["ambient"], "simulation.thermal.ambient", errors_);
             if (thermal["default_rth"]) options.thermal.default_rth = parse_real(thermal["default_rth"], "simulation.thermal.default_rth", errors_);
             if (thermal["default_cth"]) options.thermal.default_cth = parse_real(thermal["default_cth"], "simulation.thermal.default_cth", errors_);
+            if (!std::isfinite(options.thermal.ambient)) {
+                push_error(errors_, kDiagThermalInvalidRange,
+                           "simulation.thermal.ambient must be finite");
+            }
+            if (!std::isfinite(options.thermal.default_rth) || options.thermal.default_rth <= 0.0) {
+                push_error(errors_, kDiagThermalInvalidRange,
+                           "simulation.thermal.default_rth must be finite and > 0");
+            }
+            if (!std::isfinite(options.thermal.default_cth) || options.thermal.default_cth < 0.0) {
+                push_error(errors_, kDiagThermalInvalidRange,
+                           "simulation.thermal.default_cth must be finite and >= 0");
+            }
             if (thermal["policy"]) {
                 const std::string policy = normalize_key(thermal["policy"].as<std::string>());
                 if (policy == "lossonly") {
@@ -1484,15 +1510,81 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             validate_keys(thermal, {"enabled", "rth", "cth", "temp_init", "temp_ref", "alpha"},
                           name + ".thermal", errors_, options_.strict);
             ThermalDeviceConfig cfg;
-            if (thermal["enabled"]) cfg.enabled = thermal["enabled"].as<bool>();
-            if (thermal["rth"]) cfg.rth = parse_real(thermal["rth"], name + ".thermal.rth", errors_);
-            if (thermal["cth"]) cfg.cth = parse_real(thermal["cth"], name + ".thermal.cth", errors_);
+            if (const auto enabled = parse_bool_scalar(
+                    thermal["enabled"], name + ".thermal.enabled", errors_)) {
+                cfg.enabled = *enabled;
+            }
+            const bool supports_thermal = component_type_supports_thermal(type);
+            const bool has_rth = is_set(thermal["rth"]);
+            const bool has_cth = is_set(thermal["cth"]);
+
+            if (cfg.enabled && !supports_thermal) {
+                push_error(errors_, kDiagThermalUnsupportedComponent,
+                           "Component '" + name + "' (" + type + ") does not support thermal port enablement");
+            }
+
+            if (has_rth) {
+                cfg.rth = parse_real(thermal["rth"], name + ".thermal.rth", errors_);
+            } else if (cfg.enabled) {
+                if (options_.strict) {
+                    push_error(errors_, kDiagThermalMissingRequired,
+                               "Missing required field '" + name + ".thermal.rth' when thermal is enabled");
+                } else {
+                    cfg.rth = options.thermal.default_rth;
+                    push_warning(
+                        warnings_,
+                        kDiagThermalDefaultApplied,
+                        "Applied simulation.thermal.default_rth to '" + name + ".thermal.rth'");
+                }
+            }
+
+            if (has_cth) {
+                cfg.cth = parse_real(thermal["cth"], name + ".thermal.cth", errors_);
+            } else if (cfg.enabled) {
+                if (options_.strict) {
+                    push_error(errors_, kDiagThermalMissingRequired,
+                               "Missing required field '" + name + ".thermal.cth' when thermal is enabled");
+                } else {
+                    cfg.cth = options.thermal.default_cth;
+                    push_warning(
+                        warnings_,
+                        kDiagThermalDefaultApplied,
+                        "Applied simulation.thermal.default_cth to '" + name + ".thermal.cth'");
+                }
+            }
+
             if (thermal["temp_init"]) cfg.temp_init = parse_real(thermal["temp_init"], name + ".thermal.temp_init", errors_);
             if (thermal["temp_ref"]) cfg.temp_ref = parse_real(thermal["temp_ref"], name + ".thermal.temp_ref", errors_);
             if (thermal["alpha"]) cfg.alpha = parse_real(thermal["alpha"], name + ".thermal.alpha", errors_);
-            options.thermal_devices[name] = cfg;
+
             if (cfg.enabled) {
-                options.thermal.enable = true;
+                if (!std::isfinite(cfg.rth) || cfg.rth <= 0.0) {
+                    push_error(errors_, kDiagThermalInvalidRange,
+                               name + ".thermal.rth must be finite and > 0");
+                }
+                if (!std::isfinite(cfg.cth) || cfg.cth < 0.0) {
+                    push_error(errors_, kDiagThermalInvalidRange,
+                               name + ".thermal.cth must be finite and >= 0");
+                }
+                if (!std::isfinite(cfg.temp_init)) {
+                    push_error(errors_, kDiagThermalInvalidRange,
+                               name + ".thermal.temp_init must be finite");
+                }
+                if (!std::isfinite(cfg.temp_ref)) {
+                    push_error(errors_, kDiagThermalInvalidRange,
+                               name + ".thermal.temp_ref must be finite");
+                }
+                if (!std::isfinite(cfg.alpha)) {
+                    push_error(errors_, kDiagThermalInvalidRange,
+                               name + ".thermal.alpha must be finite");
+                }
+            }
+
+            if (supports_thermal) {
+                options.thermal_devices[name] = cfg;
+                if (cfg.enabled) {
+                    options.thermal.enable = true;
+                }
             }
         }
 

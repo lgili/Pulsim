@@ -22,6 +22,24 @@ Circuit make_validation_circuit() {
     return circuit;
 }
 
+Circuit make_validation_thermal_circuit() {
+    Circuit circuit;
+    const auto n_gate = circuit.add_node("gate");
+    const auto n_drain = circuit.add_node("drain");
+    const auto n_source = circuit.add_node("source");
+    circuit.add_voltage_source("Vg", n_gate, Circuit::ground(), 10.0);
+    circuit.add_voltage_source("Vd", n_drain, Circuit::ground(), 20.0);
+
+    MOSFET::Params m;
+    m.vth = 2.5;
+    m.kp = 0.01;
+    m.lambda = 0.0;
+    m.g_off = 1e-8;
+    circuit.add_mosfet("M1", n_gate, n_drain, n_source, m);
+    circuit.add_resistor("Rload", n_source, Circuit::ground(), 100.0);
+    return circuit;
+}
+
 SimulationOptions make_fixed_options(const Circuit& circuit) {
     SimulationOptions opts;
     opts.tstart = 0.0;
@@ -95,6 +113,32 @@ TEST_CASE("v1 transient rejects invalid time window", "[v1][safety][validation]"
     CHECK(result.diagnostic == SimulationDiagnosticCode::InvalidTimeWindow);
     CHECK(result.final_status == SolverStatus::NumericalError);
     CHECK(result.backend_telemetry.failure_reason == "invalid_time_window");
+}
+
+TEST_CASE("v1 transient rejects invalid thermal configuration before stepping",
+          "[v1][safety][validation][thermal]") {
+    Circuit circuit = make_validation_thermal_circuit();
+    SimulationOptions opts = make_fixed_options(circuit);
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.default_rth = 1.0;
+    opts.thermal.default_cth = 0.1;
+
+    ThermalDeviceConfig cfg;
+    cfg.enabled = true;
+    cfg.rth = 0.0;
+    cfg.cth = 1e-4;
+    opts.thermal_devices["M1"] = cfg;
+
+    Simulator sim(circuit, opts);
+    Vector x0 = Vector::Zero(static_cast<Index>(circuit.system_size()));
+    const auto result = sim.run_transient(x0);
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.diagnostic == SimulationDiagnosticCode::InvalidThermalConfiguration);
+    CHECK(result.final_status == SolverStatus::NumericalError);
+    CHECK(result.backend_telemetry.failure_reason == "invalid_thermal_configuration");
+    CHECK(result.message.find("thermal") != std::string::npos);
 }
 
 TEST_CASE("v1 parser flags malformed netlist topology with coded diagnostics",

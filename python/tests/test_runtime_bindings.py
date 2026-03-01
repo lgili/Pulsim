@@ -273,6 +273,77 @@ components:
     assert any("JSON netlists are unsupported" in msg for msg in parser_json.errors)
 
 
+def test_yaml_parser_strict_mode_requires_thermal_rth_cth() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    thermal:
+      enabled: true
+      cth: 0.1
+"""
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = True
+    parser = ps.YamlParser(parser_opts)
+    parser.load_string(content)
+    assert any("PULSIM_YAML_E_THERMAL_MISSING_REQUIRED" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_non_strict_defaults_missing_thermal_rth_cth() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  thermal:
+    default_rth: 1.8
+    default_cth: 0.25
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    thermal:
+      enabled: true
+"""
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+    parser = ps.YamlParser(parser_opts)
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert abs(options.thermal_devices["M1"].rth - 1.8) < 1e-12
+    assert abs(options.thermal_devices["M1"].cth - 0.25) < 1e-12
+    assert any("PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED" in msg for msg in parser.warnings)
+
+
+def test_yaml_parser_rejects_unsupported_thermal_component_enablement() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.8
+      cth: 0.1
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+    assert any("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT" in msg for msg in parser.errors)
+
+
 def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     circuit = ps.Circuit()
     n_gate = circuit.add_node("gate")
@@ -316,6 +387,13 @@ def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     assert result.thermal_summary.enabled
     assert result.thermal_summary.max_temperature >= result.thermal_summary.ambient
     assert any(item.device_name == "M1" for item in result.thermal_summary.device_temperatures)
+    assert len(result.component_electrothermal) == circuit.num_devices()
+    m1 = next(item for item in result.component_electrothermal if item.component_name == "M1")
+    assert m1.thermal_enabled
+    assert m1.total_energy > 0.0
+    rload = next(item for item in result.component_electrothermal if item.component_name == "Rload")
+    assert not rload.thermal_enabled
+    assert abs(rload.final_temperature - result.thermal_summary.ambient) < 1e-12
 
 
 def test_yaml_parser_maps_fallback_controls() -> None:
