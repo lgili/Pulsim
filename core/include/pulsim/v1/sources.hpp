@@ -7,6 +7,7 @@
 #include "pulsim/v1/device_base.hpp"
 #include <functional>
 #include <cmath>
+#include <numbers>
 #include <optional>
 
 namespace pulsim::v1 {
@@ -131,7 +132,7 @@ public:
         if (t_on < 0) t_on = 0;
 
         // Phase-shifted time within period
-        Real t_phase = t + params_.phase / (2.0 * M_PI) * T;
+        Real t_phase = t + params_.phase / (2.0 * std::numbers::pi_v<Real>) * T;
         Real t_mod = std::fmod(t_phase, T);
         if (t_mod < 0) t_mod += T;
 
@@ -239,7 +240,8 @@ public:
 
     [[nodiscard]] Real voltage_at(Real t) const {
         return params_.offset +
-               params_.amplitude * std::sin(2.0 * M_PI * params_.frequency * t + params_.phase);
+               params_.amplitude *
+                   std::sin(2.0 * std::numbers::pi_v<Real> * params_.frequency * t + params_.phase);
     }
 
     template<typename Matrix, typename Vec>
@@ -294,7 +296,7 @@ public:
     /// Get value at time t
     [[nodiscard]] Real value_at(Real t) const {
         Real T = period();
-        Real t_phase = t + params_.phase / (2.0 * M_PI) * T;
+        Real t_phase = t + params_.phase / (2.0 * std::numbers::pi_v<Real>) * T;
         Real t_mod = std::fmod(t_phase, T);
         if (t_mod < 0) t_mod += T;
 

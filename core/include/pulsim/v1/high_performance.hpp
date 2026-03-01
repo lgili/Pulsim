@@ -32,8 +32,32 @@
 #include <optional>
 #include <utility>
 #include <vector>
+#ifdef _MSC_VER
+#include <malloc.h>
+#endif
 
 namespace pulsim::v1 {
+
+namespace detail {
+
+[[nodiscard]] inline void* aligned_allocate(std::size_t alignment, std::size_t size) {
+    const std::size_t aligned_size = (size + alignment - 1) & ~(alignment - 1);
+#if defined(_MSC_VER)
+    return _aligned_malloc(aligned_size, alignment);
+#else
+    return std::aligned_alloc(alignment, aligned_size);
+#endif
+}
+
+inline void aligned_deallocate(void* ptr) noexcept {
+#if defined(_MSC_VER)
+    _aligned_free(ptr);
+#else
+    std::free(ptr);
+#endif
+}
+
+} // namespace detail
 
 // =============================================================================
 // 4.1.4-4.1.6: Enhanced SparseLU with Caching and Reuse Detection
@@ -1930,7 +1954,7 @@ public:
 
     ~ArenaAllocator() {
         for (auto* block : blocks_) {
-            std::free(block);
+            detail::aligned_deallocate(block);
         }
     }
 
@@ -1992,7 +2016,7 @@ public:
     /// Clear arena (deallocate all but first block)
     void clear() {
         for (std::size_t i = 1; i < blocks_.size(); ++i) {
-            std::free(blocks_[i]);
+            detail::aligned_deallocate(blocks_[i]);
         }
         if (!blocks_.empty()) {
             blocks_.resize(1);
@@ -2015,12 +2039,9 @@ public:
 
 private:
     void allocate_block(std::size_t size) {
-        // Round size up to multiple of alignment (required by std::aligned_alloc)
+        // Keep arena blocks cache-line aligned for SIMD-friendly access.
         constexpr std::size_t alignment = 64;
-        std::size_t aligned_size = (size + alignment - 1) & ~(alignment - 1);
-
-        // Use aligned allocation for SIMD compatibility (4.3.3)
-        void* block = std::aligned_alloc(alignment, aligned_size);
+        void* block = detail::aligned_allocate(alignment, size);
         if (!block) {
             throw std::bad_alloc();
         }
@@ -2274,16 +2295,13 @@ public:
 
     void resize(std::size_t new_size) {
         if (new_size > capacity_) {
-            // Round size up to multiple of alignment (required by std::aligned_alloc)
             std::size_t byte_size = new_size * sizeof(T);
-            std::size_t aligned_byte_size = (byte_size + Alignment - 1) & ~(Alignment - 1);
-
-            T* new_data = static_cast<T*>(std::aligned_alloc(Alignment, aligned_byte_size));
+            T* new_data = static_cast<T*>(detail::aligned_allocate(Alignment, byte_size));
             if (!new_data) throw std::bad_alloc();
 
             if (data_) {
                 std::memcpy(new_data, data_, size_ * sizeof(T));
-                std::free(data_);
+                detail::aligned_deallocate(data_);
             }
             data_ = new_data;
             capacity_ = new_size;
@@ -2309,11 +2327,8 @@ public:
 private:
     void allocate(std::size_t size) {
         if (size > 0) {
-            // Round size up to multiple of alignment (required by std::aligned_alloc)
             std::size_t byte_size = size * sizeof(T);
-            std::size_t aligned_byte_size = (byte_size + Alignment - 1) & ~(Alignment - 1);
-
-            data_ = static_cast<T*>(std::aligned_alloc(Alignment, aligned_byte_size));
+            data_ = static_cast<T*>(detail::aligned_allocate(Alignment, byte_size));
             if (!data_) throw std::bad_alloc();
             capacity_ = size;
         }
@@ -2321,7 +2336,7 @@ private:
 
     void deallocate() {
         if (data_) {
-            std::free(data_);
+            detail::aligned_deallocate(data_);
             data_ = nullptr;
         }
         size_ = 0;
