@@ -17,6 +17,22 @@ metrics:
     direction: lower_is_better
     max_regression_rel: 0.05
     required: true
+  component_coverage_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: true
+  component_coverage_gap:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
+  component_loss_summary_consistency_error:
+    direction: lower_is_better
+    max_regression_abs: 1e-6
+    required: true
+  component_thermal_summary_consistency_error:
+    direction: lower_is_better
+    max_regression_abs: 1e-6
+    required: true
   state_space_primary_ratio:
     direction: higher_is_better
     max_regression_abs: 0.05

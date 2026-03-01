@@ -191,6 +191,82 @@ def test_kpi_gate_fails_on_runtime_regression(tmp_path: Path) -> None:
     assert report["comparisons"]["parity_rms_error_ltspice"]["status"] == "skipped"
 
 
+def test_kpi_gate_fails_on_component_consistency_regression(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "buck_electrothermal",
+                "scenario": "fixed_mode",
+                "status": "passed",
+                "runtime_s": 0.12,
+                "telemetry": {
+                    "component_coverage_rate": 0.75,
+                    "component_coverage_gap": 1.0,
+                    "component_loss_summary_consistency_error": 2.0e-2,
+                    "component_thermal_summary_consistency_error": 1.0e-2,
+                },
+            }
+        ]
+    }
+    baseline_metrics = {
+        "component_coverage_rate": 1.0,
+        "component_coverage_gap": 0.0,
+        "component_loss_summary_consistency_error": 0.0,
+        "component_thermal_summary_consistency_error": 0.0,
+    }
+    thresholds = {
+        "metrics": {
+            "component_coverage_rate": {
+                "direction": "higher_is_better",
+                "max_regression_abs": 0.01,
+                "required": True,
+            },
+            "component_coverage_gap": {
+                "direction": "lower_is_better",
+                "max_regression_abs": 0.0,
+                "required": True,
+            },
+            "component_loss_summary_consistency_error": {
+                "direction": "lower_is_better",
+                "max_regression_abs": 1e-6,
+                "required": True,
+            },
+            "component_thermal_summary_consistency_error": {
+                "direction": "lower_is_better",
+                "max_regression_abs": 1e-6,
+                "required": True,
+            },
+        }
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+
+    assert report["overall_status"] == "failed"
+    assert report["failed_required_metrics"] == 4
+    assert report["comparisons"]["component_coverage_rate"]["status"] == "failed"
+    assert report["comparisons"]["component_loss_summary_consistency_error"]["status"] == "failed"
+
+
 def test_compute_metrics_includes_state_space_primary_ratio(tmp_path: Path) -> None:
     bench_results = {
         "results": [
@@ -238,6 +314,10 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
                     "dae_fallback_steps": 2.0,
                     "loss_energy_balance_error": 0.012,
                     "thermal_peak_temperature_delta": 18.0,
+                    "component_coverage_rate": 1.0,
+                    "component_coverage_gap": 0.0,
+                    "component_loss_summary_consistency_error": 0.0,
+                    "component_thermal_summary_consistency_error": 0.0,
                 },
             },
             {
@@ -248,6 +328,10 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
                     "dae_fallback_steps": 4.0,
                     "loss_energy_balance_error": 0.008,
                     "thermal_peak_temperature_delta": 22.0,
+                    "component_coverage_rate": 0.9,
+                    "component_coverage_gap": 0.1,
+                    "component_loss_summary_consistency_error": 1.0e-4,
+                    "component_thermal_summary_consistency_error": 5.0e-5,
                 },
             },
         ]
@@ -260,6 +344,10 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
     assert metrics["dae_fallback_ratio"] == 6.0 / 20.0
     assert metrics["loss_energy_balance_error"] == 0.01
     assert metrics["thermal_peak_temperature_delta"] == 20.0
+    assert metrics["component_coverage_rate"] == 0.95
+    assert metrics["component_coverage_gap"] == 0.05
+    assert metrics["component_loss_summary_consistency_error"] == 5.0e-5
+    assert metrics["component_thermal_summary_consistency_error"] == 2.5e-5
 
 
 def test_compute_metrics_runtime_quantiles_can_use_case_filter(tmp_path: Path) -> None:

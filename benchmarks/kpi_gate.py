@@ -530,6 +530,14 @@ def compute_metrics(
 
     metrics["loss_energy_balance_error"] = telemetry_mean("loss_energy_balance_error")
     metrics["thermal_peak_temperature_delta"] = telemetry_mean("thermal_peak_temperature_delta")
+    metrics["component_coverage_rate"] = telemetry_mean("component_coverage_rate")
+    metrics["component_coverage_gap"] = telemetry_mean("component_coverage_gap")
+    metrics["component_loss_summary_consistency_error"] = telemetry_mean(
+        "component_loss_summary_consistency_error"
+    )
+    metrics["component_thermal_summary_consistency_error"] = telemetry_mean(
+        "component_thermal_summary_consistency_error"
+    )
 
     def parity_mean_rms(path: Optional[Path]) -> Optional[float]:
         if path is None:
