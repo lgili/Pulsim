@@ -220,6 +220,40 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         denom = max(abs(loss_total_energy_j), abs(expected_energy), 1e-12)
         loss_energy_balance_error = abs(loss_total_energy_j - expected_energy) / denom
 
+    component_reported_count: Optional[float] = None
+    component_thermal_enabled_count: Optional[float] = None
+    component_loss_total_power_w: Optional[float] = None
+    component_loss_total_energy_j: Optional[float] = None
+    component_peak_temperature_c: Optional[float] = None
+    component_loss_summary_consistency_error: Optional[float] = None
+    component_thermal_summary_consistency_error: Optional[float] = None
+    component_electrothermal = getattr(result, "component_electrothermal", None)
+    if component_electrothermal is not None:
+        try:
+            component_rows = list(component_electrothermal)
+            component_reported_count = float(len(component_rows))
+            component_thermal_enabled_count = float(
+                sum(1 for item in component_rows if bool(getattr(item, "thermal_enabled", False)))
+            )
+            component_loss_total_power_w = float(
+                sum(float(getattr(item, "total_loss", 0.0)) for item in component_rows)
+            )
+            component_loss_total_energy_j = float(
+                sum(float(getattr(item, "total_energy", 0.0)) for item in component_rows)
+            )
+            if component_rows:
+                component_peak_temperature_c = float(
+                    max(float(getattr(item, "peak_temperature", 25.0)) for item in component_rows)
+                )
+            else:
+                component_peak_temperature_c = None
+        except Exception:
+            component_reported_count = None
+            component_thermal_enabled_count = None
+            component_loss_total_power_w = None
+            component_loss_total_energy_j = None
+            component_peak_temperature_c = None
+
     thermal_enabled: Optional[float] = None
     thermal_peak_temperature_c: Optional[float] = None
     thermal_final_temperature_c: Optional[float] = None
@@ -244,6 +278,18 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
             thermal_peak_temperature_c = None
             thermal_final_temperature_c = None
             thermal_peak_temperature_delta = None
+
+    if loss_total_power_w is not None and component_loss_total_power_w is not None:
+        denom = max(abs(loss_total_power_w), abs(component_loss_total_power_w), 1e-12)
+        component_loss_summary_consistency_error = (
+            abs(loss_total_power_w - component_loss_total_power_w) / denom
+        )
+
+    if thermal_peak_temperature_c is not None and component_peak_temperature_c is not None:
+        denom = max(abs(thermal_peak_temperature_c), abs(component_peak_temperature_c), 1e-12)
+        component_thermal_summary_consistency_error = (
+            abs(thermal_peak_temperature_c - component_peak_temperature_c) / denom
+        )
 
     return {
         "newton_iterations": float(getattr(result, "newton_iterations_total", 0)),
@@ -279,6 +325,13 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         "loss_total_energy_j": loss_total_energy_j,
         "loss_duration_s": loss_duration_s,
         "loss_energy_balance_error": loss_energy_balance_error,
+        "component_reported_count": component_reported_count,
+        "component_thermal_enabled_count": component_thermal_enabled_count,
+        "component_loss_total_power_w": component_loss_total_power_w,
+        "component_loss_total_energy_j": component_loss_total_energy_j,
+        "component_peak_temperature_c": component_peak_temperature_c,
+        "component_loss_summary_consistency_error": component_loss_summary_consistency_error,
+        "component_thermal_summary_consistency_error": component_thermal_summary_consistency_error,
         "thermal_enabled": thermal_enabled,
         "thermal_peak_temperature_c": thermal_peak_temperature_c,
         "thermal_final_temperature_c": thermal_final_temperature_c,

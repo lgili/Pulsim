@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_map>
 
 namespace pulsim::v1 {
 
@@ -415,6 +416,55 @@ void Simulator::finalize_thermal_summary(SimulationResult& result) {
         summary.device_temperatures.push_back(std::move(telemetry));
     }
     result.thermal_summary = std::move(summary);
+}
+
+void Simulator::finalize_component_electrothermal(SimulationResult& result) {
+    const auto& conns = circuit_.connections();
+    result.component_electrothermal.clear();
+    result.component_electrothermal.reserve(conns.size());
+
+    std::unordered_map<std::string, const LossResult*> loss_by_name;
+    loss_by_name.reserve(result.loss_summary.device_losses.size());
+    for (const auto& item : result.loss_summary.device_losses) {
+        loss_by_name[item.device_name] = &item;
+    }
+
+    std::unordered_map<std::string, const DeviceThermalTelemetry*> thermal_by_name;
+    thermal_by_name.reserve(result.thermal_summary.device_temperatures.size());
+    for (const auto& item : result.thermal_summary.device_temperatures) {
+        thermal_by_name[item.device_name] = &item;
+    }
+
+    const Real ambient = result.thermal_summary.ambient;
+    for (const auto& conn : conns) {
+        ComponentElectrothermalTelemetry entry;
+        entry.component_name = conn.name;
+        entry.final_temperature = ambient;
+        entry.peak_temperature = ambient;
+        entry.average_temperature = ambient;
+
+        if (const auto loss_it = loss_by_name.find(conn.name); loss_it != loss_by_name.end()) {
+            const LossResult& loss = *loss_it->second;
+            entry.conduction = loss.breakdown.conduction;
+            entry.turn_on = loss.breakdown.turn_on;
+            entry.turn_off = loss.breakdown.turn_off;
+            entry.reverse_recovery = loss.breakdown.reverse_recovery;
+            entry.total_loss = loss.breakdown.total();
+            entry.total_energy = loss.total_energy;
+            entry.average_power = loss.average_power;
+            entry.peak_power = loss.peak_power;
+        }
+
+        if (const auto thermal_it = thermal_by_name.find(conn.name); thermal_it != thermal_by_name.end()) {
+            const DeviceThermalTelemetry& thermal = *thermal_it->second;
+            entry.thermal_enabled = thermal.enabled;
+            entry.final_temperature = thermal.final_temperature;
+            entry.peak_temperature = thermal.peak_temperature;
+            entry.average_temperature = thermal.average_temperature;
+        }
+
+        result.component_electrothermal.push_back(std::move(entry));
+    }
 }
 
 

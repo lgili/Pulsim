@@ -46,6 +46,7 @@ PY
 
 - Documentation site: [https://lgili.github.io/Pulsim/](https://lgili.github.io/Pulsim/)
 - Getting started guide: [`docs/getting-started.md`](docs/getting-started.md)
+- Electrothermal workflow: [`docs/electrothermal-workflow.md`](docs/electrothermal-workflow.md)
 - API reference: [`docs/api-reference.md`](docs/api-reference.md)
 - Benchmarks and parity: [`docs/benchmarks-and-parity.md`](docs/benchmarks-and-parity.md)
 

@@ -121,3 +121,16 @@ Campos úteis de `SimulationResult`:
 - `newton_iterations_total`, `timestep_rejections`
 - `linear_solver_telemetry`, `fallback_trace`
 - `loss_summary`, `thermal_summary`
+- `component_electrothermal` (deterministic per-component loss + temperature telemetry)
+
+## Electrothermal Result Example
+
+```python
+result = sim.run_transient(circuit.initial_state())
+
+for item in result.component_electrothermal:
+    print(item.component_name, item.total_loss, item.peak_temperature)
+```
+
+For full YAML + Python electrothermal setup (global thermal block, component thermal ports, strict/non-strict parser behavior), see
+[Electrothermal Workflow](electrothermal-workflow.md).

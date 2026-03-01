@@ -1185,6 +1185,7 @@ void init_v2_module(py::module_& v2) {
         .value("InvalidInitialState", SimulationDiagnosticCode::InvalidInitialState)
         .value("InvalidTimeWindow", SimulationDiagnosticCode::InvalidTimeWindow)
         .value("InvalidTimestep", SimulationDiagnosticCode::InvalidTimestep)
+        .value("InvalidThermalConfiguration", SimulationDiagnosticCode::InvalidThermalConfiguration)
         .value("UserStopRequested", SimulationDiagnosticCode::UserStopRequested)
         .value("TransientStepFailure", SimulationDiagnosticCode::TransientStepFailure)
         .value("PeriodicInvalidPeriod", SimulationDiagnosticCode::PeriodicInvalidPeriod)
@@ -1321,6 +1322,23 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("max_temperature", &ThermalSummary::max_temperature)
         .def_readwrite("device_temperatures", &ThermalSummary::device_temperatures);
 
+    py::class_<ComponentElectrothermalTelemetry>(v2, "ComponentElectrothermalTelemetry",
+        "Unified per-component electrothermal telemetry")
+        .def(py::init<>())
+        .def_readwrite("component_name", &ComponentElectrothermalTelemetry::component_name)
+        .def_readwrite("thermal_enabled", &ComponentElectrothermalTelemetry::thermal_enabled)
+        .def_readwrite("conduction", &ComponentElectrothermalTelemetry::conduction)
+        .def_readwrite("turn_on", &ComponentElectrothermalTelemetry::turn_on)
+        .def_readwrite("turn_off", &ComponentElectrothermalTelemetry::turn_off)
+        .def_readwrite("reverse_recovery", &ComponentElectrothermalTelemetry::reverse_recovery)
+        .def_readwrite("total_loss", &ComponentElectrothermalTelemetry::total_loss)
+        .def_readwrite("total_energy", &ComponentElectrothermalTelemetry::total_energy)
+        .def_readwrite("average_power", &ComponentElectrothermalTelemetry::average_power)
+        .def_readwrite("peak_power", &ComponentElectrothermalTelemetry::peak_power)
+        .def_readwrite("final_temperature", &ComponentElectrothermalTelemetry::final_temperature)
+        .def_readwrite("peak_temperature", &ComponentElectrothermalTelemetry::peak_temperature)
+        .def_readwrite("average_temperature", &ComponentElectrothermalTelemetry::average_temperature);
+
     py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
         .def(py::init<>())
         .def_readwrite("tstart", &SimulationOptions::tstart)
@@ -1392,6 +1410,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("backend_telemetry", &SimulationResult::backend_telemetry)
         .def_readwrite("loss_summary", &SimulationResult::loss_summary)
         .def_readwrite("thermal_summary", &SimulationResult::thermal_summary)
+        .def_readwrite("component_electrothermal", &SimulationResult::component_electrothermal)
         // Compatibility alias used by legacy Python tests
         .def_property_readonly("data", [](const SimulationResult& result) {
             return result.states;

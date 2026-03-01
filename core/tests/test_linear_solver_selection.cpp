@@ -361,6 +361,96 @@ components:
     CHECK(parser_json.errors().front().find("JSON netlists are unsupported") != std::string::npos);
 }
 
+TEST_CASE("YAML parser enforces required thermal constants in strict mode",
+          "[v1][yaml][thermal][strict]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    thermal:
+      enabled: true
+      cth: 0.05
+)";
+
+    parser::YamlParserOptions parser_options;
+    parser_options.strict = true;
+    parser::YamlParser parser(parser_options);
+    parser.load_string(yaml);
+
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& err) {
+                          return err.find("PULSIM_YAML_E_THERMAL_MISSING_REQUIRED") != std::string::npos;
+                      }));
+}
+
+TEST_CASE("YAML parser defaults missing thermal constants in non-strict mode",
+          "[v1][yaml][thermal][non-strict]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  thermal:
+    default_rth: 1.7
+    default_cth: 0.3
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    thermal:
+      enabled: true
+)";
+
+    parser::YamlParserOptions parser_options;
+    parser_options.strict = false;
+    parser::YamlParser parser(parser_options);
+    const auto [circuit, options] = parser.load_string(yaml);
+
+    (void)circuit;
+    REQUIRE(parser.errors().empty());
+    REQUIRE(options.thermal_devices.contains("M1"));
+    CHECK(options.thermal_devices.at("M1").rth == Approx(1.7));
+    CHECK(options.thermal_devices.at("M1").cth == Approx(0.3));
+    CHECK(std::any_of(parser.warnings().begin(), parser.warnings().end(),
+                      [](const std::string& warn) {
+                          return warn.find("PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED") != std::string::npos;
+                      }));
+}
+
+TEST_CASE("YAML parser rejects thermal enablement on unsupported components",
+          "[v1][yaml][thermal][capability]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.5
+      cth: 0.1
+)";
+
+    parser::YamlParser parser;
+    parser.load_string(yaml);
+
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& err) {
+                          return err.find("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT") != std::string::npos;
+                      }));
+}
+
 TEST_CASE("YAML parser maps fallback policy controls", "[v1][yaml][fallback]") {
     const std::string yaml = R"(schema: pulsim-v1
 version: 1

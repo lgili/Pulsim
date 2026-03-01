@@ -162,6 +162,7 @@ enum class SimulationDiagnosticCode {
     InvalidInitialState,
     InvalidTimeWindow,
     InvalidTimestep,
+    InvalidThermalConfiguration,
     UserStopRequested,
     TransientStepFailure,
     PeriodicInvalidPeriod,
@@ -226,6 +227,24 @@ struct ThermalSummary {
     Real ambient = 25.0;
     Real max_temperature = 25.0;
     std::vector<DeviceThermalTelemetry> device_temperatures;
+};
+
+struct ComponentElectrothermalTelemetry {
+    std::string component_name;
+    bool thermal_enabled = false;
+
+    Real conduction = 0.0;
+    Real turn_on = 0.0;
+    Real turn_off = 0.0;
+    Real reverse_recovery = 0.0;
+    Real total_loss = 0.0;
+    Real total_energy = 0.0;
+    Real average_power = 0.0;
+    Real peak_power = 0.0;
+
+    Real final_temperature = 25.0;
+    Real peak_temperature = 25.0;
+    Real average_temperature = 25.0;
 };
 
 struct SimulationOptions {
@@ -304,6 +323,7 @@ struct SimulationResult {
 
     SystemLossSummary loss_summary;
     ThermalSummary thermal_summary;
+    std::vector<ComponentElectrothermalTelemetry> component_electrothermal;
 };
 
 struct PeriodicSteadyStateResult {
@@ -422,6 +442,7 @@ private:
     void initialize_thermal_tracking();
     void update_thermal_state(Real dt);
     void finalize_thermal_summary(SimulationResult& result);
+    void finalize_component_electrothermal(SimulationResult& result);
     void record_fallback_event(SimulationResult& result,
                                int step_index,
                                int retry_index,

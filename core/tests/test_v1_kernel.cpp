@@ -689,6 +689,26 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
     CHECK(thermal_it->final_temperature >= result.thermal_summary.ambient);
     CHECK(thermal_it->peak_temperature >= thermal_it->final_temperature);
     CHECK(thermal_it->average_temperature >= result.thermal_summary.ambient);
+
+    REQUIRE(result.component_electrothermal.size() == circuit.connections().size());
+    const auto component_m1 = std::find_if(
+        result.component_electrothermal.begin(),
+        result.component_electrothermal.end(),
+        [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "M1"; });
+    REQUIRE(component_m1 != result.component_electrothermal.end());
+    CHECK(component_m1->thermal_enabled);
+    CHECK(component_m1->total_energy > 0.0);
+    CHECK(component_m1->conduction > 0.0);
+    CHECK(component_m1->peak_temperature >= component_m1->final_temperature);
+
+    const auto component_rload = std::find_if(
+        result.component_electrothermal.begin(),
+        result.component_electrothermal.end(),
+        [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "Rload"; });
+    REQUIRE(component_rload != result.component_electrothermal.end());
+    CHECK_FALSE(component_rload->thermal_enabled);
+    CHECK(component_rload->final_temperature == Approx(result.thermal_summary.ambient));
+    CHECK(component_rload->peak_temperature == Approx(result.thermal_summary.ambient));
 }
 
 TEST_CASE("v1 switching topologies auto-enable robust transient defaults", "[v1][robust][autoprofile]") {

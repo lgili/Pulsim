@@ -499,6 +499,23 @@ class ThermalSummary:
 
     def __init__(self) -> None: ...
 
+class ComponentElectrothermalTelemetry:
+    component_name: str
+    thermal_enabled: bool
+    conduction: float
+    turn_on: float
+    turn_off: float
+    reverse_recovery: float
+    total_loss: float
+    total_energy: float
+    average_power: float
+    peak_power: float
+    final_temperature: float
+    peak_temperature: float
+    average_temperature: float
+
+    def __init__(self) -> None: ...
+
 class SystemLossSummary:
     device_losses: Dict[str, object]
     total_loss: float
@@ -562,6 +579,7 @@ class SimulationResult:
     backend_telemetry: BackendTelemetry
     loss_summary: SystemLossSummary
     thermal_summary: ThermalSummary
+    component_electrothermal: List[ComponentElectrothermalTelemetry]
     data: List[List[float]]
 
     def __init__(self) -> None: ...

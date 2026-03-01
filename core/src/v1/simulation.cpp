@@ -281,6 +281,8 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
             return "invalid_time_window";
         case SimulationDiagnosticCode::InvalidTimestep:
             return "invalid_timestep";
+        case SimulationDiagnosticCode::InvalidThermalConfiguration:
+            return "invalid_thermal_configuration";
         case SimulationDiagnosticCode::UserStopRequested:
             return "user_stop_requested";
         case SimulationDiagnosticCode::TransientStepFailure:
@@ -362,6 +364,89 @@ struct TransientInputIssue {
             SimulationDiagnosticCode::InvalidTimestep,
             "Invalid timestep bounds: require dt > 0, dt_min > 0, and dt_max >= dt_min"
         };
+    }
+
+    if (!options.thermal.enable) {
+        return std::nullopt;
+    }
+
+    if (!std::isfinite(options.thermal.ambient)) {
+        return TransientInputIssue{
+            SimulationDiagnosticCode::InvalidThermalConfiguration,
+            "Invalid thermal configuration: simulation.thermal.ambient must be finite"
+        };
+    }
+    if (!std::isfinite(options.thermal.default_rth) || options.thermal.default_rth <= 0.0) {
+        return TransientInputIssue{
+            SimulationDiagnosticCode::InvalidThermalConfiguration,
+            "Invalid thermal configuration: simulation.thermal.default_rth must be finite and > 0"
+        };
+    }
+    if (!std::isfinite(options.thermal.default_cth) || options.thermal.default_cth < 0.0) {
+        return TransientInputIssue{
+            SimulationDiagnosticCode::InvalidThermalConfiguration,
+            "Invalid thermal configuration: simulation.thermal.default_cth must be finite and >= 0"
+        };
+    }
+
+    const auto& devices = circuit.devices();
+    const auto& conns = circuit.connections();
+    for (std::size_t i = 0; i < devices.size() && i < conns.size(); ++i) {
+        bool supports_thermal = false;
+        std::visit([&](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            supports_thermal = device_traits<T>::has_thermal_model;
+        }, devices[i]);
+
+        if (!supports_thermal) {
+            continue;
+        }
+
+        ThermalDeviceConfig cfg;
+        cfg.enabled = true;
+        cfg.rth = options.thermal.default_rth;
+        cfg.cth = options.thermal.default_cth;
+        cfg.temp_init = options.thermal.ambient;
+        cfg.temp_ref = options.thermal.ambient;
+
+        const auto it = options.thermal_devices.find(conns[i].name);
+        if (it != options.thermal_devices.end()) {
+            cfg = it->second;
+        }
+
+        if (!cfg.enabled) {
+            continue;
+        }
+
+        auto fail = [&](const std::string& field, const std::string& rule) {
+            return TransientInputIssue{
+                SimulationDiagnosticCode::InvalidThermalConfiguration,
+                "Invalid thermal configuration for component '" + conns[i].name +
+                    "': " + field + " " + rule
+            };
+        };
+
+        if (!std::isfinite(cfg.rth)) {
+            return fail("rth", "must be finite");
+        }
+        if (cfg.rth <= 0.0) {
+            return fail("rth", "must be > 0");
+        }
+        if (!std::isfinite(cfg.cth)) {
+            return fail("cth", "must be finite");
+        }
+        if (cfg.cth < 0.0) {
+            return fail("cth", "must be >= 0");
+        }
+        if (!std::isfinite(cfg.temp_init)) {
+            return fail("temp_init", "must be finite");
+        }
+        if (!std::isfinite(cfg.temp_ref)) {
+            return fail("temp_ref", "must be finite");
+        }
+        if (!std::isfinite(cfg.alpha)) {
+            return fail("alpha", "must be finite");
+        }
     }
 
     return std::nullopt;
@@ -1859,6 +1944,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
     finalize_loss_summary(result);
     finalize_thermal_summary(result);
+    finalize_component_electrothermal(result);
 
     result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
     const EquationAssemblerTelemetry assembler_telemetry =

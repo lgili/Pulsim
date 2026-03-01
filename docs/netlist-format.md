@@ -148,6 +148,9 @@ simulation:
 `simulation.backend` e `simulation.sundials` são chaves legadas e não fazem parte
 da superfície suportada de transiente.
 
+For thermal-port rules, strict/non-strict behavior, and complete electrothermal examples, see
+[Electrothermal Workflow](electrothermal-workflow.md).
+
 ### Solver Configuration
 
 Use `simulation.solver` to control linear/iterative solver selection and nonlinear aids:

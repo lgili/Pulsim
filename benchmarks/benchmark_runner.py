@@ -446,6 +446,26 @@ def run_benchmarks(
                 for key in ("newton_iterations", "timestep_rejections", "linear_fallbacks"):
                     if telemetry.get(key) is None:
                         telemetry[key] = 0.0
+                components_block = scenario_netlist.get("components", [])
+                if isinstance(components_block, list):
+                    declared_components = sum(1 for item in components_block if isinstance(item, dict))
+                    telemetry["component_declared_count"] = float(declared_components)
+                    reported_value = telemetry.get("component_reported_count")
+                    if reported_value is not None:
+                        try:
+                            reported_components = float(reported_value)
+                            if math.isfinite(reported_components):
+                                covered = min(reported_components, float(declared_components))
+                                telemetry["component_coverage_rate"] = (
+                                    (covered / float(declared_components))
+                                    if declared_components > 0
+                                    else 1.0
+                                )
+                                telemetry["component_coverage_gap"] = max(
+                                    0.0, float(declared_components) - reported_components
+                                )
+                        except (TypeError, ValueError):
+                            pass
 
                 validation = bench_meta.get("validation", {})
                 validation_type = validation.get("type", "none")
