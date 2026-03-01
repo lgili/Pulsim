@@ -902,6 +902,50 @@ def test_pwm_generator_supports_input_driven_duty_with_limits() -> None:
     assert low_duty.channel_values["PWM1"] == 0.0
 
 
+def test_yaml_pulse_voltage_source_can_drive_target_switch_component() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+components:
+  - type: voltage_source
+    name: VDRV
+    nodes: [drv, 0]
+    target_component: Q1
+    waveform:
+      type: pulse
+      v_initial: 0
+      v_pulse: 10
+      t_delay: 0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 2e-6
+      period: 4e-6
+  - type: igbt
+    name: Q1
+    nodes: [gate, main, 0]
+    vth: 5
+    g_on: 2000
+    g_off: 1e-9
+"""
+    parser = ps.YamlParser()
+    circuit, _ = parser.load_string(content)
+    assert parser.errors == []
+
+    n_main = circuit.get_node("main")
+    x = [0.0] * circuit.system_size()
+    x[n_main] = 1.0
+
+    circuit.execute_mixed_domain_step(x, 1e-6)  # high interval
+    _, f_on = circuit.assemble_jacobian(x)
+    g_on = abs(float(f_on[n_main])) / max(abs(float(x[n_main])), 1e-9)
+
+    circuit.execute_mixed_domain_step(x, 3e-6)  # low interval
+    _, f_off = circuit.assemble_jacobian(x)
+    g_off = abs(float(f_off[n_main])) / max(abs(float(x[n_main])), 1e-9)
+
+    assert g_on > g_off * 10.0
+
+
 def test_integrator_respects_output_limits() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -1725,10 +1726,10 @@ TEST_CASE("v1 pwm generator clamps duty from input", "[v1][mixed-domain][pwm][re
     Vector x = Vector::Zero(circuit.system_size());
     x[n_cmd] = 0.95;
     const auto hi = circuit.execute_mixed_domain_step(x, 0.0);
-    const auto hi_off = circuit.execute_mixed_domain_step(x, 8.5e-4);  // phase=0.85 > duty
+    const auto hi_off = circuit.execute_mixed_domain_step(x, 4.5e-4);  // phase=0.45 => carrier=0.9 > duty
 
     x[n_cmd] = 0.10;
-    const auto lo = circuit.execute_mixed_domain_step(x, 2.5e-4);  // phase=0.25 > duty_min
+    const auto lo = circuit.execute_mixed_domain_step(x, 2.5e-4);  // phase=0.25 => carrier=0.5 > duty_min
 
     REQUIRE(hi.channel_values.contains("PWM1"));
     REQUIRE(hi.channel_values.contains("PWM1.duty"));
@@ -1743,6 +1744,166 @@ TEST_CASE("v1 pwm generator clamps duty from input", "[v1][mixed-domain][pwm][re
     CHECK(hi_off.channel_values.at("PWM1") == Approx(0.0).margin(1e-12));
     CHECK(lo.channel_values.at("PWM1.duty") == Approx(0.2).margin(1e-12));
     CHECK(lo.channel_values.at("PWM1") == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("v1 pwm generator can switch all power-switch families via target component",
+          "[v1][mixed-domain][pwm][switching]") {
+    auto estimate_conductance = [](Circuit& circuit, const Vector& state, Index node) {
+        SparseMatrix J;
+        Vector f;
+        circuit.assemble_jacobian(J, f, state);
+        const Real v = std::max<Real>(std::abs(state[node]), 1e-9);
+        return std::abs(f[node]) / v;
+    };
+
+    auto run_case = [&](const std::string& target_type,
+                        const std::function<void(Circuit&, Index, Index, Index)>& add_target) {
+        Circuit circuit;
+        const auto n_cmd = circuit.add_node("cmd");
+        const auto n_ctrl = circuit.add_node("ctrl");
+        const auto n_gate = circuit.add_node("gate");
+        const auto n_main = circuit.add_node("main");
+
+        add_target(circuit, n_ctrl, n_gate, n_main);
+        circuit.add_virtual_component(
+            "pwm_generator",
+            "PWM1",
+            {n_cmd},
+            {
+                {"frequency", 1000.0},
+                {"duty_from_input", 1.0},
+                {"duty_min", 0.0},
+                {"duty_max", 1.0},
+            },
+            {{"target_component", "SW"}}
+        );
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_main] = 1.0;
+        x[n_cmd] = 0.75;
+
+        const auto step_on = circuit.execute_mixed_domain_step(x, 1.0e-4);   // phase=0.1, carrier=0.2
+        const Real g_on = estimate_conductance(circuit, x, n_main);
+        const auto step_off = circuit.execute_mixed_domain_step(x, 4.0e-4);  // phase=0.4, carrier=0.8
+        const Real g_off = estimate_conductance(circuit, x, n_main);
+
+        INFO("target=" << target_type << " g_on=" << g_on << " g_off=" << g_off);
+        REQUIRE(step_on.channel_values.contains("PWM1"));
+        REQUIRE(step_off.channel_values.contains("PWM1"));
+        CHECK(step_on.channel_values.at("PWM1") == Approx(1.0).margin(1e-12));
+        CHECK(step_off.channel_values.at("PWM1") == Approx(0.0).margin(1e-12));
+        CHECK(g_on > g_off * 10.0);
+    };
+
+    SECTION("ideal switch target") {
+        run_case("switch", [](Circuit& circuit, Index /*ctrl*/, Index /*gate*/, Index n_main) {
+            circuit.add_switch("SW", n_main, Circuit::ground(), false, 1e3, 1e-9);
+        });
+    }
+
+    SECTION("voltage-controlled switch target") {
+        run_case("vcswitch", [](Circuit& circuit, Index n_ctrl, Index /*gate*/, Index n_main) {
+            circuit.add_vcswitch("SW", n_ctrl, n_main, Circuit::ground(), 2.5, 1e3, 1e-9);
+        });
+    }
+
+    SECTION("mosfet target") {
+        run_case("mosfet", [](Circuit& circuit, Index /*ctrl*/, Index n_gate, Index n_main) {
+            MOSFET::Params params;
+            params.vth = 2.0;
+            params.kp = 0.2;
+            params.g_off = 1e-12;
+            params.is_nmos = true;
+            circuit.add_mosfet("SW", n_gate, n_main, Circuit::ground(), params);
+        });
+    }
+
+    SECTION("igbt target") {
+        run_case("igbt", [](Circuit& circuit, Index /*ctrl*/, Index n_gate, Index n_main) {
+            IGBT::Params params;
+            params.vth = 5.0;
+            params.g_on = 2e3;
+            params.g_off = 1e-12;
+            circuit.add_igbt("SW", n_gate, n_main, Circuit::ground(), params);
+        });
+    }
+}
+
+TEST_CASE("v1 pulse source driver can switch all power-switch families",
+          "[v1][mixed-domain][pulse][switching]") {
+    auto estimate_conductance = [](Circuit& circuit, const Vector& state, Index node) {
+        SparseMatrix J;
+        Vector f;
+        circuit.assemble_jacobian(J, f, state);
+        const Real v = std::max<Real>(std::abs(state[node]), 1e-9);
+        return std::abs(f[node]) / v;
+    };
+
+    auto run_case = [&](const std::string& target_type,
+                        const std::function<void(Circuit&, Index, Index, Index)>& add_target) {
+        Circuit circuit;
+        const auto n_drv = circuit.add_node("drv");
+        const auto n_ctrl = circuit.add_node("ctrl");
+        const auto n_gate = circuit.add_node("gate");
+        const auto n_main = circuit.add_node("main");
+
+        PulseParams pulse;
+        pulse.v_initial = 0.0;
+        pulse.v_pulse = 10.0;
+        pulse.t_delay = 0.0;
+        pulse.t_rise = 1e-9;
+        pulse.t_fall = 1e-9;
+        pulse.t_width = 4e-4;
+        pulse.period = 1e-3;
+        circuit.add_pulse_voltage_source("VDRV", n_drv, Circuit::ground(), pulse);
+
+        add_target(circuit, n_ctrl, n_gate, n_main);
+        circuit.bind_switch_driver("VDRV", "SW");
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_main] = 1.0;
+
+        (void)circuit.execute_mixed_domain_step(x, 1.0e-4);  // inside pulse high window
+        const Real g_on = estimate_conductance(circuit, x, n_main);
+        (void)circuit.execute_mixed_domain_step(x, 7.0e-4);  // pulse low window
+        const Real g_off = estimate_conductance(circuit, x, n_main);
+
+        INFO("target=" << target_type << " g_on=" << g_on << " g_off=" << g_off);
+        CHECK(g_on > g_off * 10.0);
+    };
+
+    SECTION("ideal switch target") {
+        run_case("switch", [](Circuit& circuit, Index /*ctrl*/, Index /*gate*/, Index n_main) {
+            circuit.add_switch("SW", n_main, Circuit::ground(), false, 1e3, 1e-9);
+        });
+    }
+
+    SECTION("voltage-controlled switch target") {
+        run_case("vcswitch", [](Circuit& circuit, Index n_ctrl, Index /*gate*/, Index n_main) {
+            circuit.add_vcswitch("SW", n_ctrl, n_main, Circuit::ground(), 2.5, 1e3, 1e-9);
+        });
+    }
+
+    SECTION("mosfet target") {
+        run_case("mosfet", [](Circuit& circuit, Index /*ctrl*/, Index n_gate, Index n_main) {
+            MOSFET::Params params;
+            params.vth = 2.0;
+            params.kp = 0.2;
+            params.g_off = 1e-12;
+            params.is_nmos = true;
+            circuit.add_mosfet("SW", n_gate, n_main, Circuit::ground(), params);
+        });
+    }
+
+    SECTION("igbt target") {
+        run_case("igbt", [](Circuit& circuit, Index /*ctrl*/, Index n_gate, Index n_main) {
+            IGBT::Params params;
+            params.vth = 5.0;
+            params.g_on = 2e3;
+            params.g_off = 1e-12;
+            circuit.add_igbt("SW", n_gate, n_main, Circuit::ground(), params);
+        });
+    }
 }
 
 TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
@@ -2133,9 +2294,13 @@ TEST_CASE("v1 runtime circuit supports string_view name lookups", "[v1][runtime]
     CHECK(circuit.get_node(std::string_view{"gNd"}) == Circuit::ground());
 
     const auto n_ctrl = circuit.add_node(std::string_view{"ctrl"});
+    const auto n_gate = circuit.add_node(std::string_view{"gate"});
     const auto n_out = circuit.add_node(std::string_view{"out"});
 
     circuit.add_switch("S1", n_out, Circuit::ground(), false, 1e3, 1e-9);
+    circuit.add_vcswitch("S2", n_ctrl, n_out, Circuit::ground(), 2.5, 1e3, 1e-9);
+    circuit.add_mosfet("S3", n_gate, n_out, Circuit::ground(), MOSFET::Params{});
+    circuit.add_igbt("S4", n_gate, n_out, Circuit::ground(), IGBT::Params{});
 
     PWMParams pwm;
     pwm.v_high = 10.0;
@@ -2145,6 +2310,9 @@ TEST_CASE("v1 runtime circuit supports string_view name lookups", "[v1][runtime]
     circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
 
     REQUIRE_NOTHROW(circuit.set_switch_state(std::string_view{"S1"}, true));
+    REQUIRE_NOTHROW(circuit.set_switch_state(std::string_view{"S2"}, true));
+    REQUIRE_NOTHROW(circuit.set_switch_state(std::string_view{"S3"}, true));
+    REQUIRE_NOTHROW(circuit.set_switch_state(std::string_view{"S4"}, true));
     REQUIRE_NOTHROW(circuit.set_pwm_duty(std::string_view{"Vpwm"}, 0.25));
     REQUIRE_NOTHROW(circuit.set_pwm_duty_callback(std::string_view{"Vpwm"}, [](Real /*time*/) { return 0.4; }));
     REQUIRE_NOTHROW(circuit.clear_pwm_duty_callback(std::string_view{"Vpwm"}));

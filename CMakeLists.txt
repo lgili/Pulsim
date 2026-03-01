@@ -22,7 +22,7 @@ if(APPLE AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED CMAKE_CXX_COMPILER)
     endif()
 endif()
 
-project(pulsim VERSION 0.5.0 LANGUAGES CXX)
+project(pulsim VERSION 0.5.1 LANGUAGES CXX)
 
 # =============================================================================
 # C++ Standard Configuration
@@ -77,13 +77,28 @@ endif()
 
 # LTO (Link-Time Optimization) - significant performance improvement
 if(PULSIM_ENABLE_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
-    if(LTO_SUPPORTED)
-        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-        message(STATUS "LTO: Enabled (interprocedural optimization)")
+    # Some CI/editable-build environments can expose mismatched CMake module
+    # roots (e.g. pip build env cleanup on Windows), making CheckIPOSupported
+    # fail while probing. In that case, disable LTO gracefully.
+    set(_ipo_template "${CMAKE_ROOT}/Modules/CheckIPOSupported/CMakeLists-CXX.txt.in")
+    if(EXISTS "${_ipo_template}")
+        include(CheckIPOSupported)
+        if(COMMAND check_ipo_supported)
+            check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
+            if(LTO_SUPPORTED)
+                set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+                message(STATUS "LTO: Enabled (interprocedural optimization)")
+            else()
+                message(WARNING "LTO: Not supported - ${LTO_ERROR}")
+            endif()
+        else()
+            message(WARNING "LTO: check_ipo_supported() unavailable; disabling LTO for this configure")
+        endif()
     else()
-        message(WARNING "LTO: Not supported - ${LTO_ERROR}")
+        message(WARNING
+            "LTO: IPO template not found at '${_ipo_template}'. "
+            "Disabling LTO for this configure (likely transient CMake module path in CI)."
+        )
     endif()
 endif()
 
@@ -227,12 +242,15 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -Wall -Wextra -Wpedantic -Werror=return-type
         -Wno-c++98-compat -Wno-c++98-compat-pedantic
     )
-    # On Linux, use libc++ instead of libstdc++ for better C++23 support
-    # This avoids ABI issues between Clang and GCC's standard library
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # On Linux, optionally use libc++ for pure C++ builds.
+    # For Python builds (wheels/editable), keep default libstdc++ to avoid
+    # ABI mismatches with dependency/toolchain artifacts in CI.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
         list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -stdlib=libc++)
         list(APPEND PULSIM_TARGET_LINK_OPTIONS -stdlib=libc++ -lc++abi)
         message(STATUS "Using libc++ on Linux for Clang")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(STATUS "Using default libstdc++ on Linux for Python build compatibility")
     endif()
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -g -O0 -fno-omit-frame-pointer)
@@ -293,25 +311,68 @@ endfunction()
 include(FetchContent)
 
 # Note: We don't set BUILD_TESTING OFF globally as it would disable our own tests.
-# Eigen is handled via FetchContent_Populate (not MakeAvailable) to skip its CMakeLists.txt.
 
-# Eigen - header-only, don't process its CMakeLists.txt to avoid test targets
-FetchContent_Declare(
-    eigen
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    GIT_SHALLOW TRUE
-)
-FetchContent_GetProperties(eigen)
-if(NOT eigen_POPULATED)
-    FetchContent_Populate(eigen)
-endif()
-# Create Eigen3::Eigen target manually (header-only)
+# Eigen - header-only dependency
+# Prefer system package in CI to avoid network flakiness, then fall back to fetch.
+find_package(Eigen3 3.4 QUIET NO_MODULE)
+
+# Some CMake/Python build environments miss Homebrew prefixes by default.
 if(NOT TARGET Eigen3::Eigen)
-    add_library(Eigen3::Eigen INTERFACE IMPORTED)
-    set_target_properties(Eigen3::Eigen PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${eigen_SOURCE_DIR}"
+    find_package(Eigen3 3.4 QUIET NO_MODULE
+        PATHS
+            /opt/homebrew/opt/eigen
+            /usr/local/opt/eigen
+        PATH_SUFFIXES
+            share/eigen3/cmake
     )
+endif()
+
+if(TARGET Eigen3::Eigen)
+    message(STATUS "Eigen3: using system package")
+else()
+    # Last local fallback for environments with headers installed but no CMake config package.
+    find_path(PULSIM_EIGEN3_INCLUDE_DIR
+        NAMES Eigen/Core
+        PATHS
+            /opt/homebrew/include
+            /usr/local/include
+            /usr/include
+        PATH_SUFFIXES
+            eigen3
+    )
+
+    if(PULSIM_EIGEN3_INCLUDE_DIR)
+        message(STATUS "Eigen3: using headers from ${PULSIM_EIGEN3_INCLUDE_DIR}")
+        add_library(Eigen3::Eigen INTERFACE IMPORTED)
+        set_target_properties(Eigen3::Eigen PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${PULSIM_EIGEN3_INCLUDE_DIR}"
+        )
+    else()
+        # Network fallback uses archive download (no git credentials required).
+        set(PULSIM_EIGEN_ARCHIVE_URL
+            "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz"
+            CACHE STRING "Eigen source archive URL"
+        )
+        message(STATUS "Eigen3: system package not found, downloading ${PULSIM_EIGEN_ARCHIVE_URL}")
+
+        # Use populate-only mode so Eigen's own CMake targets/tests are never added.
+        set(_pulsim_eigen_source_dir "${CMAKE_BINARY_DIR}/_deps/eigen-src")
+        set(_pulsim_eigen_subbuild_dir "${CMAKE_BINARY_DIR}/_deps/eigen-subbuild")
+        if(NOT EXISTS "${_pulsim_eigen_source_dir}/Eigen/Core")
+            FetchContent_Populate(
+                eigen
+                SOURCE_DIR "${_pulsim_eigen_source_dir}"
+                SUBBUILD_DIR "${_pulsim_eigen_subbuild_dir}"
+                URL ${PULSIM_EIGEN_ARCHIVE_URL}
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            )
+        endif()
+
+        add_library(Eigen3::Eigen INTERFACE IMPORTED)
+        set_target_properties(Eigen3::Eigen PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${_pulsim_eigen_source_dir}"
+        )
+    endif()
 endif()
 
 # yaml-cpp - YAML parser
@@ -325,6 +386,25 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(yaml-cpp)
 
+# GCC 14 + libstdc++ in C++23 mode can fail when compiling yaml-cpp internals
+# (tuple-like conversion in std::map::operator[]). Build yaml-cpp with C++17
+# while keeping Pulsim targets on C++23.
+if(TARGET yaml-cpp)
+    set_target_properties(yaml-cpp PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS OFF
+    )
+
+    # Linux Clang C++ builds use libc++; compile yaml-cpp with the same
+    # standard library to avoid std::__1 vs std::__cxx11 link mismatches.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
+        target_compile_options(yaml-cpp PUBLIC -stdlib=libc++)
+        target_link_options(yaml-cpp PUBLIC -stdlib=libc++ -lc++abi)
+        message(STATUS "yaml-cpp: forcing libc++ for Linux Clang ABI compatibility")
+    endif()
+endif()
+
 # Catch2 for testing (v3.8.0+ required for GCC 14 compatibility)
 if(PULSIM_BUILD_TESTS)
     FetchContent_Declare(
@@ -334,6 +414,36 @@ if(PULSIM_BUILD_TESTS)
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(Catch2)
+
+    # GCC 14 + libstdc++ can fail compiling Catch2 internals in C++23 mode.
+    # Keep our code on C++23, but build Catch2 itself with C++17.
+    if(TARGET Catch2)
+        set_target_properties(Catch2 PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS OFF
+        )
+    endif()
+    if(TARGET Catch2WithMain)
+        set_target_properties(Catch2WithMain PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED YES
+            CXX_EXTENSIONS OFF
+        )
+    endif()
+
+    # Linux Clang sanitizer jobs use libc++; ensure Catch2 is compiled with the
+    # same standard library to avoid ABI mismatches (std::__1 vs std::__cxx11).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
+        foreach(_catch_target Catch2 Catch2WithMain)
+            if(TARGET ${_catch_target})
+                target_compile_options(${_catch_target} PUBLIC -stdlib=libc++)
+                target_link_options(${_catch_target} INTERFACE -stdlib=libc++ -lc++abi)
+            endif()
+        endforeach()
+        message(STATUS "Catch2: forcing libc++ for Linux Clang ABI compatibility")
+    endif()
+
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(CTest)
     include(Catch)

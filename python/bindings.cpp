@@ -683,6 +683,9 @@ void init_v2_module(py::module_& v2) {
              "Get current simulation time")
         .def("has_time_varying", &Circuit::has_time_varying,
              "Check if circuit has time-varying sources")
+        .def("bind_switch_driver", &Circuit::bind_switch_driver,
+             py::arg("source_name"), py::arg("target_switch_name"),
+             "Bind pulse/PWM voltage source output to a target switch-like component")
         // State
         .def("num_devices", &Circuit::num_devices,
              "Number of devices in circuit")
