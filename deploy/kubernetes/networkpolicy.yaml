@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pulsim
+  namespace: pulsim
+  labels:
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/component: server
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: pulsim
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow gRPC traffic from anywhere in the cluster
+  - ports:
+    - protocol: TCP
+      port: 50051
+  # Allow metrics scraping from Prometheus
+  - ports:
+    - protocol: TCP
+      port: 9090
+    from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  egress:
+  # Allow DNS
+  - ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow communication with Redis (if used)
+  - ports:
+    - protocol: TCP
+      port: 6379

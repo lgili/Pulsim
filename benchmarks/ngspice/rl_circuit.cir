@@ -1,0 +1,13 @@
+* RL Circuit - ngspice benchmark
+* Step response of RL circuit
+
+V1 in 0 DC 10.0
+R1 in out 100
+L1 out 0 10m IC=0
+
+.tran 1u 1m UIC
+.control
+run
+wrdata rl_ngspice.csv v(out) i(V1)
+.endc
+.end

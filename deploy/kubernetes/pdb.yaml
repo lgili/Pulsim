@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pulsim
+  namespace: pulsim
+  labels:
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/component: server
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pulsim
+      app.kubernetes.io/component: server

@@ -1,0 +1,13 @@
+* RC Low-pass Filter - ngspice benchmark
+* Equivalent to examples/rc_circuit.json
+
+V1 in 0 DC 5.0
+R1 in out 1k
+C1 out 0 1u IC=0
+
+.tran 1u 5m UIC
+.control
+run
+wrdata rc_ngspice.csv v(out)
+.endc
+.end

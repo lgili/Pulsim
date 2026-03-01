@@ -1,0 +1,327 @@
+syntax = "proto3";
+
+package pulsim.api.v1;
+
+option csharp_namespace = "Pulsim.Api.V1";
+option go_package = "github.com/pulsim/api/v1;apiv1";
+option java_multiple_files = true;
+option java_outer_classname = "PulsimSimulatorProto";
+option java_package = "com.pulsim.api.v1";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/wrappers.proto";
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_OK = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_ERROR = 3;
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_CREATED = 1;
+  SESSION_STATUS_VALIDATING = 2;
+  SESSION_STATUS_READY = 3;
+  SESSION_STATUS_RUNNING = 4;
+  SESSION_STATUS_PAUSED = 5;
+  SESSION_STATUS_COMPLETED = 6;
+  SESSION_STATUS_STOPPED = 7;
+  SESSION_STATUS_FAILED = 8;
+}
+
+enum SimulationResultFormat {
+  SIMULATION_RESULT_FORMAT_UNSPECIFIED = 0;
+  SIMULATION_RESULT_FORMAT_CSV = 1;
+  SIMULATION_RESULT_FORMAT_HDF5 = 2;
+  SIMULATION_RESULT_FORMAT_PARQUET = 3;
+}
+
+enum SweepStatus {
+  SWEEP_STATUS_UNSPECIFIED = 0;
+  SWEEP_STATUS_PENDING = 1;
+  SWEEP_STATUS_RUNNING = 2;
+  SWEEP_STATUS_COMPLETED = 3;
+  SWEEP_STATUS_FAILED = 4;
+  SWEEP_STATUS_CANCELLED = 5;
+}
+
+message SimulationOptions {
+  google.protobuf.DoubleValue tstart = 1;
+  google.protobuf.DoubleValue tstop = 2;
+  google.protobuf.DoubleValue dt = 3;
+  google.protobuf.DoubleValue dtmin = 4;
+  google.protobuf.DoubleValue dtmax = 5;
+  google.protobuf.DoubleValue abstol = 6;
+  google.protobuf.DoubleValue reltol = 7;
+  google.protobuf.Int32Value max_newton_iterations = 8;
+  google.protobuf.DoubleValue damping_factor = 9;
+  google.protobuf.BoolValue use_ic = 10;
+  repeated string output_signals = 11;
+}
+
+message CircuitModel {
+  string name = 1;
+  string description = 2;
+  string model_json = 3;
+  google.protobuf.Timestamp created_at = 4;
+  string created_by = 5;
+}
+
+message ModelDescriptor {
+  string model_id = 1;
+  CircuitModel model = 2;
+}
+
+message SessionDescriptor {
+  string session_id = 1;
+  string model_id = 2;
+  string name = 3;
+  SessionStatus status = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  repeated string active_signals = 7;
+  google.protobuf.Duration retention = 8;
+  string owner = 9;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  HealthStatus status = 1;
+  string version = 2;
+  google.protobuf.Duration uptime = 3;
+  uint32 active_sessions = 4;
+  uint32 completed_sessions = 5;
+  bool authentication_enabled = 6;
+}
+
+message CreateSessionRequest {
+  string name = 1;
+  oneof model_source {
+    string model_id = 2;
+    CircuitModel inline_model = 3;
+  }
+  SimulationOptions options = 4;
+}
+
+message CreateSessionResponse {
+  SessionDescriptor session = 1;
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated SessionDescriptor sessions = 1;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  SessionDescriptor session = 1;
+}
+
+message StartSimulationRequest {
+  string session_id = 1;
+  SimulationOptions overrides = 2;
+}
+
+message StartSimulationResponse {
+  SessionDescriptor session = 1;
+}
+
+message PauseSimulationRequest {
+  string session_id = 1;
+}
+
+message PauseSimulationResponse {
+  SessionDescriptor session = 1;
+}
+
+message ResumeSimulationRequest {
+  string session_id = 1;
+}
+
+message ResumeSimulationResponse {
+  SessionDescriptor session = 1;
+}
+
+message StopSimulationRequest {
+  string session_id = 1;
+}
+
+message StopSimulationResponse {
+  SessionDescriptor session = 1;
+}
+
+message StreamWaveformsRequest {
+  string session_id = 1;
+  repeated string signals = 2;
+  uint32 decimation = 3;
+  google.protobuf.DoubleValue start_time = 4;
+}
+
+message WaveformStreamHeader {
+  string session_id = 1;
+  repeated string signals = 2;
+  double tstart = 3;
+  double tstop = 4;
+  uint64 total_samples = 5;
+}
+
+message WaveformSample {
+  double time = 1;
+  repeated double values = 2;
+}
+
+message WaveformStreamComplete {
+  SessionStatus final_status = 1;
+  string error_message = 2;
+}
+
+message WaveformStreamResponse {
+  oneof payload {
+    WaveformStreamHeader header = 1;
+    WaveformSample sample = 2;
+    WaveformStreamComplete complete = 3;
+  }
+}
+
+message GetResultRequest {
+  string session_id = 1;
+  repeated string signals = 2;
+  google.protobuf.DoubleValue start_time = 3;
+  google.protobuf.DoubleValue end_time = 4;
+}
+
+message ResultMetadata {
+  double start_time = 1;
+  double end_time = 2;
+  uint64 sample_count = 3;
+  repeated string signals = 4;
+  SessionStatus status = 5;
+  string error_message = 6;
+}
+
+message GetResultResponse {
+  ResultMetadata metadata = 1;
+}
+
+message DownloadResultRequest {
+  string session_id = 1;
+  repeated string signals = 2;
+  google.protobuf.DoubleValue start_time = 3;
+  google.protobuf.DoubleValue end_time = 4;
+  SimulationResultFormat format = 5;
+}
+
+message DownloadResultResponse {
+  bytes chunk = 1;
+  bool last_chunk = 2;
+  string content_type = 3;
+  string filename = 4;
+}
+
+message UploadModelRequest {
+  CircuitModel model = 1;
+}
+
+message UploadModelResponse {
+  ModelDescriptor model = 1;
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated ModelDescriptor models = 1;
+}
+
+message GetModelRequest {
+  string model_id = 1;
+}
+
+message GetModelResponse {
+  ModelDescriptor model = 1;
+}
+
+message DeleteModelRequest {
+  string model_id = 1;
+  bool force = 2;
+}
+
+message DeleteModelResponse {
+  bool deleted = 1;
+}
+
+message SweepParameter {
+  string name = 1;
+  double start = 2;
+  double stop = 3;
+  uint32 steps = 4;
+  bool logarithmic = 5;
+}
+
+message CreateSweepRequest {
+  string model_id = 1;
+  SimulationOptions base_options = 2;
+  repeated SweepParameter parameters = 3;
+  repeated string signals = 4;
+}
+
+message CreateSweepResponse {
+  string sweep_id = 1;
+}
+
+message RunSweepRequest {
+  string sweep_id = 1;
+  bool parallel = 2;
+}
+
+message RunSweepResponse {
+  SweepStatus status = 1;
+}
+
+message GetSweepResultsRequest {
+  string sweep_id = 1;
+}
+
+message ParameterValue {
+  string name = 1;
+  double value = 2;
+}
+
+message SweepResult {
+  repeated ParameterValue parameters = 1;
+  ResultMetadata metadata = 2;
+  repeated double final_values = 3;
+}
+
+message GetSweepResultsResponse {
+  SweepStatus status = 1;
+  repeated SweepResult results = 2;
+}
+
+service SimulatorService {
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc StartSimulation(StartSimulationRequest) returns (StartSimulationResponse);
+  rpc PauseSimulation(PauseSimulationRequest) returns (PauseSimulationResponse);
+  rpc ResumeSimulation(ResumeSimulationRequest) returns (ResumeSimulationResponse);
+  rpc StopSimulation(StopSimulationRequest) returns (StopSimulationResponse);
+  rpc StreamWaveforms(StreamWaveformsRequest) returns (stream WaveformStreamResponse);
+  rpc GetResult(GetResultRequest) returns (GetResultResponse);
+  rpc DownloadResult(DownloadResultRequest) returns (stream DownloadResultResponse);
+  rpc UploadModel(UploadModelRequest) returns (UploadModelResponse);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc GetModel(GetModelRequest) returns (GetModelResponse);
+  rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
+  rpc CreateSweep(CreateSweepRequest) returns (CreateSweepResponse);
+  rpc RunSweep(RunSweepRequest) returns (RunSweepResponse);
+  rpc GetSweepResults(GetSweepResultsRequest) returns (GetSweepResultsResponse);
+}

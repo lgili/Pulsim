@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulsim
+  namespace: pulsim
+  labels:
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc
+    port: 50051
+    targetPort: grpc
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/component: server
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulsim-headless
+  namespace: pulsim
+  labels:
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: grpc
+    port: 50051
+    targetPort: grpc
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/component: server

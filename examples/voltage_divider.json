@@ -1,0 +1,35 @@
+{
+    "name": "Voltage Divider",
+    "description": "Simple resistive voltage divider",
+    "components": [
+        {
+            "type": "voltage_source",
+            "name": "Vin",
+            "npos": "vcc",
+            "nneg": "0",
+            "waveform": {
+                "type": "dc",
+                "value": 12.0
+            }
+        },
+        {
+            "type": "resistor",
+            "name": "R1",
+            "n1": "vcc",
+            "n2": "vout",
+            "value": "10k"
+        },
+        {
+            "type": "resistor",
+            "name": "R2",
+            "n1": "vout",
+            "n2": "0",
+            "value": "10k"
+        }
+    ],
+    "simulation": {
+        "type": "transient",
+        "tstop": 1e-3,
+        "dt": 1e-6
+    }
+}

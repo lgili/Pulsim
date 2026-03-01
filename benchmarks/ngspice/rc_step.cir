@@ -1,0 +1,15 @@
+* RC Step Response - ngspice benchmark
+* Matches Pulsim rc_step.json
+
+V1 in 0 PULSE(0 5 0 1n 1n 10m 20m)
+R1 in out 1k
+C1 out 0 1u IC=0
+
+.tran 1u 5m UIC
+
+.control
+run
+wrdata ../results/rc_ngspice.csv v(out)
+.endc
+
+.end

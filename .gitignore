@@ -1,0 +1,41 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.out
+*.app
+
+# Results
+*.csv
+
+# Dependencies (fetched by CMake)
+_deps/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.so
+.skbuild-info.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# CMake API (scikit-build)
+.cmake/
+
+# OS
+.DS_Store
+Thumbs.db

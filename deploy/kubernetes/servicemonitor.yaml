@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pulsim
+  namespace: pulsim
+  labels:
+    app.kubernetes.io/name: pulsim
+    app.kubernetes.io/component: server
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pulsim
+      app.kubernetes.io/component: server
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+  namespaceSelector:
+    matchNames:
+    - pulsim
