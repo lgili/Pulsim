@@ -79,6 +79,7 @@ jobs:
             cxx: clang++-17
             build_type: Debug
             sanitizers: ON
+            build_parallel_level: 2
             install_cmd: |
               sudo apt-get update
               sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
@@ -104,13 +105,18 @@ jobs:
             -DPULSIM_SANITIZERS=${{ matrix.sanitizers || 'OFF' }}
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }}
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} \
+            --parallel ${{ matrix.build_parallel_level || env.CMAKE_BUILD_PARALLEL_LEVEL }}
 
       - name: Run C++ Tests
         run: |
           cd build
           # Use longer timeout for sanitizer builds (10-20x overhead)
           if [ "${{ matrix.sanitizers }}" = "ON" ]; then
+            # libc++ on Linux can report alloc/dealloc mismatch false positives
+            # for certain std::exception message paths under ASan.
+            export ASAN_OPTIONS="alloc_dealloc_mismatch=0"
             ctest --output-on-failure --timeout 600
           else
             ctest --output-on-failure --timeout 120
@@ -188,7 +194,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
+          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev gcc-13 g++-13
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -208,10 +214,14 @@ jobs:
 
       - name: Build and install package
         env:
-          # On macOS, let CMake auto-detect AppleClang for ABI compatibility
-          # On Linux, use Clang 17 explicitly
-          CC: ${{ runner.os == 'Linux' && 'clang-17' || '' }}
-          CXX: ${{ runner.os == 'Linux' && 'clang++-17' || '' }}
+          # On macOS, let CMake auto-detect AppleClang for ABI compatibility.
+          # On Linux python jobs, use GCC 13 to avoid libstdc++14 regressions
+          # seen in some third-party template instantiations.
+          CC: ${{ runner.os == 'Linux' && 'gcc-13' || '' }}
+          CXX: ${{ runner.os == 'Linux' && 'g++-13' || '' }}
+          # Linux runners can OOM while compiling C++ extension dependencies
+          # (yaml-cpp/Catch2) at high parallelism; keep this job stable.
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ runner.os == 'Linux' && '2' || '4' }}
         run: |
           # Use non-editable install in CI to avoid import-time rebuilds with
           # transient pip build-env paths (Windows runner instability).
@@ -307,7 +317,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
+          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev gcc-13 g++-13
 
       - name: Install Python dependencies
         run: |
@@ -316,8 +326,12 @@ jobs:
 
       - name: Build and install Python runtime
         env:
-          CC: clang-17
-          CXX: clang++-17
+          # Keep benchmark build on GCC 13 for stability with Linux stdlib headers.
+          CC: gcc-13
+          CXX: g++-13
+          # Benchmark job compiles the Python extension as part of pip install.
+          # Keep parallelism conservative to avoid intermittent OOM failures.
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
         run: |
           pip install ".[dev]"
 

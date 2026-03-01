@@ -1,80 +1,80 @@
-# PulsimCore
+# PulsimCore Documentation
 
 <div class="pulsim-hero">
-  <h1>PulsimCore Documentation</h1>
-  <p>Simulação de eletrônica de potência com foco em <strong>Python-first runtime</strong>, netlists YAML e validação contra ferramentas de referência.</p>
-  <p>API suportada: <code>import pulsim</code> + schema <code>pulsim-v1</code>.</p>
+  <h1>PulsimCore Backend</h1>
+  <p>High-performance power electronics simulation backend with a <strong>Python-first runtime</strong>, versioned YAML netlists, and robust convergence tooling.</p>
+  <p>Recommended surface: <code>import pulsim</code> + <code>schema: pulsim-v1</code>.</p>
   <div class="pulsim-hero-actions">
-    <a class="md-button md-button--primary" href="getting-started/">Começar agora</a>
-    <a class="md-button" href="python-api/">API Python</a>
-    <a class="md-button" href="versioning-and-release/">Versionamento</a>
+    <a class="md-button md-button--primary" href="getting-started/">Get Started</a>
+    <a class="md-button" href="api-reference/">API Reference</a>
+    <a class="md-button" href="examples-and-results/">Examples</a>
   </div>
 </div>
 
-## Trilha recomendada
+## What You Can Do With PulsimCore
 
 <div class="grid cards" markdown>
 
-- :material-rocket-launch-outline: **Primeiro contato**
+- :material-rocket-launch-outline: **Run simulations from Python**
 
   ---
 
-  Build local, primeiro circuito e primeiro `run_transient`.
+  Build locally or install from package, then execute transient runs through `Simulator`.
 
   [Getting Started](getting-started.md)
 
-- :material-sine-wave: **Simulação de conversores**
+- :material-file-code-outline: **Drive the backend with YAML netlists**
 
   ---
 
-  Buck/Boost/Flyback/Forward, malha fechada e tuning de controle.
+  Keep simulations reproducible and versioned with `pulsim-v1` schema.
 
-  [Notebooks](notebooks.md)
+  [Netlist YAML Format](netlist-format.md)
 
-- :material-memory: **Solver + convergência**
-
-  ---
-
-  Estratégias de fallback, robustez numérica e tuning de timestep.
-
-  [Convergence Tuning](convergence-tuning-guide.md)
-
-- :material-file-code-outline: **YAML e componentes**
+- :material-sine-wave: **Model switched converters and control loops**
 
   ---
 
-  Formato de netlist, componentes avançados e paridade GUI/backend.
+  Use mixed-domain blocks, event handling, and duty callbacks in production-like scenarios.
 
-  [Netlist YAML](netlist-format.md)
+  [Examples and Results](examples-and-results.md)
 
-- :material-chart-line: **Validação e benchmark**
+- :material-chart-line: **Measure performance and parity**
 
   ---
 
-  Métricas de precisão/performance e comparação com LTspice/ngspice.
+  Validate runtime and waveform fidelity against benchmark baselines and SPICE tools.
 
   [Benchmarks and Parity](benchmarks-and-parity.md)
 
-- :material-history: **Docs por versão**
+- :material-api: **Integrate through a typed API**
 
   ---
 
-  Cada tag `vX.Y.Z` gera documentação versionada com histórico preservado.
+  Navigate classes, options, and enums generated from the package interface.
 
-  [Versionamento e Release](versioning-and-release.md)
+  [API Reference](api-reference.md)
+
+- :material-tools: **Operate docs and release pipeline**
+
+  ---
+
+  Publish versioned docs in GitHub Pages and keep strict docs checks in CI.
+
+  [Docs Versioning and Release](versioning-and-release.md)
 
 </div>
 
-## Quick start (2 comandos)
+## Backend In One Command
 
 ```bash
-cmake -S . -B build -G Ninja -DPULSIM_BUILD_PYTHON=ON
-PYTHONPATH=build/python python3 -c "import pulsim; print(pulsim.__version__)"
+PYTHONPATH=build/python python3 -c "import pulsim as ps; print(ps.__version__)"
 ```
 
-## O que esta documentação cobre
+## Recommended Learning Path
 
-- API Python completa (configuração de solver, integração, análise e callbacks).
-- Fluxo YAML `pulsim-v1` com componentes elétricos, térmicos e mixed-domain.
-- Exemplos reproduzíveis com notebooks para projeto e validação.
-- Diretrizes de release para manter docs por versão no GitHub Pages.
+1. Start with [Getting Started](getting-started.md).
+2. Follow the [User Guide](user-guide.md) to understand the canonical runtime flow.
+3. Run [Examples and Results](examples-and-results.md) end-to-end.
+4. Use [Benchmarks and Parity](benchmarks-and-parity.md) to set CI quality gates.
+5. Integrate against [API Reference](api-reference.md).

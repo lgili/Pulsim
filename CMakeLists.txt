@@ -242,9 +242,10 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -Wall -Wextra -Wpedantic -Werror=return-type
         -Wno-c++98-compat -Wno-c++98-compat-pedantic
     )
-    # On Linux, optionally use libc++ for pure C++ builds.
-    # For Python builds (wheels/editable), keep default libstdc++ to avoid
-    # ABI mismatches with dependency/toolchain artifacts in CI.
+    # On Linux, use libc++ for Clang C++ builds to avoid GCC14/libstdc++
+    # header regressions seen in third-party dependencies during CI.
+    # Keep libstdc++ only for Python extension builds where ABI expectations
+    # are tighter (wheel/editable environments).
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
         list(APPEND PULSIM_TARGET_COMPILE_OPTIONS -stdlib=libc++)
         list(APPEND PULSIM_TARGET_LINK_OPTIONS -stdlib=libc++ -lc++abi)
@@ -432,7 +433,7 @@ if(PULSIM_BUILD_TESTS)
         )
     endif()
 
-    # Linux Clang sanitizer jobs use libc++; ensure Catch2 is compiled with the
+    # Linux Clang C++ builds use libc++; ensure Catch2 is compiled with the
     # same standard library to avoid ABI mismatches (std::__1 vs std::__cxx11).
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT (SKBUILD OR PULSIM_BUILD_PYTHON))
         foreach(_catch_target Catch2 Catch2WithMain)

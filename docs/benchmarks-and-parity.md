@@ -1,13 +1,15 @@
-# Benchmarks, Paridade e Stress
+# Benchmarks and Parity
 
-## Benchmark base (runtime Python)
+Use these workflows to guard runtime, numerical stability, and external parity.
+
+## 1) Standard Benchmark Suite
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
   --output-dir benchmarks/out
 ```
 
-## Casos complexos de conversores (foco em convergencia)
+For switching-heavy converter cases:
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
@@ -15,21 +17,18 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
   --output-dir benchmarks/out_converters
 ```
 
-Atalhos no Makefile:
-
-```bash
-make benchmark-converters BUILD_DIR=build
-make benchmark BUILD_DIR=build LTSPICE_EXE=/Applications/LTspice.app/Contents/MacOS/LTspice
-```
-
-## Matriz de cenários (variações de solver/integrador)
+## 2) Solver/Integrator Validation Matrix
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/validation_matrix.py \
   --output-dir benchmarks/matrix
 ```
 
-## Paridade externa com ngspice
+This matrix is useful to detect solver regressions across fixed/variable timestep modes.
+
+## 3) External Parity
+
+### ngspice
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
@@ -37,7 +36,7 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
   --output-dir benchmarks/ngspice_out
 ```
 
-## Paridade externa com LTspice
+### LTspice
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
@@ -46,27 +45,23 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_ngspice.py \
   --output-dir benchmarks/ltspice_out
 ```
 
-## Stress suite por tiers
+## 4) Tiered Stress Suite
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
   --output-dir benchmarks/stress_out
 ```
 
-## Suíte eletrotérmica (perdas + temperatura)
+Electro-thermal stress variant:
 
 ```bash
-PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
-  --benchmarks benchmarks/electrothermal_benchmarks.yaml \
-  --output-dir benchmarks/out_electrothermal
-
 PYTHONPATH=build/python python3 benchmarks/stress_suite.py \
   --benchmarks benchmarks/electrothermal_benchmarks.yaml \
   --catalog benchmarks/electrothermal_stress_catalog.yaml \
   --output-dir benchmarks/stress_out_electrothermal
 ```
 
-## Gate de paridade GUI -> backend
+## 5) GUI-to-Backend Parity Gate
 
 ```bash
 PYTHONPATH=build/python pytest -q python/tests/test_gui_component_parity.py
@@ -74,17 +69,7 @@ PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py
 ./build-test/core/pulsim_simulation_tests "[v1][yaml][gui-parity]"
 ```
 
-## Artefatos de saída
-
-- benchmark: `results.csv`, `results.json`, `summary.json`
-- paridade: `parity_results.csv`, `parity_results.json`, `parity_summary.json`
-- stress: `stress_results.csv`, `stress_results.json`, `stress_summary.json`
-
-Esses artefatos são o caminho recomendado para validação contínua (CI) e comparação de regressão.
-
-## Gate de KPI para refactor do solver
-
-Para bloquear regressões por fase do refactor do core, use:
+## 6) KPI Regression Gate
 
 ```bash
 python3 benchmarks/kpi_gate.py \
@@ -94,14 +79,20 @@ python3 benchmarks/kpi_gate.py \
   --print-report
 ```
 
-Configuração:
+Baseline and threshold files:
 
-- baseline congelado: `benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json`
-- thresholds: `benchmarks/kpi_thresholds.yaml`
-- `runtime_p50`/`runtime_p95`: avaliados no escopo comum entre baseline e execução atual
-  (interseção `benchmark_id` + `scenario`) quando os artefatos de baseline estão disponíveis.
+- `benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json`
+- `benchmarks/kpi_thresholds.yaml`
 
-KPIs híbridos/eletrotérmicos emitidos no `results.json`:
+## Artifact Contract
+
+These files are the recommended CI contract:
+
+- benchmark: `results.csv`, `results.json`, `summary.json`
+- parity: `parity_results.csv`, `parity_results.json`, `parity_summary.json`
+- stress: `stress_results.csv`, `stress_results.json`, `stress_summary.json`
+
+Primary hybrid/electro-thermal KPI keys emitted in benchmark outputs:
 
 - `state_space_primary_ratio`
 - `dae_fallback_ratio`

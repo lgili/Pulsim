@@ -826,7 +826,15 @@ public:
             } else if (component.type == "pwm_generator") {
                 const Real frequency = std::max<Real>(get_numeric(component, "frequency", 1e3), 1.0);
                 Real duty = get_numeric(component, "duty", 0.5);
-                if (get_numeric(component, "duty_from_input", 0.0) > 0.5) {
+                // duty_from_channel: read duty from a previously-evaluated virtual signal
+                if (const auto it = component.metadata.find("duty_from_channel");
+                    it != component.metadata.end() && !it->second.empty()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) {
+                        duty = get_numeric(component, "duty_offset", 0.0) +
+                               get_numeric(component, "duty_gain", 1.0) * sig_it->second;
+                    }
+                } else if (get_numeric(component, "duty_from_input", 0.0) > 0.5) {
                     duty = get_numeric(component, "duty_offset", 0.0) +
                            get_numeric(component, "duty_gain", 1.0) * in0;
                 }

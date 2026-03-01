@@ -23,15 +23,21 @@ def _workflow_on_section(workflow: dict) -> dict:
     raise AssertionError("Workflow missing `on` section")
 
 
-def test_docs_workflow_is_tag_only_and_version_scoped() -> None:
+def test_docs_workflow_builds_on_pr_and_deploys_from_main_or_tags() -> None:
     workflow = _load_yaml(ROOT / ".github/workflows/docs.yml")
     on_section = _workflow_on_section(workflow)
 
-    assert "workflow_dispatch" not in on_section
+    assert "workflow_dispatch" in on_section
+    assert "pull_request" in on_section
     assert "push" in on_section
 
+    pr_section = on_section["pull_request"]
+    assert "branches" in pr_section
+    assert "main" in pr_section["branches"]
+
     push_section = on_section["push"]
-    assert "branches" not in push_section
+    assert "branches" in push_section
+    assert "main" in push_section["branches"]
     assert "tags" in push_section
     assert "v*.*.*" in push_section["tags"]
 
