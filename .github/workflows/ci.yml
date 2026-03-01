@@ -79,6 +79,7 @@ jobs:
             cxx: clang++-17
             build_type: Debug
             sanitizers: ON
+            build_parallel_level: 2
             install_cmd: |
               sudo apt-get update
               sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
@@ -104,7 +105,9 @@ jobs:
             -DPULSIM_SANITIZERS=${{ matrix.sanitizers || 'OFF' }}
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }}
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} \
+            --parallel ${{ matrix.build_parallel_level || env.CMAKE_BUILD_PARALLEL_LEVEL }}
 
       - name: Run C++ Tests
         run: |
@@ -212,6 +215,9 @@ jobs:
           # On Linux, use Clang 17 explicitly
           CC: ${{ runner.os == 'Linux' && 'clang-17' || '' }}
           CXX: ${{ runner.os == 'Linux' && 'clang++-17' || '' }}
+          # Linux runners can OOM while compiling C++ extension dependencies
+          # (yaml-cpp/Catch2) at high parallelism; keep this job stable.
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ runner.os == 'Linux' && '2' || '4' }}
         run: |
           # Use non-editable install in CI to avoid import-time rebuilds with
           # transient pip build-env paths (Windows runner instability).
@@ -318,6 +324,9 @@ jobs:
         env:
           CC: clang-17
           CXX: clang++-17
+          # Benchmark job compiles the Python extension as part of pip install.
+          # Keep parallelism conservative to avoid intermittent OOM failures.
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
         run: |
           pip install ".[dev]"
 
