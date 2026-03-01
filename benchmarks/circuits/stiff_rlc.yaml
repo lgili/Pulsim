@@ -1,0 +1,38 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: stiff_rlc
+  category: stiff
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/stiff_rlc.csv
+simulation:
+  tstop: 50e-6
+  dt: 50e-9
+  dt_max: 200e-9
+  adaptive_timestep: false
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [in, 0]
+    waveform:
+      type: dc
+      value: 5.0
+  - type: resistor
+    name: R1
+    nodes: [in, n1]
+    value: 1
+  - type: inductor
+    name: L1
+    nodes: [n1, out]
+    value: 1u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1n

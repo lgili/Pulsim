@@ -39,7 +39,10 @@ enum class Integrator {
     BDF3,          // Third-order
     BDF4,          // Fourth-order
     BDF5,          // Fifth-order
-    Gear           // Alias for BDF2 (compatibility)
+    Gear,          // Alias for BDF2 (compatibility)
+    TRBDF2,        // Trapezoidal + BDF2 (stiff-stable)
+    RosenbrockW,   // Linearly implicit Rosenbrock-W (stiff-stable)
+    SDIRK2         // 2nd-order SDIRK (stiff-stable)
 };
 
 /// Get integration method order
@@ -52,6 +55,9 @@ enum class Integrator {
         case Integrator::BDF4: return 4;
         case Integrator::BDF5: return 5;
         case Integrator::Gear: return 2;
+        case Integrator::TRBDF2: return 2;
+        case Integrator::RosenbrockW: return 2;
+        case Integrator::SDIRK2: return 2;
         default: return 1;
     }
 }
@@ -60,6 +66,61 @@ enum class Integrator {
 [[nodiscard]] constexpr bool requires_startup(Integrator m) noexcept {
     return m != Integrator::BDF1 && m != Integrator::Trapezoidal;
 }
+
+[[nodiscard]] constexpr bool is_stiff_stable(Integrator m) noexcept {
+    switch (m) {
+        case Integrator::BDF1:
+        case Integrator::TRBDF2:
+        case Integrator::RosenbrockW:
+        case Integrator::SDIRK2:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// =============================================================================
+// Stage Coefficients for Multi-Stage Stiff Integrators
+// =============================================================================
+
+/// TR-BDF2 coefficients (fixed gamma)
+struct TRBDF2Coeffs {
+    // gamma = 2 - sqrt(2)
+    static constexpr Real gamma = Real{2.0} - Real{1.4142135623730950488};
+    static constexpr Real c1 = gamma;
+    static constexpr Real c2 = Real{1.0};
+
+    struct BDF2Variable {
+        Real a0 = 0.0;
+        Real a1 = 0.0;
+        Real a2 = 0.0;
+    };
+
+    /// Variable-step BDF2 derivative coefficients at t_{n+1}
+    /// dv/dt ≈ a0*v_n + a1*v_{n+γ} + a2*v_{n+1}
+    [[nodiscard]] static constexpr BDF2Variable bdf2_variable(Real h1, Real h2) noexcept {
+        const Real denom = h1 + h2;
+        const Real h1_safe = std::max(h1, Real{1e-15});
+        const Real h2_safe = std::max(h2, Real{1e-15});
+        const Real denom_safe = std::max(denom, Real{1e-15});
+        BDF2Variable coeffs;
+        coeffs.a0 = h2_safe / (h1_safe * denom_safe);
+        coeffs.a1 = -(denom_safe) / (h1_safe * h2_safe);
+        coeffs.a2 = (h1_safe + 2.0 * h2_safe) / (h2_safe * denom_safe);
+        return coeffs;
+    }
+};
+
+/// 2-stage SDIRK2 coefficients (stiffly accurate, L-stable)
+struct SDIRK2Coeffs {
+    // gamma = 1 - 1/sqrt(2)
+    static constexpr Real gamma = Real{1.0} - Real{0.7071067811865475244};
+    static constexpr Real a11 = gamma;
+    static constexpr Real a21 = Real{1.0} - gamma;
+    static constexpr Real a22 = gamma;
+    static constexpr Real c1 = gamma;
+    static constexpr Real c2 = Real{1.0};
+};
 
 // =============================================================================
 // 3.2.3: Trapezoidal Integration Coefficients
@@ -464,11 +525,14 @@ struct IntegrationCoeffs {
                 break;
             }
             case Integrator::BDF1:
+            case Integrator::RosenbrockW:
+            case Integrator::SDIRK2:
             case Integrator::BDF2:
             case Integrator::BDF3:
             case Integrator::BDF4:
             case Integrator::BDF5:
-            case Integrator::Gear: {
+            case Integrator::Gear:
+            case Integrator::TRBDF2: {
                 int order = method_order(method);
                 auto bdf = BDFCoeffs::for_order(order);
                 auto [g, i] = bdf.capacitor_companion(C, dt, v_history, i_history);
@@ -504,11 +568,14 @@ struct IntegrationCoeffs {
                 break;
             }
             case Integrator::BDF1:
+            case Integrator::RosenbrockW:
+            case Integrator::SDIRK2:
             case Integrator::BDF2:
             case Integrator::BDF3:
             case Integrator::BDF4:
             case Integrator::BDF5:
-            case Integrator::Gear: {
+            case Integrator::Gear:
+            case Integrator::TRBDF2: {
                 int order = method_order(method);
                 auto bdf = BDFCoeffs::for_order(order);
                 auto [g, i] = bdf.inductor_companion(L, dt, i_history, v_history);

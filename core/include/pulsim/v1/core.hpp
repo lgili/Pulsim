@@ -25,6 +25,8 @@
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/validation.hpp"
 #include "pulsim/v1/runtime_circuit.hpp"
+#include "pulsim/v1/parser/yaml_parser.hpp"
+#include "pulsim/v1/simulation.hpp"
 #include "pulsim/v1/thermal.hpp"
 #include "pulsim/v1/losses.hpp"
 #include "pulsim/v1/sources.hpp"

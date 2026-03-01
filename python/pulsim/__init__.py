@@ -13,6 +13,8 @@ from ._pulsim import (
     RLCDamping,
     DeviceHint,
     SIMDLevel,
+    Integrator,
+    TimestepMethod,
 
     # Device Classes - Linear
     Resistor,
@@ -59,6 +61,28 @@ from ._pulsim import (
     # Transient Simulation
     run_transient,
     run_transient_streaming,
+    SimulationOptions,
+    SimulationResult,
+    Simulator,
+    PeriodicSteadyStateOptions,
+    PeriodicSteadyStateResult,
+    HarmonicBalanceOptions,
+    HarmonicBalanceResult,
+    StiffnessConfig,
+    SwitchingEnergy,
+    FallbackReasonCode,
+    FallbackPolicyOptions,
+    FallbackTraceEntry,
+    ThermalCouplingPolicy,
+    ThermalCouplingOptions,
+    ThermalDeviceConfig,
+    DeviceThermalTelemetry,
+    ThermalSummary,
+    SimulationEventType,
+    SimulationEvent,
+    LinearSolverTelemetry,
+    YamlParserOptions,
+    YamlParser,
 
     # Solver Configuration
     Tolerances,
@@ -99,9 +123,15 @@ from ._pulsim import (
     # Integration Methods
     BDFOrderConfig,
     TimestepConfig,
+    AdvancedTimestepConfig,
+    RichardsonLTEConfig,
 
     # High-Performance Features
     LinearSolverConfig,
+    LinearSolverKind,
+    PreconditionerKind,
+    IterativeSolverConfig,
+    LinearSolverStackConfig,
     detect_simd_level,
     simd_vector_width,
     solver_status_to_string,
@@ -130,16 +160,6 @@ from ._pulsim import (
     LossResult,
     SystemLossSummary,
 
-    # AC Analysis
-    ACOptions,
-    ACResult,
-    ACAnalyzer,
-    ACSolverStatus,
-    FrequencySweepType,
-    BodeData,
-    run_ac,
-    extract_bode_data,
-    calculate_stability_margins,
 )
 
 # Netlist Parser (Pure Python)
@@ -163,6 +183,8 @@ __all__ = [
     "RLCDamping",
     "DeviceHint",
     "SIMDLevel",
+    "Integrator",
+    "TimestepMethod",
 
     # Device Classes - Linear
     "Resistor",
@@ -209,6 +231,28 @@ __all__ = [
     # Transient Simulation
     "run_transient",
     "run_transient_streaming",
+    "SimulationOptions",
+    "SimulationResult",
+    "Simulator",
+    "PeriodicSteadyStateOptions",
+    "PeriodicSteadyStateResult",
+    "HarmonicBalanceOptions",
+    "HarmonicBalanceResult",
+    "StiffnessConfig",
+    "SwitchingEnergy",
+    "FallbackReasonCode",
+    "FallbackPolicyOptions",
+    "FallbackTraceEntry",
+    "ThermalCouplingPolicy",
+    "ThermalCouplingOptions",
+    "ThermalDeviceConfig",
+    "DeviceThermalTelemetry",
+    "ThermalSummary",
+    "SimulationEventType",
+    "SimulationEvent",
+    "LinearSolverTelemetry",
+    "YamlParserOptions",
+    "YamlParser",
 
     # Solver Configuration
     "Tolerances",
@@ -249,9 +293,15 @@ __all__ = [
     # Integration Methods
     "BDFOrderConfig",
     "TimestepConfig",
+    "AdvancedTimestepConfig",
+    "RichardsonLTEConfig",
 
     # High-Performance Features
     "LinearSolverConfig",
+    "LinearSolverKind",
+    "PreconditionerKind",
+    "IterativeSolverConfig",
+    "LinearSolverStackConfig",
     "detect_simd_level",
     "simd_vector_width",
     "solver_status_to_string",
@@ -279,17 +329,6 @@ __all__ = [
     "EfficiencyCalculator",
     "LossResult",
     "SystemLossSummary",
-
-    # AC Analysis
-    "ACOptions",
-    "ACResult",
-    "ACAnalyzer",
-    "ACSolverStatus",
-    "FrequencySweepType",
-    "BodeData",
-    "run_ac",
-    "extract_bode_data",
-    "calculate_stability_margins",
 
     # Netlist Parser
     "parse_netlist",

@@ -3,158 +3,25 @@
 // =============================================================================
 // Phase 7: Python Integration
 // - 7.1.1: pybind11 bindings for new API
-// - 7.1.2: Compatibility layer for old API
-// - 7.1.3: New solver configuration options
+// - 7.1.2: New solver configuration options
 // =============================================================================
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 #include <pybind11/eigen.h>
 #include <pybind11/functional.h>
 #include <pybind11/chrono.h>
 
+#include <atomic>
+
 #include "pulsim/v1/core.hpp"
 #include "pulsim/v1/control.hpp"
-#include "pulsim/ac_analysis.hpp"
-#include "pulsim/circuit.hpp"
 
 namespace py = pybind11;
 using namespace pulsim::v1;
+namespace v1parser = pulsim::v1::parser;
 
-// =============================================================================
-// Circuit Converter: v1::Circuit -> pulsim::Circuit (IR)
-// =============================================================================
-
-/// Convert runtime v1::Circuit to IR pulsim::Circuit for AC analysis
-/// Note: Only basic components (R, L, C, V, I) are supported for AC analysis.
-/// Complex devices (switches, MOSFETs, IGBTs) are linearized as resistors.
-pulsim::Circuit convert_to_ir_circuit(const Circuit& v1_circuit) {
-    pulsim::Circuit ir;
-
-    // Helper to get node name from index (GND for -1)
-    auto get_node_name = [&](pulsim::Index idx) -> std::string {
-        if (idx < 0) return "0";  // Ground
-        return v1_circuit.node_name(idx);
-    };
-
-    const auto& devices = v1_circuit.devices();
-    const auto& connections = v1_circuit.connections();
-
-    for (std::size_t i = 0; i < devices.size(); ++i) {
-        const auto& conn = connections[i];
-        const auto& dev = devices[i];
-
-        std::visit([&](const auto& d) -> void {
-            using T = std::decay_t<decltype(d)>;
-
-            if constexpr (std::is_same_v<T, Resistor>) {
-                ir.add_resistor(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    d.resistance());
-            }
-            else if constexpr (std::is_same_v<T, Capacitor>) {
-                ir.add_capacitor(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    d.capacitance());
-            }
-            else if constexpr (std::is_same_v<T, Inductor>) {
-                ir.add_inductor(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    d.inductance());
-            }
-            else if constexpr (std::is_same_v<T, VoltageSource>) {
-                pulsim::DCWaveform wf{d.voltage()};
-                ir.add_voltage_source(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    wf);
-            }
-            else if constexpr (std::is_same_v<T, CurrentSource>) {
-                pulsim::DCWaveform wf{d.current()};
-                ir.add_current_source(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    wf);
-            }
-            else if constexpr (std::is_same_v<T, SineVoltageSource>) {
-                // Convert to DC source with amplitude value for AC analysis
-                pulsim::DCWaveform wf{d.params().amplitude};
-                ir.add_voltage_source(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    wf);
-            }
-            else if constexpr (std::is_same_v<T, PulseVoltageSource>) {
-                // Use pulse high value as DC equivalent
-                pulsim::DCWaveform wf{d.params().v_pulse};
-                ir.add_voltage_source(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    wf);
-            }
-            else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
-                // Use average value for AC analysis
-                const auto& p = d.params();
-                pulsim::DCWaveform wf{p.v_low + (p.v_high - p.v_low) * p.duty};
-                ir.add_voltage_source(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    wf);
-            }
-            else if constexpr (std::is_same_v<T, IdealDiode>) {
-                // Linearize as small resistor (conducting state for AC)
-                ir.add_resistor(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    1e-3);  // 1 mOhm forward resistance
-            }
-            else if constexpr (std::is_same_v<T, IdealSwitch>) {
-                // Linearize as resistor based on state
-                Scalar r = d.is_closed() ? 1e-6 : 1e12;
-                ir.add_resistor(conn.name,
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    r);
-            }
-            else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
-                // Linearize as resistor (assume on state)
-                ir.add_resistor(conn.name,
-                    get_node_name(conn.nodes[1]),
-                    get_node_name(conn.nodes[2]),
-                    1e-3);
-            }
-            else if constexpr (std::is_same_v<T, MOSFET>) {
-                // Linearize MOSFET as resistor (assume on state)
-                ir.add_resistor(conn.name,
-                    get_node_name(conn.nodes[1]),  // drain
-                    get_node_name(conn.nodes[2]),  // source
-                    1e-3);  // Small on-resistance
-            }
-            else if constexpr (std::is_same_v<T, IGBT>) {
-                // Linearize IGBT as resistor (assume on state)
-                ir.add_resistor(conn.name,
-                    get_node_name(conn.nodes[1]),  // collector
-                    get_node_name(conn.nodes[2]),  // emitter
-                    1e-3);  // Small on-resistance
-            }
-            else if constexpr (std::is_same_v<T, Transformer>) {
-                // Approximate transformer as coupled inductors
-                // For now, use large inductor on primary and ideal ratio
-                const Scalar lp = 1.0;  // 1H primary
-                ir.add_inductor(conn.name + "_Lp",
-                    get_node_name(conn.nodes[0]),
-                    get_node_name(conn.nodes[1]),
-                    lp);
-                // Secondary would need proper coupling - skip for now
-            }
-        }, dev);
-    }
-
-    return ir;
-}
 
 // =============================================================================
 // Helper: Convert Result types to Python (raise exception on error)
@@ -578,6 +445,10 @@ void init_v2_module(py::module_& v2) {
              "Get node name by index")
         .def("node_names", &Circuit::node_names,
              "Get all node names")
+        .def("signal_names", &Circuit::signal_names,
+             "Get signal names in state-vector order")
+        .def("initial_state", &Circuit::initial_state,
+             "Build initial state vector from device initial conditions")
         // Device addition
         .def("add_resistor", &Circuit::add_resistor,
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
@@ -719,12 +590,70 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("num_nodes", &NewtonOptions::num_nodes)
         .def_readwrite("num_branches", &NewtonOptions::num_branches)
         .def_readwrite("tolerances", &NewtonOptions::tolerances)
+        .def_readwrite("enable_anderson", &NewtonOptions::enable_anderson)
+        .def_readwrite("anderson_depth", &NewtonOptions::anderson_depth)
+        .def_readwrite("anderson_beta", &NewtonOptions::anderson_beta)
+        .def_readwrite("enable_broyden", &NewtonOptions::enable_broyden)
+        .def_readwrite("broyden_max_size", &NewtonOptions::broyden_max_size)
+        .def_readwrite("enable_newton_krylov", &NewtonOptions::enable_newton_krylov)
+        .def_readwrite("enable_trust_region", &NewtonOptions::enable_trust_region)
+        .def_readwrite("trust_radius", &NewtonOptions::trust_radius)
+        .def_readwrite("trust_shrink", &NewtonOptions::trust_shrink)
+        .def_readwrite("trust_expand", &NewtonOptions::trust_expand)
+        .def_readwrite("trust_min", &NewtonOptions::trust_min)
+        .def_readwrite("trust_max", &NewtonOptions::trust_max)
+        .def_readwrite("reuse_jacobian_pattern", &NewtonOptions::reuse_jacobian_pattern)
         .def_readwrite("max_voltage_step", &NewtonOptions::max_voltage_step,
             "Max voltage change per iteration [V] (default: 5.0)")
         .def_readwrite("max_current_step", &NewtonOptions::max_current_step,
             "Max current change per iteration [A] (default: 10.0)")
         .def_readwrite("enable_limiting", &NewtonOptions::enable_limiting,
             "Enable voltage/current limiting (default: True)");
+
+    py::enum_<LinearSolverKind>(v2, "LinearSolverKind", "Linear solver types")
+        .value("SparseLU", LinearSolverKind::SparseLU)
+        .value("EnhancedSparseLU", LinearSolverKind::EnhancedSparseLU)
+        .value("KLU", LinearSolverKind::KLU)
+        .value("GMRES", LinearSolverKind::GMRES)
+        .value("BiCGSTAB", LinearSolverKind::BiCGSTAB)
+        .value("CG", LinearSolverKind::CG)
+        .export_values();
+
+    py::enum_<IterativeSolverConfig::PreconditionerKind>(v2, "PreconditionerKind",
+        "Iterative preconditioner types")
+        .value("None_", IterativeSolverConfig::PreconditionerKind::None)
+        .value("Jacobi", IterativeSolverConfig::PreconditionerKind::Jacobi)
+        .value("ILU0", IterativeSolverConfig::PreconditionerKind::ILU0)
+        .value("ILUT", IterativeSolverConfig::PreconditionerKind::ILUT)
+        .value("AMG", IterativeSolverConfig::PreconditionerKind::AMG)
+        .export_values();
+
+    py::class_<IterativeSolverConfig>(v2, "IterativeSolverConfig",
+        "Iterative solver configuration")
+        .def(py::init<>())
+        .def_readwrite("max_iterations", &IterativeSolverConfig::max_iterations)
+        .def_readwrite("tolerance", &IterativeSolverConfig::tolerance)
+        .def_readwrite("restart", &IterativeSolverConfig::restart)
+        .def_readwrite("preconditioner", &IterativeSolverConfig::preconditioner)
+        .def_readwrite("enable_scaling", &IterativeSolverConfig::enable_scaling)
+        .def_readwrite("scaling_floor", &IterativeSolverConfig::scaling_floor)
+        .def_readwrite("ilut_drop_tolerance", &IterativeSolverConfig::ilut_drop_tolerance)
+        .def_readwrite("ilut_fill_factor", &IterativeSolverConfig::ilut_fill_factor)
+        .def_static("defaults", &IterativeSolverConfig::defaults);
+
+    py::class_<LinearSolverStackConfig>(v2, "LinearSolverStackConfig",
+        "Runtime linear solver stack configuration")
+        .def(py::init<>())
+        .def_readwrite("order", &LinearSolverStackConfig::order)
+        .def_readwrite("fallback_order", &LinearSolverStackConfig::fallback_order)
+        .def_readwrite("direct_config", &LinearSolverStackConfig::direct_config)
+        .def_readwrite("iterative_config", &LinearSolverStackConfig::iterative_config)
+        .def_readwrite("allow_fallback", &LinearSolverStackConfig::allow_fallback)
+        .def_readwrite("auto_select", &LinearSolverStackConfig::auto_select)
+        .def_readwrite("size_threshold", &LinearSolverStackConfig::size_threshold)
+        .def_readwrite("nnz_threshold", &LinearSolverStackConfig::nnz_threshold)
+        .def_readwrite("diag_min_threshold", &LinearSolverStackConfig::diag_min_threshold)
+        .def_static("defaults", &LinearSolverStackConfig::defaults);
 
     // =========================================================================
     // Convergence History & Monitoring
@@ -926,28 +855,336 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("success", &DCAnalysisResult::success)
         .def_readonly("message", &DCAnalysisResult::message);
 
+    py::enum_<Integrator>(v2, "Integrator", "Transient integration method")
+        .value("Trapezoidal", Integrator::Trapezoidal)
+        .value("BDF1", Integrator::BDF1)
+        .value("BDF2", Integrator::BDF2)
+        .value("BDF3", Integrator::BDF3)
+        .value("BDF4", Integrator::BDF4)
+        .value("BDF5", Integrator::BDF5)
+        .value("Gear", Integrator::Gear)
+        .value("TRBDF2", Integrator::TRBDF2)
+        .value("RosenbrockW", Integrator::RosenbrockW)
+        .value("SDIRK2", Integrator::SDIRK2)
+        .export_values();
+
+    py::enum_<TimestepMethod>(v2, "TimestepMethod", "LTE estimation method")
+        .value("StepDoubling", TimestepMethod::StepDoubling)
+        .value("Richardson", TimestepMethod::Richardson)
+        .export_values();
+
+    py::class_<AdvancedTimestepConfig>(v2, "AdvancedTimestepConfig",
+        "Advanced adaptive timestep configuration with Newton feedback")
+        .def(py::init<>())
+        .def_readwrite("dt_min", &AdvancedTimestepConfig::dt_min)
+        .def_readwrite("dt_max", &AdvancedTimestepConfig::dt_max)
+        .def_readwrite("dt_initial", &AdvancedTimestepConfig::dt_initial)
+        .def_readwrite("safety_factor", &AdvancedTimestepConfig::safety_factor)
+        .def_readwrite("error_tolerance", &AdvancedTimestepConfig::error_tolerance)
+        .def_readwrite("growth_factor", &AdvancedTimestepConfig::growth_factor)
+        .def_readwrite("shrink_factor", &AdvancedTimestepConfig::shrink_factor)
+        .def_readwrite("max_rejections", &AdvancedTimestepConfig::max_rejections)
+        .def_readwrite("k_p", &AdvancedTimestepConfig::k_p)
+        .def_readwrite("k_i", &AdvancedTimestepConfig::k_i)
+        .def_readwrite("target_newton_iterations", &AdvancedTimestepConfig::target_newton_iterations)
+        .def_readwrite("min_newton_iterations", &AdvancedTimestepConfig::min_newton_iterations)
+        .def_readwrite("max_newton_iterations", &AdvancedTimestepConfig::max_newton_iterations)
+        .def_readwrite("newton_feedback_gain", &AdvancedTimestepConfig::newton_feedback_gain)
+        .def_readwrite("max_growth_rate", &AdvancedTimestepConfig::max_growth_rate)
+        .def_readwrite("max_shrink_rate", &AdvancedTimestepConfig::max_shrink_rate)
+        .def_readwrite("enable_smoothing", &AdvancedTimestepConfig::enable_smoothing)
+        .def_readwrite("lte_weight", &AdvancedTimestepConfig::lte_weight)
+        .def_readwrite("newton_weight", &AdvancedTimestepConfig::newton_weight)
+        .def_static("defaults", &AdvancedTimestepConfig::defaults)
+        .def_static("for_switching", &AdvancedTimestepConfig::for_switching)
+        .def_static("for_power_electronics", &AdvancedTimestepConfig::for_power_electronics);
+
+    py::class_<RichardsonLTEConfig>(v2, "RichardsonLTEConfig",
+        "Richardson LTE estimator configuration")
+        .def(py::init<>())
+        .def_readwrite("method", &RichardsonLTEConfig::method)
+        .def_readwrite("extrapolation_order", &RichardsonLTEConfig::extrapolation_order)
+        .def_readwrite("voltage_tolerance", &RichardsonLTEConfig::voltage_tolerance)
+        .def_readwrite("current_tolerance", &RichardsonLTEConfig::current_tolerance)
+        .def_readwrite("use_weighted_norm", &RichardsonLTEConfig::use_weighted_norm)
+        .def_readwrite("history_depth", &RichardsonLTEConfig::history_depth)
+        .def_static("defaults", &RichardsonLTEConfig::defaults)
+        .def_static("step_doubling", &RichardsonLTEConfig::step_doubling);
+
+    py::class_<StiffnessConfig>(v2, "StiffnessConfig", "Stiffness handling configuration")
+        .def(py::init<>())
+        .def_readwrite("enable", &StiffnessConfig::enable)
+        .def_readwrite("rejection_streak_threshold", &StiffnessConfig::rejection_streak_threshold)
+        .def_readwrite("newton_iter_threshold", &StiffnessConfig::newton_iter_threshold)
+        .def_readwrite("newton_streak_threshold", &StiffnessConfig::newton_streak_threshold)
+        .def_readwrite("cooldown_steps", &StiffnessConfig::cooldown_steps)
+        .def_readwrite("dt_backoff", &StiffnessConfig::dt_backoff)
+        .def_readwrite("max_bdf_order", &StiffnessConfig::max_bdf_order)
+        .def_readwrite("monitor_conditioning", &StiffnessConfig::monitor_conditioning)
+        .def_readwrite("conditioning_error_threshold", &StiffnessConfig::conditioning_error_threshold)
+        .def_readwrite("switch_integrator", &StiffnessConfig::switch_integrator)
+        .def_readwrite("stiff_integrator", &StiffnessConfig::stiff_integrator);
+
+    py::class_<PeriodicSteadyStateOptions>(v2, "PeriodicSteadyStateOptions",
+        "Shooting method configuration")
+        .def(py::init<>())
+        .def_readwrite("period", &PeriodicSteadyStateOptions::period)
+        .def_readwrite("max_iterations", &PeriodicSteadyStateOptions::max_iterations)
+        .def_readwrite("tolerance", &PeriodicSteadyStateOptions::tolerance)
+        .def_readwrite("relaxation", &PeriodicSteadyStateOptions::relaxation)
+        .def_readwrite("store_last_transient", &PeriodicSteadyStateOptions::store_last_transient);
+
+    py::class_<HarmonicBalanceOptions>(v2, "HarmonicBalanceOptions",
+        "Harmonic balance configuration")
+        .def(py::init<>())
+        .def_readwrite("period", &HarmonicBalanceOptions::period)
+        .def_readwrite("num_samples", &HarmonicBalanceOptions::num_samples)
+        .def_readwrite("max_iterations", &HarmonicBalanceOptions::max_iterations)
+        .def_readwrite("tolerance", &HarmonicBalanceOptions::tolerance)
+        .def_readwrite("relaxation", &HarmonicBalanceOptions::relaxation)
+        .def_readwrite("initialize_from_transient", &HarmonicBalanceOptions::initialize_from_transient);
+
+    py::class_<SwitchingEnergy>(v2, "SwitchingEnergy", "Per-event switching energy model")
+        .def(py::init<>())
+        .def_readwrite("eon", &SwitchingEnergy::eon)
+        .def_readwrite("eoff", &SwitchingEnergy::eoff)
+        .def_readwrite("err", &SwitchingEnergy::err);
+
+    py::class_<LinearSolverTelemetry>(v2, "LinearSolverTelemetry",
+        "Linear solver runtime telemetry")
+        .def(py::init<>())
+        .def_readwrite("total_solve_calls", &LinearSolverTelemetry::total_solve_calls)
+        .def_readwrite("total_iterations", &LinearSolverTelemetry::total_iterations)
+        .def_readwrite("total_fallbacks", &LinearSolverTelemetry::total_fallbacks)
+        .def_readwrite("last_iterations", &LinearSolverTelemetry::last_iterations)
+        .def_readwrite("last_error", &LinearSolverTelemetry::last_error)
+        .def_readwrite("last_solver", &LinearSolverTelemetry::last_solver)
+        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner);
+
+    py::enum_<SimulationEventType>(v2, "SimulationEventType", "Simulation event kind")
+        .value("SwitchOn", SimulationEventType::SwitchOn)
+        .value("SwitchOff", SimulationEventType::SwitchOff)
+        .value("ConvergenceWarning", SimulationEventType::ConvergenceWarning)
+        .value("TimestepChange", SimulationEventType::TimestepChange)
+        .export_values();
+
+    py::enum_<FallbackReasonCode>(v2, "FallbackReasonCode",
+        "Reason code for solver fallback/retry actions")
+        .value("NewtonFailure", FallbackReasonCode::NewtonFailure)
+        .value("LTERejection", FallbackReasonCode::LTERejection)
+        .value("EventSplit", FallbackReasonCode::EventSplit)
+        .value("StiffnessBackoff", FallbackReasonCode::StiffnessBackoff)
+        .value("TransientGminEscalation", FallbackReasonCode::TransientGminEscalation)
+        .value("MaxRetriesExceeded", FallbackReasonCode::MaxRetriesExceeded)
+        .export_values();
+
+    py::enum_<ThermalCouplingPolicy>(v2, "ThermalCouplingPolicy",
+        "Electro-thermal coupling policy")
+        .value("LossOnly", ThermalCouplingPolicy::LossOnly)
+        .value("LossWithTemperatureScaling", ThermalCouplingPolicy::LossWithTemperatureScaling)
+        .export_values();
+
+    py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
+        .def(py::init<>())
+        .def_readwrite("time", &SimulationEvent::time)
+        .def_readwrite("type", &SimulationEvent::type)
+        .def_readwrite("component", &SimulationEvent::component)
+        .def_readwrite("description", &SimulationEvent::description)
+        .def_readwrite("value1", &SimulationEvent::value1)
+        .def_readwrite("value2", &SimulationEvent::value2);
+
+    py::class_<FallbackPolicyOptions>(v2, "FallbackPolicyOptions",
+        "Convergence fallback policy options for stiff transients")
+        .def(py::init<>())
+        .def_readwrite("trace_retries", &FallbackPolicyOptions::trace_retries)
+        .def_readwrite("enable_transient_gmin", &FallbackPolicyOptions::enable_transient_gmin)
+        .def_readwrite("gmin_retry_threshold", &FallbackPolicyOptions::gmin_retry_threshold)
+        .def_readwrite("gmin_initial", &FallbackPolicyOptions::gmin_initial)
+        .def_readwrite("gmin_max", &FallbackPolicyOptions::gmin_max)
+        .def_readwrite("gmin_growth", &FallbackPolicyOptions::gmin_growth);
+
+    py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
+        "Structured telemetry entry for each fallback/retry action")
+        .def(py::init<>())
+        .def_readwrite("step_index", &FallbackTraceEntry::step_index)
+        .def_readwrite("retry_index", &FallbackTraceEntry::retry_index)
+        .def_readwrite("time", &FallbackTraceEntry::time)
+        .def_readwrite("dt", &FallbackTraceEntry::dt)
+        .def_readwrite("reason", &FallbackTraceEntry::reason)
+        .def_readwrite("solver_status", &FallbackTraceEntry::solver_status)
+        .def_readwrite("action", &FallbackTraceEntry::action);
+
+    py::class_<ThermalCouplingOptions>(v2, "ThermalCouplingOptions",
+        "Global electro-thermal coupling options")
+        .def(py::init<>())
+        .def_readwrite("enable", &ThermalCouplingOptions::enable)
+        .def_readwrite("ambient", &ThermalCouplingOptions::ambient)
+        .def_readwrite("policy", &ThermalCouplingOptions::policy)
+        .def_readwrite("default_rth", &ThermalCouplingOptions::default_rth)
+        .def_readwrite("default_cth", &ThermalCouplingOptions::default_cth);
+
+    py::class_<ThermalDeviceConfig>(v2, "ThermalDeviceConfig",
+        "Per-device thermal configuration for electro-thermal coupling")
+        .def(py::init<>())
+        .def_readwrite("enabled", &ThermalDeviceConfig::enabled)
+        .def_readwrite("rth", &ThermalDeviceConfig::rth)
+        .def_readwrite("cth", &ThermalDeviceConfig::cth)
+        .def_readwrite("temp_init", &ThermalDeviceConfig::temp_init)
+        .def_readwrite("temp_ref", &ThermalDeviceConfig::temp_ref)
+        .def_readwrite("alpha", &ThermalDeviceConfig::alpha);
+
+    py::class_<DeviceThermalTelemetry>(v2, "DeviceThermalTelemetry",
+        "Per-device thermal telemetry")
+        .def(py::init<>())
+        .def_readwrite("device_name", &DeviceThermalTelemetry::device_name)
+        .def_readwrite("enabled", &DeviceThermalTelemetry::enabled)
+        .def_readwrite("final_temperature", &DeviceThermalTelemetry::final_temperature)
+        .def_readwrite("peak_temperature", &DeviceThermalTelemetry::peak_temperature)
+        .def_readwrite("average_temperature", &DeviceThermalTelemetry::average_temperature);
+
+    py::class_<ThermalSummary>(v2, "ThermalSummary",
+        "Electro-thermal summary for a transient run")
+        .def(py::init<>())
+        .def_readwrite("enabled", &ThermalSummary::enabled)
+        .def_readwrite("ambient", &ThermalSummary::ambient)
+        .def_readwrite("max_temperature", &ThermalSummary::max_temperature)
+        .def_readwrite("device_temperatures", &ThermalSummary::device_temperatures);
+
+    py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
+        .def(py::init<>())
+        .def_readwrite("tstart", &SimulationOptions::tstart)
+        .def_readwrite("tstop", &SimulationOptions::tstop)
+        .def_readwrite("dt", &SimulationOptions::dt)
+        .def_readwrite("dt_min", &SimulationOptions::dt_min)
+        .def_readwrite("dt_max", &SimulationOptions::dt_max)
+        .def_readwrite("newton_options", &SimulationOptions::newton_options)
+        .def_readwrite("dc_config", &SimulationOptions::dc_config)
+        .def_readwrite("linear_solver", &SimulationOptions::linear_solver)
+        .def_readwrite("adaptive_timestep", &SimulationOptions::adaptive_timestep)
+        .def_readwrite("timestep_config", &SimulationOptions::timestep_config)
+        .def_readwrite("lte_config", &SimulationOptions::lte_config)
+        .def_readwrite("integrator", &SimulationOptions::integrator)
+        .def_readwrite("enable_bdf_order_control", &SimulationOptions::enable_bdf_order_control)
+        .def_readwrite("bdf_config", &SimulationOptions::bdf_config)
+        .def_readwrite("stiffness_config", &SimulationOptions::stiffness_config)
+        .def_readwrite("enable_periodic_shooting", &SimulationOptions::enable_periodic_shooting)
+        .def_readwrite("periodic_options", &SimulationOptions::periodic_options)
+        .def_readwrite("enable_harmonic_balance", &SimulationOptions::enable_harmonic_balance)
+        .def_readwrite("harmonic_balance", &SimulationOptions::harmonic_balance)
+        .def_readwrite("enable_events", &SimulationOptions::enable_events)
+        .def_readwrite("enable_losses", &SimulationOptions::enable_losses)
+        .def_readwrite("switching_energy", &SimulationOptions::switching_energy)
+        .def_readwrite("thermal", &SimulationOptions::thermal)
+        .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
+        .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
+        .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
+        .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy);
+
+    py::class_<SimulationResult>(v2, "SimulationResult", "Transient simulation result")
+        .def(py::init<>())
+        .def_readwrite("time", &SimulationResult::time)
+        .def_readwrite("states", &SimulationResult::states)
+        .def_readwrite("events", &SimulationResult::events)
+        .def_readwrite("success", &SimulationResult::success)
+        .def_readwrite("final_status", &SimulationResult::final_status)
+        .def_readwrite("message", &SimulationResult::message)
+        .def_readwrite("total_steps", &SimulationResult::total_steps)
+        .def_readwrite("newton_iterations_total", &SimulationResult::newton_iterations_total)
+        .def_readwrite("timestep_rejections", &SimulationResult::timestep_rejections)
+        .def_readwrite("total_time_seconds", &SimulationResult::total_time_seconds)
+        .def_readwrite("linear_solver_telemetry", &SimulationResult::linear_solver_telemetry)
+        .def_readwrite("fallback_trace", &SimulationResult::fallback_trace)
+        .def_readwrite("loss_summary", &SimulationResult::loss_summary)
+        .def_readwrite("thermal_summary", &SimulationResult::thermal_summary)
+        // Compatibility alias used by legacy Python tests
+        .def_property_readonly("data", [](const SimulationResult& result) {
+            return result.states;
+        });
+
+    py::class_<PeriodicSteadyStateResult>(v2, "PeriodicSteadyStateResult",
+        "Periodic steady-state result")
+        .def(py::init<>())
+        .def_readwrite("success", &PeriodicSteadyStateResult::success)
+        .def_readwrite("iterations", &PeriodicSteadyStateResult::iterations)
+        .def_readwrite("residual_norm", &PeriodicSteadyStateResult::residual_norm)
+        .def_readwrite("steady_state", &PeriodicSteadyStateResult::steady_state)
+        .def_readwrite("last_cycle", &PeriodicSteadyStateResult::last_cycle)
+        .def_readwrite("message", &PeriodicSteadyStateResult::message);
+
+    py::class_<HarmonicBalanceResult>(v2, "HarmonicBalanceResult",
+        "Harmonic balance result")
+        .def(py::init<>())
+        .def_readwrite("success", &HarmonicBalanceResult::success)
+        .def_readwrite("iterations", &HarmonicBalanceResult::iterations)
+        .def_readwrite("residual_norm", &HarmonicBalanceResult::residual_norm)
+        .def_readwrite("solution", &HarmonicBalanceResult::solution)
+        .def_readwrite("sample_times", &HarmonicBalanceResult::sample_times)
+        .def_readwrite("message", &HarmonicBalanceResult::message);
+
+    py::class_<Simulator>(v2, "Simulator", "Runtime simulator interface")
+        .def(py::init<Circuit&, const SimulationOptions&>(),
+             py::arg("circuit"), py::arg("options") = SimulationOptions(),
+             py::keep_alive<1, 2>())
+        .def("dc_operating_point", &Simulator::dc_operating_point,
+             "Solve the DC operating point")
+        .def("run_transient", [](Simulator& sim) {
+            return sim.run_transient();
+        }, "Run transient simulation from computed DC initial state")
+        .def("run_transient", [](Simulator& sim, const Vector& x0) {
+            return sim.run_transient(x0);
+        }, py::arg("x0"), "Run transient simulation with explicit initial state")
+        .def("run_periodic_shooting", [](Simulator& sim, const PeriodicSteadyStateOptions& options) {
+            return sim.run_periodic_shooting(options);
+        }, py::arg("options") = PeriodicSteadyStateOptions(),
+           "Run periodic steady-state using shooting method")
+        .def("run_periodic_shooting", [](Simulator& sim, const Vector& x0, const PeriodicSteadyStateOptions& options) {
+            return sim.run_periodic_shooting(x0, options);
+        }, py::arg("x0"), py::arg("options") = PeriodicSteadyStateOptions(),
+           "Run periodic steady-state using shooting method with explicit initial state")
+        .def("run_harmonic_balance", [](Simulator& sim, const HarmonicBalanceOptions& options) {
+            return sim.run_harmonic_balance(options);
+        }, py::arg("options") = HarmonicBalanceOptions(),
+           "Run harmonic balance solver")
+        .def("run_harmonic_balance", [](Simulator& sim, const Vector& x0, const HarmonicBalanceOptions& options) {
+            return sim.run_harmonic_balance(x0, options);
+        }, py::arg("x0"), py::arg("options") = HarmonicBalanceOptions(),
+           "Run harmonic balance with explicit initial state")
+        .def("set_switching_energy", &Simulator::set_switching_energy,
+             py::arg("device_name"), py::arg("energy"))
+        .def_property("options",
+            [](const Simulator& sim) { return sim.options(); },
+            &Simulator::set_options,
+            "Get or set simulation options");
+
+    py::class_<v1parser::YamlParserOptions>(v2, "YamlParserOptions", "YAML parser options")
+        .def(py::init<>())
+        .def_readwrite("strict", &v1parser::YamlParserOptions::strict)
+        .def_readwrite("validate_nodes", &v1parser::YamlParserOptions::validate_nodes);
+
+    py::class_<v1parser::YamlParser>(v2, "YamlParser", "v1 YAML netlist parser")
+        .def(py::init<v1parser::YamlParserOptions>(),
+             py::arg("options") = v1parser::YamlParserOptions())
+        .def("load", &v1parser::YamlParser::load, py::arg("path"),
+             "Parse YAML netlist file and return (Circuit, SimulationOptions)")
+        .def("load_string", &v1parser::YamlParser::load_string, py::arg("content"),
+             "Parse YAML netlist string and return (Circuit, SimulationOptions)")
+        .def_property_readonly("errors", [](const v1parser::YamlParser& parser) {
+            return parser.errors();
+        })
+        .def_property_readonly("warnings", [](const v1parser::YamlParser& parser) {
+            return parser.warnings();
+        });
+
     // =========================================================================
     // DC Analysis Function (Phase 5)
     // =========================================================================
 
     // High-level DC analysis with automatic strategy selection
     v2.def("dc_operating_point", [](Circuit& circuit, const DCConvergenceConfig& config) {
-        // For DC analysis, use very large timestep so inductor 2L/dt -> 0 (short circuit)
-        // and capacitor 2C/dt -> 0 (open circuit)
-        circuit.set_timestep(1e6);  // 1 million seconds -> effectively DC
-
-        // Create system function
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        // Initial guess
-        Vector x0 = Vector::Zero(circuit.system_size());
-
-        // Create and run DC solver
-        DCConvergenceSolver<SparseLUPolicy> solver(config);
-        return solver.solve(x0, circuit.num_nodes(), circuit.num_branches(),
-                           system_func, nullptr);
+        SimulationOptions opts;
+        opts.dc_config = config;
+        Simulator sim(circuit, opts);
+        return sim.dc_operating_point();
     }, py::arg("circuit"), py::arg("config") = DCConvergenceConfig(),
     R"doc(
     Compute DC operating point with automatic convergence aids.
@@ -986,166 +1223,29 @@ void init_v2_module(py::module_& v2) {
             return std::get<3>(r);
         });
 
-    // Transient simulation function with built-in robustness
+    // Transient simulation (simplified API)
     v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
-                                const Vector& x0, const NewtonOptions& newton_opts) {
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-        int gmin_fallback_count = 0;
-        int dt_reduction_count = 0;
+                                const Vector& x0, const NewtonOptions& newton_opts,
+                                const LinearSolverStackConfig& linear_solver) {
+        SimulationOptions opts;
+        opts.tstart = t_start;
+        opts.tstop = t_stop;
+        opts.dt = dt;
+        opts.newton_options = newton_opts;
+        opts.linear_solver = linear_solver;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
 
-        // Set timestep for dynamic elements
-        Real current_dt = dt;
-        circuit.set_timestep(current_dt);
-
-        // Configure Newton solver (respect user settings)
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        // Note: enable_limiting defaults to true in NewtonOptions
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        // Gmin configuration for fallback
-        GminConfig gmin_config;
-        gmin_config.initial_gmin = 0.1;
-        gmin_config.final_gmin = 1e-12;
-        gmin_config.reduction_factor = 10.0;
-        gmin_config.max_steps = 30;
-
-        // System function
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        // Initial state
-        Vector x = x0;
-
-        // Set initial time for time-varying sources
-        circuit.set_current_time(t_start);
-
-        // Initialize dynamic element history
-        circuit.update_history(x, true);
-
-        // Store initial state
-        times.push_back(t_start);
-        states.push_back(x);
-
-        // Time stepping
-        Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
-        const int max_dt_reductions = 5;
-        const Real dt_reduction_factor = 0.2;
-
-        while (t < t_stop && step < max_steps) {
-            // Advance time
-            Real t_next = t + current_dt;
-            circuit.set_current_time(t_next);
-
-            // Try normal Newton solve first
-            auto result = solver.solve(x, system_func);
-
-            // Fallback 1: Gmin stepping if Newton fails
-            if (!result.success()) {
-                GminStepping gmin_stepper(gmin_config);
-
-                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
-                    Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
-
-                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
-                        circuit.assemble_jacobian(J, f, x_inner);
-                        // Add Gmin to node diagonals
-                        for (Index i = 0; i < num_nodes; ++i) {
-                            J.coeffRef(i, i) += current_gmin;
-                        }
-                    };
-                    return solver.solve(x_start, modified_func);
-                };
-
-                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-
-                if (result.success()) {
-                    gmin_fallback_count++;
-                }
-            }
-
-            // Fallback 2: Timestep reduction if still failing
-            if (!result.success()) {
-                int reductions = 0;
-                Real temp_dt = current_dt;
-                Vector x_sub = x;
-                Real t_sub = t;
-                bool sub_success = true;
-
-                while (!result.success() && reductions < max_dt_reductions) {
-                    temp_dt *= dt_reduction_factor;
-                    circuit.set_timestep(temp_dt);
-                    reductions++;
-
-                    // Try sub-stepping
-                    x_sub = x;
-                    t_sub = t;
-                    sub_success = true;
-
-                    while (t_sub < t_next - temp_dt * 0.5) {
-                        t_sub += temp_dt;
-                        circuit.set_current_time(t_sub);
-                        result = solver.solve(x_sub, system_func);
-
-                        if (!result.success()) {
-                            sub_success = false;
-                            break;
-                        }
-                        x_sub = result.solution;
-                        circuit.update_history(x_sub);
-                    }
-
-                    if (sub_success) {
-                        result.solution = x_sub;
-                        result.status = SolverStatus::Success;
-                        dt_reduction_count++;
-                        break;
-                    }
-                }
-
-                // Restore original timestep
-                circuit.set_timestep(current_dt);
-            }
-
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
-            }
-
-            // Update solution
-            x = result.solution;
-            circuit.update_history(x);
-
-            // Store state
-            t = t_next;
-            step++;
-            times.push_back(t);
-            states.push_back(x);
-        }
-
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
-                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
-        }
-
-        return std::make_tuple(times, states, success, message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-       py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
+        Simulator sim(circuit, opts);
+        auto result = sim.run_transient(x0);
+        return std::make_tuple(result.time, result.states, result.success, result.message);
+     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+         py::arg("x0"), py::arg("newton_options") = NewtonOptions(),
+         py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     R"doc(
-    Run transient simulation with automatic convergence aids.
-
-    This function automatically uses fallback strategies when Newton fails:
-    - Gmin stepping: Adds conductances to improve matrix conditioning
-    - Timestep reduction: Uses smaller substeps for difficult transitions
+    Run transient simulation (simplified API).
 
     Args:
         circuit: Circuit object with devices
@@ -1154,6 +1254,7 @@ void init_v2_module(py::module_& v2) {
         dt: Timestep (s)
         x0: Initial state vector (e.g., from DC operating point)
         newton_options: Newton solver options
+        linear_solver: Linear solver stack configuration
 
     Returns:
         Tuple of (times, states, success, message)
@@ -1161,338 +1262,174 @@ void init_v2_module(py::module_& v2) {
 
     // Convenience function with zero initial state
     v2.def("run_transient", [](Circuit& circuit, Real t_start, Real t_stop, Real dt,
-                                const NewtonOptions& newton_opts) {
+                                const NewtonOptions& newton_opts,
+                                const LinearSolverStackConfig& linear_solver) {
         Vector x0 = Vector::Zero(circuit.system_size());
 
-        // Call the full version (this is a simplified overload)
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-        int gmin_fallback_count = 0;
-        int dt_reduction_count = 0;
+        SimulationOptions opts;
+        opts.tstart = t_start;
+        opts.tstop = t_stop;
+        opts.dt = dt;
+        opts.newton_options = newton_opts;
+        opts.linear_solver = linear_solver;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
 
-        Real current_dt = dt;
-        circuit.set_timestep(current_dt);
-
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        GminConfig gmin_config;
-        gmin_config.initial_gmin = 0.1;
-        gmin_config.final_gmin = 1e-12;
-        gmin_config.reduction_factor = 10.0;
-        gmin_config.max_steps = 30;
-
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
-        };
-
-        Vector x = x0;
-        circuit.set_current_time(t_start);
-        circuit.update_history(x, true);
-        times.push_back(t_start);
-        states.push_back(x);
-
-        Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
-        const int max_dt_reductions = 5;
-        const Real dt_reduction_factor = 0.2;
-
-        while (t < t_stop && step < max_steps) {
-            Real t_next = t + current_dt;
-            circuit.set_current_time(t_next);
-
-            auto result = solver.solve(x, system_func);
-
-            if (!result.success()) {
-                GminStepping gmin_stepper(gmin_config);
-                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
-                    Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
-                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
-                        circuit.assemble_jacobian(J, f, x_inner);
-                        for (Index i = 0; i < num_nodes; ++i) {
-                            J.coeffRef(i, i) += current_gmin;
-                        }
-                    };
-                    return solver.solve(x_start, modified_func);
-                };
-                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-                if (result.success()) gmin_fallback_count++;
-            }
-
-            if (!result.success()) {
-                int reductions = 0;
-                Real temp_dt = current_dt;
-                Vector x_sub = x;
-                Real t_sub = t;
-                bool sub_success = true;
-
-                while (!result.success() && reductions < max_dt_reductions) {
-                    temp_dt *= dt_reduction_factor;
-                    circuit.set_timestep(temp_dt);
-                    reductions++;
-                    x_sub = x;
-                    t_sub = t;
-                    sub_success = true;
-
-                    while (t_sub < t_next - temp_dt * 0.5) {
-                        t_sub += temp_dt;
-                        circuit.set_current_time(t_sub);
-                        result = solver.solve(x_sub, system_func);
-                        if (!result.success()) { sub_success = false; break; }
-                        x_sub = result.solution;
-                        circuit.update_history(x_sub);
-                    }
-                    if (sub_success) {
-                        result.solution = x_sub;
-                        result.status = SolverStatus::Success;
-                        dt_reduction_count++;
-                        break;
-                    }
-                }
-                circuit.set_timestep(current_dt);
-            }
-
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
-            }
-
-            x = result.solution;
-            circuit.update_history(x);
-            t = t_next;
-            step++;
-            times.push_back(t);
-            states.push_back(x);
-        }
-
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
-                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
-        }
-
-        return std::make_tuple(times, states, success, message);
-    }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
-       py::arg("newton_options") = NewtonOptions(),
+        Simulator sim(circuit, opts);
+        auto result = sim.run_transient(x0);
+        return std::make_tuple(result.time, result.states, result.success, result.message);
+     }, py::arg("circuit"), py::arg("t_start"), py::arg("t_stop"), py::arg("dt"),
+         py::arg("newton_options") = NewtonOptions(),
+         py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     "Run transient with zero initial state");
 
     // =========================================================================
     // Streaming transient simulation (for real-time GUI updates)
     // =========================================================================
 
-    v2.def("run_transient_streaming", [](
+    auto run_transient_streaming_impl = [](
         Circuit& circuit,
         Real t_start,
         Real t_stop,
         Real dt,
         const Vector& x0,
         const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
         py::object data_callback,
         py::object progress_callback,
         py::object cancel_check,
         int emit_interval
     ) {
-        std::vector<Real> times;
-        std::vector<Vector> states;
-        bool success = true;
-        std::string message = "Transient completed";
-        int gmin_fallback_count = 0;
-        int dt_reduction_count = 0;
+        SimulationOptions opts;
+        opts.tstart = t_start;
+        opts.tstop = t_stop;
+        opts.dt = dt;
+        opts.newton_options = newton_opts;
+        opts.linear_solver = linear_solver;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
 
-        // Get node names for data callback
+        Simulator sim(circuit, opts);
+
         std::vector<std::string> node_names;
         for (Index i = 0; i < circuit.num_nodes(); ++i) {
             node_names.push_back(circuit.node_name(i));
         }
 
-        Real current_dt = dt;
-        circuit.set_timestep(current_dt);
-
-        NewtonOptions opts = newton_opts;
-        opts.num_nodes = circuit.num_nodes();
-        opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
-
-        GminConfig gmin_config;
-        gmin_config.initial_gmin = 0.1;
-        gmin_config.final_gmin = 1e-12;
-        gmin_config.reduction_factor = 10.0;
-        gmin_config.max_steps = 30;
-
-        auto system_func = [&circuit](const Vector& x, Vector& f, SparseMatrix& J) {
-            circuit.assemble_jacobian(J, f, x);
+        struct PyControl final : SimulationControl {
+            std::atomic<bool>* stop = nullptr;
+            bool should_stop() const override { return stop && stop->load(); }
+            bool should_pause() const override { return false; }
+            void wait_until_resumed() override {}
         };
 
-        Vector x = x0;
-        circuit.set_current_time(t_start);
-        circuit.update_history(x, true);
-        times.push_back(t_start);
-        states.push_back(x);
+        std::atomic<bool> stop_requested{false};
+        PyControl control;
+        control.stop = &stop_requested;
 
-        Real t = t_start;
         int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
-        const int max_dt_reductions = 5;
-        const Real dt_reduction_factor = 0.2;
+        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
         const Real total_duration = t_stop - t_start;
 
-        // Ensure emit_interval is valid
-        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
-
-        while (t < t_stop && step < max_steps) {
-            // Check for cancellation (acquire GIL for Python call)
-            if (!cancel_check.is_none()) {
-                py::gil_scoped_acquire acquire;
-                try {
-                    if (py::cast<bool>(cancel_check())) {
-                        success = false;
-                        message = "Cancelled by user";
-                        break;
-                    }
-                } catch (...) {
-                    // Ignore callback errors
-                }
-            }
-
-            Real t_next = t + current_dt;
-            circuit.set_current_time(t_next);
-
-            auto result = solver.solve(x, system_func);
-
-            // Fallback 1: Gmin stepping if Newton fails
-            if (!result.success()) {
-                GminStepping gmin_stepper(gmin_config);
-                auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
-                    Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
-                    auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
-                        circuit.assemble_jacobian(J, f, x_inner);
-                        for (Index i = 0; i < num_nodes; ++i) {
-                            J.coeffRef(i, i) += current_gmin;
-                        }
-                    };
-                    return solver.solve(x_start, modified_func);
-                };
-                result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-                if (result.success()) {
-                    gmin_fallback_count++;
-                }
-            }
-
-            // Fallback 2: Timestep reduction if still failing
-            if (!result.success()) {
-                int reductions = 0;
-                Real temp_dt = current_dt;
-                Vector x_sub = x;
-                Real t_sub = t;
-                bool sub_success = true;
-
-                while (!result.success() && reductions < max_dt_reductions) {
-                    temp_dt *= dt_reduction_factor;
-                    circuit.set_timestep(temp_dt);
-                    reductions++;
-
-                    x_sub = x;
-                    t_sub = t;
-                    sub_success = true;
-
-                    while (t_sub < t_next - temp_dt * 0.5) {
-                        t_sub += temp_dt;
-                        circuit.set_current_time(t_sub);
-                        result = solver.solve(x_sub, system_func);
-
-                        if (!result.success()) {
-                            sub_success = false;
-                            break;
-                        }
-                        x_sub = result.solution;
-                        circuit.update_history(x_sub);
-                    }
-
-                    if (sub_success) {
-                        result.solution = x_sub;
-                        result.status = SolverStatus::Success;
-                        dt_reduction_count++;
-                        break;
-                    }
-                }
-                circuit.set_timestep(current_dt);
-            }
-
-            if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
-            }
-
-            x = result.solution;
-            circuit.update_history(x);
-            t = t_next;
+        auto callback = [&](Real time, const Vector& state) {
             step++;
-            times.push_back(t);
-            states.push_back(x);
+            bool emit = (step % actual_emit_interval == 0);
 
-            // Emit callbacks at specified interval (acquire GIL for Python calls)
-            if (step % actual_emit_interval == 0) {
+            if (emit || !cancel_check.is_none()) {
                 py::gil_scoped_acquire acquire;
 
-                // Data callback with state dictionary
-                if (!data_callback.is_none()) {
+                if (emit && !data_callback.is_none()) {
                     try {
                         py::dict state_dict;
                         for (size_t i = 0; i < node_names.size(); ++i) {
-                            state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                            state_dict[py::str("V(" + node_names[i] + ")")] = state[static_cast<Index>(i)];
                         }
-                        data_callback(t, state_dict);
+                        data_callback(time, state_dict);
                     } catch (...) {
                         // Ignore callback errors
                     }
                 }
 
-                // Progress callback
-                if (!progress_callback.is_none()) {
+                if (emit && !progress_callback.is_none()) {
                     try {
-                        Real progress = (t - t_start) / total_duration * 100.0;
-                        std::string prog_msg = "Simulating: t=" + std::to_string(t * 1e6) + "us";
+                        Real progress = total_duration > 0
+                            ? (time - t_start) / total_duration * 100.0
+                            : 0.0;
+                        std::string prog_msg = "Simulating: t=" + std::to_string(time * 1e6) + "us";
                         progress_callback(progress, prog_msg);
                     } catch (...) {
                         // Ignore callback errors
                     }
                 }
+
+                if (!cancel_check.is_none()) {
+                    try {
+                        if (py::cast<bool>(cancel_check())) {
+                            stop_requested.store(true);
+                        }
+                    } catch (...) {
+                        // Ignore callback errors
+                    }
+                }
+            }
+        };
+
+        SimulationResult result = sim.run_transient(x0, callback, nullptr, &control);
+
+        bool success = result.success;
+        std::string message = result.message.empty()
+            ? (success ? "Transient completed" : "Transient failed")
+            : result.message;
+
+        if (stop_requested.load()) {
+            success = false;
+            if (message.empty() || message.find("stopped") != std::string::npos) {
+                message = "Cancelled by user";
             }
         }
 
-        // Final callbacks
         {
             py::gil_scoped_acquire acquire;
-            if (!data_callback.is_none() && !times.empty()) {
+            if (!data_callback.is_none() && !result.time.empty()) {
                 try {
+                    const Vector& state = result.states.back();
                     py::dict state_dict;
                     for (size_t i = 0; i < node_names.size(); ++i) {
-                        state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
+                        state_dict[py::str("V(" + node_names[i] + ")")] = state[static_cast<Index>(i)];
                     }
-                    data_callback(times.back(), state_dict);
+                    data_callback(result.time.back(), state_dict);
                 } catch (...) {}
             }
             if (!progress_callback.is_none()) {
                 try {
-                    progress_callback(100.0, success ? "Complete" : message);
+                    progress_callback(100.0, message);
                 } catch (...) {}
             }
         }
 
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
-                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
-        }
+        return std::make_tuple(result.time, result.states, success, message);
+    };
 
-        return std::make_tuple(times, states, success, message);
+    v2.def("run_transient_streaming", [run_transient_streaming_impl](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
+        py::object data_callback,
+        py::object progress_callback,
+        py::object cancel_check,
+        int emit_interval
+    ) {
+        return run_transient_streaming_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
+            data_callback, progress_callback, cancel_check, emit_interval);
     },
     py::call_guard<py::gil_scoped_release>(),
     py::arg("circuit"),
@@ -1501,6 +1438,7 @@ void init_v2_module(py::module_& v2) {
     py::arg("dt"),
     py::arg("x0"),
     py::arg("newton_options") = NewtonOptions(),
+    py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     py::arg("data_callback") = py::none(),
     py::arg("progress_callback") = py::none(),
     py::arg("cancel_check") = py::none(),
@@ -1519,6 +1457,7 @@ void init_v2_module(py::module_& v2) {
         dt: Timestep (s)
         x0: Initial state vector (e.g., from DC operating point)
         newton_options: Newton solver options
+        linear_solver: Linear solver stack configuration
         data_callback: Called with (time, state_dict) for waveform updates
         progress_callback: Called with (percent, message) for progress bar
         cancel_check: Called to check if simulation should be cancelled
@@ -1529,32 +1468,74 @@ void init_v2_module(py::module_& v2) {
     )doc");
 
     // Convenience version with zero initial state
-    v2.def("run_transient_streaming", [](
+    v2.def("run_transient_streaming", [run_transient_streaming_impl](
         Circuit& circuit,
         Real t_start,
         Real t_stop,
         Real dt,
         const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
         py::object data_callback,
         py::object progress_callback,
         py::object cancel_check,
         int emit_interval
     ) {
         Vector x0 = Vector::Zero(circuit.system_size());
-        // Forward to full version - need to duplicate logic here for now
-        // (pybind11 doesn't support easy forwarding between overloads)
+        return run_transient_streaming_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
+            data_callback, progress_callback, cancel_check, emit_interval);
+    },
+    py::call_guard<py::gil_scoped_release>(),
+    py::arg("circuit"),
+    py::arg("t_start"),
+    py::arg("t_stop"),
+    py::arg("dt"),
+    py::arg("newton_options") = NewtonOptions(),
+    py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
+    py::arg("data_callback") = py::none(),
+    py::arg("progress_callback") = py::none(),
+    py::arg("cancel_check") = py::none(),
+    py::arg("emit_interval") = 100,
+    "Run streaming transient with zero initial state");
 
-        std::vector<Real> times;
-        std::vector<Vector> states;
+    // =========================================================================
+    // Shared Memory Transient Simulation (Zero-copy real-time display)
+    // =========================================================================
+
+    auto run_transient_shared_impl = [](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
+        py::array_t<double, py::array::c_style> time_buffer,
+        py::array_t<double, py::array::c_style> states_buffer,
+        py::array_t<int64_t, py::array::c_style> status_buffer,
+        py::object cancel_check,
+        int cancel_check_interval
+    ) {
+        // Get direct pointers to numpy arrays (zero-copy access)
+        auto time_ptr = time_buffer.mutable_unchecked<1>();
+        auto states_ptr = states_buffer.mutable_unchecked<2>();
+        auto status_ptr = status_buffer.mutable_unchecked<1>();
+
+        const int64_t max_steps = time_ptr.shape(0);
+        const int num_nodes = static_cast<int>(states_ptr.shape(1));
+
+        // Status buffer layout:
+        // [0] = current_index (how many steps completed)
+        // [1] = status (0=running, 1=completed, 2=error, 3=cancelled)
+        // [2] = error_code
+        status_ptr(0) = 0;  // current_index
+        status_ptr(1) = 0;  // status = running
+        status_ptr(2) = 0;  // error_code
+
         bool success = true;
         std::string message = "Transient completed";
         int gmin_fallback_count = 0;
         int dt_reduction_count = 0;
-
-        std::vector<std::string> node_names;
-        for (Index i = 0; i < circuit.num_nodes(); ++i) {
-            node_names.push_back(circuit.node_name(i));
-        }
 
         Real current_dt = dt;
         circuit.set_timestep(current_dt);
@@ -1562,7 +1543,8 @@ void init_v2_module(py::module_& v2) {
         NewtonOptions opts = newton_opts;
         opts.num_nodes = circuit.num_nodes();
         opts.num_branches = circuit.num_branches();
-        NewtonRaphsonSolver<SparseLUPolicy> solver(opts);
+        NewtonRaphsonSolver<RuntimeLinearSolver> solver(opts);
+        solver.linear_solver().set_config(linear_solver);
 
         GminConfig gmin_config;
         gmin_config.initial_gmin = 0.1;
@@ -1577,50 +1559,64 @@ void init_v2_module(py::module_& v2) {
         Vector x = x0;
         circuit.set_current_time(t_start);
         circuit.update_history(x, true);
-        times.push_back(t_start);
-        states.push_back(x);
+
+        // Write initial state to shared buffer
+        time_ptr(0) = t_start;
+        for (int i = 0; i < num_nodes && i < static_cast<int>(x.size()); ++i) {
+            states_ptr(0, i) = x[i];
+        }
+        status_ptr(0) = 1;  // One step completed
 
         Real t = t_start;
-        int step = 0;
-        const int max_steps = static_cast<int>((t_stop - t_start) / dt * 10) + 1;
+        int64_t step = 0;
+        const int64_t actual_max_steps = std::min(max_steps - 1,
+            static_cast<int64_t>((t_stop - t_start) / dt * 10) + 1);
         const int max_dt_reductions = 5;
         const Real dt_reduction_factor = 0.2;
-        const Real total_duration = t_stop - t_start;
-        int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
 
-        while (t < t_stop && step < max_steps) {
-            if (!cancel_check.is_none()) {
-                py::gil_scoped_acquire acquire;
-                try {
-                    if (py::cast<bool>(cancel_check())) {
-                        success = false;
-                        message = "Cancelled by user";
-                        break;
+        // Main simulation loop - NO GIL acquired during computation
+        while (t < t_stop && step < actual_max_steps) {
+            // Check for cancellation periodically (acquire GIL only here)
+            if (cancel_check_interval > 0 && step % cancel_check_interval == 0) {
+                if (!cancel_check.is_none()) {
+                    py::gil_scoped_acquire acquire;
+                    try {
+                        if (py::cast<bool>(cancel_check())) {
+                            status_ptr(1) = 3;  // cancelled
+                            return std::make_tuple(false, std::string("Cancelled by user"));
+                        }
+                    } catch (...) {
+                        // Ignore callback errors
                     }
-                } catch (...) {}
+                }
             }
 
             Real t_next = t + current_dt;
             circuit.set_current_time(t_next);
+
             auto result = solver.solve(x, system_func);
 
+            // Fallback 1: Gmin stepping if Newton fails
             if (!result.success()) {
                 GminStepping gmin_stepper(gmin_config);
                 auto gmin_solve = [&](const Vector& x_start) -> NewtonResult {
                     Real current_gmin = gmin_stepper.current_gmin();
-                    Index num_nodes = circuit.num_nodes();
+                    Index n_nodes = circuit.num_nodes();
                     auto modified_func = [&](const Vector& x_inner, Vector& f, SparseMatrix& J) {
                         circuit.assemble_jacobian(J, f, x_inner);
-                        for (Index i = 0; i < num_nodes; ++i) {
+                        for (Index i = 0; i < n_nodes; ++i) {
                             J.coeffRef(i, i) += current_gmin;
                         }
                     };
                     return solver.solve(x_start, modified_func);
                 };
                 result = gmin_stepper.execute(x, circuit.num_nodes(), gmin_solve);
-                if (result.success()) gmin_fallback_count++;
+                if (result.success()) {
+                    gmin_fallback_count++;
+                }
             }
 
+            // Fallback 2: Timestep reduction if still failing
             if (!result.success()) {
                 int reductions = 0;
                 Real temp_dt = current_dt;
@@ -1632,6 +1628,7 @@ void init_v2_module(py::module_& v2) {
                     temp_dt *= dt_reduction_factor;
                     circuit.set_timestep(temp_dt);
                     reductions++;
+
                     x_sub = x;
                     t_sub = t;
                     sub_success = true;
@@ -1640,7 +1637,11 @@ void init_v2_module(py::module_& v2) {
                         t_sub += temp_dt;
                         circuit.set_current_time(t_sub);
                         result = solver.solve(x_sub, system_func);
-                        if (!result.success()) { sub_success = false; break; }
+
+                        if (!result.success()) {
+                            sub_success = false;
+                            break;
+                        }
                         x_sub = result.solution;
                         circuit.update_history(x_sub);
                     }
@@ -1656,74 +1657,149 @@ void init_v2_module(py::module_& v2) {
             }
 
             if (!result.success()) {
-                success = false;
-                message = "Newton failed at t=" + std::to_string(t_next) + ": " + result.error_message;
-                break;
+                status_ptr(1) = 2;  // error
+                status_ptr(2) = 1;  // convergence error
+                return std::make_tuple(false,
+                    std::string("Newton failed at t=") + std::to_string(t_next) + ": " + result.error_message);
             }
 
             x = result.solution;
             circuit.update_history(x);
             t = t_next;
             step++;
-            times.push_back(t);
-            states.push_back(x);
 
-            if (step % actual_emit_interval == 0) {
-                py::gil_scoped_acquire acquire;
-                if (!data_callback.is_none()) {
-                    try {
-                        py::dict state_dict;
-                        for (size_t i = 0; i < node_names.size(); ++i) {
-                            state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
-                        }
-                        data_callback(t, state_dict);
-                    } catch (...) {}
+            // Write to shared buffer - this is the zero-copy magic!
+            // Python can read this data at any time without blocking
+            if (step < max_steps) {
+                time_ptr(step) = t;
+                for (int i = 0; i < num_nodes && i < static_cast<int>(x.size()); ++i) {
+                    states_ptr(step, i) = x[i];
                 }
-                if (!progress_callback.is_none()) {
-                    try {
-                        Real progress = (t - t_start) / total_duration * 100.0;
-                        progress_callback(progress, "Simulating...");
-                    } catch (...) {}
-                }
+                // Update index AFTER writing data (memory barrier implicit in x86)
+                status_ptr(0) = step + 1;
             }
         }
 
-        {
-            py::gil_scoped_acquire acquire;
-            if (!data_callback.is_none() && !times.empty()) {
-                try {
-                    py::dict state_dict;
-                    for (size_t i = 0; i < node_names.size(); ++i) {
-                        state_dict[py::str("V(" + node_names[i] + ")")] = x[static_cast<Index>(i)];
-                    }
-                    data_callback(times.back(), state_dict);
-                } catch (...) {}
-            }
-            if (!progress_callback.is_none()) {
-                try {
-                    progress_callback(100.0, success ? "Complete" : message);
-                } catch (...) {}
-            }
+        // Mark as completed
+        status_ptr(1) = 1;  // completed
+
+        if (gmin_fallback_count > 0 || dt_reduction_count > 0) {
+            message = "Transient completed (Gmin fallbacks: " + std::to_string(gmin_fallback_count) +
+                      ", dt reductions: " + std::to_string(dt_reduction_count) + ")";
         }
 
-        if (success && (gmin_fallback_count > 0 || dt_reduction_count > 0)) {
-            message = "Transient completed (Gmin: " + std::to_string(gmin_fallback_count) +
-                      ", dt: " + std::to_string(dt_reduction_count) + ")";
-        }
+        return std::make_tuple(success, message);
+    };
 
-        return std::make_tuple(times, states, success, message);
+    v2.def("run_transient_shared", [run_transient_shared_impl](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        const LinearSolverStackConfig& linear_solver,
+        py::array_t<double, py::array::c_style> time_buffer,
+        py::array_t<double, py::array::c_style> states_buffer,
+        py::array_t<int64_t, py::array::c_style> status_buffer,
+        py::object cancel_check,
+        int cancel_check_interval
+    ) {
+        return run_transient_shared_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
+            time_buffer, states_buffer, status_buffer, cancel_check, cancel_check_interval);
     },
     py::call_guard<py::gil_scoped_release>(),
     py::arg("circuit"),
     py::arg("t_start"),
     py::arg("t_stop"),
     py::arg("dt"),
+    py::arg("x0"),
     py::arg("newton_options") = NewtonOptions(),
-    py::arg("data_callback") = py::none(),
-    py::arg("progress_callback") = py::none(),
+    py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
+    py::arg("time_buffer"),
+    py::arg("states_buffer"),
+    py::arg("status_buffer"),
     py::arg("cancel_check") = py::none(),
-    py::arg("emit_interval") = 100,
-    "Run streaming transient with zero initial state");
+    py::arg("cancel_check_interval") = 1000,
+    R"doc(
+    Run transient simulation with shared memory buffers for zero-copy real-time display.
+
+    This function writes simulation data directly to pre-allocated numpy arrays,
+    allowing Python to poll the data at any time without GIL contention.
+    This is the fastest method for real-time waveform display.
+
+    Args:
+        circuit: Circuit object with devices
+        t_start: Start time (s)
+        t_stop: Stop time (s)
+        dt: Timestep (s)
+        x0: Initial state vector
+        newton_options: Newton solver options
+        linear_solver: Linear solver stack configuration
+        time_buffer: Pre-allocated 1D numpy array for time values
+        states_buffer: Pre-allocated 2D numpy array (steps x nodes) for state values
+        status_buffer: 1D numpy array with 3 elements:
+                      [0] = current_index (steps completed)
+                      [1] = status (0=running, 1=completed, 2=error, 3=cancelled)
+                      [2] = error_code
+        cancel_check: Optional callback to check for cancellation
+        cancel_check_interval: Steps between cancellation checks (default: 1000)
+
+    Returns:
+        Tuple of (success, message)
+
+    Usage:
+        # Pre-allocate buffers
+        max_steps = int((t_stop - t_start) / dt) + 100
+        time_buf = np.zeros(max_steps, dtype=np.float64)
+        states_buf = np.zeros((max_steps, num_nodes), dtype=np.float64)
+        status_buf = np.zeros(3, dtype=np.int64)
+
+        # Run in thread
+        thread = Thread(target=run_transient_shared, args=(...))
+        thread.start()
+
+        # Poll from main thread
+        while status_buf[1] == 0:  # while running
+            current_idx = status_buf[0]
+            time_data = time_buf[:current_idx]
+            states_data = states_buf[:current_idx]
+            update_display(time_data, states_data)
+            time.sleep(0.016)  # 60 FPS
+    )doc");
+
+    v2.def("run_transient_shared", [run_transient_shared_impl](
+        Circuit& circuit,
+        Real t_start,
+        Real t_stop,
+        Real dt,
+        const Vector& x0,
+        const NewtonOptions& newton_opts,
+        py::array_t<double, py::array::c_style> time_buffer,
+        py::array_t<double, py::array::c_style> states_buffer,
+        py::array_t<int64_t, py::array::c_style> status_buffer,
+        py::object cancel_check,
+        int cancel_check_interval
+    ) {
+        return run_transient_shared_impl(
+            circuit, t_start, t_stop, dt, x0, newton_opts,
+            LinearSolverStackConfig::defaults(),
+            time_buffer, states_buffer, status_buffer, cancel_check, cancel_check_interval);
+    },
+    py::call_guard<py::gil_scoped_release>(),
+    py::arg("circuit"),
+    py::arg("t_start"),
+    py::arg("t_stop"),
+    py::arg("dt"),
+    py::arg("x0"),
+    py::arg("newton_options") = NewtonOptions(),
+    py::arg("time_buffer"),
+    py::arg("states_buffer"),
+    py::arg("status_buffer"),
+    py::arg("cancel_check") = py::none(),
+    py::arg("cancel_check_interval") = 1000,
+    "Run transient shared with default linear solver");
 
     // =========================================================================
     // Validation Framework (Phase 6 exposed)
@@ -2285,133 +2361,6 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("output_power", &SystemLossSummary::output_power)
         .def_readwrite("efficiency", &SystemLossSummary::efficiency)
         .def("compute_totals", &SystemLossSummary::compute_totals);
-
-    // =========================================================================
-    // AC Analysis (Frequency Domain)
-    // =========================================================================
-
-    // Frequency sweep type enum
-    py::enum_<pulsim::FrequencySweepType>(v2, "FrequencySweepType",
-        "Frequency sweep type for AC analysis")
-        .value("Linear", pulsim::FrequencySweepType::Linear)
-        .value("Decade", pulsim::FrequencySweepType::Decade)
-        .value("Octave", pulsim::FrequencySweepType::Octave)
-        .value("List", pulsim::FrequencySweepType::List)
-        .export_values();
-
-    // Solver status enum (pulsim namespace, used by ACResult)
-    py::enum_<pulsim::SolverStatus>(v2, "ACSolverStatus",
-        "Solver status for AC analysis")
-        .value("Success", pulsim::SolverStatus::Success)
-        .value("MaxIterationsReached", pulsim::SolverStatus::MaxIterationsReached)
-        .value("SingularMatrix", pulsim::SolverStatus::SingularMatrix)
-        .value("NumericalError", pulsim::SolverStatus::NumericalError)
-        .export_values();
-
-    // AC analysis options
-    py::class_<pulsim::ACOptions>(v2, "ACOptions", "AC analysis options")
-        .def(py::init<>())
-        .def_readwrite("sweep_type", &pulsim::ACOptions::sweep_type)
-        .def_readwrite("fstart", &pulsim::ACOptions::fstart)
-        .def_readwrite("fstop", &pulsim::ACOptions::fstop)
-        .def_readwrite("npoints", &pulsim::ACOptions::npoints)
-        .def_readwrite("frequency_list", &pulsim::ACOptions::frequency_list)
-        .def("generate_frequencies", &pulsim::ACOptions::generate_frequencies,
-            "Generate frequency points based on options");
-
-    // AC analysis result
-    py::class_<pulsim::ACResult>(v2, "ACResult", "AC analysis result")
-        .def(py::init<>())
-        .def_readonly("frequencies", &pulsim::ACResult::frequencies)
-        .def_readonly("signal_names", &pulsim::ACResult::signal_names)
-        .def_readonly("data", &pulsim::ACResult::data)
-        .def_readonly("status", &pulsim::ACResult::status)
-        .def_readonly("error_message", &pulsim::ACResult::error_message)
-        .def("num_frequencies", &pulsim::ACResult::num_frequencies)
-        .def("num_signals", &pulsim::ACResult::num_signals)
-        .def("magnitude", &pulsim::ACResult::magnitude,
-            py::arg("freq_idx"), py::arg("signal_idx"),
-            "Get magnitude at frequency index for signal index")
-        .def("phase_deg", &pulsim::ACResult::phase_deg,
-            py::arg("freq_idx"), py::arg("signal_idx"),
-            "Get phase in degrees at frequency index for signal index")
-        .def("magnitude_db", &pulsim::ACResult::magnitude_db,
-            py::arg("freq_idx"), py::arg("signal_idx"),
-            "Get magnitude in dB at frequency index for signal index")
-        .def("transfer_magnitude_db", &pulsim::ACResult::transfer_magnitude_db,
-            py::arg("freq_idx"), py::arg("output_idx"), py::arg("input_idx"),
-            "Get transfer function magnitude in dB")
-        .def("transfer_phase_deg", &pulsim::ACResult::transfer_phase_deg,
-            py::arg("freq_idx"), py::arg("output_idx"), py::arg("input_idx"),
-            "Get transfer function phase in degrees");
-
-    // Bode data structure
-    py::class_<pulsim::BodeData>(v2, "BodeData", "Bode plot data")
-        .def(py::init<>())
-        .def_readonly("frequencies", &pulsim::BodeData::frequencies)
-        .def_readonly("magnitude_db", &pulsim::BodeData::magnitude_db)
-        .def_readonly("phase_deg", &pulsim::BodeData::phase_deg)
-        .def_readonly("gain_margin_db", &pulsim::BodeData::gain_margin_db)
-        .def_readonly("phase_margin_deg", &pulsim::BodeData::phase_margin_deg)
-        .def_readonly("gain_crossover_freq", &pulsim::BodeData::gain_crossover_freq)
-        .def_readonly("phase_crossover_freq", &pulsim::BodeData::phase_crossover_freq)
-        .def("has_gain_margin", &pulsim::BodeData::has_gain_margin)
-        .def("has_phase_margin", &pulsim::BodeData::has_phase_margin);
-
-    // Extract Bode data from AC result
-    v2.def("extract_bode_data",
-        py::overload_cast<const pulsim::ACResult&, size_t, size_t>(&pulsim::extract_bode_data),
-        py::arg("result"), py::arg("output_idx"), py::arg("input_idx"),
-        "Extract Bode plot data by signal indices");
-
-    v2.def("extract_bode_data",
-        py::overload_cast<const pulsim::ACResult&, const std::string&, const std::string&>(&pulsim::extract_bode_data),
-        py::arg("result"), py::arg("output_signal"), py::arg("input_signal"),
-        "Extract Bode plot data by signal names");
-
-    v2.def("calculate_stability_margins", &pulsim::calculate_stability_margins,
-        py::arg("bode"), "Calculate gain and phase margins from Bode data");
-
-    // =========================================================================
-    // AC Analysis Functions (with v1::Circuit conversion)
-    // =========================================================================
-
-    // Expose the circuit converter
-    v2.def("convert_to_ir_circuit", &convert_to_ir_circuit,
-        py::arg("circuit"),
-        "Convert v1::Circuit to IR circuit for AC analysis");
-
-    // AC analysis function that takes v1::Circuit
-    v2.def("run_ac",
-        [](const Circuit& circuit, const pulsim::ACOptions& options,
-           const std::optional<pulsim::Vector>& operating_point) {
-            // Convert v1::Circuit to IR circuit
-            pulsim::Circuit ir = convert_to_ir_circuit(circuit);
-
-            // Run AC analysis
-            if (operating_point) {
-                return pulsim::ac_analysis(ir, options, *operating_point);
-            } else {
-                return pulsim::ac_analysis(ir, options);
-            }
-        },
-        py::arg("circuit"), py::arg("options"),
-        py::arg("operating_point") = std::nullopt,
-        "Run AC frequency analysis on a circuit");
-
-    // AC Analyzer class (wraps v1::Circuit)
-    py::class_<pulsim::ACAnalyzer>(v2, "ACAnalyzer",
-        "AC small-signal analyzer for frequency-domain analysis")
-        .def(py::init([](const Circuit& circuit) {
-            return std::make_unique<pulsim::ACAnalyzer>(convert_to_ir_circuit(circuit));
-        }), py::arg("circuit"),
-            "Create AC analyzer from v1::Circuit")
-        .def("set_operating_point", &pulsim::ACAnalyzer::set_operating_point,
-            py::arg("x_op"), "Set DC operating point for linearization")
-        .def("analyze", &pulsim::ACAnalyzer::analyze, py::arg("options"),
-            "Run AC analysis over frequency range")
-        .def("analyze_at_frequency", &pulsim::ACAnalyzer::analyze_at_frequency,
-            py::arg("frequency"), "Analyze at a single frequency");
 
     // Version info
     v2.attr("__version__") = "2.0.0";

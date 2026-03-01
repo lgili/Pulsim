@@ -1,0 +1,9 @@
+{
+  "backend": "ngspice",
+  "failed": 0,
+  "failure_reasons": {},
+  "passed": 8,
+  "schema_version": "pulsim-parity-v1",
+  "skipped": 5,
+  "total": 13
+}

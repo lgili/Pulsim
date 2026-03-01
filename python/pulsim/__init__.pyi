@@ -1,6 +1,6 @@
 """Type stubs for PulsimCore High-Performance API."""
 
-from typing import List
+from typing import Dict, List, Optional, Tuple
 from enum import Enum
 
 __version__: str
@@ -64,9 +64,42 @@ class SIMDLevel(Enum):
     AVX512 = ...
     NEON = ...
 
+class Integrator(Enum):
+    Trapezoidal = ...
+    BDF1 = ...
+    BDF2 = ...
+    BDF3 = ...
+    BDF4 = ...
+    BDF5 = ...
+    Gear = ...
+    TRBDF2 = ...
+    RosenbrockW = ...
+    SDIRK2 = ...
+
+class TimestepMethod(Enum):
+    StepDoubling = ...
+    Richardson = ...
+
 # =============================================================================
 # Device Classes
 # =============================================================================
+
+class Circuit:
+    def __init__(self) -> None: ...
+    def add_node(self, name: str) -> int: ...
+    def get_node(self, name: str) -> int: ...
+    @staticmethod
+    def ground() -> int: ...
+    def num_nodes(self) -> int: ...
+    def num_branches(self) -> int: ...
+    def system_size(self) -> int: ...
+    def node_name(self, index: int) -> str: ...
+    def node_names(self) -> List[str]: ...
+    def signal_names(self) -> List[str]: ...
+    def initial_state(self) -> List[float]: ...
+    def num_devices(self) -> int: ...
+    def set_timestep(self, dt: float) -> None: ...
+    def timestep(self) -> float: ...
 
 class Resistor:
     def __init__(self, resistance: float, name: str = "") -> None: ...
@@ -206,6 +239,301 @@ class DCAnalysisResult:
 
     def __init__(self) -> None: ...
 
+class StiffnessConfig:
+    enable: bool
+    rejection_streak_threshold: int
+    newton_iter_threshold: int
+    newton_streak_threshold: int
+    cooldown_steps: int
+    dt_backoff: float
+    max_bdf_order: int
+    monitor_conditioning: bool
+    conditioning_error_threshold: float
+    switch_integrator: bool
+    stiff_integrator: Integrator
+
+    def __init__(self) -> None: ...
+
+class PeriodicSteadyStateOptions:
+    period: float
+    max_iterations: int
+    tolerance: float
+    relaxation: float
+    store_last_transient: bool
+
+    def __init__(self) -> None: ...
+
+class HarmonicBalanceOptions:
+    period: float
+    num_samples: int
+    max_iterations: int
+    tolerance: float
+    relaxation: float
+    initialize_from_transient: bool
+
+    def __init__(self) -> None: ...
+
+class SwitchingEnergy:
+    eon: float
+    eoff: float
+    err: float
+
+    def __init__(self) -> None: ...
+
+class LinearSolverKind(Enum):
+    SparseLU = ...
+    EnhancedSparseLU = ...
+    KLU = ...
+    GMRES = ...
+    BiCGSTAB = ...
+    CG = ...
+
+class PreconditionerKind(Enum):
+    None_ = ...
+    Jacobi = ...
+    ILU0 = ...
+    ILUT = ...
+    AMG = ...
+
+class IterativeSolverConfig:
+    max_iterations: int
+    tolerance: float
+    restart: int
+    preconditioner: PreconditionerKind
+    enable_scaling: bool
+    scaling_floor: float
+    ilut_drop_tolerance: float
+    ilut_fill_factor: float
+
+    def __init__(self) -> None: ...
+    @staticmethod
+    def defaults() -> IterativeSolverConfig: ...
+
+class LinearSolverStackConfig:
+    order: List[LinearSolverKind]
+    fallback_order: List[LinearSolverKind]
+    direct_config: LinearSolverConfig
+    iterative_config: IterativeSolverConfig
+    allow_fallback: bool
+    auto_select: bool
+    size_threshold: int
+    nnz_threshold: int
+    diag_min_threshold: float
+
+    def __init__(self) -> None: ...
+    @staticmethod
+    def defaults() -> LinearSolverStackConfig: ...
+
+class LinearSolverTelemetry:
+    total_solve_calls: int
+    total_iterations: int
+    total_fallbacks: int
+    last_iterations: int
+    last_error: float
+    last_solver: Optional[LinearSolverKind]
+    last_preconditioner: Optional[PreconditionerKind]
+
+    def __init__(self) -> None: ...
+
+class SimulationEventType(Enum):
+    SwitchOn = ...
+    SwitchOff = ...
+    ConvergenceWarning = ...
+    TimestepChange = ...
+
+class FallbackReasonCode(Enum):
+    NewtonFailure = ...
+    LTERejection = ...
+    EventSplit = ...
+    StiffnessBackoff = ...
+    TransientGminEscalation = ...
+    MaxRetriesExceeded = ...
+
+class ThermalCouplingPolicy(Enum):
+    LossOnly = ...
+    LossWithTemperatureScaling = ...
+
+class SimulationEvent:
+    time: float
+    type: SimulationEventType
+    component: str
+    description: str
+    value1: float
+    value2: float
+
+    def __init__(self) -> None: ...
+
+class FallbackPolicyOptions:
+    trace_retries: bool
+    enable_transient_gmin: bool
+    gmin_retry_threshold: int
+    gmin_initial: float
+    gmin_max: float
+    gmin_growth: float
+
+    def __init__(self) -> None: ...
+
+class FallbackTraceEntry:
+    step_index: int
+    retry_index: int
+    time: float
+    dt: float
+    reason: FallbackReasonCode
+    solver_status: SolverStatus
+    action: str
+
+    def __init__(self) -> None: ...
+
+class ThermalCouplingOptions:
+    enable: bool
+    ambient: float
+    policy: ThermalCouplingPolicy
+    default_rth: float
+    default_cth: float
+
+    def __init__(self) -> None: ...
+
+class ThermalDeviceConfig:
+    enabled: bool
+    rth: float
+    cth: float
+    temp_init: float
+    temp_ref: float
+    alpha: float
+
+    def __init__(self) -> None: ...
+
+class DeviceThermalTelemetry:
+    device_name: str
+    enabled: bool
+    final_temperature: float
+    peak_temperature: float
+    average_temperature: float
+
+    def __init__(self) -> None: ...
+
+class ThermalSummary:
+    enabled: bool
+    ambient: float
+    max_temperature: float
+    device_temperatures: List[DeviceThermalTelemetry]
+
+    def __init__(self) -> None: ...
+
+class SystemLossSummary:
+    device_losses: Dict[str, object]
+    total_loss: float
+    total_conduction: float
+    total_switching: float
+    input_power: float
+    output_power: float
+    efficiency: float
+
+    def __init__(self) -> None: ...
+    def compute_totals(self) -> None: ...
+
+class SimulationOptions:
+    tstart: float
+    tstop: float
+    dt: float
+    dt_min: float
+    dt_max: float
+    newton_options: NewtonOptions
+    dc_config: DCConvergenceConfig
+    linear_solver: LinearSolverStackConfig
+    adaptive_timestep: bool
+    timestep_config: AdvancedTimestepConfig
+    lte_config: RichardsonLTEConfig
+    integrator: Integrator
+    enable_bdf_order_control: bool
+    bdf_config: BDFOrderConfig
+    stiffness_config: StiffnessConfig
+    enable_periodic_shooting: bool
+    periodic_options: PeriodicSteadyStateOptions
+    enable_harmonic_balance: bool
+    harmonic_balance: HarmonicBalanceOptions
+    enable_events: bool
+    enable_losses: bool
+    switching_energy: Dict[str, SwitchingEnergy]
+    thermal: ThermalCouplingOptions
+    thermal_devices: Dict[str, ThermalDeviceConfig]
+    gmin_fallback: GminConfig
+    max_step_retries: int
+    fallback_policy: FallbackPolicyOptions
+
+    def __init__(self) -> None: ...
+
+class SimulationResult:
+    time: List[float]
+    states: List[List[float]]
+    events: List[SimulationEvent]
+    success: bool
+    final_status: SolverStatus
+    message: str
+    total_steps: int
+    newton_iterations_total: int
+    timestep_rejections: int
+    total_time_seconds: float
+    linear_solver_telemetry: LinearSolverTelemetry
+    fallback_trace: List[FallbackTraceEntry]
+    loss_summary: SystemLossSummary
+    thermal_summary: ThermalSummary
+    data: List[List[float]]
+
+    def __init__(self) -> None: ...
+
+class PeriodicSteadyStateResult:
+    success: bool
+    iterations: int
+    residual_norm: float
+    steady_state: List[float]
+    last_cycle: SimulationResult
+    message: str
+
+    def __init__(self) -> None: ...
+
+class HarmonicBalanceResult:
+    success: bool
+    iterations: int
+    residual_norm: float
+    solution: List[float]
+    sample_times: List[float]
+    message: str
+
+    def __init__(self) -> None: ...
+
+class Simulator:
+    options: SimulationOptions
+
+    def __init__(self, circuit: Circuit, options: SimulationOptions = ...) -> None: ...
+    def dc_operating_point(self) -> DCAnalysisResult: ...
+    def run_transient(self, x0: Optional[List[float]] = ...) -> SimulationResult: ...
+    def run_periodic_shooting(
+        self,
+        x0_or_options: Optional[object] = ...,
+        options: Optional[PeriodicSteadyStateOptions] = ...,
+    ) -> PeriodicSteadyStateResult: ...
+    def run_harmonic_balance(
+        self,
+        x0_or_options: Optional[object] = ...,
+        options: Optional[HarmonicBalanceOptions] = ...,
+    ) -> HarmonicBalanceResult: ...
+    def set_switching_energy(self, device_name: str, energy: SwitchingEnergy) -> None: ...
+
+class YamlParserOptions:
+    strict: bool
+    validate_nodes: bool
+
+    def __init__(self) -> None: ...
+
+class YamlParser:
+    errors: List[str]
+    warnings: List[str]
+
+    def __init__(self, options: YamlParserOptions = ...) -> None: ...
+    def load(self, path: str) -> Tuple[Circuit, SimulationOptions]: ...
+    def load_string(self, content: str) -> Tuple[Circuit, SimulationOptions]: ...
+
 # =============================================================================
 # Validation Framework
 # =============================================================================
@@ -316,6 +644,39 @@ class TimestepConfig:
     def conservative() -> TimestepConfig: ...
     @staticmethod
     def aggressive() -> TimestepConfig: ...
+
+class AdvancedTimestepConfig(TimestepConfig):
+    target_newton_iterations: int
+    min_newton_iterations: int
+    max_newton_iterations: int
+    newton_feedback_gain: float
+    max_growth_rate: float
+    max_shrink_rate: float
+    enable_smoothing: bool
+    lte_weight: float
+    newton_weight: float
+
+    def __init__(self) -> None: ...
+    @staticmethod
+    def defaults() -> AdvancedTimestepConfig: ...
+    @staticmethod
+    def for_switching() -> AdvancedTimestepConfig: ...
+    @staticmethod
+    def for_power_electronics() -> AdvancedTimestepConfig: ...
+
+class RichardsonLTEConfig:
+    method: TimestepMethod
+    extrapolation_order: int
+    voltage_tolerance: float
+    current_tolerance: float
+    use_weighted_norm: bool
+    history_depth: int
+
+    def __init__(self) -> None: ...
+    @staticmethod
+    def defaults() -> RichardsonLTEConfig: ...
+    @staticmethod
+    def step_doubling() -> RichardsonLTEConfig: ...
 
 # =============================================================================
 # High-Performance Features

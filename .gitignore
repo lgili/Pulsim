@@ -1,5 +1,9 @@
 # Build directories
 build/
+build-test/
+build-ci/
+docs/_build/
+site/
 cmake-build-*/
 
 # IDE
@@ -18,6 +22,10 @@ cmake-build-*/
 
 # Results
 *.csv
+!benchmarks/baselines/*.csv
+benchmarks/out/
+benchmarks/matrix/
+benchmarks/ngspice_out/
 
 # Dependencies (fetched by CMake)
 _deps/
