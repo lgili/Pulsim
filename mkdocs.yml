@@ -21,17 +21,17 @@ exclude_docs: |
 theme:
   name: material
   language: en
-  logo: material/flash
-  favicon: null
+  logo: assets/images/pulsim-logo.svg
+  favicon: assets/images/pulsim-logo.svg
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: teal
-      accent: cyan
+      primary: blue grey
+      accent: deep orange
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: teal
-      accent: light blue
+      primary: blue grey
+      accent: deep orange
   features:
     - navigation.tabs
     - navigation.tabs.sticky
