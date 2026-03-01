@@ -137,6 +137,8 @@ simulation:
   tstop: 1e-3
   dt: 1e-6
   step_mode: variable    # fixed | variable
+  formulation: projected_wrapper  # projected_wrapper | direct
+  direct_formulation_fallback: true
   dt_min: 1e-12
   dt_max: 1e-3
   adaptive_timestep: true # override avançado; prefira step_mode
@@ -146,7 +148,7 @@ simulation:
 ```
 
 `simulation.backend` e `simulation.sundials` são chaves legadas e não fazem parte
-da superfície suportada de transiente.
+da superfície suportada de transiente. Use `step_mode` + `formulation`.
 
 For thermal-port rules, strict/non-strict behavior, and complete electrothermal examples, see
 [Electrothermal Workflow](electrothermal-workflow.md).

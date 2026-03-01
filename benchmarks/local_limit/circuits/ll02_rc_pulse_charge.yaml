@@ -9,6 +9,8 @@ simulation:
   tstart: 0.0
   tstop: 12e-3
   dt: 2e-6
+  # Guard variable-step mode from collapsing into excessive dt_min retries in CI.
+  dt_min: 1e-6
 components:
   - type: voltage_source
     name: Vpulse
@@ -18,8 +20,9 @@ components:
       v_initial: 0.0
       v_pulse: 24.0
       t_delay: 0.0
-      t_rise: 200e-9
-      t_fall: 200e-9
+      # Keep edges realistic for local-limit runtime stability in variable mode.
+      t_rise: 2e-6
+      t_fall: 2e-6
       t_width: 6e-3
       period: 12e-3
   - type: resistor

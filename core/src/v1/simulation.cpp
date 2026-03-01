@@ -694,6 +694,17 @@ void Simulator::set_switching_energy(const std::string& device_name, const Switc
     }
 }
 
+[[nodiscard]] std::string_view formulation_mode_to_string(FormulationMode mode) {
+    switch (mode) {
+        case FormulationMode::ProjectedWrapper:
+            return "projected_wrapper";
+        case FormulationMode::Direct:
+            return "direct";
+        default:
+            return "projected_wrapper";
+    }
+}
+
 void Simulator::record_fallback_event(SimulationResult& result,
                                       int step_index,
                                       int retry_index,
@@ -804,6 +815,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
                                           SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
+    const std::string formulation_mode = std::string(formulation_mode_to_string(options_.formulation_mode));
     if (const auto input_issue = validate_transient_inputs(circuit_, options_, x0)) {
         SimulationResult result;
         result.success = false;
@@ -813,7 +825,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         result.backend_telemetry.requested_backend = "native";
         result.backend_telemetry.selected_backend = "native";
         result.backend_telemetry.solver_family = "native";
-        result.backend_telemetry.formulation_mode = "native";
+        result.backend_telemetry.formulation_mode = formulation_mode;
         result.backend_telemetry.failure_reason =
             std::string(diagnostic_code_to_reason(result.diagnostic));
         return result;
@@ -833,7 +845,7 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         native_result.backend_telemetry.solver_family = "native";
     }
     if (native_result.backend_telemetry.formulation_mode.empty()) {
-        native_result.backend_telemetry.formulation_mode = "native";
+        native_result.backend_telemetry.formulation_mode = formulation_mode;
     }
     return native_result;
 }
@@ -844,9 +856,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                                       SimulationControl* control) {
     SimulationResult result;
     auto start_time = std::chrono::high_resolution_clock::now();
+    const std::string formulation_mode = std::string(formulation_mode_to_string(options_.formulation_mode));
     result.backend_telemetry.selected_backend = "native";
     result.backend_telemetry.solver_family = "native";
-    result.backend_telemetry.formulation_mode = "native";
+    result.backend_telemetry.formulation_mode = formulation_mode;
     const std::size_t sample_reserve = estimate_output_sample_reserve(options_);
     result.backend_telemetry.reserved_output_samples =
         saturating_int(static_cast<std::uint64_t>(sample_reserve));
@@ -878,6 +891,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     last_step_solve_path_ = StepSolvePath::DaeFallback;
     last_step_solve_reason_ = "init";
     last_step_segment_cache_hit_ = false;
+    last_step_segment_attempted_ = false;
     last_step_linear_factor_cache_hit_ = false;
     last_step_linear_factor_cache_miss_ = false;
     last_step_linear_factor_cache_invalidation_reason_.clear();
@@ -1286,20 +1300,22 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             dt_used = dt;
 
             step_result = solve_step(t_next, dt_used, x);
-            if (last_step_segment_cache_hit_) {
-                result.backend_telemetry.segment_model_cache_hits += 1;
-            } else {
-                result.backend_telemetry.segment_model_cache_misses += 1;
-            }
-            if (last_step_linear_factor_cache_hit_) {
-                result.backend_telemetry.linear_factor_cache_hits += 1;
-            }
-            if (last_step_linear_factor_cache_miss_) {
-                result.backend_telemetry.linear_factor_cache_misses += 1;
-                if (!last_step_linear_factor_cache_invalidation_reason_.empty()) {
-                    result.backend_telemetry.linear_factor_cache_invalidations += 1;
-                    result.backend_telemetry.linear_factor_cache_last_invalidation_reason =
-                        last_step_linear_factor_cache_invalidation_reason_;
+            if (last_step_segment_attempted_) {
+                if (last_step_segment_cache_hit_) {
+                    result.backend_telemetry.segment_model_cache_hits += 1;
+                } else {
+                    result.backend_telemetry.segment_model_cache_misses += 1;
+                }
+                if (last_step_linear_factor_cache_hit_) {
+                    result.backend_telemetry.linear_factor_cache_hits += 1;
+                }
+                if (last_step_linear_factor_cache_miss_) {
+                    result.backend_telemetry.linear_factor_cache_misses += 1;
+                    if (!last_step_linear_factor_cache_invalidation_reason_.empty()) {
+                        result.backend_telemetry.linear_factor_cache_invalidations += 1;
+                        result.backend_telemetry.linear_factor_cache_last_invalidation_reason =
+                            last_step_linear_factor_cache_invalidation_reason_;
+                    }
                 }
             }
             if (last_step_solve_path_ == StepSolvePath::SegmentPrimary) {
@@ -1957,6 +1973,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         assembler_telemetry.system_time_seconds + direct_assemble_system_time_seconds_;
     result.backend_telemetry.equation_assemble_residual_time_seconds =
         assembler_telemetry.residual_time_seconds + direct_assemble_residual_time_seconds_;
+    result.backend_telemetry.function_evaluations =
+        result.backend_telemetry.equation_assemble_residual_calls;
+    result.backend_telemetry.jacobian_evaluations =
+        result.backend_telemetry.equation_assemble_system_calls;
+    result.backend_telemetry.nonlinear_iterations = result.newton_iterations_total;
+    result.backend_telemetry.error_test_failures = std::max(0, result.timestep_rejections);
+    result.backend_telemetry.nonlinear_convergence_failures =
+        (result.success || result.diagnostic != SimulationDiagnosticCode::TransientStepFailure) ? 0 : 1;
 
     return result;
 }

@@ -84,6 +84,10 @@ class StepMode(Enum):
     Fixed = ...
     Variable = ...
 
+class FormulationMode(Enum):
+    ProjectedWrapper = ...
+    Direct = ...
+
 # =============================================================================
 # Device Classes
 # =============================================================================
@@ -539,6 +543,8 @@ class SimulationOptions:
     linear_solver: LinearSolverStackConfig
     adaptive_timestep: bool
     step_mode: StepMode
+    formulation_mode: FormulationMode
+    direct_formulation_fallback: bool
     timestep_config: AdvancedTimestepConfig
     lte_config: RichardsonLTEConfig
     integrator: Integrator

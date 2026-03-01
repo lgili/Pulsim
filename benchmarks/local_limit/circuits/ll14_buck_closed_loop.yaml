@@ -27,7 +27,7 @@ components:
   # Power Stage
   - type: vcswitch
     name: S_buck
-    nodes: [pwm_gate, vin, sw]
+    nodes: [0, vin, sw]
     v_threshold: 1.0
     ron: 0.05
     roff: 1e7
@@ -54,14 +54,9 @@ components:
     value: 10.0
 
   # Control Loop
-  - type: math_block
-    name: ErrorCalc
-    nodes: [vref, vout]
-    operation: sub
-
   - type: pi_controller
     name: PI1
-    nodes: [ErrorCalc, vref, pi_out_dummy_node] # [err, ref, out]
+    nodes: [vref, vout, 0]
     kp: 0.02
     ki: 40.0
     output_min: 0.1
@@ -70,19 +65,11 @@ components:
 
   - type: pwm_generator
     name: PWM1
-    nodes: [PI1]
+    nodes: [0]
+    duty_from_channel: PI1
     frequency: 100000.0
     duty_min: 0.05
     duty_max: 0.95
     v_high: 5.0
     v_low: 0.0
-
-  # Route PWM to gate via a stiff resistor to help nodes
-  - type: resistor
-    name: Rgate
-    nodes: [PWM1, pwm_gate]
-    value: 1.0
-  - type: resistor
-    name: Rgate_gnd
-    nodes: [pwm_gate, 0]
-    value: 10k
+    target_component: S_buck

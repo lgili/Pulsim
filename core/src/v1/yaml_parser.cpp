@@ -666,13 +666,16 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         validate_keys(sim, {"tstart", "tstop", "dt", "dt_min", "dt_max", "step_mode", "adaptive_timestep",
                             "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
-                        "max_step_retries", "fallback", "model_regularization", "backend", "sundials", "advanced"},
+                            "max_step_retries", "fallback", "model_regularization", "formulation",
+                            "direct_formulation_fallback",
+                            "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
         YAML::Node advanced = sim["advanced"];
         if (advanced) {
             validate_keys(advanced, {"adaptive_timestep", "integrator", "integration", "newton", "timestep",
-                                     "lte", "bdf", "solver", "fallback", "backend", "sundials"},
+                                     "lte", "bdf", "solver", "fallback", "formulation",
+                                     "direct_formulation_fallback", "backend", "sundials"},
                           "simulation.advanced", errors_, options_.strict);
         }
 
@@ -722,6 +725,40 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
             return sim[key];
         };
+
+        YAML::Node formulation = expert_node("formulation");
+        if (formulation) {
+            const std::string formulation_path =
+                (advanced && advanced["formulation"])
+                    ? "simulation.advanced.formulation"
+                    : "simulation.formulation";
+            const auto formulation_raw = parse_string_scalar(formulation, formulation_path, errors_);
+            if (formulation_raw) {
+                const std::string mode = normalize_key(*formulation_raw);
+                if (mode == "projectedwrapper" || mode == "projected" || mode == "native") {
+                    options.formulation_mode = FormulationMode::ProjectedWrapper;
+                } else if (mode == "direct" || mode == "directdae" || mode == "dae") {
+                    options.formulation_mode = FormulationMode::Direct;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagInvalidParameter,
+                        "Invalid " + formulation_path + ": '" + *formulation_raw +
+                            "' (expected 'projected_wrapper' or 'direct')");
+                }
+            }
+        }
+
+        YAML::Node direct_formulation_fallback = expert_node("direct_formulation_fallback");
+        if (direct_formulation_fallback) {
+            const std::string fallback_path =
+                (advanced && advanced["direct_formulation_fallback"])
+                    ? "simulation.advanced.direct_formulation_fallback"
+                    : "simulation.direct_formulation_fallback";
+            if (const auto value = parse_bool_scalar(direct_formulation_fallback, fallback_path, errors_)) {
+                options.direct_formulation_fallback = *value;
+            }
+        }
 
         YAML::Node adaptive_timestep = expert_node("adaptive_timestep");
         if (adaptive_timestep) {

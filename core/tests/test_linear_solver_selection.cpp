@@ -673,6 +673,70 @@ components:
     CHECK(circuit_var.num_devices() == 1);
 }
 
+TEST_CASE("YAML parser maps transient formulation mode controls",
+          "[v1][yaml][formulation]") {
+    const std::string yaml_direct = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  formulation: direct
+  direct_formulation_fallback: false
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    auto [circuit_direct, options_direct] = parser.load_string(yaml_direct);
+    REQUIRE(parser.errors().empty());
+    CHECK(options_direct.formulation_mode == FormulationMode::Direct);
+    CHECK_FALSE(options_direct.direct_formulation_fallback);
+    CHECK(circuit_direct.num_devices() == 1);
+
+    const std::string yaml_advanced_override = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  formulation: direct
+  advanced:
+    formulation: projected_wrapper
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    auto [circuit_projected, options_projected] = parser.load_string(yaml_advanced_override);
+    REQUIRE(parser.errors().empty());
+    CHECK(options_projected.formulation_mode == FormulationMode::ProjectedWrapper);
+    CHECK(circuit_projected.num_devices() == 1);
+
+    const std::string yaml_invalid = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  formulation: unsupported_mode
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser.load_string(yaml_invalid);
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& err) {
+                          return err.find("simulation.formulation") != std::string::npos;
+                      }));
+}
+
 TEST_CASE("YAML parser emits strict migration diagnostics for legacy backend keys",
           "[v1][yaml][migration]") {
     const std::string yaml = R"(schema: pulsim-v1

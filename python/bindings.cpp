@@ -1178,6 +1178,12 @@ void init_v2_module(py::module_& v2) {
         .value("Variable", TransientStepMode::Variable)
         .export_values();
 
+    py::enum_<FormulationMode>(v2, "FormulationMode",
+        "Transient formulation mode for native runtime")
+        .value("ProjectedWrapper", FormulationMode::ProjectedWrapper)
+        .value("Direct", FormulationMode::Direct)
+        .export_values();
+
     py::enum_<SimulationDiagnosticCode>(v2, "SimulationDiagnosticCode",
         "Typed simulation diagnostic code")
         .value("None", SimulationDiagnosticCode::None)
@@ -1369,6 +1375,8 @@ void init_v2_module(py::module_& v2) {
                 options.step_mode_explicit = true;
                 options.adaptive_timestep = (mode == TransientStepMode::Variable);
             })
+        .def_readwrite("formulation_mode", &SimulationOptions::formulation_mode)
+        .def_readwrite("direct_formulation_fallback", &SimulationOptions::direct_formulation_fallback)
         .def_readwrite("timestep_config", &SimulationOptions::timestep_config)
         .def_readwrite("lte_config", &SimulationOptions::lte_config)
         .def_readwrite("integrator", &SimulationOptions::integrator)
