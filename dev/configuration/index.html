@@ -1051,6 +1051,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#dae-direto-diagnosticoperfil" class="md-nav__link">
+    <span class="md-ellipsis">
+      DAE direto (diagnóstico/perfil)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1192,6 +1201,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#dae-direto-diagnosticoperfil" class="md-nav__link">
+    <span class="md-ellipsis">
+      DAE direto (diagnóstico/perfil)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1237,6 +1255,7 @@
 <span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2e-3</span>
 <span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-6</span>
 <span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span><span class="w">   </span><span class="c1"># fixed | variable</span>
+<span class="w">  </span><span class="nt">formulation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">projected_wrapper</span><span class="w">  </span><span class="c1"># projected_wrapper | direct</span>
 <span class="w">  </span><span class="nt">dt_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-10</span>
 <span class="w">  </span><span class="nt">dt_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
 <span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span>
@@ -1245,13 +1264,14 @@
 <ul>
 <li><code>tstop</code>, <code>dt</code>: resolução e duração.</li>
 <li><code>step_mode</code>: <code>fixed</code> para grade determinística; <code>variable</code> para adaptação automática.</li>
+<li><code>formulation</code>: <code>projected_wrapper</code> (padrão, mais robusto em mistas) ou <code>direct</code> (DAE direto).</li>
 <li><code>adaptive_timestep</code>: override avançado (evite no fluxo canônico; prefira <code>step_mode</code>).</li>
 <li><code>integrator</code>: <code>trapezoidal</code>, <code>bdf1..bdf5</code>, <code>trbdf2</code>, <code>rosenbrockw</code>, <code>sdirk2</code>.</li>
 </ul>
 <p>Observação de migração:</p>
 <ul>
 <li><code>simulation.backend</code> e <code>simulation.sundials</code> são campos legados para transiente e não
-  fazem parte do caminho suportado; use <code>simulation.step_mode</code>.</li>
+  fazem parte do caminho suportado; use <code>simulation.step_mode</code> + <code>simulation.formulation</code>.</li>
 </ul>
 <h2 id="solver-linear-em-runtime">Solver linear em runtime<a class="headerlink" href="#solver-linear-em-runtime" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
@@ -1329,9 +1349,16 @@
 <h3 id="producao-robusta">Produção robusta<a class="headerlink" href="#producao-robusta" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>step_mode: variable</code></li>
+<li><code>formulation: projected_wrapper</code></li>
 <li><code>integrator: trbdf2</code> ou <code>rosenbrockw</code></li>
 <li><code>order: [klu, gmres]</code></li>
 <li><code>fallback_order: [sparselu]</code></li>
+</ul>
+<h3 id="dae-direto-diagnosticoperfil">DAE direto (diagnóstico/perfil)<a class="headerlink" href="#dae-direto-diagnosticoperfil" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>step_mode: fixed</code> ou <code>variable</code></li>
+<li><code>formulation: direct</code></li>
+<li>opcional: <code>direct_formulation_fallback: false</code> para comparar somente rota direta</li>
 </ul>
 
 

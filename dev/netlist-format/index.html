@@ -1530,6 +1530,8 @@ suporte backend, veja <code>gui-component-parity</code>.</p>
 <span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-3</span>
 <span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-6</span>
 <span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span><span class="w">    </span><span class="c1"># fixed | variable</span>
+<span class="w">  </span><span class="nt">formulation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">projected_wrapper</span><span class="w">  </span><span class="c1"># projected_wrapper | direct</span>
+<span class="w">  </span><span class="nt">direct_formulation_fallback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">dt_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-12</span>
 <span class="w">  </span><span class="nt">dt_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-3</span>
 <span class="w">  </span><span class="nt">adaptive_timestep</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w"> </span><span class="c1"># override avançado; prefira step_mode</span>
@@ -1538,7 +1540,7 @@ suporte backend, veja <code>gui-component-parity</code>.</p>
 <span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span><span class="w">   </span><span class="c1"># trapezoidal, bdf1, bdf2, trbdf2, rosenbrockw, sdirk2</span>
 </code></pre></div>
 <p><code>simulation.backend</code> e <code>simulation.sundials</code> são chaves legadas e não fazem parte
-da superfície suportada de transiente.</p>
+da superfície suportada de transiente. Use <code>step_mode</code> + <code>formulation</code>.</p>
 <p>For thermal-port rules, strict/non-strict behavior, and complete electrothermal examples, see
 <a href="../electrothermal-workflow/">Electrothermal Workflow</a>.</p>
 <h3 id="solver-configuration">Solver Configuration<a class="headerlink" href="#solver-configuration" title="Permanent link">&para;</a></h3>

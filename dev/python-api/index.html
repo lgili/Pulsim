@@ -1425,6 +1425,8 @@ de robustez por padrão:</p>
 <h3 id="timestep-e-integrador">Timestep e integrador<a class="headerlink" href="#timestep-e-integrador" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>SimulationOptions.step_mode</code> (<code>StepMode.Fixed</code> ou <code>StepMode.Variable</code>)</li>
+<li><code>SimulationOptions.formulation_mode</code> (<code>FormulationMode.ProjectedWrapper</code> ou <code>FormulationMode.Direct</code>)</li>
+<li><code>SimulationOptions.direct_formulation_fallback</code></li>
 <li><code>SimulationOptions.integrator</code></li>
 <li><code>SimulationOptions.adaptive_timestep</code></li>
 <li><code>SimulationOptions.timestep_config</code></li>
@@ -1432,7 +1434,7 @@ de robustez por padrão:</p>
 </ul>
 <p><code>SimulationOptions.transient_backend</code> e <code>SimulationOptions.sundials</code> permanecem
 apenas para migração/diagnóstico de legado; o caminho suportado usa core nativo
-com <code>step_mode</code>.</p>
+com <code>step_mode</code> + <code>formulation_mode</code>.</p>
 <h3 id="termico-e-perdas">Térmico e perdas<a class="headerlink" href="#termico-e-perdas" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>SimulationOptions.enable_losses</code></li>
