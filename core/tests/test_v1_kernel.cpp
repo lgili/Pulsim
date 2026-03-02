@@ -711,6 +711,40 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
     CHECK(component_rload->peak_temperature == Approx(result.thermal_summary.ambient));
 }
 
+TEST_CASE("v1 direct formulation runs through DAE solve path with direct telemetry",
+          "[v1][formulation][direct]") {
+    Circuit circuit;
+
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    circuit.add_voltage_source("V1", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 5e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.formulation_mode = FormulationMode::Direct;
+    opts.direct_formulation_fallback = false;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+    REQUIRE(result.success);
+    CHECK(result.backend_telemetry.formulation_mode == "direct");
+    CHECK(result.backend_telemetry.state_space_primary_steps == 0);
+    CHECK(result.backend_telemetry.dae_fallback_steps >= 1);
+    CHECK(result.backend_telemetry.segment_model_cache_hits == 0);
+    CHECK(result.backend_telemetry.segment_model_cache_misses == 0);
+}
+
 TEST_CASE("v1 switching topologies auto-enable robust transient defaults", "[v1][robust][autoprofile]") {
     Circuit circuit;
 

@@ -50,6 +50,7 @@ private:
 
 NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     last_step_segment_cache_hit_ = false;
+    last_step_segment_attempted_ = false;
     last_step_linear_factor_cache_hit_ = false;
     last_step_linear_factor_cache_miss_ = false;
 
@@ -128,34 +129,54 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     request.event_adjacent = false;
     last_step_linear_factor_cache_invalidation_reason_.clear();
 
-    if (segment_primary_disabled_for_run_) {
+    auto solve_segment_primary = [this, &x_prev, &request, &solve_dae_fallback](bool direct_fallback_attempt) {
+        if (segment_primary_disabled_for_run_) {
+            last_step_solve_path_ = StepSolvePath::DaeFallback;
+            last_step_solve_reason_ = "segment_disabled_cached_non_admissible";
+            return solve_dae_fallback();
+        }
+
+        last_step_segment_attempted_ = true;
+        const auto segment_model = transient_services_.segment_model->build_model(x_prev, request);
+        last_step_segment_cache_hit_ = segment_model.cache_hit;
+        if (!segment_model.admissible &&
+            segment_model.classification == "segment_not_admissible_nonlinear_device") {
+            segment_primary_disabled_for_run_ = true;
+        }
+        const auto segment_outcome =
+            transient_services_.segment_stepper->try_advance(segment_model, x_prev, request);
+        last_step_linear_factor_cache_hit_ = segment_outcome.linear_factor_cache_hit;
+        last_step_linear_factor_cache_miss_ = segment_outcome.linear_factor_cache_miss;
+        last_step_linear_factor_cache_invalidation_reason_ = segment_outcome.cache_invalidation_reason;
+        if (!segment_outcome.requires_fallback) {
+            last_step_solve_path_ = StepSolvePath::SegmentPrimary;
+            if (direct_fallback_attempt) {
+                last_step_solve_reason_ = "direct_failure_projected_fallback";
+            } else {
+                last_step_solve_reason_ = segment_outcome.reason;
+            }
+            return segment_outcome.result;
+        }
+
         last_step_solve_path_ = StepSolvePath::DaeFallback;
-        last_step_solve_reason_ = "segment_disabled_cached_non_admissible";
+        last_step_solve_reason_ = segment_outcome.reason.empty()
+            ? "segment_not_admissible"
+            : segment_outcome.reason;
         return solve_dae_fallback();
+    };
+
+    if (options_.formulation_mode == FormulationMode::Direct) {
+        last_step_solve_path_ = StepSolvePath::DaeFallback;
+        last_step_solve_reason_ = "direct_dae_formulation";
+        NewtonResult direct_result = solve_dae_fallback();
+        if (direct_result.status == SolverStatus::Success || !options_.direct_formulation_fallback) {
+            return direct_result;
+        }
+
+        return solve_segment_primary(true);
     }
 
-    const auto segment_model = transient_services_.segment_model->build_model(x_prev, request);
-    last_step_segment_cache_hit_ = segment_model.cache_hit;
-    if (!segment_model.admissible &&
-        segment_model.classification == "segment_not_admissible_nonlinear_device") {
-        segment_primary_disabled_for_run_ = true;
-    }
-    const auto segment_outcome =
-        transient_services_.segment_stepper->try_advance(segment_model, x_prev, request);
-    last_step_linear_factor_cache_hit_ = segment_outcome.linear_factor_cache_hit;
-    last_step_linear_factor_cache_miss_ = segment_outcome.linear_factor_cache_miss;
-    last_step_linear_factor_cache_invalidation_reason_ = segment_outcome.cache_invalidation_reason;
-    if (!segment_outcome.requires_fallback) {
-        last_step_solve_path_ = StepSolvePath::SegmentPrimary;
-        last_step_solve_reason_ = segment_outcome.reason;
-        return segment_outcome.result;
-    }
-
-    last_step_solve_path_ = StepSolvePath::DaeFallback;
-    last_step_solve_reason_ = segment_outcome.reason.empty()
-        ? "segment_not_admissible"
-        : segment_outcome.reason;
-    return solve_dae_fallback();
+    return solve_segment_primary(false);
 }
 
 NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev) {

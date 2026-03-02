@@ -12,6 +12,7 @@ simulation:
   tstop: 2e-3
   dt: 1e-6
   step_mode: variable   # fixed | variable
+  formulation: projected_wrapper  # projected_wrapper | direct
   dt_min: 1e-10
   dt_max: 1e-4
   integrator: trbdf2
@@ -21,13 +22,14 @@ Campos práticos:
 
 - `tstop`, `dt`: resolução e duração.
 - `step_mode`: `fixed` para grade determinística; `variable` para adaptação automática.
+- `formulation`: `projected_wrapper` (padrão, mais robusto em mistas) ou `direct` (DAE direto).
 - `adaptive_timestep`: override avançado (evite no fluxo canônico; prefira `step_mode`).
 - `integrator`: `trapezoidal`, `bdf1..bdf5`, `trbdf2`, `rosenbrockw`, `sdirk2`.
 
 Observação de migração:
 
 - `simulation.backend` e `simulation.sundials` são campos legados para transiente e não
-  fazem parte do caminho suportado; use `simulation.step_mode`.
+  fazem parte do caminho suportado; use `simulation.step_mode` + `simulation.formulation`.
 
 ## Solver linear em runtime
 
@@ -118,6 +120,13 @@ Saídas relevantes:
 ### Produção robusta
 
 - `step_mode: variable`
+- `formulation: projected_wrapper`
 - `integrator: trbdf2` ou `rosenbrockw`
 - `order: [klu, gmres]`
 - `fallback_order: [sparselu]`
+
+### DAE direto (diagnóstico/perfil)
+
+- `step_mode: fixed` ou `variable`
+- `formulation: direct`
+- opcional: `direct_formulation_fallback: false` para comparar somente rota direta

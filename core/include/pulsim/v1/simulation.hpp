@@ -175,6 +175,11 @@ enum class SimulationDiagnosticCode {
     HarmonicSolverFailure
 };
 
+enum class FormulationMode {
+    ProjectedWrapper,
+    Direct
+};
+
 struct PeriodicSteadyStateOptions {
     Real period = 0.0;
     int max_iterations = 20;
@@ -268,6 +273,8 @@ struct SimulationOptions {
     bool step_mode_explicit = false;
     AdvancedTimestepConfig timestep_config = AdvancedTimestepConfig::for_power_electronics();
     RichardsonLTEConfig lte_config = RichardsonLTEConfig::defaults();
+    FormulationMode formulation_mode = FormulationMode::ProjectedWrapper;
+    bool direct_formulation_fallback = true;
 
     // Integration method selection
     Integrator integrator = Integrator::Trapezoidal;
@@ -467,6 +474,7 @@ private:
     StepSolvePath last_step_solve_path_ = StepSolvePath::DaeFallback;
     std::string last_step_solve_reason_ = "init";
     bool last_step_segment_cache_hit_ = false;
+    bool last_step_segment_attempted_ = false;
     bool last_step_linear_factor_cache_hit_ = false;
     bool last_step_linear_factor_cache_miss_ = false;
     std::string last_step_linear_factor_cache_invalidation_reason_;

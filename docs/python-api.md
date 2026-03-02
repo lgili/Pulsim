@@ -95,6 +95,8 @@ times, states, ok, msg = ps.run_transient(
 ### Timestep e integrador
 
 - `SimulationOptions.step_mode` (`StepMode.Fixed` ou `StepMode.Variable`)
+- `SimulationOptions.formulation_mode` (`FormulationMode.ProjectedWrapper` ou `FormulationMode.Direct`)
+- `SimulationOptions.direct_formulation_fallback`
 - `SimulationOptions.integrator`
 - `SimulationOptions.adaptive_timestep`
 - `SimulationOptions.timestep_config`
@@ -102,7 +104,7 @@ times, states, ok, msg = ps.run_transient(
 
 `SimulationOptions.transient_backend` e `SimulationOptions.sundials` permanecem
 apenas para migração/diagnóstico de legado; o caminho suportado usa core nativo
-com `step_mode`.
+com `step_mode` + `formulation_mode`.
 
 ### Térmico e perdas
 

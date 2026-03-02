@@ -45,6 +45,6 @@
 ## Phase 6: Final CLI Removal (Post-Python Validation)
 
 - [ ] 6.1 Confirm Phases 1-5 completed and Python validation gates are all green.
-- [ ] 6.2 Remove `--pulsim-cli` argument and CLI discovery/dispatch code from benchmark runners.
-- [ ] 6.3 Remove benchmark documentation references to CLI-based execution fallback.
+- [x] 6.2 Remove `--pulsim-cli` argument and CLI discovery/dispatch code from benchmark runners.
+- [x] 6.3 Remove benchmark documentation references to CLI-based execution fallback.
 - [ ] 6.4 Run full benchmark + matrix + ngspice smoke regression after CLI path removal.

@@ -20,6 +20,7 @@ from ._pulsim import (
     Integrator,
     TimestepMethod,
     StepMode,
+    FormulationMode,
 
     # Device Classes - Linear
     Resistor,
@@ -483,6 +484,7 @@ __all__ = [
     "Integrator",
     "TimestepMethod",
     "StepMode",
+    "FormulationMode",
 
     # Device Classes - Linear
     "Resistor",

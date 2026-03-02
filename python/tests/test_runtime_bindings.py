@@ -500,6 +500,48 @@ components:
     assert options.adaptive_timestep is False
 
 
+def test_yaml_parser_maps_formulation_mode_controls() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  formulation: direct
+  direct_formulation_fallback: false
+  advanced:
+    formulation: projected_wrapper
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+    assert parser.errors == []
+    assert options.formulation_mode == ps.FormulationMode.ProjectedWrapper
+    assert options.direct_formulation_fallback is False
+
+    invalid = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  formulation: unsupported_mode
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser_invalid = ps.YamlParser()
+    parser_invalid.load_string(invalid)
+    assert parser_invalid.errors
+    assert any("simulation.formulation" in msg for msg in parser_invalid.errors)
+
+
 def test_yaml_parser_reports_migration_error_for_legacy_backend_keys_in_strict_mode() -> None:
     content = """
 schema: pulsim-v1
@@ -1801,6 +1843,36 @@ def test_linear_factor_cache_telemetry_is_exposed() -> None:
         result.backend_telemetry.linear_factor_cache_hits
         + result.backend_telemetry.linear_factor_cache_misses
     ) >= result.backend_telemetry.state_space_primary_steps
+
+
+def test_direct_formulation_runtime_telemetry_is_exposed() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-6
+    opts.dt = 1e-6
+    opts.dt_min = 1e-9
+    opts.dt_max = 1e-6
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.formulation_mode = ps.FormulationMode.Direct
+    opts.direct_formulation_fallback = False
+
+    x0 = [0.0] * (circuit.num_nodes() + circuit.num_branches())
+    result = ps.Simulator(circuit, opts).run_transient(x0)
+    assert result.success
+    assert result.backend_telemetry.formulation_mode == "direct"
+    assert result.backend_telemetry.state_space_primary_steps == 0
+    assert result.backend_telemetry.dae_fallback_steps >= 1
+    assert result.backend_telemetry.segment_model_cache_hits == 0
+    assert result.backend_telemetry.segment_model_cache_misses == 0
 
 
 def test_invalid_time_window_sets_typed_diagnostic() -> None:
