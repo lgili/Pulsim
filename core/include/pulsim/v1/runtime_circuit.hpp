@@ -604,6 +604,9 @@ public:
             "transfer_function", "delay_block", "sample_hold",
             "state_machine", "signal_mux", "signal_demux"
         };
+        const auto is_discrete_control_component = [](std::string_view type) {
+            return type == "pi_controller" || type == "pid_controller";
+        };
 
         // Phase 2: control update
         for (const auto& component : virtual_components_) {
@@ -615,12 +618,20 @@ public:
             const Real in1 = (component.nodes.size() > 1) ? node_voltage(component.nodes[1]) : 0.0;
             const Real signal = in0 - in1;
             Real output = signal * get_numeric(component, "gain", 1.0);
-
-            const Real dt = [&]() {
-                const auto it = virtual_last_time_.find(component.name);
-                if (it == virtual_last_time_.end()) return Real{0.0};
-                return std::max<Real>(0.0, time - it->second);
-            }();
+            const auto last_time_it = virtual_last_time_.find(component.name);
+            const bool first_update = (last_time_it == virtual_last_time_.end());
+            const Real dt = first_update ? Real{0.0}
+                                         : std::max<Real>(0.0, time - last_time_it->second);
+            const bool discrete_control =
+                control_sample_time_ > 0.0 && is_discrete_control_component(component.type);
+            if (discrete_control && !first_update) {
+                const Real tol = std::max<Real>(control_sample_time_ * Real{1e-9}, Real{1e-15});
+                if (dt + tol < control_sample_time_) {
+                    output = virtual_signal_state_[component.name];
+                    result.channel_values[component.name] = output;
+                    continue;
+                }
+            }
             const auto maybe_limit_output = [&](Real value, bool force_rails = false) {
                 bool has_limits = force_rails ||
                     has_numeric(component, "output_min") || has_numeric(component, "output_max") ||
@@ -1457,6 +1468,20 @@ public:
     /// Get current simulation time
     [[nodiscard]] Real current_time() const { return current_time_; }
 
+    /// Configure global discrete-control sample interval (seconds).
+    /// Non-finite or non-positive values disable discrete control sampling.
+    void set_control_sample_time(Real sample_time) {
+        if (!(std::isfinite(sample_time) && sample_time > 0.0)) {
+            control_sample_time_ = 0.0;
+            return;
+        }
+        control_sample_time_ = sample_time;
+    }
+
+    /// Returns the active global control sample interval in seconds.
+    /// A value of 0 means continuous control updates.
+    [[nodiscard]] Real control_sample_time() const { return control_sample_time_; }
+
     /// Check if circuit has time-varying sources
     [[nodiscard]] bool has_time_varying() const {
         for (const auto& dev : devices_) {
@@ -2046,6 +2071,17 @@ private:
             return;
         }
         connection_name_to_index_.try_emplace(connections_[index].name, index);
+        std::unordered_set<Index> unique_nodes;
+        for (const Index node : connections_[index].nodes) {
+            if (node < 0 || !unique_nodes.insert(node).second) {
+                continue;
+            }
+            const auto node_u = static_cast<std::size_t>(node);
+            if (stamped_node_ref_count_.size() <= node_u) {
+                stamped_node_ref_count_.resize(node_u + 1, 0);
+            }
+            ++stamped_node_ref_count_[node_u];
+        }
         if (forced_switch_state_.size() < connections_.size()) {
             forced_switch_state_.resize(connections_.size());
         }
@@ -2062,6 +2098,15 @@ private:
             return std::nullopt;
         }
         return forced_switch_state_[device_index];
+    }
+
+    [[nodiscard]] bool is_isolated_stamped_node(Index node) const {
+        if (node < 0) {
+            return false;
+        }
+        const auto node_u = static_cast<std::size_t>(node);
+        return node_u < stamped_node_ref_count_.size() &&
+               stamped_node_ref_count_[node_u] <= 1;
     }
 
     [[nodiscard]] const DeviceConnection* find_connection(std::string_view name) const {
@@ -2483,6 +2528,7 @@ private:
     std::vector<DeviceConnection> connections_;
     std::unordered_map<std::string, std::size_t, TransparentStringHash, TransparentStringEqual>
         connection_name_to_index_;
+    std::vector<std::size_t> stamped_node_ref_count_;
     std::vector<Real> device_temperature_scale_;
     std::vector<std::optional<bool>> forced_switch_state_;
     std::unordered_map<std::string, std::string, TransparentStringHash, TransparentStringEqual>
@@ -2495,6 +2541,7 @@ private:
     Integrator integration_method_ = Integrator::Trapezoidal;
     int integration_order_ = 2;  // companion-model order (1 = BE, 2 = TR)
     Real current_time_ = 0.0;
+    Real control_sample_time_ = 0.0;
     inline static const std::string ground_name_ = "0";
 
     StageContext stage_context_{};
@@ -2839,6 +2886,18 @@ private:
     }
 
     template<typename Triplets>
+    void stamp_control_node_bleed(Index node, Real v_node, Triplets& triplets, Vector& f) const {
+        if (!is_isolated_stamped_node(node)) {
+            return;
+        }
+        // If a forced-control node is physically isolated, clamp it to ground
+        // to avoid singular matrices and adaptive-step rejection storms.
+        constexpr Real kControlNodeAnchorToGround = 1e3;
+        stamp_conductance(kControlNodeAnchorToGround, node, -1, triplets);
+        f[node] += kControlNodeAnchorToGround * v_node;
+    }
+
+    template<typename Triplets>
     void stamp_diode_jacobian(const IdealDiode& /*dev*/, const std::vector<Index>& nodes,
                               Triplets& triplets,
                               Vector& f, const Vector& x) const {
@@ -2882,6 +2941,7 @@ private:
         const auto forced = forced_switch_state(device_index);
         if (forced.has_value()) {
             g = *forced ? g_on : g_off;
+            stamp_control_node_bleed(n_ctrl, v_ctrl, triplets, f);
         } else {
             const Real v_norm = (v_ctrl - v_th) / hysteresis;
             const Real tanh_val = std::tanh(v_norm);
@@ -2929,13 +2989,25 @@ private:
         const Real inv_scale = 1.0 / std::max<Real>(scale, Real{0.05});
         const Real kp_eff = p.kp * inv_scale;
         const Real g_off_eff = p.g_off * inv_scale;
+        const auto forced = forced_switch_state(device_index);
+
+        // When externally forced (e.g., virtual PWM target_component), treat MOSFET as a
+        // switch-like conductance to avoid nonlinear gate-dependent behavior.
+        if (forced.has_value()) {
+            const Real g_forced = *forced
+                ? std::max<Real>(kp_eff, Real{1e-6})
+                : std::max<Real>(g_off_eff, Real{1e-18});
+            const Real vds_forced = vd - vs;
+            stamp_control_node_bleed(n_gate, vg, triplets, f);
+            stamp_conductance(g_forced, n_drain, n_source, triplets);
+            if (n_drain >= 0) f[n_drain] += g_forced * vds_forced;
+            if (n_source >= 0) f[n_source] -= g_forced * vds_forced;
+            return;
+        }
+
         Real sign = p.is_nmos ? 1.0 : -1.0;
         Real vgs = sign * (vg - vs);
         Real vds = sign * (vd - vs);
-        const auto forced = forced_switch_state(device_index);
-        if (forced.has_value()) {
-            vgs = *forced ? (p.vth + 5.0) : 0.0;
-        }
 
         Real id = 0.0, gm = 0.0, gds = 0.0;
 
@@ -3002,6 +3074,7 @@ private:
         bool is_on = (vge > p.vth) && (vce > 0);
         if (const auto forced = forced_switch_state(device_index); forced.has_value()) {
             is_on = *forced;
+            stamp_control_node_bleed(n_gate, vg, triplets, f);
         }
         Real g = is_on ? g_on_eff : g_off_eff;
         Real ic = g * vce;
