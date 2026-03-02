@@ -431,10 +431,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
 components:
-  - type: resistor
-    name: R1
+  - type: capacitor
+    name: C1
     nodes: [in, 0]
-    value: 10
+    value: 10u
     thermal:
       enabled: true
       rth: 0.5
@@ -449,6 +449,50 @@ components:
                       [](const std::string& err) {
                           return err.find("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT") != std::string::npos;
                       }));
+}
+
+TEST_CASE("YAML parser accepts thermal enablement on resistor and diode",
+          "[v1][yaml][thermal][capability]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  thermal:
+    ambient: 30.0
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.5
+      cth: 0.1
+  - type: diode
+    name: D1
+    nodes: [in, 0]
+    g_on: 1e3
+    g_off: 1e-9
+    thermal:
+      enabled: true
+      rth: 0.6
+      cth: 0.2
+)";
+
+    parser::YamlParser parser;
+    const auto [circuit, options] = parser.load_string(yaml);
+    (void)circuit;
+
+    REQUIRE(parser.errors().empty());
+    REQUIRE(options.thermal_devices.contains("R1"));
+    REQUIRE(options.thermal_devices.contains("D1"));
+    CHECK(options.thermal_devices.at("R1").enabled);
+    CHECK(options.thermal_devices.at("R1").rth == Approx(0.5));
+    CHECK(options.thermal_devices.at("R1").cth == Approx(0.1));
+    CHECK(options.thermal_devices.at("D1").enabled);
+    CHECK(options.thermal_devices.at("D1").rth == Approx(0.6));
+    CHECK(options.thermal_devices.at("D1").cth == Approx(0.2));
 }
 
 TEST_CASE("YAML parser maps fallback policy controls", "[v1][yaml][fallback]") {

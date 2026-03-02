@@ -145,7 +145,7 @@ struct device_traits<IdealDiode> {
     static constexpr bool is_linear = false;  // Nonlinear!
     static constexpr bool is_dynamic = false;
     static constexpr bool has_loss_model = true;
-    static constexpr bool has_thermal_model = false;
+    static constexpr bool has_thermal_model = true;
     static constexpr std::size_t jacobian_size = 4;
 };
 

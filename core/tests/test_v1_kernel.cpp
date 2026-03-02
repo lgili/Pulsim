@@ -504,6 +504,60 @@ TEST_CASE("v1 forced MOSFET state drives electrical conduction", "[v1][mosfet][s
     CHECK(vout_last > 1.0);
 }
 
+TEST_CASE("v1 forced MOSFET state contributes to electrothermal losses",
+          "[v1][mosfet][switch][loss][thermal][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("vin");
+    const auto n_out = circuit.add_node("out");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0);
+
+    MOSFET::Params mosfet;
+    mosfet.vth = 2.0;
+    mosfet.kp = 0.35;
+    mosfet.g_off = 1e-8;
+    mosfet.lambda = 0.0;
+    circuit.add_mosfet("M1", gnd, n_in, n_out, mosfet);
+    circuit.add_resistor("Rload", n_out, gnd, 10.0);
+    circuit.set_switch_state("M1", true);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 2e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.enable_losses = true;
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.default_rth = 1.0;
+    opts.thermal.default_cth = 0.05;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+
+    const auto loss_it = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "M1"; });
+    REQUIRE(loss_it != result.loss_summary.device_losses.end());
+    CHECK(loss_it->breakdown.conduction > 0.5);
+
+    const auto thermal_it = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "M1"; });
+    REQUIRE(thermal_it != result.thermal_summary.device_temperatures.end());
+    CHECK(thermal_it->final_temperature > opts.thermal.ambient + 1e-4);
+}
+
 TEST_CASE("v1 PWM target_component controls MOSFET conduction path",
           "[v1][mixed-domain][pwm][mosfet][regression]") {
     Circuit circuit;
@@ -934,9 +988,96 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
         result.component_electrothermal.end(),
         [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "Rload"; });
     REQUIRE(component_rload != result.component_electrothermal.end());
-    CHECK_FALSE(component_rload->thermal_enabled);
-    CHECK(component_rload->final_temperature == Approx(result.thermal_summary.ambient));
-    CHECK(component_rload->peak_temperature == Approx(result.thermal_summary.ambient));
+    CHECK(component_rload->thermal_enabled);
+    CHECK(component_rload->final_temperature >= result.thermal_summary.ambient);
+    CHECK(component_rload->peak_temperature >= component_rload->final_temperature);
+}
+
+TEST_CASE("v1 electro-thermal supports resistor and diode telemetry", "[v1][thermal][regression]") {
+    Circuit circuit;
+
+    const auto n_in = circuit.add_node("in");
+    const auto n_mid = circuit.add_node("mid");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, Circuit::ground(), 10.0);
+    circuit.add_resistor("Rs", n_in, n_mid, 10.0);
+    circuit.add_diode("D1", n_mid, Circuit::ground(), 1.0, 1e-6);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 1e-6;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_losses = true;
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.policy = ThermalCouplingPolicy::LossWithTemperatureScaling;
+
+    ThermalDeviceConfig r_cfg;
+    r_cfg.rth = 0.5;
+    r_cfg.cth = 5e-5;
+    r_cfg.temp_init = 25.0;
+    r_cfg.temp_ref = 25.0;
+    r_cfg.alpha = 0.002;
+    opts.thermal_devices["R1"] = r_cfg;
+
+    ThermalDeviceConfig d_cfg;
+    d_cfg.rth = 1.0;
+    d_cfg.cth = 5e-5;
+    d_cfg.temp_init = 25.0;
+    d_cfg.temp_ref = 25.0;
+    d_cfg.alpha = 0.002;
+    opts.thermal_devices["D1"] = d_cfg;
+
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+    REQUIRE(result.success);
+
+    const auto r1_loss = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "R1"; });
+    const auto d1_loss = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "D1"; });
+    REQUIRE(r1_loss != result.loss_summary.device_losses.end());
+    REQUIRE(d1_loss != result.loss_summary.device_losses.end());
+    CHECK(r1_loss->breakdown.conduction > 0.0);
+    CHECK(d1_loss->breakdown.conduction > 0.0);
+
+    const auto r1_thermal = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "R1"; });
+    const auto d1_thermal = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "D1"; });
+    REQUIRE(r1_thermal != result.thermal_summary.device_temperatures.end());
+    REQUIRE(d1_thermal != result.thermal_summary.device_temperatures.end());
+    CHECK(r1_thermal->final_temperature > result.thermal_summary.ambient);
+    CHECK(d1_thermal->final_temperature > result.thermal_summary.ambient);
+
+    const auto r1_component = std::find_if(
+        result.component_electrothermal.begin(),
+        result.component_electrothermal.end(),
+        [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "R1"; });
+    const auto d1_component = std::find_if(
+        result.component_electrothermal.begin(),
+        result.component_electrothermal.end(),
+        [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "D1"; });
+    REQUIRE(r1_component != result.component_electrothermal.end());
+    REQUIRE(d1_component != result.component_electrothermal.end());
+    CHECK(r1_component->thermal_enabled);
+    CHECK(d1_component->thermal_enabled);
 }
 
 TEST_CASE("v1 direct formulation runs through DAE solve path with direct telemetry",

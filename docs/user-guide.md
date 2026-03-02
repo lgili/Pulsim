@@ -65,6 +65,28 @@ The backend reports structured diagnostics such as:
 
 This data should be consumed in CI gates instead of relying on visual-only inspection.
 
+## Closed-Loop + Thermal Workflow
+
+For converter workflows with control and electrothermal coupling:
+
+1. Enable `simulation.enable_losses: true`.
+2. Configure `simulation.thermal.enabled: true`.
+3. Configure control update policy with `simulation.control.mode`.
+4. Add `component.thermal` blocks to thermal-capable devices.
+5. Validate `result.component_electrothermal` together with waveforms.
+
+Recommended defaults:
+
+- `simulation.control.mode: auto` for PWM-driven loops.
+- PI/PID with `output_min/output_max` and `anti_windup: 1.0`.
+- Thermal per component with explicit `rth`/`cth` in strict parser mode.
+
+Primary result fields:
+
+- `result.loss_summary`
+- `result.thermal_summary`
+- `result.component_electrothermal`
+
 ## Recommended Configuration Baseline
 
 For switched converters in production-like runs:
@@ -84,6 +106,7 @@ For switched converters in production-like runs:
 
 - [Netlist YAML Format](netlist-format.md)
 - [Electrothermal Workflow](electrothermal-workflow.md)
+- [Configuration](configuration.md)
 - [Examples and Results](examples-and-results.md)
 - [Benchmarks and Parity](benchmarks-and-parity.md)
 - [Troubleshooting](troubleshooting.md)

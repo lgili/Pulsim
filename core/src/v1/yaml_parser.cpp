@@ -59,7 +59,9 @@ bool is_known_key(const std::string& key, const std::unordered_set<std::string>&
 }
 
 [[nodiscard]] bool component_type_supports_thermal(const std::string& canonical_type) {
-    return canonical_type == "mosfet" ||
+    return canonical_type == "resistor" ||
+           canonical_type == "diode" ||
+           canonical_type == "mosfet" ||
            canonical_type == "igbt" ||
            canonical_type == "bjt_npn" ||
            canonical_type == "bjt_pnp";

@@ -1494,6 +1494,12 @@ public:
         return false;
     }
 
+    /// Returns externally-forced switch state for a device, when present.
+    /// std::nullopt means the device follows its native electrical control.
+    [[nodiscard]] std::optional<bool> forced_state_for_device(std::size_t device_index) const {
+        return forced_switch_state(device_index);
+    }
+
     /// Bind a time-varying source output to a target switch-like component.
     /// Supported drivers: pulse and pwm voltage sources.
     void bind_switch_driver(std::string_view source_name, std::string_view target_switch_name) {
@@ -2582,8 +2588,12 @@ private:
             stamp_current_source(dev.current(), conn.nodes, b);
         }
         else if constexpr (std::is_same_v<T, IdealDiode>) {
-            // Initial guess: use off-state conductance for DC stamping
-            Real g = dev.is_conducting() ? 1e3 : 1e-9;
+            const Real scale = device_temperature_scale(device_index);
+            const Real inv_scale = 1.0 / std::max<Real>(scale, Real{0.05});
+            // Initial guess: use current diode state and configured conductances.
+            Real g = dev.is_conducting()
+                ? std::max<Real>(dev.g_on() * inv_scale, Real{1e-12})
+                : std::max<Real>(dev.g_off() * inv_scale, Real{1e-18});
             stamp_resistor(1.0 / g, conn.nodes, triplets);
         }
         else if constexpr (std::is_same_v<T, IdealSwitch>) {
@@ -2687,7 +2697,7 @@ private:
             if (nneg >= 0) f[nneg] += i;
         }
         else if constexpr (std::is_same_v<T, IdealDiode>) {
-            stamp_diode_jacobian(dev, conn.nodes, triplets, f, x);
+            stamp_diode_jacobian(dev, conn.nodes, device_index, triplets, f, x);
         }
         else if constexpr (std::is_same_v<T, IdealSwitch>) {
             Real g = dev.is_closed() ? 1e6 : 1e-12;
@@ -2898,7 +2908,8 @@ private:
     }
 
     template<typename Triplets>
-    void stamp_diode_jacobian(const IdealDiode& /*dev*/, const std::vector<Index>& nodes,
+    void stamp_diode_jacobian(const IdealDiode& dev, const std::vector<Index>& nodes,
+                              std::size_t device_index,
                               Triplets& triplets,
                               Vector& f, const Vector& x) const {
         Index n_anode = nodes[0];
@@ -2908,8 +2919,13 @@ private:
         Real v_cathode = (n_cathode >= 0) ? x[n_cathode] : 0.0;
         Real v_diode = v_anode - v_cathode;
 
-        // Determine state (simple ideal model)
-        Real g = (v_diode > 0.0) ? 1e3 : 1e-9;
+        const Real scale = device_temperature_scale(device_index);
+        const Real inv_scale = 1.0 / std::max<Real>(scale, Real{0.05});
+        const Real g_on = std::max<Real>(dev.g_on() * inv_scale, Real{1e-12});
+        const Real g_off = std::max<Real>(dev.g_off() * inv_scale, Real{1e-18});
+
+        // Determine state (simple ideal model).
+        Real g = (v_diode > 0.0) ? g_on : g_off;
         Real i = g * v_diode;
 
         stamp_conductance(g, n_anode, n_cathode, triplets);

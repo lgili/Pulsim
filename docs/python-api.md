@@ -73,6 +73,7 @@ times, states, ok, msg = ps.run_transient(
 ## Enums importantes
 
 - `Integrator`: `Trapezoidal`, `BDF1..BDF5`, `TRBDF2`, `RosenbrockW`, `SDIRK2`
+- `ControlUpdateMode`: `Auto`, `Continuous`, `Discrete`
 - `LinearSolverKind`: `SparseLU`, `EnhancedSparseLU`, `KLU`, `GMRES`, `BiCGSTAB`, `CG`
 - `PreconditionerKind`: `None_`, `Jacobi`, `ILU0`, `ILUT`, `AMG` (quando disponível)
 - `SolverStatus`, `DCStrategy`, `SimulationEventType`, `FallbackReasonCode`
@@ -95,6 +96,8 @@ times, states, ok, msg = ps.run_transient(
 ### Timestep e integrador
 
 - `SimulationOptions.step_mode` (`StepMode.Fixed` ou `StepMode.Variable`)
+- `SimulationOptions.control_mode`
+- `SimulationOptions.control_sample_time`
 - `SimulationOptions.formulation_mode` (`FormulationMode.ProjectedWrapper` ou `FormulationMode.Direct`)
 - `SimulationOptions.direct_formulation_fallback`
 - `SimulationOptions.integrator`
@@ -105,6 +108,21 @@ times, states, ok, msg = ps.run_transient(
 `SimulationOptions.transient_backend` e `SimulationOptions.sundials` permanecem
 apenas para migração/diagnóstico de legado; o caminho suportado usa core nativo
 com `step_mode` + `formulation_mode`.
+
+### Controle em malha fechada
+
+```python
+import pulsim as ps
+
+options.control_mode = ps.ControlUpdateMode.Auto
+options.control_sample_time = 0.0  # 0 => auto/continuous path
+```
+
+Semântica:
+
+- `Auto`: usa `control_sample_time` se `> 0`; caso contrário tenta inferir por frequência PWM.
+- `Continuous`: força atualização contínua de controle.
+- `Discrete`: aplica amostragem global para blocos PI/PID.
 
 ### Térmico e perdas
 
@@ -133,6 +151,9 @@ result = sim.run_transient(circuit.initial_state())
 for item in result.component_electrothermal:
     print(item.component_name, item.total_loss, item.peak_temperature)
 ```
+
+`component_electrothermal` inclui todos os componentes elétricos não virtuais, com
+campos térmicos determinísticos mesmo quando a porta térmica não está habilitada.
 
 For full YAML + Python electrothermal setup (global thermal block, component thermal ports, strict/non-strict parser behavior), see
 [Electrothermal Workflow](electrothermal-workflow.md).
