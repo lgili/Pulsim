@@ -457,6 +457,288 @@ TEST_CASE("v1 variable-step mosfet buck stays close to fixed-step reference",
     CHECK(variable.timestep_rejections <= 2);
 }
 
+TEST_CASE("v1 forced MOSFET state drives electrical conduction", "[v1][mosfet][switch][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("vin");
+    const auto n_out = circuit.add_node("out");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0);
+
+    MOSFET::Params mosfet;
+    mosfet.vth = 2.0;
+    mosfet.kp = 0.35;
+    mosfet.g_off = 1e-8;
+    mosfet.lambda = 0.0;
+    circuit.add_mosfet("M1", gnd, n_in, n_out, mosfet);
+    circuit.add_resistor("Rload", n_out, gnd, 10.0);
+
+    circuit.set_switch_state("M1", true);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 100e-6;
+    opts.dt = 1e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE_FALSE(result.states.empty());
+
+    const auto signals = circuit.signal_names();
+    const auto out_it = std::find(signals.begin(), signals.end(), "V(out)");
+    REQUIRE(out_it != signals.end());
+    const auto out_index = static_cast<std::size_t>(std::distance(signals.begin(), out_it));
+    const Real vout_last = result.states.back()[static_cast<Index>(out_index)];
+
+    INFO("forced MOSFET vout_last=" << vout_last
+         << " steps=" << result.total_steps
+         << " rejections=" << result.timestep_rejections);
+    CHECK(vout_last > 1.0);
+}
+
+TEST_CASE("v1 forced MOSFET state contributes to electrothermal losses",
+          "[v1][mosfet][switch][loss][thermal][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("vin");
+    const auto n_out = circuit.add_node("out");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0);
+
+    MOSFET::Params mosfet;
+    mosfet.vth = 2.0;
+    mosfet.kp = 0.35;
+    mosfet.g_off = 1e-8;
+    mosfet.lambda = 0.0;
+    circuit.add_mosfet("M1", gnd, n_in, n_out, mosfet);
+    circuit.add_resistor("Rload", n_out, gnd, 10.0);
+    circuit.set_switch_state("M1", true);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 2e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.enable_losses = true;
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.default_rth = 1.0;
+    opts.thermal.default_cth = 0.05;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+
+    const auto loss_it = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "M1"; });
+    REQUIRE(loss_it != result.loss_summary.device_losses.end());
+    CHECK(loss_it->breakdown.conduction > 0.5);
+
+    const auto thermal_it = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "M1"; });
+    REQUIRE(thermal_it != result.thermal_summary.device_temperatures.end());
+    CHECK(thermal_it->final_temperature > opts.thermal.ambient + 1e-4);
+}
+
+TEST_CASE("v1 PWM target_component controls MOSFET conduction path",
+          "[v1][mixed-domain][pwm][mosfet][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("vin");
+    const auto n_out = circuit.add_node("out");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0);
+
+    MOSFET::Params mosfet;
+    mosfet.vth = 2.0;
+    mosfet.kp = 0.35;
+    mosfet.g_off = 1e-8;
+    mosfet.lambda = 0.0;
+    circuit.add_mosfet("M1", gnd, n_in, n_out, mosfet);
+    circuit.add_resistor("Rload", n_out, gnd, 10.0);
+
+    circuit.add_virtual_component(
+        "pwm_generator",
+        "PWM1",
+        {gnd},
+        {
+            {"frequency", 10e3},
+            {"duty", 0.5},
+            {"duty_min", 0.0},
+            {"duty_max", 1.0},
+        },
+        {{"target_component", "M1"}});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 2e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE_FALSE(result.states.empty());
+
+    const auto signals = circuit.signal_names();
+    const auto out_it = std::find(signals.begin(), signals.end(), "V(out)");
+    REQUIRE(out_it != signals.end());
+    const auto out_index = static_cast<std::size_t>(std::distance(signals.begin(), out_it));
+
+    Real vout_max = 0.0;
+    for (const auto& state : result.states) {
+        vout_max = std::max(vout_max, state[static_cast<Index>(out_index)]);
+    }
+
+    const auto pwm_it = result.virtual_channels.find("PWM1");
+    REQUIRE(pwm_it != result.virtual_channels.end());
+    const auto& pwm_values = pwm_it->second;
+    const bool saw_high = std::any_of(pwm_values.begin(), pwm_values.end(), [](Real v) { return v > 0.5; });
+    const bool saw_low = std::any_of(pwm_values.begin(), pwm_values.end(), [](Real v) { return v < 0.5; });
+
+    INFO("PWM target MOSFET vout_max=" << vout_max
+         << " steps=" << result.total_steps
+         << " rejections=" << result.timestep_rejections);
+    CHECK(saw_high);
+    CHECK(saw_low);
+    CHECK(vout_max > 1.0);
+}
+
+TEST_CASE("v1 PWM target_component remains stable with floating MOSFET gate node",
+          "[v1][mixed-domain][pwm][mosfet][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("vin");
+    const auto n_gate = circuit.add_node("gate");
+    const auto n_out = circuit.add_node("out");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0);
+
+    MOSFET::Params mosfet;
+    mosfet.vth = 2.0;
+    mosfet.kp = 0.35;
+    mosfet.g_off = 1e-8;
+    mosfet.lambda = 0.0;
+    circuit.add_mosfet("M1", n_gate, n_in, n_out, mosfet);
+    circuit.add_resistor("Rload", n_out, gnd, 10.0);
+
+    circuit.add_virtual_component(
+        "pwm_generator",
+        "PWM1",
+        {gnd},
+        {
+            {"frequency", 10e3},
+            {"duty", 0.5},
+            {"duty_min", 0.0},
+            {"duty_max", 1.0},
+        },
+        {{"target_component", "M1"}});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 2e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE_FALSE(result.states.empty());
+
+    const auto signals = circuit.signal_names();
+    const auto out_it = std::find(signals.begin(), signals.end(), "V(out)");
+    REQUIRE(out_it != signals.end());
+    const auto out_index = static_cast<std::size_t>(std::distance(signals.begin(), out_it));
+
+    Real vout_max = 0.0;
+    for (const auto& state : result.states) {
+        vout_max = std::max(vout_max, state[static_cast<Index>(out_index)]);
+    }
+
+    INFO("PWM target floating-gate MOSFET vout_max=" << vout_max
+         << " steps=" << result.total_steps
+         << " rejections=" << result.timestep_rejections
+         << " message=" << result.message);
+    CHECK(vout_max > 1.0);
+}
+
+TEST_CASE("v1 auto control scheduler samples PI at PWM period",
+          "[v1][mixed-domain][control][scheduler][regression]") {
+    Circuit circuit;
+    const auto n_err = circuit.add_node("err");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Verr", n_err, gnd, 1.0);
+    circuit.add_resistor("Rerr", n_err, gnd, 1e3);
+
+    circuit.add_virtual_component(
+        "pi_controller", "PI1", {n_err, gnd},
+        {{"kp", 0.0}, {"ki", 10000.0}},
+        {});
+    circuit.add_virtual_component(
+        "pwm_generator", "PWM1", {gnd},
+        {{"frequency", 10e3}, {"duty", 0.5}, {"duty_from_input", 0.0}, {"duty_min", 0.0}, {"duty_max", 1.0}},
+        {{"duty_from_channel", "PI1"}});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 250e-6;
+    opts.dt = 10e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.control_mode = ControlUpdateMode::Auto;
+    opts.control_sample_time = 0.0;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE(result.virtual_channels.contains("PI1"));
+    const auto& pi = result.virtual_channels.at("PI1");
+    REQUIRE(pi.size() >= 21);
+
+    // dt = 10 us, PWM = 10 kHz => inferred control sample time = 100 us.
+    CHECK(pi[0] == Approx(0.0).margin(1e-12));
+    CHECK(pi[5] == Approx(pi[0]).margin(1e-12));   // 50 us: hold
+    CHECK(pi[10] > pi[5]);                          // 100 us: update
+    CHECK(pi[15] == Approx(pi[10]).margin(1e-12)); // 150 us: hold
+    CHECK(pi[20] > pi[15]);                         // 200 us: update
+}
+
 TEST_CASE("v1 event scheduler applies unified calendar ordering", "[v1][events][scheduler][regression]") {
     Circuit circuit;
     auto n_ctrl = circuit.add_node("ctrl");
@@ -706,9 +988,96 @@ TEST_CASE("v1 electro-thermal coupling emits device telemetry", "[v1][thermal][r
         result.component_electrothermal.end(),
         [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "Rload"; });
     REQUIRE(component_rload != result.component_electrothermal.end());
-    CHECK_FALSE(component_rload->thermal_enabled);
-    CHECK(component_rload->final_temperature == Approx(result.thermal_summary.ambient));
-    CHECK(component_rload->peak_temperature == Approx(result.thermal_summary.ambient));
+    CHECK(component_rload->thermal_enabled);
+    CHECK(component_rload->final_temperature >= result.thermal_summary.ambient);
+    CHECK(component_rload->peak_temperature >= component_rload->final_temperature);
+}
+
+TEST_CASE("v1 electro-thermal supports resistor and diode telemetry", "[v1][thermal][regression]") {
+    Circuit circuit;
+
+    const auto n_in = circuit.add_node("in");
+    const auto n_mid = circuit.add_node("mid");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, Circuit::ground(), 10.0);
+    circuit.add_resistor("Rs", n_in, n_mid, 10.0);
+    circuit.add_diode("D1", n_mid, Circuit::ground(), 1.0, 1e-6);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 1e-6;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_losses = true;
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.policy = ThermalCouplingPolicy::LossWithTemperatureScaling;
+
+    ThermalDeviceConfig r_cfg;
+    r_cfg.rth = 0.5;
+    r_cfg.cth = 5e-5;
+    r_cfg.temp_init = 25.0;
+    r_cfg.temp_ref = 25.0;
+    r_cfg.alpha = 0.002;
+    opts.thermal_devices["R1"] = r_cfg;
+
+    ThermalDeviceConfig d_cfg;
+    d_cfg.rth = 1.0;
+    d_cfg.cth = 5e-5;
+    d_cfg.temp_init = 25.0;
+    d_cfg.temp_ref = 25.0;
+    d_cfg.alpha = 0.002;
+    opts.thermal_devices["D1"] = d_cfg;
+
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+    REQUIRE(result.success);
+
+    const auto r1_loss = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "R1"; });
+    const auto d1_loss = std::find_if(
+        result.loss_summary.device_losses.begin(),
+        result.loss_summary.device_losses.end(),
+        [](const LossResult& item) { return item.device_name == "D1"; });
+    REQUIRE(r1_loss != result.loss_summary.device_losses.end());
+    REQUIRE(d1_loss != result.loss_summary.device_losses.end());
+    CHECK(r1_loss->breakdown.conduction > 0.0);
+    CHECK(d1_loss->breakdown.conduction > 0.0);
+
+    const auto r1_thermal = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "R1"; });
+    const auto d1_thermal = std::find_if(
+        result.thermal_summary.device_temperatures.begin(),
+        result.thermal_summary.device_temperatures.end(),
+        [](const DeviceThermalTelemetry& item) { return item.device_name == "D1"; });
+    REQUIRE(r1_thermal != result.thermal_summary.device_temperatures.end());
+    REQUIRE(d1_thermal != result.thermal_summary.device_temperatures.end());
+    CHECK(r1_thermal->final_temperature > result.thermal_summary.ambient);
+    CHECK(d1_thermal->final_temperature > result.thermal_summary.ambient);
+
+    const auto r1_component = std::find_if(
+        result.component_electrothermal.begin(),
+        result.component_electrothermal.end(),
+        [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "R1"; });
+    const auto d1_component = std::find_if(
+        result.component_electrothermal.begin(),
+        result.component_electrothermal.end(),
+        [](const ComponentElectrothermalTelemetry& item) { return item.component_name == "D1"; });
+    REQUIRE(r1_component != result.component_electrothermal.end());
+    REQUIRE(d1_component != result.component_electrothermal.end());
+    CHECK(r1_component->thermal_enabled);
+    CHECK(d1_component->thermal_enabled);
 }
 
 TEST_CASE("v1 direct formulation runs through DAE solve path with direct telemetry",
@@ -2066,6 +2435,37 @@ TEST_CASE("v1 control primitives keep bounded deterministic outputs",
         REQUIRE(recovery.channel_values.contains("PI_NO_AW"));
         CHECK(recovery.channel_values.at("PI_AW") <= 0.0);
         CHECK(recovery.channel_values.at("PI_NO_AW") > 0.0);
+    }
+
+    SECTION("pi controller honors global discrete control sample time") {
+        Circuit circuit;
+        const auto n_err = circuit.add_node("err");
+        const auto n_ref = circuit.add_node("ref");
+        circuit.add_virtual_component(
+            "pi_controller", "PI_DS", {n_err, n_ref},
+            {{"kp", 0.0}, {"ki", 1.0}},
+            {});
+        circuit.set_control_sample_time(1.0);
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_err] = 1.0;
+
+        const auto s0 = circuit.execute_mixed_domain_step(x, 0.0);
+        const auto s05 = circuit.execute_mixed_domain_step(x, 0.5);
+        const auto s10 = circuit.execute_mixed_domain_step(x, 1.0);
+        const auto s15 = circuit.execute_mixed_domain_step(x, 1.5);
+        const auto s20 = circuit.execute_mixed_domain_step(x, 2.0);
+
+        REQUIRE(s0.channel_values.contains("PI_DS"));
+        REQUIRE(s05.channel_values.contains("PI_DS"));
+        REQUIRE(s10.channel_values.contains("PI_DS"));
+        REQUIRE(s15.channel_values.contains("PI_DS"));
+        REQUIRE(s20.channel_values.contains("PI_DS"));
+
+        CHECK(s05.channel_values.at("PI_DS") == Approx(s0.channel_values.at("PI_DS")).margin(1e-12));
+        CHECK(s10.channel_values.at("PI_DS") > s05.channel_values.at("PI_DS"));
+        CHECK(s15.channel_values.at("PI_DS") == Approx(s10.channel_values.at("PI_DS")).margin(1e-12));
+        CHECK(s20.channel_values.at("PI_DS") > s15.channel_values.at("PI_DS"));
     }
 
     SECTION("pid derivative path reacts to error slope") {

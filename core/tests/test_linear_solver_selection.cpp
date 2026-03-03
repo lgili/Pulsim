@@ -431,10 +431,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
 components:
-  - type: resistor
-    name: R1
+  - type: capacitor
+    name: C1
     nodes: [in, 0]
-    value: 10
+    value: 10u
     thermal:
       enabled: true
       rth: 0.5
@@ -449,6 +449,50 @@ components:
                       [](const std::string& err) {
                           return err.find("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT") != std::string::npos;
                       }));
+}
+
+TEST_CASE("YAML parser accepts thermal enablement on resistor and diode",
+          "[v1][yaml][thermal][capability]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  thermal:
+    ambient: 30.0
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.5
+      cth: 0.1
+  - type: diode
+    name: D1
+    nodes: [in, 0]
+    g_on: 1e3
+    g_off: 1e-9
+    thermal:
+      enabled: true
+      rth: 0.6
+      cth: 0.2
+)";
+
+    parser::YamlParser parser;
+    const auto [circuit, options] = parser.load_string(yaml);
+    (void)circuit;
+
+    REQUIRE(parser.errors().empty());
+    REQUIRE(options.thermal_devices.contains("R1"));
+    REQUIRE(options.thermal_devices.contains("D1"));
+    CHECK(options.thermal_devices.at("R1").enabled);
+    CHECK(options.thermal_devices.at("R1").rth == Approx(0.5));
+    CHECK(options.thermal_devices.at("R1").cth == Approx(0.1));
+    CHECK(options.thermal_devices.at("D1").enabled);
+    CHECK(options.thermal_devices.at("D1").rth == Approx(0.6));
+    CHECK(options.thermal_devices.at("D1").cth == Approx(0.2));
 }
 
 TEST_CASE("YAML parser maps fallback policy controls", "[v1][yaml][fallback]") {
@@ -673,6 +717,72 @@ components:
     CHECK(circuit_var.num_devices() == 1);
 }
 
+TEST_CASE("YAML parser maps control scheduler options",
+          "[v1][yaml][control]") {
+    const std::string yaml_discrete = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  control_mode: discrete
+  control_sample_time: 100e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser::YamlParser parser;
+    auto [circuit_discrete, options_discrete] = parser.load_string(yaml_discrete);
+    REQUIRE(parser.errors().empty());
+    CHECK(options_discrete.control_mode == ControlUpdateMode::Discrete);
+    CHECK(options_discrete.control_sample_time == Approx(100e-6).margin(1e-12));
+    CHECK(circuit_discrete.num_devices() == 1);
+
+    const std::string yaml_nested = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  control:
+    mode: auto
+    sample_time: 50e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    auto [circuit_nested, options_nested] = parser.load_string(yaml_nested);
+    REQUIRE(parser.errors().empty());
+    CHECK(options_nested.control_mode == ControlUpdateMode::Auto);
+    CHECK(options_nested.control_sample_time == Approx(50e-6).margin(1e-12));
+    CHECK(circuit_nested.num_devices() == 1);
+
+    const std::string yaml_invalid = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 2e-5
+  dt: 1e-6
+  control_mode: discrete
+  control_sample_time: 0.0
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 1k
+)";
+
+    parser.load_string(yaml_invalid);
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& err) {
+                          return err.find("control_sample_time") != std::string::npos;
+                      }));
+}
+
 TEST_CASE("YAML parser maps transient formulation mode controls",
           "[v1][yaml][formulation]") {
     const std::string yaml_direct = R"(schema: pulsim-v1
@@ -843,6 +953,59 @@ components:
                                  msg.find("simulation.adaptive_timestep") != std::string::npos &&
                                  msg.find("simulation.step_mode") != std::string::npos;
                       }));
+}
+
+TEST_CASE("YAML parser strict mode accepts backend newton and pwm control keys",
+          "[v1][yaml][strict][regression]") {
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  newton:
+    max_iterations: 50
+    enable_limiting: true
+    max_voltage_step: 2.0
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 12}
+  - type: mosfet
+    name: M1
+    nodes: [0, vin, sw]
+    vth: 2.0
+    kp: 0.2
+    g_off: 1e-8
+  - type: resistor
+    name: Rload
+    nodes: [sw, 0]
+    value: 10
+  - type: pi_controller
+    name: PI1
+    nodes: [vin, sw, 0]
+    kp: 0.05
+    ki: 10.0
+  - type: pwm_generator
+    name: PWM1
+    nodes: [0]
+    frequency: 10000
+    duty: 0.5
+    duty_min: 0.0
+    duty_max: 0.95
+    duty_from_channel: PI1
+    v_high: 20.0
+    v_low: 0.0
+    target_component: M1
+)";
+
+    parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(yaml);
+
+    REQUIRE(parser.errors().empty());
+    CHECK(circuit.num_devices() >= 3);
+    CHECK(options.newton_options.enable_limiting == SimulationOptions{}.newton_options.enable_limiting);
+    CHECK(options.newton_options.max_voltage_step == Approx(SimulationOptions{}.newton_options.max_voltage_step));
 }
 
 TEST_CASE("YAML parser accepts GUI parity slice with virtual and surrogate components",

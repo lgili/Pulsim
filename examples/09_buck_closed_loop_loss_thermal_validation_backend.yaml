@@ -1,0 +1,107 @@
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 10e-3
+  dt: 1e-6
+  step_mode: variable
+  enable_events: true
+  enable_losses: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 99
+    enable_limiting: true
+    max_voltage_step: 2.0
+  formulation: projected_wrapper
+  direct_formulation_fallback: true
+  thermal:
+    enabled: true
+    ambient: 25.0
+    policy: loss_with_temperature_scaling
+    default_rth: 1.0
+    default_cth: 0.05
+
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 12.0
+
+  - type: voltage_source
+    name: Vref
+    nodes: [vref, 0]
+    waveform:
+      type: dc
+      value: 6.0
+
+  - type: mosfet
+    name: M1
+    # With target_component control, gate is forced by mixed-domain scheduler.
+    # Keep gate electrically tied to ground to avoid a floating control node.
+    nodes: [0, vin, sw]
+    vth: 3.0
+    kp: 0.35
+    lambda: 0.01
+    g_off: 1e-8
+    thermal:
+      enabled: true
+      rth: 1.0
+      cth: 0.05
+      temp_init: 25.0
+      temp_ref: 25.0
+      alpha: 0.004
+
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    g_on: 350.0
+    g_off: 1e-9
+
+  - type: inductor
+    name: L1
+    nodes: [sw, vout]
+    value: 220u
+    ic: 0.0
+
+  - type: capacitor
+    name: Cout
+    nodes: [vout, 0]
+    value: 220u
+    ic: 0.0
+
+  - type: resistor
+    name: Rload
+    nodes: [vout, 0]
+    value: 8.0
+
+  # GUI chain equivalent: error = vref - vout -> PI -> PWM duty -> MOSFET gate.
+  - type: pi_controller
+    name: PI1
+    nodes: [vref, vout, 0]
+    kp: 0.08
+    ki: 100.0
+    output_min: 0.0
+    output_max: 0.95
+    anti_windup: 1.0
+
+  - type: pwm_generator
+    name: PWM1
+    nodes: [0]
+    frequency: 10000.0
+    duty: 0.5
+    duty_min: 0.0
+    duty_max: 0.95
+    duty_from_channel: PI1
+    v_high: 20.0
+    v_low: 0.0
+    target_component: M1
+
+  - type: voltage_probe
+    name: Xsw
+    nodes: [sw, 0]
+
+  - type: voltage_probe
+    name: Xout
+    nodes: [vout, 0]

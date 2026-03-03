@@ -73,7 +73,7 @@ struct device_traits<Resistor> {
     static constexpr bool is_linear = true;
     static constexpr bool is_dynamic = false;
     static constexpr bool has_loss_model = true;  // Conduction loss = I²R
-    static constexpr bool has_thermal_model = false;
+    static constexpr bool has_thermal_model = true;
     static constexpr std::size_t jacobian_size = 4;  // 2x2 contribution
 };
 

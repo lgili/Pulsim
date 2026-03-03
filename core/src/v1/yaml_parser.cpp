@@ -59,7 +59,9 @@ bool is_known_key(const std::string& key, const std::unordered_set<std::string>&
 }
 
 [[nodiscard]] bool component_type_supports_thermal(const std::string& canonical_type) {
-    return canonical_type == "mosfet" ||
+    return canonical_type == "resistor" ||
+           canonical_type == "diode" ||
+           canonical_type == "mosfet" ||
            canonical_type == "igbt" ||
            canonical_type == "bjt_npn" ||
            canonical_type == "bjt_pnp";
@@ -667,7 +669,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
-                            "direct_formulation_fallback",
+                            "direct_formulation_fallback", "control", "control_mode", "control_sample_time",
                             "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
@@ -717,6 +719,61 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                                "Invalid simulation.step_mode (expected 'fixed' or 'variable')");
                 }
             }
+        }
+
+        if (sim["control"]) {
+            validate_keys(sim["control"], {"mode", "sample_time"},
+                          "simulation.control", errors_, options_.strict);
+        }
+
+        YAML::Node control_mode_node = sim["control_mode"];
+        std::string control_mode_path = "simulation.control_mode";
+        if (!control_mode_node && sim["control"] && sim["control"]["mode"]) {
+            control_mode_node = sim["control"]["mode"];
+            control_mode_path = "simulation.control.mode";
+        }
+        if (control_mode_node) {
+            const auto mode_raw = parse_string_scalar(control_mode_node, control_mode_path, errors_);
+            if (mode_raw) {
+                const std::string mode = normalize_key(*mode_raw);
+                if (mode == "auto") {
+                    options.control_mode = ControlUpdateMode::Auto;
+                } else if (mode == "continuous" || mode == "analog") {
+                    options.control_mode = ControlUpdateMode::Continuous;
+                } else if (mode == "discrete" || mode == "sampled" || mode == "digital") {
+                    options.control_mode = ControlUpdateMode::Discrete;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagInvalidParameter,
+                        "Invalid " + control_mode_path + ": '" + *mode_raw +
+                            "' (expected 'auto', 'continuous', or 'discrete')");
+                }
+            }
+        }
+
+        YAML::Node control_sample_time_node = sim["control_sample_time"];
+        std::string control_sample_time_path = "simulation.control_sample_time";
+        if (!control_sample_time_node && sim["control"] && sim["control"]["sample_time"]) {
+            control_sample_time_node = sim["control"]["sample_time"];
+            control_sample_time_path = "simulation.control.sample_time";
+        }
+        if (control_sample_time_node) {
+            options.control_sample_time =
+                parse_real(control_sample_time_node, control_sample_time_path, errors_);
+            if (!std::isfinite(options.control_sample_time) || options.control_sample_time < 0.0) {
+                push_error(
+                    errors_,
+                    kDiagInvalidParameter,
+                    control_sample_time_path + " must be finite and >= 0");
+            }
+        }
+        if (options.control_mode == ControlUpdateMode::Discrete &&
+            !(std::isfinite(options.control_sample_time) && options.control_sample_time > 0.0)) {
+            push_error(
+                errors_,
+                kDiagInvalidParameter,
+                "simulation.control_sample_time must be > 0 when simulation.control_mode is 'discrete'");
         }
 
         auto expert_node = [&](const char* key) -> YAML::Node {
@@ -1093,7 +1150,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                               "enable_broyden", "broyden_max_size", "enable_newton_krylov",
                               "enable_trust_region", "trust_radius", "trust_shrink", "trust_expand",
                               "trust_min", "trust_max", "reuse_jacobian_pattern",
-                              "krylov_residual_cache_tolerance"},
+                              "krylov_residual_cache_tolerance", "enable_limiting", "max_voltage_step"},
                           "simulation.newton", errors_, options_.strict);
             if (n["max_iterations"]) options.newton_options.max_iterations = n["max_iterations"].as<int>();
             if (n["initial_damping"]) options.newton_options.initial_damping = parse_real(n["initial_damping"], "newton.initial_damping", errors_);
@@ -1460,6 +1517,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "state", "mode", "select_index", "gain", "open_loop_gain", "offset",
              "kp", "ki", "kd", "threshold", "high", "low",
              "frequency", "duty", "duty_min", "duty_max", "duty_from_input", "duty_gain", "duty_offset",
+             "duty_from_channel", "v_high", "v_low",
              "alpha", "anti_windup", "min", "max", "output_min", "output_max",
              "rising_rate", "falling_rate",
              "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping"},

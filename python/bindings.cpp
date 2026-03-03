@@ -1178,6 +1178,13 @@ void init_v2_module(py::module_& v2) {
         .value("Variable", TransientStepMode::Variable)
         .export_values();
 
+    py::enum_<ControlUpdateMode>(v2, "ControlUpdateMode",
+        "Global mixed-domain control scheduler mode")
+        .value("Auto", ControlUpdateMode::Auto)
+        .value("Continuous", ControlUpdateMode::Continuous)
+        .value("Discrete", ControlUpdateMode::Discrete)
+        .export_values();
+
     py::enum_<FormulationMode>(v2, "FormulationMode",
         "Transient formulation mode for native runtime")
         .value("ProjectedWrapper", FormulationMode::ProjectedWrapper)
@@ -1375,6 +1382,8 @@ void init_v2_module(py::module_& v2) {
                 options.step_mode_explicit = true;
                 options.adaptive_timestep = (mode == TransientStepMode::Variable);
             })
+        .def_readwrite("control_mode", &SimulationOptions::control_mode)
+        .def_readwrite("control_sample_time", &SimulationOptions::control_sample_time)
         .def_readwrite("formulation_mode", &SimulationOptions::formulation_mode)
         .def_readwrite("direct_formulation_fallback", &SimulationOptions::direct_formulation_fallback)
         .def_readwrite("timestep_config", &SimulationOptions::timestep_config)

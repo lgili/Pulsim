@@ -58,6 +58,35 @@ Checkpoints:
 - `thermal_summary.max_temperature` remains within design envelope.
 - efficiency and loss totals are coherent with operating point.
 
+## Example 5: Closed-Loop Buck + Thermal Port Validation
+
+```bash
+PYTHONPATH=build/python python3 - <<'PY'
+import pulsim as ps
+
+parser = ps.YamlParser(ps.YamlParserOptions())
+circuit, options = parser.load("examples/09_buck_closed_loop_loss_thermal_validation_backend.yaml")
+options.newton_options.num_nodes = int(circuit.num_nodes())
+options.newton_options.num_branches = int(circuit.num_branches())
+
+sim = ps.Simulator(circuit, options)
+result = sim.run_transient(circuit.initial_state())
+
+print("success:", result.success)
+print("steps:", result.total_steps)
+print("max_temp:", result.thermal_summary.max_temperature)
+for item in result.component_electrothermal:
+    if item.thermal_enabled:
+        print(item.component_name, item.average_power, item.final_temperature)
+PY
+```
+
+Checkpoints:
+
+- closed-loop control remains bounded (`PI` output and PWM duty).
+- thermal-enabled devices report non-empty telemetry in `component_electrothermal`.
+- run remains stable for longer windows (10 ms, 20 ms, ...).
+
 ## Output Artifacts for Automation
 
 Main files used in CI/regression tooling:

@@ -90,13 +90,34 @@ Complementos úteis:
 - `gmin_fallback`: reforço de robustez em regiões difíceis.
 - `fallback_policy`: rastreio e política de retry (`fallback_trace`).
 
+## Controle em malha fechada (`simulation.control`)
+
+```yaml
+simulation:
+  control:
+    mode: auto         # auto | continuous | discrete
+    sample_time: 1e-4  # obrigatório quando mode=discrete
+```
+
+Semântica:
+
+- `auto`: usa `sample_time` explícito; se ausente, infere `Ts = 1/f_pwm_max` (maior frequência PWM do circuito).
+- `continuous`: atualiza blocos de controle a cada passo aceito.
+- `discrete`: atualiza PI/PID apenas nos instantes de amostragem.
+
+Dicas práticas:
+
+- Em buck/boost chaveado, comece com `auto` para sincronizar controle com PWM.
+- Se houver oscilação numérica por controle muito rápido, teste `discrete` com `sample_time = 1/f_sw` ou `1/(2*f_sw)`.
+- Use limites explícitos (`output_min/output_max`) e `anti_windup` em PI/PID.
+
 ## Perdas e térmico
 
 ```yaml
 simulation:
   enable_losses: true
   thermal:
-    enable: true
+    enabled: true
     ambient: 25.0
     policy: loss_with_temperature_scaling
     default_rth: 1.5
@@ -107,7 +128,12 @@ Saídas relevantes:
 
 - `result.loss_summary`
 - `result.thermal_summary`
+- `result.component_electrothermal`
 - `result.events` para inspeção de chaveamento/eventos.
+
+Componentes com porta térmica suportada (`component.thermal.enabled: true`):
+
+- `resistor`, `diode`, `mosfet`, `igbt`, `bjt_npn`, `bjt_pnp`
 
 ## Estratégias de configuração
 
