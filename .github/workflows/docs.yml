@@ -3,7 +3,7 @@ name: Docs
 on:
   pull_request:
     branches:
-      - main
+      - dev
     paths:
       - "docs/**"
       - "mkdocs.yml"
@@ -11,7 +11,7 @@ on:
       - "python/pulsim/**"
   push:
     branches:
-      - main
+      - dev
     tags:
       - "v*.*.*"
     paths:
@@ -99,7 +99,7 @@ jobs:
             mike deploy --push --update-aliases "${VERSION}" latest
             mike set-default --push latest
           else
-            echo "Deploying main branch docs as dev"
+            echo "Deploying dev branch docs as dev"
             mike deploy --push --update-aliases dev
             if mike list | awk 'NR>1 {print $1}' | grep -qx latest; then
               mike set-default --push latest
