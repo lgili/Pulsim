@@ -658,6 +658,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#example-5-closed-loop-buck-thermal-port-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 5: Closed-Loop Buck + Thermal Port Validation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#output-artifacts-for-automation" class="md-nav__link">
     <span class="md-ellipsis">
       Output Artifacts for Automation
@@ -1147,6 +1156,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#example-5-closed-loop-buck-thermal-port-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 5: Closed-Loop Buck + Thermal Port Validation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#output-artifacts-for-automation" class="md-nav__link">
     <span class="md-ellipsis">
       Output Artifacts for Automation
@@ -1255,6 +1273,32 @@
 <li>device temperatures increase consistently with losses.</li>
 <li><code>thermal_summary.max_temperature</code> remains within design envelope.</li>
 <li>efficiency and loss totals are coherent with operating point.</li>
+</ul>
+<h2 id="example-5-closed-loop-buck-thermal-port-validation">Example 5: Closed-Loop Buck + Thermal Port Validation<a class="headerlink" href="#example-5-closed-loop-buck-thermal-port-validation" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
+<span class="s">import pulsim as ps</span>
+
+<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
+<span class="s">circuit, options = parser.load(&quot;examples/09_buck_closed_loop_loss_thermal_validation_backend.yaml&quot;)</span>
+<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
+<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
+
+<span class="s">sim = ps.Simulator(circuit, options)</span>
+<span class="s">result = sim.run_transient(circuit.initial_state())</span>
+
+<span class="s">print(&quot;success:&quot;, result.success)</span>
+<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
+<span class="s">print(&quot;max_temp:&quot;, result.thermal_summary.max_temperature)</span>
+<span class="s">for item in result.component_electrothermal:</span>
+<span class="s">    if item.thermal_enabled:</span>
+<span class="s">        print(item.component_name, item.average_power, item.final_temperature)</span>
+<span class="s">PY</span>
+</code></pre></div>
+<p>Checkpoints:</p>
+<ul>
+<li>closed-loop control remains bounded (<code>PI</code> output and PWM duty).</li>
+<li>thermal-enabled devices report non-empty telemetry in <code>component_electrothermal</code>.</li>
+<li>run remains stable for longer windows (10 ms, 20 ms, ...).</li>
 </ul>
 <h2 id="output-artifacts-for-automation">Output Artifacts for Automation<a class="headerlink" href="#output-artifacts-for-automation" title="Permanent link">&para;</a></h2>
 <p>Main files used in CI/regression tooling:</p>
