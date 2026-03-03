@@ -619,15 +619,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#closed-loop-thermal-workflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-Loop + Thermal Workflow
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#recommended-configuration-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       Recommended Configuration Baseline
@@ -1198,15 +1189,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#closed-loop-thermal-workflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-Loop + Thermal Workflow
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#recommended-configuration-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       Recommended Configuration Baseline
@@ -1322,27 +1304,6 @@
 <li>thermal summary / loss metrics</li>
 </ul>
 <p>This data should be consumed in CI gates instead of relying on visual-only inspection.</p>
-<h2 id="closed-loop-thermal-workflow">Closed-Loop + Thermal Workflow<a class="headerlink" href="#closed-loop-thermal-workflow" title="Permanent link">&para;</a></h2>
-<p>For converter workflows with control and electrothermal coupling:</p>
-<ol>
-<li>Enable <code>simulation.enable_losses: true</code>.</li>
-<li>Configure <code>simulation.thermal.enabled: true</code>.</li>
-<li>Configure control update policy with <code>simulation.control.mode</code>.</li>
-<li>Add <code>component.thermal</code> blocks to thermal-capable devices.</li>
-<li>Validate <code>result.component_electrothermal</code> together with waveforms.</li>
-</ol>
-<p>Recommended defaults:</p>
-<ul>
-<li><code>simulation.control.mode: auto</code> for PWM-driven loops.</li>
-<li>PI/PID with <code>output_min/output_max</code> and <code>anti_windup: 1.0</code>.</li>
-<li>Thermal per component with explicit <code>rth</code>/<code>cth</code> in strict parser mode.</li>
-</ul>
-<p>Primary result fields:</p>
-<ul>
-<li><code>result.loss_summary</code></li>
-<li><code>result.thermal_summary</code></li>
-<li><code>result.component_electrothermal</code></li>
-</ul>
 <h2 id="recommended-configuration-baseline">Recommended Configuration Baseline<a class="headerlink" href="#recommended-configuration-baseline" title="Permanent link">&para;</a></h2>
 <p>For switched converters in production-like runs:</p>
 <ul>
@@ -1361,7 +1322,6 @@
 <ul>
 <li><a href="../netlist-format/">Netlist YAML Format</a></li>
 <li><a href="../electrothermal-workflow/">Electrothermal Workflow</a></li>
-<li><a href="../configuration/">Configuration</a></li>
 <li><a href="../examples-and-results/">Examples and Results</a></li>
 <li><a href="../benchmarks-and-parity/">Benchmarks and Parity</a></li>
 <li><a href="../troubleshooting/">Troubleshooting</a></li>

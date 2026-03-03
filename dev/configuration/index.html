@@ -1015,15 +1015,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#controle-em-malha-fechada-simulationcontrol" class="md-nav__link">
-    <span class="md-ellipsis">
-      Controle em malha fechada (simulation.control)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#perdas-e-termico" class="md-nav__link">
     <span class="md-ellipsis">
       Perdas e térmico
@@ -1168,15 +1159,6 @@
   <a href="#newton-fallback-e-robustez" class="md-nav__link">
     <span class="md-ellipsis">
       Newton, fallback e robustez
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#controle-em-malha-fechada-simulationcontrol" class="md-nav__link">
-    <span class="md-ellipsis">
-      Controle em malha fechada (simulation.control)
     </span>
   </a>
   
@@ -1341,29 +1323,11 @@
 <li><code>gmin_fallback</code>: reforço de robustez em regiões difíceis.</li>
 <li><code>fallback_policy</code>: rastreio e política de retry (<code>fallback_trace</code>).</li>
 </ul>
-<h2 id="controle-em-malha-fechada-simulationcontrol">Controle em malha fechada (<code>simulation.control</code>)<a class="headerlink" href="#controle-em-malha-fechada-simulationcontrol" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">control</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">         </span><span class="c1"># auto | continuous | discrete</span>
-<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span><span class="w">  </span><span class="c1"># obrigatório quando mode=discrete</span>
-</code></pre></div>
-<p>Semântica:</p>
-<ul>
-<li><code>auto</code>: usa <code>sample_time</code> explícito; se ausente, infere <code>Ts = 1/f_pwm_max</code> (maior frequência PWM do circuito).</li>
-<li><code>continuous</code>: atualiza blocos de controle a cada passo aceito.</li>
-<li><code>discrete</code>: atualiza PI/PID apenas nos instantes de amostragem.</li>
-</ul>
-<p>Dicas práticas:</p>
-<ul>
-<li>Em buck/boost chaveado, comece com <code>auto</code> para sincronizar controle com PWM.</li>
-<li>Se houver oscilação numérica por controle muito rápido, teste <code>discrete</code> com <code>sample_time = 1/f_sw</code> ou <code>1/(2*f_sw)</code>.</li>
-<li>Use limites explícitos (<code>output_min/output_max</code>) e <code>anti_windup</code> em PI/PID.</li>
-</ul>
 <h2 id="perdas-e-termico">Perdas e térmico<a class="headerlink" href="#perdas-e-termico" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">enable_losses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">ambient</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
 <span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loss_with_temperature_scaling</span>
 <span class="w">    </span><span class="nt">default_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.5</span>
@@ -1373,12 +1337,7 @@
 <ul>
 <li><code>result.loss_summary</code></li>
 <li><code>result.thermal_summary</code></li>
-<li><code>result.component_electrothermal</code></li>
 <li><code>result.events</code> para inspeção de chaveamento/eventos.</li>
-</ul>
-<p>Componentes com porta térmica suportada (<code>component.thermal.enabled: true</code>):</p>
-<ul>
-<li><code>resistor</code>, <code>diode</code>, <code>mosfet</code>, <code>igbt</code>, <code>bjt_npn</code>, <code>bjt_pnp</code></li>
 </ul>
 <h2 id="estrategias-de-configuracao">Estratégias de configuração<a class="headerlink" href="#estrategias-de-configuracao" title="Permanent link">&para;</a></h2>
 <h3 id="debug-rapido">Debug rápido<a class="headerlink" href="#debug-rapido" title="Permanent link">&para;</a></h3>

@@ -888,15 +888,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#controle-em-malha-fechada" class="md-nav__link">
-    <span class="md-ellipsis">
-      Controle em malha fechada
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#termico-e-perdas" class="md-nav__link">
     <span class="md-ellipsis">
       Térmico e perdas
@@ -1265,15 +1256,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#controle-em-malha-fechada" class="md-nav__link">
-    <span class="md-ellipsis">
-      Controle em malha fechada
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#termico-e-perdas" class="md-nav__link">
     <span class="md-ellipsis">
       Térmico e perdas
@@ -1422,7 +1404,6 @@ de robustez por padrão:</p>
 <h2 id="enums-importantes">Enums importantes<a class="headerlink" href="#enums-importantes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>Integrator</code>: <code>Trapezoidal</code>, <code>BDF1..BDF5</code>, <code>TRBDF2</code>, <code>RosenbrockW</code>, <code>SDIRK2</code></li>
-<li><code>ControlUpdateMode</code>: <code>Auto</code>, <code>Continuous</code>, <code>Discrete</code></li>
 <li><code>LinearSolverKind</code>: <code>SparseLU</code>, <code>EnhancedSparseLU</code>, <code>KLU</code>, <code>GMRES</code>, <code>BiCGSTAB</code>, <code>CG</code></li>
 <li><code>PreconditionerKind</code>: <code>None_</code>, <code>Jacobi</code>, <code>ILU0</code>, <code>ILUT</code>, <code>AMG</code> (quando disponível)</li>
 <li><code>SolverStatus</code>, <code>DCStrategy</code>, <code>SimulationEventType</code>, <code>FallbackReasonCode</code></li>
@@ -1444,8 +1425,6 @@ de robustez por padrão:</p>
 <h3 id="timestep-e-integrador">Timestep e integrador<a class="headerlink" href="#timestep-e-integrador" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>SimulationOptions.step_mode</code> (<code>StepMode.Fixed</code> ou <code>StepMode.Variable</code>)</li>
-<li><code>SimulationOptions.control_mode</code></li>
-<li><code>SimulationOptions.control_sample_time</code></li>
 <li><code>SimulationOptions.formulation_mode</code> (<code>FormulationMode.ProjectedWrapper</code> ou <code>FormulationMode.Direct</code>)</li>
 <li><code>SimulationOptions.direct_formulation_fallback</code></li>
 <li><code>SimulationOptions.integrator</code></li>
@@ -1456,18 +1435,6 @@ de robustez por padrão:</p>
 <p><code>SimulationOptions.transient_backend</code> e <code>SimulationOptions.sundials</code> permanecem
 apenas para migração/diagnóstico de legado; o caminho suportado usa core nativo
 com <code>step_mode</code> + <code>formulation_mode</code>.</p>
-<h3 id="controle-em-malha-fechada">Controle em malha fechada<a class="headerlink" href="#controle-em-malha-fechada" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
-
-<span class="n">options</span><span class="o">.</span><span class="n">control_mode</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">ControlUpdateMode</span><span class="o">.</span><span class="n">Auto</span>
-<span class="n">options</span><span class="o">.</span><span class="n">control_sample_time</span> <span class="o">=</span> <span class="mf">0.0</span>  <span class="c1"># 0 =&gt; auto/continuous path</span>
-</code></pre></div>
-<p>Semântica:</p>
-<ul>
-<li><code>Auto</code>: usa <code>control_sample_time</code> se <code>&gt; 0</code>; caso contrário tenta inferir por frequência PWM.</li>
-<li><code>Continuous</code>: força atualização contínua de controle.</li>
-<li><code>Discrete</code>: aplica amostragem global para blocos PI/PID.</li>
-</ul>
 <h3 id="termico-e-perdas">Térmico e perdas<a class="headerlink" href="#termico-e-perdas" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>SimulationOptions.enable_losses</code></li>
@@ -1492,8 +1459,6 @@ com <code>step_mode</code> + <code>formulation_mode</code>.</p>
 <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">component_electrothermal</span><span class="p">:</span>
     <span class="nb">print</span><span class="p">(</span><span class="n">item</span><span class="o">.</span><span class="n">component_name</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">total_loss</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">peak_temperature</span><span class="p">)</span>
 </code></pre></div>
-<p><code>component_electrothermal</code> inclui todos os componentes elétricos não virtuais, com
-campos térmicos determinísticos mesmo quando a porta térmica não está habilitada.</p>
 <p>For full YAML + Python electrothermal setup (global thermal block, component thermal ports, strict/non-strict parser behavior), see
 <a href="../electrothermal-workflow/">Electrothermal Workflow</a>.</p>
 

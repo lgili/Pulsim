@@ -701,33 +701,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#control-update-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Update Mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#control-blocks-for-closed-loop-converters" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Blocks for Closed-Loop Converters
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#thermal-ports-and-supported-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal Ports and Supported Types
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#solver-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       Solver Configuration
@@ -1343,33 +1316,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#control-update-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Update Mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#control-blocks-for-closed-loop-converters" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Blocks for Closed-Loop Converters
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#thermal-ports-and-supported-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal Ports and Supported Types
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#solver-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       Solver Configuration
@@ -1592,87 +1538,9 @@ suporte backend, veja <code>gui-component-parity</code>.</p>
 <span class="w">  </span><span class="nt">enable_events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">enable_losses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span><span class="w">   </span><span class="c1"># trapezoidal, bdf1, bdf2, trbdf2, rosenbrockw, sdirk2</span>
-<span class="w">  </span><span class="nt">control</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">         </span><span class="c1"># auto | continuous | discrete</span>
-<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span><span class="w">  </span><span class="c1"># required when mode=discrete</span>
-<span class="w">  </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">ambient</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
-<span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loss_with_temperature_scaling</span>
-<span class="w">    </span><span class="nt">default_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
-<span class="w">    </span><span class="nt">default_cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
 </code></pre></div>
 <p><code>simulation.backend</code> e <code>simulation.sundials</code> são chaves legadas e não fazem parte
 da superfície suportada de transiente. Use <code>step_mode</code> + <code>formulation</code>.</p>
-<h3 id="control-update-mode">Control Update Mode<a class="headerlink" href="#control-update-mode" title="Permanent link">&para;</a></h3>
-<p>You can configure control update policy using either flat keys:</p>
-<ul>
-<li><code>simulation.control_mode</code></li>
-<li><code>simulation.control_sample_time</code></li>
-</ul>
-<p>or nested keys:</p>
-<ul>
-<li><code>simulation.control.mode</code></li>
-<li><code>simulation.control.sample_time</code></li>
-</ul>
-<p>Supported values for mode:</p>
-<ul>
-<li><code>auto</code>: use explicit sample time if set, otherwise infer from highest PWM frequency.</li>
-<li><code>continuous</code>: update control on every accepted simulation step.</li>
-<li><code>discrete</code>: update PI/PID blocks only at sample boundaries.</li>
-</ul>
-<p>In strict parsing, <code>discrete</code> requires <code>sample_time &gt; 0</code>.</p>
-<h3 id="control-blocks-for-closed-loop-converters">Control Blocks for Closed-Loop Converters<a class="headerlink" href="#control-blocks-for-closed-loop-converters" title="Permanent link">&para;</a></h3>
-<p>Common blocks for converter control loops:</p>
-<ul>
-<li><code>pi_controller</code>: <code>kp</code>, <code>ki</code>, <code>output_min</code>, <code>output_max</code>, <code>anti_windup</code></li>
-<li><code>pid_controller</code>: <code>kp</code>, <code>ki</code>, <code>kd</code>, <code>output_min</code>, <code>output_max</code>, <code>anti_windup</code></li>
-<li><code>pwm_generator</code>: <code>frequency</code>, <code>duty</code>, <code>duty_min</code>, <code>duty_max</code>, <code>duty_from_input</code>, <code>duty_from_channel</code>, <code>duty_gain</code>, <code>duty_offset</code>, <code>target_component</code></li>
-<li><code>sample_hold</code>: <code>sample_period</code></li>
-</ul>
-<p>Typical closed-loop pattern:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pi_controller</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vref</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.08</span>
-<span class="w">    </span><span class="nt">ki</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span>
-<span class="w">    </span><span class="nt">output_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">output_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">anti_windup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pwm_generator</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PWM1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10000.0</span>
-<span class="w">    </span><span class="nt">duty_from_channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
-<span class="w">    </span><span class="nt">duty_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">duty_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">target_component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
-</code></pre></div>
-<p><code>target_component</code> links the PWM output to a switch-like power device (<code>mosfet</code>,
-<code>igbt</code>, <code>switch</code>, <code>vcswitch</code>), enabling mixed-domain control + electrical stamping.</p>
-<h3 id="thermal-ports-and-supported-types">Thermal Ports and Supported Types<a class="headerlink" href="#thermal-ports-and-supported-types" title="Permanent link">&para;</a></h3>
-<p>Per-component thermal block:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resistor</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Rload</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8.0</span>
-<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">      </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3.0</span>
-<span class="w">      </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
-</code></pre></div>
-<p>Thermal-port enablement is supported for:</p>
-<ul>
-<li><code>resistor</code></li>
-<li><code>diode</code></li>
-<li><code>mosfet</code></li>
-<li><code>igbt</code></li>
-<li><code>bjt_npn</code></li>
-<li><code>bjt_pnp</code></li>
-</ul>
 <p>For thermal-port rules, strict/non-strict behavior, and complete electrothermal examples, see
 <a href="../electrothermal-workflow/">Electrothermal Workflow</a>.</p>
 <h3 id="solver-configuration">Solver Configuration<a class="headerlink" href="#solver-configuration" title="Permanent link">&para;</a></h3>

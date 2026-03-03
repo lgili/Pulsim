@@ -768,24 +768,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-loop buck converges in open-loop but struggles in closed-loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#thermal-yaml-errors-on-valid-converter-netlists" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal YAML errors on valid converter netlists
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1185,24 +1167,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-loop buck converges in open-loop but struggles in closed-loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#thermal-yaml-errors-on-valid-converter-netlists" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal YAML errors on valid converter netlists
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1309,31 +1273,6 @@ mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
 <li>use variable timestep first;</li>
 <li>inspect fallback and rejection telemetry before tuning manually;</li>
 <li>run benchmark matrix to compare integrators and solver stacks in a controlled way.</li>
-</ul>
-<h2 id="closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop">Closed-loop buck converges in open-loop but struggles in closed-loop<a class="headerlink" href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" title="Permanent link">&para;</a></h2>
-<p>Common causes:</p>
-<ul>
-<li>control running effectively faster than desired for the selected switching setup;</li>
-<li>PI/PID output saturating without proper limits;</li>
-<li>mismatch between PWM frequency and controller update cadence.</li>
-</ul>
-<p>Fix checklist:</p>
-<ul>
-<li>set <code>simulation.control.mode: auto</code> to infer sample time from PWM frequency;</li>
-<li>or force <code>simulation.control.mode: discrete</code> with explicit <code>simulation.control.sample_time</code>;</li>
-<li>ensure PI/PID has <code>output_min</code>, <code>output_max</code>, and <code>anti_windup: 1.0</code>;</li>
-<li>verify <code>pwm_generator.target_component</code> points to the intended switch device.</li>
-</ul>
-<h2 id="thermal-yaml-errors-on-valid-converter-netlists">Thermal YAML errors on valid converter netlists<a class="headerlink" href="#thermal-yaml-errors-on-valid-converter-netlists" title="Permanent link">&para;</a></h2>
-<p>If parsing fails with thermal diagnostics:</p>
-<ul>
-<li><code>PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT</code>: thermal enabled on unsupported type.</li>
-<li><code>PULSIM_YAML_E_THERMAL_MISSING_REQUIRED</code>: strict mode requires explicit <code>rth</code>/<code>cth</code>.</li>
-<li><code>PULSIM_YAML_E_THERMAL_RANGE_INVALID</code>: invalid finite/range checks for thermal values.</li>
-</ul>
-<p>Thermal-enabled types currently supported:</p>
-<ul>
-<li><code>resistor</code>, <code>diode</code>, <code>mosfet</code>, <code>igbt</code>, <code>bjt_npn</code>, <code>bjt_pnp</code>.</li>
 </ul>
 
 
