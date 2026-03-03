@@ -93,3 +93,30 @@ Recommendations:
 - use variable timestep first;
 - inspect fallback and rejection telemetry before tuning manually;
 - run benchmark matrix to compare integrators and solver stacks in a controlled way.
+
+## Closed-loop buck converges in open-loop but struggles in closed-loop
+
+Common causes:
+
+- control running effectively faster than desired for the selected switching setup;
+- PI/PID output saturating without proper limits;
+- mismatch between PWM frequency and controller update cadence.
+
+Fix checklist:
+
+- set `simulation.control.mode: auto` to infer sample time from PWM frequency;
+- or force `simulation.control.mode: discrete` with explicit `simulation.control.sample_time`;
+- ensure PI/PID has `output_min`, `output_max`, and `anti_windup: 1.0`;
+- verify `pwm_generator.target_component` points to the intended switch device.
+
+## Thermal YAML errors on valid converter netlists
+
+If parsing fails with thermal diagnostics:
+
+- `PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT`: thermal enabled on unsupported type.
+- `PULSIM_YAML_E_THERMAL_MISSING_REQUIRED`: strict mode requires explicit `rth`/`cth`.
+- `PULSIM_YAML_E_THERMAL_RANGE_INVALID`: invalid finite/range checks for thermal values.
+
+Thermal-enabled types currently supported:
+
+- `resistor`, `diode`, `mosfet`, `igbt`, `bjt_npn`, `bjt_pnp`.

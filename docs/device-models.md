@@ -430,39 +430,36 @@ o----------------------o    o---------------------o
 
 ## Thermal Models
 
-### Foster Network
+### Runtime Thermal RC Model
 
-Pulsim uses the Foster RC network representation for thermal modeling:
+The current runtime electrothermal path uses a per-device first-order RC model:
 
 ```
-       R_th1        R_th2        R_th3
-P_loss --/\/\/--+--/\/\/--+--/\/\/--+-- T_ambient
-               |         |         |
-              ===C1     ===C2     ===C3
-               |         |         |
-              GND       GND       GND
+P_loss --> [R_th, C_th] --> T_j
+              |
+           T_ambient
 ```
 
-**Time Constants:**
-```
-τ_i = R_th_i × C_th_i
-```
+Thermal parameters are configured per component using:
 
-**Transient Response:**
-```
-Z_th(t) = Σ R_th_i × (1 - e^(-t/τ_i))
-```
-
-**Steady-State:**
-```
-R_th_jc = Σ R_th_i
-```
-
-**Parameters:**
 | Parameter | Symbol | Unit | Description |
 |-----------|--------|------|-------------|
-| rth | R_th | K/W | Array of thermal resistances |
-| tau | τ | s | Array of time constants |
+| `rth` | R_th | K/W | Thermal resistance (junction-to-ambient equivalent) |
+| `cth` | C_th | J/K | Thermal capacitance |
+| `temp_init` | T_0 | degC | Initial device temperature |
+| `temp_ref` | T_ref | degC | Reference temperature for scaling |
+| `alpha` | α | 1/degC | Electrical temperature scaling coefficient |
+
+Global defaults and ambient are configured in `simulation.thermal`.
+
+Thermal-port enablement (`component.thermal.enabled: true`) is supported for:
+
+- `resistor`
+- `diode`
+- `mosfet`
+- `igbt`
+- `bjt_npn`
+- `bjt_pnp`
 
 ### Temperature-Dependent Parameters
 

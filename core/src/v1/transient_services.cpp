@@ -576,6 +576,9 @@ public:
         for (std::size_t i = 0; i < devices.size(); ++i) {
             const auto& conn = conns[i];
             Real p_cond = 0.0;
+            const Real thermal_scale_i = thermal_factor(i);
+            const Real inv_thermal_scale_i = 1.0 / std::max<Real>(thermal_scale_i, Real{0.05});
+            const auto forced_state = circuit_.forced_state_for_device(i);
 
             std::visit([&](const auto& dev) {
                 using T = std::decay_t<decltype(dev)>;
@@ -590,18 +593,20 @@ public:
                     p_cond = std::abs(v * i_dev);
                 } else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
                     const Real v_ctrl = node_voltage(conn.nodes[0]);
-                    const bool on = v_ctrl > dev.v_threshold();
+                    const bool on = forced_state.has_value()
+                        ? *forced_state
+                        : (v_ctrl > dev.v_threshold());
                     const Real g = on ? dev.g_on() : dev.g_off();
                     const Real v = node_voltage(conn.nodes[1]) - node_voltage(conn.nodes[2]);
                     const Real i_dev = g * v;
                     p_cond = std::abs(v * i_dev);
                 } else if constexpr (std::is_same_v<T, IdealDiode>) {
                     const Real v = node_voltage(conn.nodes[0]) - node_voltage(conn.nodes[1]);
-                    const Real g = dev.is_conducting() ? dev.g_on() : dev.g_off();
+                    const bool conducting = v > 0.0;
+                    const Real g = conducting ? dev.g_on() : dev.g_off();
                     const Real i_dev = g * v;
                     p_cond = std::max<Real>(0.0, v * i_dev);
 
-                    const bool conducting = dev.is_conducting();
                     if (diode_conducting_[i] && !conducting) {
                         const auto& energy_opt = switching_energy_[i];
                         if (energy_opt.has_value() && energy_opt->err > 0.0) {
@@ -610,44 +615,54 @@ public:
                     }
                     diode_conducting_[i] = conducting;
                 } else if constexpr (std::is_same_v<T, MOSFET>) {
-                    const Real vg = node_voltage(conn.nodes[0]);
                     const Real vd = node_voltage(conn.nodes[1]);
                     const Real vs = node_voltage(conn.nodes[2]);
                     const auto params = dev.params();
-
-                    const Real sign = params.is_nmos ? 1.0 : -1.0;
-                    const Real vgs = sign * (vg - vs);
-                    const Real vds = sign * (vd - vs);
-
-                    Real id = 0.0;
-                    if (vgs <= params.vth) {
-                        id = params.g_off * vds;
-                    } else if (vds < vgs - params.vth) {
-                        const Real vov = vgs - params.vth;
-                        id = params.kp * (vov * vds - 0.5 * vds * vds) * (1.0 + params.lambda * vds);
+                    if (forced_state.has_value()) {
+                        const Real g_forced = *forced_state
+                            ? std::max<Real>(params.kp * inv_thermal_scale_i, Real{1e-6})
+                            : std::max<Real>(params.g_off * inv_thermal_scale_i, Real{1e-18});
+                        const Real vds = vd - vs;
+                        const Real i_dev = g_forced * vds;
+                        p_cond = std::abs(vds * i_dev);
                     } else {
-                        const Real vov = vgs - params.vth;
-                        id = 0.5 * params.kp * vov * vov * (1.0 + params.lambda * vds);
-                    }
+                        const Real vg = node_voltage(conn.nodes[0]);
+                        const Real sign = params.is_nmos ? 1.0 : -1.0;
+                        const Real vgs = sign * (vg - vs);
+                        const Real vds = sign * (vd - vs);
 
-                    id *= sign;
-                    p_cond = std::abs((vd - vs) * id);
+                        Real id = 0.0;
+                        if (vgs <= params.vth) {
+                            id = params.g_off * vds;
+                        } else if (vds < vgs - params.vth) {
+                            const Real vov = vgs - params.vth;
+                            id = params.kp * (vov * vds - 0.5 * vds * vds) * (1.0 + params.lambda * vds);
+                        } else {
+                            const Real vov = vgs - params.vth;
+                            id = 0.5 * params.kp * vov * vov * (1.0 + params.lambda * vds);
+                        }
+
+                        id *= sign;
+                        p_cond = std::abs((vd - vs) * id);
+                    }
                 } else if constexpr (std::is_same_v<T, IGBT>) {
-                    const Real vg = node_voltage(conn.nodes[0]);
                     const Real vc = node_voltage(conn.nodes[1]);
                     const Real ve = node_voltage(conn.nodes[2]);
                     const auto params = dev.params();
 
-                    const Real vge = vg - ve;
                     const Real vce = vc - ve;
-                    const bool on = (vge > params.vth) && (vce > 0);
-                    const Real g = on ? params.g_on : params.g_off;
+                    const bool on = forced_state.has_value()
+                        ? *forced_state
+                        : ((node_voltage(conn.nodes[0]) - ve > params.vth) && (vce > 0));
+                    const Real g = on
+                        ? params.g_on * inv_thermal_scale_i
+                        : params.g_off * inv_thermal_scale_i;
                     const Real i_dev = g * vce;
                     p_cond = std::abs(vce * i_dev);
                 }
             }, devices[i]);
 
-            p_cond *= thermal_factor(i);
+            p_cond *= thermal_scale_i;
             const Real p_clamped = std::max<Real>(0.0, p_cond);
             last_device_power_[i] = p_clamped;
 

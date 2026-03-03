@@ -145,10 +145,99 @@ simulation:
   enable_events: true
   enable_losses: true
   integrator: trbdf2   # trapezoidal, bdf1, bdf2, trbdf2, rosenbrockw, sdirk2
+  control:
+    mode: auto         # auto | continuous | discrete
+    sample_time: 1e-4  # required when mode=discrete
+  thermal:
+    enabled: true
+    ambient: 25.0
+    policy: loss_with_temperature_scaling
+    default_rth: 1.0
+    default_cth: 0.1
 ```
 
 `simulation.backend` e `simulation.sundials` são chaves legadas e não fazem parte
 da superfície suportada de transiente. Use `step_mode` + `formulation`.
+
+### Control Update Mode
+
+You can configure control update policy using either flat keys:
+
+- `simulation.control_mode`
+- `simulation.control_sample_time`
+
+or nested keys:
+
+- `simulation.control.mode`
+- `simulation.control.sample_time`
+
+Supported values for mode:
+
+- `auto`: use explicit sample time if set, otherwise infer from highest PWM frequency.
+- `continuous`: update control on every accepted simulation step.
+- `discrete`: update PI/PID blocks only at sample boundaries.
+
+In strict parsing, `discrete` requires `sample_time > 0`.
+
+### Control Blocks for Closed-Loop Converters
+
+Common blocks for converter control loops:
+
+- `pi_controller`: `kp`, `ki`, `output_min`, `output_max`, `anti_windup`
+- `pid_controller`: `kp`, `ki`, `kd`, `output_min`, `output_max`, `anti_windup`
+- `pwm_generator`: `frequency`, `duty`, `duty_min`, `duty_max`, `duty_from_input`, `duty_from_channel`, `duty_gain`, `duty_offset`, `target_component`
+- `sample_hold`: `sample_period`
+
+Typical closed-loop pattern:
+
+```yaml
+components:
+  - type: pi_controller
+    name: PI1
+    nodes: [vref, vout, 0]
+    kp: 0.08
+    ki: 100.0
+    output_min: 0.0
+    output_max: 0.95
+    anti_windup: 1.0
+
+  - type: pwm_generator
+    name: PWM1
+    nodes: [0]
+    frequency: 10000.0
+    duty_from_channel: PI1
+    duty_min: 0.0
+    duty_max: 0.95
+    target_component: M1
+```
+
+`target_component` links the PWM output to a switch-like power device (`mosfet`,
+`igbt`, `switch`, `vcswitch`), enabling mixed-domain control + electrical stamping.
+
+### Thermal Ports and Supported Types
+
+Per-component thermal block:
+
+```yaml
+components:
+  - type: resistor
+    name: Rload
+    nodes: [vout, 0]
+    value: 8.0
+    thermal:
+      enabled: true
+      rth: 3.0
+      cth: 0.2
+```
+
+Thermal-port enablement is supported for:
+
+- `resistor`
+- `diode`
+- `mosfet`
+- `igbt`
+- `bjt_npn`
+- `bjt_pnp`
 
 For thermal-port rules, strict/non-strict behavior, and complete electrothermal examples, see
 [Electrothermal Workflow](electrothermal-workflow.md).

@@ -46,9 +46,33 @@ PY
 
 - Documentation site: [https://lgili.github.io/Pulsim/](https://lgili.github.io/Pulsim/)
 - Getting started guide: [`docs/getting-started.md`](docs/getting-started.md)
+- Netlist format (including `simulation.control`): [`docs/netlist-format.md`](docs/netlist-format.md)
 - Electrothermal workflow: [`docs/electrothermal-workflow.md`](docs/electrothermal-workflow.md)
+- Configuration guide (solver/control/thermal): [`docs/configuration.md`](docs/configuration.md)
 - API reference: [`docs/api-reference.md`](docs/api-reference.md)
 - Benchmarks and parity: [`docs/benchmarks-and-parity.md`](docs/benchmarks-and-parity.md)
+
+## Closed-Loop + Thermal Quickstart
+
+Use the backend-ready closed-loop buck example:
+
+```bash
+PYTHONPATH=build/python python3 - <<'PY'
+import pulsim as ps
+
+parser = ps.YamlParser(ps.YamlParserOptions())
+circuit, options = parser.load("examples/09_buck_closed_loop_loss_thermal_validation_backend.yaml")
+options.newton_options.num_nodes = int(circuit.num_nodes())
+options.newton_options.num_branches = int(circuit.num_branches())
+
+sim = ps.Simulator(circuit, options)
+result = sim.run_transient(circuit.initial_state())
+
+print("ok:", result.success)
+print("max_temp:", result.thermal_summary.max_temperature)
+print("components:", len(result.component_electrothermal))
+PY
+```
 
 ## Validation and Performance Workflows
 

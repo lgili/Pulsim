@@ -164,6 +164,67 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     return hints;
 }
 
+[[nodiscard]] std::optional<Real> infer_control_sample_time_from_pwm(const Circuit& circuit) {
+    Real max_pwm_frequency = 0.0;
+
+    for (const auto& component : circuit.virtual_components()) {
+        if (component.type != "pwm_generator") {
+            continue;
+        }
+        const auto it = component.numeric_params.find("frequency");
+        if (it == component.numeric_params.end()) {
+            continue;
+        }
+        const Real frequency = it->second;
+        if (std::isfinite(frequency) && frequency > 0.0) {
+            max_pwm_frequency = std::max(max_pwm_frequency, frequency);
+        }
+    }
+
+    for (const auto& device : circuit.devices()) {
+        std::visit([&](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+                const Real frequency = dev.params().frequency;
+                if (std::isfinite(frequency) && frequency > 0.0) {
+                    max_pwm_frequency = std::max(max_pwm_frequency, frequency);
+                }
+            }
+        }, device);
+    }
+
+    if (!(std::isfinite(max_pwm_frequency) && max_pwm_frequency > 0.0)) {
+        return std::nullopt;
+    }
+    return Real{1.0} / max_pwm_frequency;
+}
+
+[[nodiscard]] Real resolve_control_sample_time(const SimulationOptions& options, const Circuit& circuit) {
+    auto sanitize = [](Real value) -> Real {
+        return (std::isfinite(value) && value > 0.0) ? value : Real{0.0};
+    };
+    const Real explicit_sample_time = sanitize(options.control_sample_time);
+
+    switch (options.control_mode) {
+        case ControlUpdateMode::Continuous:
+            return 0.0;
+        case ControlUpdateMode::Discrete:
+            if (explicit_sample_time > 0.0) {
+                return explicit_sample_time;
+            }
+            return sanitize(std::max(options.dt, options.dt_min));
+        case ControlUpdateMode::Auto:
+        default:
+            if (explicit_sample_time > 0.0) {
+                return explicit_sample_time;
+            }
+            if (const auto inferred = infer_control_sample_time_from_pwm(circuit); inferred.has_value()) {
+                return sanitize(*inferred);
+            }
+            return 0.0;
+    }
+}
+
 [[nodiscard]] bool legacy_fixed_timestep_heuristic(const SimulationOptions& options) {
     const Real span = std::abs(options.dt_max - options.dt_min);
     const Real scale = std::max<Real>({Real{1.0}, std::abs(options.dt), std::abs(options.dt_max)});
@@ -637,6 +698,8 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     enforce_explicit_step_mode(options_);
     apply_auto_transient_profile(options_, circuit_);
     enforce_explicit_step_mode(options_);
+    options_.control_sample_time = resolve_control_sample_time(options_, circuit_);
+    circuit_.set_control_sample_time(options_.control_sample_time);
     options_.newton_options.num_nodes = circuit_.num_nodes();
     options_.newton_options.num_branches = circuit_.num_branches();
     newton_solver_.set_options(options_.newton_options);

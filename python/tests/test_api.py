@@ -1,9 +1,73 @@
 """Tests for PulsimCore High-Performance API."""
 
+import sys
 import math
+import os
+import glob
 import pytest
 
-# Import pulsim from path resolution managed by python/tests/conftest.py.
+# Ensure build path is FIRST in sys.path before importing pulsim.
+# This is necessary because pytest may add python/ to path, which has pulsim source.
+# Only accept build paths that include both the native extension and the
+# pure-Python companion modules required by the test suite.
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+build_patterns = [
+    os.path.join(project_root, 'build', 'cp*', 'python'),
+    os.path.join(project_root, 'build', 'python'),
+]
+
+
+def _normalize_path(path: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+def _is_valid_build_path(path: str) -> bool:
+    package_dir = os.path.join(path, "pulsim")
+    if not os.path.isdir(package_dir):
+        return False
+
+    has_native = any(
+        glob.glob(os.path.join(package_dir, pattern))
+        for pattern in ("_pulsim*.so", "_pulsim*.pyd", "_pulsim*.dylib")
+    )
+    if not has_native:
+        return False
+
+    required_python_files = (
+        "__init__.py",
+        "netlist.py",
+        "signal_evaluator.py",
+    )
+    return all(os.path.exists(os.path.join(package_dir, name)) for name in required_python_files)
+
+
+# Find the build path
+build_path = None
+for pattern in build_patterns:
+    for path in sorted(glob.glob(pattern)):
+        if _is_valid_build_path(path):
+            build_path = path
+            break
+    if build_path:
+        break
+
+# Remove any entries that might shadow the build path (like python/)
+if build_path:
+    source_python = os.path.join(project_root, 'python')
+    source_python_norm = _normalize_path(source_python)
+    sys.path = [p for p in sys.path if _normalize_path(p) != source_python_norm]
+    # Add build path at the front
+    build_path_norm = _normalize_path(build_path)
+    sys.path = [p for p in sys.path if _normalize_path(p) != build_path_norm]
+    sys.path.insert(0, build_path)
+
+# Only clear cached modules when we actively switched sys.path to a build tree.
+if build_path:
+    for mod in list(sys.modules.keys()):
+        if mod.startswith('pulsim'):
+            del sys.modules[mod]
+
+# Import pulsim
 try:
     import pulsim as ps
 except ImportError:
