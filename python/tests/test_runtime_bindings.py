@@ -330,10 +330,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
 components:
-  - type: resistor
-    name: R1
+  - type: voltage_source
+    name: V1
     nodes: [in, 0]
-    value: 10
+    waveform: {type: dc, value: 5}
     thermal:
       enabled: true
       rth: 0.8
@@ -392,8 +392,8 @@ def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     assert m1.thermal_enabled
     assert m1.total_energy > 0.0
     rload = next(item for item in result.component_electrothermal if item.component_name == "Rload")
-    assert not rload.thermal_enabled
-    assert abs(rload.final_temperature - result.thermal_summary.ambient) < 1e-12
+    assert rload.thermal_enabled
+    assert rload.final_temperature >= result.thermal_summary.ambient
 
 
 def test_yaml_parser_maps_fallback_controls() -> None:
