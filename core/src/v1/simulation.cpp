@@ -2036,14 +2036,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         assembler_telemetry.system_time_seconds + direct_assemble_system_time_seconds_;
     result.backend_telemetry.equation_assemble_residual_time_seconds =
         assembler_telemetry.residual_time_seconds + direct_assemble_residual_time_seconds_;
-    result.backend_telemetry.function_evaluations =
-        result.backend_telemetry.equation_assemble_residual_calls;
-    result.backend_telemetry.jacobian_evaluations =
-        result.backend_telemetry.equation_assemble_system_calls;
-    result.backend_telemetry.nonlinear_iterations = result.newton_iterations_total;
-    result.backend_telemetry.error_test_failures = std::max(0, result.timestep_rejections);
-    result.backend_telemetry.nonlinear_convergence_failures =
-        (result.success || result.diagnostic != SimulationDiagnosticCode::TransientStepFailure) ? 0 : 1;
 
     return result;
 }

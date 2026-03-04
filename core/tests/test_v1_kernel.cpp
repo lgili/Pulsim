@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -2771,6 +2772,35 @@ TEST_CASE("v1 runtime circuit supports string_view name lookups", "[v1][runtime]
     REQUIRE_NOTHROW(circuit.set_pwm_duty_callback(std::string_view{"Vpwm"}, [](Real /*time*/) { return 0.4; }));
     REQUIRE_NOTHROW(circuit.clear_pwm_duty_callback(std::string_view{"Vpwm"}));
     CHECK(circuit.get_pwm_state(std::string_view{"Vpwm"}));
+}
+
+TEST_CASE("v1 PWM duty callback caches repeated evaluations at identical time",
+          "[v1][runtime][pwm][performance]") {
+    Circuit circuit;
+    const auto n_ctrl = circuit.add_node("ctrl");
+
+    PWMParams pwm;
+    pwm.v_high = 10.0;
+    pwm.v_low = 0.0;
+    pwm.frequency = 100e3;
+    pwm.duty = 0.5;
+    circuit.add_pwm_voltage_source("Vpwm", n_ctrl, Circuit::ground(), pwm);
+
+    std::atomic<int> callback_calls{0};
+    circuit.set_pwm_duty_callback("Vpwm", [&callback_calls](Real /*time*/) {
+        callback_calls.fetch_add(1, std::memory_order_relaxed);
+        return 0.4;
+    });
+
+    circuit.set_current_time(1e-6);
+    for (int i = 0; i < 64; ++i) {
+        (void)circuit.get_pwm_state("Vpwm");
+    }
+    CHECK(callback_calls.load(std::memory_order_relaxed) == 1);
+
+    circuit.set_current_time(2e-6);
+    (void)circuit.get_pwm_state("Vpwm");
+    CHECK(callback_calls.load(std::memory_order_relaxed) == 2);
 }
 
 TEST_CASE("v1 runtime circuit rejects invalid timesteps", "[v1][runtime][safety]") {
