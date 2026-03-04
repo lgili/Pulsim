@@ -220,7 +220,10 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         denom = max(abs(loss_total_energy_j), abs(expected_energy), 1e-12)
         loss_energy_balance_error = abs(loss_total_energy_j - expected_energy) / denom
 
+    component_declared_count: Optional[float] = None
     component_reported_count: Optional[float] = None
+    component_coverage_rate: Optional[float] = None
+    component_coverage_gap: Optional[float] = None
     component_thermal_enabled_count: Optional[float] = None
     component_loss_total_power_w: Optional[float] = None
     component_loss_total_energy_j: Optional[float] = None
@@ -232,6 +235,10 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         try:
             component_rows = list(component_electrothermal)
             component_reported_count = float(len(component_rows))
+            # Runtime result exposes only reported components; treat as declared for direct backend paths.
+            component_declared_count = component_reported_count
+            component_coverage_rate = 1.0
+            component_coverage_gap = 0.0
             component_thermal_enabled_count = float(
                 sum(1 for item in component_rows if bool(getattr(item, "thermal_enabled", False)))
             )
@@ -248,7 +255,10 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
             else:
                 component_peak_temperature_c = None
         except Exception:
+            component_declared_count = None
             component_reported_count = None
+            component_coverage_rate = None
+            component_coverage_gap = None
             component_thermal_enabled_count = None
             component_loss_total_power_w = None
             component_loss_total_energy_j = None
@@ -325,7 +335,10 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         "loss_total_energy_j": loss_total_energy_j,
         "loss_duration_s": loss_duration_s,
         "loss_energy_balance_error": loss_energy_balance_error,
+        "component_declared_count": component_declared_count,
         "component_reported_count": component_reported_count,
+        "component_coverage_rate": component_coverage_rate,
+        "component_coverage_gap": component_coverage_gap,
         "component_thermal_enabled_count": component_thermal_enabled_count,
         "component_loss_total_power_w": component_loss_total_power_w,
         "component_loss_total_energy_j": component_loss_total_energy_j,

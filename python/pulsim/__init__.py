@@ -20,6 +20,7 @@ from ._pulsim import (
     Integrator,
     TimestepMethod,
     StepMode,
+    ControlUpdateMode,
     FormulationMode,
 
     # Device Classes - Linear
@@ -484,6 +485,7 @@ __all__ = [
     "Integrator",
     "TimestepMethod",
     "StepMode",
+    "ControlUpdateMode",
     "FormulationMode",
 
     # Device Classes - Linear

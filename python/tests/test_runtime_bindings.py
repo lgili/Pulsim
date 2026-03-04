@@ -330,10 +330,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
 components:
-  - type: resistor
-    name: R1
+  - type: voltage_source
+    name: V1
     nodes: [in, 0]
-    value: 10
+    waveform: {type: dc, value: 5}
     thermal:
       enabled: true
       rth: 0.8
@@ -392,8 +392,118 @@ def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     assert m1.thermal_enabled
     assert m1.total_energy > 0.0
     rload = next(item for item in result.component_electrothermal if item.component_name == "Rload")
-    assert not rload.thermal_enabled
-    assert abs(rload.final_temperature - result.thermal_summary.ambient) < 1e-12
+    assert rload.thermal_enabled
+    assert rload.final_temperature >= result.thermal_summary.ambient
+
+
+def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+    parser = ps.YamlParser(parser_opts)
+    circuit, options = parser.load(str(example_path))
+
+    assert parser.errors == []
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+    assert result.success
+    assert len(result.time) > 10
+    assert abs(float(result.time[-1]) - float(options.tstop)) < 1e-12
+
+    assert "PI1" in result.virtual_channels
+    assert "PWM1.duty" in result.virtual_channels
+    assert "Xout" in result.virtual_channels
+    pi = [float(v) for v in result.virtual_channels["PI1"]]
+    duty = [float(v) for v in result.virtual_channels["PWM1.duty"]]
+    vout = [float(v) for v in result.virtual_channels["Xout"]]
+
+    assert len(pi) == len(duty) == len(vout) == len(result.time)
+    assert all(0.0 <= value <= 0.95 + 1e-12 for value in duty)
+    assert max(abs(a - b) for a, b in zip(pi, duty)) < 1e-12
+    assert abs(vout[-1] - 6.0) < 0.5
+
+    loss_summary = result.loss_summary
+    assert loss_summary.total_loss > 0.0
+    loss_rows = list(loss_summary.device_losses)
+    loss_by_name = {item.device_name: item for item in loss_rows}
+    assert "M1" in loss_by_name
+    assert "D1" in loss_by_name
+    assert "Rload" in loss_by_name
+    assert loss_by_name["M1"].total_energy > 0.0
+    assert loss_by_name["Rload"].total_energy > 0.0
+
+    duration = float(result.time[-1]) - float(result.time[0])
+    total_energy = sum(float(item.total_energy) for item in loss_rows)
+    expected_energy = float(loss_summary.total_loss) * duration
+    energy_denom = max(abs(total_energy), abs(expected_energy), 1e-12)
+    assert abs(total_energy - expected_energy) / energy_denom < 1e-9
+
+    thermal_summary = result.thermal_summary
+    assert thermal_summary.enabled
+    assert thermal_summary.max_temperature >= thermal_summary.ambient
+    thermal_by_name = {
+        item.device_name: item for item in list(thermal_summary.device_temperatures)
+    }
+    assert "M1" in thermal_by_name
+    assert "D1" in thermal_by_name
+    assert "Rload" in thermal_by_name
+    for item in thermal_by_name.values():
+        assert item.final_temperature >= thermal_summary.ambient
+        assert item.peak_temperature >= item.final_temperature
+    assert thermal_by_name["Rload"].final_temperature > thermal_by_name["M1"].final_temperature
+
+    component_rows = {item.component_name: item for item in result.component_electrothermal}
+    assert len(component_rows) == circuit.num_devices()
+    assert component_rows["M1"].thermal_enabled
+    assert component_rows["Rload"].thermal_enabled
+    assert not component_rows["L1"].thermal_enabled
+    assert component_rows["M1"].total_energy > 0.0
+    assert component_rows["Rload"].total_energy > 0.0
+
+    component_total_loss = sum(float(item.total_loss) for item in component_rows.values())
+    component_loss_denom = max(abs(component_total_loss), abs(float(loss_summary.total_loss)), 1e-12)
+    assert abs(component_total_loss - float(loss_summary.total_loss)) / component_loss_denom < 1e-9
+
+
+def test_python_api_exposes_control_mode_surface_and_yaml_mapping() -> None:
+    opts = ps.SimulationOptions()
+    control_mode_enum = getattr(ps, "ControlUpdateMode", type(opts.control_mode))
+    assert hasattr(control_mode_enum, "Auto")
+    assert hasattr(control_mode_enum, "Continuous")
+    assert hasattr(control_mode_enum, "Discrete")
+
+    opts.control_mode = control_mode_enum.Continuous
+    opts.control_sample_time = 2.5e-6
+    assert opts.control_mode == control_mode_enum.Continuous
+    assert abs(opts.control_sample_time - 2.5e-6) < 1e-18
+
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  control:
+    mode: discrete
+    sample_time: 5e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    _, parsed = parser.load_string(content)
+    assert parser.errors == []
+    assert parsed.control_mode == control_mode_enum.Discrete
+    assert abs(parsed.control_sample_time - 5e-6) < 1e-18
 
 
 def test_yaml_parser_maps_fallback_controls() -> None:

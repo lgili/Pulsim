@@ -7,6 +7,7 @@
 #include "pulsim/v1/device_base.hpp"
 #include <functional>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <optional>
 
@@ -98,22 +99,34 @@ public:
     void set_duty(Real d) {
         params_.duty = std::clamp(d, 0.0, 1.0);
         duty_callback_ = std::nullopt;
+        invalidate_duty_cache_();
     }
 
     /// Set duty cycle callback (called at each timestep)
     void set_duty_callback(DutyCallback cb) {
         duty_callback_ = std::move(cb);
+        invalidate_duty_cache_();
     }
 
     /// Clear duty callback (use fixed duty)
     void clear_duty_callback() {
         duty_callback_ = std::nullopt;
+        invalidate_duty_cache_();
     }
 
     /// Get current duty (may depend on time if callback is set)
     [[nodiscard]] Real duty_at(Real t) const {
         if (duty_callback_) {
-            return std::clamp((*duty_callback_)(t), 0.0, 1.0);
+            if (duty_cache_valid_) {
+                const Real scale = std::max<Real>(Real{1.0}, std::abs(cached_duty_time_));
+                if (std::abs(t - cached_duty_time_) <= scale * Real{1e-15}) {
+                    return cached_duty_value_;
+                }
+            }
+            cached_duty_value_ = std::clamp((*duty_callback_)(t), 0.0, 1.0);
+            cached_duty_time_ = t;
+            duty_cache_valid_ = true;
+            return cached_duty_value_;
         }
         return params_.duty;
     }
@@ -199,9 +212,18 @@ public:
     }
 
 private:
+    void invalidate_duty_cache_() {
+        duty_cache_valid_ = false;
+        cached_duty_time_ = std::numeric_limits<Real>::quiet_NaN();
+        cached_duty_value_ = 0.0;
+    }
+
     PWMParams params_;
     NodeIndex branch_index_;
     std::optional<DutyCallback> duty_callback_;
+    mutable Real cached_duty_time_ = std::numeric_limits<Real>::quiet_NaN();
+    mutable Real cached_duty_value_ = 0.0;
+    mutable bool duty_cache_valid_ = false;
 };
 
 // =============================================================================
