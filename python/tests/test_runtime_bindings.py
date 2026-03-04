@@ -472,6 +472,40 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert abs(component_total_loss - float(loss_summary.total_loss)) / component_loss_denom < 1e-9
 
 
+def test_python_api_exposes_control_mode_surface_and_yaml_mapping() -> None:
+    opts = ps.SimulationOptions()
+    control_mode_enum = getattr(ps, "ControlUpdateMode", type(opts.control_mode))
+    assert hasattr(control_mode_enum, "Auto")
+    assert hasattr(control_mode_enum, "Continuous")
+    assert hasattr(control_mode_enum, "Discrete")
+
+    opts.control_mode = control_mode_enum.Continuous
+    opts.control_sample_time = 2.5e-6
+    assert opts.control_mode == control_mode_enum.Continuous
+    assert abs(opts.control_sample_time - 2.5e-6) < 1e-18
+
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+  control:
+    mode: discrete
+    sample_time: 5e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    _, parsed = parser.load_string(content)
+    assert parser.errors == []
+    assert parsed.control_mode == control_mode_enum.Discrete
+    assert abs(parsed.control_sample_time - 5e-6) < 1e-18
+
+
 def test_yaml_parser_maps_fallback_controls() -> None:
     content = """
 schema: pulsim-v1

@@ -119,7 +119,8 @@ Analytical `max_error` thresholds in `circuits/*.yaml` are calibrated for the cu
 Python-first runtime defaults (fixed-step unless explicitly overridden).
 Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `state_space_primary_ratio`, `dae_fallback_ratio`, `loss_energy_balance_error`,
-and `thermal_peak_temperature_delta`.
+`thermal_peak_temperature_delta`, `component_coverage_rate`, `component_coverage_gap`,
+`component_loss_summary_consistency_error`, and `component_thermal_summary_consistency_error`.
 
 `benchmark_ngspice.py` also emits:
 
