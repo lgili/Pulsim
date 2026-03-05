@@ -800,8 +800,9 @@ public:
             state.enabled = state.config.enabled;
             state.temperature = state.config.temp_init;
             state.peak_temperature = state.temperature;
-            state.sum_temperature = 0.0;
-            state.samples = 0;
+            // Keep summary average consistent with exported time traces, which include t=tstart.
+            state.sum_temperature = state.temperature;
+            state.samples = 1;
         }
 
         refresh_scales();

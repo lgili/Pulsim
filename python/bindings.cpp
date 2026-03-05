@@ -560,7 +560,9 @@ void init_v2_module(py::module_& v2) {
         .def(py::init<>())
         .def_readwrite("component_type", &VirtualChannelMetadata::component_type)
         .def_readwrite("component_name", &VirtualChannelMetadata::component_name)
+        .def_readwrite("source_component", &VirtualChannelMetadata::source_component)
         .def_readwrite("domain", &VirtualChannelMetadata::domain)
+        .def_readwrite("unit", &VirtualChannelMetadata::unit)
         .def_readwrite("nodes", &VirtualChannelMetadata::nodes);
 
     // =========================================================================

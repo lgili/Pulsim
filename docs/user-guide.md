@@ -105,6 +105,7 @@ For switched converters in production-like runs:
 ## Where To Go Next
 
 - [Netlist YAML Format](netlist-format.md)
+- [Frontend Control and Signals Contract](frontend-control-signals.md)
 - [Electrothermal Workflow](electrothermal-workflow.md)
 - [Configuration](configuration.md)
 - [Examples and Results](examples-and-results.md)

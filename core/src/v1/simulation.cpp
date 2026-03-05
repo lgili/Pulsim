@@ -1038,7 +1038,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     circuit_.update_history(x, true);
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
-        if (circuit_.num_virtual_components() == 0) {
+        const bool has_virtual_components = circuit_.num_virtual_components() > 0;
+        const bool has_thermal_trace =
+            options_.enable_losses &&
+            options_.thermal.enable &&
+            static_cast<bool>(transient_services_.thermal_service);
+        if (!has_virtual_components && !has_thermal_trace) {
             return;
         }
 
@@ -1047,9 +1052,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             result.virtual_channels.reserve(result.virtual_channel_metadata.size());
         }
 
-        auto mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
-        if (result.mixed_domain_phase_order.empty()) {
-            result.mixed_domain_phase_order = mixed_step.phase_order;
+        std::optional<MixedDomainStepResult> mixed_step;
+        if (has_virtual_components) {
+            mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
+            if (result.mixed_domain_phase_order.empty()) {
+                result.mixed_domain_phase_order = mixed_step->phase_order;
+            }
         }
 
         const std::size_t sample_count = result.time.size();
@@ -1068,21 +1076,54 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        for (const auto& [channel, value] : mixed_step.channel_values) {
-            auto [it, inserted] = result.virtual_channels.try_emplace(channel);
-            auto& series = it->second;
-            if (inserted && sample_reserve > 0) {
-                series.reserve(sample_reserve);
-            }
-            while (series.size() + 1 < sample_count) {
-                append_series_value(series, nan);
-            }
-            append_series_value(series, value);
+        if (mixed_step.has_value()) {
+            for (const auto& [channel, value] : mixed_step->channel_values) {
+                auto [it, inserted] = result.virtual_channels.try_emplace(channel);
+                auto& series = it->second;
+                if (inserted && sample_reserve > 0) {
+                    series.reserve(sample_reserve);
+                }
+                while (series.size() + 1 < sample_count) {
+                    append_series_value(series, nan);
+                }
+                append_series_value(series, value);
 
-            if (!result.virtual_channel_metadata.contains(channel)) {
-                result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
-                    "virtual", channel, "control", {}
-                };
+                if (!result.virtual_channel_metadata.contains(channel)) {
+                    result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
+                        "virtual", channel, channel, "control", "", {}
+                    };
+                }
+            }
+        }
+
+        if (has_thermal_trace) {
+            const auto thermal_summary = transient_services_.thermal_service->finalize();
+            for (const auto& item : thermal_summary.device_temperatures) {
+                if (!item.enabled) {
+                    continue;
+                }
+
+                const std::string channel = "T(" + item.device_name + ")";
+                auto [it, inserted] = result.virtual_channels.try_emplace(channel);
+                auto& series = it->second;
+                if (inserted && sample_reserve > 0) {
+                    series.reserve(sample_reserve);
+                }
+                while (series.size() + 1 < sample_count) {
+                    append_series_value(series, nan);
+                }
+                append_series_value(series, item.final_temperature);
+
+                if (!result.virtual_channel_metadata.contains(channel)) {
+                    result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
+                        "thermal_trace",
+                        channel,
+                        item.device_name,
+                        "thermal",
+                        "degC",
+                        {}
+                    };
+                }
             }
         }
 

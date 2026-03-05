@@ -47,6 +47,7 @@ PY
 - Documentation site: [https://lgili.github.io/Pulsim/](https://lgili.github.io/Pulsim/)
 - Getting started guide: [`docs/getting-started.md`](docs/getting-started.md)
 - Netlist format (including `simulation.control`): [`docs/netlist-format.md`](docs/netlist-format.md)
+- Frontend control/signal contract: [`docs/frontend-control-signals.md`](docs/frontend-control-signals.md)
 - Electrothermal workflow: [`docs/electrothermal-workflow.md`](docs/electrothermal-workflow.md)
 - Configuration guide (solver/control/thermal): [`docs/configuration.md`](docs/configuration.md)
 - API reference: [`docs/api-reference.md`](docs/api-reference.md)
@@ -71,7 +72,14 @@ result = sim.run_transient(circuit.initial_state())
 print("ok:", result.success)
 print("max_temp:", result.thermal_summary.max_temperature)
 print("components:", len(result.component_electrothermal))
+print("thermal_trace_keys:", [k for k in result.virtual_channels if k.startswith("T(")])
 PY
+```
+
+Generate a plot with electrical/control channels plus switch thermal trace (`T(M1)`):
+
+```bash
+PYTHONPATH=build/python python3 examples/plot_buck_closed_loop_thermal_backend.py
 ```
 
 ## Validation and Performance Workflows

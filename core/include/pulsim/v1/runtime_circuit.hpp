@@ -101,7 +101,9 @@ struct MixedDomainStepResult {
 struct VirtualChannelMetadata {
     std::string component_type;
     std::string component_name;
+    std::string source_component;
     std::string domain;
+    std::string unit;
     std::vector<Index> nodes;
 };
 
@@ -531,7 +533,9 @@ public:
             VirtualChannelMetadata base{
                 component.type,
                 component.name,
+                component.name,
                 channel_domain(component.type),
+                "",
                 component.nodes
             };
             metadata.emplace(component.name, base);

@@ -142,6 +142,33 @@ Campos úteis de `SimulationResult`:
 - `linear_solver_telemetry`, `fallback_trace`
 - `loss_summary`, `thermal_summary`
 - `component_electrothermal` (deterministic per-component loss + temperature telemetry)
+- `virtual_channels`, `virtual_channel_metadata`
+
+### Traços térmicos canônicos no transiente
+
+Quando as três condições abaixo são verdadeiras:
+
+- `options.enable_losses == True`
+- `options.thermal.enable == True`
+- componente com thermal habilitado (`options.thermal_devices[name].enabled == True`)
+
+o backend exporta em `result.virtual_channels` um canal térmico por componente no formato:
+
+- `T(<component_name>)` (ex.: `T(M1)`, `T(Rload)`)
+
+Contrato:
+
+- `len(result.virtual_channels["T(M1)"]) == len(result.time)`
+- `component_electrothermal["M1"].final_temperature == last(T(M1))`
+- `component_electrothermal["M1"].peak_temperature == max(T(M1))`
+- `component_electrothermal["M1"].average_temperature == mean(T(M1))`
+
+Metadata recomendada para front-end (preenchida no backend):
+
+- `result.virtual_channel_metadata["T(M1)"].domain == "thermal"`
+- `component_type == "thermal_trace"`
+- `source_component == "M1"`
+- `unit == "degC"`
 
 ## Electrothermal Result Example
 
@@ -150,6 +177,11 @@ result = sim.run_transient(circuit.initial_state())
 
 for item in result.component_electrothermal:
     print(item.component_name, item.total_loss, item.peak_temperature)
+
+trace_m1 = result.virtual_channels["T(M1)"]
+meta_m1 = result.virtual_channel_metadata["T(M1)"]
+print("trace samples:", len(trace_m1), "time samples:", len(result.time))
+print("meta:", meta_m1.domain, meta_m1.source_component, meta_m1.unit)
 ```
 
 `component_electrothermal` inclui todos os componentes elétricos não virtuais, com
