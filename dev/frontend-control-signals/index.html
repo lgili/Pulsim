@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/backend-architecture/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/frontend-control-signals/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../netlist-format/">
       
       
-        <link rel="next" href="../getting-started/">
+        <link rel="next" href="../electrothermal-workflow/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Backend Architecture - PulsimCore</title>
+        <title>Frontend Control and Signals Contract - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#backend-architecture" class="md-skip">
+        <a href="#frontend-control-and-signal-contract" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Backend Architecture
+              Frontend Control and Signals Contract
             
           </span>
         </div>
@@ -210,12 +210,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
@@ -230,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -353,30 +353,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -387,7 +384,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             Overview
@@ -419,30 +416,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Backend Architecture
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../backend-architecture/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -451,71 +428,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#architectural-goals" class="md-nav__link">
-    <span class="md-ellipsis">
-      Architectural Goals
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#runtime-layers" class="md-nav__link">
-    <span class="md-ellipsis">
-      Runtime Layers
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#canonical-execution-flow" class="md-nav__link">
-    <span class="md-ellipsis">
-      Canonical Execution Flow
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#why-this-design-works-for-production" class="md-nav__link">
-    <span class="md-ellipsis">
-      Why This Design Works for Production
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#extension-boundaries" class="md-nav__link">
-    <span class="md-ellipsis">
-      Extension Boundaries
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -553,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -584,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -637,10 +552,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../frontend-control-signals/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Frontend Control and Signals Contract
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -649,6 +584,140 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-base-temporal-unica" class="md-nav__link">
+    <span class="md-ellipsis">
+      1) Base temporal única
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-ordem-de-execucao-mixed-domain-por-amostra" class="md-nav__link">
+    <span class="md-ellipsis">
+      2) Ordem de execução mixed-domain por amostra
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-modos-de-atualizacao-de-controle" class="md-nav__link">
+    <span class="md-ellipsis">
+      3) Modos de atualização de controle
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-canais-canonicos-por-tipo" class="md-nav__link">
+    <span class="md-ellipsis">
+      4) Canais canônicos por tipo
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4) Canais canônicos por tipo">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#controle" class="md-nav__link">
+    <span class="md-ellipsis">
+      Controle
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#eventos" class="md-nav__link">
+    <span class="md-ellipsis">
+      Eventos
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instrumentacao" class="md-nav__link">
+    <span class="md-ellipsis">
+      Instrumentação
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#termico-juncaodispositivo" class="md-nav__link">
+    <span class="md-ellipsis">
+      Térmico (junção/dispositivo)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-metadata-obrigatoria-para-roteamento-no-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      5) Metadata obrigatória para roteamento no front
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-consistencia-numerica-que-o-front-pode-validar" class="md-nav__link">
+    <span class="md-ellipsis">
+      6) Consistência numérica que o front pode validar
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-fluxo-recomendado-no-frontend" class="md-nav__link">
+    <span class="md-ellipsis">
+      7) Fluxo recomendado no frontend
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-erros-comuns-no-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      8) Erros comuns no front
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1108,45 +1177,114 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#architectural-goals" class="md-nav__link">
+  <a href="#1-base-temporal-unica" class="md-nav__link">
     <span class="md-ellipsis">
-      Architectural Goals
+      1) Base temporal única
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#runtime-layers" class="md-nav__link">
+  <a href="#2-ordem-de-execucao-mixed-domain-por-amostra" class="md-nav__link">
     <span class="md-ellipsis">
-      Runtime Layers
+      2) Ordem de execução mixed-domain por amostra
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#canonical-execution-flow" class="md-nav__link">
+  <a href="#3-modos-de-atualizacao-de-controle" class="md-nav__link">
     <span class="md-ellipsis">
-      Canonical Execution Flow
+      3) Modos de atualização de controle
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-this-design-works-for-production" class="md-nav__link">
+  <a href="#4-canais-canonicos-por-tipo" class="md-nav__link">
     <span class="md-ellipsis">
-      Why This Design Works for Production
+      4) Canais canônicos por tipo
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4) Canais canônicos por tipo">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#controle" class="md-nav__link">
+    <span class="md-ellipsis">
+      Controle
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#eventos" class="md-nav__link">
+    <span class="md-ellipsis">
+      Eventos
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instrumentacao" class="md-nav__link">
+    <span class="md-ellipsis">
+      Instrumentação
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#termico-juncaodispositivo" class="md-nav__link">
+    <span class="md-ellipsis">
+      Térmico (junção/dispositivo)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-metadata-obrigatoria-para-roteamento-no-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      5) Metadata obrigatória para roteamento no front
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#extension-boundaries" class="md-nav__link">
+  <a href="#6-consistencia-numerica-que-o-front-pode-validar" class="md-nav__link">
     <span class="md-ellipsis">
-      Extension Boundaries
+      6) Consistência numérica que o front pode validar
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-fluxo-recomendado-no-frontend" class="md-nav__link">
+    <span class="md-ellipsis">
+      7) Fluxo recomendado no frontend
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-erros-comuns-no-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      8) Erros comuns no front
     </span>
   </a>
   
@@ -1167,7 +1305,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/backend-architecture.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/frontend-control-signals.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1176,59 +1314,137 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/backend-architecture.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/frontend-control-signals.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="backend-architecture">Backend Architecture<a class="headerlink" href="#backend-architecture" title="Permanent link">&para;</a></h1>
-<p>PulsimCore is designed as a <strong>Python-first simulation backend</strong> with a high-performance C++ kernel and a stable YAML workflow for automation.</p>
-<h2 id="architectural-goals">Architectural Goals<a class="headerlink" href="#architectural-goals" title="Permanent link">&para;</a></h2>
+<h1 id="frontend-control-and-signal-contract">Frontend Control and Signal Contract<a class="headerlink" href="#frontend-control-and-signal-contract" title="Permanent link">&para;</a></h1>
+<p>Este documento define o contrato que o frontend deve usar para consumir sinais de controle, eventos, instrumentação e térmico no <code>SimulationResult</code>.</p>
+<p>Objetivo: evitar heurísticas frágeis no front e garantir que o que é plotado corresponde ao que o core realmente simula.</p>
+<h2 id="1-base-temporal-unica">1) Base temporal única<a class="headerlink" href="#1-base-temporal-unica" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Deliver deterministic transient simulation for power electronics converters.</li>
-<li>Keep the user surface simple: <code>import pulsim</code> + YAML netlists.</li>
-<li>Isolate solver complexity behind typed options and telemetry.</li>
-<li>Support validation and parity workflows (ngspice/LTspice) from the same backend runtime.</li>
+<li>A base temporal oficial é <code>result.time</code>.</li>
+<li>O backend adiciona amostras de canais a cada passo <strong>aceito</strong> de transiente.</li>
+<li>Regra de consumo no front:</li>
+<li>sempre use <code>result.time</code> no eixo X;</li>
+<li>assuma que cada série em <code>result.virtual_channels[...]</code> é alinhada com <code>result.time</code>.</li>
 </ul>
-<h2 id="runtime-layers">Runtime Layers<a class="headerlink" href="#runtime-layers" title="Permanent link">&para;</a></h2>
+<h2 id="2-ordem-de-execucao-mixed-domain-por-amostra">2) Ordem de execução mixed-domain por amostra<a class="headerlink" href="#2-ordem-de-execucao-mixed-domain-por-amostra" title="Permanent link">&para;</a></h2>
+<p>Para cada amostra, o scheduler executa nesta ordem:</p>
 <ol>
-<li><strong>Python API Layer (<code>python/pulsim</code>)</strong></li>
-<li>Public package consumed by scripts, notebooks, and CI.</li>
-<li>Exposes typed classes (<code>Circuit</code>, <code>Simulator</code>, <code>SimulationOptions</code>, <code>YamlParser</code>) and utility modules (<code>netlist</code>, <code>signal_evaluator</code>).</li>
-<li><strong>Binding Layer (<code>python/bindings.cpp</code>)</strong></li>
-<li><code>pybind11</code> bridge between Python API and C++ kernel.</li>
-<li>Preserves zero-copy/low-overhead behavior where possible.</li>
-<li><strong>Core Kernel (<code>core/</code>)</strong></li>
-<li>Unified <code>v1</code> execution path for fixed/variable timestep simulation.</li>
-<li>Nonlinear solves, fallback policies, event handling, thermal coupling, and telemetry.</li>
-<li><strong>Validation &amp; Benchmarks (<code>benchmarks/</code>)</strong></li>
-<li>Regression gate for runtime, accuracy, parity, and stress scenarios.</li>
+<li><code>electrical</code></li>
+<li><code>control</code></li>
+<li><code>events</code></li>
+<li><code>instrumentation</code></li>
 </ol>
-<h2 id="canonical-execution-flow">Canonical Execution Flow<a class="headerlink" href="#canonical-execution-flow" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>flowchart LR
-    A[&quot;YAML Netlist&quot;] --&gt; B[&quot;YamlParser&quot;]
-    B --&gt; C[&quot;Circuit + SimulationOptions&quot;]
-    C --&gt; D[&quot;Simulator.run_transient(...)&quot;]
-    D --&gt; E[&quot;SimulationResult&quot;]
-    E --&gt; F[&quot;Waveforms / Telemetry / KPI Gates&quot;]
-</code></pre></div>
-<h2 id="why-this-design-works-for-production">Why This Design Works for Production<a class="headerlink" href="#why-this-design-works-for-production" title="Permanent link">&para;</a></h2>
+<p>Isso importa para interpretação:</p>
 <ul>
-<li><strong>Stable user entrypoint</strong>: product-facing surface stays in Python even while kernel internals evolve.</li>
-<li><strong>Performance isolation</strong>: critical numerics remain in C++ while orchestration stays scriptable.</li>
-<li><strong>Observability built-in</strong>: fallback trace, linear solver telemetry, and event diagnostics are first-class outputs.</li>
-<li><strong>Automation-ready</strong>: benchmarks and parity scripts emit machine-readable artifacts (<code>*.json</code>, <code>*.csv</code>) for CI gates.</li>
+<li>PI/PID são atualizados antes dos blocos de evento daquele mesmo instante.</li>
+<li><code>pwm_generator.target_component</code> já afeta estado do switch no passo mixed-domain.</li>
 </ul>
-<h2 id="extension-boundaries">Extension Boundaries<a class="headerlink" href="#extension-boundaries" title="Permanent link">&para;</a></h2>
-<p>You can safely extend at the following boundaries:</p>
+<h2 id="3-modos-de-atualizacao-de-controle">3) Modos de atualização de controle<a class="headerlink" href="#3-modos-de-atualizacao-de-controle" title="Permanent link">&para;</a></h2>
+<p>Configuração: <code>simulation.control.mode</code> (<code>auto|continuous|discrete</code>) e <code>sample_time</code>.</p>
 <ul>
-<li>Add new YAML fields in parser with strict diagnostics.</li>
-<li>Add new virtual channels and telemetry fields in runtime outputs.</li>
-<li>Add new benchmark scenarios in <code>benchmarks/</code> and gate with <code>kpi_gate.py</code>.</li>
+<li><code>continuous</code>:</li>
+<li>blocos de controle (PI/PID) atualizam em todo passo aceito.</li>
+<li><code>discrete</code>:</li>
+<li>PI/PID atualizam apenas quando <code>dt_acumulado &gt;= sample_time</code>;</li>
+<li>entre amostras, o canal mantém o último valor (hold).</li>
+<li><code>auto</code>:</li>
+<li>usa <code>sample_time</code> se definido;</li>
+<li>senão tenta inferir por frequência PWM.</li>
 </ul>
-<p>Avoid changing the canonical <code>Simulator</code> execution contract unless accompanied by migration notes and compatibility tests.</p>
+<h2 id="4-canais-canonicos-por-tipo">4) Canais canônicos por tipo<a class="headerlink" href="#4-canais-canonicos-por-tipo" title="Permanent link">&para;</a></h2>
+<h3 id="controle">Controle<a class="headerlink" href="#controle" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>PI1</code>: saída do <code>pi_controller</code>.</li>
+<li><code>PID1</code>: saída do <code>pid_controller</code>.</li>
+<li><code>PWM1</code>: estado PWM (0/1).</li>
+<li><code>PWM1.duty</code>: duty efetivo já clampado (<code>duty_min</code>/<code>duty_max</code>).</li>
+<li><code>PWM1.carrier</code>: portadora triangular normalizada.</li>
+</ul>
+<p>Para malha fechada com PWM:</p>
+<ul>
+<li>use <code>PWM1.duty</code> para gráfico de duty;</li>
+<li>não derive duty de <code>PWM1</code> (é estado lógico, não razão cíclica).</li>
+</ul>
+<h3 id="eventos">Eventos<a class="headerlink" href="#eventos" title="Permanent link">&para;</a></h3>
+<ul>
+<li>relay:</li>
+<li><code>K1.state</code>, <code>K1.no_state</code>, <code>K1.nc_state</code></li>
+<li>fuse/circuit_breaker/thyristor/triac:</li>
+<li><code>X.state</code></li>
+<li>thyristor/triac também expõem:</li>
+<li><code>X.trigger</code>, <code>X.i_est</code></li>
+</ul>
+<h3 id="instrumentacao">Instrumentação<a class="headerlink" href="#instrumentacao" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>voltage_probe</code>, <code>current_probe</code>, <code>power_probe</code>, <code>electrical_scope</code> etc.</li>
+</ul>
+<h3 id="termico-juncaodispositivo">Térmico (junção/dispositivo)<a class="headerlink" href="#termico-juncaodispositivo" title="Permanent link">&para;</a></h3>
+<p>Canal térmico oficial de transiente:</p>
+<ul>
+<li><code>T(&lt;component_name&gt;)</code></li>
+<li>exemplos: <code>T(M1)</code>, <code>T(D1)</code>, <code>T(Rload)</code></li>
+</ul>
+<p>Condições para existir:</p>
+<ul>
+<li><code>simulation.enable_losses: true</code></li>
+<li><code>simulation.thermal.enabled: true</code></li>
+<li>componente com thermal habilitado no runtime (<code>component.thermal.enabled</code>/config equivalente)</li>
+</ul>
+<p>Importante:</p>
+<ul>
+<li><code>THERMAL_SCOPE</code> <strong>não</strong> é a temperatura de junção do componente.</li>
+<li>para temperatura de dispositivo, use sempre <code>T(&lt;component&gt;)</code>.</li>
+</ul>
+<h2 id="5-metadata-obrigatoria-para-roteamento-no-front">5) Metadata obrigatória para roteamento no front<a class="headerlink" href="#5-metadata-obrigatoria-para-roteamento-no-front" title="Permanent link">&para;</a></h2>
+<p>Não use heurística por nome; use <code>result.virtual_channel_metadata[channel]</code>.</p>
+<p>Para canal térmico canônico:</p>
+<ul>
+<li><code>domain == "thermal"</code></li>
+<li><code>component_type == "thermal_trace"</code></li>
+<li><code>source_component == "&lt;component_name&gt;"</code></li>
+<li><code>unit == "degC"</code></li>
+</ul>
+<p>Para controle/eventos/instrumentação:</p>
+<ul>
+<li>use <code>domain</code> para escolher painel/eixo.</li>
+</ul>
+<h2 id="6-consistencia-numerica-que-o-front-pode-validar">6) Consistência numérica que o front pode validar<a class="headerlink" href="#6-consistencia-numerica-que-o-front-pode-validar" title="Permanent link">&para;</a></h2>
+<p>Para qualquer componente térmico <code>X</code>:</p>
+<ul>
+<li><code>len(T(X)) == len(result.time)</code></li>
+<li><code>component_electrothermal[X].final_temperature == last(T(X))</code></li>
+<li><code>component_electrothermal[X].peak_temperature == max(T(X))</code></li>
+<li><code>component_electrothermal[X].average_temperature == mean(T(X))</code></li>
+</ul>
+<p>Essas relações são o contrato canônico do backend.</p>
+<h2 id="7-fluxo-recomendado-no-frontend">7) Fluxo recomendado no frontend<a class="headerlink" href="#7-fluxo-recomendado-no-frontend" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Executar simulação e ler <code>result.time</code>.</li>
+<li>Enumerar <code>result.virtual_channels</code>.</li>
+<li>Para cada canal:</li>
+<li>ler <code>meta = result.virtual_channel_metadata[channel]</code>;</li>
+<li>roteamento por <code>meta.domain</code>:<ul>
+<li><code>control</code> -&gt; painel de controle;</li>
+<li><code>events</code> -&gt; painel de estados;</li>
+<li><code>instrumentation</code> -&gt; painel elétrico;</li>
+<li><code>thermal</code> -&gt; painel térmico.</li>
+</ul>
+</li>
+<li>Para térmico, exibir unidade <code>degC</code> e mapear componente por <code>meta.source_component</code>.</li>
+</ol>
+<h2 id="8-erros-comuns-no-front">8) Erros comuns no front<a class="headerlink" href="#8-erros-comuns-no-front" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Usar <code>THERMAL_SCOPE</code> para temperatura de junção.</li>
+<li>Plotar <code>PWM1</code> como se fosse duty (o correto é <code>PWM1.duty</code>).</li>
+<li>Ignorar <code>control.mode=discrete</code> e esperar atualização contínua de PI/PID.</li>
+<li>Ignorar <code>virtual_channel_metadata</code> e inferir domínio por regex de nome.</li>
+</ul>
 
 
 
@@ -1264,7 +1480,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href=".." class="md-footer__link md-footer__link--prev" aria-label="Previous: Documentation Home">
+          <a href="../netlist-format/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Netlist YAML Format">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1274,20 +1490,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Documentation Home
+                Netlist YAML Format
               </div>
             </div>
           </a>
         
         
           
-          <a href="../getting-started/" class="md-footer__link md-footer__link--next" aria-label="Next: Getting Started">
+          <a href="../electrothermal-workflow/" class="md-footer__link md-footer__link--next" aria-label="Next: Electrothermal Workflow">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Getting Started
+                Electrothermal Workflow
               </div>
             </div>
             <div class="md-footer__button md-icon">

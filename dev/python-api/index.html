@@ -552,6 +552,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../frontend-control-signals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frontend Control and Signals Contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../electrothermal-workflow/" class="md-nav__link">
         
   
@@ -916,6 +937,21 @@
       Resultados para análise
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Resultados para análise">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tracos-termicos-canonicos-no-transiente" class="md-nav__link">
+    <span class="md-ellipsis">
+      Traços térmicos canônicos no transiente
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1294,6 +1330,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Resultados para análise">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tracos-termicos-canonicos-no-transiente" class="md-nav__link">
+    <span class="md-ellipsis">
+      Traços térmicos canônicos no transiente
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1485,12 +1536,43 @@ com <code>step_mode</code> + <code>formulation_mode</code>.</p>
 <li><code>linear_solver_telemetry</code>, <code>fallback_trace</code></li>
 <li><code>loss_summary</code>, <code>thermal_summary</code></li>
 <li><code>component_electrothermal</code> (deterministic per-component loss + temperature telemetry)</li>
+<li><code>virtual_channels</code>, <code>virtual_channel_metadata</code></li>
+</ul>
+<h3 id="tracos-termicos-canonicos-no-transiente">Traços térmicos canônicos no transiente<a class="headerlink" href="#tracos-termicos-canonicos-no-transiente" title="Permanent link">&para;</a></h3>
+<p>Quando as três condições abaixo são verdadeiras:</p>
+<ul>
+<li><code>options.enable_losses == True</code></li>
+<li><code>options.thermal.enable == True</code></li>
+<li>componente com thermal habilitado (<code>options.thermal_devices[name].enabled == True</code>)</li>
+</ul>
+<p>o backend exporta em <code>result.virtual_channels</code> um canal térmico por componente no formato:</p>
+<ul>
+<li><code>T(&lt;component_name&gt;)</code> (ex.: <code>T(M1)</code>, <code>T(Rload)</code>)</li>
+</ul>
+<p>Contrato:</p>
+<ul>
+<li><code>len(result.virtual_channels["T(M1)"]) == len(result.time)</code></li>
+<li><code>component_electrothermal["M1"].final_temperature == last(T(M1))</code></li>
+<li><code>component_electrothermal["M1"].peak_temperature == max(T(M1))</code></li>
+<li><code>component_electrothermal["M1"].average_temperature == mean(T(M1))</code></li>
+</ul>
+<p>Metadata recomendada para front-end (preenchida no backend):</p>
+<ul>
+<li><code>result.virtual_channel_metadata["T(M1)"].domain == "thermal"</code></li>
+<li><code>component_type == "thermal_trace"</code></li>
+<li><code>source_component == "M1"</code></li>
+<li><code>unit == "degC"</code></li>
 </ul>
 <h2 id="electrothermal-result-example">Electrothermal Result Example<a class="headerlink" href="#electrothermal-result-example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
 
 <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">component_electrothermal</span><span class="p">:</span>
     <span class="nb">print</span><span class="p">(</span><span class="n">item</span><span class="o">.</span><span class="n">component_name</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">total_loss</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">peak_temperature</span><span class="p">)</span>
+
+<span class="n">trace_m1</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">virtual_channels</span><span class="p">[</span><span class="s2">&quot;T(M1)&quot;</span><span class="p">]</span>
+<span class="n">meta_m1</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">virtual_channel_metadata</span><span class="p">[</span><span class="s2">&quot;T(M1)&quot;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;trace samples:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">trace_m1</span><span class="p">),</span> <span class="s2">&quot;time samples:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">time</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;meta:&quot;</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">domain</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">source_component</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">unit</span><span class="p">)</span>
 </code></pre></div>
 <p><code>component_electrothermal</code> inclui todos os componentes elétricos não virtuais, com
 campos térmicos determinísticos mesmo quando a porta térmica não está habilitada.</p>

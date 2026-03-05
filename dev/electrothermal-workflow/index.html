@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/electrothermal-workflow/">
       
       
-        <link rel="prev" href="../netlist-format/">
+        <link rel="prev" href="../frontend-control-signals/">
       
       
         <link rel="next" href="../examples-and-results/">
@@ -539,6 +539,27 @@
   
   <span class="md-ellipsis">
     Netlist YAML Format
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../frontend-control-signals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frontend Control and Signals Contract
   </span>
   
 
@@ -1404,6 +1425,8 @@
 <li><code>result.loss_summary</code></li>
 <li><code>result.thermal_summary</code></li>
 <li><code>result.component_electrothermal</code></li>
+<li><code>result.virtual_channels</code> (includes canonical thermal traces when enabled)</li>
+<li><code>result.virtual_channel_metadata</code></li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
 
@@ -1423,11 +1446,26 @@
         <span class="s2">&quot;Tfinal=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">final_temperature</span><span class="p">,</span>
         <span class="s2">&quot;Tpeak=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">peak_temperature</span><span class="p">,</span>
     <span class="p">)</span>
+
+<span class="n">t_m1</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">virtual_channels</span><span class="p">[</span><span class="s2">&quot;T(M1)&quot;</span><span class="p">]</span>
+<span class="n">meta_m1</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">virtual_channel_metadata</span><span class="p">[</span><span class="s2">&quot;T(M1)&quot;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;T(M1) samples:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">t_m1</span><span class="p">),</span> <span class="s2">&quot;time:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">time</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;metadata:&quot;</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">domain</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">source_component</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">unit</span><span class="p">)</span>
 </code></pre></div>
 <p>Notes:</p>
 <ul>
 <li>All non-virtual components are listed in <code>component_electrothermal</code>.</li>
 <li>Components with thermal disabled are still reported with deterministic ambient-based thermal fields.</li>
+<li>When <code>enable_losses=true</code> and <code>thermal.enabled=true</code>, transient output includes canonical thermal traces
+  in <code>result.virtual_channels</code> named <code>T(&lt;component_name&gt;)</code> (for thermal-enabled components).</li>
+<li>Thermal traces are emitted only when all conditions hold:</li>
+<li><code>simulation.enable_losses: true</code></li>
+<li><code>simulation.thermal.enabled: true</code></li>
+<li><code>component.thermal.enabled: true</code> (or equivalent runtime thermal config)</li>
+<li>Consistency constraints for each thermal-enabled component <code>X</code>:</li>
+<li><code>component_electrothermal[X].final_temperature == last(T(X))</code></li>
+<li><code>component_electrothermal[X].peak_temperature == max(T(X))</code></li>
+<li><code>component_electrothermal[X].average_temperature == mean(T(X))</code></li>
 </ul>
 <h2 id="8-kpi-gate-integration">8) KPI Gate Integration<a class="headerlink" href="#8-kpi-gate-integration" title="Permanent link">&para;</a></h2>
 <p>The electrothermal gate validates consistency KPIs:</p>
@@ -1477,7 +1515,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../netlist-format/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Netlist YAML Format">
+          <a href="../frontend-control-signals/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Frontend Control and Signals Contract">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1487,7 +1525,7 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Netlist YAML Format
+                Frontend Control and Signals Contract
               </div>
             </div>
           </a>
