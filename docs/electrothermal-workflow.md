@@ -208,6 +208,8 @@ components:
 - `result.loss_summary`
 - `result.thermal_summary`
 - `result.component_electrothermal`
+- `result.virtual_channels` (includes canonical thermal traces when enabled)
+- `result.virtual_channel_metadata`
 
 ```python
 import pulsim as ps
@@ -228,12 +230,27 @@ for item in result.component_electrothermal:
         "Tfinal=", item.final_temperature,
         "Tpeak=", item.peak_temperature,
     )
+
+t_m1 = result.virtual_channels["T(M1)"]
+meta_m1 = result.virtual_channel_metadata["T(M1)"]
+print("T(M1) samples:", len(t_m1), "time:", len(result.time))
+print("metadata:", meta_m1.domain, meta_m1.source_component, meta_m1.unit)
 ```
 
 Notes:
 
 - All non-virtual components are listed in `component_electrothermal`.
 - Components with thermal disabled are still reported with deterministic ambient-based thermal fields.
+- When `enable_losses=true` and `thermal.enabled=true`, transient output includes canonical thermal traces
+  in `result.virtual_channels` named `T(<component_name>)` (for thermal-enabled components).
+- Thermal traces are emitted only when all conditions hold:
+  - `simulation.enable_losses: true`
+  - `simulation.thermal.enabled: true`
+  - `component.thermal.enabled: true` (or equivalent runtime thermal config)
+- Consistency constraints for each thermal-enabled component `X`:
+  - `component_electrothermal[X].final_temperature == last(T(X))`
+  - `component_electrothermal[X].peak_temperature == max(T(X))`
+  - `component_electrothermal[X].average_temperature == mean(T(X))`
 
 ## 8) KPI Gate Integration
 

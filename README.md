@@ -71,7 +71,14 @@ result = sim.run_transient(circuit.initial_state())
 print("ok:", result.success)
 print("max_temp:", result.thermal_summary.max_temperature)
 print("components:", len(result.component_electrothermal))
+print("thermal_trace_keys:", [k for k in result.virtual_channels if k.startswith("T(")])
 PY
+```
+
+Generate a plot with electrical/control channels plus switch thermal trace (`T(M1)`):
+
+```bash
+PYTHONPATH=build/python python3 examples/plot_buck_closed_loop_thermal_backend.py
 ```
 
 ## Validation and Performance Workflows
