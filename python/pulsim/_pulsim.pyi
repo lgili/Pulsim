@@ -149,7 +149,9 @@ class MixedDomainStepResult:
 class VirtualChannelMetadata:
     component_type: str
     component_name: str
+    source_component: str
     domain: str
+    unit: str
     nodes: List[int]
     def __init__(self) -> None: ...
 

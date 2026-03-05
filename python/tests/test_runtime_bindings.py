@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import statistics
 from pathlib import Path
 
 import pulsim as ps
@@ -420,11 +421,13 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert "PI1" in result.virtual_channels
     assert "PWM1.duty" in result.virtual_channels
     assert "Xout" in result.virtual_channels
+    assert "T(M1)" in result.virtual_channels
     pi = [float(v) for v in result.virtual_channels["PI1"]]
     duty = [float(v) for v in result.virtual_channels["PWM1.duty"]]
     vout = [float(v) for v in result.virtual_channels["Xout"]]
+    m1_temp = [float(v) for v in result.virtual_channels["T(M1)"]]
 
-    assert len(pi) == len(duty) == len(vout) == len(result.time)
+    assert len(pi) == len(duty) == len(vout) == len(m1_temp) == len(result.time)
     assert all(0.0 <= value <= 0.95 + 1e-12 for value in duty)
     assert max(abs(a - b) for a, b in zip(pi, duty)) < 1e-12
     assert abs(vout[-1] - 6.0) < 0.5
@@ -448,6 +451,11 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     thermal_summary = result.thermal_summary
     assert thermal_summary.enabled
     assert thermal_summary.max_temperature >= thermal_summary.ambient
+    assert result.virtual_channel_metadata["T(M1)"].domain == "thermal"
+    assert result.virtual_channel_metadata["T(M1)"].component_type == "thermal_trace"
+    assert result.virtual_channel_metadata["T(M1)"].source_component == "M1"
+    assert result.virtual_channel_metadata["T(M1)"].unit == "degC"
+    assert m1_temp[-1] >= thermal_summary.ambient
     thermal_by_name = {
         item.device_name: item for item in list(thermal_summary.device_temperatures)
     }
@@ -458,6 +466,9 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
         assert item.final_temperature >= thermal_summary.ambient
         assert item.peak_temperature >= item.final_temperature
     assert thermal_by_name["Rload"].final_temperature > thermal_by_name["M1"].final_temperature
+    assert abs(thermal_by_name["M1"].final_temperature - m1_temp[-1]) < 1e-12
+    assert abs(thermal_by_name["M1"].peak_temperature - max(m1_temp)) < 1e-12
+    assert abs(thermal_by_name["M1"].average_temperature - statistics.fmean(m1_temp)) < 1e-12
 
     component_rows = {item.component_name: item for item in result.component_electrothermal}
     assert len(component_rows) == circuit.num_devices()
@@ -466,10 +477,133 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert not component_rows["L1"].thermal_enabled
     assert component_rows["M1"].total_energy > 0.0
     assert component_rows["Rload"].total_energy > 0.0
+    assert abs(component_rows["M1"].final_temperature - m1_temp[-1]) < 1e-12
+    assert abs(component_rows["M1"].peak_temperature - max(m1_temp)) < 1e-12
+    assert abs(component_rows["M1"].average_temperature - statistics.fmean(m1_temp)) < 1e-12
 
     component_total_loss = sum(float(item.total_loss) for item in component_rows.values())
     component_loss_denom = max(abs(component_total_loss), abs(float(loss_summary.total_loss)), 1e-12)
     assert abs(component_total_loss - float(loss_summary.total_loss)) / component_loss_denom < 1e-9
+
+
+def test_transient_exports_canonical_thermal_trace_for_simple_resistive_case() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+    opts.thermal.policy = ps.ThermalCouplingPolicy.LossWithTemperatureScaling
+
+    tcfg = ps.ThermalDeviceConfig()
+    tcfg.enabled = True
+    tcfg.rth = 1.0
+    tcfg.cth = 5e-4
+    tcfg.temp_init = 25.0
+    tcfg.temp_ref = 25.0
+    tcfg.alpha = 0.004
+    opts.thermal_devices = {"R1": tcfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "T(R1)" in result.virtual_channels
+
+    trace = [float(v) for v in result.virtual_channels["T(R1)"]]
+    assert len(trace) == len(result.time)
+    assert trace[-1] > trace[0]
+    assert result.virtual_channel_metadata["T(R1)"].domain == "thermal"
+    assert result.virtual_channel_metadata["T(R1)"].source_component == "R1"
+    assert result.virtual_channel_metadata["T(R1)"].unit == "degC"
+
+    rows = {item.component_name: item for item in result.component_electrothermal}
+    thermal_rows = {
+        item.device_name: item for item in list(result.thermal_summary.device_temperatures)
+    }
+    assert "R1" in thermal_rows
+    assert abs(thermal_rows["R1"].final_temperature - trace[-1]) < 1e-12
+    assert abs(thermal_rows["R1"].peak_temperature - max(trace)) < 1e-12
+    assert abs(thermal_rows["R1"].average_temperature - statistics.fmean(trace)) < 1e-12
+    assert "R1" in rows
+    assert abs(rows["R1"].final_temperature - trace[-1]) < 1e-12
+    assert abs(rows["R1"].peak_temperature - max(trace)) < 1e-12
+    assert abs(rows["R1"].average_temperature - statistics.fmean(trace)) < 1e-12
+
+
+def test_transient_does_not_export_thermal_trace_without_loss_and_thermal_enable() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-5
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.enable_losses = False
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    tcfg = ps.ThermalDeviceConfig()
+    tcfg.enabled = True
+    tcfg.rth = 1.0
+    tcfg.cth = 1e-3
+    tcfg.temp_init = 25.0
+    tcfg.temp_ref = 25.0
+    tcfg.alpha = 0.004
+    opts.thermal_devices = {"R1": tcfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "T(R1)" not in result.virtual_channels
+
+
+def test_transient_does_not_export_thermal_trace_when_component_thermal_disabled() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 5.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-5
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    tcfg = ps.ThermalDeviceConfig()
+    tcfg.enabled = False
+    tcfg.rth = 1.0
+    tcfg.cth = 1e-3
+    tcfg.temp_init = 25.0
+    tcfg.temp_ref = 25.0
+    tcfg.alpha = 0.004
+    opts.thermal_devices = {"R1": tcfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "T(R1)" not in result.virtual_channels
 
 
 def test_python_api_exposes_control_mode_surface_and_yaml_mapping() -> None:
