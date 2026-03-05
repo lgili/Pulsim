@@ -75,7 +75,8 @@ PYTHONPATH=build/python python3 -c "import pulsim as ps; print(ps.__version__)"
 
 1. Start with [Getting Started](getting-started.md).
 2. Follow the [User Guide](user-guide.md) to understand the canonical runtime flow.
-3. Configure closed-loop + thermal runs with [Electrothermal Workflow](electrothermal-workflow.md).
-4. Run [Examples and Results](examples-and-results.md) end-to-end.
-5. Use [Benchmarks and Parity](benchmarks-and-parity.md) to set CI quality gates.
-6. Integrate against [API Reference](api-reference.md).
+3. For frontend integration, follow [Frontend Control and Signals Contract](frontend-control-signals.md).
+4. Configure closed-loop + thermal runs with [Electrothermal Workflow](electrothermal-workflow.md).
+5. Run [Examples and Results](examples-and-results.md) end-to-end.
+6. Use [Benchmarks and Parity](benchmarks-and-parity.md) to set CI quality gates.
+7. Integrate against [API Reference](api-reference.md).

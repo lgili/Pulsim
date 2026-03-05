@@ -47,6 +47,7 @@ PY
 - Documentation site: [https://lgili.github.io/Pulsim/](https://lgili.github.io/Pulsim/)
 - Getting started guide: [`docs/getting-started.md`](docs/getting-started.md)
 - Netlist format (including `simulation.control`): [`docs/netlist-format.md`](docs/netlist-format.md)
+- Frontend control/signal contract: [`docs/frontend-control-signals.md`](docs/frontend-control-signals.md)
 - Electrothermal workflow: [`docs/electrothermal-workflow.md`](docs/electrothermal-workflow.md)
 - Configuration guide (solver/control/thermal): [`docs/configuration.md`](docs/configuration.md)
 - API reference: [`docs/api-reference.md`](docs/api-reference.md)
