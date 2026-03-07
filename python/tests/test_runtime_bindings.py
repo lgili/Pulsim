@@ -1061,6 +1061,31 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert abs(component_total_loss - float(loss_summary.total_loss)) / component_loss_denom < 1e-9
 
 
+def test_closed_loop_buck_electrothermal_avoids_output_reallocations() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+    parser = ps.YamlParser(parser_opts)
+    circuit, options = parser.load(str(example_path))
+    assert parser.errors == []
+
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+    assert result.success
+
+    telemetry = result.backend_telemetry
+    assert telemetry.reserved_output_samples >= len(result.time)
+    assert telemetry.time_series_reallocations == 0
+    assert telemetry.state_series_reallocations == 0
+    assert telemetry.virtual_channel_reallocations == 0
+
+
 def test_transient_exports_canonical_thermal_trace_for_simple_resistive_case() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")

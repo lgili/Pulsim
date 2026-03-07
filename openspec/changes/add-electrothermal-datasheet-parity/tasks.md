@@ -30,7 +30,7 @@
 - [x] 6.1 Add closed-loop buck electrothermal regression validating PI+PWM control with non-zero semiconductor switching losses.
 - [x] 6.2 Add component-minimum thermal tests comparing simulated traces against theoretical/expected behavior.
 - [x] 6.3 Add parser contract tests for strict and non-strict datasheet/thermal definitions.
-- [ ] 6.4 Add electrothermal performance gates (runtime/memory/allocation counters) for rich-loss scenarios.
+- [x] 6.4 Add electrothermal performance gates (runtime/memory/allocation counters) for rich-loss scenarios.
 
 ## 7. Documentation and GUI Boundary
 - [ ] 7.1 Document full backend electrothermal contract (input schema, outputs, metadata, guarantees).
