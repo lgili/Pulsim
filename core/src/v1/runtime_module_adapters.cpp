@@ -270,7 +270,17 @@ void ElectrothermalTelemetryModule::initialize_thermal_channels() {
     thermal_channels_initialized_ = true;
 }
 
-void ElectrothermalTelemetryModule::on_step_accepted(Real dt_segment) {
+void ElectrothermalTelemetryModule::on_step_accepted(const Vector& state, Real dt_segment) {
+    if (services_.loss_service && services_.thermal_service) {
+        services_.loss_service->commit_accepted_segment(
+            state,
+            dt_segment,
+            services_.thermal_service->thermal_scale_vector());
+        services_.thermal_service->commit_accepted_segment(
+            dt_segment,
+            services_.loss_service->last_device_power());
+    }
+
     if (!has_loss_trace_ || dt_segment <= 0.0) {
         return;
     }

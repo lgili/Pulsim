@@ -101,8 +101,8 @@ public:
                                   std::size_t sample_reserve,
                                   Real initial_time);
 
-    /// Accumulates per-device segment energy for an accepted electrical interval.
-    void on_step_accepted(Real dt_segment);
+    /// Commits accepted-step loss/thermal state and accumulates trace interval energy.
+    void on_step_accepted(const Vector& state, Real dt_segment);
 
     /// Emits one sample for canonical loss/thermal channels.
     void on_sample_emit(Real sample_time, std::size_t sample_count);

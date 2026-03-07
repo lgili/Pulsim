@@ -499,27 +499,6 @@ void Simulator::accumulate_reverse_recovery_loss(const std::string& name, Real e
     transient_services_.loss_service->commit_reverse_recovery_event(name, energy);
 }
 
-/// Commits conduction losses for an accepted electrical state interval.
-void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
-    if (!transient_services_.loss_service || !transient_services_.thermal_service) {
-        return;
-    }
-    transient_services_.loss_service->commit_accepted_segment(
-        x,
-        dt,
-        transient_services_.thermal_service->thermal_scale_vector());
-}
-
-/// Advances thermal state using the latest per-device power trace.
-void Simulator::update_thermal_state(Real dt) {
-    if (!transient_services_.thermal_service || !transient_services_.loss_service) {
-        return;
-    }
-    transient_services_.thermal_service->commit_accepted_segment(
-        dt,
-        transient_services_.loss_service->last_device_power());
-}
-
 /// Finalizes aggregate loss summary after transient completion.
 void Simulator::finalize_loss_summary(SimulationResult& result) {
     if (!transient_services_.loss_service) {

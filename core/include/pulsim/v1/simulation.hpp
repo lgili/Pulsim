@@ -624,14 +624,12 @@ private:
         Real voltage,
         Real current) const;
 
-    void accumulate_conduction_losses(const Vector& x, Real dt);
     void accumulate_switching_loss(const std::string& name, bool turning_on, Real energy);
     void accumulate_reverse_recovery_loss(const std::string& name, Real energy);
 
     void initialize_loss_tracking();
     void finalize_loss_summary(SimulationResult& result);
     void initialize_thermal_tracking();
-    void update_thermal_state(Real dt);
     void finalize_thermal_summary(SimulationResult& result);
     void finalize_component_electrothermal(SimulationResult& result);
     void validate_electrothermal_consistency(SimulationResult& result);

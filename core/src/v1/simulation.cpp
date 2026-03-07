@@ -2039,9 +2039,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 transient_gmin_ = 0.0;
                 transient_services_.nonlinear_solve->set_options(baseline_newton_options);
 
-                accumulate_conduction_losses(step_anchor_state, hold_dt);
-                update_thermal_state(hold_dt);
-                electrothermal_module.on_step_accepted(hold_dt);
+                electrothermal_module.on_step_accepted(step_anchor_state, hold_dt);
 
                 t += hold_dt;
                 pending_dt_override = hold_dt;
@@ -2217,9 +2215,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        accumulate_conduction_losses(step_result.solution, dt_used);
-        update_thermal_state(dt_used);
-        electrothermal_module.on_step_accepted(dt_used);
+        electrothermal_module.on_step_accepted(step_result.solution, dt_used);
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);
