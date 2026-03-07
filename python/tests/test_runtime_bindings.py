@@ -445,6 +445,12 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert max(m1_poff) > 0.0
     assert max(m1_ptotal) >= max(m1_pcond)
 
+    def integrate(power: list[float]) -> float:
+        return sum(
+            power[i] * (float(result.time[i]) - float(result.time[i - 1]))
+            for i in range(1, len(result.time))
+        )
+
     loss_summary = result.loss_summary
     assert loss_summary.total_loss > 0.0
     loss_rows = list(loss_summary.device_losses)
@@ -464,6 +470,17 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     expected_energy = float(loss_summary.total_loss) * duration
     energy_denom = max(abs(total_energy), abs(expected_energy), 1e-12)
     assert abs(total_energy - expected_energy) / energy_denom < 1e-9
+
+    m1_econd = integrate(m1_pcond)
+    m1_eon = integrate(m1_pon)
+    m1_eoff = integrate(m1_poff)
+    m1_etotal = integrate(m1_ptotal)
+    m1_loss = loss_by_name["M1"]
+    m1_energy_denom = max(abs(m1_etotal), abs(float(m1_loss.total_energy)), 1e-12)
+    assert abs(float(m1_loss.total_energy) - m1_etotal) / m1_energy_denom < 1e-9
+    assert abs(float(m1_loss.breakdown.conduction) * duration - m1_econd) / max(abs(m1_econd), 1e-12) < 1e-9
+    assert abs(float(m1_loss.breakdown.turn_on) * duration - m1_eon) / max(abs(m1_eon), 1e-12) < 1e-9
+    assert abs(float(m1_loss.breakdown.turn_off) * duration - m1_eoff) / max(abs(m1_eoff), 1e-12) < 1e-9
 
     thermal_summary = result.thermal_summary
     assert thermal_summary.enabled
@@ -497,6 +514,22 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert not component_rows["L1"].thermal_enabled
     assert component_rows["M1"].total_energy > 0.0
     assert component_rows["Rload"].total_energy > 0.0
+    assert abs(float(component_rows["M1"].total_energy) - m1_etotal) / max(abs(m1_etotal), 1e-12) < 1e-9
+    assert (
+        abs(float(component_rows["M1"].conduction) * duration - m1_econd)
+        / max(abs(m1_econd), 1e-12)
+        < 1e-9
+    )
+    assert (
+        abs(float(component_rows["M1"].turn_on) * duration - m1_eon)
+        / max(abs(m1_eon), 1e-12)
+        < 1e-9
+    )
+    assert (
+        abs(float(component_rows["M1"].turn_off) * duration - m1_eoff)
+        / max(abs(m1_eoff), 1e-12)
+        < 1e-9
+    )
     assert abs(component_rows["M1"].final_temperature - m1_temp[-1]) < 1e-12
     assert abs(component_rows["M1"].peak_temperature - max(m1_temp)) < 1e-12
     assert abs(component_rows["M1"].average_temperature - statistics.fmean(m1_temp)) < 1e-12

@@ -251,6 +251,10 @@ Notes:
   - `Ploss(<component>)`
   All these channels are aligned with `result.time` and tagged in
   `result.virtual_channel_metadata` with `domain="loss"` and `unit="W"`.
+- Runtime now enforces a deterministic post-run consistency guard between canonical
+  electrothermal channels and summary surfaces (`loss_summary`, `thermal_summary`,
+  `component_electrothermal`). Any mismatch beyond tolerance fails the run with a
+  deterministic diagnostic.
 - Thermal traces are emitted only when all conditions hold:
   - `simulation.enable_losses: true`
   - `simulation.thermal.enabled: true`

@@ -19,7 +19,7 @@
 - [x] 4.1 Export canonical loss channels per component: `Pcond`, `Psw_on`, `Psw_off`, `Prr`, `Ploss`.
 - [x] 4.2 Keep canonical thermal channels (`T(component)`) and align all channels to `result.time`.
 - [x] 4.3 Extend virtual channel metadata with domain, source component, physical quantity, and unit for all new channels.
-- [ ] 4.4 Enforce exact consistency checks between channel reductions and summary telemetry surfaces.
+- [x] 4.4 Enforce exact consistency checks between channel reductions and summary telemetry surfaces.
 
 ## 5. Python Bindings
 - [ ] 5.1 Expose typed Python API for new loss characterization and thermal network structures.
@@ -40,5 +40,5 @@
 
 ## 8. Quality Gate
 - [x] 8.1 Run `openspec validate add-electrothermal-datasheet-parity --strict`.
-- [ ] 8.2 Execute targeted test suites (`python/tests`, benchmark electrothermal matrix, runtime regression).
+- [x] 8.2 Execute targeted test suites (`python/tests`, benchmark electrothermal matrix, runtime regression).
 - [ ] 8.3 Record acceptance evidence and unresolved issues in change notes before implementation PR.

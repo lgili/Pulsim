@@ -474,6 +474,7 @@ private:
     void update_thermal_state(Real dt);
     void finalize_thermal_summary(SimulationResult& result);
     void finalize_component_electrothermal(SimulationResult& result);
+    void validate_electrothermal_consistency(SimulationResult& result);
     void record_fallback_event(SimulationResult& result,
                                int step_index,
                                int retry_index,
