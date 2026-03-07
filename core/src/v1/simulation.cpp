@@ -1238,6 +1238,76 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     bool thermal_trace_initialized = false;
     bool loss_trace_initialized = false;
     bool virtual_metadata_initialized = false;
+    // Canonical loss channels are exported on output samples; accumulate segment energy
+    // between samples so fixed-step internal substeps are represented exactly.
+    std::vector<Real> loss_trace_interval_cond_energy;
+    std::vector<Real> loss_trace_interval_turn_on_energy;
+    std::vector<Real> loss_trace_interval_turn_off_energy;
+    std::vector<Real> loss_trace_interval_reverse_recovery_energy;
+    std::vector<Real> loss_trace_interval_total_energy;
+    bool loss_trace_interval_initialized = false;
+    Real loss_trace_interval_start_time = t;
+
+    auto initialize_loss_trace_interval = [&]() {
+        if (!options_.enable_losses || !transient_services_.loss_service) {
+            return;
+        }
+        const std::size_t device_count = circuit_.connections().size();
+        auto reset_bucket = [device_count](std::vector<Real>& bucket) {
+            if (bucket.size() != device_count) {
+                bucket.assign(device_count, 0.0);
+            } else {
+                std::fill(bucket.begin(), bucket.end(), 0.0);
+            }
+        };
+        reset_bucket(loss_trace_interval_cond_energy);
+        reset_bucket(loss_trace_interval_turn_on_energy);
+        reset_bucket(loss_trace_interval_turn_off_energy);
+        reset_bucket(loss_trace_interval_reverse_recovery_energy);
+        reset_bucket(loss_trace_interval_total_energy);
+        loss_trace_interval_start_time = t;
+        loss_trace_interval_initialized = true;
+    };
+
+    auto accumulate_loss_trace_interval = [&](Real dt_segment) {
+        if (!options_.enable_losses || !transient_services_.loss_service || dt_segment <= 0.0) {
+            return;
+        }
+        if (!loss_trace_interval_initialized) {
+            initialize_loss_trace_interval();
+        }
+        if (!loss_trace_interval_initialized) {
+            return;
+        }
+
+        const auto conduction = transient_services_.loss_service->last_device_conduction_power();
+        const auto turn_on = transient_services_.loss_service->last_device_turn_on_power();
+        const auto turn_off = transient_services_.loss_service->last_device_turn_off_power();
+        const auto reverse_recovery =
+            transient_services_.loss_service->last_device_reverse_recovery_power();
+        const auto total = transient_services_.loss_service->last_device_power();
+        const std::size_t device_count = loss_trace_interval_total_energy.size();
+        const auto finite_non_negative = [](Real value) {
+            if (!std::isfinite(value) || value < 0.0) {
+                return Real{0.0};
+            }
+            return value;
+        };
+        for (std::size_t i = 0; i < device_count; ++i) {
+            const Real p_cond = i < conduction.size() ? finite_non_negative(conduction[i]) : 0.0;
+            const Real p_on = i < turn_on.size() ? finite_non_negative(turn_on[i]) : 0.0;
+            const Real p_off = i < turn_off.size() ? finite_non_negative(turn_off[i]) : 0.0;
+            const Real p_rr = i < reverse_recovery.size()
+                ? finite_non_negative(reverse_recovery[i])
+                : 0.0;
+            const Real p_total = i < total.size() ? finite_non_negative(total[i]) : 0.0;
+            loss_trace_interval_cond_energy[i] += p_cond * dt_segment;
+            loss_trace_interval_turn_on_energy[i] += p_on * dt_segment;
+            loss_trace_interval_turn_off_energy[i] += p_off * dt_segment;
+            loss_trace_interval_reverse_recovery_energy[i] += p_rr * dt_segment;
+            loss_trace_interval_total_energy[i] += p_total * dt_segment;
+        }
+    };
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const bool has_virtual_components = circuit_.num_virtual_components() > 0;
@@ -1380,15 +1450,18 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 loss_trace_bindings.push_back(std::move(binding));
             }
             loss_trace_initialized = true;
+            if (!loss_trace_interval_initialized) {
+                initialize_loss_trace_interval();
+            }
         }
 
         if (has_loss_trace) {
-            const auto conduction = transient_services_.loss_service->last_device_conduction_power();
-            const auto turn_on = transient_services_.loss_service->last_device_turn_on_power();
-            const auto turn_off = transient_services_.loss_service->last_device_turn_off_power();
-            const auto reverse_recovery =
-                transient_services_.loss_service->last_device_reverse_recovery_power();
-            const auto total = transient_services_.loss_service->last_device_power();
+            if (!loss_trace_interval_initialized) {
+                initialize_loss_trace_interval();
+            }
+            const Real interval_duration = sample_time - loss_trace_interval_start_time;
+            const bool valid_interval =
+                std::isfinite(interval_duration) && interval_duration > 0.0;
 
             auto sample_loss_channel = [&](const std::string& channel_name, Real value) {
                 auto channel_it = result.virtual_channels.find(channel_name);
@@ -1404,16 +1477,43 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
             for (const auto& binding : loss_trace_bindings) {
                 const std::size_t i = binding.device_index;
-                const Real p_cond = i < conduction.size() ? conduction[i] : 0.0;
-                const Real p_on = i < turn_on.size() ? turn_on[i] : 0.0;
-                const Real p_off = i < turn_off.size() ? turn_off[i] : 0.0;
-                const Real p_rr = i < reverse_recovery.size() ? reverse_recovery[i] : 0.0;
-                const Real p_total = i < total.size() ? total[i] : 0.0;
+                const auto average_power = [&](const std::vector<Real>& energy_bucket) {
+                    if (!valid_interval || i >= energy_bucket.size()) {
+                        return Real{0.0};
+                    }
+                    return energy_bucket[i] / interval_duration;
+                };
+                const Real p_cond = average_power(loss_trace_interval_cond_energy);
+                const Real p_on = average_power(loss_trace_interval_turn_on_energy);
+                const Real p_off = average_power(loss_trace_interval_turn_off_energy);
+                const Real p_rr = average_power(loss_trace_interval_reverse_recovery_energy);
+                const Real p_total = average_power(loss_trace_interval_total_energy);
                 sample_loss_channel(binding.conduction_channel, p_cond);
                 sample_loss_channel(binding.turn_on_channel, p_on);
                 sample_loss_channel(binding.turn_off_channel, p_off);
                 sample_loss_channel(binding.reverse_recovery_channel, p_rr);
                 sample_loss_channel(binding.total_channel, p_total);
+            }
+
+            if (loss_trace_interval_initialized) {
+                if (valid_interval) {
+                    std::fill(loss_trace_interval_cond_energy.begin(),
+                              loss_trace_interval_cond_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_turn_on_energy.begin(),
+                              loss_trace_interval_turn_on_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_turn_off_energy.begin(),
+                              loss_trace_interval_turn_off_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_reverse_recovery_energy.begin(),
+                              loss_trace_interval_reverse_recovery_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_total_energy.begin(),
+                              loss_trace_interval_total_energy.end(),
+                              Real{0.0});
+                }
+                loss_trace_interval_start_time = sample_time;
             }
         }
 
@@ -2179,6 +2279,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
                 accumulate_conduction_losses(step_anchor_state, hold_dt);
                 update_thermal_state(hold_dt);
+                accumulate_loss_trace_interval(hold_dt);
 
                 t += hold_dt;
                 pending_dt_override = hold_dt;
@@ -2356,6 +2457,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         accumulate_conduction_losses(step_result.solution, dt_used);
         update_thermal_state(dt_used);
+        accumulate_loss_trace_interval(dt_used);
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);

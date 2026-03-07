@@ -17,7 +17,7 @@ namespace pulsim::v1 {
 namespace {
 constexpr int kMaxBisections = 12;
 // Loss consistency is compared between step-averaged telemetry and sampled channels.
-// Use a bounded tolerance to avoid false negatives in strongly pulsed waveforms.
+// Pulsed channels carry quantization uncertainty on sampled integration (order P_peak * dt).
 constexpr Real kLossConsistencyRelTol = 1e-2;
 constexpr Real kLossConsistencyAbsTol = 1e-8;
 
@@ -721,7 +721,33 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
 
     const Real duration =
         result.time.size() >= 2 ? (result.time.back() - result.time.front()) : Real{0.0};
+    Real max_dt = 0.0;
+    for (std::size_t i = 1; i < result.time.size(); ++i) {
+        const Real dt = result.time[i] - result.time[i - 1];
+        if (std::isfinite(dt) && dt > 0.0) {
+            max_dt = std::max(max_dt, dt);
+        }
+    }
+    max_dt = std::max(max_dt, Real{1e-18});
+
+    auto channel_energy_quantization_tol = [&](const std::vector<Real>& series) -> Real {
+        Real peak_power = 0.0;
+        for (Real sample : series) {
+            if (std::isfinite(sample)) {
+                peak_power = std::max(peak_power, std::abs(sample));
+            }
+        }
+        return std::max(kLossConsistencyAbsTol, peak_power * max_dt);
+    };
+    auto channel_average_power_quantization_tol = [&](const std::vector<Real>& series) -> Real {
+        if (duration <= 0.0) {
+            return kLossConsistencyAbsTol;
+        }
+        return channel_energy_quantization_tol(series) / duration;
+    };
+
     Real aggregated_channel_energy = 0.0;
+    Real aggregated_channel_energy_tol = 0.0;
     const auto& conns = circuit_.connections();
     for (const auto& conn : conns) {
         const std::string p_cond_name = "Pcond(" + conn.name + ")";
@@ -758,17 +784,33 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
         const Real e_rr = *e_rr_opt;
         const Real e_total = *e_total_opt;
         const Real e_breakdown = e_cond + e_on + e_off + e_rr;
-        if (!nearly_equal(e_total, e_breakdown, 1e-6, 1e-8)) {
+        const Real e_cond_tol = channel_energy_quantization_tol(*p_cond);
+        const Real e_on_tol = channel_energy_quantization_tol(*p_on);
+        const Real e_off_tol = channel_energy_quantization_tol(*p_off);
+        const Real e_rr_tol = channel_energy_quantization_tol(*p_rr);
+        const Real e_total_tol = channel_energy_quantization_tol(*p_total);
+        const Real e_breakdown_tol = e_cond_tol + e_on_tol + e_off_tol + e_rr_tol;
+        if (!nearly_equal(
+                e_total,
+                e_breakdown,
+                kLossConsistencyRelTol,
+                std::max(e_total_tol, e_breakdown_tol))) {
             fail("Ploss channel mismatch against breakdown for component '" + conn.name + "'");
             return;
         }
         aggregated_channel_energy += e_total;
+        aggregated_channel_energy_tol += e_total_tol;
 
         const Real avg_cond = duration > 0.0 ? e_cond / duration : 0.0;
         const Real avg_on = duration > 0.0 ? e_on / duration : 0.0;
         const Real avg_off = duration > 0.0 ? e_off / duration : 0.0;
         const Real avg_rr = duration > 0.0 ? e_rr / duration : 0.0;
         const Real avg_total = duration > 0.0 ? e_total / duration : 0.0;
+        const Real avg_cond_tol = channel_average_power_quantization_tol(*p_cond);
+        const Real avg_on_tol = channel_average_power_quantization_tol(*p_on);
+        const Real avg_off_tol = channel_average_power_quantization_tol(*p_off);
+        const Real avg_rr_tol = channel_average_power_quantization_tol(*p_rr);
+        const Real avg_total_tol = channel_average_power_quantization_tol(*p_total);
 
         const auto component_it = component_by_name.find(conn.name);
         if (component_it == component_by_name.end()) {
@@ -776,12 +818,12 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
             return;
         }
         const auto* component = component_it->second;
-        if (!nearly_equal(component->conduction, avg_cond, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(component->turn_on, avg_on, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(component->turn_off, avg_off, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(component->reverse_recovery, avg_rr, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(component->total_loss, avg_total, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(component->total_energy, e_total, kLossConsistencyRelTol, kLossConsistencyAbsTol)) {
+        if (!nearly_equal(component->conduction, avg_cond, kLossConsistencyRelTol, avg_cond_tol) ||
+            !nearly_equal(component->turn_on, avg_on, kLossConsistencyRelTol, avg_on_tol) ||
+            !nearly_equal(component->turn_off, avg_off, kLossConsistencyRelTol, avg_off_tol) ||
+            !nearly_equal(component->reverse_recovery, avg_rr, kLossConsistencyRelTol, avg_rr_tol) ||
+            !nearly_equal(component->total_loss, avg_total, kLossConsistencyRelTol, avg_total_tol) ||
+            !nearly_equal(component->total_energy, e_total, kLossConsistencyRelTol, e_total_tol)) {
             fail("component_electrothermal loss mismatch for component '" + conn.name + "'");
             return;
         }
@@ -795,12 +837,12 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
             continue;
         }
         const auto* loss = loss_it->second;
-        if (!nearly_equal(loss->breakdown.conduction, avg_cond, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(loss->breakdown.turn_on, avg_on, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(loss->breakdown.turn_off, avg_off, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(loss->breakdown.reverse_recovery, avg_rr, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(loss->average_power, avg_total, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
-            !nearly_equal(loss->total_energy, e_total, kLossConsistencyRelTol, kLossConsistencyAbsTol)) {
+        if (!nearly_equal(loss->breakdown.conduction, avg_cond, kLossConsistencyRelTol, avg_cond_tol) ||
+            !nearly_equal(loss->breakdown.turn_on, avg_on, kLossConsistencyRelTol, avg_on_tol) ||
+            !nearly_equal(loss->breakdown.turn_off, avg_off, kLossConsistencyRelTol, avg_off_tol) ||
+            !nearly_equal(loss->breakdown.reverse_recovery, avg_rr, kLossConsistencyRelTol, avg_rr_tol) ||
+            !nearly_equal(loss->average_power, avg_total, kLossConsistencyRelTol, avg_total_tol) ||
+            !nearly_equal(loss->total_energy, e_total, kLossConsistencyRelTol, e_total_tol)) {
             fail("loss_summary mismatch for component '" + conn.name + "'");
             return;
         }
@@ -810,7 +852,7 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
         !nearly_equal(result.loss_summary.total_loss * duration,
                       aggregated_channel_energy,
                       kLossConsistencyRelTol,
-                      kLossConsistencyAbsTol)) {
+                      std::max(kLossConsistencyAbsTol, aggregated_channel_energy_tol))) {
         fail("aggregate loss_summary total_loss mismatch against channel energy");
     }
 }
