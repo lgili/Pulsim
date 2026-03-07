@@ -27,6 +27,7 @@ from ._pulsim import (
     FrequencySweepScale,
     FrequencyMetricUndefinedReason,
     AveragedConverterTopology,
+    AveragedOperatingMode,
     AveragedEnvelopePolicy,
 
     # Device Classes - Linear
@@ -573,6 +574,7 @@ __all__ = [
     "FrequencySweepScale",
     "FrequencyMetricUndefinedReason",
     "AveragedConverterTopology",
+    "AveragedOperatingMode",
     "AveragedEnvelopePolicy",
 
     # Device Classes - Linear

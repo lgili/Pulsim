@@ -120,6 +120,13 @@ class FrequencyMetricUndefinedReason(Enum):
 
 class AveragedConverterTopology(Enum):
     Buck = ...
+    Boost = ...
+    BuckBoost = ...
+
+class AveragedOperatingMode(Enum):
+    CCM = ...
+    DCM = ...
+    Auto = ...
 
 class AveragedEnvelopePolicy(Enum):
     Strict = ...
@@ -474,6 +481,7 @@ class FrequencyAnalysisOptions:
 class AveragedConverterOptions:
     enabled: bool
     topology: AveragedConverterTopology
+    operating_mode: AveragedOperatingMode
     envelope_policy: AveragedEnvelopePolicy
     vin_source: str
     inductor: str
@@ -483,6 +491,7 @@ class AveragedConverterOptions:
     duty: float
     duty_min: float
     duty_max: float
+    switching_frequency_hz: float
     initial_inductor_current: float
     initial_output_voltage: float
     ccm_current_threshold: float

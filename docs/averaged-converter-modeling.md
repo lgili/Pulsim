@@ -6,12 +6,13 @@ This guide defines the backend contract for averaged-converter transient mode.
 
 Current backend support:
 
-- topology: `buck`
+- topologies: `buck`, `boost`, `buck_boost`
+- operating modes: `ccm`, `dcm`, `auto`
 - execution mode: transient (`Simulator.run_transient(...)`)
 - duty command: constant scalar (`simulation.averaged_converter.duty`)
-- envelope policy: `strict` or `warn` (CCM-oriented check)
+- envelope policy: `strict` or `warn` (CCM-only check)
 
-Current explicit non-goals in MVP:
+Current explicit non-goals:
 
 - no automatic averaged-model synthesis for arbitrary topologies
 - no implicit fallback to switched transient on averaged failures
@@ -28,7 +29,8 @@ simulation:
   dt: 0.2e-6
   averaged_converter:
     enabled: true
-    topology: buck
+    topology: boost            # buck | boost | buck_boost
+    operating_mode: auto       # ccm | dcm | auto
     envelope_policy: warn       # strict | warn
     vin_source: Vin             # voltage_source component name
     inductor: L1                # inductor component name
@@ -38,6 +40,7 @@ simulation:
     duty: 0.4
     duty_min: 0.0
     duty_max: 0.95
+    switching_frequency_hz: 100000.0
     initial_inductor_current: 0.0
     initial_output_voltage: 0.0
     ccm_current_threshold: 0.0
@@ -46,9 +49,10 @@ simulation:
 Strict parser/runtime checks include:
 
 - missing mapped fields when `enabled=true`
-- invalid `topology` or `envelope_policy`
+- invalid `topology`, `operating_mode`, or `envelope_policy`
 - invalid duty bounds (`0 <= duty_min <= duty <= duty_max <= 1`)
 - invalid `ccm_current_threshold`
+- invalid `switching_frequency_hz` (`> 0`)
 - invalid mapped component types (for example mapping `inductor` to a resistor)
 
 ## Python API Surface
@@ -70,6 +74,7 @@ Related typed enums/options:
 
 - `AveragedConverterOptions`
 - `AveragedConverterTopology`
+- `AveragedOperatingMode`
 - `AveragedEnvelopePolicy`
 
 ## Diagnostics
@@ -83,8 +88,9 @@ Canonical averaged runtime diagnostics:
 
 Behavior is deterministic:
 
-- `strict` envelope policy: fails with `AveragedOutOfEnvelope`
-- `warn` envelope policy: run succeeds and message marks out-of-envelope warning
+- `operating_mode=ccm` + `strict`: fails with `AveragedOutOfEnvelope`
+- `operating_mode=ccm` + `warn`: run succeeds with out-of-envelope warning in message
+- `operating_mode=dcm|auto`: uses DCM-capable equations and does not raise CCM-envelope failure
 
 ## Result Channels and Metadata
 
@@ -124,11 +130,12 @@ Frontend must not:
 
 Recommended migration path for control-design iteration:
 
-1. Start from a switched buck YAML that already has mapped `Vin`, `L`, `C`, `Rload`.
+1. Start from a switched converter YAML (`buck`, `boost`, or `buck_boost`) that already has mapped `Vin`, `L`, `C`, `Rload`.
 2. Add `simulation.averaged_converter` and keep `duty` fixed for first parity pass.
 3. Compare averaged-vs-switching with paired benchmark validation.
-4. Use averaged mode for rapid controller sweeps in supported envelope.
-5. Keep switched/electrothermal runs as final validation stage.
+4. Select `operating_mode` (`ccm`, `dcm`, or `auto`) based on expected load regime.
+5. Use averaged mode for rapid controller sweeps in supported envelope.
+6. Keep switched/electrothermal runs as final validation stage.
 
 Reference files:
 

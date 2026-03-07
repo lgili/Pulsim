@@ -220,13 +220,14 @@ For full backend contract and Python result usage, see
 
 ### Averaged Converter Mode
 
-Use `simulation.averaged_converter` for backend averaged plant runs (MVP topology: buck):
+Use `simulation.averaged_converter` for backend averaged plant runs:
 
 ```yaml
 simulation:
   averaged_converter:
     enabled: true
     topology: buck
+    operating_mode: auto
     envelope_policy: warn
     vin_source: Vin
     inductor: L1
@@ -236,6 +237,7 @@ simulation:
     duty: 0.4
     duty_min: 0.0
     duty_max: 0.95
+    switching_frequency_hz: 100000.0
     initial_inductor_current: 0.0
     initial_output_voltage: 0.0
     ccm_current_threshold: 0.0
@@ -243,7 +245,8 @@ simulation:
 
 Supported values:
 
-- `topology`: `buck`
+- `topology`: `buck` | `boost` | `buck_boost`
+- `operating_mode`: `ccm` | `dcm` | `auto`
 - `envelope_policy`: `strict` | `warn`
 
 Deterministic checks:
@@ -251,6 +254,7 @@ Deterministic checks:
 - required mapping fields when `enabled=true`
 - valid duty bounds (`0 <= duty_min <= duty <= duty_max <= 1`)
 - finite `ccm_current_threshold >= 0`
+- finite `switching_frequency_hz > 0`
 - mapped component types (`vin_source` voltage source, `inductor` inductor, `capacitor` capacitor, `load_resistor` resistor)
 
 For full runtime/result/frontend contract and migration guidance, see

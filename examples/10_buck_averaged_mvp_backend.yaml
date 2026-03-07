@@ -11,6 +11,7 @@ simulation:
   averaged_converter:
     enabled: true
     topology: buck
+    operating_mode: ccm
     envelope_policy: warn
     vin_source: Vin
     inductor: L1
@@ -20,6 +21,7 @@ simulation:
     duty: 0.4
     duty_min: 0.0
     duty_max: 0.95
+    switching_frequency_hz: 100000.0
     initial_inductor_current: 0.0
     initial_output_voltage: 0.0
     ccm_current_threshold: 0.0

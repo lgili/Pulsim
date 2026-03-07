@@ -1256,6 +1256,15 @@ void init_v2_module(py::module_& v2) {
     py::enum_<AveragedConverterTopology>(v2, "AveragedConverterTopology",
         "Supported topology for averaged-converter transient mode")
         .value("Buck", AveragedConverterTopology::Buck)
+        .value("Boost", AveragedConverterTopology::Boost)
+        .value("BuckBoost", AveragedConverterTopology::BuckBoost)
+        .export_values();
+
+    py::enum_<AveragedOperatingMode>(v2, "AveragedOperatingMode",
+        "Operating mode policy for averaged-converter transient mode")
+        .value("CCM", AveragedOperatingMode::CCM)
+        .value("DCM", AveragedOperatingMode::DCM)
+        .value("Auto", AveragedOperatingMode::Auto)
         .export_values();
 
     py::enum_<AveragedEnvelopePolicy>(v2, "AveragedEnvelopePolicy",
@@ -1487,10 +1496,11 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("gain_margin_reason", &FrequencyAnalysisResult::gain_margin_reason);
 
     py::class_<AveragedConverterOptions>(v2, "AveragedConverterOptions",
-        "Averaged-converter runtime configuration (MVP buck)")
+        "Averaged-converter runtime configuration")
         .def(py::init<>())
         .def_readwrite("enabled", &AveragedConverterOptions::enabled)
         .def_readwrite("topology", &AveragedConverterOptions::topology)
+        .def_readwrite("operating_mode", &AveragedConverterOptions::operating_mode)
         .def_readwrite("envelope_policy", &AveragedConverterOptions::envelope_policy)
         .def_readwrite("vin_source", &AveragedConverterOptions::vin_source)
         .def_readwrite("inductor", &AveragedConverterOptions::inductor)
@@ -1500,6 +1510,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("duty", &AveragedConverterOptions::duty)
         .def_readwrite("duty_min", &AveragedConverterOptions::duty_min)
         .def_readwrite("duty_max", &AveragedConverterOptions::duty_max)
+        .def_readwrite("switching_frequency_hz", &AveragedConverterOptions::switching_frequency_hz)
         .def_readwrite("initial_inductor_current", &AveragedConverterOptions::initial_inductor_current)
         .def_readwrite("initial_output_voltage", &AveragedConverterOptions::initial_output_voltage)
         .def_readwrite("ccm_current_threshold", &AveragedConverterOptions::ccm_current_threshold);

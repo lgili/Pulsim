@@ -424,8 +424,18 @@ struct FrequencyAnalysisResult {
         FrequencyMetricUndefinedReason::NotTransferMode;
 };
 
+/// Supported averaged converter topologies in transient mode.
 enum class AveragedConverterTopology {
-    Buck
+    Buck,
+    Boost,
+    BuckBoost
+};
+
+/// Operating-mode policy for averaged converter execution.
+enum class AveragedOperatingMode {
+    CCM,
+    DCM,
+    Auto
 };
 
 enum class AveragedEnvelopePolicy {
@@ -436,6 +446,8 @@ enum class AveragedEnvelopePolicy {
 struct AveragedConverterOptions {
     bool enabled = false;
     AveragedConverterTopology topology = AveragedConverterTopology::Buck;
+    // Explicit operating-mode selection for averaged equations.
+    AveragedOperatingMode operating_mode = AveragedOperatingMode::CCM;
     AveragedEnvelopePolicy envelope_policy = AveragedEnvelopePolicy::Strict;
 
     // Component-name mapping for topology extraction.
@@ -449,6 +461,8 @@ struct AveragedConverterOptions {
     Real duty = 0.5;
     Real duty_min = 0.0;
     Real duty_max = 1.0;
+    // Used by DCM/auto operating modes for load-dependent gain estimation.
+    Real switching_frequency_hz = 100e3;
     Real initial_inductor_current = 0.0;
     Real initial_output_voltage = 0.0;
 

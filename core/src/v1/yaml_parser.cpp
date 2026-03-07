@@ -1680,9 +1680,10 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         if (averaged) {
             validate_keys(
                 averaged,
-                {"enabled", "topology", "envelope_policy", "vin_source", "inductor",
+                {"enabled", "topology", "operating_mode", "envelope_policy", "vin_source", "inductor",
                  "capacitor", "load_resistor", "output_node", "duty", "duty_min", "duty_max",
-                 "initial_inductor_current", "initial_output_voltage", "ccm_current_threshold"},
+                 "switching_frequency_hz", "initial_inductor_current", "initial_output_voltage",
+                 "ccm_current_threshold"},
                 "simulation.averaged_converter",
                 errors_,
                 options_.strict);
@@ -1698,11 +1699,36 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 const std::string topology = normalize_key(*topology_raw);
                 if (topology == "buck") {
                     options.averaged_converter.topology = AveragedConverterTopology::Buck;
+                } else if (topology == "boost") {
+                    options.averaged_converter.topology = AveragedConverterTopology::Boost;
+                } else if (topology == "buckboost" || topology == "buckboostinverting" ||
+                           topology == "invertingbuckboost") {
+                    options.averaged_converter.topology = AveragedConverterTopology::BuckBoost;
                 } else {
                     push_error(
                         errors_,
                         kDiagAveragedInvalid,
                         "Invalid simulation.averaged_converter.topology: '" + *topology_raw + "'");
+                }
+            }
+
+            if (const auto mode_raw = parse_string_scalar(
+                    averaged["operating_mode"],
+                    "simulation.averaged_converter.operating_mode",
+                    errors_)) {
+                const std::string mode = normalize_key(*mode_raw);
+                if (mode == "ccm") {
+                    options.averaged_converter.operating_mode = AveragedOperatingMode::CCM;
+                } else if (mode == "dcm") {
+                    options.averaged_converter.operating_mode = AveragedOperatingMode::DCM;
+                } else if (mode == "auto") {
+                    options.averaged_converter.operating_mode = AveragedOperatingMode::Auto;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "Invalid simulation.averaged_converter.operating_mode: '" + *mode_raw +
+                            "' (expected 'ccm', 'dcm', or 'auto')");
                 }
             }
 
@@ -1756,6 +1782,12 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (averaged["duty_max"]) {
                 options.averaged_converter.duty_max = parse_real(
                     averaged["duty_max"], "simulation.averaged_converter.duty_max", errors_);
+            }
+            if (averaged["switching_frequency_hz"]) {
+                options.averaged_converter.switching_frequency_hz = parse_real(
+                    averaged["switching_frequency_hz"],
+                    "simulation.averaged_converter.switching_frequency_hz",
+                    errors_);
             }
             if (averaged["initial_inductor_current"]) {
                 options.averaged_converter.initial_inductor_current = parse_real(
@@ -1812,6 +1844,13 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                         errors_,
                         kDiagAveragedInvalid,
                         "simulation.averaged_converter.ccm_current_threshold must be finite and >= 0");
+                }
+                if (!(std::isfinite(options.averaged_converter.switching_frequency_hz) &&
+                      options.averaged_converter.switching_frequency_hz > 0.0)) {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "simulation.averaged_converter.switching_frequency_hz must be finite and > 0");
                 }
             }
         }

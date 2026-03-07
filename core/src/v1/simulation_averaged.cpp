@@ -1,6 +1,6 @@
 /**
  * @file simulation_averaged.cpp
- * @brief Averaged-converter transient runtime path (MVP buck model).
+ * @brief Averaged-converter transient runtime path for basic non-isolated DC-DC topologies.
  */
 
 #include "pulsim/v1/simulation.hpp"
@@ -10,7 +10,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
-#include <sstream>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -19,7 +19,7 @@ namespace pulsim::v1 {
 
 namespace {
 
-struct BuckModelBinding {
+struct AveragedModelBinding {
     Real vin = 0.0;
     Real inductance = 0.0;
     Real capacitance = 0.0;
@@ -27,6 +27,16 @@ struct BuckModelBinding {
     Index vin_node = -1;
     Index output_node = -1;
     Index inductor_branch = -1;
+};
+
+struct AveragedDerivatives {
+    Real d_iL = 0.0;
+    Real d_vOut = 0.0;
+};
+
+struct DcmTargets {
+    Real iL_target = 0.0;
+    Real output_current_ratio = 0.0;
 };
 
 [[nodiscard]] bool nearly_same(Real lhs, Real rhs, Real eps = 1e-12) {
@@ -49,15 +59,27 @@ struct BuckModelBinding {
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<BuckModelBinding> build_buck_binding(
+[[nodiscard]] std::string topology_name(AveragedConverterTopology topology) {
+    switch (topology) {
+        case AveragedConverterTopology::Buck:
+            return "buck";
+        case AveragedConverterTopology::Boost:
+            return "boost";
+        case AveragedConverterTopology::BuckBoost:
+            return "buck_boost";
+    }
+    return "unknown";
+}
+
+[[nodiscard]] std::optional<AveragedModelBinding> build_converter_binding(
     const Circuit& circuit,
     const AveragedConverterOptions& options,
     std::string* error_message) {
-    BuckModelBinding binding;
+    AveragedModelBinding binding;
     const auto& devices = circuit.devices();
     const auto& conns = circuit.connections();
 
-    const auto fail = [&](std::string message) -> std::optional<BuckModelBinding> {
+    const auto fail = [&](std::string message) -> std::optional<AveragedModelBinding> {
         if (error_message != nullptr) {
             *error_message = std::move(message);
         }
@@ -70,8 +92,7 @@ struct BuckModelBinding {
     }
     const auto* vin_source = std::get_if<VoltageSource>(&devices[*vin_idx]);
     if (vin_source == nullptr) {
-        return fail(
-            "averaged_converter.vin_source must reference a voltage_source in MVP buck mode");
+        return fail("averaged_converter.vin_source must reference a voltage_source");
     }
     const auto& vin_conn = conns[*vin_idx];
     if (vin_conn.nodes.size() < 2) {
@@ -86,8 +107,7 @@ struct BuckModelBinding {
         binding.vin = -vin_source->voltage();
         binding.vin_node = vin_neg;
     } else {
-        return fail(
-            "MVP buck averaged mode currently supports vin_source referenced to ground");
+        return fail("averaged_converter.vin_source must be referenced to ground");
     }
 
     const auto inductor_idx = find_component_index(circuit, options.inductor);
@@ -161,6 +181,138 @@ struct BuckModelBinding {
     return meta;
 }
 
+[[nodiscard]] std::optional<AveragedDerivatives> compute_ccm_derivatives(
+    AveragedConverterTopology topology,
+    const AveragedModelBinding& binding,
+    Real duty,
+    Real iL,
+    Real vOut) {
+    AveragedDerivatives out;
+    switch (topology) {
+        case AveragedConverterTopology::Buck:
+            out.d_iL = (duty * binding.vin - vOut) / binding.inductance;
+            out.d_vOut = (iL - vOut / binding.load_resistance) / binding.capacitance;
+            break;
+        case AveragedConverterTopology::Boost:
+            out.d_iL = (binding.vin - (1.0 - duty) * vOut) / binding.inductance;
+            out.d_vOut =
+                ((1.0 - duty) * iL - vOut / binding.load_resistance) / binding.capacitance;
+            break;
+        case AveragedConverterTopology::BuckBoost:
+            out.d_iL = (duty * binding.vin + (1.0 - duty) * vOut) / binding.inductance;
+            out.d_vOut =
+                (-(1.0 - duty) * iL - vOut / binding.load_resistance) / binding.capacitance;
+            break;
+    }
+
+    if (!(std::isfinite(out.d_iL) && std::isfinite(out.d_vOut))) {
+        return std::nullopt;
+    }
+    return out;
+}
+
+[[nodiscard]] std::optional<DcmTargets> compute_dcm_targets(
+    AveragedConverterTopology topology,
+    const AveragedModelBinding& binding,
+    Real duty,
+    Real switching_frequency_hz) {
+    if (!(std::isfinite(switching_frequency_hz) && switching_frequency_hz > 0.0)) {
+        return std::nullopt;
+    }
+
+    const Real k = 2.0 * binding.inductance * switching_frequency_hz / binding.load_resistance;
+    if (!(std::isfinite(k) && k > 0.0)) {
+        return std::nullopt;
+    }
+
+    const Real vin_abs = std::abs(binding.vin);
+    const Real vin_sign = std::copysign(1.0, binding.vin);
+    const Real duty_sq = duty * duty;
+    const Real eps = 1e-15;
+
+    Real m = 0.0;
+    Real v_target = 0.0;
+    switch (topology) {
+        case AveragedConverterTopology::Buck:
+            m = 0.5 * (std::sqrt(k * k + 4.0 * duty_sq) - k);
+            v_target = vin_sign * (m * vin_abs);
+            break;
+        case AveragedConverterTopology::Boost:
+            m = 0.5 * (1.0 + std::sqrt(1.0 + 4.0 * duty_sq / k));
+            v_target = vin_sign * (m * vin_abs);
+            break;
+        case AveragedConverterTopology::BuckBoost:
+            m = duty / std::sqrt(k);
+            v_target = -vin_sign * (m * vin_abs);
+            break;
+    }
+
+    DcmTargets targets{};
+    if (topology == AveragedConverterTopology::Buck) {
+        targets.iL_target = v_target / binding.load_resistance;
+        targets.output_current_ratio = 1.0;
+    } else {
+        if (vin_abs <= eps) {
+            targets.iL_target = 0.0;
+        } else {
+            const Real p_out_target = (v_target * v_target) / binding.load_resistance;
+            targets.iL_target = vin_sign * (p_out_target / vin_abs);
+        }
+        if (std::abs(v_target) <= eps) {
+            targets.output_current_ratio = 0.0;
+        } else {
+            // Ratio i_out / i_L from ideal power transfer in DCM for boost-derived stages.
+            targets.output_current_ratio = binding.vin / v_target;
+        }
+    }
+
+    if (!(std::isfinite(targets.iL_target) && std::isfinite(targets.output_current_ratio))) {
+        return std::nullopt;
+    }
+    return targets;
+}
+
+[[nodiscard]] std::optional<AveragedDerivatives> compute_dcm_derivatives(
+    AveragedConverterTopology topology,
+    const AveragedModelBinding& binding,
+    Real duty,
+    Real switching_frequency_hz,
+    Real dt,
+    Real iL,
+    Real vOut) {
+    const auto targets = compute_dcm_targets(topology, binding, duty, switching_frequency_hz);
+    if (!targets.has_value()) {
+        return std::nullopt;
+    }
+
+    const Real tau_i = std::max(dt, 1.0 / switching_frequency_hz);
+    if (!(std::isfinite(tau_i) && tau_i > 0.0)) {
+        return std::nullopt;
+    }
+
+    AveragedDerivatives out;
+    out.d_iL = (targets->iL_target - iL) / tau_i;
+    const Real i_out = targets->output_current_ratio * iL;
+    out.d_vOut = (i_out - vOut / binding.load_resistance) / binding.capacitance;
+
+    if (!(std::isfinite(out.d_iL) && std::isfinite(out.d_vOut))) {
+        return std::nullopt;
+    }
+    return out;
+}
+
+[[nodiscard]] bool uses_ccm_equations(const AveragedConverterOptions& options, Real iL) {
+    switch (options.operating_mode) {
+        case AveragedOperatingMode::CCM:
+            return true;
+        case AveragedOperatingMode::DCM:
+            return false;
+        case AveragedOperatingMode::Auto:
+            return iL >= options.ccm_current_threshold;
+    }
+    return true;
+}
+
 }  // namespace
 
 SimulationResult Simulator::run_transient_averaged_impl(const Vector& x0,
@@ -181,15 +333,11 @@ SimulationResult Simulator::run_transient_averaged_impl(const Vector& x0,
     };
 
     const auto& avg = options_.averaged_converter;
+    const std::string topology = topology_name(avg.topology);
     if (!avg.enabled) {
         return fail(
             SimulationDiagnosticCode::AveragedInvalidConfiguration,
             "Averaged converter mode is disabled");
-    }
-    if (avg.topology != AveragedConverterTopology::Buck) {
-        return fail(
-            SimulationDiagnosticCode::AveragedUnsupportedConfiguration,
-            "Only buck topology is supported in averaged_converter MVP");
     }
     if (!(std::isfinite(avg.duty_min) && std::isfinite(avg.duty_max) &&
           std::isfinite(avg.duty) && avg.duty_min >= 0.0 && avg.duty_max <= 1.0 &&
@@ -206,9 +354,14 @@ SimulationResult Simulator::run_transient_averaged_impl(const Vector& x0,
             SimulationDiagnosticCode::AveragedInvalidConfiguration,
             "Invalid averaged_converter.ccm_current_threshold: must be finite and >= 0");
     }
+    if (!(std::isfinite(avg.switching_frequency_hz) && avg.switching_frequency_hz > 0.0)) {
+        return fail(
+            SimulationDiagnosticCode::AveragedInvalidConfiguration,
+            "Invalid averaged_converter.switching_frequency_hz: must be finite and > 0");
+    }
 
     std::string binding_error;
-    const auto binding = build_buck_binding(circuit_, avg, &binding_error);
+    const auto binding = build_converter_binding(circuit_, avg, &binding_error);
     if (!binding.has_value()) {
         return fail(SimulationDiagnosticCode::AveragedInvalidConfiguration, binding_error);
     }
@@ -276,6 +429,7 @@ SimulationResult Simulator::run_transient_averaged_impl(const Vector& x0,
     Real t = options_.tstart;
     std::size_t steps = 0;
     bool warned_out_of_envelope = false;
+    const bool enforce_ccm_envelope = (avg.operating_mode == AveragedOperatingMode::CCM);
 
     while (t <= tstop || nearly_same(t, tstop)) {
         if (control != nullptr) {
@@ -310,17 +464,28 @@ SimulationResult Simulator::run_transient_averaged_impl(const Vector& x0,
             break;
         }
 
-        const Real d_iL = (duty * binding->vin - vOut) / binding->inductance;
-        const Real d_vOut = (iL - vOut / binding->load_resistance) / binding->capacitance;
-
-        if (!(std::isfinite(d_iL) && std::isfinite(d_vOut))) {
-            return fail(
-                SimulationDiagnosticCode::AveragedSolverFailure,
-                "Non-finite derivative detected in averaged buck integration");
+        std::optional<AveragedDerivatives> derivatives;
+        if (uses_ccm_equations(avg, iL)) {
+            derivatives = compute_ccm_derivatives(avg.topology, *binding, duty, iL, vOut);
+        } else {
+            derivatives = compute_dcm_derivatives(
+                avg.topology,
+                *binding,
+                duty,
+                avg.switching_frequency_hz,
+                dt,
+                iL,
+                vOut);
         }
 
-        iL += d_iL * dt;
-        vOut += d_vOut * dt;
+        if (!derivatives.has_value()) {
+            return fail(
+                SimulationDiagnosticCode::AveragedSolverFailure,
+                "Non-finite derivative detected in averaged " + topology + " integration");
+        }
+
+        iL += derivatives->d_iL * dt;
+        vOut += derivatives->d_vOut * dt;
         t += dt;
         ++steps;
 
@@ -330,11 +495,11 @@ SimulationResult Simulator::run_transient_averaged_impl(const Vector& x0,
                 "Averaged simulation exceeded maximum step budget");
         }
 
-        if (iL < avg.ccm_current_threshold) {
+        if (enforce_ccm_envelope && iL < avg.ccm_current_threshold) {
             if (avg.envelope_policy == AveragedEnvelopePolicy::Strict) {
                 return fail(
                     SimulationDiagnosticCode::AveragedOutOfEnvelope,
-                    "Averaged buck run left CCM envelope (iL < ccm_current_threshold)");
+                    "Averaged " + topology + " run left CCM envelope (iL < ccm_current_threshold)");
             }
             warned_out_of_envelope = true;
         }
@@ -349,8 +514,8 @@ SimulationResult Simulator::run_transient_averaged_impl(const Vector& x0,
     result.final_status = SolverStatus::Success;
     result.diagnostic = SimulationDiagnosticCode::None;
     result.message = warned_out_of_envelope
-        ? "Averaged buck simulation completed with out-of-envelope warning"
-        : "Averaged buck simulation completed";
+        ? "Averaged " + topology + " simulation completed with out-of-envelope warning"
+        : "Averaged " + topology + " simulation completed";
     result.total_steps = static_cast<int>(result.time.size());
     result.newton_iterations_total = 0;
     result.timestep_rejections = 0;

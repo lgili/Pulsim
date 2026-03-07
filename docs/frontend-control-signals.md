@@ -62,6 +62,11 @@ Quando `simulation.averaged_converter.enabled: true`, os canais canônicos são:
 - `Vavg(<output_node>)`
 - `Davg`
 
+Modos suportados no backend:
+
+- `operating_mode: ccm | dcm | auto`
+- `topology: buck | boost | buck_boost`
+
 Contrato de consumo no front:
 
 - plote estes canais diretamente quando existirem;
