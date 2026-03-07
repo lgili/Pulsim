@@ -8,9 +8,35 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
+#include <optional>
+#include <unordered_map>
 #include <utility>
 
 namespace pulsim::v1 {
+
+namespace {
+// Loss consistency is compared between step-averaged telemetry and sampled channels.
+// Pulsed channels carry quantization uncertainty on sampled integration (order P_peak * dt).
+constexpr Real kLossConsistencyRelTol = 1e-2;
+constexpr Real kLossConsistencyAbsTol = 1e-8;
+
+/// Relative/absolute floating-point comparator used by post-run consistency guards.
+[[nodiscard]] bool nearly_equal(Real a,
+                                Real b,
+                                Real rel_tol = 1e-6,
+                                Real abs_tol = 1e-9) {
+    if (!std::isfinite(a) || !std::isfinite(b)) {
+        return false;
+    }
+    const Real diff = std::abs(a - b);
+    if (diff <= abs_tol) {
+        return true;
+    }
+    const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
+    return diff <= rel_tol * scale;
+}
+}  // namespace
 
 EventTopologyModule::EventTopologyModule(const SimulationOptions& options,
                                          Circuit& circuit,
@@ -134,6 +160,7 @@ ElectrothermalTelemetryModule::ElectrothermalTelemetryModule(
       services_(services),
       result_(result),
       sample_reserve_(sample_reserve),
+      losses_enabled_(options.enable_losses),
       has_loss_trace_(options.enable_losses &&
                       static_cast<bool>(services.loss_service)),
       has_thermal_trace_(options.enable_losses &&
@@ -393,6 +420,346 @@ void ElectrothermalTelemetryModule::sample_thermal_channels(std::size_t sample_c
         ensure_prefix(series, sample_count, nan);
         push_series_value(series, services_.thermal_service->device_temperature(binding.device_index));
     }
+}
+
+void ElectrothermalTelemetryModule::finalize_loss_summary() {
+    if (!services_.loss_service) {
+        return;
+    }
+
+    Real duration = 0.0;
+    if (result_.time.size() >= 2) {
+        duration = result_.time.back() - result_.time.front();
+    }
+    result_.loss_summary = services_.loss_service->finalize(duration);
+}
+
+void ElectrothermalTelemetryModule::finalize_thermal_summary() {
+    if (!services_.thermal_service) {
+        return;
+    }
+
+    const ThermalServiceSummary service_summary = services_.thermal_service->finalize();
+    ThermalSummary summary;
+    summary.enabled = service_summary.enabled;
+    summary.ambient = service_summary.ambient;
+    summary.max_temperature = service_summary.max_temperature;
+    summary.device_temperatures.reserve(service_summary.device_temperatures.size());
+    for (const auto& item : service_summary.device_temperatures) {
+        DeviceThermalTelemetry telemetry;
+        telemetry.device_name = item.device_name;
+        telemetry.enabled = item.enabled;
+        telemetry.final_temperature = item.final_temperature;
+        telemetry.peak_temperature = item.peak_temperature;
+        telemetry.average_temperature = item.average_temperature;
+        summary.device_temperatures.push_back(std::move(telemetry));
+    }
+    result_.thermal_summary = std::move(summary);
+}
+
+void ElectrothermalTelemetryModule::finalize_component_electrothermal() {
+    const auto& conns = circuit_.connections();
+    result_.component_electrothermal.clear();
+    result_.component_electrothermal.reserve(conns.size());
+
+    std::unordered_map<std::string, const LossResult*> loss_by_name;
+    loss_by_name.reserve(result_.loss_summary.device_losses.size());
+    for (const auto& item : result_.loss_summary.device_losses) {
+        loss_by_name[item.device_name] = &item;
+    }
+
+    std::unordered_map<std::string, const DeviceThermalTelemetry*> thermal_by_name;
+    thermal_by_name.reserve(result_.thermal_summary.device_temperatures.size());
+    for (const auto& item : result_.thermal_summary.device_temperatures) {
+        thermal_by_name[item.device_name] = &item;
+    }
+
+    const Real ambient = result_.thermal_summary.ambient;
+    for (const auto& conn : conns) {
+        ComponentElectrothermalTelemetry entry;
+        entry.component_name = conn.name;
+        entry.final_temperature = ambient;
+        entry.peak_temperature = ambient;
+        entry.average_temperature = ambient;
+
+        if (const auto loss_it = loss_by_name.find(conn.name); loss_it != loss_by_name.end()) {
+            const LossResult& loss = *loss_it->second;
+            entry.conduction = loss.breakdown.conduction;
+            entry.turn_on = loss.breakdown.turn_on;
+            entry.turn_off = loss.breakdown.turn_off;
+            entry.reverse_recovery = loss.breakdown.reverse_recovery;
+            entry.total_loss = loss.breakdown.total();
+            entry.total_energy = loss.total_energy;
+            entry.average_power = loss.average_power;
+            entry.peak_power = loss.peak_power;
+        }
+
+        if (const auto thermal_it = thermal_by_name.find(conn.name); thermal_it != thermal_by_name.end()) {
+            const DeviceThermalTelemetry& thermal = *thermal_it->second;
+            entry.thermal_enabled = thermal.enabled;
+            entry.final_temperature = thermal.final_temperature;
+            entry.peak_temperature = thermal.peak_temperature;
+            entry.average_temperature = thermal.average_temperature;
+        }
+
+        result_.component_electrothermal.push_back(std::move(entry));
+    }
+}
+
+void ElectrothermalTelemetryModule::validate_electrothermal_consistency() {
+    if (!result_.success) {
+        return;
+    }
+    if (result_.time.empty()) {
+        return;
+    }
+
+    auto fail = [&](const std::string& detail) {
+        result_.success = false;
+        result_.final_status = SolverStatus::NumericalError;
+        result_.diagnostic = SimulationDiagnosticCode::TransientStepFailure;
+        result_.message = "Electrothermal consistency failure: " + detail;
+        result_.backend_telemetry.failure_reason = "electrothermal_consistency_failure";
+    };
+
+    auto find_channel = [&](const std::string& channel_name) -> const std::vector<Real>* {
+        const auto it = result_.virtual_channels.find(channel_name);
+        if (it == result_.virtual_channels.end()) {
+            return nullptr;
+        }
+        if (it->second.size() != result_.time.size()) {
+            fail("channel '" + channel_name + "' length mismatch");
+            return nullptr;
+        }
+        return &it->second;
+    };
+
+    auto integrate_channel_energy = [&](const std::string& channel_name,
+                                        const std::vector<Real>& series) -> std::optional<Real> {
+        Real energy = 0.0;
+        for (std::size_t i = 1; i < result_.time.size(); ++i) {
+            const Real dt = result_.time[i] - result_.time[i - 1];
+            if (!std::isfinite(dt) || dt < 0.0) {
+                fail("non-monotonic or non-finite time base while integrating '" + channel_name + "'");
+                return std::nullopt;
+            }
+            const Real power = series[i];
+            if (!std::isfinite(power) || power < -1e-12) {
+                fail("non-finite or negative power sample in '" + channel_name + "'");
+                return std::nullopt;
+            }
+            energy += power * dt;
+        }
+        return energy;
+    };
+
+    std::unordered_map<std::string, const DeviceThermalTelemetry*> thermal_summary_by_name;
+    thermal_summary_by_name.reserve(result_.thermal_summary.device_temperatures.size());
+    for (const auto& row : result_.thermal_summary.device_temperatures) {
+        thermal_summary_by_name[row.device_name] = &row;
+    }
+
+    std::unordered_map<std::string, const LossResult*> loss_summary_by_name;
+    loss_summary_by_name.reserve(result_.loss_summary.device_losses.size());
+    for (const auto& row : result_.loss_summary.device_losses) {
+        loss_summary_by_name[row.device_name] = &row;
+    }
+
+    std::unordered_map<std::string, const ComponentElectrothermalTelemetry*> component_by_name;
+    component_by_name.reserve(result_.component_electrothermal.size());
+    for (const auto& row : result_.component_electrothermal) {
+        component_by_name[row.component_name] = &row;
+    }
+
+    for (const auto& [name, thermal] : thermal_summary_by_name) {
+        const std::string channel_name = "T(" + name + ")";
+        const std::vector<Real>* series_ptr = find_channel(channel_name);
+        if (series_ptr == nullptr) {
+            return;
+        }
+        const auto& series = *series_ptr;
+        if (series.empty()) {
+            fail("empty thermal channel '" + channel_name + "'");
+            return;
+        }
+        if (std::any_of(series.begin(), series.end(), [](Real value) { return !std::isfinite(value); })) {
+            fail("non-finite sample in thermal channel '" + channel_name + "'");
+            return;
+        }
+
+        const Real final_temperature = series.back();
+        const Real peak_temperature = *std::max_element(series.begin(), series.end());
+        const Real sum_temperature = std::accumulate(series.begin(), series.end(), Real{0.0});
+        const Real average_temperature = sum_temperature / static_cast<Real>(series.size());
+
+        if (!nearly_equal(final_temperature, thermal->final_temperature) ||
+            !nearly_equal(peak_temperature, thermal->peak_temperature) ||
+            !nearly_equal(average_temperature, thermal->average_temperature)) {
+            fail("thermal summary mismatch for component '" + name + "'");
+            return;
+        }
+
+        const auto component_it = component_by_name.find(name);
+        if (component_it == component_by_name.end()) {
+            fail("component_electrothermal missing thermal-enabled component '" + name + "'");
+            return;
+        }
+        const auto* component = component_it->second;
+        if (!nearly_equal(final_temperature, component->final_temperature) ||
+            !nearly_equal(peak_temperature, component->peak_temperature) ||
+            !nearly_equal(average_temperature, component->average_temperature)) {
+            fail("component_electrothermal thermal mismatch for component '" + name + "'");
+            return;
+        }
+    }
+
+    if (!losses_enabled_) {
+        return;
+    }
+
+    const Real duration =
+        result_.time.size() >= 2 ? (result_.time.back() - result_.time.front()) : Real{0.0};
+    Real max_dt = 0.0;
+    for (std::size_t i = 1; i < result_.time.size(); ++i) {
+        const Real dt = result_.time[i] - result_.time[i - 1];
+        if (std::isfinite(dt) && dt > 0.0) {
+            max_dt = std::max(max_dt, dt);
+        }
+    }
+    max_dt = std::max(max_dt, Real{1e-18});
+
+    auto channel_energy_quantization_tol = [&](const std::vector<Real>& series) -> Real {
+        Real peak_power = 0.0;
+        for (Real sample : series) {
+            if (std::isfinite(sample)) {
+                peak_power = std::max(peak_power, std::abs(sample));
+            }
+        }
+        return std::max(kLossConsistencyAbsTol, peak_power * max_dt);
+    };
+    auto channel_average_power_quantization_tol = [&](const std::vector<Real>& series) -> Real {
+        if (duration <= 0.0) {
+            return kLossConsistencyAbsTol;
+        }
+        return channel_energy_quantization_tol(series) / duration;
+    };
+
+    Real aggregated_channel_energy = 0.0;
+    Real aggregated_channel_energy_tol = 0.0;
+    const auto& conns = circuit_.connections();
+    for (const auto& conn : conns) {
+        const std::string p_cond_name = "Pcond(" + conn.name + ")";
+        const std::string p_on_name = "Psw_on(" + conn.name + ")";
+        const std::string p_off_name = "Psw_off(" + conn.name + ")";
+        const std::string p_rr_name = "Prr(" + conn.name + ")";
+        const std::string p_total_name = "Ploss(" + conn.name + ")";
+
+        const std::vector<Real>* p_cond = find_channel(p_cond_name);
+        if (p_cond == nullptr) return;
+        const std::vector<Real>* p_on = find_channel(p_on_name);
+        if (p_on == nullptr) return;
+        const std::vector<Real>* p_off = find_channel(p_off_name);
+        if (p_off == nullptr) return;
+        const std::vector<Real>* p_rr = find_channel(p_rr_name);
+        if (p_rr == nullptr) return;
+        const std::vector<Real>* p_total = find_channel(p_total_name);
+        if (p_total == nullptr) return;
+
+        const std::optional<Real> e_cond_opt = integrate_channel_energy(p_cond_name, *p_cond);
+        if (!e_cond_opt.has_value()) return;
+        const std::optional<Real> e_on_opt = integrate_channel_energy(p_on_name, *p_on);
+        if (!e_on_opt.has_value()) return;
+        const std::optional<Real> e_off_opt = integrate_channel_energy(p_off_name, *p_off);
+        if (!e_off_opt.has_value()) return;
+        const std::optional<Real> e_rr_opt = integrate_channel_energy(p_rr_name, *p_rr);
+        if (!e_rr_opt.has_value()) return;
+        const std::optional<Real> e_total_opt = integrate_channel_energy(p_total_name, *p_total);
+        if (!e_total_opt.has_value()) return;
+
+        const Real e_cond = *e_cond_opt;
+        const Real e_on = *e_on_opt;
+        const Real e_off = *e_off_opt;
+        const Real e_rr = *e_rr_opt;
+        const Real e_total = *e_total_opt;
+        const Real e_breakdown = e_cond + e_on + e_off + e_rr;
+        const Real e_cond_tol = channel_energy_quantization_tol(*p_cond);
+        const Real e_on_tol = channel_energy_quantization_tol(*p_on);
+        const Real e_off_tol = channel_energy_quantization_tol(*p_off);
+        const Real e_rr_tol = channel_energy_quantization_tol(*p_rr);
+        const Real e_total_tol = channel_energy_quantization_tol(*p_total);
+        const Real e_breakdown_tol = e_cond_tol + e_on_tol + e_off_tol + e_rr_tol;
+        if (!nearly_equal(
+                e_total,
+                e_breakdown,
+                kLossConsistencyRelTol,
+                std::max(e_total_tol, e_breakdown_tol))) {
+            fail("Ploss channel mismatch against breakdown for component '" + conn.name + "'");
+            return;
+        }
+        aggregated_channel_energy += e_total;
+        aggregated_channel_energy_tol += e_total_tol;
+
+        const Real avg_cond = duration > 0.0 ? e_cond / duration : 0.0;
+        const Real avg_on = duration > 0.0 ? e_on / duration : 0.0;
+        const Real avg_off = duration > 0.0 ? e_off / duration : 0.0;
+        const Real avg_rr = duration > 0.0 ? e_rr / duration : 0.0;
+        const Real avg_total = duration > 0.0 ? e_total / duration : 0.0;
+        const Real avg_cond_tol = channel_average_power_quantization_tol(*p_cond);
+        const Real avg_on_tol = channel_average_power_quantization_tol(*p_on);
+        const Real avg_off_tol = channel_average_power_quantization_tol(*p_off);
+        const Real avg_rr_tol = channel_average_power_quantization_tol(*p_rr);
+        const Real avg_total_tol = channel_average_power_quantization_tol(*p_total);
+
+        const auto component_it = component_by_name.find(conn.name);
+        if (component_it == component_by_name.end()) {
+            fail("component_electrothermal missing row for component '" + conn.name + "'");
+            return;
+        }
+        const auto* component = component_it->second;
+        if (!nearly_equal(component->conduction, avg_cond, kLossConsistencyRelTol, avg_cond_tol) ||
+            !nearly_equal(component->turn_on, avg_on, kLossConsistencyRelTol, avg_on_tol) ||
+            !nearly_equal(component->turn_off, avg_off, kLossConsistencyRelTol, avg_off_tol) ||
+            !nearly_equal(component->reverse_recovery, avg_rr, kLossConsistencyRelTol, avg_rr_tol) ||
+            !nearly_equal(component->total_loss, avg_total, kLossConsistencyRelTol, avg_total_tol) ||
+            !nearly_equal(component->total_energy, e_total, kLossConsistencyRelTol, e_total_tol)) {
+            fail("component_electrothermal loss mismatch for component '" + conn.name + "'");
+            return;
+        }
+
+        const auto loss_it = loss_summary_by_name.find(conn.name);
+        if (loss_it == loss_summary_by_name.end()) {
+            if (!nearly_equal(e_total, 0.0, 1e-6, 1e-10)) {
+                fail("loss_summary missing non-zero component '" + conn.name + "'");
+                return;
+            }
+            continue;
+        }
+        const auto* loss = loss_it->second;
+        if (!nearly_equal(loss->breakdown.conduction, avg_cond, kLossConsistencyRelTol, avg_cond_tol) ||
+            !nearly_equal(loss->breakdown.turn_on, avg_on, kLossConsistencyRelTol, avg_on_tol) ||
+            !nearly_equal(loss->breakdown.turn_off, avg_off, kLossConsistencyRelTol, avg_off_tol) ||
+            !nearly_equal(loss->breakdown.reverse_recovery, avg_rr, kLossConsistencyRelTol, avg_rr_tol) ||
+            !nearly_equal(loss->average_power, avg_total, kLossConsistencyRelTol, avg_total_tol) ||
+            !nearly_equal(loss->total_energy, e_total, kLossConsistencyRelTol, e_total_tol)) {
+            fail("loss_summary mismatch for component '" + conn.name + "'");
+            return;
+        }
+    }
+
+    if (duration > 0.0 &&
+        !nearly_equal(result_.loss_summary.total_loss * duration,
+                      aggregated_channel_energy,
+                      kLossConsistencyRelTol,
+                      std::max(kLossConsistencyAbsTol, aggregated_channel_energy_tol))) {
+        fail("aggregate loss_summary total_loss mismatch against channel energy");
+    }
+}
+
+void ElectrothermalTelemetryModule::on_finalize() {
+    finalize_loss_summary();
+    finalize_thermal_summary();
+    finalize_component_electrothermal();
+    validate_electrothermal_consistency();
 }
 
 void ElectrothermalTelemetryModule::on_sample_emit(Real sample_time, std::size_t sample_count) {

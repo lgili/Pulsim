@@ -107,6 +107,9 @@ public:
     /// Emits one sample for canonical loss/thermal channels.
     void on_sample_emit(Real sample_time, std::size_t sample_count);
 
+    /// Finalizes loss/thermal summaries and validates channel consistency contracts.
+    void on_finalize();
+
 private:
     struct ThermalTraceBinding {
         std::size_t device_index = 0;
@@ -130,12 +133,17 @@ private:
     void initialize_thermal_channels();
     void sample_loss_channels(Real sample_time, std::size_t sample_count);
     void sample_thermal_channels(std::size_t sample_count);
+    void finalize_loss_summary();
+    void finalize_thermal_summary();
+    void finalize_component_electrothermal();
+    void validate_electrothermal_consistency();
 
     const Circuit& circuit_;
     const TransientServiceRegistry& services_;
     SimulationResult& result_;
     std::size_t sample_reserve_ = 0;
 
+    bool losses_enabled_ = false;
     bool has_loss_trace_ = false;
     bool has_thermal_trace_ = false;
     bool loss_interval_initialized_ = false;

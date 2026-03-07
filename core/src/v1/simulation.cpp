@@ -2263,10 +2263,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             std::string(diagnostic_code_to_reason(result.diagnostic));
     }
 
-    finalize_loss_summary(result);
-    finalize_thermal_summary(result);
-    finalize_component_electrothermal(result);
-    validate_electrothermal_consistency(result);
+    electrothermal_module.on_finalize();
 
     result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
     const EquationAssemblerTelemetry assembler_telemetry =

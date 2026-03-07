@@ -628,11 +628,7 @@ private:
     void accumulate_reverse_recovery_loss(const std::string& name, Real energy);
 
     void initialize_loss_tracking();
-    void finalize_loss_summary(SimulationResult& result);
     void initialize_thermal_tracking();
-    void finalize_thermal_summary(SimulationResult& result);
-    void finalize_component_electrothermal(SimulationResult& result);
-    void validate_electrothermal_consistency(SimulationResult& result);
     void record_fallback_event(SimulationResult& result,
                                int step_index,
                                int retry_index,
