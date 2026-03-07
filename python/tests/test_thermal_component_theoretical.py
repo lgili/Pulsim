@@ -233,10 +233,10 @@ def _expected_thermal_trace_from_constant_power(
         if cth <= 0.0:
             current = ambient_c + power_w * rth
         else:
-            tau = max(rth * cth, 1e-12)
+            tau = max(rth * cth, 1e-18)
             delta = current - ambient_c
-            delta_dot = (power_w * rth - delta) / tau
-            current = ambient_c + delta + dt * delta_dot
+            a = math.exp(-dt / tau)
+            current = ambient_c + delta * a + (power_w * rth) * (1.0 - a)
         trace.append(current)
     return trace
 

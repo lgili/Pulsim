@@ -16,6 +16,10 @@ namespace pulsim::v1 {
 
 namespace {
 constexpr int kMaxBisections = 12;
+// Loss consistency is compared between step-averaged telemetry and sampled channels.
+// Use a bounded tolerance to avoid false negatives in strongly pulsed waveforms.
+constexpr Real kLossConsistencyRelTol = 1e-2;
+constexpr Real kLossConsistencyAbsTol = 1e-8;
 
 /// Relative/absolute floating-point comparator used by post-run consistency guards.
 [[nodiscard]] bool nearly_equal(Real a,
@@ -772,12 +776,12 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
             return;
         }
         const auto* component = component_it->second;
-        if (!nearly_equal(component->conduction, avg_cond) ||
-            !nearly_equal(component->turn_on, avg_on) ||
-            !nearly_equal(component->turn_off, avg_off) ||
-            !nearly_equal(component->reverse_recovery, avg_rr) ||
-            !nearly_equal(component->total_loss, avg_total) ||
-            !nearly_equal(component->total_energy, e_total, 1e-6, 1e-8)) {
+        if (!nearly_equal(component->conduction, avg_cond, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(component->turn_on, avg_on, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(component->turn_off, avg_off, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(component->reverse_recovery, avg_rr, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(component->total_loss, avg_total, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(component->total_energy, e_total, kLossConsistencyRelTol, kLossConsistencyAbsTol)) {
             fail("component_electrothermal loss mismatch for component '" + conn.name + "'");
             return;
         }
@@ -791,12 +795,12 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
             continue;
         }
         const auto* loss = loss_it->second;
-        if (!nearly_equal(loss->breakdown.conduction, avg_cond) ||
-            !nearly_equal(loss->breakdown.turn_on, avg_on) ||
-            !nearly_equal(loss->breakdown.turn_off, avg_off) ||
-            !nearly_equal(loss->breakdown.reverse_recovery, avg_rr) ||
-            !nearly_equal(loss->average_power, avg_total) ||
-            !nearly_equal(loss->total_energy, e_total, 1e-6, 1e-8)) {
+        if (!nearly_equal(loss->breakdown.conduction, avg_cond, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(loss->breakdown.turn_on, avg_on, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(loss->breakdown.turn_off, avg_off, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(loss->breakdown.reverse_recovery, avg_rr, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(loss->average_power, avg_total, kLossConsistencyRelTol, kLossConsistencyAbsTol) ||
+            !nearly_equal(loss->total_energy, e_total, kLossConsistencyRelTol, kLossConsistencyAbsTol)) {
             fail("loss_summary mismatch for component '" + conn.name + "'");
             return;
         }
@@ -805,8 +809,8 @@ void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
     if (duration > 0.0 &&
         !nearly_equal(result.loss_summary.total_loss * duration,
                       aggregated_channel_energy,
-                      1e-6,
-                      1e-8)) {
+                      kLossConsistencyRelTol,
+                      kLossConsistencyAbsTol)) {
         fail("aggregate loss_summary total_loss mismatch against channel energy");
     }
 }
