@@ -507,6 +507,13 @@ public:
         states_.assign(devices.size(), DeviceLossState{});
         switching_energy_.assign(devices.size(), std::nullopt);
         diode_conducting_.assign(devices.size(), false);
+        pending_turn_on_energy_.assign(devices.size(), 0.0);
+        pending_turn_off_energy_.assign(devices.size(), 0.0);
+        pending_reverse_recovery_energy_.assign(devices.size(), 0.0);
+        last_device_conduction_power_.assign(devices.size(), 0.0);
+        last_device_turn_on_power_.assign(devices.size(), 0.0);
+        last_device_turn_off_power_.assign(devices.size(), 0.0);
+        last_device_reverse_recovery_power_.assign(devices.size(), 0.0);
         last_device_power_.assign(devices.size(), 0.0);
         name_to_index_.clear();
 
@@ -536,8 +543,10 @@ public:
         state.accumulator.add_switching_event(energy);
         if (turning_on) {
             state.switching_energy.turn_on += energy;
+            pending_turn_on_energy_[*index] += energy;
         } else {
             state.switching_energy.turn_off += energy;
+            pending_turn_off_energy_[*index] += energy;
         }
     }
 
@@ -555,6 +564,7 @@ public:
         auto& state = states_[*index];
         state.accumulator.add_switching_event(energy);
         state.switching_energy.reverse_recovery += energy;
+        pending_reverse_recovery_energy_[*index] += energy;
     }
 
     void commit_accepted_segment(const Vector& x,
@@ -571,6 +581,26 @@ public:
             last_device_power_.assign(devices.size(), 0.0);
         } else {
             std::fill(last_device_power_.begin(), last_device_power_.end(), 0.0);
+        }
+        if (last_device_conduction_power_.size() != devices.size()) {
+            last_device_conduction_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_conduction_power_.begin(), last_device_conduction_power_.end(), 0.0);
+        }
+        if (last_device_turn_on_power_.size() != devices.size()) {
+            last_device_turn_on_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_turn_on_power_.begin(), last_device_turn_on_power_.end(), 0.0);
+        }
+        if (last_device_turn_off_power_.size() != devices.size()) {
+            last_device_turn_off_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_turn_off_power_.begin(), last_device_turn_off_power_.end(), 0.0);
+        }
+        if (last_device_reverse_recovery_power_.size() != devices.size()) {
+            last_device_reverse_recovery_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_reverse_recovery_power_.begin(), last_device_reverse_recovery_power_.end(), 0.0);
         }
 
         auto node_voltage = [&x](Index node) -> Real {
@@ -678,14 +708,49 @@ public:
 
             p_cond *= thermal_scale_i;
             const Real p_clamped = std::max<Real>(0.0, p_cond);
-            last_device_power_[i] = p_clamped;
+            last_device_conduction_power_[i] = p_clamped;
 
             if (p_clamped > 0.0) {
                 auto& state = states_[i];
                 state.accumulator.add_sample(p_clamped, dt);
-                state.peak_power = std::max(state.peak_power, p_clamped);
             }
         }
+
+        const Real inv_dt = 1.0 / dt;
+        for (std::size_t i = 0; i < devices.size(); ++i) {
+            const Real p_on = pending_turn_on_energy_[i] * inv_dt;
+            const Real p_off = pending_turn_off_energy_[i] * inv_dt;
+            const Real p_rr = pending_reverse_recovery_energy_[i] * inv_dt;
+            const Real p_total =
+                std::max<Real>(0.0, last_device_conduction_power_[i] + p_on + p_off + p_rr);
+
+            last_device_turn_on_power_[i] = p_on;
+            last_device_turn_off_power_[i] = p_off;
+            last_device_reverse_recovery_power_[i] = p_rr;
+            last_device_power_[i] = p_total;
+
+            auto& state = states_[i];
+            state.peak_power = std::max(state.peak_power, p_total);
+            pending_turn_on_energy_[i] = 0.0;
+            pending_turn_off_energy_[i] = 0.0;
+            pending_reverse_recovery_energy_[i] = 0.0;
+        }
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_conduction_power() const override {
+        return last_device_conduction_power_;
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_turn_on_power() const override {
+        return last_device_turn_on_power_;
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_turn_off_power() const override {
+        return last_device_turn_off_power_;
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_reverse_recovery_power() const override {
+        return last_device_reverse_recovery_power_;
     }
 
     [[nodiscard]] std::span<const Real> last_device_power() const override {
@@ -762,7 +827,14 @@ private:
     std::vector<DeviceLossState> states_;
     std::vector<std::optional<SwitchingEnergy>> switching_energy_;
     std::vector<bool> diode_conducting_;
+    std::vector<Real> pending_turn_on_energy_;
+    std::vector<Real> pending_turn_off_energy_;
+    std::vector<Real> pending_reverse_recovery_energy_;
     std::unordered_map<std::string, std::size_t, TransparentStringHash, std::equal_to<>> name_to_index_;
+    std::vector<Real> last_device_conduction_power_;
+    std::vector<Real> last_device_turn_on_power_;
+    std::vector<Real> last_device_turn_off_power_;
+    std::vector<Real> last_device_reverse_recovery_power_;
     std::vector<Real> last_device_power_;
 };
 

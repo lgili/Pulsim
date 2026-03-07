@@ -422,15 +422,28 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert "PWM1.duty" in result.virtual_channels
     assert "Xout" in result.virtual_channels
     assert "T(M1)" in result.virtual_channels
+    assert "Pcond(M1)" in result.virtual_channels
+    assert "Psw_on(M1)" in result.virtual_channels
+    assert "Psw_off(M1)" in result.virtual_channels
+    assert "Prr(M1)" in result.virtual_channels
+    assert "Ploss(M1)" in result.virtual_channels
     pi = [float(v) for v in result.virtual_channels["PI1"]]
     duty = [float(v) for v in result.virtual_channels["PWM1.duty"]]
     vout = [float(v) for v in result.virtual_channels["Xout"]]
     m1_temp = [float(v) for v in result.virtual_channels["T(M1)"]]
+    m1_pcond = [float(v) for v in result.virtual_channels["Pcond(M1)"]]
+    m1_pon = [float(v) for v in result.virtual_channels["Psw_on(M1)"]]
+    m1_poff = [float(v) for v in result.virtual_channels["Psw_off(M1)"]]
+    m1_ptotal = [float(v) for v in result.virtual_channels["Ploss(M1)"]]
 
     assert len(pi) == len(duty) == len(vout) == len(m1_temp) == len(result.time)
+    assert len(m1_pcond) == len(m1_pon) == len(m1_poff) == len(m1_ptotal) == len(result.time)
     assert all(0.0 <= value <= 0.95 + 1e-12 for value in duty)
     assert max(abs(a - b) for a, b in zip(pi, duty)) < 1e-12
     assert abs(vout[-1] - 6.0) < 0.5
+    assert max(m1_pon) > 0.0
+    assert max(m1_poff) > 0.0
+    assert max(m1_ptotal) >= max(m1_pcond)
 
     loss_summary = result.loss_summary
     assert loss_summary.total_loss > 0.0
@@ -441,6 +454,10 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert "Rload" in loss_by_name
     assert loss_by_name["M1"].total_energy > 0.0
     assert loss_by_name["Rload"].total_energy > 0.0
+    assert (
+        float(loss_by_name["M1"].breakdown.turn_on) +
+        float(loss_by_name["M1"].breakdown.turn_off)
+    ) > 0.0
 
     duration = float(result.time[-1]) - float(result.time[0])
     total_energy = sum(float(item.total_energy) for item in loss_rows)
@@ -455,6 +472,9 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert result.virtual_channel_metadata["T(M1)"].component_type == "thermal_trace"
     assert result.virtual_channel_metadata["T(M1)"].source_component == "M1"
     assert result.virtual_channel_metadata["T(M1)"].unit == "degC"
+    assert result.virtual_channel_metadata["Pcond(M1)"].domain == "loss"
+    assert result.virtual_channel_metadata["Pcond(M1)"].source_component == "M1"
+    assert result.virtual_channel_metadata["Pcond(M1)"].unit == "W"
     assert m1_temp[-1] >= thermal_summary.ambient
     thermal_by_name = {
         item.device_name: item for item in list(thermal_summary.device_temperatures)

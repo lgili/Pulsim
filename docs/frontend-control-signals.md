@@ -85,6 +85,20 @@ Importante:
 - `THERMAL_SCOPE` **não** é a temperatura de junção do componente.
 - para temperatura de dispositivo, use sempre `T(<component>)`.
 
+### Perdas (potência por componente)
+
+Canais canônicos de perdas instantâneas (amostrados por passo aceito):
+
+- `Pcond(<component_name>)`: potência de condução (W)
+- `Psw_on(<component_name>)`: potência equivalente de turn-on no passo (W)
+- `Psw_off(<component_name>)`: potência equivalente de turn-off no passo (W)
+- `Prr(<component_name>)`: potência equivalente de reverse recovery no passo (W)
+- `Ploss(<component_name>)`: potência total (`Pcond + Psw_on + Psw_off + Prr`) (W)
+
+Condição para existir:
+
+- `simulation.enable_losses: true`
+
 ## 5) Metadata obrigatória para roteamento no front
 
 Não use heurística por nome; use `result.virtual_channel_metadata[channel]`.
@@ -95,6 +109,12 @@ Para canal térmico canônico:
 - `component_type == "thermal_trace"`
 - `source_component == "<component_name>"`
 - `unit == "degC"`
+
+Para canal canônico de perdas:
+
+- `domain == "loss"`
+- `source_component == "<component_name>"`
+- `unit == "W"`
 
 Para controle/eventos/instrumentação:
 

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <type_traits>
 #include <unordered_map>
 
 namespace pulsim::v1 {
@@ -383,11 +384,22 @@ void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
     const auto& devices = circuit_.devices();
     auto idx_it = device_index_.find(sw.name);
     if (idx_it != device_index_.end()) {
-        const auto* dev = std::get_if<VoltageControlledSwitch>(&devices[idx_it->second]);
-        if (dev) {
-            g_on = dev->g_on();
-            g_off = dev->g_off();
-        }
+        const std::size_t device_index = idx_it->second;
+        std::visit([&](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                g_on = dev.g_on();
+                g_off = dev.g_off();
+            } else if constexpr (std::is_same_v<T, MOSFET>) {
+                const auto params = dev.params();
+                g_on = std::max<Real>(params.kp, Real{1e-6});
+                g_off = std::max<Real>(params.g_off, Real{1e-18});
+            } else if constexpr (std::is_same_v<T, IGBT>) {
+                const auto params = dev.params();
+                g_on = std::max<Real>(params.g_on, Real{1e-6});
+                g_off = std::max<Real>(params.g_off, Real{1e-18});
+            }
+        }, devices[device_index]);
     }
 
     Real g = new_state ? g_on : g_off;

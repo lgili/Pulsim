@@ -243,6 +243,14 @@ Notes:
 - Components with thermal disabled are still reported with deterministic ambient-based thermal fields.
 - When `enable_losses=true` and `thermal.enabled=true`, transient output includes canonical thermal traces
   in `result.virtual_channels` named `T(<component_name>)` (for thermal-enabled components).
+- When `enable_losses=true`, transient output also includes canonical per-component loss traces:
+  - `Pcond(<component>)`
+  - `Psw_on(<component>)`
+  - `Psw_off(<component>)`
+  - `Prr(<component>)`
+  - `Ploss(<component>)`
+  All these channels are aligned with `result.time` and tagged in
+  `result.virtual_channel_metadata` with `domain="loss"` and `unit="W"`.
 - Thermal traces are emitted only when all conditions hold:
   - `simulation.enable_losses: true`
   - `simulation.thermal.enabled: true`

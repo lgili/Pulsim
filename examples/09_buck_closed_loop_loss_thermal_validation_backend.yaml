@@ -45,6 +45,10 @@ components:
     kp: 0.35
     lambda: 0.01
     g_off: 1e-8
+    loss:
+      # Event energies used by backend switching-loss accounting.
+      eon: 6.0e-6
+      eoff: 8.0e-6
     thermal:
       enabled: true
       rth: 1.0

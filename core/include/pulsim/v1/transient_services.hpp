@@ -213,6 +213,10 @@ public:
     virtual void commit_accepted_segment(const Vector& x,
                                          Real dt,
                                          std::span<const Real> thermal_scale) = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_conduction_power() const = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_turn_on_power() const = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_turn_off_power() const = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_reverse_recovery_power() const = 0;
     [[nodiscard]] virtual std::span<const Real> last_device_power() const = 0;
     [[nodiscard]] virtual SystemLossSummary finalize(Real duration) const = 0;
 };

@@ -438,6 +438,14 @@ private:
         bool was_on = false;
     };
 
+    struct ForcedSwitchMonitor {
+        std::string name;
+        std::size_t device_index = 0;
+        Index t1 = -1;
+        Index t2 = -1;
+        std::optional<bool> was_forced_on;
+    };
+
     [[nodiscard]] SimulationResult run_transient_native_impl(
         const Vector& x0,
         SimulationCallback callback,
@@ -480,6 +488,7 @@ private:
     NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
 
     std::vector<SwitchMonitor> switch_monitors_;
+    std::vector<ForcedSwitchMonitor> forced_switch_monitors_;
     std::unordered_map<std::string, std::size_t> device_index_;
     Real transient_gmin_ = 0.0;
 

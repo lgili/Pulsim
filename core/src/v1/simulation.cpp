@@ -12,6 +12,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <type_traits>
 
 namespace pulsim::v1 {
 
@@ -766,6 +767,7 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     const auto& conns = circuit_.connections();
     device_index_.clear();
     switch_monitors_.clear();
+    forced_switch_monitors_.clear();
 
     for (std::size_t i = 0; i < devices.size(); ++i) {
         const auto& conn = conns[i];
@@ -783,6 +785,30 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
                 switch_monitors_.push_back(monitor);
             }
         }
+
+        std::visit([&, this](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                if (conn.nodes.size() >= 3) {
+                    ForcedSwitchMonitor monitor;
+                    monitor.name = conn.name;
+                    monitor.device_index = i;
+                    monitor.t1 = conn.nodes[1];
+                    monitor.t2 = conn.nodes[2];
+                    forced_switch_monitors_.push_back(std::move(monitor));
+                }
+            } else if constexpr (std::is_same_v<T, MOSFET> ||
+                                 std::is_same_v<T, IGBT>) {
+                if (conn.nodes.size() >= 3) {
+                    ForcedSwitchMonitor monitor;
+                    monitor.name = conn.name;
+                    monitor.device_index = i;
+                    monitor.t1 = conn.nodes[1];
+                    monitor.t2 = conn.nodes[2];
+                    forced_switch_monitors_.push_back(std::move(monitor));
+                }
+            }
+        }, devices[i]);
     }
 
     initialize_loss_tracking();
@@ -1030,9 +1056,13 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             result.fallback_trace.reserve(fallback_reserve);
         }
     }
-    if (options_.enable_events && sample_reserve > 0 && !switch_monitors_.empty()) {
+    if (options_.enable_events &&
+        sample_reserve > 0 &&
+        (!switch_monitors_.empty() || !forced_switch_monitors_.empty())) {
         const std::size_t event_reserve =
-            std::min<std::size_t>(sample_reserve * switch_monitors_.size(), sample_reserve * 2);
+            std::min<std::size_t>(
+                sample_reserve * (switch_monitors_.size() + forced_switch_monitors_.size()),
+                sample_reserve * 3);
         if (event_reserve > 0) {
             result.events.reserve(event_reserve);
         }
@@ -1132,17 +1162,30 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         std::size_t device_index = 0;
         std::string channel_name;
     };
+    struct LossTraceBinding {
+        std::size_t device_index = 0;
+        std::string conduction_channel;
+        std::string turn_on_channel;
+        std::string turn_off_channel;
+        std::string reverse_recovery_channel;
+        std::string total_channel;
+    };
     std::vector<ThermalTraceBinding> thermal_trace_bindings;
+    std::vector<LossTraceBinding> loss_trace_bindings;
     bool thermal_trace_initialized = false;
+    bool loss_trace_initialized = false;
     bool virtual_metadata_initialized = false;
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const bool has_virtual_components = circuit_.num_virtual_components() > 0;
+        const bool has_loss_trace =
+            options_.enable_losses &&
+            static_cast<bool>(transient_services_.loss_service);
         const bool has_thermal_trace =
             options_.enable_losses &&
             options_.thermal.enable &&
             static_cast<bool>(transient_services_.thermal_service);
-        if (!has_virtual_components && !has_thermal_trace) {
+        if (!has_virtual_components && !has_loss_trace && !has_thermal_trace) {
             return;
         }
 
@@ -1162,6 +1205,39 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         const std::size_t sample_count = result.time.size();
         const Real nan = std::numeric_limits<Real>::quiet_NaN();
+
+        if (options_.enable_events &&
+            sample_count > 1 &&
+            !nearly_same_time(sample_time, options_.tstop) &&
+            !forced_switch_monitors_.empty()) {
+            for (auto& monitor : forced_switch_monitors_) {
+                const std::optional<bool> current_forced =
+                    circuit_.forced_state_for_device(monitor.device_index);
+                if (!monitor.was_forced_on.has_value()) {
+                    monitor.was_forced_on = current_forced;
+                    continue;
+                }
+
+                if (monitor.was_forced_on.has_value() &&
+                    current_forced.has_value() &&
+                    *monitor.was_forced_on != *current_forced) {
+                    SwitchMonitor event_monitor;
+                    event_monitor.name = monitor.name;
+                    event_monitor.t1 = monitor.t1;
+                    event_monitor.t2 = monitor.t2;
+                    record_switch_event(
+                        event_monitor,
+                        sample_time,
+                        state,
+                        *current_forced,
+                        result,
+                        event_callback);
+                }
+
+                monitor.was_forced_on = current_forced;
+            }
+        }
+
         auto append_series_value = [&](std::vector<Real>& series, Real value) {
             const std::size_t capacity_before = series.capacity();
             series.push_back(value);
@@ -1193,6 +1269,88 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                         "virtual", channel, channel, "control", "", {}
                     };
                 }
+            }
+        }
+
+        if (has_loss_trace && !loss_trace_initialized) {
+            const auto& conns = circuit_.connections();
+            loss_trace_bindings.reserve(conns.size());
+            if (sample_reserve > 0) {
+                result.virtual_channels.reserve(result.virtual_channels.size() + conns.size() * 5);
+            }
+            auto register_loss_channel = [&](const std::string& channel,
+                                             const std::string& source,
+                                             const std::string& quantity) {
+                auto [it, inserted] = result.virtual_channels.try_emplace(channel);
+                if (inserted && sample_reserve > 0) {
+                    it->second.reserve(sample_reserve);
+                }
+                result.virtual_channel_metadata.try_emplace(
+                    channel,
+                    VirtualChannelMetadata{
+                        quantity,
+                        channel,
+                        source,
+                        "loss",
+                        "W",
+                        {}
+                    });
+            };
+
+            for (std::size_t i = 0; i < conns.size(); ++i) {
+                const std::string source = conns[i].name;
+                LossTraceBinding binding;
+                binding.device_index = i;
+                binding.conduction_channel = "Pcond(" + source + ")";
+                binding.turn_on_channel = "Psw_on(" + source + ")";
+                binding.turn_off_channel = "Psw_off(" + source + ")";
+                binding.reverse_recovery_channel = "Prr(" + source + ")";
+                binding.total_channel = "Ploss(" + source + ")";
+                register_loss_channel(binding.conduction_channel, source, "loss_trace_conduction");
+                register_loss_channel(binding.turn_on_channel, source, "loss_trace_turn_on");
+                register_loss_channel(binding.turn_off_channel, source, "loss_trace_turn_off");
+                register_loss_channel(
+                    binding.reverse_recovery_channel,
+                    source,
+                    "loss_trace_reverse_recovery");
+                register_loss_channel(binding.total_channel, source, "loss_trace_total");
+                loss_trace_bindings.push_back(std::move(binding));
+            }
+            loss_trace_initialized = true;
+        }
+
+        if (has_loss_trace) {
+            const auto conduction = transient_services_.loss_service->last_device_conduction_power();
+            const auto turn_on = transient_services_.loss_service->last_device_turn_on_power();
+            const auto turn_off = transient_services_.loss_service->last_device_turn_off_power();
+            const auto reverse_recovery =
+                transient_services_.loss_service->last_device_reverse_recovery_power();
+            const auto total = transient_services_.loss_service->last_device_power();
+
+            auto sample_loss_channel = [&](const std::string& channel_name, Real value) {
+                auto channel_it = result.virtual_channels.find(channel_name);
+                if (channel_it == result.virtual_channels.end()) {
+                    return;
+                }
+                auto& series = channel_it->second;
+                while (series.size() + 1 < sample_count) {
+                    append_series_value(series, nan);
+                }
+                append_series_value(series, value);
+            };
+
+            for (const auto& binding : loss_trace_bindings) {
+                const std::size_t i = binding.device_index;
+                const Real p_cond = i < conduction.size() ? conduction[i] : 0.0;
+                const Real p_on = i < turn_on.size() ? turn_on[i] : 0.0;
+                const Real p_off = i < turn_off.size() ? turn_off[i] : 0.0;
+                const Real p_rr = i < reverse_recovery.size() ? reverse_recovery[i] : 0.0;
+                const Real p_total = i < total.size() ? total[i] : 0.0;
+                sample_loss_channel(binding.conduction_channel, p_cond);
+                sample_loss_channel(binding.turn_on_channel, p_on);
+                sample_loss_channel(binding.turn_off_channel, p_off);
+                sample_loss_channel(binding.reverse_recovery_channel, p_rr);
+                sample_loss_channel(binding.total_channel, p_total);
             }
         }
 
@@ -1274,6 +1432,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     for (auto& sw : switch_monitors_) {
         Real v_ctrl = (sw.ctrl >= 0) ? x[sw.ctrl] : 0.0;
         sw.was_on = v_ctrl > sw.v_threshold;
+    }
+    for (auto& sw : forced_switch_monitors_) {
+        sw.was_forced_on = circuit_.forced_state_for_device(sw.device_index);
     }
 
     int lte_discontinuity_grace_steps = 0;
