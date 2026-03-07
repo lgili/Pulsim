@@ -1277,6 +1277,22 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         sw.v_threshold = monitor.v_threshold;
         return sw;
     };
+    auto refine_threshold_event = [&](const SwitchThresholdEventMonitor& monitor,
+                                      Real t_start,
+                                      Real t_end,
+                                      const Vector& x_start,
+                                      Real& t_event,
+                                      Vector& x_event) {
+        const SwitchMonitor sw = build_threshold_monitor(monitor);
+        return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
+    };
+    auto emit_threshold_event = [&](const SwitchThresholdEventMonitor& monitor,
+                                    Real event_time,
+                                    const Vector& event_state,
+                                    bool new_state) {
+        const SwitchMonitor sw = build_threshold_monitor(monitor);
+        record_switch_event(sw, event_time, event_state, new_state, result, event_callback);
+    };
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const std::size_t sample_count = result.time.size();
@@ -1847,21 +1863,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
             // Event-aligned step splitting for hard switching edges
             if (options_.enable_events && dt_used > options_.dt_min * 1.01) {
-                const auto refine_threshold_event =
-                    [&](const SwitchThresholdEventMonitor& monitor,
-                        Real t_start,
-                        Real t_end,
-                        const Vector& x_start,
-                        Real& t_event,
-                        Vector& x_event) {
-                        SwitchMonitor sw;
-                        sw.name = monitor.name;
-                        sw.ctrl = monitor.ctrl;
-                        sw.t1 = monitor.t1;
-                        sw.t2 = monitor.t2;
-                        sw.v_threshold = monitor.v_threshold;
-                        return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
-                    };
                 const std::optional<Real> earliest_event_time =
                     runtime_modules.earliest_threshold_crossing_time(
                         t,
@@ -2150,22 +2151,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             dt_used,
             x,
             step_result.solution,
-            [&](const SwitchThresholdEventMonitor& monitor,
-                Real t_start,
-                Real t_end,
-                const Vector& x_start,
-                Real& t_event,
-                Vector& x_event) {
-                const SwitchMonitor sw = build_threshold_monitor(monitor);
-                return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
-            },
-            [&](const SwitchThresholdEventMonitor& monitor,
-                Real event_time,
-                const Vector& event_state,
-                bool new_state) {
-                const SwitchMonitor sw = build_threshold_monitor(monitor);
-                record_switch_event(sw, event_time, event_state, new_state, result, event_callback);
-            });
+            refine_threshold_event,
+            emit_threshold_event);
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);

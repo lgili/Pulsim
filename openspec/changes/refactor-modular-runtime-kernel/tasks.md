@@ -19,7 +19,7 @@
 
 ## 3. Orchestrator simplification
 - [x] 3.1 Refactor runtime orchestrator to policy-only flow over module hooks.
-- [ ] 3.2 Remove duplicated cross-cutting code from orchestrator files after extraction.
+- [x] 3.2 Remove duplicated cross-cutting code from orchestrator files after extraction.
 - [x] 3.3 Add boundary checks preventing direct module-internal coupling.
 
 ## 4. Quality and performance gates
