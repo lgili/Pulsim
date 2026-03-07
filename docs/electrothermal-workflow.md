@@ -370,3 +370,48 @@ Threshold files:
 
 - `benchmarks/kpi_thresholds.yaml` (optional in general gate)
 - `benchmarks/kpi_thresholds_electrothermal.yaml` (required in electrothermal gate)
+
+## 9) Backend Contract (GUI Integration)
+
+For each accepted transient sample index `k`, backend guarantees:
+
+- `result.time[k]` exists and is monotonic.
+- every exported `result.virtual_channels[name][k]` is aligned to the same `k`.
+- channel metadata exists in `result.virtual_channel_metadata[name]`.
+
+Electrothermal canonical guarantees:
+
+- thermal channels use `T(<component_name>)`.
+- loss channels use:
+  - `Pcond(<component>)`
+  - `Psw_on(<component>)`
+  - `Psw_off(<component>)`
+  - `Prr(<component>)`
+  - `Ploss(<component>)`
+- thermal/loss channels are backend-computed physics outputs (not UI post-processing).
+- reductions are internally consistent:
+  - `component_electrothermal[i].final_temperature == last(T(component))`
+  - `component_electrothermal[i].peak_temperature == max(T(component))`
+  - `component_electrothermal[i].average_temperature == mean(T(component))`
+
+## 10) GUI Responsibility Boundary
+
+GUI should own:
+
+- form/wizard UX for scalar and datasheet model entry.
+- unit conversion helpers and validation message presentation.
+- curve import UX (CSV/PDF digitization) before sending numeric arrays to backend.
+- plotting and dashboard composition.
+
+GUI must not own:
+
+- synthetic thermal curve generation.
+- reconstruction of switching/conduction losses from electrical channels.
+- replacement or smoothing of backend physical traces.
+- heuristic domain inference from channel names when metadata is available.
+
+## 11) Scalar-to-Datasheet Migration
+
+Use the dedicated migration guide:
+
+- `docs/electrothermal-migration-scalar-to-datasheet.md`

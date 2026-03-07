@@ -919,6 +919,38 @@ def test_python_api_switching_energy_surface_override_is_used() -> None:
     assert abs(e_off / off_events - 1.5e-6) < 1e-11
 
 
+def test_closed_loop_buck_loss_channel_order_is_deterministic() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+
+    def run_once() -> list[str]:
+        parser = ps.YamlParser(parser_opts)
+        circuit, options = parser.load(str(example_path))
+        assert parser.errors == []
+        options.newton_options.num_nodes = int(circuit.num_nodes())
+        options.newton_options.num_branches = int(circuit.num_branches())
+        result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+        assert result.success
+        return [
+            name for name in result.virtual_channels.keys()
+            if name.startswith("Pcond(")
+            or name.startswith("Psw_on(")
+            or name.startswith("Psw_off(")
+            or name.startswith("Prr(")
+            or name.startswith("Ploss(")
+        ]
+
+    order_a = run_once()
+    order_b = run_once()
+    assert order_a == order_b
+
+
 def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal() -> None:
     example_path = (
         Path(__file__).resolve().parents[2]

@@ -150,3 +150,17 @@ Essas relações são o contrato canônico do backend.
 - Plotar `PWM1` como se fosse duty (o correto é `PWM1.duty`).
 - Ignorar `control.mode=discrete` e esperar atualização contínua de PI/PID.
 - Ignorar `virtual_channel_metadata` e inferir domínio por regex de nome.
+
+## 9) Responsabilidades GUI-only
+
+- UX de entrada de dados (formularios, validações visuais, assistentes).
+- Importação/digitalização de curvas para gerar arrays numéricos de entrada.
+- Organização de painéis, legenda, escala e interação de plots.
+- Conversão/apresentação de unidades no nível de interface.
+
+## 10) Comportamentos proibidos no GUI
+
+- Criar curva térmica sintética quando `T(...)` não existe no resultado.
+- Inferir perdas por heurística local sem usar canais `Pcond/Psw_on/Psw_off/Prr/Ploss`.
+- Reescrever, filtrar ou suavizar fisicamente os traços do backend sem sinalizar que é pós-processamento.
+- Corrigir inconsistências de resumo no frontend em vez de reportar erro de contrato.

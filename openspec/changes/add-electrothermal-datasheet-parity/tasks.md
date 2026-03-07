@@ -8,7 +8,7 @@
 - [x] 2.1 Implement multidimensional interpolation path for `Eon/Eoff/Err` and temperature-dependent conduction models.
 - [x] 2.2 Generalize switching-event detection to include forced `MOSFET`/`IGBT` transitions and native switching components.
 - [x] 2.3 Ensure diode reverse-recovery loss accounting is consistent with event transitions and configured data.
-- [ ] 2.4 Keep deterministic ordering and no unplanned hot-loop allocations after warm-up.
+- [x] 2.4 Keep deterministic ordering and no unplanned hot-loop allocations after warm-up.
 
 ## 3. Kernel Thermal Engine
 - [x] 3.1 Implement thermal solver support for `single_rc`, `foster`, and `cauer` networks.
@@ -33,12 +33,12 @@
 - [x] 6.4 Add electrothermal performance gates (runtime/memory/allocation counters) for rich-loss scenarios.
 
 ## 7. Documentation and GUI Boundary
-- [ ] 7.1 Document full backend electrothermal contract (input schema, outputs, metadata, guarantees).
-- [ ] 7.2 Document explicit GUI-only responsibilities (input UX, curve import UX, visualization layout).
-- [ ] 7.3 Document forbidden GUI behaviors (no synthetic physics, no heuristic thermal reconstruction).
-- [ ] 7.4 Publish migration guide from scalar-only loss setup to datasheet-grade modeling.
+- [x] 7.1 Document full backend electrothermal contract (input schema, outputs, metadata, guarantees).
+- [x] 7.2 Document explicit GUI-only responsibilities (input UX, curve import UX, visualization layout).
+- [x] 7.3 Document forbidden GUI behaviors (no synthetic physics, no heuristic thermal reconstruction).
+- [x] 7.4 Publish migration guide from scalar-only loss setup to datasheet-grade modeling.
 
 ## 8. Quality Gate
 - [x] 8.1 Run `openspec validate add-electrothermal-datasheet-parity --strict`.
 - [x] 8.2 Execute targeted test suites (`python/tests`, benchmark electrothermal matrix, runtime regression).
-- [ ] 8.3 Record acceptance evidence and unresolved issues in change notes before implementation PR.
+- [x] 8.3 Record acceptance evidence and unresolved issues in change notes before implementation PR.
