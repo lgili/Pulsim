@@ -122,6 +122,7 @@ nav:
       - API Reference: api-reference.md
       - Python API (Legacy Notes): python-api.md
   - Compatibility:
+      - Supported Components Catalog: supported-components-catalog.md
       - GUI Backend Parity: gui-component-parity.md
       - Migration Guide: migration-guide.md
       - Device Models: device-models.md
