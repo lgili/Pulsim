@@ -47,7 +47,7 @@ Current non-breaking extraction status:
 - `control_mixed_domain` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - `telemetry_channels` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - orchestrator delegates mixed-domain block execution/channel append via module hook (`on_sample_emit`)
-- orchestrator now delegates accepted-step electrothermal service updates, canonical `P*`/`T(*)` traces, and electrothermal finalization/consistency checks through module hooks (`on_step_accepted`, `on_sample_emit`, `on_finalize`)
+- orchestrator now delegates electrothermal service reset/init, accepted-step updates, canonical `P*`/`T(*)` traces, and finalization/consistency checks through module hooks (`on_run_initialize`, `on_step_accepted`, `on_sample_emit`, `on_finalize`)
 - channel names, metadata, and Python/YAML-facing behavior remain unchanged
 
 ## 2.2 Dependency rules and anti-patterns

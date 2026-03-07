@@ -101,6 +101,9 @@ public:
                                   std::size_t sample_reserve,
                                   Real initial_time);
 
+    /// Resets loss and thermal runtime services for a new transient run.
+    void on_run_initialize();
+
     /// Commits accepted-step loss/thermal state and accumulates trace interval energy.
     void on_step_accepted(const Vector& state, Real dt_segment);
 

@@ -627,8 +627,6 @@ private:
     void accumulate_switching_loss(const std::string& name, bool turning_on, Real energy);
     void accumulate_reverse_recovery_loss(const std::string& name, Real energy);
 
-    void initialize_loss_tracking();
-    void initialize_thermal_tracking();
     void record_fallback_event(SimulationResult& result,
                                int step_index,
                                int retry_index,

@@ -871,15 +871,12 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
         }, devices[i]);
     }
 
-    initialize_loss_tracking();
-}
-
-/// Initializes loss and thermal tracking services for a new run.
-void Simulator::initialize_loss_tracking() {
     if (transient_services_.loss_service) {
         transient_services_.loss_service->reset();
     }
-    initialize_thermal_tracking();
+    if (transient_services_.thermal_service) {
+        transient_services_.thermal_service->reset();
+    }
 }
 
 /**
@@ -952,13 +949,6 @@ void Simulator::record_fallback_event(SimulationResult& result,
     entry.solver_status = solver_status;
     entry.action = action;
     result.fallback_trace.push_back(std::move(entry));
-}
-
-/// Resets thermal-service runtime state for a new transient run.
-void Simulator::initialize_thermal_tracking() {
-    if (transient_services_.thermal_service) {
-        transient_services_.thermal_service->reset();
-    }
 }
 
 /**
@@ -1155,7 +1145,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
     }
 
-    initialize_loss_tracking();
     lte_estimator_.reset();
     transient_gmin_ = 0.0;
     segment_primary_disabled_for_run_ = false;
@@ -1270,6 +1259,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         result,
         sample_reserve,
         t);
+    electrothermal_module.on_run_initialize();
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const bool has_virtual_components = circuit_.num_virtual_components() > 0;

@@ -168,6 +168,15 @@ ElectrothermalTelemetryModule::ElectrothermalTelemetryModule(
                          static_cast<bool>(services.thermal_service)),
       loss_interval_start_time_(initial_time) {}
 
+void ElectrothermalTelemetryModule::on_run_initialize() {
+    if (services_.loss_service) {
+        services_.loss_service->reset();
+    }
+    if (services_.thermal_service) {
+        services_.thermal_service->reset();
+    }
+}
+
 Real ElectrothermalTelemetryModule::sanitize_power(Real value) {
     if (!std::isfinite(value) || value < 0.0) {
         return 0.0;
