@@ -59,7 +59,9 @@ jobs:
           fi
 
       - name: Install cibuildwheel
-        run: pip install cibuildwheel==2.22.0
+        # >=3.3.0 switches virtualenv bootstrap from GitHub blob URL to release URL,
+        # reducing transient 429 failures on Windows/macOS during build-env setup.
+        run: pip install cibuildwheel==3.3.1
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse

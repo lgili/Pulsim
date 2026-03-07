@@ -348,7 +348,7 @@ jobs:
       - name: Enforce KPI regression gate
         run: |
           python3 benchmarks/kpi_gate.py \
-            --baseline benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json \
+            --baseline benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json \
             --thresholds benchmarks/kpi_thresholds.yaml \
             --bench-results benchmarks/out_ci/results.json \
             --stress-summary benchmarks/stress_out_ci/stress_summary.json \

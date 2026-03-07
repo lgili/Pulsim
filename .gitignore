@@ -5,6 +5,7 @@ build-sundials-local/
 build-sundials/
 build-sundials-py313/
 build-ci/
+build-release/
 docs/_build/
 docs/cpp-api-reference/
 site/

@@ -129,6 +129,7 @@ nav:
       - Device Models: device-models.md
   - Operations:
       - Configuration: configuration.md
+      - PSIM/PLECS Gap and Modular Roadmap: psim-plecs-gap-and-modular-architecture-roadmap.md
       - Docs Versioning and Release: versioning-and-release.md
       - Release Notes (Electrothermal Parity): release-notes-electrothermal-parity.md
       - PR Package (Electrothermal): pr-electrothermal-datasheet-parity-package.md

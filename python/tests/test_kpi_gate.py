@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import platform
 from pathlib import Path
 
 import yaml
@@ -33,7 +35,9 @@ def _write_baseline_with_manifest(
     source_bench_results: Path,
     metrics: dict,
     source_artifacts_root: Path | None = None,
+    machine_class: str | None = None,
 ) -> None:
+    effective_machine_class = machine_class or (platform.machine() or "unknown")
     captured_at = "2026-02-25T00:00:00Z"
     baseline = {
         "schema_version": "pulsim-kpi-baseline-v1",
@@ -44,7 +48,7 @@ def _write_baseline_with_manifest(
         "environment": {
             "os": "test-os",
             "python": "Python 3.13",
-            "machine_class": "ci",
+            "machine_class": effective_machine_class,
             "compiler": "clang test",
             "cc": "clang test",
             "cmake": "cmake test",
@@ -314,6 +318,10 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
                     "dae_fallback_steps": 2.0,
                     "loss_energy_balance_error": 0.012,
                     "thermal_peak_temperature_delta": 18.0,
+                    "runtime_module_order_crc32": 101.0,
+                    "runtime_module_count_match": 1.0,
+                    "output_reallocation_total": 0.0,
+                    "output_reallocation_free": 1.0,
                     "component_coverage_rate": 1.0,
                     "component_coverage_gap": 0.0,
                     "component_loss_summary_consistency_error": 0.0,
@@ -328,6 +336,10 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
                     "dae_fallback_steps": 4.0,
                     "loss_energy_balance_error": 0.008,
                     "thermal_peak_temperature_delta": 22.0,
+                    "runtime_module_order_crc32": 101.0,
+                    "runtime_module_count_match": 1.0,
+                    "output_reallocation_total": 0.0,
+                    "output_reallocation_free": 1.0,
                     "component_coverage_rate": 0.9,
                     "component_coverage_gap": 0.1,
                     "component_loss_summary_consistency_error": 1.0e-4,
@@ -342,12 +354,44 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
     metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
     assert metrics["state_space_primary_ratio"] == 14.0 / 20.0
     assert metrics["dae_fallback_ratio"] == 6.0 / 20.0
+    assert metrics["module_order_mismatch_rate"] == 0.0
+    assert metrics["module_order_count_match_rate"] == 1.0
+    assert metrics["module_output_reallocation_p95"] == 0.0
+    assert metrics["module_output_reallocation_free_rate"] == 1.0
     assert metrics["loss_energy_balance_error"] == 0.01
     assert metrics["thermal_peak_temperature_delta"] == 20.0
     assert metrics["component_coverage_rate"] == 0.95
     assert metrics["component_coverage_gap"] == 0.05
     assert metrics["component_loss_summary_consistency_error"] == 5.0e-5
     assert metrics["component_thermal_summary_consistency_error"] == 2.5e-5
+
+
+def test_compute_metrics_detects_module_order_mismatch_rate(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {"runtime_module_order_crc32": 55.0, "output_reallocation_total": 0.0},
+            },
+            {
+                "status": "passed",
+                "runtime_s": 0.11,
+                "telemetry": {"runtime_module_order_crc32": 55.0, "output_reallocation_total": 0.0},
+            },
+            {
+                "status": "passed",
+                "runtime_s": 0.12,
+                "telemetry": {"runtime_module_order_crc32": 99.0, "output_reallocation_total": 1.0},
+            },
+        ]
+    }
+    bench_path = tmp_path / "bench.json"
+    _write_json(bench_path, bench_results)
+
+    metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
+    assert metrics["module_order_mismatch_rate"] == 1.0 / 3.0
+    assert math.isclose(float(metrics["module_output_reallocation_p95"]), 0.9, rel_tol=0.0, abs_tol=1e-12)
 
 
 def test_compute_metrics_runtime_quantiles_can_use_case_filter(tmp_path: Path) -> None:
@@ -526,3 +570,64 @@ def test_kpi_gate_can_continue_when_strict_provenance_is_disabled(tmp_path: Path
 
     assert report["blocked_by_provenance"] is False
     assert report["comparisons"]["runtime_p95"]["status"] == "passed"
+
+
+def test_kpi_gate_skips_runtime_metrics_on_machine_class_mismatch(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {"benchmark_id": "a", "scenario": "s0", "status": "passed", "runtime_s": 0.80},
+            {"benchmark_id": "b", "scenario": "s0", "status": "passed", "runtime_s": 0.90},
+        ]
+    }
+    thresholds = {
+        "metrics": {
+            "runtime_p95": {
+                "direction": "lower_is_better",
+                "max_regression_rel": 0.05,
+                "required": True,
+            },
+        }
+    }
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics={"runtime_p95": 0.10},
+        machine_class="mismatch-machine-class",
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+
+    assert report["overall_status"] == "passed"
+    assert report["comparisons"]["runtime_p95"]["status"] == "skipped"
+    assert "machine_class mismatch" in report["comparisons"]["runtime_p95"]["message"]
+
+
+def test_compare_metric_uses_epsilon_guard_for_near_zero_baseline() -> None:
+    cmp = kpi_gate.compare_metric(
+        name="loss_energy_balance_error",
+        current_value=3.4399697850963737e-17,
+        baseline_value=3.271133600931126e-17,
+        rules={
+            "direction": "lower_is_better",
+            "max_regression_rel": 0.05,
+            "required": True,
+        },
+    )
+
+    assert cmp.status == "passed"
+    assert cmp.regression_abs is not None
+    assert cmp.regression_rel == 0.0
