@@ -43,7 +43,11 @@ Rules:
   `result.backend_telemetry.runtime_module_order`.
 
 Current non-breaking extraction status:
-- `events_topology` adapter (forced-switch sampled transitions): `core/src/v1/runtime_module_adapters.hpp/.cpp`
+- `events_topology` adapter (`EventTopologyModule`):
+  - threshold proximity detection + crossing refinement hooks,
+  - event-aligned split candidate selection,
+  - accepted-step switch transition emission,
+  - forced-switch sampled transition emission
 - `control_mixed_domain` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - `loss_accounting` adapter (`LossAccountingModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - `thermal_coupling` adapter (`ThermalCouplingModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`

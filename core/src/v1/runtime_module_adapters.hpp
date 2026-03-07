@@ -27,11 +27,39 @@ struct ForcedSwitchEventMonitor {
     std::optional<bool> was_forced_on;
 };
 
+/**
+ * @brief Runtime watcher state for threshold-driven switch transitions.
+ */
+struct SwitchThresholdEventMonitor {
+    std::string name;
+    Index ctrl = -1;
+    Index t1 = -1;
+    Index t2 = -1;
+    Real v_threshold = 0.0;
+    bool was_on = false;
+};
+
 /// Callback invoked when forced-switch state transition should emit an event.
 using ForcedSwitchEventEmitter = std::function<void(
     const ForcedSwitchEventMonitor& monitor,
     const Vector& state,
     Real event_time,
+    bool new_state)>;
+
+/// Callback that refines threshold-crossing event time inside one accepted step.
+using ThresholdEventRefiner = std::function<bool(
+    const SwitchThresholdEventMonitor& monitor,
+    Real t_start,
+    Real t_end,
+    const Vector& x_start,
+    Real& t_event,
+    Vector& x_event)>;
+
+/// Callback that emits threshold-driven switch transition events.
+using ThresholdEventEmitter = std::function<void(
+    const SwitchThresholdEventMonitor& monitor,
+    Real event_time,
+    const Vector& event_state,
     bool new_state)>;
 
 /**
@@ -41,10 +69,33 @@ class EventTopologyModule final {
 public:
     EventTopologyModule(const SimulationOptions& options,
                         Circuit& circuit,
-                        std::vector<ForcedSwitchEventMonitor> forced_monitors);
+                        std::vector<ForcedSwitchEventMonitor> forced_monitors,
+                        std::vector<SwitchThresholdEventMonitor> threshold_monitors);
 
     /// Captures initial forced states so first sampled point does not emit false transitions.
     void on_run_initialize();
+
+    /// Initializes threshold-switch monitor states from the current state vector.
+    void initialize_threshold_states(const Vector& state);
+
+    /// Returns true when any threshold-switch control is close to switching boundary.
+    [[nodiscard]] bool near_threshold(const Vector& state) const;
+
+    /// Finds earliest threshold-crossing candidate time in one accepted electrical step.
+    [[nodiscard]] std::optional<Real> earliest_threshold_crossing_time(
+        Real t_start,
+        Real dt_used,
+        const Vector& x_start,
+        const Vector& x_end,
+        const ThresholdEventRefiner& refine_event_time) const;
+
+    /// Emits threshold-driven transition events and updates monitor states after accepted step.
+    void on_step_accepted(Real t_start,
+                          Real dt_used,
+                          const Vector& x_start,
+                          const Vector& x_end,
+                          const ThresholdEventRefiner& refine_event_time,
+                          const ThresholdEventEmitter& emit_event);
 
     /// Checks forced-state transitions and emits events for this output sample.
     void on_sample_emit(const Vector& state,
@@ -57,6 +108,7 @@ private:
     const SimulationOptions& options_;
     Circuit& circuit_;
     std::vector<ForcedSwitchEventMonitor> forced_monitors_;
+    std::vector<SwitchThresholdEventMonitor> threshold_monitors_;
 };
 
 /**

@@ -40,14 +40,113 @@ constexpr Real kLossConsistencyAbsTol = 1e-8;
 
 EventTopologyModule::EventTopologyModule(const SimulationOptions& options,
                                          Circuit& circuit,
-                                         std::vector<ForcedSwitchEventMonitor> forced_monitors)
+                                         std::vector<ForcedSwitchEventMonitor> forced_monitors,
+                                         std::vector<SwitchThresholdEventMonitor> threshold_monitors)
     : options_(options),
       circuit_(circuit),
-      forced_monitors_(std::move(forced_monitors)) {}
+      forced_monitors_(std::move(forced_monitors)),
+      threshold_monitors_(std::move(threshold_monitors)) {}
 
 void EventTopologyModule::on_run_initialize() {
     for (auto& monitor : forced_monitors_) {
         monitor.was_forced_on = circuit_.forced_state_for_device(monitor.device_index);
+    }
+}
+
+void EventTopologyModule::initialize_threshold_states(const Vector& state) {
+    for (auto& monitor : threshold_monitors_) {
+        if (monitor.ctrl >= 0 && monitor.ctrl < state.size()) {
+            monitor.was_on = state[monitor.ctrl] > monitor.v_threshold;
+        } else {
+            monitor.was_on = false;
+        }
+    }
+}
+
+bool EventTopologyModule::near_threshold(const Vector& state) const {
+    if (!options_.enable_events) {
+        return false;
+    }
+    for (const auto& monitor : threshold_monitors_) {
+        if (monitor.ctrl < 0 || monitor.ctrl >= state.size()) {
+            continue;
+        }
+        const Real v_ctrl = state[monitor.ctrl];
+        const Real threshold_scale = std::max<Real>(std::abs(monitor.v_threshold), Real{1.0});
+        const Real guard_band = std::max<Real>(threshold_scale * 0.05, Real{0.05});
+        if (std::abs(v_ctrl - monitor.v_threshold) <= guard_band) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<Real> EventTopologyModule::earliest_threshold_crossing_time(
+    Real t_start,
+    Real dt_used,
+    const Vector& x_start,
+    const Vector& x_end,
+    const ThresholdEventRefiner& refine_event_time) const {
+    if (!options_.enable_events || threshold_monitors_.empty()) {
+        return std::nullopt;
+    }
+
+    std::optional<Real> earliest_event_time;
+    const Real t_end = t_start + dt_used;
+    for (const auto& monitor : threshold_monitors_) {
+        if (monitor.ctrl < 0 || monitor.ctrl >= x_end.size()) {
+            continue;
+        }
+
+        const Real v_now = x_end[monitor.ctrl];
+        const bool now_on = v_now > monitor.v_threshold;
+        if (now_on == monitor.was_on) {
+            continue;
+        }
+
+        Real t_event = t_end;
+        Vector x_event = x_end;
+        if (!refine_event_time(monitor, t_start, t_end, x_start, t_event, x_event)) {
+            continue;
+        }
+        if (!earliest_event_time.has_value() || t_event < *earliest_event_time) {
+            earliest_event_time = t_event;
+        }
+    }
+
+    return earliest_event_time;
+}
+
+void EventTopologyModule::on_step_accepted(Real t_start,
+                                           Real dt_used,
+                                           const Vector& x_start,
+                                           const Vector& x_end,
+                                           const ThresholdEventRefiner& refine_event_time,
+                                           const ThresholdEventEmitter& emit_event) {
+    if (!options_.enable_events || threshold_monitors_.empty()) {
+        return;
+    }
+
+    const Real t_end = t_start + dt_used;
+    for (auto& monitor : threshold_monitors_) {
+        if (monitor.ctrl < 0 || monitor.ctrl >= x_end.size()) {
+            continue;
+        }
+
+        const Real v_now = x_end[monitor.ctrl];
+        const bool now_on = v_now > monitor.v_threshold;
+        if (now_on == monitor.was_on) {
+            continue;
+        }
+
+        Real t_event = t_end;
+        Vector x_event = x_end;
+        if (refine_event_time(monitor, t_start, t_end, x_start, t_event, x_event)) {
+            emit_event(monitor, t_event, x_event, now_on);
+        } else {
+            emit_event(monitor, t_end, x_end, now_on);
+        }
+        monitor.was_on = now_on;
     }
 }
 

@@ -1246,10 +1246,23 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             std::nullopt
         });
     }
+    std::vector<SwitchThresholdEventMonitor> threshold_event_monitors;
+    threshold_event_monitors.reserve(switch_monitors_.size());
+    for (const auto& monitor : switch_monitors_) {
+        threshold_event_monitors.push_back(SwitchThresholdEventMonitor{
+            monitor.name,
+            monitor.ctrl,
+            monitor.t1,
+            monitor.t2,
+            monitor.v_threshold,
+            false
+        });
+    }
     EventTopologyModule event_topology_module(
         options_,
         circuit_,
-        std::move(forced_event_monitors));
+        std::move(forced_event_monitors),
+        std::move(threshold_event_monitors));
     event_topology_module.on_run_initialize();
 
     LossAccountingModule loss_module(options_, transient_services_);
@@ -1348,10 +1361,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         callback(t, x);
     }
 
-    for (auto& sw : switch_monitors_) {
-        Real v_ctrl = (sw.ctrl >= 0) ? x[sw.ctrl] : 0.0;
-        sw.was_on = v_ctrl > sw.v_threshold;
-    }
+    event_topology_module.initialize_threshold_states(x);
     int lte_discontinuity_grace_steps = 0;
 
     while (t < options_.tstop) {
@@ -1386,30 +1396,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             return std::max(options_.dt_min,
                             std::max(profile_floor, dt_ref * Real{1e-3}));
         };
-        auto near_switching_threshold = [&](const Vector& state) {
-            if (!options_.enable_events) {
-                return false;
-            }
-            for (const auto& sw : switch_monitors_) {
-                if (sw.ctrl < 0 || sw.ctrl >= state.size()) {
-                    continue;
-                }
-                const Real v_ctrl = state[sw.ctrl];
-                const Real threshold_scale = std::max<Real>(std::abs(sw.v_threshold), Real{1.0});
-                const Real guard_band = std::max<Real>(threshold_scale * 0.05, Real{0.05});
-                if (std::abs(v_ctrl - sw.v_threshold) <= guard_band) {
-                    return true;
-                }
-            }
-            return false;
-        };
 
         const Real dt_candidate = pending_dt_override.has_value()
             ? *pending_dt_override
             : (fixed_step_policy.enabled() ? fixed_step_policy.default_dt() : dt);
         pending_dt_override.reset();
         dt = clamp_dt_for_mode(dt_candidate);
-        bool discontinuity_adjacent = variable_step_policy.enabled() && near_switching_threshold(x);
+        bool discontinuity_adjacent = variable_step_policy.enabled() &&
+                                      event_topology_module.near_threshold(x);
         if (discontinuity_adjacent && options_.stiffness_config.enable && stiffness_cooldown <= 0) {
             stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
         }
@@ -1892,23 +1886,28 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
             // Event-aligned step splitting for hard switching edges
             if (options_.enable_events && dt_used > options_.dt_min * 1.01) {
-                std::optional<Real> earliest_event_time;
-                for (const auto& sw : switch_monitors_) {
-                    Real v_now = (sw.ctrl >= 0) ? step_result.solution[sw.ctrl] : 0.0;
-                    bool now_on = v_now > sw.v_threshold;
-                    if (now_on == sw.was_on) {
-                        continue;
-                    }
-
-                    Real t_event = t + dt_used;
-                    Vector x_event = step_result.solution;
-                    if (!find_switch_event_time(sw, t, t + dt_used, x, t_event, x_event)) {
-                        continue;
-                    }
-                    if (!earliest_event_time.has_value() || t_event < *earliest_event_time) {
-                        earliest_event_time = t_event;
-                    }
-                }
+                const auto refine_threshold_event =
+                    [&](const SwitchThresholdEventMonitor& monitor,
+                        Real t_start,
+                        Real t_end,
+                        const Vector& x_start,
+                        Real& t_event,
+                        Vector& x_event) {
+                        SwitchMonitor sw;
+                        sw.name = monitor.name;
+                        sw.ctrl = monitor.ctrl;
+                        sw.t1 = monitor.t1;
+                        sw.t2 = monitor.t2;
+                        sw.v_threshold = monitor.v_threshold;
+                        return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
+                    };
+                const std::optional<Real> earliest_event_time =
+                    event_topology_module.earliest_threshold_crossing_time(
+                        t,
+                        dt_used,
+                        x,
+                        step_result.solution,
+                        refine_threshold_event);
 
                 bool split_for_event = false;
                 if (earliest_event_time.has_value()) {
@@ -2191,23 +2190,37 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         if (options_.enable_events) {
-            for (auto& sw : switch_monitors_) {
-                Real v_now = (sw.ctrl >= 0) ? step_result.solution[sw.ctrl] : 0.0;
-                bool now_on = v_now > sw.v_threshold;
-
-                if (now_on != sw.was_on) {
-                    Real t_event = t + dt_used;
-                    Vector x_event = step_result.solution;
-
-                    if (find_switch_event_time(sw, t, t + dt_used, x, t_event, x_event)) {
-                        record_switch_event(sw, t_event, x_event, now_on, result, event_callback);
-                    } else {
-                        record_switch_event(sw, t + dt_used, step_result.solution, now_on, result, event_callback);
-                    }
-
-                    sw.was_on = now_on;
-                }
-            }
+            event_topology_module.on_step_accepted(
+                t,
+                dt_used,
+                x,
+                step_result.solution,
+                [&](const SwitchThresholdEventMonitor& monitor,
+                    Real t_start,
+                    Real t_end,
+                    const Vector& x_start,
+                    Real& t_event,
+                    Vector& x_event) {
+                    SwitchMonitor sw;
+                    sw.name = monitor.name;
+                    sw.ctrl = monitor.ctrl;
+                    sw.t1 = monitor.t1;
+                    sw.t2 = monitor.t2;
+                    sw.v_threshold = monitor.v_threshold;
+                    return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
+                },
+                [&](const SwitchThresholdEventMonitor& monitor,
+                    Real event_time,
+                    const Vector& event_state,
+                    bool new_state) {
+                    SwitchMonitor sw;
+                    sw.name = monitor.name;
+                    sw.ctrl = monitor.ctrl;
+                    sw.t1 = monitor.t1;
+                    sw.t2 = monitor.t2;
+                    sw.v_threshold = monitor.v_threshold;
+                    record_switch_event(sw, event_time, event_state, new_state, result, event_callback);
+                });
         }
 
         loss_module.on_step_accepted(
