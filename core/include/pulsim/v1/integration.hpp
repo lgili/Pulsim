@@ -1,3 +1,8 @@
+/**
+ * @file integration.hpp
+ * @brief Public declarations for pulsim/v1/integration.hpp.
+ */
+
 #pragma once
 
 // =============================================================================
@@ -628,6 +633,7 @@ namespace analytical {
 /// @param R resistance
 /// @param L inductance
 /// @param C capacitance
+/// @param V_source source voltage
 /// @param v0 initial voltage
 /// @param i0 initial current
 [[nodiscard]] inline Real rlc_voltage(

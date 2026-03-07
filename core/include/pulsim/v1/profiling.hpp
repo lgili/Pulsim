@@ -8,23 +8,21 @@
  * - Measure memory usage
  *
  * Usage:
- *   // Enable profiling in debug builds
- *   #define PULSIM_ENABLE_PROFILING
+ * @code{.cpp}
+ * // Enable profiling in debug builds.
+ * // Compile with PULSIM_ENABLE_PROFILING defined.
  *
- *   // Use scoped timers
- *   {
- *       PULSIM_PROFILE_SCOPE("dc_operating_point");
- *       // ... code to profile ...
- *   }
+ * {
+ *     PULSIM_PROFILE_SCOPE("dc_operating_point");
+ *     // ... code to profile ...
+ * }
  *
- *   // Or manual timing
- *   auto& profiler = pulsim::v1::Profiler::instance();
- *   profiler.start("my_operation");
- *   // ... code ...
- *   profiler.stop("my_operation");
- *
- *   // Print report
- *   profiler.report();
+ * auto& profiler = pulsim::v1::Profiler::instance();
+ * profiler.start("my_operation");
+ * // ... code ...
+ * profiler.stop("my_operation");
+ * profiler.report();
+ * @endcode
  */
 
 #pragma once

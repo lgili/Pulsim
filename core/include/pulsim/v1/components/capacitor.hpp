@@ -1,3 +1,8 @@
+/**
+ * @file capacitor.hpp
+ * @brief Public declarations for pulsim/v1/components/capacitor.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

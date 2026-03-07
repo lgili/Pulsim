@@ -1,3 +1,8 @@
+/**
+ * @file thermal.hpp
+ * @brief Public declarations for pulsim/v1/thermal.hpp.
+ */
+
 #pragma once
 
 // =============================================================================
@@ -469,11 +474,16 @@ struct ThermalResult {
 // =============================================================================
 
 /// Create a typical 3-stage Foster network for MOSFET
-/// Parameters from typical datasheet
+/// Parameters from typical datasheet.
+/// @param Rth_jc Junction-to-case thermal resistance (K/W).
+/// @param Rth_cs Case-to-heatsink thermal resistance (K/W).
+/// @param Rth_sa Heatsink-to-ambient thermal resistance (K/W).
+/// @param name Optional model name.
+/// @return Three-stage Foster network.
 inline FosterNetwork create_mosfet_thermal_model(
-    Real Rth_jc,    ///< Junction-to-case thermal resistance (K/W)
-    Real Rth_cs,    ///< Case-to-sink thermal resistance (K/W)
-    Real Rth_sa,    ///< Sink-to-ambient thermal resistance (K/W)
+    Real Rth_jc,
+    Real Rth_cs,
+    Real Rth_sa,
     const std::string& name = "") {
 
     // Typical time constants for MOSFET
@@ -506,9 +516,13 @@ inline FosterNetwork create_from_datasheet_4param(
 }
 
 /// Create simple single-stage thermal model
+/// @param Rth_ja Total junction-to-ambient thermal resistance (K/W).
+/// @param tau Dominant thermal time constant in seconds.
+/// @param name Optional model name.
+/// @return Single-stage Foster network.
 inline FosterNetwork create_simple_thermal_model(
-    Real Rth_ja,        ///< Total junction-to-ambient (K/W)
-    Real tau = 1.0,     ///< Time constant (s)
+    Real Rth_ja,
+    Real tau = 1.0,
     const std::string& name = "") {
 
     return FosterNetwork({{Rth_ja, tau}}, name);

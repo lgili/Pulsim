@@ -1,3 +1,8 @@
+/**
+ * @file voltage_source.hpp
+ * @brief Public declarations for pulsim/v1/components/voltage_source.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

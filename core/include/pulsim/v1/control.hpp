@@ -1,3 +1,8 @@
+/**
+ * @file control.hpp
+ * @brief Public declarations for pulsim/v1/control.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

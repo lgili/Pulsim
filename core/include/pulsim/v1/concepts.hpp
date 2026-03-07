@@ -1,3 +1,8 @@
+/**
+ * @file concepts.hpp
+ * @brief Public declarations for pulsim/v1/concepts.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

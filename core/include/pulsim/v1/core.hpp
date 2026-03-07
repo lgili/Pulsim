@@ -1,3 +1,8 @@
+/**
+ * @file core.hpp
+ * @brief Public declarations for pulsim/v1/core.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

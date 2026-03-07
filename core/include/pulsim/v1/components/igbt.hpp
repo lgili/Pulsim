@@ -1,3 +1,8 @@
+/**
+ * @file igbt.hpp
+ * @brief Public declarations for pulsim/v1/components/igbt.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

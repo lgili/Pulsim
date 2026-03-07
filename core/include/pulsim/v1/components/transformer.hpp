@@ -1,3 +1,8 @@
+/**
+ * @file transformer.hpp
+ * @brief Public declarations for pulsim/v1/components/transformer.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

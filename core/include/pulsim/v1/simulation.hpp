@@ -1,3 +1,8 @@
+/**
+ * @file simulation.hpp
+ * @brief Public declarations for pulsim/v1/simulation.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/runtime_circuit.hpp"

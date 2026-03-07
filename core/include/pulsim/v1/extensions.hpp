@@ -1,3 +1,8 @@
+/**
+ * @file extensions.hpp
+ * @brief Public declarations for pulsim/v1/extensions.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/cpp23_features.hpp"

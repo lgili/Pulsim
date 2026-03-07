@@ -1,3 +1,8 @@
+/**
+ * @file constexpr_utils.hpp
+ * @brief Public declarations for pulsim/v1/constexpr_utils.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

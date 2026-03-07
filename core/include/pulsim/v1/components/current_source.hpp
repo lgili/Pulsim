@@ -1,3 +1,8 @@
+/**
+ * @file current_source.hpp
+ * @brief Public declarations for pulsim/v1/components/current_source.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

@@ -1,3 +1,8 @@
+/**
+ * @file types.hpp
+ * @brief Public declarations for pulsim/types.hpp.
+ */
+
 #pragma once
 
 #include <Eigen/Dense>

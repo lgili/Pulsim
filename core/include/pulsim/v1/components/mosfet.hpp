@@ -1,3 +1,8 @@
+/**
+ * @file mosfet.hpp
+ * @brief Public declarations for pulsim/v1/components/mosfet.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

@@ -1,3 +1,8 @@
+/**
+ * @file ideal_diode.hpp
+ * @brief Public declarations for pulsim/v1/components/ideal_diode.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

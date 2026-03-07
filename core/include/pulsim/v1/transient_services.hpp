@@ -1,3 +1,8 @@
+/**
+ * @file transient_services.hpp
+ * @brief Public declarations for pulsim/v1/transient_services.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/runtime_circuit.hpp"

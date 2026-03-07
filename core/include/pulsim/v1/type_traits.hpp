@@ -1,3 +1,8 @@
+/**
+ * @file type_traits.hpp
+ * @brief Public declarations for pulsim/v1/type_traits.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

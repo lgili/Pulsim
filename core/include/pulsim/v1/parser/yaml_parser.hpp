@@ -1,3 +1,8 @@
+/**
+ * @file yaml_parser.hpp
+ * @brief Public declarations for pulsim/v1/parser/yaml_parser.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/runtime_circuit.hpp"
