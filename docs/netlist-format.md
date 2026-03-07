@@ -218,6 +218,44 @@ The parser enforces deterministic validation for sweep ranges, point count, and 
 For full backend contract and Python result usage, see
 [Frequency Analysis (AC Sweep)](frequency-analysis-ac-sweep.md).
 
+### Averaged Converter Mode
+
+Use `simulation.averaged_converter` for backend averaged plant runs (MVP topology: buck):
+
+```yaml
+simulation:
+  averaged_converter:
+    enabled: true
+    topology: buck
+    envelope_policy: warn
+    vin_source: Vin
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 0.4
+    duty_min: 0.0
+    duty_max: 0.95
+    initial_inductor_current: 0.0
+    initial_output_voltage: 0.0
+    ccm_current_threshold: 0.0
+```
+
+Supported values:
+
+- `topology`: `buck`
+- `envelope_policy`: `strict` | `warn`
+
+Deterministic checks:
+
+- required mapping fields when `enabled=true`
+- valid duty bounds (`0 <= duty_min <= duty <= duty_max <= 1`)
+- finite `ccm_current_threshold >= 0`
+- mapped component types (`vin_source` voltage source, `inductor` inductor, `capacitor` capacitor, `load_resistor` resistor)
+
+For full runtime/result/frontend contract and migration guidance, see
+[Averaged Converter Modeling](averaged-converter-modeling.md).
+
 ### Control Blocks for Closed-Loop Converters
 
 Common blocks for converter control loops:

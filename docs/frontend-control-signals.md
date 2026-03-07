@@ -54,6 +54,20 @@ Para malha fechada com PWM:
 - use `PWM1.duty` para gráfico de duty;
 - não derive duty de `PWM1` (é estado lógico, não razão cíclica).
 
+### Averaged converter (planta média)
+
+Quando `simulation.averaged_converter.enabled: true`, os canais canônicos são:
+
+- `Iavg(<inductor_name>)`
+- `Vavg(<output_node>)`
+- `Davg`
+
+Contrato de consumo no front:
+
+- plote estes canais diretamente quando existirem;
+- mantenha alinhamento estrito com `result.time`;
+- use metadata para roteamento (`component_type == "averaged_converter"` e `source_component == "averaged_state"`).
+
 ### Eventos
 
 - relay:
@@ -116,6 +130,16 @@ Para canal canônico de perdas:
 - `source_component == "<component_name>"`
 - `unit == "W"`
 
+Para averaged converter:
+
+- `component_type == "averaged_converter"`
+- `source_component == "averaged_state"`
+- `domain == "time"`
+- unidades esperadas:
+  - `Iavg(...)`: `A`
+  - `Vavg(...)`: `V`
+  - `Davg`: `ratio`
+
 Para controle/eventos/instrumentação:
 
 - use `domain` para escolher painel/eixo.
@@ -150,6 +174,7 @@ Essas relações são o contrato canônico do backend.
 - Plotar `PWM1` como se fosse duty (o correto é `PWM1.duty`).
 - Ignorar `control.mode=discrete` e esperar atualização contínua de PI/PID.
 - Ignorar `virtual_channel_metadata` e inferir domínio por regex de nome.
+- Sintetizar `Iavg/Vavg/Davg` localmente quando backend não exportou o canal.
 
 ## 9) Responsabilidades GUI-only
 

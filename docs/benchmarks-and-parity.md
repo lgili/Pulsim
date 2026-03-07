@@ -25,6 +25,14 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
   --output-dir benchmarks/out_ac
 ```
 
+For averaged-converter paired coverage:
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only buck_switching_paired buck_averaged_mvp buck_averaged_expected_failure \
+  --output-dir benchmarks/phase14_averaged_artifacts/benchmarks
+```
+
 ## 2) Solver/Integrator Validation Matrix
 
 ```bash
@@ -92,6 +100,19 @@ Baseline and threshold files:
 - `benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json`
 - `benchmarks/kpi_thresholds.yaml`
 - `benchmarks/kpi_thresholds_ac.yaml` (AC-focused KPI gate)
+- `benchmarks/kpi_baselines/averaged_converter_phase14_2026-03-07/kpi_baseline.json` (averaged-focused gate)
+- `benchmarks/kpi_thresholds_averaged.yaml` (averaged-focused KPI gate)
+
+Averaged-focused gate command:
+
+```bash
+python3 benchmarks/kpi_gate.py \
+  --baseline benchmarks/kpi_baselines/averaged_converter_phase14_2026-03-07/kpi_baseline.json \
+  --bench-results benchmarks/phase14_averaged_artifacts/benchmarks/results.json \
+  --thresholds benchmarks/kpi_thresholds_averaged.yaml \
+  --report-out benchmarks/phase14_averaged_artifacts/reports/kpi_gate_averaged.json \
+  --print-report
+```
 
 ## Artifact Contract
 
@@ -117,3 +138,6 @@ Primary hybrid/electro-thermal KPI keys emitted in benchmark outputs:
 - `ac_sweep_mag_error`
 - `ac_sweep_phase_error`
 - `ac_runtime_p95`
+- `averaged_pair_case_count`
+- `averaged_pair_fidelity_error`
+- `averaged_pair_runtime_speedup_min`

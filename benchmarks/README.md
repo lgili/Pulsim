@@ -19,6 +19,7 @@ This folder contains the YAML benchmark suite and validation runners.
   with environment fingerprint and artifact hashes for provenance-safe gating.
 - `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
 - `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
+- `kpi_thresholds_averaged.yaml` — required KPI thresholds for averaged-mode paired gate.
 - `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
 
 ## Running
@@ -61,6 +62,17 @@ python3 benchmarks/benchmark_runner.py \
 python3 benchmarks/benchmark_runner.py \
   --only ac_rc_lowpass ac_control_workflow_expected_failure \
   --output-dir benchmarks/out_ac
+
+# Averaged converter focused paired gate
+python3 benchmarks/benchmark_runner.py \
+  --only buck_switching_paired buck_averaged_mvp buck_averaged_expected_failure \
+  --output-dir benchmarks/phase14_averaged_artifacts/benchmarks
+python3 benchmarks/kpi_gate.py \
+  --baseline benchmarks/kpi_baselines/averaged_converter_phase14_2026-03-07/kpi_baseline.json \
+  --bench-results benchmarks/phase14_averaged_artifacts/benchmarks/results.json \
+  --thresholds benchmarks/kpi_thresholds_averaged.yaml \
+  --report-out benchmarks/phase14_averaged_artifacts/reports/kpi_gate_averaged.json \
+  --print-report
 python3 benchmarks/stress_suite.py \
   --benchmarks benchmarks/electrothermal_benchmarks.yaml \
   --catalog benchmarks/electrothermal_stress_catalog.yaml \

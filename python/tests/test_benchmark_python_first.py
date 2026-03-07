@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 import benchmark_runner as br
+import kpi_gate
 import pulsim_python_backend as backend
 
 
@@ -469,6 +470,47 @@ def test_run_benchmarks_accepts_expected_failure_for_averaged_invalid_mapping(
     assert result.mode == "transient"
     assert "Expected failure matched" in result.message
     assert result.telemetry.get("expected_failure_matched") == 1.0
+
+
+def test_averaged_benchmark_kpi_gate_passes_with_frozen_baseline(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+    out_dir = tmp_path / "averaged_gate_out"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        out_dir,
+        selected=["buck_switching_paired", "buck_averaged_mvp", "buck_averaged_expected_failure"],
+        scenario_filter=["direct_trap"],
+    )
+    br.write_results(out_dir, results)
+    assert len(results) == 3
+    assert all(item.status == "passed" for item in results)
+
+    baseline_path = (
+        repo_root
+        / "benchmarks"
+        / "kpi_baselines"
+        / "averaged_converter_phase14_2026-03-07"
+        / "kpi_baseline.json"
+    )
+    thresholds_path = repo_root / "benchmarks" / "kpi_thresholds_averaged.yaml"
+    bench_results_path = out_dir / "results.json"
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_results_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+
+    assert report["overall_status"] == "passed"
+    assert report["failed_required_metrics"] == 0
+    assert report["comparisons"]["averaged_pair_case_count"]["status"] == "passed"
+    assert report["comparisons"]["averaged_pair_fidelity_error"]["status"] == "passed"
+    assert report["comparisons"]["averaged_pair_runtime_speedup_min"]["status"] == "passed"
 
 
 def test_python_backend_runs_frequency_analysis_mode_and_writes_frequency_csv(tmp_path: Path) -> None:

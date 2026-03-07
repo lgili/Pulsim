@@ -26,12 +26,12 @@
 - [x] 5.4 Add strict parser contract tests for invalid averaged-model configurations.
 
 ## 6. Documentation and UX Boundary
-- [ ] 6.1 Document averaged-model contract, supported topologies, and explicit validity envelope.
-- [ ] 6.2 Document frontend responsibilities (mode setup, envelope warnings, plotting/selection) and non-responsibilities.
-- [ ] 6.3 Publish YAML + Python examples and migration guidance from switched transient workflows.
+- [x] 6.1 Document averaged-model contract, supported topologies, and explicit validity envelope.
+- [x] 6.2 Document frontend responsibilities (mode setup, envelope warnings, plotting/selection) and non-responsibilities.
+- [x] 6.3 Publish YAML + Python examples and migration guidance from switched transient workflows.
 
 ## 7. Quality Gates (Mandatory Before Merge)
 - [x] 7.1 `openspec validate add-averaged-converter-modeling --strict` passes.
 - [x] 7.2 Targeted kernel/python/parser tests for averaged mode pass locally and in CI.
-- [ ] 7.3 Benchmark KPI gate for averaged modeling (fidelity + speedup) passes in CI.
+- [x] 7.3 Benchmark KPI gate for averaged modeling (fidelity + speedup) passes in CI.
 - [x] 7.4 Acceptance evidence (artifacts, thresholds, known limitations) is recorded in change notes.
