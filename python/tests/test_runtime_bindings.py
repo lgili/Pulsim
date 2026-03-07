@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import statistics
 from pathlib import Path
 
@@ -624,6 +625,41 @@ def test_resistor_cauer_network_generates_rising_temperature_trace() -> None:
     assert len(trace) == len(result.time)
     assert trace[-1] > trace[0]
     assert max(trace) == trace[-1]
+
+
+def test_stiff_cauer_network_remains_finite_with_large_timestep() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-3
+    opts.dt = 1e-4
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    cfg = ps.ThermalDeviceConfig()
+    cfg.enabled = True
+    cfg.network_kind = ps.ThermalNetworkKind.Cauer
+    cfg.stage_rth = [0.05, 0.10]
+    cfg.stage_cth = [1e-6, 2e-6]
+    cfg.temp_init = 25.0
+    cfg.temp_ref = 25.0
+    cfg.alpha = 0.0
+    opts.thermal_devices = {"R1": cfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    trace = [float(v) for v in result.virtual_channels["T(R1)"]]
+    assert all(math.isfinite(value) for value in trace)
+    assert trace[-1] >= trace[0]
 
 
 def test_datasheet_switching_surface_drives_event_loss_channels() -> None:

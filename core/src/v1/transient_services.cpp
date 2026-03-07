@@ -951,6 +951,7 @@ public:
                 state.config.stage_rth.size() == state.config.stage_cth.size() &&
                 !state.config.stage_rth.empty()) {
                 state.stage_temperature_rise.assign(state.config.stage_rth.size(), 0.0);
+                state.stage_work.clear();
                 const Real total_rth =
                     std::accumulate(state.config.stage_rth.begin(), state.config.stage_rth.end(), Real{0.0});
                 if (total_rth > 0.0) {
@@ -970,10 +971,12 @@ public:
                        state.config.stage_rth.size() == state.config.stage_cth.size() &&
                        !state.config.stage_rth.empty()) {
                 state.stage_temperature_rise.assign(state.config.stage_rth.size(), delta_init);
+                state.stage_work.assign(state.config.stage_rth.size(), 0.0);
                 state.temperature = ambient + state.stage_temperature_rise.front();
             } else {
                 state.config.network_kind = ThermalNetworkKind::SingleRC;
                 state.temperature = state.config.temp_init;
+                state.stage_work.clear();
             }
             state.peak_temperature = state.temperature;
             // Keep summary average consistent with exported time traces, which include t=tstart.
@@ -1032,10 +1035,11 @@ public:
                     if (cth <= 0.0) {
                         state.temperature = ambient + power * rth;
                     } else {
-                        const Real tau = std::max<Real>(rth * cth, 1e-12);
+                        const Real tau = std::max<Real>(rth * cth, 1e-18);
                         const Real delta = state.temperature - ambient;
-                        const Real delta_dot = (power * rth - delta) / tau;
-                        state.temperature = ambient + delta + dt * delta_dot;
+                        const Real a = std::exp(-dt / tau);
+                        const Real delta_ss = power * rth;
+                        state.temperature = ambient + delta * a + delta_ss * (1.0 - a);
                     }
                     break;
                 }
@@ -1048,11 +1052,11 @@ public:
                     }
                     for (std::size_t stage = 0; stage < n; ++stage) {
                         const Real r = std::max<Real>(state.config.stage_rth[stage], 1e-12);
-                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-12);
-                        const Real tau = std::max<Real>(r * c, 1e-12);
+                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-18);
+                        const Real tau = std::max<Real>(r * c, 1e-18);
                         const Real theta = state.stage_temperature_rise[stage];
-                        const Real theta_dot = (power * r - theta) / tau;
-                        const Real theta_new = theta + dt * theta_dot;
+                        const Real a = std::exp(-dt / tau);
+                        const Real theta_new = theta * a + (power * r) * (1.0 - a);
                         state.stage_temperature_rise[stage] =
                             std::isfinite(theta_new) ? theta_new : (power * r);
                     }
@@ -1067,39 +1071,52 @@ public:
                     const std::size_t n = state.config.stage_rth.size();
                     if (n == 0 ||
                         n != state.config.stage_cth.size() ||
-                        n != state.stage_temperature_rise.size()) {
+                        n != state.stage_temperature_rise.size() ||
+                        n != state.stage_work.size()) {
                         break;
                     }
-                    const std::vector<Real> previous = state.stage_temperature_rise;
-                    std::vector<Real> updated = previous;
-                    for (std::size_t stage = 0; stage < n; ++stage) {
-                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-12);
+                    // Backward-Euler implicit solve of the Cauer ladder:
+                    // C_i * d(theta_i)/dt = flow_in_i - flow_out_i.
+                    // The resulting linear system is tridiagonal and solved in O(n) with Thomas.
+                    auto& theta = state.stage_temperature_rise;
+                    auto& cprime = state.stage_work;
+                    const Real inv_dt = 1.0 / std::max<Real>(dt, 1e-18);
 
-                        Real inflow = 0.0;
-                        if (stage == 0) {
-                            inflow = power;
-                        } else {
-                            const Real r_up = std::max<Real>(state.config.stage_rth[stage - 1], 1e-12);
-                            inflow = (previous[stage - 1] - previous[stage]) / r_up;
-                        }
-
-                        Real outflow = 0.0;
-                        if (stage + 1 < n) {
-                            const Real r_down = std::max<Real>(state.config.stage_rth[stage], 1e-12);
-                            outflow = (previous[stage] - previous[stage + 1]) / r_down;
-                        } else {
-                            const Real r_ambient = std::max<Real>(state.config.stage_rth[stage], 1e-12);
-                            outflow = previous[stage] / r_ambient;
-                        }
-
-                        const Real theta_dot = (inflow - outflow) / c;
-                        const Real theta_new = previous[stage] + dt * theta_dot;
-                        updated[stage] = std::isfinite(theta_new) ? theta_new : previous[stage];
+                    {
+                        const Real c0 = std::max<Real>(state.config.stage_cth[0], 1e-18);
+                        const Real g0 = 1.0 / std::max<Real>(state.config.stage_rth[0], 1e-12);
+                        const Real diag0 = c0 * inv_dt + g0;
+                        const Real upper0 = (n > 1) ? -g0 : 0.0;
+                        const Real b0 = c0 * inv_dt * theta[0] + power;
+                        const Real denom0 = std::max<Real>(diag0, 1e-18);
+                        cprime[0] = upper0 / denom0;
+                        theta[0] = b0 / denom0;
                     }
-                    state.stage_temperature_rise = std::move(updated);
+
+                    for (std::size_t stage = 1; stage < n; ++stage) {
+                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-18);
+                        const Real g_up = 1.0 / std::max<Real>(state.config.stage_rth[stage - 1], 1e-12);
+                        const Real g_down = 1.0 / std::max<Real>(state.config.stage_rth[stage], 1e-12);
+                        const Real lower = -g_up;
+                        const Real upper = (stage + 1 < n) ? -g_down : 0.0;
+                        const Real diag = c * inv_dt + g_up + g_down;
+                        const Real b = c * inv_dt * theta[stage];
+                        const Real denom = std::max<Real>(diag - lower * cprime[stage - 1], 1e-18);
+                        cprime[stage] = upper / denom;
+                        theta[stage] = (b - lower * theta[stage - 1]) / denom;
+                    }
+
+                    for (std::size_t stage = n - 1; stage > 0; --stage) {
+                        theta[stage - 1] -= cprime[stage - 1] * theta[stage];
+                    }
+
                     state.temperature = ambient + state.stage_temperature_rise.front();
                     break;
                 }
+            }
+
+            if (!std::isfinite(state.temperature)) {
+                state.temperature = ambient;
             }
 
             state.peak_temperature = std::max(state.peak_temperature, state.temperature);
@@ -1147,6 +1164,7 @@ private:
         bool enabled = false;
         ThermalDeviceConfig config{};
         std::vector<Real> stage_temperature_rise;
+        std::vector<Real> stage_work;
         Real temperature = 25.0;
         Real peak_temperature = 25.0;
         Real sum_temperature = 0.0;
