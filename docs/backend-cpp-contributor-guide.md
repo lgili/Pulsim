@@ -45,9 +45,14 @@ Rules:
 Current non-breaking extraction status:
 - `events_topology` adapter (forced-switch sampled transitions): `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - `control_mixed_domain` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
-- `telemetry_channels` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
+- `loss_accounting` adapter (`LossAccountingModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`
+- `thermal_coupling` adapter (`ThermalCouplingModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`
+- `telemetry_channels` adapter (`ElectrothermalTelemetryModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - orchestrator delegates mixed-domain block execution/channel append via module hook (`on_sample_emit`)
-- orchestrator now delegates electrothermal service reset/init, accepted-step updates, canonical `P*`/`T(*)` traces, and finalization/consistency checks through module hooks (`on_run_initialize`, `on_step_accepted`, `on_sample_emit`, `on_finalize`)
+- orchestrator now delegates:
+  - loss service reset/step/finalize to `loss_accounting`,
+  - thermal service reset/step/finalize to `thermal_coupling`,
+  - canonical `P*`/`T(*)` traces and electrothermal consistency checks to `telemetry_channels`
 - channel names, metadata, and Python/YAML-facing behavior remain unchanged
 
 ## 2.2 Dependency rules and anti-patterns

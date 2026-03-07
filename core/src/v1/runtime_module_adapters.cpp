@@ -1,6 +1,6 @@
 /**
  * @file runtime_module_adapters.cpp
- * @brief Internal runtime module adapters for loss/thermal channel emission.
+ * @brief Internal runtime module adapter implementations for transient execution.
  */
 
 #include "runtime_module_adapters.hpp"
@@ -149,33 +149,151 @@ void ControlMixedDomainModule::on_sample_emit(const Vector& state,
     }
 }
 
-ElectrothermalTelemetryModule::ElectrothermalTelemetryModule(
-    const Circuit& circuit,
-    const SimulationOptions& options,
-    const TransientServiceRegistry& services,
-    SimulationResult& result,
-    std::size_t sample_reserve,
-    Real initial_time)
-    : circuit_(circuit),
-      services_(services),
-      result_(result),
-      sample_reserve_(sample_reserve),
-      losses_enabled_(options.enable_losses),
+LossAccountingModule::LossAccountingModule(const SimulationOptions& options,
+                                           const TransientServiceRegistry& services)
+    : services_(services),
       has_loss_trace_(options.enable_losses &&
-                      static_cast<bool>(services.loss_service)),
-      has_thermal_trace_(options.enable_losses &&
-                         options.thermal.enable &&
-                         static_cast<bool>(services.thermal_service)),
-      loss_interval_start_time_(initial_time) {}
+                      static_cast<bool>(services.loss_service)) {}
 
-void ElectrothermalTelemetryModule::on_run_initialize() {
+void LossAccountingModule::on_run_initialize() const {
     if (services_.loss_service) {
         services_.loss_service->reset();
     }
+}
+
+void LossAccountingModule::on_step_accepted(const Vector& state,
+                                            Real dt_segment,
+                                            std::span<const Real> thermal_scale) const {
+    if (!services_.loss_service) {
+        return;
+    }
+    services_.loss_service->commit_accepted_segment(state, dt_segment, thermal_scale);
+}
+
+std::span<const Real> LossAccountingModule::last_device_conduction_power() const {
+    if (!services_.loss_service) {
+        return {};
+    }
+    return services_.loss_service->last_device_conduction_power();
+}
+
+std::span<const Real> LossAccountingModule::last_device_turn_on_power() const {
+    if (!services_.loss_service) {
+        return {};
+    }
+    return services_.loss_service->last_device_turn_on_power();
+}
+
+std::span<const Real> LossAccountingModule::last_device_turn_off_power() const {
+    if (!services_.loss_service) {
+        return {};
+    }
+    return services_.loss_service->last_device_turn_off_power();
+}
+
+std::span<const Real> LossAccountingModule::last_device_reverse_recovery_power() const {
+    if (!services_.loss_service) {
+        return {};
+    }
+    return services_.loss_service->last_device_reverse_recovery_power();
+}
+
+std::span<const Real> LossAccountingModule::last_device_power() const {
+    if (!services_.loss_service) {
+        return {};
+    }
+    return services_.loss_service->last_device_power();
+}
+
+void LossAccountingModule::on_finalize(SimulationResult& result, Real duration) const {
+    if (!services_.loss_service) {
+        return;
+    }
+    result.loss_summary = services_.loss_service->finalize(duration);
+}
+
+ThermalCouplingModule::ThermalCouplingModule(const SimulationOptions& options,
+                                             const TransientServiceRegistry& services)
+    : services_(services),
+      has_thermal_trace_(options.enable_losses &&
+                         options.thermal.enable &&
+                         static_cast<bool>(services.thermal_service)) {}
+
+void ThermalCouplingModule::on_run_initialize() const {
     if (services_.thermal_service) {
         services_.thermal_service->reset();
     }
 }
+
+void ThermalCouplingModule::on_step_accepted(Real dt_segment,
+                                             std::span<const Real> device_power) const {
+    if (!services_.thermal_service) {
+        return;
+    }
+    services_.thermal_service->commit_accepted_segment(dt_segment, device_power);
+}
+
+std::span<const Real> ThermalCouplingModule::thermal_scale_vector() const {
+    if (!services_.thermal_service) {
+        return {};
+    }
+    return services_.thermal_service->thermal_scale_vector();
+}
+
+bool ThermalCouplingModule::is_device_enabled(std::size_t device_index) const {
+    if (!services_.thermal_service) {
+        return false;
+    }
+    return services_.thermal_service->is_device_enabled(device_index);
+}
+
+Real ThermalCouplingModule::device_temperature(std::size_t device_index) const {
+    if (!services_.thermal_service) {
+        return 0.0;
+    }
+    return services_.thermal_service->device_temperature(device_index);
+}
+
+void ThermalCouplingModule::on_finalize(SimulationResult& result) const {
+    if (!services_.thermal_service) {
+        return;
+    }
+
+    const ThermalServiceSummary service_summary = services_.thermal_service->finalize();
+    ThermalSummary summary;
+    summary.enabled = service_summary.enabled;
+    summary.ambient = service_summary.ambient;
+    summary.max_temperature = service_summary.max_temperature;
+    summary.device_temperatures.reserve(service_summary.device_temperatures.size());
+    for (const auto& item : service_summary.device_temperatures) {
+        DeviceThermalTelemetry telemetry;
+        telemetry.device_name = item.device_name;
+        telemetry.enabled = item.enabled;
+        telemetry.final_temperature = item.final_temperature;
+        telemetry.peak_temperature = item.peak_temperature;
+        telemetry.average_temperature = item.average_temperature;
+        summary.device_temperatures.push_back(std::move(telemetry));
+    }
+    result.thermal_summary = std::move(summary);
+}
+
+ElectrothermalTelemetryModule::ElectrothermalTelemetryModule(
+    const Circuit& circuit,
+    const SimulationOptions& options,
+    const LossAccountingModule& loss_module,
+    const ThermalCouplingModule& thermal_module,
+    SimulationResult& result,
+    std::size_t sample_reserve,
+    Real initial_time)
+    : circuit_(circuit),
+      loss_module_(loss_module),
+      thermal_module_(thermal_module),
+      result_(result),
+      sample_reserve_(sample_reserve),
+      losses_enabled_(options.enable_losses),
+      has_loss_trace_(loss_module.has_trace_enabled()),
+      has_thermal_trace_(thermal_module.has_trace_enabled()),
+      loss_interval_start_time_(initial_time) {}
 
 Real ElectrothermalTelemetryModule::sanitize_power(Real value) {
     if (!std::isfinite(value) || value < 0.0) {
@@ -282,7 +400,7 @@ void ElectrothermalTelemetryModule::initialize_thermal_channels() {
     }
 
     for (std::size_t i = 0; i < conns.size(); ++i) {
-        if (!services_.thermal_service->is_device_enabled(i)) {
+        if (!thermal_module_.is_device_enabled(i)) {
             continue;
         }
         const std::string channel = "T(" + conns[i].name + ")";
@@ -306,17 +424,7 @@ void ElectrothermalTelemetryModule::initialize_thermal_channels() {
     thermal_channels_initialized_ = true;
 }
 
-void ElectrothermalTelemetryModule::on_step_accepted(const Vector& state, Real dt_segment) {
-    if (services_.loss_service && services_.thermal_service) {
-        services_.loss_service->commit_accepted_segment(
-            state,
-            dt_segment,
-            services_.thermal_service->thermal_scale_vector());
-        services_.thermal_service->commit_accepted_segment(
-            dt_segment,
-            services_.loss_service->last_device_power());
-    }
-
+void ElectrothermalTelemetryModule::on_step_accepted(Real dt_segment) {
     if (!has_loss_trace_ || dt_segment <= 0.0) {
         return;
     }
@@ -327,11 +435,11 @@ void ElectrothermalTelemetryModule::on_step_accepted(const Vector& state, Real d
         return;
     }
 
-    const auto conduction = services_.loss_service->last_device_conduction_power();
-    const auto turn_on = services_.loss_service->last_device_turn_on_power();
-    const auto turn_off = services_.loss_service->last_device_turn_off_power();
-    const auto reverse_recovery = services_.loss_service->last_device_reverse_recovery_power();
-    const auto total = services_.loss_service->last_device_power();
+    const auto conduction = loss_module_.last_device_conduction_power();
+    const auto turn_on = loss_module_.last_device_turn_on_power();
+    const auto turn_off = loss_module_.last_device_turn_off_power();
+    const auto reverse_recovery = loss_module_.last_device_reverse_recovery_power();
+    const auto total = loss_module_.last_device_power();
     const std::size_t device_count = loss_interval_total_energy_.size();
     for (std::size_t i = 0; i < device_count; ++i) {
         const Real p_cond = i < conduction.size() ? sanitize_power(conduction[i]) : 0.0;
@@ -427,43 +535,8 @@ void ElectrothermalTelemetryModule::sample_thermal_channels(std::size_t sample_c
         }
         auto& series = channel_it->second;
         ensure_prefix(series, sample_count, nan);
-        push_series_value(series, services_.thermal_service->device_temperature(binding.device_index));
+        push_series_value(series, thermal_module_.device_temperature(binding.device_index));
     }
-}
-
-void ElectrothermalTelemetryModule::finalize_loss_summary() {
-    if (!services_.loss_service) {
-        return;
-    }
-
-    Real duration = 0.0;
-    if (result_.time.size() >= 2) {
-        duration = result_.time.back() - result_.time.front();
-    }
-    result_.loss_summary = services_.loss_service->finalize(duration);
-}
-
-void ElectrothermalTelemetryModule::finalize_thermal_summary() {
-    if (!services_.thermal_service) {
-        return;
-    }
-
-    const ThermalServiceSummary service_summary = services_.thermal_service->finalize();
-    ThermalSummary summary;
-    summary.enabled = service_summary.enabled;
-    summary.ambient = service_summary.ambient;
-    summary.max_temperature = service_summary.max_temperature;
-    summary.device_temperatures.reserve(service_summary.device_temperatures.size());
-    for (const auto& item : service_summary.device_temperatures) {
-        DeviceThermalTelemetry telemetry;
-        telemetry.device_name = item.device_name;
-        telemetry.enabled = item.enabled;
-        telemetry.final_temperature = item.final_temperature;
-        telemetry.peak_temperature = item.peak_temperature;
-        telemetry.average_temperature = item.average_temperature;
-        summary.device_temperatures.push_back(std::move(telemetry));
-    }
-    result_.thermal_summary = std::move(summary);
 }
 
 void ElectrothermalTelemetryModule::finalize_component_electrothermal() {
@@ -765,8 +838,6 @@ void ElectrothermalTelemetryModule::validate_electrothermal_consistency() {
 }
 
 void ElectrothermalTelemetryModule::on_finalize() {
-    finalize_loss_summary();
-    finalize_thermal_summary();
     finalize_component_electrothermal();
     validate_electrothermal_consistency();
 }

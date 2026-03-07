@@ -1,6 +1,6 @@
 /**
  * @file runtime_module_adapters.hpp
- * @brief Internal runtime module adapters for transient channel emission.
+ * @brief Internal runtime module adapters for modular transient concerns.
  */
 
 #pragma once
@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -87,6 +88,70 @@ private:
 };
 
 /**
+ * @brief Owns loss-service lifecycle and accepted-step loss accounting hooks.
+ */
+class LossAccountingModule final {
+public:
+    LossAccountingModule(const SimulationOptions& options,
+                         const TransientServiceRegistry& services);
+
+    /// Resets loss accounting service state for a new transient run.
+    void on_run_initialize() const;
+
+    /// Commits one accepted electrical segment into the loss accounting service.
+    void on_step_accepted(const Vector& state,
+                          Real dt_segment,
+                          std::span<const Real> thermal_scale) const;
+
+    /// Indicates whether sampled loss channels are enabled for this run.
+    [[nodiscard]] bool has_trace_enabled() const { return has_loss_trace_; }
+
+    /// Exposes the latest per-device loss power vectors for telemetry sampling.
+    [[nodiscard]] std::span<const Real> last_device_conduction_power() const;
+    [[nodiscard]] std::span<const Real> last_device_turn_on_power() const;
+    [[nodiscard]] std::span<const Real> last_device_turn_off_power() const;
+    [[nodiscard]] std::span<const Real> last_device_reverse_recovery_power() const;
+    [[nodiscard]] std::span<const Real> last_device_power() const;
+
+    /// Finalizes system/device loss summary tables.
+    void on_finalize(SimulationResult& result, Real duration) const;
+
+private:
+    const TransientServiceRegistry& services_;
+    bool has_loss_trace_ = false;
+};
+
+/**
+ * @brief Owns thermal-service lifecycle and accepted-step thermal coupling hooks.
+ */
+class ThermalCouplingModule final {
+public:
+    ThermalCouplingModule(const SimulationOptions& options,
+                          const TransientServiceRegistry& services);
+
+    /// Resets thermal service state for a new transient run.
+    void on_run_initialize() const;
+
+    /// Commits one accepted segment using latest loss power for electrothermal coupling.
+    void on_step_accepted(Real dt_segment, std::span<const Real> device_power) const;
+
+    /// Indicates whether sampled thermal channels are enabled for this run.
+    [[nodiscard]] bool has_trace_enabled() const { return has_thermal_trace_; }
+
+    /// Exposes thermal scale and device temperature lookups for coupled modules.
+    [[nodiscard]] std::span<const Real> thermal_scale_vector() const;
+    [[nodiscard]] bool is_device_enabled(std::size_t device_index) const;
+    [[nodiscard]] Real device_temperature(std::size_t device_index) const;
+
+    /// Finalizes thermal summary tables.
+    void on_finalize(SimulationResult& result) const;
+
+private:
+    const TransientServiceRegistry& services_;
+    bool has_thermal_trace_ = false;
+};
+
+/**
  * @brief Emits canonical loss/thermal virtual channels through module-style hooks.
  *
  * This internal adapter isolates electrothermal channel logic from the transient
@@ -96,16 +161,14 @@ class ElectrothermalTelemetryModule final {
 public:
     ElectrothermalTelemetryModule(const Circuit& circuit,
                                   const SimulationOptions& options,
-                                  const TransientServiceRegistry& services,
+                                  const LossAccountingModule& loss_module,
+                                  const ThermalCouplingModule& thermal_module,
                                   SimulationResult& result,
                                   std::size_t sample_reserve,
                                   Real initial_time);
 
-    /// Resets loss and thermal runtime services for a new transient run.
-    void on_run_initialize();
-
-    /// Commits accepted-step loss/thermal state and accumulates trace interval energy.
-    void on_step_accepted(const Vector& state, Real dt_segment);
+    /// Accumulates trace interval loss energy from latest accepted-step power vectors.
+    void on_step_accepted(Real dt_segment);
 
     /// Emits one sample for canonical loss/thermal channels.
     void on_sample_emit(Real sample_time, std::size_t sample_count);
@@ -136,13 +199,12 @@ private:
     void initialize_thermal_channels();
     void sample_loss_channels(Real sample_time, std::size_t sample_count);
     void sample_thermal_channels(std::size_t sample_count);
-    void finalize_loss_summary();
-    void finalize_thermal_summary();
     void finalize_component_electrothermal();
     void validate_electrothermal_consistency();
 
     const Circuit& circuit_;
-    const TransientServiceRegistry& services_;
+    const LossAccountingModule& loss_module_;
+    const ThermalCouplingModule& thermal_module_;
     SimulationResult& result_;
     std::size_t sample_reserve_ = 0;
 

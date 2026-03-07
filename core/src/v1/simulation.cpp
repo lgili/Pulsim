@@ -1252,24 +1252,24 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         std::move(forced_event_monitors));
     event_topology_module.on_run_initialize();
 
+    LossAccountingModule loss_module(options_, transient_services_);
+    loss_module.on_run_initialize();
+    ThermalCouplingModule thermal_module(options_, transient_services_);
+    thermal_module.on_run_initialize();
+
     ElectrothermalTelemetryModule electrothermal_module(
         circuit_,
         options_,
-        transient_services_,
+        loss_module,
+        thermal_module,
         result,
         sample_reserve,
         t);
-    electrothermal_module.on_run_initialize();
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const bool has_virtual_components = circuit_.num_virtual_components() > 0;
-        const bool has_loss_trace =
-            options_.enable_losses &&
-            static_cast<bool>(transient_services_.loss_service);
-        const bool has_thermal_trace =
-            options_.enable_losses &&
-            options_.thermal.enable &&
-            static_cast<bool>(transient_services_.thermal_service);
+        const bool has_loss_trace = loss_module.has_trace_enabled();
+        const bool has_thermal_trace = thermal_module.has_trace_enabled();
         if (!has_virtual_components && !has_loss_trace && !has_thermal_trace) {
             return;
         }
@@ -2029,7 +2029,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 transient_gmin_ = 0.0;
                 transient_services_.nonlinear_solve->set_options(baseline_newton_options);
 
-                electrothermal_module.on_step_accepted(step_anchor_state, hold_dt);
+                loss_module.on_step_accepted(
+                    step_anchor_state,
+                    hold_dt,
+                    thermal_module.thermal_scale_vector());
+                thermal_module.on_step_accepted(hold_dt, loss_module.last_device_power());
+                electrothermal_module.on_step_accepted(hold_dt);
 
                 t += hold_dt;
                 pending_dt_override = hold_dt;
@@ -2205,7 +2210,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        electrothermal_module.on_step_accepted(step_result.solution, dt_used);
+        loss_module.on_step_accepted(
+            step_result.solution,
+            dt_used,
+            thermal_module.thermal_scale_vector());
+        thermal_module.on_step_accepted(dt_used, loss_module.last_device_power());
+        electrothermal_module.on_step_accepted(dt_used);
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);
@@ -2253,6 +2263,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             std::string(diagnostic_code_to_reason(result.diagnostic));
     }
 
+    const Real duration =
+        result.time.size() >= 2 ? (result.time.back() - result.time.front()) : Real{0.0};
+    loss_module.on_finalize(result, duration);
+    thermal_module.on_finalize(result);
     electrothermal_module.on_finalize();
 
     result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
