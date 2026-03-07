@@ -21,6 +21,14 @@ metrics:
     direction: lower_is_better
     max_regression_abs: 0.50
     required: false
+  averaged_pair_fidelity_error:
+    direction: lower_is_better
+    max_regression_abs: 0.02
+    required: false
+  averaged_pair_runtime_speedup_min:
+    direction: higher_is_better
+    max_regression_abs: 0.10
+    required: false
   module_order_mismatch_rate:
     direction: lower_is_better
     max_regression_abs: 0.0

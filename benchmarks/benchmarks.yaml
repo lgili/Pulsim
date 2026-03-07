@@ -35,6 +35,12 @@ benchmarks:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, trbdf2]
+  - path: circuits/buck_switching_paired.yaml
+    scenarios: [direct_trap]
+  - path: circuits/buck_averaged_mvp.yaml
+    scenarios: [direct_trap]
+  - path: circuits/buck_averaged_expected_failure.yaml
+    scenarios: [direct_trap]
   - path: circuits/boost_switching_complex.yaml
     ltspice_netlist: ltspice/boost_switching_complex.cir
     ltspice_observables:

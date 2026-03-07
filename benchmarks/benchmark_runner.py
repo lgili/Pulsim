@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import tempfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -160,6 +161,33 @@ def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
     # Benchmark suite targets deterministic comparisons by default.
     if "adaptive_timestep" not in simulation:
         simulation["adaptive_timestep"] = False
+
+
+def extract_averaged_pair_telemetry(benchmark_meta: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    """Extract deterministic averaged-pair telemetry tags from benchmark metadata."""
+    if not isinstance(benchmark_meta, dict):
+        return {}
+
+    averaged_pair = benchmark_meta.get("averaged_pair")
+    if not isinstance(averaged_pair, dict):
+        return {}
+
+    pair_id = averaged_pair.get("id")
+    if not isinstance(pair_id, str) or not pair_id.strip():
+        return {}
+
+    role_raw = averaged_pair.get("role")
+    role = str(role_raw).strip().lower() if role_raw is not None else ""
+    if role not in {"switching", "averaged"}:
+        return {}
+
+    pair_crc32 = float(zlib.crc32(pair_id.strip().encode("utf-8")) & 0xFFFFFFFF)
+    return {
+        "averaged_pair_case": 1.0,
+        "averaged_pair_group_crc32": pair_crc32,
+        "averaged_pair_role_switching": 1.0 if role == "switching" else 0.0,
+        "averaged_pair_role_averaged": 1.0 if role == "averaged" else 0.0,
+    }
 
 
 def run_pulsim(
@@ -472,6 +500,7 @@ def run_benchmarks(
     manifest = load_yaml(benchmarks_path)
     scenarios = manifest.get("scenarios", {})
     results: List[ScenarioResult] = []
+    output_index: Dict[Tuple[str, str], Path] = {}
 
     for entry in manifest.get("benchmarks", []):
         circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
@@ -544,6 +573,7 @@ def run_benchmarks(
                 if not isinstance(expectations, dict):
                     expectations = {}
                 expected_failure = expectations.get("expected_failure")
+                averaged_pair_telemetry = extract_averaged_pair_telemetry(scenario_bench_meta)
 
                 try:
                     run_result = run_pulsim(
@@ -566,6 +596,7 @@ def run_benchmarks(
                             "expected_failure_matched": 1.0,
                             "expected_failure_case": 1.0,
                         }
+                        telemetry.update(averaged_pair_telemetry)
                         results.append(
                             ScenarioResult(
                                 benchmark_id=benchmark_id,
@@ -612,6 +643,8 @@ def run_benchmarks(
                 telemetry["steps"] = float(steps)
                 telemetry["runtime_s"] = float(runtime_s)
                 telemetry["python_backend"] = 1.0
+                telemetry.update(averaged_pair_telemetry)
+                output_index[(benchmark_id, scenario_name)] = output_path
                 for key in ("newton_iterations", "timestep_rejections", "linear_fallbacks"):
                     if telemetry.get(key) is None:
                         telemetry[key] = 0.0
@@ -742,9 +775,65 @@ def run_benchmarks(
                                                 message = (
                                                     f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
                                                 )
+                            elif validation_type == "paired_reference":
+                                pair_benchmark_id = validation.get("pair_benchmark_id")
+                                pair_scenario = validation.get("pair_scenario", scenario_name)
+                                pair_observable = validation.get("pair_observable", observable)
+                                if (
+                                    not isinstance(pair_benchmark_id, str)
+                                    or not pair_benchmark_id.strip()
+                                ):
+                                    status = "failed"
+                                    message = "Missing validation pair_benchmark_id"
+                                elif not isinstance(pair_scenario, str) or not pair_scenario.strip():
+                                    status = "failed"
+                                    message = "Invalid validation pair_scenario"
+                                elif not isinstance(pair_observable, str) or not pair_observable.strip():
+                                    status = "failed"
+                                    message = "Invalid validation pair_observable"
+                                else:
+                                    pair_key = (pair_benchmark_id.strip(), pair_scenario.strip())
+                                    pair_output_path = output_index.get(pair_key)
+                                    if pair_output_path is None or not pair_output_path.exists():
+                                        status = "failed"
+                                        message = (
+                                            "Missing paired reference output for "
+                                            f"{pair_key[0]}/{pair_key[1]}"
+                                        )
+                                    else:
+                                        max_error, rms_error, message = validate_reference(
+                                            times_eval,
+                                            values_eval,
+                                            pair_output_path,
+                                            pair_observable.strip(),
+                                        )
+                                        telemetry["paired_reference_case"] = 1.0
+                                        telemetry["paired_reference_group_crc32"] = float(
+                                            zlib.crc32(
+                                                f"{pair_key[0]}::{pair_key[1]}".encode("utf-8")
+                                            )
+                                            & 0xFFFFFFFF
+                                        )
+                                        if max_error is None:
+                                            status = "failed"
+                                        elif max_threshold is not None:
+                                            if max_error <= max_threshold:
+                                                status = "passed"
+                                            else:
+                                                status = "failed"
+                                                message = (
+                                                    f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                                                )
                             else:
                                 status = "failed"
                                 message = f"Unsupported validation type: {validation_type}"
+
+                if max_error is not None:
+                    telemetry["validation_max_error"] = float(max_error)
+                if rms_error is not None:
+                    telemetry["validation_rms_error"] = float(rms_error)
+                if phase_error_deg is not None:
+                    telemetry["validation_phase_error_deg"] = float(phase_error_deg)
 
                 results.append(
                     ScenarioResult(

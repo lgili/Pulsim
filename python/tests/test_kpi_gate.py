@@ -443,6 +443,93 @@ def test_compute_metrics_includes_ac_sweep_accuracy_and_runtime_metrics(tmp_path
     assert float(metrics["runtime_p95"]) > float(metrics["ac_runtime_p95"])
 
 
+def test_compute_metrics_includes_averaged_pair_metrics(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.30,
+                "telemetry": {
+                    "averaged_pair_case": 1.0,
+                    "averaged_pair_group_crc32": 101.0,
+                    "averaged_pair_role_switching": 1.0,
+                    "averaged_pair_role_averaged": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "buck_averaged_mvp",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "max_error": 0.25,
+                "telemetry": {
+                    "averaged_pair_case": 1.0,
+                    "averaged_pair_group_crc32": 101.0,
+                    "averaged_pair_role_switching": 0.0,
+                    "averaged_pair_role_averaged": 1.0,
+                },
+            },
+            {
+                "benchmark_id": "buck_switching_fast",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.50,
+                "telemetry": {
+                    "averaged_pair_case": 1.0,
+                    "averaged_pair_group_crc32": 202.0,
+                    "averaged_pair_role_switching": 1.0,
+                    "averaged_pair_role_averaged": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "buck_averaged_fast",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.25,
+                "max_error": 0.15,
+                "telemetry": {
+                    "averaged_pair_case": 1.0,
+                    "averaged_pair_group_crc32": 202.0,
+                    "averaged_pair_role_switching": 0.0,
+                    "averaged_pair_role_averaged": 1.0,
+                },
+            },
+        ]
+    }
+    bench_path = tmp_path / "bench.json"
+    _write_json(bench_path, bench_results)
+
+    metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
+    assert metrics["averaged_pair_case_count"] == 4.0
+    assert metrics["averaged_pair_fidelity_error"] is not None
+    assert math.isclose(
+        float(metrics["averaged_pair_fidelity_error"]),
+        0.20,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["averaged_pair_runtime_speedup_min"] is not None
+    assert math.isclose(
+        float(metrics["averaged_pair_runtime_speedup_min"]),
+        2.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["averaged_pair_runtime_speedup_mean"] is not None
+    assert math.isclose(
+        float(metrics["averaged_pair_runtime_speedup_mean"]),
+        2.5,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+
+
 def test_compute_metrics_runtime_quantiles_can_use_case_filter(tmp_path: Path) -> None:
     bench_results = {
         "results": [

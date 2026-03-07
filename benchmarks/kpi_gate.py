@@ -556,6 +556,33 @@ def compute_metrics(
             return None
         return float(sum(values) / len(values))
 
+    def telemetry_flag(row: Dict[str, Any], key: str) -> bool:
+        telemetry = row.get("telemetry")
+        if not isinstance(telemetry, dict):
+            return False
+        value = telemetry.get(key)
+        if value is None:
+            return False
+        try:
+            return float(value) > 0.0
+        except (TypeError, ValueError):
+            return False
+
+    def telemetry_float(row: Dict[str, Any], key: str) -> Optional[float]:
+        telemetry = row.get("telemetry")
+        if not isinstance(telemetry, dict):
+            return None
+        value = telemetry.get(key)
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(numeric):
+            return None
+        return numeric
+
     module_order_crc_values = telemetry_values("runtime_module_order_crc32")
     if module_order_crc_values:
         histogram: Dict[int, int] = {}
@@ -588,6 +615,64 @@ def compute_metrics(
     )
     metrics["ac_sweep_mag_error"] = telemetry_mean("ac_sweep_mag_error", rows=ac_rows)
     metrics["ac_sweep_phase_error"] = telemetry_mean("ac_sweep_phase_error", rows=ac_rows)
+
+    averaged_pair_rows = [row for row in executed if telemetry_flag(row, "averaged_pair_case")]
+    metrics["averaged_pair_case_count"] = float(len(averaged_pair_rows)) if averaged_pair_rows else None
+
+    averaged_pair_fidelity_values: list[float] = []
+    pair_runtime_groups: Dict[int, Dict[str, list[float]]] = {}
+    for row in averaged_pair_rows:
+        if telemetry_flag(row, "averaged_pair_role_averaged"):
+            try:
+                max_error_value = row.get("max_error")
+                if max_error_value is not None:
+                    fidelity_error = float(max_error_value)
+                    if math.isfinite(fidelity_error):
+                        averaged_pair_fidelity_values.append(fidelity_error)
+            except (TypeError, ValueError):
+                pass
+
+        group_crc = telemetry_float(row, "averaged_pair_group_crc32")
+        runtime_value = row.get("runtime_s")
+        if group_crc is None or runtime_value is None:
+            continue
+        try:
+            runtime_f = float(runtime_value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(runtime_f) or runtime_f <= 0.0:
+            continue
+
+        group_key = int(round(group_crc))
+        group = pair_runtime_groups.setdefault(group_key, {"switching": [], "averaged": []})
+        if telemetry_flag(row, "averaged_pair_role_switching"):
+            group["switching"].append(runtime_f)
+        if telemetry_flag(row, "averaged_pair_role_averaged"):
+            group["averaged"].append(runtime_f)
+
+    if averaged_pair_fidelity_values:
+        metrics["averaged_pair_fidelity_error"] = float(
+            sum(averaged_pair_fidelity_values) / len(averaged_pair_fidelity_values)
+        )
+    else:
+        metrics["averaged_pair_fidelity_error"] = None
+
+    speedup_values: list[float] = []
+    for group in pair_runtime_groups.values():
+        switching = group["switching"]
+        averaged = group["averaged"]
+        if not switching or not averaged:
+            continue
+        switching_mean = float(sum(switching) / len(switching))
+        averaged_mean = float(sum(averaged) / len(averaged))
+        if averaged_mean <= 0.0:
+            continue
+        speedup_values.append(switching_mean / averaged_mean)
+
+    metrics["averaged_pair_runtime_speedup_min"] = min(speedup_values) if speedup_values else None
+    metrics["averaged_pair_runtime_speedup_mean"] = (
+        float(sum(speedup_values) / len(speedup_values)) if speedup_values else None
+    )
 
     def parity_mean_rms(path: Optional[Path]) -> Optional[float]:
         if path is None:

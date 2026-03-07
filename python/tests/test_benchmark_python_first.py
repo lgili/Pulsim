@@ -402,6 +402,75 @@ def test_periodic_benchmark_shooting_default_keeps_reference_error_bounded(
     assert result.max_error <= 0.11
 
 
+def test_averaged_benchmark_pair_case_emits_pair_telemetry(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        tmp_path / "out",
+        selected=["buck_switching_paired", "buck_averaged_mvp"],
+        scenario_filter=["direct_trap"],
+    )
+
+    assert len(results) == 2
+    result = next(item for item in results if item.benchmark_id == "buck_averaged_mvp")
+    assert result.status == "passed"
+    assert result.mode == "transient"
+    assert result.max_error is not None
+    assert result.max_error <= 10.0
+    assert result.telemetry.get("averaged_pair_case") == 1.0
+    assert result.telemetry.get("averaged_pair_role_averaged") == 1.0
+    assert result.telemetry.get("averaged_pair_role_switching") == 0.0
+    assert result.telemetry.get("averaged_pair_group_crc32") is not None
+    assert result.telemetry.get("paired_reference_case") == 1.0
+
+
+def test_averaged_benchmark_repeat_runs_are_deterministic(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+
+    out_a = tmp_path / "out_a"
+    out_b = tmp_path / "out_b"
+    br.run_benchmarks(
+        manifest_path,
+        out_a,
+        selected=["buck_switching_paired", "buck_averaged_mvp"],
+        scenario_filter=["direct_trap"],
+    )
+    br.run_benchmarks(
+        manifest_path,
+        out_b,
+        selected=["buck_switching_paired", "buck_averaged_mvp"],
+        scenario_filter=["direct_trap"],
+    )
+
+    csv_a = out_a / "outputs" / "buck_averaged_mvp" / "direct_trap" / "pulsim.csv"
+    csv_b = out_b / "outputs" / "buck_averaged_mvp" / "direct_trap" / "pulsim.csv"
+    assert csv_a.read_text(encoding="utf-8") == csv_b.read_text(encoding="utf-8")
+
+
+def test_run_benchmarks_accepts_expected_failure_for_averaged_invalid_mapping(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        tmp_path / "out",
+        selected=["buck_averaged_expected_failure"],
+        scenario_filter=["direct_trap"],
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.status == "passed"
+    assert result.mode == "transient"
+    assert "Expected failure matched" in result.message
+    assert result.telemetry.get("expected_failure_matched") == 1.0
+
+
 def test_python_backend_runs_frequency_analysis_mode_and_writes_frequency_csv(tmp_path: Path) -> None:
     netlist_path = _write_ac_rc_netlist(
         tmp_path,

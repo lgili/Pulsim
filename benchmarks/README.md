@@ -139,7 +139,8 @@ Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `thermal_peak_temperature_delta`, `component_coverage_rate`, `component_coverage_gap`,
 `component_loss_summary_consistency_error`, `component_thermal_summary_consistency_error`,
 `runtime_module_order_crc32`, `runtime_module_count_match`, `output_reallocation_total`,
-`ac_sweep_mag_error`, and `ac_sweep_phase_error`.
+`ac_sweep_mag_error`, `ac_sweep_phase_error`, `averaged_pair_fidelity_error`,
+and `averaged_pair_runtime_speedup_min`.
 
 `benchmark_ngspice.py` also emits:
 
@@ -180,12 +181,19 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
 8. Optional validation window controls:
    - `benchmark.validation.ignore_initial_samples`: ignore N leading samples.
    - `benchmark.validation.start_time`: compare only from a minimum time.
+9. For paired switching-vs-averaged fidelity checks in one run, use:
+   - `benchmark.validation.type: paired_reference`
+   - `benchmark.validation.pair_benchmark_id`
+   - Optional `benchmark.validation.pair_scenario` and `benchmark.validation.pair_observable`
 
 ## Converter stress cases included
 
 The suite now includes larger converter-focused regression cases:
 
 - `buck_switching` (surrogate switch + freewheel diode + LC output stage)
+- `buck_switching_paired` (switching reference used by averaged-pair fidelity checks)
+- `buck_averaged_mvp` (paired averaged-mode buck reference against switching baseline)
+- `buck_averaged_expected_failure` (typed deterministic failure for invalid averaged mapping)
 - `boost_switching_complex` (boost stage with switched inductor and output filter)
 - `interleaved_buck_3ph` (3-phase interleaved buck)
 - `buck_mosfet_nonlinear` (nonlinear MOSFET-based buck)
@@ -194,7 +202,7 @@ Run only these converter cases:
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
-  --only buck_switching boost_switching_complex interleaved_buck_3ph buck_mosfet_nonlinear \
+  --only buck_switching buck_switching_paired buck_averaged_mvp buck_averaged_expected_failure boost_switching_complex interleaved_buck_3ph buck_mosfet_nonlinear \
   --output-dir benchmarks/out_converters
 ```
 
