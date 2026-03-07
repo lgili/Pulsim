@@ -1234,7 +1234,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
     circuit_.update_history(x, true);
 
-    ControlMixedDomainModule control_mixed_module(circuit_, result, sample_reserve);
     std::vector<ForcedSwitchEventMonitor> forced_event_monitors;
     forced_event_monitors.reserve(forced_switch_monitors_.size());
     for (const auto& monitor : forced_switch_monitors_) {
@@ -1258,44 +1257,34 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             false
         });
     }
-    EventTopologyModule event_topology_module(
+    RuntimeModuleOrchestrator runtime_modules(
         options_,
         circuit_,
-        std::move(forced_event_monitors),
-        std::move(threshold_event_monitors));
-    event_topology_module.on_run_initialize();
-
-    LossAccountingModule loss_module(options_, transient_services_);
-    loss_module.on_run_initialize();
-    ThermalCouplingModule thermal_module(options_, transient_services_);
-    thermal_module.on_run_initialize();
-
-    ElectrothermalTelemetryModule electrothermal_module(
-        circuit_,
-        options_,
-        loss_module,
-        thermal_module,
+        transient_services_,
         result,
         sample_reserve,
-        t);
+        t,
+        std::move(forced_event_monitors),
+        std::move(threshold_event_monitors));
+    runtime_modules.on_run_initialize(x);
+
+    auto build_threshold_monitor = [](const SwitchThresholdEventMonitor& monitor) {
+        SwitchMonitor sw;
+        sw.name = monitor.name;
+        sw.ctrl = monitor.ctrl;
+        sw.t1 = monitor.t1;
+        sw.t2 = monitor.t2;
+        sw.v_threshold = monitor.v_threshold;
+        return sw;
+    };
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
-        const bool has_virtual_components = circuit_.num_virtual_components() > 0;
-        const bool has_loss_trace = loss_module.has_trace_enabled();
-        const bool has_thermal_trace = thermal_module.has_trace_enabled();
-        if (!has_virtual_components && !has_loss_trace && !has_thermal_trace) {
-            return;
-        }
-
-        control_mixed_module.ensure_base_metadata();
-
         const std::size_t sample_count = result.time.size();
-        const Real nan = std::numeric_limits<Real>::quiet_NaN();
-
-        event_topology_module.on_sample_emit(
+        runtime_modules.on_sample_emit(
             state,
             sample_time,
             sample_count,
+            circuit_.num_virtual_components() > 0,
             nearly_same_time(sample_time, options_.tstop),
             [&](const ForcedSwitchEventMonitor& monitor,
                 const Vector& event_state,
@@ -1313,32 +1302,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                     result,
                     event_callback);
             });
-
-        auto append_series_value = [&](std::vector<Real>& series, Real value) {
-            const std::size_t capacity_before = series.capacity();
-            series.push_back(value);
-            if (series.capacity() != capacity_before) {
-                result.backend_telemetry.virtual_channel_reallocations += 1;
-            }
-        };
-
-        for (auto& [channel, series] : result.virtual_channels) {
-            while (series.size() + 1 < sample_count) {
-                append_series_value(series, nan);
-            }
-        }
-
-        if (has_virtual_components) {
-            control_mixed_module.on_sample_emit(state, sample_time, sample_count);
-        }
-
-        electrothermal_module.on_sample_emit(sample_time, sample_count);
-
-        for (auto& [channel, series] : result.virtual_channels) {
-            if (series.size() < sample_count) {
-                append_series_value(series, nan);
-            }
-        }
     };
 
     auto append_sample = [&](Real sample_time, const Vector& state) {
@@ -1360,8 +1323,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     if (callback) {
         callback(t, x);
     }
-
-    event_topology_module.initialize_threshold_states(x);
     int lte_discontinuity_grace_steps = 0;
 
     while (t < options_.tstop) {
@@ -1403,7 +1364,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         pending_dt_override.reset();
         dt = clamp_dt_for_mode(dt_candidate);
         bool discontinuity_adjacent = variable_step_policy.enabled() &&
-                                      event_topology_module.near_threshold(x);
+                                      runtime_modules.near_threshold(x);
         if (discontinuity_adjacent && options_.stiffness_config.enable && stiffness_cooldown <= 0) {
             stiffness_cooldown = std::max(1, options_.stiffness_config.cooldown_steps);
         }
@@ -1902,7 +1863,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                         return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
                     };
                 const std::optional<Real> earliest_event_time =
-                    event_topology_module.earliest_threshold_crossing_time(
+                    runtime_modules.earliest_threshold_crossing_time(
                         t,
                         dt_used,
                         x,
@@ -2028,12 +1989,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 transient_gmin_ = 0.0;
                 transient_services_.nonlinear_solve->set_options(baseline_newton_options);
 
-                loss_module.on_step_accepted(
-                    step_anchor_state,
-                    hold_dt,
-                    thermal_module.thermal_scale_vector());
-                thermal_module.on_step_accepted(hold_dt, loss_module.last_device_power());
-                electrothermal_module.on_step_accepted(hold_dt);
+                runtime_modules.on_hold_step_accepted(step_anchor_state, hold_dt);
 
                 t += hold_dt;
                 pending_dt_override = hold_dt;
@@ -2189,46 +2145,27 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        if (options_.enable_events) {
-            event_topology_module.on_step_accepted(
-                t,
-                dt_used,
-                x,
-                step_result.solution,
-                [&](const SwitchThresholdEventMonitor& monitor,
-                    Real t_start,
-                    Real t_end,
-                    const Vector& x_start,
-                    Real& t_event,
-                    Vector& x_event) {
-                    SwitchMonitor sw;
-                    sw.name = monitor.name;
-                    sw.ctrl = monitor.ctrl;
-                    sw.t1 = monitor.t1;
-                    sw.t2 = monitor.t2;
-                    sw.v_threshold = monitor.v_threshold;
-                    return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
-                },
-                [&](const SwitchThresholdEventMonitor& monitor,
-                    Real event_time,
-                    const Vector& event_state,
-                    bool new_state) {
-                    SwitchMonitor sw;
-                    sw.name = monitor.name;
-                    sw.ctrl = monitor.ctrl;
-                    sw.t1 = monitor.t1;
-                    sw.t2 = monitor.t2;
-                    sw.v_threshold = monitor.v_threshold;
-                    record_switch_event(sw, event_time, event_state, new_state, result, event_callback);
-                });
-        }
-
-        loss_module.on_step_accepted(
-            step_result.solution,
+        runtime_modules.on_step_accepted(
+            t,
             dt_used,
-            thermal_module.thermal_scale_vector());
-        thermal_module.on_step_accepted(dt_used, loss_module.last_device_power());
-        electrothermal_module.on_step_accepted(dt_used);
+            x,
+            step_result.solution,
+            [&](const SwitchThresholdEventMonitor& monitor,
+                Real t_start,
+                Real t_end,
+                const Vector& x_start,
+                Real& t_event,
+                Vector& x_event) {
+                const SwitchMonitor sw = build_threshold_monitor(monitor);
+                return find_switch_event_time(sw, t_start, t_end, x_start, t_event, x_event);
+            },
+            [&](const SwitchThresholdEventMonitor& monitor,
+                Real event_time,
+                const Vector& event_state,
+                bool new_state) {
+                const SwitchMonitor sw = build_threshold_monitor(monitor);
+                record_switch_event(sw, event_time, event_state, new_state, result, event_callback);
+            });
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);
@@ -2276,11 +2213,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             std::string(diagnostic_code_to_reason(result.diagnostic));
     }
 
-    const Real duration =
-        result.time.size() >= 2 ? (result.time.back() - result.time.front()) : Real{0.0};
-    loss_module.on_finalize(result, duration);
-    thermal_module.on_finalize(result);
-    electrothermal_module.on_finalize();
+    runtime_modules.on_finalize();
 
     result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
     const EquationAssemblerTelemetry assembler_telemetry =

@@ -277,4 +277,72 @@ private:
     std::vector<Real> loss_interval_total_energy_;
 };
 
+/**
+ * @brief Bundles runtime modules behind unified hook entrypoints for transient orchestration.
+ *
+ * This adapter keeps module ownership localized while exposing policy-only operations to
+ * `Simulator::run_transient_native_impl(...)`.
+ */
+class RuntimeModuleOrchestrator final {
+public:
+    RuntimeModuleOrchestrator(const SimulationOptions& options,
+                              Circuit& circuit,
+                              const TransientServiceRegistry& services,
+                              SimulationResult& result,
+                              std::size_t sample_reserve,
+                              Real initial_time,
+                              std::vector<ForcedSwitchEventMonitor> forced_monitors,
+                              std::vector<SwitchThresholdEventMonitor> threshold_monitors);
+
+    /// Initializes module run state and threshold monitors from the initial state vector.
+    void on_run_initialize(const Vector& initial_state);
+
+    /// Emits per-sample channel updates from all relevant runtime modules.
+    void on_sample_emit(const Vector& state,
+                        Real sample_time,
+                        std::size_t sample_count,
+                        bool has_virtual_components,
+                        bool is_terminal_sample,
+                        const ForcedSwitchEventEmitter& emit_forced_event);
+
+    /// Indicates whether current state is close to threshold-driven switching boundaries.
+    [[nodiscard]] bool near_threshold(const Vector& state) const;
+
+    /// Finds earliest threshold-crossing candidate inside one accepted step.
+    [[nodiscard]] std::optional<Real> earliest_threshold_crossing_time(
+        Real t_start,
+        Real dt_used,
+        const Vector& x_start,
+        const Vector& x_end,
+        const ThresholdEventRefiner& refine_event_time) const;
+
+    /// Applies accepted-step event/loss/thermal/electrothermal hooks.
+    void on_step_accepted(Real t_start,
+                          Real dt_used,
+                          const Vector& x_start,
+                          const Vector& x_end,
+                          const ThresholdEventRefiner& refine_event_time,
+                          const ThresholdEventEmitter& emit_threshold_event);
+
+    /// Applies hold-step loss/thermal/electrothermal hooks without threshold-event emission.
+    void on_hold_step_accepted(const Vector& held_state, Real dt_used);
+
+    /// Finalizes module summaries/channels and post-run consistency checks.
+    void on_finalize();
+
+private:
+    void push_series_value(std::vector<Real>& series, Real value);
+    void ensure_channel_prefix(std::size_t sample_count, Real fill_value);
+    void fill_missing_sample(std::size_t sample_count, Real fill_value);
+
+    const SimulationOptions& options_;
+    SimulationResult& result_;
+
+    ControlMixedDomainModule control_mixed_module_;
+    EventTopologyModule event_topology_module_;
+    LossAccountingModule loss_module_;
+    ThermalCouplingModule thermal_module_;
+    ElectrothermalTelemetryModule electrothermal_module_;
+};
+
 }  // namespace pulsim::v1

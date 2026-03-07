@@ -949,4 +949,155 @@ void ElectrothermalTelemetryModule::on_sample_emit(Real sample_time, std::size_t
     sample_thermal_channels(sample_count);
 }
 
+RuntimeModuleOrchestrator::RuntimeModuleOrchestrator(
+    const SimulationOptions& options,
+    Circuit& circuit,
+    const TransientServiceRegistry& services,
+    SimulationResult& result,
+    std::size_t sample_reserve,
+    Real initial_time,
+    std::vector<ForcedSwitchEventMonitor> forced_monitors,
+    std::vector<SwitchThresholdEventMonitor> threshold_monitors)
+    : options_(options),
+      result_(result),
+      control_mixed_module_(circuit, result, sample_reserve),
+      event_topology_module_(
+          options,
+          circuit,
+          std::move(forced_monitors),
+          std::move(threshold_monitors)),
+      loss_module_(options, services),
+      thermal_module_(options, services),
+      electrothermal_module_(
+          circuit,
+          options,
+          loss_module_,
+          thermal_module_,
+          result,
+          sample_reserve,
+          initial_time) {}
+
+void RuntimeModuleOrchestrator::on_run_initialize(const Vector& initial_state) {
+    event_topology_module_.on_run_initialize();
+    loss_module_.on_run_initialize();
+    thermal_module_.on_run_initialize();
+    event_topology_module_.initialize_threshold_states(initial_state);
+}
+
+void RuntimeModuleOrchestrator::push_series_value(std::vector<Real>& series, Real value) {
+    const std::size_t capacity_before = series.capacity();
+    series.push_back(value);
+    if (series.capacity() != capacity_before) {
+        result_.backend_telemetry.virtual_channel_reallocations += 1;
+    }
+}
+
+void RuntimeModuleOrchestrator::ensure_channel_prefix(std::size_t sample_count, Real fill_value) {
+    for (auto& [channel, series] : result_.virtual_channels) {
+        (void)channel;
+        while (series.size() + 1 < sample_count) {
+            push_series_value(series, fill_value);
+        }
+    }
+}
+
+void RuntimeModuleOrchestrator::fill_missing_sample(std::size_t sample_count, Real fill_value) {
+    for (auto& [channel, series] : result_.virtual_channels) {
+        (void)channel;
+        if (series.size() < sample_count) {
+            push_series_value(series, fill_value);
+        }
+    }
+}
+
+void RuntimeModuleOrchestrator::on_sample_emit(const Vector& state,
+                                               Real sample_time,
+                                               std::size_t sample_count,
+                                               bool has_virtual_components,
+                                               bool is_terminal_sample,
+                                               const ForcedSwitchEventEmitter& emit_forced_event) {
+    const bool has_loss_trace = loss_module_.has_trace_enabled();
+    const bool has_thermal_trace = thermal_module_.has_trace_enabled();
+    if (!has_virtual_components && !has_loss_trace && !has_thermal_trace) {
+        return;
+    }
+
+    control_mixed_module_.ensure_base_metadata();
+    const Real nan = std::numeric_limits<Real>::quiet_NaN();
+    ensure_channel_prefix(sample_count, nan);
+
+    event_topology_module_.on_sample_emit(
+        state,
+        sample_time,
+        sample_count,
+        is_terminal_sample,
+        emit_forced_event);
+
+    if (has_virtual_components) {
+        control_mixed_module_.on_sample_emit(state, sample_time, sample_count);
+    }
+
+    electrothermal_module_.on_sample_emit(sample_time, sample_count);
+    fill_missing_sample(sample_count, nan);
+}
+
+bool RuntimeModuleOrchestrator::near_threshold(const Vector& state) const {
+    return event_topology_module_.near_threshold(state);
+}
+
+std::optional<Real> RuntimeModuleOrchestrator::earliest_threshold_crossing_time(
+    Real t_start,
+    Real dt_used,
+    const Vector& x_start,
+    const Vector& x_end,
+    const ThresholdEventRefiner& refine_event_time) const {
+    return event_topology_module_.earliest_threshold_crossing_time(
+        t_start,
+        dt_used,
+        x_start,
+        x_end,
+        refine_event_time);
+}
+
+void RuntimeModuleOrchestrator::on_step_accepted(Real t_start,
+                                                 Real dt_used,
+                                                 const Vector& x_start,
+                                                 const Vector& x_end,
+                                                 const ThresholdEventRefiner& refine_event_time,
+                                                 const ThresholdEventEmitter& emit_threshold_event) {
+    if (options_.enable_events) {
+        event_topology_module_.on_step_accepted(
+            t_start,
+            dt_used,
+            x_start,
+            x_end,
+            refine_event_time,
+            emit_threshold_event);
+    }
+
+    loss_module_.on_step_accepted(
+        x_end,
+        dt_used,
+        thermal_module_.thermal_scale_vector());
+    thermal_module_.on_step_accepted(dt_used, loss_module_.last_device_power());
+    electrothermal_module_.on_step_accepted(dt_used);
+}
+
+void RuntimeModuleOrchestrator::on_hold_step_accepted(const Vector& held_state, Real dt_used) {
+    loss_module_.on_step_accepted(
+        held_state,
+        dt_used,
+        thermal_module_.thermal_scale_vector());
+    thermal_module_.on_step_accepted(dt_used, loss_module_.last_device_power());
+    electrothermal_module_.on_step_accepted(dt_used);
+}
+
+void RuntimeModuleOrchestrator::on_finalize() {
+    const Real duration =
+        result_.time.size() >= 2 ? (result_.time.back() - result_.time.front()) : Real{0.0};
+    loss_module_.on_finalize(result_, duration);
+    thermal_module_.on_finalize(result_);
+    electrothermal_module_.on_finalize();
+}
+
 }  // namespace pulsim::v1

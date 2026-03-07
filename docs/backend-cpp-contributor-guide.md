@@ -52,11 +52,13 @@ Current non-breaking extraction status:
 - `loss_accounting` adapter (`LossAccountingModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - `thermal_coupling` adapter (`ThermalCouplingModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - `telemetry_channels` adapter (`ElectrothermalTelemetryModule`): `core/src/v1/runtime_module_adapters.hpp/.cpp`
-- orchestrator delegates mixed-domain block execution/channel append via module hook (`on_sample_emit`)
-- orchestrator now delegates:
-  - loss service reset/step/finalize to `loss_accounting`,
-  - thermal service reset/step/finalize to `thermal_coupling`,
-  - canonical `P*`/`T(*)` traces and electrothermal consistency checks to `telemetry_channels`
+- `RuntimeModuleOrchestrator` composes these adapters and exposes unified hooks:
+  - `on_run_initialize`
+  - `on_sample_emit`
+  - `on_step_accepted`
+  - `on_hold_step_accepted`
+  - `on_finalize`
+- `simulation.cpp` now stays policy-focused and interacts with module internals only through the orchestrator boundary.
 - channel names, metadata, and Python/YAML-facing behavior remain unchanged
 
 ## 2.2 Dependency rules and anti-patterns

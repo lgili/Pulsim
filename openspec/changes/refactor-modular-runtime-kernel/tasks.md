@@ -18,9 +18,9 @@
 - [x] 2.6 Keep external YAML/Python/channel behavior unchanged.
 
 ## 3. Orchestrator simplification
-- [ ] 3.1 Refactor runtime orchestrator to policy-only flow over module hooks.
+- [x] 3.1 Refactor runtime orchestrator to policy-only flow over module hooks.
 - [ ] 3.2 Remove duplicated cross-cutting code from orchestrator files after extraction.
-- [ ] 3.3 Add boundary checks preventing direct module-internal coupling.
+- [x] 3.3 Add boundary checks preventing direct module-internal coupling.
 
 ## 4. Quality and performance gates
 - [x] 4.1 Add deterministic replay tests for module output order.
