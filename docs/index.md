@@ -89,3 +89,7 @@ PYTHONPATH=build/python python3 -c "import pulsim as ps; print(ps.__version__)"
 6. Use [Benchmarks and Parity](benchmarks-and-parity.md) to set CI quality gates.
 7. Integrate against [API Reference](api-reference.md).
 8. If you plan to contribute backend code, follow [Backend C++ Contributor Guide](backend-cpp-contributor-guide.md).
+
+## Latest Release Notes
+
+- [Electrothermal Parity (2026-03-07)](release-notes-electrothermal-parity.md)
