@@ -63,6 +63,33 @@ components:
       alpha: 0.004
 ```
 
+Datasheet switching-loss surface (optional, backend-evaluated):
+
+```yaml
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0, 20.0]      # A
+        voltage: [0.0, 200.0, 400.0]    # V
+        temperature: [25.0, 125.0]      # degC
+      eon:  [ ... flat table ... ]      # J
+      eoff: [ ... flat table ... ]      # J
+      err:  [ ... flat table ... ]      # J (optional)
+```
+
+Table order is row-major `(current, voltage, temperature)`:
+`index = ((i_current * N_voltage) + i_voltage) * N_temperature + i_temperature`.
+
+Validation for datasheet loss model:
+
+- `axes.current/voltage/temperature` must be finite and strictly increasing
+- each table length must match `N_current * N_voltage * N_temperature`
+- each energy sample must be finite and `>= 0`
+
 Validation rules when `thermal.enabled: true`:
 
 - `rth` finite and `> 0`
@@ -72,6 +99,66 @@ Validation rules when `thermal.enabled: true`:
 Invalid ranges fail with:
 
 - `PULSIM_YAML_E_THERMAL_RANGE_INVALID`
+
+Optional staged thermal networks:
+
+```yaml
+thermal:
+  enabled: true
+  network: foster      # single_rc | foster | cauer
+  rth_stages: [0.3, 0.7]
+  cth_stages: [0.01, 0.05]
+  temp_init: 25.0
+  temp_ref: 25.0
+  alpha: 0.004
+```
+
+Staged thermal validation:
+
+- `rth_stages` and `cth_stages` are required for `foster`/`cauer`
+- stage arrays must be non-empty and same size
+- each `rth_stages[i]` finite and `> 0`
+- each `cth_stages[i]` finite and `>= 0`
+
+Deterministic diagnostics:
+
+- `PULSIM_YAML_E_THERMAL_NETWORK_INVALID`
+- `PULSIM_YAML_E_THERMAL_DIMENSION_INVALID`
+
+Optional shared sink coupling (multiple devices on one heatsink):
+
+```yaml
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, vin, sw]
+    thermal:
+      enabled: true
+      rth: 0.7
+      cth: 0.02
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.35
+      shared_sink_cth: 0.10
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    thermal:
+      enabled: true
+      rth: 1.2
+      cth: 0.03
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.35
+      shared_sink_cth: 0.10
+```
+
+Shared sink rules:
+
+- `shared_sink_id` groups devices into one common sink.
+- all devices in the same `shared_sink_id` must use identical
+  `shared_sink_rth/shared_sink_cth`.
+- `shared_sink_rth` must be finite and `> 0`.
+- `shared_sink_cth` must be finite and `>= 0`.
+- `shared_sink_rth/shared_sink_cth` without `shared_sink_id` is invalid.
 
 ## 4) Closed-Loop Control Sampling (Important for Stability)
 
@@ -243,6 +330,24 @@ Notes:
 - Components with thermal disabled are still reported with deterministic ambient-based thermal fields.
 - When `enable_losses=true` and `thermal.enabled=true`, transient output includes canonical thermal traces
   in `result.virtual_channels` named `T(<component_name>)` (for thermal-enabled components).
+- When `enable_losses=true`, transient output also includes canonical per-component loss traces:
+  - `Pcond(<component>)`
+  - `Psw_on(<component>)`
+  - `Psw_off(<component>)`
+  - `Prr(<component>)`
+  - `Ploss(<component>)`
+  All these channels are aligned with `result.time` and tagged in
+  `result.virtual_channel_metadata` with `domain="loss"` and `unit="W"`.
+- YAML parser validates `loss.eon/eoff/err` as finite and non-negative; invalid values
+  fail deterministically with `PULSIM_YAML_E_LOSS_RANGE_INVALID`.
+- Datasheet loss schema errors are deterministic:
+  - `PULSIM_YAML_E_LOSS_MODEL_INVALID`
+  - `PULSIM_YAML_E_LOSS_AXIS_INVALID`
+  - `PULSIM_YAML_E_LOSS_DIMENSION_INVALID`
+- Runtime now enforces a deterministic post-run consistency guard between canonical
+  electrothermal channels and summary surfaces (`loss_summary`, `thermal_summary`,
+  `component_electrothermal`). Any mismatch beyond tolerance fails the run with a
+  deterministic diagnostic.
 - Thermal traces are emitted only when all conditions hold:
   - `simulation.enable_losses: true`
   - `simulation.thermal.enabled: true`
@@ -265,3 +370,48 @@ Threshold files:
 
 - `benchmarks/kpi_thresholds.yaml` (optional in general gate)
 - `benchmarks/kpi_thresholds_electrothermal.yaml` (required in electrothermal gate)
+
+## 9) Backend Contract (GUI Integration)
+
+For each accepted transient sample index `k`, backend guarantees:
+
+- `result.time[k]` exists and is monotonic.
+- every exported `result.virtual_channels[name][k]` is aligned to the same `k`.
+- channel metadata exists in `result.virtual_channel_metadata[name]`.
+
+Electrothermal canonical guarantees:
+
+- thermal channels use `T(<component_name>)`.
+- loss channels use:
+  - `Pcond(<component>)`
+  - `Psw_on(<component>)`
+  - `Psw_off(<component>)`
+  - `Prr(<component>)`
+  - `Ploss(<component>)`
+- thermal/loss channels are backend-computed physics outputs (not UI post-processing).
+- reductions are internally consistent:
+  - `component_electrothermal[i].final_temperature == last(T(component))`
+  - `component_electrothermal[i].peak_temperature == max(T(component))`
+  - `component_electrothermal[i].average_temperature == mean(T(component))`
+
+## 10) GUI Responsibility Boundary
+
+GUI should own:
+
+- form/wizard UX for scalar and datasheet model entry.
+- unit conversion helpers and validation message presentation.
+- curve import UX (CSV/PDF digitization) before sending numeric arrays to backend.
+- plotting and dashboard composition.
+
+GUI must not own:
+
+- synthetic thermal curve generation.
+- reconstruction of switching/conduction losses from electrical channels.
+- replacement or smoothing of backend physical traces.
+- heuristic domain inference from channel names when metadata is available.
+
+## 11) Scalar-to-Datasheet Migration
+
+Use the dedicated migration guide:
+
+- `docs/electrothermal-migration-scalar-to-datasheet.md`

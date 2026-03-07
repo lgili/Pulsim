@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.6.5"
+__version__ = "0.7.0"
 
 import weakref
 
@@ -80,11 +80,13 @@ from ._pulsim import (
     HarmonicBalanceResult,
     StiffnessConfig,
     SwitchingEnergy,
+    SwitchingEnergySurface3D,
     FallbackReasonCode,
     FallbackPolicyOptions,
     FallbackTraceEntry,
     BackendTelemetry,
     ThermalCouplingPolicy,
+    ThermalNetworkKind,
     ThermalCouplingOptions,
     ThermalDeviceConfig,
     DeviceThermalTelemetry,
@@ -545,11 +547,13 @@ __all__ = [
     "HarmonicBalanceResult",
     "StiffnessConfig",
     "SwitchingEnergy",
+    "SwitchingEnergySurface3D",
     "FallbackReasonCode",
     "FallbackPolicyOptions",
     "FallbackTraceEntry",
     "BackendTelemetry",
     "ThermalCouplingPolicy",
+    "ThermalNetworkKind",
     "ThermalCouplingOptions",
     "ThermalDeviceConfig",
     "DeviceThermalTelemetry",

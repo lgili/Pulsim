@@ -1,3 +1,8 @@
+/**
+ * @file inductor.hpp
+ * @brief Public declarations for pulsim/v1/components/inductor.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

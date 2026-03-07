@@ -1,3 +1,8 @@
+/**
+ * @file validation.hpp
+ * @brief Public declarations for pulsim/v1/validation.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

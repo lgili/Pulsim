@@ -1,3 +1,8 @@
+/**
+ * @file circuit_graph.hpp
+ * @brief Public declarations for pulsim/v1/circuit_graph.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

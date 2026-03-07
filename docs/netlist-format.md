@@ -40,8 +40,9 @@ components:
 
 ## Components
 
-Para a matriz completa de paridade do catálogo do PulsimGui com status de
-suporte backend, veja `gui-component-parity`.
+For the full canonical backend catalog (all supported YAML types), see
+[Supported Components Catalog](supported-components-catalog.md). For GUI-focused
+parity status, see [GUI Backend Parity](gui-component-parity.md).
 
 ### Passive Components
 

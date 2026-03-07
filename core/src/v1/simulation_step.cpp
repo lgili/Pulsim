@@ -1,21 +1,50 @@
+/**
+ * @file simulation_step.cpp
+ * @brief Step-level solve paths and per-step post-processing for transient simulation.
+ */
+
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <numeric>
+#include <type_traits>
 #include <unordered_map>
 
 namespace pulsim::v1 {
 
 namespace {
 constexpr int kMaxBisections = 12;
+// Loss consistency is compared between step-averaged telemetry and sampled channels.
+// Pulsed channels carry quantization uncertainty on sampled integration (order P_peak * dt).
+constexpr Real kLossConsistencyRelTol = 1e-2;
+constexpr Real kLossConsistencyAbsTol = 1e-8;
 
+/// Relative/absolute floating-point comparator used by post-run consistency guards.
+[[nodiscard]] bool nearly_equal(Real a,
+                                Real b,
+                                Real rel_tol = 1e-6,
+                                Real abs_tol = 1e-9) {
+    if (!std::isfinite(a) || !std::isfinite(b)) {
+        return false;
+    }
+    const Real diff = std::abs(a - b);
+    if (diff <= abs_tol) {
+        return true;
+    }
+    const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
+    return diff <= rel_tol * scale;
+}
+
+/// Legacy heuristic used when only dt_min/dt_max are provided.
 [[nodiscard]] bool legacy_fixed_timestep_heuristic(const SimulationOptions& options) {
     const Real span = std::abs(options.dt_max - options.dt_min);
     const Real scale = std::max<Real>({Real{1.0}, std::abs(options.dt), std::abs(options.dt_max)});
     return span <= scale * Real{1e-12};
 }
 
+/// Resolves canonical fixed/variable stepping mode from simulation options.
 [[nodiscard]] TransientStepMode resolve_step_mode(const SimulationOptions& options) {
     if (options.step_mode_explicit) {
         return options.step_mode;
@@ -27,6 +56,7 @@ constexpr int kMaxBisections = 12;
                                                     : TransientStepMode::Variable;
 }
 
+/// RAII guard that always clears stage context across multi-stage integrator paths.
 class ScopedStageContext final {
 public:
     explicit ScopedStageContext(Circuit& circuit)
@@ -48,6 +78,13 @@ private:
 };
 }  // namespace
 
+/**
+ * @brief Solves one accepted transient step using primary segment path with DAE fallback.
+ * @param t_next Target time for this step.
+ * @param dt Candidate timestep.
+ * @param x_prev Previous accepted state.
+ * @return Newton solve result for the chosen path.
+ */
 NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     last_step_segment_cache_hit_ = false;
     last_step_segment_attempted_ = false;
@@ -179,6 +216,13 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     return solve_segment_primary(false);
 }
 
+/**
+ * @brief Solves one TR-BDF2 step using two implicit stages.
+ * @param t_next Target time for this step.
+ * @param dt Candidate timestep.
+ * @param x_prev Previous accepted state.
+ * @return Stage-2 Newton result (or stage-1 failure).
+ */
 NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev) {
     last_step_solve_path_ = StepSolvePath::DaeFallback;
     last_step_solve_reason_ = "trbdf2_multistage";
@@ -217,6 +261,14 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
     return stage2;
 }
 
+/**
+ * @brief Solves one SDIRK2/Rosenbrock-W step using two implicit stages.
+ * @param t_next Target time for this step.
+ * @param dt Candidate timestep.
+ * @param x_prev Previous accepted state.
+ * @param method Active SDIRK2-family integrator.
+ * @return Stage-2 Newton result (or stage-1 failure).
+ */
 NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_prev, Integrator method) {
     last_step_solve_path_ = StepSolvePath::DaeFallback;
     last_step_solve_reason_ = "sdirk2_multistage";
@@ -261,6 +313,16 @@ NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_
     return stage2;
 }
 
+/**
+ * @brief Locates switching threshold crossing time via bisection and sub-solves.
+ * @param sw Switch monitor descriptor.
+ * @param t_start Step start time.
+ * @param t_end Step end time.
+ * @param x_start State at @p t_start.
+ * @param t_event Output event time.
+ * @param x_event Output state at event time.
+ * @return `true` when an event time is found; `false` on solver failure.
+ */
 bool Simulator::find_switch_event_time(const SwitchMonitor& sw,
                                        Real t_start, Real t_end,
                                        const Vector& x_start,
@@ -319,6 +381,15 @@ bool Simulator::find_switch_event_time(const SwitchMonitor& sw,
     return true;
 }
 
+/**
+ * @brief Records a switch transition event and optional switching-energy contribution.
+ * @param sw Monitored switch descriptor.
+ * @param time Event timestamp.
+ * @param x_state State used to estimate event voltage/current.
+ * @param new_state New logical state (`true`=on, `false`=off).
+ * @param result Simulation result accumulator.
+ * @param event_callback Optional streaming callback.
+ */
 void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
                                     const Vector& x_state, bool new_state,
                                     SimulationResult& result, EventCallback event_callback) {
@@ -334,11 +405,22 @@ void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
     const auto& devices = circuit_.devices();
     auto idx_it = device_index_.find(sw.name);
     if (idx_it != device_index_.end()) {
-        const auto* dev = std::get_if<VoltageControlledSwitch>(&devices[idx_it->second]);
-        if (dev) {
-            g_on = dev->g_on();
-            g_off = dev->g_off();
-        }
+        const std::size_t device_index = idx_it->second;
+        std::visit([&](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                g_on = dev.g_on();
+                g_off = dev.g_off();
+            } else if constexpr (std::is_same_v<T, MOSFET>) {
+                const auto params = dev.params();
+                g_on = std::max<Real>(params.kp, Real{1e-6});
+                g_off = std::max<Real>(params.g_off, Real{1e-18});
+            } else if constexpr (std::is_same_v<T, IGBT>) {
+                const auto params = dev.params();
+                g_on = std::max<Real>(params.g_on, Real{1e-6});
+                g_off = std::max<Real>(params.g_off, Real{1e-18});
+            }
+        }, devices[device_index]);
     }
 
     Real g = new_state ? g_on : g_off;
@@ -363,14 +445,45 @@ void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
         event_callback(se);
     }
 
-    // Accumulate switching energy if configured
-    const auto it = options_.switching_energy.find(sw.name);
-    if (it != options_.switching_energy.end()) {
-        const Real e = new_state ? it->second.eon : it->second.eoff;
+    // Accumulate switching energy from scalar or datasheet surface model.
+    const Real e = resolve_switching_event_energy(sw.name, new_state, v_switch, i_switch);
+    if (e > 0.0) {
         accumulate_switching_loss(sw.name, new_state, e);
     }
 }
 
+/// Resolves event switching energy from scalar or datasheet loss models.
+[[nodiscard]] Real Simulator::resolve_switching_event_energy(const std::string& name,
+                                                             bool turning_on,
+                                                             Real voltage,
+                                                             Real current) const {
+    const Real i_abs = std::abs(current);
+    const Real v_abs = std::abs(voltage);
+
+    if (const auto it = options_.switching_energy_surfaces.find(name);
+        it != options_.switching_energy_surfaces.end()) {
+        Real temperature = options_.thermal.ambient;
+        const auto index_it = device_index_.find(name);
+        if (index_it != device_index_.end() && transient_services_.thermal_service) {
+            temperature = transient_services_.thermal_service->device_temperature(index_it->second);
+        }
+
+        const Real e = turning_on
+            ? it->second.evaluate_eon(i_abs, v_abs, temperature)
+            : it->second.evaluate_eoff(i_abs, v_abs, temperature);
+        return std::max<Real>(0.0, e);
+    }
+
+    if (const auto it = options_.switching_energy.find(name);
+        it != options_.switching_energy.end()) {
+        const Real e = turning_on ? it->second.eon : it->second.eoff;
+        return std::max<Real>(0.0, e);
+    }
+
+    return 0.0;
+}
+
+/// Accumulates discrete turn-on/off switching energy into the loss service.
 void Simulator::accumulate_switching_loss(const std::string& name, bool turning_on, Real energy) {
     if (!transient_services_.loss_service) {
         return;
@@ -378,6 +491,7 @@ void Simulator::accumulate_switching_loss(const std::string& name, bool turning_
     transient_services_.loss_service->commit_switching_event(name, turning_on, energy);
 }
 
+/// Accumulates reverse-recovery energy into the loss service.
 void Simulator::accumulate_reverse_recovery_loss(const std::string& name, Real energy) {
     if (!transient_services_.loss_service) {
         return;
@@ -385,6 +499,7 @@ void Simulator::accumulate_reverse_recovery_loss(const std::string& name, Real e
     transient_services_.loss_service->commit_reverse_recovery_event(name, energy);
 }
 
+/// Commits conduction losses for an accepted electrical state interval.
 void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
     if (!transient_services_.loss_service || !transient_services_.thermal_service) {
         return;
@@ -395,6 +510,7 @@ void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
         transient_services_.thermal_service->thermal_scale_vector());
 }
 
+/// Advances thermal state using the latest per-device power trace.
 void Simulator::update_thermal_state(Real dt) {
     if (!transient_services_.thermal_service || !transient_services_.loss_service) {
         return;
@@ -404,6 +520,7 @@ void Simulator::update_thermal_state(Real dt) {
         transient_services_.loss_service->last_device_power());
 }
 
+/// Finalizes aggregate loss summary after transient completion.
 void Simulator::finalize_loss_summary(SimulationResult& result) {
     if (!transient_services_.loss_service) {
         return;
@@ -416,6 +533,7 @@ void Simulator::finalize_loss_summary(SimulationResult& result) {
     result.loss_summary = transient_services_.loss_service->finalize(duration);
 }
 
+/// Finalizes thermal summary after transient completion.
 void Simulator::finalize_thermal_summary(SimulationResult& result) {
     if (!transient_services_.thermal_service) {
         return;
@@ -439,6 +557,7 @@ void Simulator::finalize_thermal_summary(SimulationResult& result) {
     result.thermal_summary = std::move(summary);
 }
 
+/// Joins loss and thermal summaries into per-component electrothermal telemetry.
 void Simulator::finalize_component_electrothermal(SimulationResult& result) {
     const auto& conns = circuit_.connections();
     result.component_electrothermal.clear();
@@ -485,6 +604,256 @@ void Simulator::finalize_component_electrothermal(SimulationResult& result) {
         }
 
         result.component_electrothermal.push_back(std::move(entry));
+    }
+}
+
+/// Verifies deterministic consistency between canonical channels and summary telemetry.
+void Simulator::validate_electrothermal_consistency(SimulationResult& result) {
+    if (!result.success) {
+        return;
+    }
+    if (result.time.empty()) {
+        return;
+    }
+
+    auto fail = [&](const std::string& detail) {
+        result.success = false;
+        result.final_status = SolverStatus::NumericalError;
+        result.diagnostic = SimulationDiagnosticCode::TransientStepFailure;
+        result.message = "Electrothermal consistency failure: " + detail;
+        result.backend_telemetry.failure_reason = "electrothermal_consistency_failure";
+    };
+
+    auto find_channel = [&](const std::string& channel_name) -> const std::vector<Real>* {
+        const auto it = result.virtual_channels.find(channel_name);
+        if (it == result.virtual_channels.end()) {
+            return nullptr;
+        }
+        if (it->second.size() != result.time.size()) {
+            fail("channel '" + channel_name + "' length mismatch");
+            return nullptr;
+        }
+        return &it->second;
+    };
+
+    auto integrate_channel_energy = [&](const std::string& channel_name,
+                                        const std::vector<Real>& series) -> std::optional<Real> {
+        Real energy = 0.0;
+        for (std::size_t i = 1; i < result.time.size(); ++i) {
+            const Real dt = result.time[i] - result.time[i - 1];
+            if (!std::isfinite(dt) || dt < 0.0) {
+                fail("non-monotonic or non-finite time base while integrating '" + channel_name + "'");
+                return std::nullopt;
+            }
+            const Real power = series[i];
+            if (!std::isfinite(power) || power < -1e-12) {
+                fail("non-finite or negative power sample in '" + channel_name + "'");
+                return std::nullopt;
+            }
+            energy += power * dt;
+        }
+        return energy;
+    };
+
+    std::unordered_map<std::string, const DeviceThermalTelemetry*> thermal_summary_by_name;
+    thermal_summary_by_name.reserve(result.thermal_summary.device_temperatures.size());
+    for (const auto& row : result.thermal_summary.device_temperatures) {
+        thermal_summary_by_name[row.device_name] = &row;
+    }
+
+    std::unordered_map<std::string, const LossResult*> loss_summary_by_name;
+    loss_summary_by_name.reserve(result.loss_summary.device_losses.size());
+    for (const auto& row : result.loss_summary.device_losses) {
+        loss_summary_by_name[row.device_name] = &row;
+    }
+
+    std::unordered_map<std::string, const ComponentElectrothermalTelemetry*> component_by_name;
+    component_by_name.reserve(result.component_electrothermal.size());
+    for (const auto& row : result.component_electrothermal) {
+        component_by_name[row.component_name] = &row;
+    }
+
+    for (const auto& [name, thermal] : thermal_summary_by_name) {
+        const std::string channel_name = "T(" + name + ")";
+        const std::vector<Real>* series_ptr = find_channel(channel_name);
+        if (series_ptr == nullptr) {
+            return;
+        }
+        const auto& series = *series_ptr;
+        if (series.empty()) {
+            fail("empty thermal channel '" + channel_name + "'");
+            return;
+        }
+        if (std::any_of(series.begin(), series.end(), [](Real value) { return !std::isfinite(value); })) {
+            fail("non-finite sample in thermal channel '" + channel_name + "'");
+            return;
+        }
+
+        const Real final_temperature = series.back();
+        const Real peak_temperature = *std::max_element(series.begin(), series.end());
+        const Real sum_temperature = std::accumulate(series.begin(), series.end(), Real{0.0});
+        const Real average_temperature = sum_temperature / static_cast<Real>(series.size());
+
+        if (!nearly_equal(final_temperature, thermal->final_temperature) ||
+            !nearly_equal(peak_temperature, thermal->peak_temperature) ||
+            !nearly_equal(average_temperature, thermal->average_temperature)) {
+            fail("thermal summary mismatch for component '" + name + "'");
+            return;
+        }
+
+        const auto component_it = component_by_name.find(name);
+        if (component_it == component_by_name.end()) {
+            fail("component_electrothermal missing thermal-enabled component '" + name + "'");
+            return;
+        }
+        const auto* component = component_it->second;
+        if (!nearly_equal(final_temperature, component->final_temperature) ||
+            !nearly_equal(peak_temperature, component->peak_temperature) ||
+            !nearly_equal(average_temperature, component->average_temperature)) {
+            fail("component_electrothermal thermal mismatch for component '" + name + "'");
+            return;
+        }
+    }
+
+    if (!options_.enable_losses) {
+        return;
+    }
+
+    const Real duration =
+        result.time.size() >= 2 ? (result.time.back() - result.time.front()) : Real{0.0};
+    Real max_dt = 0.0;
+    for (std::size_t i = 1; i < result.time.size(); ++i) {
+        const Real dt = result.time[i] - result.time[i - 1];
+        if (std::isfinite(dt) && dt > 0.0) {
+            max_dt = std::max(max_dt, dt);
+        }
+    }
+    max_dt = std::max(max_dt, Real{1e-18});
+
+    auto channel_energy_quantization_tol = [&](const std::vector<Real>& series) -> Real {
+        Real peak_power = 0.0;
+        for (Real sample : series) {
+            if (std::isfinite(sample)) {
+                peak_power = std::max(peak_power, std::abs(sample));
+            }
+        }
+        return std::max(kLossConsistencyAbsTol, peak_power * max_dt);
+    };
+    auto channel_average_power_quantization_tol = [&](const std::vector<Real>& series) -> Real {
+        if (duration <= 0.0) {
+            return kLossConsistencyAbsTol;
+        }
+        return channel_energy_quantization_tol(series) / duration;
+    };
+
+    Real aggregated_channel_energy = 0.0;
+    Real aggregated_channel_energy_tol = 0.0;
+    const auto& conns = circuit_.connections();
+    for (const auto& conn : conns) {
+        const std::string p_cond_name = "Pcond(" + conn.name + ")";
+        const std::string p_on_name = "Psw_on(" + conn.name + ")";
+        const std::string p_off_name = "Psw_off(" + conn.name + ")";
+        const std::string p_rr_name = "Prr(" + conn.name + ")";
+        const std::string p_total_name = "Ploss(" + conn.name + ")";
+
+        const std::vector<Real>* p_cond = find_channel(p_cond_name);
+        if (p_cond == nullptr) return;
+        const std::vector<Real>* p_on = find_channel(p_on_name);
+        if (p_on == nullptr) return;
+        const std::vector<Real>* p_off = find_channel(p_off_name);
+        if (p_off == nullptr) return;
+        const std::vector<Real>* p_rr = find_channel(p_rr_name);
+        if (p_rr == nullptr) return;
+        const std::vector<Real>* p_total = find_channel(p_total_name);
+        if (p_total == nullptr) return;
+
+        const std::optional<Real> e_cond_opt = integrate_channel_energy(p_cond_name, *p_cond);
+        if (!e_cond_opt.has_value()) return;
+        const std::optional<Real> e_on_opt = integrate_channel_energy(p_on_name, *p_on);
+        if (!e_on_opt.has_value()) return;
+        const std::optional<Real> e_off_opt = integrate_channel_energy(p_off_name, *p_off);
+        if (!e_off_opt.has_value()) return;
+        const std::optional<Real> e_rr_opt = integrate_channel_energy(p_rr_name, *p_rr);
+        if (!e_rr_opt.has_value()) return;
+        const std::optional<Real> e_total_opt = integrate_channel_energy(p_total_name, *p_total);
+        if (!e_total_opt.has_value()) return;
+
+        const Real e_cond = *e_cond_opt;
+        const Real e_on = *e_on_opt;
+        const Real e_off = *e_off_opt;
+        const Real e_rr = *e_rr_opt;
+        const Real e_total = *e_total_opt;
+        const Real e_breakdown = e_cond + e_on + e_off + e_rr;
+        const Real e_cond_tol = channel_energy_quantization_tol(*p_cond);
+        const Real e_on_tol = channel_energy_quantization_tol(*p_on);
+        const Real e_off_tol = channel_energy_quantization_tol(*p_off);
+        const Real e_rr_tol = channel_energy_quantization_tol(*p_rr);
+        const Real e_total_tol = channel_energy_quantization_tol(*p_total);
+        const Real e_breakdown_tol = e_cond_tol + e_on_tol + e_off_tol + e_rr_tol;
+        if (!nearly_equal(
+                e_total,
+                e_breakdown,
+                kLossConsistencyRelTol,
+                std::max(e_total_tol, e_breakdown_tol))) {
+            fail("Ploss channel mismatch against breakdown for component '" + conn.name + "'");
+            return;
+        }
+        aggregated_channel_energy += e_total;
+        aggregated_channel_energy_tol += e_total_tol;
+
+        const Real avg_cond = duration > 0.0 ? e_cond / duration : 0.0;
+        const Real avg_on = duration > 0.0 ? e_on / duration : 0.0;
+        const Real avg_off = duration > 0.0 ? e_off / duration : 0.0;
+        const Real avg_rr = duration > 0.0 ? e_rr / duration : 0.0;
+        const Real avg_total = duration > 0.0 ? e_total / duration : 0.0;
+        const Real avg_cond_tol = channel_average_power_quantization_tol(*p_cond);
+        const Real avg_on_tol = channel_average_power_quantization_tol(*p_on);
+        const Real avg_off_tol = channel_average_power_quantization_tol(*p_off);
+        const Real avg_rr_tol = channel_average_power_quantization_tol(*p_rr);
+        const Real avg_total_tol = channel_average_power_quantization_tol(*p_total);
+
+        const auto component_it = component_by_name.find(conn.name);
+        if (component_it == component_by_name.end()) {
+            fail("component_electrothermal missing row for component '" + conn.name + "'");
+            return;
+        }
+        const auto* component = component_it->second;
+        if (!nearly_equal(component->conduction, avg_cond, kLossConsistencyRelTol, avg_cond_tol) ||
+            !nearly_equal(component->turn_on, avg_on, kLossConsistencyRelTol, avg_on_tol) ||
+            !nearly_equal(component->turn_off, avg_off, kLossConsistencyRelTol, avg_off_tol) ||
+            !nearly_equal(component->reverse_recovery, avg_rr, kLossConsistencyRelTol, avg_rr_tol) ||
+            !nearly_equal(component->total_loss, avg_total, kLossConsistencyRelTol, avg_total_tol) ||
+            !nearly_equal(component->total_energy, e_total, kLossConsistencyRelTol, e_total_tol)) {
+            fail("component_electrothermal loss mismatch for component '" + conn.name + "'");
+            return;
+        }
+
+        const auto loss_it = loss_summary_by_name.find(conn.name);
+        if (loss_it == loss_summary_by_name.end()) {
+            if (!nearly_equal(e_total, 0.0, 1e-6, 1e-10)) {
+                fail("loss_summary missing non-zero component '" + conn.name + "'");
+                return;
+            }
+            continue;
+        }
+        const auto* loss = loss_it->second;
+        if (!nearly_equal(loss->breakdown.conduction, avg_cond, kLossConsistencyRelTol, avg_cond_tol) ||
+            !nearly_equal(loss->breakdown.turn_on, avg_on, kLossConsistencyRelTol, avg_on_tol) ||
+            !nearly_equal(loss->breakdown.turn_off, avg_off, kLossConsistencyRelTol, avg_off_tol) ||
+            !nearly_equal(loss->breakdown.reverse_recovery, avg_rr, kLossConsistencyRelTol, avg_rr_tol) ||
+            !nearly_equal(loss->average_power, avg_total, kLossConsistencyRelTol, avg_total_tol) ||
+            !nearly_equal(loss->total_energy, e_total, kLossConsistencyRelTol, e_total_tol)) {
+            fail("loss_summary mismatch for component '" + conn.name + "'");
+            return;
+        }
+    }
+
+    if (duration > 0.0 &&
+        !nearly_equal(result.loss_summary.total_loss * duration,
+                      aggregated_channel_energy,
+                      kLossConsistencyRelTol,
+                      std::max(kLossConsistencyAbsTol, aggregated_channel_energy_tol))) {
+        fail("aggregate loss_summary total_loss mismatch against channel energy");
     }
 }
 

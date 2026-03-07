@@ -1,3 +1,8 @@
+/**
+ * @file resistor.hpp
+ * @brief Public declarations for pulsim/v1/components/resistor.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

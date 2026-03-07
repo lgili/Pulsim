@@ -107,6 +107,7 @@ For switched converters in production-like runs:
 - [Netlist YAML Format](netlist-format.md)
 - [Frontend Control and Signals Contract](frontend-control-signals.md)
 - [Electrothermal Workflow](electrothermal-workflow.md)
+- [Electrothermal Migration (Scalar to Datasheet)](electrothermal-migration-scalar-to-datasheet.md)
 - [Configuration](configuration.md)
 - [Examples and Results](examples-and-results.md)
 - [Benchmarks and Parity](benchmarks-and-parity.md)

@@ -1,3 +1,8 @@
+/**
+ * @file cpp23_features.hpp
+ * @brief Public declarations for pulsim/v1/cpp23_features.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

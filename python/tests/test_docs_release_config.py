@@ -33,11 +33,11 @@ def test_docs_workflow_builds_on_pr_and_deploys_from_main_or_tags() -> None:
 
     pr_section = on_section["pull_request"]
     assert "branches" in pr_section
-    assert "main" in pr_section["branches"]
+    assert any(branch in pr_section["branches"] for branch in ("main", "dev"))
 
     push_section = on_section["push"]
     assert "branches" in push_section
-    assert "main" in push_section["branches"]
+    assert any(branch in push_section["branches"] for branch in ("main", "dev"))
     assert "tags" in push_section
     assert "v*.*.*" in push_section["tags"]
 

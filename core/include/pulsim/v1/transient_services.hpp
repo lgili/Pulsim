@@ -1,3 +1,8 @@
+/**
+ * @file transient_services.hpp
+ * @brief Public declarations for pulsim/v1/transient_services.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/runtime_circuit.hpp"
@@ -208,6 +213,10 @@ public:
     virtual void commit_accepted_segment(const Vector& x,
                                          Real dt,
                                          std::span<const Real> thermal_scale) = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_conduction_power() const = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_turn_on_power() const = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_turn_off_power() const = 0;
+    [[nodiscard]] virtual std::span<const Real> last_device_reverse_recovery_power() const = 0;
     [[nodiscard]] virtual std::span<const Real> last_device_power() const = 0;
     [[nodiscard]] virtual SystemLossSummary finalize(Real duration) const = 0;
 };
@@ -219,6 +228,8 @@ public:
     virtual void reset() = 0;
     [[nodiscard]] virtual Real thermal_scale_factor(std::size_t device_index) const = 0;
     [[nodiscard]] virtual std::span<const Real> thermal_scale_vector() const = 0;
+    [[nodiscard]] virtual bool is_device_enabled(std::size_t device_index) const = 0;
+    [[nodiscard]] virtual Real device_temperature(std::size_t device_index) const = 0;
     virtual void commit_accepted_segment(Real dt,
                                          std::span<const Real> device_power) = 0;
     [[nodiscard]] virtual ThermalServiceSummary finalize() const = 0;

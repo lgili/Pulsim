@@ -1,3 +1,8 @@
+/**
+ * @file yaml_parser.cpp
+ * @brief YAML schema v1 parser: maps netlist documents into Circuit + SimulationOptions.
+ */
+
 #include "pulsim/v1/parser/yaml_parser.hpp"
 
 #include <yaml-cpp/yaml.h>
@@ -33,15 +38,24 @@ constexpr const char* kDiagDeprecatedField = "PULSIM_YAML_W_DEPRECATED_FIELD";
 constexpr const char* kDiagThermalUnsupportedComponent = "PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT";
 constexpr const char* kDiagThermalMissingRequired = "PULSIM_YAML_E_THERMAL_MISSING_REQUIRED";
 constexpr const char* kDiagThermalInvalidRange = "PULSIM_YAML_E_THERMAL_RANGE_INVALID";
+constexpr const char* kDiagThermalNetworkInvalid = "PULSIM_YAML_E_THERMAL_NETWORK_INVALID";
+constexpr const char* kDiagThermalDimensionInvalid = "PULSIM_YAML_E_THERMAL_DIMENSION_INVALID";
 constexpr const char* kDiagThermalDefaultApplied = "PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED";
+constexpr const char* kDiagLossInvalidRange = "PULSIM_YAML_E_LOSS_RANGE_INVALID";
+constexpr const char* kDiagLossModelInvalid = "PULSIM_YAML_E_LOSS_MODEL_INVALID";
+constexpr const char* kDiagLossAxisInvalid = "PULSIM_YAML_E_LOSS_AXIS_INVALID";
+constexpr const char* kDiagLossDimensionInvalid = "PULSIM_YAML_E_LOSS_DIMENSION_INVALID";
 
+/// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
 
+/// Lowercases ASCII characters for key normalization.
 std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
+/// Normalizes schema keys by lowercasing and removing non-alphanumeric chars.
 std::string normalize_key(std::string s) {
     s = to_lower(s);
     std::string out;
@@ -54,10 +68,12 @@ std::string normalize_key(std::string s) {
     return out;
 }
 
+/// Returns whether a normalized key belongs to an allowed-key set.
 bool is_known_key(const std::string& key, const std::unordered_set<std::string>& allowed) {
     return allowed.find(key) != allowed.end();
 }
 
+/// Returns whether canonical component type supports electrothermal options.
 [[nodiscard]] bool component_type_supports_thermal(const std::string& canonical_type) {
     return canonical_type == "resistor" ||
            canonical_type == "diode" ||
@@ -67,18 +83,22 @@ bool is_known_key(const std::string& key, const std::unordered_set<std::string>&
            canonical_type == "bjt_pnp";
 }
 
+/// Prefixes diagnostics with stable machine-readable error code.
 std::string with_diag_code(const std::string& code, const std::string& message) {
     return "[" + code + "] " + message;
 }
 
+/// Appends one structured parser error.
 void push_error(std::vector<std::string>& errors, const std::string& code, const std::string& message) {
     errors.push_back(with_diag_code(code, message));
 }
 
+/// Appends one structured parser warning.
 void push_warning(std::vector<std::string>& warnings, const std::string& code, const std::string& message) {
     warnings.push_back(with_diag_code(code, message));
 }
 
+/// Classifies YAML node type for error reporting.
 std::string yaml_node_class(const YAML::Node& node) {
     if (!node || node.IsNull()) {
         return "null";
@@ -95,6 +115,7 @@ std::string yaml_node_class(const YAML::Node& node) {
     return "unknown";
 }
 
+/// Emits standardized type mismatch parser diagnostic.
 void push_type_mismatch_error(std::vector<std::string>& errors,
                               const std::string& path,
                               const std::string& expected,
@@ -106,6 +127,7 @@ void push_type_mismatch_error(std::vector<std::string>& errors,
             ", got " + yaml_node_class(received) + ")");
 }
 
+/// Parses optional boolean scalar while validating type.
 std::optional<bool> parse_bool_scalar(const YAML::Node& node,
                                       const std::string& path,
                                       std::vector<std::string>& errors) {
@@ -124,6 +146,7 @@ std::optional<bool> parse_bool_scalar(const YAML::Node& node,
     }
 }
 
+/// Parses optional integer scalar while validating type.
 std::optional<int> parse_int_scalar(const YAML::Node& node,
                                     const std::string& path,
                                     std::vector<std::string>& errors) {
@@ -142,6 +165,7 @@ std::optional<int> parse_int_scalar(const YAML::Node& node,
     }
 }
 
+/// Parses optional string scalar while validating type.
 std::optional<std::string> parse_string_scalar(const YAML::Node& node,
                                                const std::string& path,
                                                std::vector<std::string>& errors) {
@@ -561,6 +585,40 @@ std::vector<std::string> parse_nodes(const YAML::Node& node,
     return nodes;
 }
 
+std::vector<Real> parse_real_sequence(const YAML::Node& node,
+                                      const std::string& context,
+                                      std::vector<std::string>& errors) {
+    std::vector<Real> values;
+    if (!node) {
+        return values;
+    }
+    if (!node.IsSequence()) {
+        push_type_mismatch_error(errors, context, "sequence", node);
+        return values;
+    }
+
+    values.reserve(node.size());
+    for (std::size_t i = 0; i < node.size(); ++i) {
+        values.push_back(parse_real(node[i], context + "[" + std::to_string(i) + "]", errors));
+    }
+    return values;
+}
+
+[[nodiscard]] bool is_strictly_increasing(const std::vector<Real>& values) {
+    if (values.empty()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (!std::isfinite(values[i])) {
+            return false;
+        }
+        if (i > 0 && !(values[i] > values[i - 1])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 YAML::Node merge_nodes(const YAML::Node& base, const YAML::Node& overrides) {
     if (!base) return overrides;
     if (!overrides) return base;
@@ -586,9 +644,18 @@ YAML::Node merge_nodes(const YAML::Node& base, const YAML::Node& overrides) {
 
 }  // namespace
 
+/**
+ * @brief Creates parser instance with strict/lenient behavior options.
+ * @param options Parser behavior options.
+ */
 YamlParser::YamlParser(YamlParserOptions options)
     : options_(options) {}
 
+/**
+ * @brief Loads YAML netlist from file path.
+ * @param path Source YAML file path.
+ * @return Pair `(Circuit, SimulationOptions)`; parser errors are exposed via `errors()`.
+ */
 std::pair<Circuit, SimulationOptions> YamlParser::load(const std::filesystem::path& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -601,6 +668,11 @@ std::pair<Circuit, SimulationOptions> YamlParser::load(const std::filesystem::pa
     return load_string(buffer.str());
 }
 
+/**
+ * @brief Loads YAML netlist from in-memory string.
+ * @param content YAML document string.
+ * @return Pair `(Circuit, SimulationOptions)`; parser errors are exposed via `errors()`.
+ */
 std::pair<Circuit, SimulationOptions> YamlParser::load_string(const std::string& content) {
     Circuit circuit;
     SimulationOptions options;
@@ -611,6 +683,12 @@ std::pair<Circuit, SimulationOptions> YamlParser::load_string(const std::string&
     return {circuit, options};
 }
 
+/**
+ * @brief Parses YAML document into runtime circuit and simulation options.
+ * @param content YAML netlist content.
+ * @param circuit Output runtime circuit.
+ * @param options Output simulation options.
+ */
 void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, SimulationOptions& options) {
     const auto first_non_space = content.find_first_not_of(" \t\r\n");
     if (first_non_space != std::string::npos) {
@@ -1482,6 +1560,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
     }
 
     YAML::Node components = root["components"];
+    std::unordered_map<std::string, std::pair<Real, Real>> shared_sink_defs;
 
     for (const auto& comp_node_raw : components) {
         YAML::Node comp_node = comp_node_raw;
@@ -1592,17 +1671,136 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         // Loss model (switching energy)
         if (comp["loss"]) {
             YAML::Node loss = comp["loss"];
-            validate_keys(loss, {"eon", "eoff", "err"}, name + ".loss", errors_, options_.strict);
-            SwitchingEnergy energy;
-            if (loss["eon"]) energy.eon = parse_real(loss["eon"], name + ".loss.eon", errors_);
-            if (loss["eoff"]) energy.eoff = parse_real(loss["eoff"], name + ".loss.eoff", errors_);
-            if (loss["err"]) energy.err = parse_real(loss["err"], name + ".loss.err", errors_);
-            options.switching_energy[name] = energy;
+            validate_keys(loss, {"model", "axes", "eon", "eoff", "err"}, name + ".loss", errors_, options_.strict);
+
+            const bool has_axes = loss["axes"] && !loss["axes"].IsNull();
+            const bool has_table_values =
+                (loss["eon"] && loss["eon"].IsSequence()) ||
+                (loss["eoff"] && loss["eoff"].IsSequence()) ||
+                (loss["err"] && loss["err"].IsSequence());
+
+            bool datasheet_mode = has_axes || has_table_values;
+            if (const auto model_raw = parse_string_scalar(loss["model"], name + ".loss.model", errors_);
+                model_raw.has_value()) {
+                const std::string model = normalize_key(*model_raw);
+                if (model == "scalar") {
+                    datasheet_mode = false;
+                } else if (model == "datasheet") {
+                    datasheet_mode = true;
+                } else {
+                    push_error(errors_,
+                               kDiagLossModelInvalid,
+                               "Unsupported " + name + ".loss.model '" + *model_raw +
+                                   "' (expected 'scalar' or 'datasheet')");
+                }
+            }
+
+            auto validate_loss_energy = [&](Real value, const std::string& field_path) {
+                if (!std::isfinite(value) || value < 0.0) {
+                    push_error(errors_,
+                               kDiagLossInvalidRange,
+                               field_path + " must be finite and >= 0");
+                }
+            };
+
+            if (datasheet_mode) {
+                if (!loss["axes"] || !loss["axes"].IsMap()) {
+                    if (loss["axes"]) {
+                        push_type_mismatch_error(errors_, name + ".loss.axes", "map", loss["axes"]);
+                    } else {
+                        push_error(errors_,
+                                   kDiagLossModelInvalid,
+                                   "Missing required field '" + name + ".loss.axes' for datasheet model");
+                    }
+                } else {
+                    const YAML::Node axes = loss["axes"];
+                    validate_keys(
+                        axes,
+                        {"current", "voltage", "temperature"},
+                        name + ".loss.axes",
+                        errors_,
+                        options_.strict);
+
+                    SwitchingEnergySurface3D surface;
+                    surface.current_axis =
+                        parse_real_sequence(axes["current"], name + ".loss.axes.current", errors_);
+                    surface.voltage_axis =
+                        parse_real_sequence(axes["voltage"], name + ".loss.axes.voltage", errors_);
+                    surface.temperature_axis =
+                        parse_real_sequence(axes["temperature"], name + ".loss.axes.temperature", errors_);
+
+                    if (!is_strictly_increasing(surface.current_axis)) {
+                        push_error(errors_,
+                                   kDiagLossAxisInvalid,
+                                   name + ".loss.axes.current must be finite and strictly increasing");
+                    }
+                    if (!is_strictly_increasing(surface.voltage_axis)) {
+                        push_error(errors_,
+                                   kDiagLossAxisInvalid,
+                                   name + ".loss.axes.voltage must be finite and strictly increasing");
+                    }
+                    if (!is_strictly_increasing(surface.temperature_axis)) {
+                        push_error(errors_,
+                                   kDiagLossAxisInvalid,
+                                   name + ".loss.axes.temperature must be finite and strictly increasing");
+                    }
+
+                    const std::size_t expected_size = surface.expected_table_size();
+                    auto parse_table = [&](const char* key,
+                                           std::vector<Real>& dest,
+                                           const std::string& path) {
+                        if (!loss[key]) {
+                            return;
+                        }
+                        dest = parse_real_sequence(loss[key], path, errors_);
+                        if (!dest.empty() && dest.size() != expected_size) {
+                            push_error(
+                                errors_,
+                                kDiagLossDimensionInvalid,
+                                path + " size mismatch (expected " + std::to_string(expected_size) +
+                                    ", got " + std::to_string(dest.size()) + ")");
+                        }
+                        for (std::size_t i = 0; i < dest.size(); ++i) {
+                            validate_loss_energy(dest[i], path + "[" + std::to_string(i) + "]");
+                        }
+                    };
+
+                    parse_table("eon", surface.eon_table, name + ".loss.eon");
+                    parse_table("eoff", surface.eoff_table, name + ".loss.eoff");
+                    parse_table("err", surface.err_table, name + ".loss.err");
+
+                    if (!surface.has_eon() && !surface.has_eoff() && !surface.has_err()) {
+                        push_error(errors_,
+                                   kDiagLossModelInvalid,
+                                   "Datasheet loss model for '" + name +
+                                       "' must define at least one table among eon/eoff/err");
+                    }
+
+                    if (surface.valid_shape()) {
+                        options.switching_energy_surfaces[name] = surface;
+                        options.switching_energy.erase(name);
+                    }
+                }
+            } else {
+                SwitchingEnergy energy;
+                if (loss["eon"]) energy.eon = parse_real(loss["eon"], name + ".loss.eon", errors_);
+                if (loss["eoff"]) energy.eoff = parse_real(loss["eoff"], name + ".loss.eoff", errors_);
+                if (loss["err"]) energy.err = parse_real(loss["err"], name + ".loss.err", errors_);
+                validate_loss_energy(energy.eon, name + ".loss.eon");
+                validate_loss_energy(energy.eoff, name + ".loss.eoff");
+                validate_loss_energy(energy.err, name + ".loss.err");
+                options.switching_energy[name] = energy;
+                options.switching_energy_surfaces.erase(name);
+            }
         }
 
         if (comp["thermal"]) {
             YAML::Node thermal = comp["thermal"];
-            validate_keys(thermal, {"enabled", "rth", "cth", "temp_init", "temp_ref", "alpha"},
+            validate_keys(
+                thermal,
+                {"enabled", "network", "rth", "cth", "rth_stages", "cth_stages",
+                 "temp_init", "temp_ref", "alpha",
+                 "shared_sink_id", "shared_sink_rth", "shared_sink_cth"},
                           name + ".thermal", errors_, options_.strict);
             ThermalDeviceConfig cfg;
             if (const auto enabled = parse_bool_scalar(
@@ -1612,45 +1810,183 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             const bool supports_thermal = component_type_supports_thermal(type);
             const bool has_rth = is_set(thermal["rth"]);
             const bool has_cth = is_set(thermal["cth"]);
+            const bool has_rth_stages = is_set(thermal["rth_stages"]);
+            const bool has_cth_stages = is_set(thermal["cth_stages"]);
+
+            bool network_explicit = false;
+            if (const auto network_raw = parse_string_scalar(
+                    thermal["network"], name + ".thermal.network", errors_);
+                network_raw.has_value()) {
+                network_explicit = true;
+                const std::string normalized = normalize_key(*network_raw);
+                if (normalized == "single" ||
+                    normalized == "singlerc" ||
+                    normalized == "single_rc") {
+                    cfg.network_kind = ThermalNetworkKind::SingleRC;
+                } else if (normalized == "foster") {
+                    cfg.network_kind = ThermalNetworkKind::Foster;
+                } else if (normalized == "cauer") {
+                    cfg.network_kind = ThermalNetworkKind::Cauer;
+                } else {
+                    push_error(errors_,
+                               kDiagThermalNetworkInvalid,
+                               "Unsupported " + name + ".thermal.network '" + *network_raw +
+                                   "' (expected single_rc, foster, or cauer)");
+                }
+            }
+
+            const bool stage_mode_requested = has_rth_stages || has_cth_stages;
+            if (stage_mode_requested && !network_explicit) {
+                cfg.network_kind = ThermalNetworkKind::Foster;
+            }
 
             if (cfg.enabled && !supports_thermal) {
                 push_error(errors_, kDiagThermalUnsupportedComponent,
                            "Component '" + name + "' (" + type + ") does not support thermal port enablement");
             }
 
-            if (has_rth) {
-                cfg.rth = parse_real(thermal["rth"], name + ".thermal.rth", errors_);
-            } else if (cfg.enabled) {
-                if (options_.strict) {
-                    push_error(errors_, kDiagThermalMissingRequired,
-                               "Missing required field '" + name + ".thermal.rth' when thermal is enabled");
-                } else {
-                    cfg.rth = options.thermal.default_rth;
-                    push_warning(
-                        warnings_,
-                        kDiagThermalDefaultApplied,
-                        "Applied simulation.thermal.default_rth to '" + name + ".thermal.rth'");
+            if (cfg.network_kind == ThermalNetworkKind::SingleRC) {
+                if (stage_mode_requested) {
+                    push_error(errors_,
+                               kDiagThermalNetworkInvalid,
+                               name + ".thermal.network=single_rc cannot use rth_stages/cth_stages");
                 }
-            }
 
-            if (has_cth) {
-                cfg.cth = parse_real(thermal["cth"], name + ".thermal.cth", errors_);
-            } else if (cfg.enabled) {
-                if (options_.strict) {
-                    push_error(errors_, kDiagThermalMissingRequired,
-                               "Missing required field '" + name + ".thermal.cth' when thermal is enabled");
-                } else {
-                    cfg.cth = options.thermal.default_cth;
-                    push_warning(
-                        warnings_,
-                        kDiagThermalDefaultApplied,
-                        "Applied simulation.thermal.default_cth to '" + name + ".thermal.cth'");
+                if (has_rth) {
+                    cfg.rth = parse_real(thermal["rth"], name + ".thermal.rth", errors_);
+                } else if (cfg.enabled) {
+                    if (options_.strict) {
+                        push_error(errors_, kDiagThermalMissingRequired,
+                                   "Missing required field '" + name + ".thermal.rth' when thermal is enabled");
+                    } else {
+                        cfg.rth = options.thermal.default_rth;
+                        push_warning(
+                            warnings_,
+                            kDiagThermalDefaultApplied,
+                            "Applied simulation.thermal.default_rth to '" + name + ".thermal.rth'");
+                    }
+                }
+
+                if (has_cth) {
+                    cfg.cth = parse_real(thermal["cth"], name + ".thermal.cth", errors_);
+                } else if (cfg.enabled) {
+                    if (options_.strict) {
+                        push_error(errors_, kDiagThermalMissingRequired,
+                                   "Missing required field '" + name + ".thermal.cth' when thermal is enabled");
+                    } else {
+                        cfg.cth = options.thermal.default_cth;
+                        push_warning(
+                            warnings_,
+                            kDiagThermalDefaultApplied,
+                            "Applied simulation.thermal.default_cth to '" + name + ".thermal.cth'");
+                    }
+                }
+                cfg.stage_rth.clear();
+                cfg.stage_cth.clear();
+            } else {
+                if (!has_rth_stages || !has_cth_stages) {
+                    push_error(
+                        errors_,
+                        kDiagThermalMissingRequired,
+                        "Missing required fields '" + name +
+                            ".thermal.rth_stages' and '" + name +
+                            ".thermal.cth_stages' for staged thermal network");
+                }
+                cfg.stage_rth =
+                    parse_real_sequence(thermal["rth_stages"], name + ".thermal.rth_stages", errors_);
+                cfg.stage_cth =
+                    parse_real_sequence(thermal["cth_stages"], name + ".thermal.cth_stages", errors_);
+
+                if (!cfg.stage_rth.empty() &&
+                    !cfg.stage_cth.empty() &&
+                    cfg.stage_rth.size() != cfg.stage_cth.size()) {
+                    push_error(errors_,
+                               kDiagThermalDimensionInvalid,
+                               name + ".thermal stage dimension mismatch: rth_stages has " +
+                                   std::to_string(cfg.stage_rth.size()) +
+                                   " entries but cth_stages has " +
+                                   std::to_string(cfg.stage_cth.size()));
+                }
+                if (cfg.stage_rth.empty() || cfg.stage_cth.empty()) {
+                    push_error(errors_,
+                               kDiagThermalDimensionInvalid,
+                               name + ".thermal staged networks require non-empty rth_stages/cth_stages");
+                }
+
+                cfg.rth = 0.0;
+                cfg.cth = 0.0;
+                for (std::size_t i = 0; i < std::min(cfg.stage_rth.size(), cfg.stage_cth.size()); ++i) {
+                    const Real r = cfg.stage_rth[i];
+                    const Real c = cfg.stage_cth[i];
+                    if (!std::isfinite(r) || r <= 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.rth_stages[" + std::to_string(i) +
+                                       "] must be finite and > 0");
+                    }
+                    if (!std::isfinite(c) || c < 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.cth_stages[" + std::to_string(i) +
+                                       "] must be finite and >= 0");
+                    }
+                    cfg.rth += r;
+                    cfg.cth += c;
                 }
             }
 
             if (thermal["temp_init"]) cfg.temp_init = parse_real(thermal["temp_init"], name + ".thermal.temp_init", errors_);
             if (thermal["temp_ref"]) cfg.temp_ref = parse_real(thermal["temp_ref"], name + ".thermal.temp_ref", errors_);
             if (thermal["alpha"]) cfg.alpha = parse_real(thermal["alpha"], name + ".thermal.alpha", errors_);
+            if (const auto sink_id = parse_string_scalar(
+                    thermal["shared_sink_id"], name + ".thermal.shared_sink_id", errors_);
+                sink_id.has_value()) {
+                cfg.shared_sink_id = *sink_id;
+            }
+
+            const bool has_shared_sink_rth = is_set(thermal["shared_sink_rth"]);
+            const bool has_shared_sink_cth = is_set(thermal["shared_sink_cth"]);
+            if (!cfg.shared_sink_id.empty()) {
+                if (has_shared_sink_rth) {
+                    cfg.shared_sink_rth = parse_real(
+                        thermal["shared_sink_rth"],
+                        name + ".thermal.shared_sink_rth",
+                        errors_);
+                } else if (options_.strict) {
+                    push_error(errors_,
+                               kDiagThermalMissingRequired,
+                               "Missing required field '" + name +
+                                   ".thermal.shared_sink_rth' when shared_sink_id is set");
+                } else {
+                    cfg.shared_sink_rth = options.thermal.default_rth;
+                    push_warning(
+                        warnings_,
+                        kDiagThermalDefaultApplied,
+                        "Applied simulation.thermal.default_rth to '" + name + ".thermal.shared_sink_rth'");
+                }
+
+                if (has_shared_sink_cth) {
+                    cfg.shared_sink_cth = parse_real(
+                        thermal["shared_sink_cth"],
+                        name + ".thermal.shared_sink_cth",
+                        errors_);
+                } else if (options_.strict) {
+                    push_error(errors_,
+                               kDiagThermalMissingRequired,
+                               "Missing required field '" + name +
+                                   ".thermal.shared_sink_cth' when shared_sink_id is set");
+                } else {
+                    cfg.shared_sink_cth = options.thermal.default_cth;
+                    push_warning(
+                        warnings_,
+                        kDiagThermalDefaultApplied,
+                        "Applied simulation.thermal.default_cth to '" + name + ".thermal.shared_sink_cth'");
+                }
+            } else if (has_shared_sink_rth || has_shared_sink_cth) {
+                push_error(errors_,
+                           kDiagThermalInvalidRange,
+                           name + ".thermal.shared_sink_rth/shared_sink_cth require non-empty shared_sink_id");
+            }
 
             if (cfg.enabled) {
                 if (!std::isfinite(cfg.rth) || cfg.rth <= 0.0) {
@@ -1672,6 +2008,42 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 if (!std::isfinite(cfg.alpha)) {
                     push_error(errors_, kDiagThermalInvalidRange,
                                name + ".thermal.alpha must be finite");
+                }
+                if (!cfg.shared_sink_id.empty()) {
+                    if (!std::isfinite(cfg.shared_sink_rth) || cfg.shared_sink_rth <= 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.shared_sink_rth must be finite and > 0");
+                    }
+                    if (!std::isfinite(cfg.shared_sink_cth) || cfg.shared_sink_cth < 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.shared_sink_cth must be finite and >= 0");
+                    }
+                    if (std::isfinite(cfg.shared_sink_rth) &&
+                        std::isfinite(cfg.shared_sink_cth) &&
+                        cfg.shared_sink_rth > 0.0 &&
+                        cfg.shared_sink_cth >= 0.0) {
+                        if (const auto sink_it = shared_sink_defs.find(cfg.shared_sink_id);
+                            sink_it == shared_sink_defs.end()) {
+                            shared_sink_defs.emplace(
+                                cfg.shared_sink_id,
+                                std::make_pair(cfg.shared_sink_rth, cfg.shared_sink_cth));
+                        } else {
+                            const auto nearly_same = [](Real a, Real b) {
+                                const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
+                                return std::abs(a - b) <= scale * Real{1e-12};
+                            };
+                            if (!nearly_same(cfg.shared_sink_rth, sink_it->second.first) ||
+                                !nearly_same(cfg.shared_sink_cth, sink_it->second.second)) {
+                                push_error(
+                                    errors_,
+                                    kDiagThermalInvalidRange,
+                                    name + ".thermal shared sink '" + cfg.shared_sink_id +
+                                        "' must reuse the same shared_sink_rth/shared_sink_cth as other members");
+                            }
+                        }
+                    }
                 }
             }
 

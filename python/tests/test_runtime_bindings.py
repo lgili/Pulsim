@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import statistics
 from pathlib import Path
 
@@ -323,6 +324,127 @@ components:
     assert any("PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED" in msg for msg in parser.warnings)
 
 
+def test_yaml_parser_maps_foster_thermal_network() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      network: foster
+      rth_stages: [0.4, 0.6]
+      cth_stages: [0.01, 0.05]
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+
+    assert parser.errors == []
+    cfg = options.thermal_devices["R1"]
+    assert cfg.network_kind == ps.ThermalNetworkKind.Foster
+    assert list(cfg.stage_rth) == [0.4, 0.6]
+    assert list(cfg.stage_cth) == [0.01, 0.05]
+    assert abs(cfg.rth - 1.0) < 1e-12
+
+
+def test_yaml_parser_maps_shared_sink_thermal_fields() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.7
+      cth: 0.02
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.5
+      shared_sink_cth: 0.08
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+
+    assert parser.errors == []
+    cfg = options.thermal_devices["R1"]
+    assert cfg.shared_sink_id == "hs_main"
+    assert abs(cfg.shared_sink_rth - 0.5) < 1e-12
+    assert abs(cfg.shared_sink_cth - 0.08) < 1e-12
+
+
+def test_yaml_parser_rejects_inconsistent_shared_sink_parameters() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.7
+      cth: 0.02
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.5
+      shared_sink_cth: 0.08
+  - type: resistor
+    name: R2
+    nodes: [n2, 0]
+    value: 20
+    thermal:
+      enabled: true
+      rth: 0.8
+      cth: 0.03
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.4
+      shared_sink_cth: 0.08
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_THERMAL_RANGE_INVALID" in msg for msg in parser.errors)
+    assert any("shared sink 'hs_main'" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_rejects_invalid_thermal_stage_dimensions() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      network: cauer
+      rth_stages: [0.2, 0.3]
+      cth_stages: [0.01]
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_THERMAL_DIMENSION_INVALID" in msg for msg in parser.errors)
+
+
 def test_yaml_parser_rejects_unsupported_thermal_component_enablement() -> None:
     content = """
 schema: pulsim-v1
@@ -343,6 +465,108 @@ components:
     parser = ps.YamlParser()
     parser.load_string(content)
     assert any("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_rejects_invalid_loss_ranges() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [g, d, s]
+    vth: 2.5
+    kp: 0.1
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      eon: -2e-6
+      eoff: 3e-6
+      err: -1e-6
+  - type: resistor
+    name: R1
+    nodes: [s, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_LOSS_RANGE_INVALID" in msg for msg in parser.errors)
+    assert any("M1.loss.eon" in msg for msg in parser.errors)
+    assert any("M1.loss.err" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_rejects_invalid_datasheet_loss_dimensions() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [g, d, s]
+    vth: 2.5
+    kp: 0.2
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0]
+        voltage: [0.0, 20.0]
+        temperature: [25.0, 125.0]
+      eon: [1e-6, 1e-6, 1e-6]
+      eoff: [2e-6, 2e-6, 2e-6, 2e-6]
+  - type: resistor
+    name: R1
+    nodes: [s, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_LOSS_DIMENSION_INVALID" in msg for msg in parser.errors)
+    assert any("M1.loss.eon" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_accepts_valid_datasheet_loss_in_strict_mode() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [g, d, s]
+    vth: 2.5
+    kp: 0.2
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0]
+        voltage: [0.0, 20.0]
+        temperature: [25.0, 125.0]
+      eon: [1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6]
+      eoff: [2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6]
+  - type: resistor
+    name: R1
+    nodes: [s, 0]
+    value: 10
+"""
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = True
+    parser = ps.YamlParser(parser_opts)
+    parser.load_string(content)
+    assert parser.errors == []
 
 
 def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
@@ -397,6 +621,336 @@ def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     assert rload.final_temperature >= result.thermal_summary.ambient
 
 
+def test_resistor_foster_network_generates_rising_temperature_trace() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    cfg = ps.ThermalDeviceConfig()
+    cfg.enabled = True
+    cfg.network_kind = ps.ThermalNetworkKind.Foster
+    cfg.stage_rth = [0.3, 0.7]
+    cfg.stage_cth = [0.01, 0.05]
+    cfg.temp_init = 25.0
+    cfg.temp_ref = 25.0
+    cfg.alpha = 0.0
+    opts.thermal_devices = {"R1": cfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "T(R1)" in result.virtual_channels
+    trace = [float(v) for v in result.virtual_channels["T(R1)"]]
+    assert len(trace) == len(result.time)
+    assert trace[-1] > trace[0]
+    assert max(trace) == trace[-1]
+
+
+def test_resistor_cauer_network_generates_rising_temperature_trace() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    cfg = ps.ThermalDeviceConfig()
+    cfg.enabled = True
+    cfg.network_kind = ps.ThermalNetworkKind.Cauer
+    cfg.stage_rth = [0.2, 0.4]
+    cfg.stage_cth = [0.01, 0.03]
+    cfg.temp_init = 25.0
+    cfg.temp_ref = 25.0
+    cfg.alpha = 0.0
+    opts.thermal_devices = {"R1": cfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "T(R1)" in result.virtual_channels
+    trace = [float(v) for v in result.virtual_channels["T(R1)"]]
+    assert len(trace) == len(result.time)
+    assert trace[-1] > trace[0]
+    assert max(trace) == trace[-1]
+
+
+def test_stiff_cauer_network_remains_finite_with_large_timestep() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-3
+    opts.dt = 1e-4
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    cfg = ps.ThermalDeviceConfig()
+    cfg.enabled = True
+    cfg.network_kind = ps.ThermalNetworkKind.Cauer
+    cfg.stage_rth = [0.05, 0.10]
+    cfg.stage_cth = [1e-6, 2e-6]
+    cfg.temp_init = 25.0
+    cfg.temp_ref = 25.0
+    cfg.alpha = 0.0
+    opts.thermal_devices = {"R1": cfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    trace = [float(v) for v in result.virtual_channels["T(R1)"]]
+    assert all(math.isfinite(value) for value in trace)
+    assert trace[-1] >= trace[0]
+
+
+def test_shared_sink_coupling_heats_other_members() -> None:
+    def run_case(with_shared_sink: bool) -> ps.TransientResult:
+        circuit = ps.Circuit()
+        n_in = circuit.add_node("in")
+        gnd = circuit.ground()
+        circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+        circuit.add_resistor("Rhot", n_in, gnd, 10.0)
+        circuit.add_resistor("Rcool", n_in, gnd, 100.0)
+
+        opts = ps.SimulationOptions()
+        opts.tstart = 0.0
+        opts.tstop = 3e-3
+        opts.dt = 2e-5
+        opts.dt_min = opts.dt
+        opts.dt_max = opts.dt
+        opts.adaptive_timestep = False
+        opts.enable_losses = True
+        opts.thermal.enable = True
+        opts.thermal.ambient = 25.0
+
+        cfg_hot = ps.ThermalDeviceConfig()
+        cfg_hot.enabled = True
+        cfg_hot.rth = 0.3
+        cfg_hot.cth = 0.02
+        cfg_hot.temp_init = 25.0
+        cfg_hot.temp_ref = 25.0
+        cfg_hot.alpha = 0.0
+
+        cfg_cool = ps.ThermalDeviceConfig()
+        cfg_cool.enabled = True
+        cfg_cool.rth = 0.3
+        cfg_cool.cth = 0.02
+        cfg_cool.temp_init = 25.0
+        cfg_cool.temp_ref = 25.0
+        cfg_cool.alpha = 0.0
+
+        if with_shared_sink:
+            cfg_hot.shared_sink_id = "HS1"
+            cfg_hot.shared_sink_rth = 0.25
+            cfg_hot.shared_sink_cth = 0.04
+            cfg_cool.shared_sink_id = "HS1"
+            cfg_cool.shared_sink_rth = 0.25
+            cfg_cool.shared_sink_cth = 0.04
+
+        opts.thermal_devices = {"Rhot": cfg_hot, "Rcool": cfg_cool}
+        result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+        assert result.success
+        return result
+
+    isolated = run_case(with_shared_sink=False)
+    coupled = run_case(with_shared_sink=True)
+
+    t_cool_iso = [float(v) for v in isolated.virtual_channels["T(Rcool)"]]
+    t_cool_cpl = [float(v) for v in coupled.virtual_channels["T(Rcool)"]]
+    t_hot_iso = [float(v) for v in isolated.virtual_channels["T(Rhot)"]]
+    t_hot_cpl = [float(v) for v in coupled.virtual_channels["T(Rhot)"]]
+
+    assert len(t_cool_iso) == len(t_cool_cpl)
+    assert len(t_hot_iso) == len(t_hot_cpl)
+    assert t_cool_cpl[-1] > t_cool_iso[-1] + 0.25
+    assert t_hot_cpl[-1] > t_hot_iso[-1] + 0.25
+
+
+def test_datasheet_switching_surface_drives_event_loss_channels() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-3
+  dt: 1e-6
+  step_mode: fixed
+  enable_events: true
+  enable_losses: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 20}
+  - type: mosfet
+    name: M1
+    nodes: [0, vin, out]
+    vth: 3.0
+    kp: 0.35
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0]
+        voltage: [0.0, 20.0]
+        temperature: [25.0, 125.0]
+      eon: [2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6]
+      eoff: [3e-6, 3e-6, 3e-6, 3e-6, 3e-6, 3e-6, 3e-6, 3e-6]
+      err: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10
+  - type: pwm_generator
+    name: PWM1
+    nodes: [0]
+    frequency: 10000.0
+    duty: 0.4
+    v_high: 10.0
+    v_low: 0.0
+    target_component: M1
+"""
+    parser = ps.YamlParser()
+    circuit, options = parser.load_string(content)
+    assert parser.errors == []
+
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success
+    assert "Psw_on(M1)" in result.virtual_channels
+    assert "Psw_off(M1)" in result.virtual_channels
+    p_on = [float(v) for v in result.virtual_channels["Psw_on(M1)"]]
+    p_off = [float(v) for v in result.virtual_channels["Psw_off(M1)"]]
+    assert len(p_on) == len(result.time)
+    assert len(p_off) == len(result.time)
+    assert max(p_on) > 0.0
+    assert max(p_off) > 0.0
+
+    def integrate(power: list[float]) -> float:
+        return sum(
+            power[i] * (float(result.time[i]) - float(result.time[i - 1]))
+            for i in range(1, len(result.time))
+        )
+
+    e_on = integrate(p_on)
+    e_off = integrate(p_off)
+    on_events = sum(1 for value in p_on if value > 0.0)
+    off_events = sum(1 for value in p_off if value > 0.0)
+    assert on_events > 0
+    assert off_events > 0
+    assert abs(e_on - on_events * 2e-6) < 1e-11
+    assert abs(e_off - off_events * 3e-6) < 1e-11
+
+
+def test_python_api_switching_energy_surface_override_is_used() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser = ps.YamlParser()
+    circuit, options = parser.load(str(example_path))
+    assert parser.errors == []
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+
+    surface = ps.SwitchingEnergySurface3D()
+    surface.current_axis = [0.0, 10.0]
+    surface.voltage_axis = [0.0, 20.0]
+    surface.temperature_axis = [25.0, 125.0]
+    surface.eon_table = [1e-6] * 8
+    surface.eoff_table = [1.5e-6] * 8
+    assert surface.valid_shape()
+    assert surface.expected_table_size() == 8
+    assert abs(surface.evaluate_eon(4.0, 12.0, 60.0) - 1e-6) < 1e-18
+
+    sim = ps.Simulator(circuit, options)
+    sim.set_switching_energy_surface("M1", surface)
+    result = sim.run_transient(circuit.initial_state())
+    assert result.success
+
+    p_on = [float(v) for v in result.virtual_channels["Psw_on(M1)"]]
+    p_off = [float(v) for v in result.virtual_channels["Psw_off(M1)"]]
+
+    def integrate(power: list[float]) -> float:
+        return sum(
+            power[i] * (float(result.time[i]) - float(result.time[i - 1]))
+            for i in range(1, len(result.time))
+        )
+
+    e_on = integrate(p_on)
+    e_off = integrate(p_off)
+    on_events = sum(1 for value in p_on if value > 0.0)
+    off_events = sum(1 for value in p_off if value > 0.0)
+    assert on_events > 0
+    assert off_events > 0
+    assert abs(e_on / on_events - 1e-6) < 1e-11
+    assert abs(e_off / off_events - 1.5e-6) < 1e-11
+
+
+def test_closed_loop_buck_loss_channel_order_is_deterministic() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+
+    def run_once() -> list[str]:
+        parser = ps.YamlParser(parser_opts)
+        circuit, options = parser.load(str(example_path))
+        assert parser.errors == []
+        options.newton_options.num_nodes = int(circuit.num_nodes())
+        options.newton_options.num_branches = int(circuit.num_branches())
+        result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+        assert result.success
+        return [
+            name for name in result.virtual_channels.keys()
+            if name.startswith("Pcond(")
+            or name.startswith("Psw_on(")
+            or name.startswith("Psw_off(")
+            or name.startswith("Prr(")
+            or name.startswith("Ploss(")
+        ]
+
+    order_a = run_once()
+    order_b = run_once()
+    assert order_a == order_b
+
+
 def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal() -> None:
     example_path = (
         Path(__file__).resolve().parents[2]
@@ -422,15 +976,34 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert "PWM1.duty" in result.virtual_channels
     assert "Xout" in result.virtual_channels
     assert "T(M1)" in result.virtual_channels
+    assert "Pcond(M1)" in result.virtual_channels
+    assert "Psw_on(M1)" in result.virtual_channels
+    assert "Psw_off(M1)" in result.virtual_channels
+    assert "Prr(M1)" in result.virtual_channels
+    assert "Ploss(M1)" in result.virtual_channels
     pi = [float(v) for v in result.virtual_channels["PI1"]]
     duty = [float(v) for v in result.virtual_channels["PWM1.duty"]]
     vout = [float(v) for v in result.virtual_channels["Xout"]]
     m1_temp = [float(v) for v in result.virtual_channels["T(M1)"]]
+    m1_pcond = [float(v) for v in result.virtual_channels["Pcond(M1)"]]
+    m1_pon = [float(v) for v in result.virtual_channels["Psw_on(M1)"]]
+    m1_poff = [float(v) for v in result.virtual_channels["Psw_off(M1)"]]
+    m1_ptotal = [float(v) for v in result.virtual_channels["Ploss(M1)"]]
 
     assert len(pi) == len(duty) == len(vout) == len(m1_temp) == len(result.time)
+    assert len(m1_pcond) == len(m1_pon) == len(m1_poff) == len(m1_ptotal) == len(result.time)
     assert all(0.0 <= value <= 0.95 + 1e-12 for value in duty)
     assert max(abs(a - b) for a, b in zip(pi, duty)) < 1e-12
     assert abs(vout[-1] - 6.0) < 0.5
+    assert max(m1_pon) > 0.0
+    assert max(m1_poff) > 0.0
+    assert max(m1_ptotal) >= max(m1_pcond)
+
+    def integrate(power: list[float]) -> float:
+        return sum(
+            power[i] * (float(result.time[i]) - float(result.time[i - 1]))
+            for i in range(1, len(result.time))
+        )
 
     loss_summary = result.loss_summary
     assert loss_summary.total_loss > 0.0
@@ -441,12 +1014,27 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert "Rload" in loss_by_name
     assert loss_by_name["M1"].total_energy > 0.0
     assert loss_by_name["Rload"].total_energy > 0.0
+    assert (
+        float(loss_by_name["M1"].breakdown.turn_on) +
+        float(loss_by_name["M1"].breakdown.turn_off)
+    ) > 0.0
 
     duration = float(result.time[-1]) - float(result.time[0])
     total_energy = sum(float(item.total_energy) for item in loss_rows)
     expected_energy = float(loss_summary.total_loss) * duration
     energy_denom = max(abs(total_energy), abs(expected_energy), 1e-12)
     assert abs(total_energy - expected_energy) / energy_denom < 1e-9
+
+    m1_econd = integrate(m1_pcond)
+    m1_eon = integrate(m1_pon)
+    m1_eoff = integrate(m1_poff)
+    m1_etotal = integrate(m1_ptotal)
+    m1_loss = loss_by_name["M1"]
+    m1_energy_denom = max(abs(m1_etotal), abs(float(m1_loss.total_energy)), 1e-12)
+    assert abs(float(m1_loss.total_energy) - m1_etotal) / m1_energy_denom < 1e-9
+    assert abs(float(m1_loss.breakdown.conduction) * duration - m1_econd) / max(abs(m1_econd), 1e-12) < 1e-9
+    assert abs(float(m1_loss.breakdown.turn_on) * duration - m1_eon) / max(abs(m1_eon), 1e-12) < 1e-9
+    assert abs(float(m1_loss.breakdown.turn_off) * duration - m1_eoff) / max(abs(m1_eoff), 1e-12) < 1e-9
 
     thermal_summary = result.thermal_summary
     assert thermal_summary.enabled
@@ -455,6 +1043,9 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert result.virtual_channel_metadata["T(M1)"].component_type == "thermal_trace"
     assert result.virtual_channel_metadata["T(M1)"].source_component == "M1"
     assert result.virtual_channel_metadata["T(M1)"].unit == "degC"
+    assert result.virtual_channel_metadata["Pcond(M1)"].domain == "loss"
+    assert result.virtual_channel_metadata["Pcond(M1)"].source_component == "M1"
+    assert result.virtual_channel_metadata["Pcond(M1)"].unit == "W"
     assert m1_temp[-1] >= thermal_summary.ambient
     thermal_by_name = {
         item.device_name: item for item in list(thermal_summary.device_temperatures)
@@ -477,6 +1068,22 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     assert not component_rows["L1"].thermal_enabled
     assert component_rows["M1"].total_energy > 0.0
     assert component_rows["Rload"].total_energy > 0.0
+    assert abs(float(component_rows["M1"].total_energy) - m1_etotal) / max(abs(m1_etotal), 1e-12) < 1e-9
+    assert (
+        abs(float(component_rows["M1"].conduction) * duration - m1_econd)
+        / max(abs(m1_econd), 1e-12)
+        < 1e-9
+    )
+    assert (
+        abs(float(component_rows["M1"].turn_on) * duration - m1_eon)
+        / max(abs(m1_eon), 1e-12)
+        < 1e-9
+    )
+    assert (
+        abs(float(component_rows["M1"].turn_off) * duration - m1_eoff)
+        / max(abs(m1_eoff), 1e-12)
+        < 1e-9
+    )
     assert abs(component_rows["M1"].final_temperature - m1_temp[-1]) < 1e-12
     assert abs(component_rows["M1"].peak_temperature - max(m1_temp)) < 1e-12
     assert abs(component_rows["M1"].average_temperature - statistics.fmean(m1_temp)) < 1e-12
@@ -484,6 +1091,31 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     component_total_loss = sum(float(item.total_loss) for item in component_rows.values())
     component_loss_denom = max(abs(component_total_loss), abs(float(loss_summary.total_loss)), 1e-12)
     assert abs(component_total_loss - float(loss_summary.total_loss)) / component_loss_denom < 1e-9
+
+
+def test_closed_loop_buck_electrothermal_avoids_output_reallocations() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = False
+    parser = ps.YamlParser(parser_opts)
+    circuit, options = parser.load(str(example_path))
+    assert parser.errors == []
+
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+    assert result.success
+
+    telemetry = result.backend_telemetry
+    assert telemetry.reserved_output_samples >= len(result.time)
+    assert telemetry.time_series_reallocations == 0
+    assert telemetry.state_series_reallocations == 0
+    assert telemetry.virtual_channel_reallocations == 0
 
 
 def test_transient_exports_canonical_thermal_trace_for_simple_resistive_case() -> None:

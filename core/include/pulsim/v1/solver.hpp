@@ -1,3 +1,8 @@
+/**
+ * @file solver.hpp
+ * @brief Public declarations for pulsim/v1/solver.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

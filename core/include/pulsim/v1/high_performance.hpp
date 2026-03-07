@@ -1,3 +1,8 @@
+/**
+ * @file high_performance.hpp
+ * @brief Public declarations for pulsim/v1/high_performance.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

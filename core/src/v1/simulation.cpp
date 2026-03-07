@@ -1,3 +1,8 @@
+/**
+ * @file simulation.cpp
+ * @brief Core transient runtime orchestration, recovery policies, and result assembly.
+ */
+
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
@@ -7,6 +12,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <type_traits>
 
 namespace pulsim::v1 {
 
@@ -17,11 +23,13 @@ constexpr int kMaxDtMinHoldAdvances = 128;
 constexpr std::size_t kMaxSampleReserve = 1'000'000;
 constexpr std::size_t kMaxFallbackReserve = 2'000'000;
 
+/// Converts 64-bit counters to int while clamping at int max.
 [[nodiscard]] int saturating_int(std::uint64_t value) {
     constexpr std::uint64_t max_int = static_cast<std::uint64_t>(std::numeric_limits<int>::max());
     return static_cast<int>(std::min(value, max_int));
 }
 
+/// Estimates output buffer reservation size for time/state samples.
 [[nodiscard]] std::size_t estimate_output_sample_reserve(const SimulationOptions& options) {
     if (!std::isfinite(options.tstart) || !std::isfinite(options.tstop) || options.tstop <= options.tstart) {
         return 0;
@@ -47,6 +55,7 @@ constexpr std::size_t kMaxFallbackReserve = 2'000'000;
     return static_cast<std::size_t>(capped);
 }
 
+/// Aggregates topology characteristics used to auto-tune robust defaults.
 struct CircuitRobustnessHints {
     int switching_devices = 0;
     int nonlinear_devices = 0;
@@ -54,11 +63,17 @@ struct CircuitRobustnessHints {
     int control_blocks = 0;
 };
 
+/// Returns whether linear solver order remains the default single SparseLU profile.
 [[nodiscard]] bool is_default_linear_order(const LinearSolverStackConfig& cfg) {
     return cfg.order.empty() ||
            (cfg.order.size() == 1 && cfg.order.front() == LinearSolverKind::SparseLU);
 }
 
+/**
+ * @brief Applies robust linear solver defaults for switched/nonlinear transients.
+ * @param cfg Solver stack configuration to update.
+ * @param force When false, only adjusts fields still matching default profile.
+ */
 void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg, bool force = true) {
     const bool has_default_order = is_default_linear_order(cfg);
     if (!force && !has_default_order) {
@@ -101,6 +116,7 @@ void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg, bool forc
     it.ilut_fill_factor = std::max(it.ilut_fill_factor, Real{10.0});
 }
 
+/// Returns whether Newton options still match conservative defaults.
 [[nodiscard]] bool is_default_newton_profile(const NewtonOptions& opts) {
     NewtonOptions defaults;
     return opts.max_iterations <= defaults.max_iterations &&
@@ -111,6 +127,11 @@ void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg, bool forc
            opts.min_damping >= defaults.min_damping;
 }
 
+/**
+ * @brief Applies robust Newton globalization defaults for difficult transients.
+ * @param opts Newton options to update.
+ * @param force When false, only adjusts fields still matching default profile.
+ */
 void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     if (!force && !is_default_newton_profile(opts)) {
         return;
@@ -129,6 +150,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     opts.detect_stall = false;
 }
 
+/// Detects switching and control complexity hints used for automatic profile tuning.
 [[nodiscard]] CircuitRobustnessHints analyze_circuit_robustness(const Circuit& circuit) {
     CircuitRobustnessHints hints;
     const auto& devices = circuit.devices();
@@ -164,6 +186,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     return hints;
 }
 
+/// Infers control sample time from highest PWM frequency present in circuit.
 [[nodiscard]] std::optional<Real> infer_control_sample_time_from_pwm(const Circuit& circuit) {
     Real max_pwm_frequency = 0.0;
 
@@ -199,6 +222,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     return Real{1.0} / max_pwm_frequency;
 }
 
+/// Resolves effective control sampling period from explicit mode and circuit hints.
 [[nodiscard]] Real resolve_control_sample_time(const SimulationOptions& options, const Circuit& circuit) {
     auto sanitize = [](Real value) -> Real {
         return (std::isfinite(value) && value > 0.0) ? value : Real{0.0};
@@ -225,12 +249,14 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     }
 }
 
+/// Backward-compatible heuristic for fixed stepping inferred from dt bounds.
 [[nodiscard]] bool legacy_fixed_timestep_heuristic(const SimulationOptions& options) {
     const Real span = std::abs(options.dt_max - options.dt_min);
     const Real scale = std::max<Real>({Real{1.0}, std::abs(options.dt), std::abs(options.dt_max)});
     return span <= scale * Real{1e-12};
 }
 
+/// Resolves canonical fixed/variable transient mode from current options.
 [[nodiscard]] TransientStepMode resolve_step_mode(const SimulationOptions& options) {
     if (options.step_mode_explicit) {
         return options.step_mode;
@@ -242,6 +268,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
                                                     : TransientStepMode::Variable;
 }
 
+/// Enforces explicit step mode onto legacy adaptive_timestep fields.
 void enforce_explicit_step_mode(SimulationOptions& options) {
     if (!options.step_mode_explicit) {
         return;
@@ -249,6 +276,11 @@ void enforce_explicit_step_mode(SimulationOptions& options) {
     options.adaptive_timestep = (options.step_mode == TransientStepMode::Variable);
 }
 
+/**
+ * @brief Auto-tunes transient profile for switching topologies when fallback is enabled.
+ * @param options Simulation options to mutate in-place.
+ * @param circuit Runtime circuit used to infer topology complexity.
+ */
 void apply_auto_transient_profile(SimulationOptions& options, const Circuit& circuit) {
     // Respect explicit strict mode: users can disable fallback for deterministic debugging.
     if (!options.linear_solver.allow_fallback) {
@@ -330,6 +362,7 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     apply_robust_linear_solver_defaults(options.linear_solver, false);
 }
 
+/// Maps typed diagnostic code to stable telemetry reason string.
 [[nodiscard]] std::string_view diagnostic_code_to_reason(SimulationDiagnosticCode code) {
     switch (code) {
         case SimulationDiagnosticCode::None:
@@ -368,11 +401,16 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     return "";
 }
 
+/// Validation issue structure for early transient input rejection.
 struct TransientInputIssue {
     SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     std::string message;
 };
 
+/**
+ * @brief Validates initial state, timestep window, and thermal configuration.
+ * @return Optional validation issue; empty when inputs are valid.
+ */
 [[nodiscard]] std::optional<TransientInputIssue> validate_transient_inputs(
     const Circuit& circuit,
     const SimulationOptions& options,
@@ -452,6 +490,7 @@ struct TransientInputIssue {
 
     const auto& devices = circuit.devices();
     const auto& conns = circuit.connections();
+    std::unordered_map<std::string, std::pair<Real, Real>> shared_sink_by_id;
     for (std::size_t i = 0; i < devices.size() && i < conns.size(); ++i) {
         bool supports_thermal = false;
         std::visit([&](const auto& dev) {
@@ -487,17 +526,36 @@ struct TransientInputIssue {
             };
         };
 
-        if (!std::isfinite(cfg.rth)) {
-            return fail("rth", "must be finite");
-        }
-        if (cfg.rth <= 0.0) {
-            return fail("rth", "must be > 0");
-        }
-        if (!std::isfinite(cfg.cth)) {
-            return fail("cth", "must be finite");
-        }
-        if (cfg.cth < 0.0) {
-            return fail("cth", "must be >= 0");
+        if (cfg.network_kind == ThermalNetworkKind::SingleRC) {
+            if (!std::isfinite(cfg.rth)) {
+                return fail("rth", "must be finite");
+            }
+            if (cfg.rth <= 0.0) {
+                return fail("rth", "must be > 0");
+            }
+            if (!std::isfinite(cfg.cth)) {
+                return fail("cth", "must be finite");
+            }
+            if (cfg.cth < 0.0) {
+                return fail("cth", "must be >= 0");
+            }
+        } else {
+            if (cfg.stage_rth.empty() || cfg.stage_cth.empty()) {
+                return fail("stage_rth/stage_cth", "must be non-empty for staged thermal network");
+            }
+            if (cfg.stage_rth.size() != cfg.stage_cth.size()) {
+                return fail("stage_rth/stage_cth", "must have equal size");
+            }
+            for (std::size_t stage = 0; stage < cfg.stage_rth.size(); ++stage) {
+                const Real r = cfg.stage_rth[stage];
+                const Real c = cfg.stage_cth[stage];
+                if (!std::isfinite(r) || r <= 0.0) {
+                    return fail("stage_rth[" + std::to_string(stage) + "]", "must be finite and > 0");
+                }
+                if (!std::isfinite(c) || c < 0.0) {
+                    return fail("stage_cth[" + std::to_string(stage) + "]", "must be finite and >= 0");
+                }
+            }
         }
         if (!std::isfinite(cfg.temp_init)) {
             return fail("temp_init", "must be finite");
@@ -508,16 +566,46 @@ struct TransientInputIssue {
         if (!std::isfinite(cfg.alpha)) {
             return fail("alpha", "must be finite");
         }
+        if (cfg.shared_sink_id.empty()) {
+            if (cfg.shared_sink_rth != 0.0 || cfg.shared_sink_cth != 0.0) {
+                return fail("shared_sink_rth/shared_sink_cth",
+                            "require non-empty shared_sink_id");
+            }
+        } else {
+            if (!std::isfinite(cfg.shared_sink_rth) || cfg.shared_sink_rth <= 0.0) {
+                return fail("shared_sink_rth", "must be finite and > 0 when shared_sink_id is set");
+            }
+            if (!std::isfinite(cfg.shared_sink_cth) || cfg.shared_sink_cth < 0.0) {
+                return fail("shared_sink_cth", "must be finite and >= 0 when shared_sink_id is set");
+            }
+            if (const auto sink_it = shared_sink_by_id.find(cfg.shared_sink_id);
+                sink_it == shared_sink_by_id.end()) {
+                shared_sink_by_id.emplace(cfg.shared_sink_id,
+                                          std::make_pair(cfg.shared_sink_rth, cfg.shared_sink_cth));
+            } else {
+                const auto nearly_same = [](Real a, Real b) {
+                    const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
+                    return std::abs(a - b) <= scale * Real{1e-12};
+                };
+                if (!nearly_same(cfg.shared_sink_rth, sink_it->second.first) ||
+                    !nearly_same(cfg.shared_sink_cth, sink_it->second.second)) {
+                    return fail("shared_sink_rth/shared_sink_cth",
+                                "must match all components using shared_sink_id='" + cfg.shared_sink_id + "'");
+                }
+            }
+        }
     }
 
     return std::nullopt;
 }
 
+/// Relative-epsilon time comparison used near stop/macro boundaries.
 [[nodiscard]] bool nearly_same_time(Real a, Real b) {
     const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
     return std::abs(a - b) <= scale * Real{1e-12};
 }
 
+/// Adapter around AdvancedTimestepController with safety guard bands.
 class VariableStepPolicy final {
 public:
     VariableStepPolicy() = default;
@@ -582,6 +670,7 @@ private:
     Real max_growth_factor_ = 2.0;
 };
 
+/// Fixed-step macro-grid policy that allows bounded internal sub-stepping for events.
 class FixedStepPolicy final {
 public:
     FixedStepPolicy() = default;
@@ -685,6 +774,11 @@ private:
 
 }
 
+/**
+ * @brief Builds simulator runtime state and default transient service registry.
+ * @param circuit Mutable runtime circuit reference.
+ * @param options User and parser-provided simulation options.
+ */
 Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     : circuit_(circuit)
     , options_(options)
@@ -721,6 +815,7 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     const auto& conns = circuit_.connections();
     device_index_.clear();
     switch_monitors_.clear();
+    forced_switch_monitors_.clear();
 
     for (std::size_t i = 0; i < devices.size(); ++i) {
         const auto& conn = conns[i];
@@ -738,11 +833,36 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
                 switch_monitors_.push_back(monitor);
             }
         }
+
+        std::visit([&, this](const auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                if (conn.nodes.size() >= 3) {
+                    ForcedSwitchMonitor monitor;
+                    monitor.name = conn.name;
+                    monitor.device_index = i;
+                    monitor.t1 = conn.nodes[1];
+                    monitor.t2 = conn.nodes[2];
+                    forced_switch_monitors_.push_back(std::move(monitor));
+                }
+            } else if constexpr (std::is_same_v<T, MOSFET> ||
+                                 std::is_same_v<T, IGBT>) {
+                if (conn.nodes.size() >= 3) {
+                    ForcedSwitchMonitor monitor;
+                    monitor.name = conn.name;
+                    monitor.device_index = i;
+                    monitor.t1 = conn.nodes[1];
+                    monitor.t2 = conn.nodes[2];
+                    forced_switch_monitors_.push_back(std::move(monitor));
+                }
+            }
+        }, devices[i]);
     }
 
     initialize_loss_tracking();
 }
 
+/// Initializes loss and thermal tracking services for a new run.
 void Simulator::initialize_loss_tracking() {
     if (transient_services_.loss_service) {
         transient_services_.loss_service->reset();
@@ -750,13 +870,34 @@ void Simulator::initialize_loss_tracking() {
     initialize_thermal_tracking();
 }
 
+/**
+ * @brief Overrides per-device switching energies used in event-based loss accounting.
+ * @param device_name Component name.
+ * @param energy Turn-on/off/recovery energy configuration.
+ */
 void Simulator::set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy) {
     options_.switching_energy[device_name] = energy;
+    options_.switching_energy_surfaces.erase(device_name);
     if (transient_services_.loss_service) {
         transient_services_.loss_service->reset();
     }
 }
 
+/**
+ * @brief Overrides per-device datasheet switching-energy surface model.
+ * @param device_name Component name.
+ * @param surface 3D datasheet surface in (I, V, Tj).
+ */
+void Simulator::set_switching_energy_surface(const std::string& device_name,
+                                             const SwitchingEnergySurface3D& surface) {
+    options_.switching_energy_surfaces[device_name] = surface;
+    options_.switching_energy.erase(device_name);
+    if (transient_services_.loss_service) {
+        transient_services_.loss_service->reset();
+    }
+}
+
+/// Converts formulation mode enum to stable telemetry string.
 [[nodiscard]] std::string_view formulation_mode_to_string(FormulationMode mode) {
     switch (mode) {
         case FormulationMode::ProjectedWrapper:
@@ -768,6 +909,17 @@ void Simulator::set_switching_energy(const std::string& device_name, const Switc
     }
 }
 
+/**
+ * @brief Appends one fallback/recovery trace entry for diagnostics.
+ * @param result Simulation result accumulator.
+ * @param step_index Accepted-step index.
+ * @param retry_index Retry number inside the current step.
+ * @param time Current simulation time.
+ * @param dt Candidate timestep at logging instant.
+ * @param reason Typed fallback reason code.
+ * @param solver_status Solver status at logging instant.
+ * @param action Human-readable action tag.
+ */
 void Simulator::record_fallback_event(SimulationResult& result,
                                       int step_index,
                                       int retry_index,
@@ -790,12 +942,17 @@ void Simulator::record_fallback_event(SimulationResult& result,
     result.fallback_trace.push_back(std::move(entry));
 }
 
+/// Resets thermal-service runtime state for a new transient run.
 void Simulator::initialize_thermal_tracking() {
     if (transient_services_.thermal_service) {
         transient_services_.thermal_service->reset();
     }
 }
 
+/**
+ * @brief Computes DC operating point using convergence-aided nonlinear solve.
+ * @return DC analysis result including solver telemetry.
+ */
 DCAnalysisResult Simulator::dc_operating_point() {
     // Large timestep to emulate DC for dynamic elements
     circuit_.set_timestep(1e6);
@@ -812,6 +969,13 @@ DCAnalysisResult Simulator::dc_operating_point() {
     return solver.solve(x0, circuit_.num_nodes(), circuit_.num_branches(), system_func, nullptr);
 }
 
+/**
+ * @brief Runs transient starting from DC operating point with startup fallback path.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional event callback.
+ * @param control Optional pause/stop control handle.
+ * @return Completed transient result.
+ */
 SimulationResult Simulator::run_transient(SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
@@ -874,6 +1038,14 @@ SimulationResult Simulator::run_transient(SimulationCallback callback,
     return result;
 }
 
+/**
+ * @brief Runs transient from explicit initial state after validating inputs.
+ * @param x0 Initial state vector.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional event callback.
+ * @param control Optional pause/stop control handle.
+ * @return Completed transient result.
+ */
 SimulationResult Simulator::run_transient(const Vector& x0,
                                           SimulationCallback callback,
                                           EventCallback event_callback,
@@ -913,6 +1085,14 @@ SimulationResult Simulator::run_transient(const Vector& x0,
     return native_result;
 }
 
+/**
+ * @brief Executes native transient loop (fixed/variable) and assembles result payload.
+ * @param x0 Initial state vector.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional switch-event callback.
+ * @param control Optional pause/stop control handle.
+ * @return Detailed simulation result with waveforms and telemetry.
+ */
 SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                                       SimulationCallback callback,
                                                       EventCallback event_callback,
@@ -939,9 +1119,13 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             result.fallback_trace.reserve(fallback_reserve);
         }
     }
-    if (options_.enable_events && sample_reserve > 0 && !switch_monitors_.empty()) {
+    if (options_.enable_events &&
+        sample_reserve > 0 &&
+        (!switch_monitors_.empty() || !forced_switch_monitors_.empty())) {
         const std::size_t event_reserve =
-            std::min<std::size_t>(sample_reserve * switch_monitors_.size(), sample_reserve * 2);
+            std::min<std::size_t>(
+                sample_reserve * (switch_monitors_.size() + forced_switch_monitors_.size()),
+                sample_reserve * 3);
         if (event_reserve > 0) {
             result.events.reserve(event_reserve);
         }
@@ -1037,19 +1221,111 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
     circuit_.update_history(x, true);
 
+    struct ThermalTraceBinding {
+        std::size_t device_index = 0;
+        std::string channel_name;
+    };
+    struct LossTraceBinding {
+        std::size_t device_index = 0;
+        std::string conduction_channel;
+        std::string turn_on_channel;
+        std::string turn_off_channel;
+        std::string reverse_recovery_channel;
+        std::string total_channel;
+    };
+    std::vector<ThermalTraceBinding> thermal_trace_bindings;
+    std::vector<LossTraceBinding> loss_trace_bindings;
+    bool thermal_trace_initialized = false;
+    bool loss_trace_initialized = false;
+    bool virtual_metadata_initialized = false;
+    // Canonical loss channels are exported on output samples; accumulate segment energy
+    // between samples so fixed-step internal substeps are represented exactly.
+    std::vector<Real> loss_trace_interval_cond_energy;
+    std::vector<Real> loss_trace_interval_turn_on_energy;
+    std::vector<Real> loss_trace_interval_turn_off_energy;
+    std::vector<Real> loss_trace_interval_reverse_recovery_energy;
+    std::vector<Real> loss_trace_interval_total_energy;
+    bool loss_trace_interval_initialized = false;
+    Real loss_trace_interval_start_time = t;
+
+    auto initialize_loss_trace_interval = [&]() {
+        if (!options_.enable_losses || !transient_services_.loss_service) {
+            return;
+        }
+        const std::size_t device_count = circuit_.connections().size();
+        auto reset_bucket = [device_count](std::vector<Real>& bucket) {
+            if (bucket.size() != device_count) {
+                bucket.assign(device_count, 0.0);
+            } else {
+                std::fill(bucket.begin(), bucket.end(), 0.0);
+            }
+        };
+        reset_bucket(loss_trace_interval_cond_energy);
+        reset_bucket(loss_trace_interval_turn_on_energy);
+        reset_bucket(loss_trace_interval_turn_off_energy);
+        reset_bucket(loss_trace_interval_reverse_recovery_energy);
+        reset_bucket(loss_trace_interval_total_energy);
+        loss_trace_interval_start_time = t;
+        loss_trace_interval_initialized = true;
+    };
+
+    auto accumulate_loss_trace_interval = [&](Real dt_segment) {
+        if (!options_.enable_losses || !transient_services_.loss_service || dt_segment <= 0.0) {
+            return;
+        }
+        if (!loss_trace_interval_initialized) {
+            initialize_loss_trace_interval();
+        }
+        if (!loss_trace_interval_initialized) {
+            return;
+        }
+
+        const auto conduction = transient_services_.loss_service->last_device_conduction_power();
+        const auto turn_on = transient_services_.loss_service->last_device_turn_on_power();
+        const auto turn_off = transient_services_.loss_service->last_device_turn_off_power();
+        const auto reverse_recovery =
+            transient_services_.loss_service->last_device_reverse_recovery_power();
+        const auto total = transient_services_.loss_service->last_device_power();
+        const std::size_t device_count = loss_trace_interval_total_energy.size();
+        const auto finite_non_negative = [](Real value) {
+            if (!std::isfinite(value) || value < 0.0) {
+                return Real{0.0};
+            }
+            return value;
+        };
+        for (std::size_t i = 0; i < device_count; ++i) {
+            const Real p_cond = i < conduction.size() ? finite_non_negative(conduction[i]) : 0.0;
+            const Real p_on = i < turn_on.size() ? finite_non_negative(turn_on[i]) : 0.0;
+            const Real p_off = i < turn_off.size() ? finite_non_negative(turn_off[i]) : 0.0;
+            const Real p_rr = i < reverse_recovery.size()
+                ? finite_non_negative(reverse_recovery[i])
+                : 0.0;
+            const Real p_total = i < total.size() ? finite_non_negative(total[i]) : 0.0;
+            loss_trace_interval_cond_energy[i] += p_cond * dt_segment;
+            loss_trace_interval_turn_on_energy[i] += p_on * dt_segment;
+            loss_trace_interval_turn_off_energy[i] += p_off * dt_segment;
+            loss_trace_interval_reverse_recovery_energy[i] += p_rr * dt_segment;
+            loss_trace_interval_total_energy[i] += p_total * dt_segment;
+        }
+    };
+
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const bool has_virtual_components = circuit_.num_virtual_components() > 0;
+        const bool has_loss_trace =
+            options_.enable_losses &&
+            static_cast<bool>(transient_services_.loss_service);
         const bool has_thermal_trace =
             options_.enable_losses &&
             options_.thermal.enable &&
             static_cast<bool>(transient_services_.thermal_service);
-        if (!has_virtual_components && !has_thermal_trace) {
+        if (!has_virtual_components && !has_loss_trace && !has_thermal_trace) {
             return;
         }
 
-        if (result.virtual_channel_metadata.empty()) {
+        if (!virtual_metadata_initialized) {
             result.virtual_channel_metadata = circuit_.virtual_channel_metadata();
             result.virtual_channels.reserve(result.virtual_channel_metadata.size());
+            virtual_metadata_initialized = true;
         }
 
         std::optional<MixedDomainStepResult> mixed_step;
@@ -1062,6 +1338,39 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         const std::size_t sample_count = result.time.size();
         const Real nan = std::numeric_limits<Real>::quiet_NaN();
+
+        if (options_.enable_events &&
+            sample_count > 1 &&
+            !nearly_same_time(sample_time, options_.tstop) &&
+            !forced_switch_monitors_.empty()) {
+            for (auto& monitor : forced_switch_monitors_) {
+                const std::optional<bool> current_forced =
+                    circuit_.forced_state_for_device(monitor.device_index);
+                if (!monitor.was_forced_on.has_value()) {
+                    monitor.was_forced_on = current_forced;
+                    continue;
+                }
+
+                if (monitor.was_forced_on.has_value() &&
+                    current_forced.has_value() &&
+                    *monitor.was_forced_on != *current_forced) {
+                    SwitchMonitor event_monitor;
+                    event_monitor.name = monitor.name;
+                    event_monitor.t1 = monitor.t1;
+                    event_monitor.t2 = monitor.t2;
+                    record_switch_event(
+                        event_monitor,
+                        sample_time,
+                        state,
+                        *current_forced,
+                        result,
+                        event_callback);
+                }
+
+                monitor.was_forced_on = current_forced;
+            }
+        }
+
         auto append_series_value = [&](std::vector<Real>& series, Real value) {
             const std::size_t capacity_before = series.capacity();
             series.push_back(value);
@@ -1096,34 +1405,163 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        if (has_thermal_trace) {
-            const auto thermal_summary = transient_services_.thermal_service->finalize();
-            for (const auto& item : thermal_summary.device_temperatures) {
-                if (!item.enabled) {
-                    continue;
-                }
-
-                const std::string channel = "T(" + item.device_name + ")";
+        if (has_loss_trace && !loss_trace_initialized) {
+            const auto& conns = circuit_.connections();
+            loss_trace_bindings.reserve(conns.size());
+            if (sample_reserve > 0) {
+                result.virtual_channels.reserve(result.virtual_channels.size() + conns.size() * 5);
+            }
+            auto register_loss_channel = [&](const std::string& channel,
+                                             const std::string& source,
+                                             const std::string& quantity) {
                 auto [it, inserted] = result.virtual_channels.try_emplace(channel);
-                auto& series = it->second;
                 if (inserted && sample_reserve > 0) {
-                    series.reserve(sample_reserve);
+                    it->second.reserve(sample_reserve);
                 }
+                result.virtual_channel_metadata.try_emplace(
+                    channel,
+                    VirtualChannelMetadata{
+                        quantity,
+                        channel,
+                        source,
+                        "loss",
+                        "W",
+                        {}
+                    });
+            };
+
+            for (std::size_t i = 0; i < conns.size(); ++i) {
+                const std::string source = conns[i].name;
+                LossTraceBinding binding;
+                binding.device_index = i;
+                binding.conduction_channel = "Pcond(" + source + ")";
+                binding.turn_on_channel = "Psw_on(" + source + ")";
+                binding.turn_off_channel = "Psw_off(" + source + ")";
+                binding.reverse_recovery_channel = "Prr(" + source + ")";
+                binding.total_channel = "Ploss(" + source + ")";
+                register_loss_channel(binding.conduction_channel, source, "loss_trace_conduction");
+                register_loss_channel(binding.turn_on_channel, source, "loss_trace_turn_on");
+                register_loss_channel(binding.turn_off_channel, source, "loss_trace_turn_off");
+                register_loss_channel(
+                    binding.reverse_recovery_channel,
+                    source,
+                    "loss_trace_reverse_recovery");
+                register_loss_channel(binding.total_channel, source, "loss_trace_total");
+                loss_trace_bindings.push_back(std::move(binding));
+            }
+            loss_trace_initialized = true;
+            if (!loss_trace_interval_initialized) {
+                initialize_loss_trace_interval();
+            }
+        }
+
+        if (has_loss_trace) {
+            if (!loss_trace_interval_initialized) {
+                initialize_loss_trace_interval();
+            }
+            const Real interval_duration = sample_time - loss_trace_interval_start_time;
+            const bool valid_interval =
+                std::isfinite(interval_duration) && interval_duration > 0.0;
+
+            auto sample_loss_channel = [&](const std::string& channel_name, Real value) {
+                auto channel_it = result.virtual_channels.find(channel_name);
+                if (channel_it == result.virtual_channels.end()) {
+                    return;
+                }
+                auto& series = channel_it->second;
                 while (series.size() + 1 < sample_count) {
                     append_series_value(series, nan);
                 }
-                append_series_value(series, item.final_temperature);
+                append_series_value(series, value);
+            };
 
-                if (!result.virtual_channel_metadata.contains(channel)) {
-                    result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
+            for (const auto& binding : loss_trace_bindings) {
+                const std::size_t i = binding.device_index;
+                const auto average_power = [&](const std::vector<Real>& energy_bucket) {
+                    if (!valid_interval || i >= energy_bucket.size()) {
+                        return Real{0.0};
+                    }
+                    return energy_bucket[i] / interval_duration;
+                };
+                const Real p_cond = average_power(loss_trace_interval_cond_energy);
+                const Real p_on = average_power(loss_trace_interval_turn_on_energy);
+                const Real p_off = average_power(loss_trace_interval_turn_off_energy);
+                const Real p_rr = average_power(loss_trace_interval_reverse_recovery_energy);
+                const Real p_total = average_power(loss_trace_interval_total_energy);
+                sample_loss_channel(binding.conduction_channel, p_cond);
+                sample_loss_channel(binding.turn_on_channel, p_on);
+                sample_loss_channel(binding.turn_off_channel, p_off);
+                sample_loss_channel(binding.reverse_recovery_channel, p_rr);
+                sample_loss_channel(binding.total_channel, p_total);
+            }
+
+            if (loss_trace_interval_initialized) {
+                if (valid_interval) {
+                    std::fill(loss_trace_interval_cond_energy.begin(),
+                              loss_trace_interval_cond_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_turn_on_energy.begin(),
+                              loss_trace_interval_turn_on_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_turn_off_energy.begin(),
+                              loss_trace_interval_turn_off_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_reverse_recovery_energy.begin(),
+                              loss_trace_interval_reverse_recovery_energy.end(),
+                              Real{0.0});
+                    std::fill(loss_trace_interval_total_energy.begin(),
+                              loss_trace_interval_total_energy.end(),
+                              Real{0.0});
+                }
+                loss_trace_interval_start_time = sample_time;
+            }
+        }
+
+        if (has_thermal_trace && !thermal_trace_initialized) {
+            // Register canonical thermal channels once and reuse indexed reads
+            // per sample to avoid rebuilding thermal summaries in the hot loop.
+            const auto& conns = circuit_.connections();
+            thermal_trace_bindings.reserve(conns.size());
+            if (sample_reserve > 0) {
+                result.virtual_channels.reserve(result.virtual_channels.size() + conns.size());
+            }
+            for (std::size_t i = 0; i < conns.size(); ++i) {
+                if (!transient_services_.thermal_service->is_device_enabled(i)) {
+                    continue;
+                }
+                const std::string channel = "T(" + conns[i].name + ")";
+                auto [it, inserted] = result.virtual_channels.try_emplace(channel);
+                if (inserted && sample_reserve > 0) {
+                    it->second.reserve(sample_reserve);
+                }
+                result.virtual_channel_metadata.try_emplace(
+                    channel,
+                    VirtualChannelMetadata{
                         "thermal_trace",
                         channel,
-                        item.device_name,
+                        conns[i].name,
                         "thermal",
                         "degC",
                         {}
-                    };
+                    });
+                thermal_trace_bindings.push_back(ThermalTraceBinding{i, channel});
+            }
+            thermal_trace_initialized = true;
+        }
+
+        if (has_thermal_trace) {
+            for (const auto& binding : thermal_trace_bindings) {
+                auto channel_it = result.virtual_channels.find(binding.channel_name);
+                if (channel_it == result.virtual_channels.end()) {
+                    continue;
                 }
+                auto& series = channel_it->second;
+                while (series.size() + 1 < sample_count) {
+                    append_series_value(series, nan);
+                }
+                append_series_value(
+                    series,
+                    transient_services_.thermal_service->device_temperature(binding.device_index));
             }
         }
 
@@ -1157,6 +1595,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     for (auto& sw : switch_monitors_) {
         Real v_ctrl = (sw.ctrl >= 0) ? x[sw.ctrl] : 0.0;
         sw.was_on = v_ctrl > sw.v_threshold;
+    }
+    for (auto& sw : forced_switch_monitors_) {
+        sw.was_forced_on = circuit_.forced_state_for_device(sw.device_index);
     }
 
     int lte_discontinuity_grace_steps = 0;
@@ -1838,6 +2279,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
                 accumulate_conduction_losses(step_anchor_state, hold_dt);
                 update_thermal_state(hold_dt);
+                accumulate_loss_trace_interval(hold_dt);
 
                 t += hold_dt;
                 pending_dt_override = hold_dt;
@@ -2015,6 +2457,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         accumulate_conduction_losses(step_result.solution, dt_used);
         update_thermal_state(dt_used);
+        accumulate_loss_trace_interval(dt_used);
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);
@@ -2065,6 +2508,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     finalize_loss_summary(result);
     finalize_thermal_summary(result);
     finalize_component_electrothermal(result);
+    validate_electrothermal_consistency(result);
 
     result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
     const EquationAssemblerTelemetry assembler_telemetry =
@@ -2081,6 +2525,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     return result;
 }
 
+/**
+ * @brief Runs transient with throttled progress callback emission.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional switch-event callback.
+ * @param control Optional pause/stop control handle.
+ * @param progress_config Progress callback cadence configuration.
+ * @return Completed simulation result.
+ */
 SimulationResult Simulator::run_transient_with_progress(
     SimulationCallback callback,
     EventCallback event_callback,

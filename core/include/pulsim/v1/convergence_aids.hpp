@@ -1,3 +1,8 @@
+/**
+ * @file convergence_aids.hpp
+ * @brief Public declarations for pulsim/v1/convergence_aids.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

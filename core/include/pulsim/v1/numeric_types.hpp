@@ -1,3 +1,8 @@
+/**
+ * @file numeric_types.hpp
+ * @brief Public declarations for pulsim/v1/numeric_types.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

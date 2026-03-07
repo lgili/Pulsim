@@ -1,3 +1,8 @@
+/**
+ * @file ideal_switch.hpp
+ * @brief Public declarations for pulsim/v1/components/ideal_switch.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"

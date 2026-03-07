@@ -334,6 +334,24 @@ class SwitchingEnergy:
 
     def __init__(self) -> None: ...
 
+class SwitchingEnergySurface3D:
+    current_axis: List[float]
+    voltage_axis: List[float]
+    temperature_axis: List[float]
+    eon_table: List[float]
+    eoff_table: List[float]
+    err_table: List[float]
+
+    def __init__(self) -> None: ...
+    def has_eon(self) -> bool: ...
+    def has_eoff(self) -> bool: ...
+    def has_err(self) -> bool: ...
+    def expected_table_size(self) -> int: ...
+    def valid_shape(self) -> bool: ...
+    def evaluate_eon(self, current: float, voltage: float, temperature: float) -> float: ...
+    def evaluate_eoff(self, current: float, voltage: float, temperature: float) -> float: ...
+    def evaluate_err(self, current: float, voltage: float, temperature: float) -> float: ...
+
 class LinearSolverKind(Enum):
     SparseLU = ...
     EnhancedSparseLU = ...
@@ -415,6 +433,11 @@ class ThermalCouplingPolicy(Enum):
     LossOnly = ...
     LossWithTemperatureScaling = ...
 
+class ThermalNetworkKind(Enum):
+    SingleRC = ...
+    Foster = ...
+    Cauer = ...
+
 class SimulationEvent:
     time: float
     type: SimulationEventType
@@ -485,11 +508,17 @@ class ThermalCouplingOptions:
 
 class ThermalDeviceConfig:
     enabled: bool
+    network_kind: ThermalNetworkKind
     rth: float
     cth: float
+    stage_rth: List[float]
+    stage_cth: List[float]
     temp_init: float
     temp_ref: float
     alpha: float
+    shared_sink_id: str
+    shared_sink_rth: float
+    shared_sink_cth: float
 
     def __init__(self) -> None: ...
 
@@ -567,6 +596,7 @@ class SimulationOptions:
     enable_events: bool
     enable_losses: bool
     switching_energy: Dict[str, SwitchingEnergy]
+    switching_energy_surfaces: Dict[str, SwitchingEnergySurface3D]
     thermal: ThermalCouplingOptions
     thermal_devices: Dict[str, ThermalDeviceConfig]
     gmin_fallback: GminConfig
@@ -636,6 +666,7 @@ class Simulator:
         options: Optional[HarmonicBalanceOptions] = ...,
     ) -> HarmonicBalanceResult: ...
     def set_switching_energy(self, device_name: str, energy: SwitchingEnergy) -> None: ...
+    def set_switching_energy_surface(self, device_name: str, surface: SwitchingEnergySurface3D) -> None: ...
 
 class YamlParserOptions:
     strict: bool

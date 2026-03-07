@@ -1,3 +1,8 @@
+/**
+ * @file runtime_circuit.hpp
+ * @brief Public declarations for pulsim/v1/runtime_circuit.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

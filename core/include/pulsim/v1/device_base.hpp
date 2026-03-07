@@ -1,3 +1,8 @@
+/**
+ * @file device_base.hpp
+ * @brief Public declarations for pulsim/v1/device_base.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

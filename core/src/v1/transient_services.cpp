@@ -1,3 +1,8 @@
+/**
+ * @file transient_services.cpp
+ * @brief Default transient service implementations for assembly, solving, events, losses, and thermal.
+ */
+
 #include "pulsim/v1/transient_services.hpp"
 
 #include "pulsim/v1/simulation.hpp"
@@ -10,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <numeric>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -22,16 +28,19 @@ namespace {
 constexpr std::uint64_t kFnvOffset = 1469598103934665603ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 
+/// Relative-value compare used for cached transient state checks.
 [[nodiscard]] inline bool nearly_same_value(Real a, Real b) {
     const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
     return std::abs(a - b) <= scale * Real{1e-12};
 }
 
+/// FNV-1a style hash mix helper used in topology/signature hashing.
 inline void hash_mix(std::uint64_t& seed, std::uint64_t value) {
     seed ^= value;
     seed *= kFnvPrime;
 }
 
+/// Hashes sparse matrix numeric pattern and values for factorization cache validation.
 [[nodiscard]] std::uint64_t hash_sparse_numeric_signature(const SparseMatrix& matrix) {
     std::uint64_t hash = kFnvOffset;
     hash_mix(hash, static_cast<std::uint64_t>(matrix.rows()));
@@ -48,6 +57,7 @@ inline void hash_mix(std::uint64_t& seed, std::uint64_t value) {
     return hash;
 }
 
+/// Default equation assembler with transient gmin injection and timing telemetry.
 class DefaultEquationAssemblerService final : public EquationAssemblerService {
 public:
     DefaultEquationAssemblerService(Circuit& circuit, const SimulationOptions& options)
@@ -140,6 +150,7 @@ private:
     EquationAssemblerTelemetry telemetry_{};
 };
 
+/// Segment model builder that derives piecewise-linear state-space from current topology.
 class DefaultSegmentModelService final : public SegmentModelService {
 public:
     DefaultSegmentModelService(Circuit& circuit,
@@ -253,6 +264,7 @@ private:
     mutable std::unordered_map<std::uint64_t, CacheEntry> topology_cache_;
 };
 
+/// Segment stepper that reuses linear factorizations when topology/numeric signature allows.
 class DefaultSegmentStepperService final : public SegmentStepperService {
 public:
     DefaultSegmentStepperService(
@@ -428,6 +440,7 @@ private:
     Index cached_state_size_ = 0;
 };
 
+/// Adapter exposing Newton solve service over the configured equation assembler.
 class DefaultNonlinearSolveService final : public NonlinearSolveService {
 public:
     DefaultNonlinearSolveService(NewtonRaphsonSolver<RuntimeLinearSolver>& solver,
@@ -462,6 +475,7 @@ private:
     std::shared_ptr<EquationAssemblerService> assembler_;
 };
 
+/// Thin adapter exposing the runtime linear solver through service registry.
 class DefaultLinearSolveService final : public LinearSolveService {
 public:
     explicit DefaultLinearSolveService(RuntimeLinearSolver& solver)
@@ -479,6 +493,7 @@ private:
     RuntimeLinearSolver& solver_;
 };
 
+/// Default electrothermal loss accumulation service for accepted segments and switch events.
 class DefaultLossService final : public LossService {
 public:
     DefaultLossService(Circuit& circuit, const SimulationOptions& options)
@@ -492,7 +507,16 @@ public:
         const auto& conns = circuit_.connections();
         states_.assign(devices.size(), DeviceLossState{});
         switching_energy_.assign(devices.size(), std::nullopt);
+        switching_energy_surfaces_.assign(devices.size(), std::nullopt);
         diode_conducting_.assign(devices.size(), false);
+        diode_last_forward_current_.assign(devices.size(), 0.0);
+        pending_turn_on_energy_.assign(devices.size(), 0.0);
+        pending_turn_off_energy_.assign(devices.size(), 0.0);
+        pending_reverse_recovery_energy_.assign(devices.size(), 0.0);
+        last_device_conduction_power_.assign(devices.size(), 0.0);
+        last_device_turn_on_power_.assign(devices.size(), 0.0);
+        last_device_turn_off_power_.assign(devices.size(), 0.0);
+        last_device_reverse_recovery_power_.assign(devices.size(), 0.0);
         last_device_power_.assign(devices.size(), 0.0);
         name_to_index_.clear();
 
@@ -502,6 +526,10 @@ public:
             auto it = options_.switching_energy.find(name);
             if (it != options_.switching_energy.end()) {
                 switching_energy_[i] = it->second;
+            }
+            auto surf_it = options_.switching_energy_surfaces.find(name);
+            if (surf_it != options_.switching_energy_surfaces.end()) {
+                switching_energy_surfaces_[i] = surf_it->second;
             }
         }
     }
@@ -522,8 +550,10 @@ public:
         state.accumulator.add_switching_event(energy);
         if (turning_on) {
             state.switching_energy.turn_on += energy;
+            pending_turn_on_energy_[*index] += energy;
         } else {
             state.switching_energy.turn_off += energy;
+            pending_turn_off_energy_[*index] += energy;
         }
     }
 
@@ -541,6 +571,7 @@ public:
         auto& state = states_[*index];
         state.accumulator.add_switching_event(energy);
         state.switching_energy.reverse_recovery += energy;
+        pending_reverse_recovery_energy_[*index] += energy;
     }
 
     void commit_accepted_segment(const Vector& x,
@@ -557,6 +588,26 @@ public:
             last_device_power_.assign(devices.size(), 0.0);
         } else {
             std::fill(last_device_power_.begin(), last_device_power_.end(), 0.0);
+        }
+        if (last_device_conduction_power_.size() != devices.size()) {
+            last_device_conduction_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_conduction_power_.begin(), last_device_conduction_power_.end(), 0.0);
+        }
+        if (last_device_turn_on_power_.size() != devices.size()) {
+            last_device_turn_on_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_turn_on_power_.begin(), last_device_turn_on_power_.end(), 0.0);
+        }
+        if (last_device_turn_off_power_.size() != devices.size()) {
+            last_device_turn_off_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_turn_off_power_.begin(), last_device_turn_off_power_.end(), 0.0);
+        }
+        if (last_device_reverse_recovery_power_.size() != devices.size()) {
+            last_device_reverse_recovery_power_.assign(devices.size(), 0.0);
+        } else {
+            std::fill(last_device_reverse_recovery_power_.begin(), last_device_reverse_recovery_power_.end(), 0.0);
         }
 
         auto node_voltage = [&x](Index node) -> Real {
@@ -606,11 +657,26 @@ public:
                     const Real g = conducting ? dev.g_on() : dev.g_off();
                     const Real i_dev = g * v;
                     p_cond = std::max<Real>(0.0, v * i_dev);
+                    if (conducting) {
+                        diode_last_forward_current_[i] = std::max<Real>(0.0, i_dev);
+                    }
 
                     if (diode_conducting_[i] && !conducting) {
-                        const auto& energy_opt = switching_energy_[i];
-                        if (energy_opt.has_value() && energy_opt->err > 0.0) {
-                            commit_reverse_recovery_event(conn.name, energy_opt->err);
+                        Real rr_energy = 0.0;
+                        if (const auto& surface_opt = switching_energy_surfaces_[i];
+                            surface_opt.has_value() && surface_opt->has_err()) {
+                            const Real ifwd = diode_last_forward_current_[i];
+                            const Real vr = std::max<Real>(0.0, -v);
+                            const Real tj = estimate_junction_temperature(i, conn.name, thermal_scale_i);
+                            rr_energy = surface_opt->evaluate_err(ifwd, vr, tj);
+                        } else {
+                            const auto& energy_opt = switching_energy_[i];
+                            if (energy_opt.has_value()) {
+                                rr_energy = energy_opt->err;
+                            }
+                        }
+                        if (rr_energy > 0.0) {
+                            commit_reverse_recovery_event(conn.name, rr_energy);
                         }
                     }
                     diode_conducting_[i] = conducting;
@@ -664,14 +730,49 @@ public:
 
             p_cond *= thermal_scale_i;
             const Real p_clamped = std::max<Real>(0.0, p_cond);
-            last_device_power_[i] = p_clamped;
+            last_device_conduction_power_[i] = p_clamped;
 
             if (p_clamped > 0.0) {
                 auto& state = states_[i];
                 state.accumulator.add_sample(p_clamped, dt);
-                state.peak_power = std::max(state.peak_power, p_clamped);
             }
         }
+
+        const Real inv_dt = 1.0 / dt;
+        for (std::size_t i = 0; i < devices.size(); ++i) {
+            const Real p_on = pending_turn_on_energy_[i] * inv_dt;
+            const Real p_off = pending_turn_off_energy_[i] * inv_dt;
+            const Real p_rr = pending_reverse_recovery_energy_[i] * inv_dt;
+            const Real p_total =
+                std::max<Real>(0.0, last_device_conduction_power_[i] + p_on + p_off + p_rr);
+
+            last_device_turn_on_power_[i] = p_on;
+            last_device_turn_off_power_[i] = p_off;
+            last_device_reverse_recovery_power_[i] = p_rr;
+            last_device_power_[i] = p_total;
+
+            auto& state = states_[i];
+            state.peak_power = std::max(state.peak_power, p_total);
+            pending_turn_on_energy_[i] = 0.0;
+            pending_turn_off_energy_[i] = 0.0;
+            pending_reverse_recovery_energy_[i] = 0.0;
+        }
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_conduction_power() const override {
+        return last_device_conduction_power_;
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_turn_on_power() const override {
+        return last_device_turn_on_power_;
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_turn_off_power() const override {
+        return last_device_turn_off_power_;
+    }
+
+    [[nodiscard]] std::span<const Real> last_device_reverse_recovery_power() const override {
+        return last_device_reverse_recovery_power_;
     }
 
     [[nodiscard]] std::span<const Real> last_device_power() const override {
@@ -743,15 +844,56 @@ private:
         return it->second;
     }
 
+    [[nodiscard]] Real estimate_junction_temperature(std::size_t device_index,
+                                                     const std::string& device_name,
+                                                     Real thermal_scale) const {
+        if (!options_.thermal.enable ||
+            options_.thermal.policy == ThermalCouplingPolicy::LossOnly) {
+            return options_.thermal.ambient;
+        }
+
+        Real temp_ref = options_.thermal.ambient;
+        Real alpha = 0.0;
+        if (const auto cfg_it = options_.thermal_devices.find(device_name);
+            cfg_it != options_.thermal_devices.end()) {
+            temp_ref = cfg_it->second.temp_ref;
+            alpha = cfg_it->second.alpha;
+        }
+
+        if (std::abs(alpha) < 1e-12 || !std::isfinite(thermal_scale)) {
+            if (device_index < switching_energy_surfaces_.size() &&
+                switching_energy_surfaces_[device_index].has_value()) {
+                const auto& surface = *switching_energy_surfaces_[device_index];
+                if (!surface.temperature_axis.empty()) {
+                    return surface.temperature_axis.front();
+                }
+            }
+            return temp_ref;
+        }
+
+        const Real scale = std::clamp(thermal_scale, Real{0.05}, Real{4.0});
+        return temp_ref + (scale - 1.0) / alpha;
+    }
+
     Circuit& circuit_;
     const SimulationOptions& options_;
     std::vector<DeviceLossState> states_;
     std::vector<std::optional<SwitchingEnergy>> switching_energy_;
+    std::vector<std::optional<SwitchingEnergySurface3D>> switching_energy_surfaces_;
     std::vector<bool> diode_conducting_;
+    std::vector<Real> diode_last_forward_current_;
+    std::vector<Real> pending_turn_on_energy_;
+    std::vector<Real> pending_turn_off_energy_;
+    std::vector<Real> pending_reverse_recovery_energy_;
     std::unordered_map<std::string, std::size_t, TransparentStringHash, std::equal_to<>> name_to_index_;
+    std::vector<Real> last_device_conduction_power_;
+    std::vector<Real> last_device_turn_on_power_;
+    std::vector<Real> last_device_turn_off_power_;
+    std::vector<Real> last_device_reverse_recovery_power_;
     std::vector<Real> last_device_power_;
 };
 
+/// Default thermal RC service coupled to per-device power dissipation.
 class DefaultThermalService final : public ThermalService {
 public:
     DefaultThermalService(Circuit& circuit, const SimulationOptions& options)
@@ -765,11 +907,15 @@ public:
         const auto& conns = circuit_.connections();
         states_.assign(devices.size(), DeviceThermalState{});
         thermal_scale_.assign(devices.size(), 1.0);
+        device_sink_index_.assign(devices.size(), -1);
+        shared_sinks_.clear();
 
         if (!options_.thermal.enable) {
             circuit_.reset_device_temperature_scales();
             return;
         }
+
+        std::unordered_map<std::string, std::size_t, TransparentStringHash, std::equal_to<>> sink_by_id;
 
         for (std::size_t i = 0; i < devices.size(); ++i) {
             bool supports_thermal = false;
@@ -785,8 +931,11 @@ public:
             auto& state = states_[i];
             state.enabled = true;
             state.config.enabled = true;
+            state.config.network_kind = ThermalNetworkKind::SingleRC;
             state.config.rth = options_.thermal.default_rth;
             state.config.cth = options_.thermal.default_cth;
+            state.config.stage_rth.clear();
+            state.config.stage_cth.clear();
             state.config.temp_init = options_.thermal.ambient;
             state.config.temp_ref = options_.thermal.ambient;
 
@@ -798,7 +947,55 @@ public:
             }
 
             state.enabled = state.config.enabled;
-            state.temperature = state.config.temp_init;
+            state.stage_temperature_rise.clear();
+            const Real ambient = options_.thermal.ambient;
+            const Real delta_init = state.config.temp_init - ambient;
+
+            if (!state.config.shared_sink_id.empty()) {
+                const auto [it, inserted] = sink_by_id.try_emplace(
+                    state.config.shared_sink_id,
+                    shared_sinks_.size());
+                if (inserted) {
+                    SharedSinkState sink;
+                    sink.id = state.config.shared_sink_id;
+                    sink.rth = std::max<Real>(state.config.shared_sink_rth, 1e-12);
+                    sink.cth = std::max<Real>(state.config.shared_sink_cth, 0.0);
+                    shared_sinks_.push_back(std::move(sink));
+                }
+                device_sink_index_[i] = static_cast<int>(it->second);
+            }
+
+            if (state.config.network_kind == ThermalNetworkKind::Foster &&
+                state.config.stage_rth.size() == state.config.stage_cth.size() &&
+                !state.config.stage_rth.empty()) {
+                state.stage_temperature_rise.assign(state.config.stage_rth.size(), 0.0);
+                state.stage_work.clear();
+                const Real total_rth =
+                    std::accumulate(state.config.stage_rth.begin(), state.config.stage_rth.end(), Real{0.0});
+                if (total_rth > 0.0) {
+                    for (std::size_t stage = 0; stage < state.stage_temperature_rise.size(); ++stage) {
+                        state.stage_temperature_rise[stage] =
+                            delta_init * (state.config.stage_rth[stage] / total_rth);
+                    }
+                } else if (!state.stage_temperature_rise.empty()) {
+                    state.stage_temperature_rise[0] = delta_init;
+                }
+                state.local_temperature_rise = std::accumulate(
+                    state.stage_temperature_rise.begin(),
+                    state.stage_temperature_rise.end(),
+                    Real{0.0});
+            } else if (state.config.network_kind == ThermalNetworkKind::Cauer &&
+                       state.config.stage_rth.size() == state.config.stage_cth.size() &&
+                       !state.config.stage_rth.empty()) {
+                state.stage_temperature_rise.assign(state.config.stage_rth.size(), delta_init);
+                state.stage_work.assign(state.config.stage_rth.size(), 0.0);
+                state.local_temperature_rise = state.stage_temperature_rise.front();
+            } else {
+                state.config.network_kind = ThermalNetworkKind::SingleRC;
+                state.local_temperature_rise = delta_init;
+                state.stage_work.clear();
+            }
+            state.temperature = ambient + state.local_temperature_rise;
             state.peak_temperature = state.temperature;
             // Keep summary average consistent with exported time traces, which include t=tstart.
             state.sum_temperature = state.temperature;
@@ -819,6 +1016,18 @@ public:
         return thermal_scale_;
     }
 
+    [[nodiscard]] bool is_device_enabled(std::size_t device_index) const override {
+        return device_index < states_.size() && states_[device_index].enabled;
+    }
+
+    [[nodiscard]] Real device_temperature(std::size_t device_index) const override {
+        if (device_index >= states_.size()) {
+            return options_.thermal.ambient;
+        }
+        const auto& state = states_[device_index];
+        return state.enabled ? state.temperature : options_.thermal.ambient;
+    }
+
     void commit_accepted_segment(Real dt,
                                  std::span<const Real> device_power) override {
         if (!options_.thermal.enable || dt <= 0.0) {
@@ -826,6 +1035,36 @@ public:
         }
         if (states_.size() != device_power.size()) {
             return;
+        }
+
+        if (!shared_sinks_.empty()) {
+            for (auto& sink : shared_sinks_) {
+                sink.step_power = 0.0;
+            }
+            for (std::size_t i = 0; i < states_.size() && i < device_sink_index_.size(); ++i) {
+                if (!states_[i].enabled) {
+                    continue;
+                }
+                const int sink_index = device_sink_index_[i];
+                if (sink_index < 0 || static_cast<std::size_t>(sink_index) >= shared_sinks_.size()) {
+                    continue;
+                }
+                shared_sinks_[static_cast<std::size_t>(sink_index)].step_power +=
+                    std::max<Real>(0.0, device_power[i]);
+            }
+            for (auto& sink : shared_sinks_) {
+                const Real rth = std::max<Real>(sink.rth, 1e-12);
+                if (sink.cth <= 0.0) {
+                    sink.temperature_rise = sink.step_power * rth;
+                } else {
+                    const Real tau = std::max<Real>(rth * sink.cth, 1e-18);
+                    const Real a = std::exp(-dt / tau);
+                    sink.temperature_rise = sink.temperature_rise * a + (sink.step_power * rth) * (1.0 - a);
+                }
+                if (!std::isfinite(sink.temperature_rise)) {
+                    sink.temperature_rise = 0.0;
+                }
+            }
         }
 
         for (std::size_t i = 0; i < states_.size(); ++i) {
@@ -836,16 +1075,107 @@ public:
 
             const Real power = std::max<Real>(0.0, device_power[i]);
             const Real ambient = options_.thermal.ambient;
-            const Real rth = std::max<Real>(state.config.rth, 1e-12);
-            const Real cth = state.config.cth;
+            Real sink_rise = 0.0;
+            if (i < device_sink_index_.size()) {
+                const int sink_index = device_sink_index_[i];
+                if (sink_index >= 0 && static_cast<std::size_t>(sink_index) < shared_sinks_.size()) {
+                    sink_rise = shared_sinks_[static_cast<std::size_t>(sink_index)].temperature_rise;
+                }
+            }
 
-            if (cth <= 0.0) {
-                state.temperature = ambient + power * rth;
-            } else {
-                const Real tau = std::max<Real>(rth * cth, 1e-12);
-                const Real delta = state.temperature - ambient;
-                const Real delta_dot = (power * rth - delta) / tau;
-                state.temperature = ambient + delta + dt * delta_dot;
+            switch (state.config.network_kind) {
+                case ThermalNetworkKind::SingleRC: {
+                    const Real rth = std::max<Real>(state.config.rth, 1e-12);
+                    const Real cth = state.config.cth;
+                    if (cth <= 0.0) {
+                        state.local_temperature_rise = power * rth;
+                    } else {
+                        const Real tau = std::max<Real>(rth * cth, 1e-18);
+                        const Real a = std::exp(-dt / tau);
+                        const Real delta_ss = power * rth;
+                        state.local_temperature_rise =
+                            state.local_temperature_rise * a + delta_ss * (1.0 - a);
+                    }
+                    break;
+                }
+                case ThermalNetworkKind::Foster: {
+                    const std::size_t n = state.config.stage_rth.size();
+                    if (n == 0 ||
+                        n != state.config.stage_cth.size() ||
+                        n != state.stage_temperature_rise.size()) {
+                        break;
+                    }
+                    for (std::size_t stage = 0; stage < n; ++stage) {
+                        const Real r = std::max<Real>(state.config.stage_rth[stage], 1e-12);
+                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-18);
+                        const Real tau = std::max<Real>(r * c, 1e-18);
+                        const Real theta = state.stage_temperature_rise[stage];
+                        const Real a = std::exp(-dt / tau);
+                        const Real theta_new = theta * a + (power * r) * (1.0 - a);
+                        state.stage_temperature_rise[stage] =
+                            std::isfinite(theta_new) ? theta_new : (power * r);
+                    }
+                    const Real delta = std::accumulate(
+                        state.stage_temperature_rise.begin(),
+                        state.stage_temperature_rise.end(),
+                        Real{0.0});
+                    state.local_temperature_rise = delta;
+                    break;
+                }
+                case ThermalNetworkKind::Cauer: {
+                    const std::size_t n = state.config.stage_rth.size();
+                    if (n == 0 ||
+                        n != state.config.stage_cth.size() ||
+                        n != state.stage_temperature_rise.size() ||
+                        n != state.stage_work.size()) {
+                        break;
+                    }
+                    // Backward-Euler implicit solve of the Cauer ladder:
+                    // C_i * d(theta_i)/dt = flow_in_i - flow_out_i.
+                    // The resulting linear system is tridiagonal and solved in O(n) with Thomas.
+                    auto& theta = state.stage_temperature_rise;
+                    auto& cprime = state.stage_work;
+                    const Real inv_dt = 1.0 / std::max<Real>(dt, 1e-18);
+
+                    {
+                        const Real c0 = std::max<Real>(state.config.stage_cth[0], 1e-18);
+                        const Real g0 = 1.0 / std::max<Real>(state.config.stage_rth[0], 1e-12);
+                        const Real diag0 = c0 * inv_dt + g0;
+                        const Real upper0 = (n > 1) ? -g0 : 0.0;
+                        const Real b0 = c0 * inv_dt * theta[0] + power;
+                        const Real denom0 = std::max<Real>(diag0, 1e-18);
+                        cprime[0] = upper0 / denom0;
+                        theta[0] = b0 / denom0;
+                    }
+
+                    for (std::size_t stage = 1; stage < n; ++stage) {
+                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-18);
+                        const Real g_up = 1.0 / std::max<Real>(state.config.stage_rth[stage - 1], 1e-12);
+                        const Real g_down = 1.0 / std::max<Real>(state.config.stage_rth[stage], 1e-12);
+                        const Real lower = -g_up;
+                        const Real upper = (stage + 1 < n) ? -g_down : 0.0;
+                        const Real diag = c * inv_dt + g_up + g_down;
+                        const Real b = c * inv_dt * theta[stage];
+                        const Real denom = std::max<Real>(diag - lower * cprime[stage - 1], 1e-18);
+                        cprime[stage] = upper / denom;
+                        theta[stage] = (b - lower * theta[stage - 1]) / denom;
+                    }
+
+                    for (std::size_t stage = n - 1; stage > 0; --stage) {
+                        theta[stage - 1] -= cprime[stage - 1] * theta[stage];
+                    }
+
+                    state.local_temperature_rise = state.stage_temperature_rise.front();
+                    break;
+                }
+            }
+
+            if (!std::isfinite(state.local_temperature_rise)) {
+                state.local_temperature_rise = 0.0;
+            }
+            state.temperature = ambient + sink_rise + state.local_temperature_rise;
+            if (!std::isfinite(state.temperature)) {
+                state.temperature = ambient + sink_rise;
             }
 
             state.peak_temperature = std::max(state.peak_temperature, state.temperature);
@@ -888,10 +1218,21 @@ public:
         return summary;
     }
 
-private:
+    private:
+    struct SharedSinkState {
+        std::string id;
+        Real rth = 0.0;
+        Real cth = 0.0;
+        Real temperature_rise = 0.0;
+        Real step_power = 0.0;
+    };
+
     struct DeviceThermalState {
         bool enabled = false;
         ThermalDeviceConfig config{};
+        std::vector<Real> stage_temperature_rise;
+        std::vector<Real> stage_work;
+        Real local_temperature_rise = 0.0;
         Real temperature = 25.0;
         Real peak_temperature = 25.0;
         Real sum_temperature = 0.0;
@@ -924,8 +1265,11 @@ private:
     const SimulationOptions& options_;
     std::vector<DeviceThermalState> states_;
     std::vector<Real> thermal_scale_;
+    std::vector<int> device_sink_index_;
+    std::vector<SharedSinkState> shared_sinks_;
 };
 
+/// Default scheduler for PWM/dead-time and other event boundaries.
 class DefaultEventSchedulerService final : public EventSchedulerService {
 public:
     DefaultEventSchedulerService(const Circuit& circuit, const SimulationOptions& options)
@@ -1238,6 +1582,7 @@ private:
     std::vector<std::size_t> virtual_pwm_indices_;
 };
 
+/// Default step-recovery policy manager for retry/backoff/escalation flow.
 class DefaultRecoveryManagerService final : public RecoveryManagerService {
 public:
     explicit DefaultRecoveryManagerService(Real backoff)
@@ -1294,6 +1639,7 @@ private:
     Real backoff_;
 };
 
+/// No-op telemetry collector; hooks reserved for instrumentation extensions.
 class DefaultTelemetryCollectorService final : public TelemetryCollectorService {
 public:
     void on_step_attempt(const TransientStepRequest& /*request*/) override {}
@@ -1301,6 +1647,7 @@ public:
     void on_step_reject(const RecoveryDecision& /*decision*/) override {}
 };
 
+/// Builder wiring all default transient services into a complete registry.
 class DefaultTransientServiceBuilder final {
 public:
     [[nodiscard]] bool supports_fixed_mode(const SimulationOptions& /*options*/) const {
@@ -1372,6 +1719,13 @@ public:
 
 }  // namespace
 
+/**
+ * @brief Creates the default transient service registry used by Simulator.
+ * @param circuit Runtime circuit reference.
+ * @param options Active simulation options.
+ * @param newton_solver Newton solver instance shared by services.
+ * @return Fully wired transient service registry.
+ */
 TransientServiceRegistry make_default_transient_service_registry(
     Circuit& circuit,
     const SimulationOptions& options,

@@ -109,9 +109,11 @@ nav:
       - Getting Started: getting-started.md
   - Guides:
       - User Guide: user-guide.md
+      - Backend C++ Contributor Guide: backend-cpp-contributor-guide.md
       - Netlist YAML Format: netlist-format.md
       - Frontend Control and Signals Contract: frontend-control-signals.md
       - Electrothermal Workflow: electrothermal-workflow.md
+      - Electrothermal Migration (Scalar to Datasheet): electrothermal-migration-scalar-to-datasheet.md
       - Examples and Results: examples-and-results.md
       - Benchmarks and Parity: benchmarks-and-parity.md
       - Notebooks: notebooks.md
@@ -121,9 +123,12 @@ nav:
       - API Reference: api-reference.md
       - Python API (Legacy Notes): python-api.md
   - Compatibility:
+      - Supported Components Catalog: supported-components-catalog.md
       - GUI Backend Parity: gui-component-parity.md
       - Migration Guide: migration-guide.md
       - Device Models: device-models.md
   - Operations:
       - Configuration: configuration.md
       - Docs Versioning and Release: versioning-and-release.md
+      - Release Notes (Electrothermal Parity): release-notes-electrothermal-parity.md
+      - PR Package (Electrothermal): pr-electrothermal-datasheet-parity-package.md

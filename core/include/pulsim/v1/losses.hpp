@@ -1,3 +1,8 @@
+/**
+ * @file losses.hpp
+ * @brief Public declarations for pulsim/v1/losses.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

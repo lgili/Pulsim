@@ -1,3 +1,8 @@
+/**
+ * @file expression_templates.hpp
+ * @brief Public declarations for pulsim/v1/expression_templates.hpp.
+ */
+
 #pragma once
 
 // =============================================================================

@@ -1,3 +1,8 @@
+/**
+ * @file voltage_controlled_switch.hpp
+ * @brief Public declarations for pulsim/v1/components/voltage_controlled_switch.hpp.
+ */
+
 #pragma once
 
 #include "pulsim/v1/components/base.hpp"
