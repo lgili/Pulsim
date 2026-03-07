@@ -1092,6 +1092,177 @@ TEST_CASE("v1 electro-thermal supports resistor and diode telemetry", "[v1][ther
     CHECK(d1_component->thermal_enabled);
 }
 
+TEST_CASE("v1 modular electrothermal fixed-step run avoids hot-path reallocations",
+          "[v1][performance][allocation][modular]") {
+    Circuit circuit;
+
+    const auto n_in = circuit.add_node("in");
+    const auto n_mid = circuit.add_node("mid");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, Circuit::ground(), 10.0);
+    circuit.add_resistor("Rs", n_in, n_mid, 10.0);
+    circuit.add_diode("D1", n_mid, Circuit::ground(), 1.0, 1e-6);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 1e-6;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_losses = true;
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.policy = ThermalCouplingPolicy::LossWithTemperatureScaling;
+
+    ThermalDeviceConfig r_cfg;
+    r_cfg.rth = 0.5;
+    r_cfg.cth = 5e-5;
+    r_cfg.temp_init = 25.0;
+    r_cfg.temp_ref = 25.0;
+    r_cfg.alpha = 0.002;
+    opts.thermal_devices["R1"] = r_cfg;
+
+    ThermalDeviceConfig d_cfg;
+    d_cfg.rth = 1.0;
+    d_cfg.cth = 5e-5;
+    d_cfg.temp_init = 25.0;
+    d_cfg.temp_ref = 25.0;
+    d_cfg.alpha = 0.002;
+    opts.thermal_devices["D1"] = d_cfg;
+
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+    REQUIRE(result.success);
+    REQUIRE(result.time.size() > 10);
+    CHECK(result.backend_telemetry.runtime_module_count == 5);
+    CHECK(result.backend_telemetry.reserved_output_samples >= static_cast<int>(result.time.size()));
+    CHECK(result.backend_telemetry.time_series_reallocations == 0);
+    CHECK(result.backend_telemetry.state_series_reallocations == 0);
+    CHECK(result.backend_telemetry.virtual_channel_reallocations == 0);
+}
+
+TEST_CASE("v1 modular electrothermal channels stay summary-consistent",
+          "[v1][thermal][losses][consistency][modular]") {
+    Circuit circuit;
+
+    const auto n_in = circuit.add_node("in");
+    const auto n_mid = circuit.add_node("mid");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 5.0);
+    circuit.add_resistor("R1", n_in, Circuit::ground(), 10.0);
+    circuit.add_resistor("Rs", n_in, n_mid, 10.0);
+    circuit.add_diode("D1", n_mid, Circuit::ground(), 1.0, 1e-6);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1e-3;
+    opts.dt = 1e-6;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.enable_losses = true;
+    opts.thermal.enable = true;
+    opts.thermal.ambient = 25.0;
+    opts.thermal.policy = ThermalCouplingPolicy::LossWithTemperatureScaling;
+
+    ThermalDeviceConfig r_cfg;
+    r_cfg.rth = 0.5;
+    r_cfg.cth = 5e-5;
+    r_cfg.temp_init = 25.0;
+    r_cfg.temp_ref = 25.0;
+    r_cfg.alpha = 0.002;
+    opts.thermal_devices["R1"] = r_cfg;
+
+    ThermalDeviceConfig d_cfg;
+    d_cfg.rth = 1.0;
+    d_cfg.cth = 5e-5;
+    d_cfg.temp_init = 25.0;
+    d_cfg.temp_ref = 25.0;
+    d_cfg.alpha = 0.002;
+    opts.thermal_devices["D1"] = d_cfg;
+
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient();
+    REQUIRE(result.success);
+    REQUIRE(result.time.size() > 1);
+
+    const Real duration = result.time.back() - result.time.front();
+    REQUIRE(duration > 0.0);
+
+    auto component_row_for = [&](std::string_view name) -> const ComponentElectrothermalTelemetry* {
+        const auto it = std::find_if(
+            result.component_electrothermal.begin(),
+            result.component_electrothermal.end(),
+            [name](const ComponentElectrothermalTelemetry& row) { return row.component_name == name; });
+        return it == result.component_electrothermal.end() ? nullptr : &*it;
+    };
+    auto thermal_row_for = [&](std::string_view name) -> const DeviceThermalTelemetry* {
+        const auto it = std::find_if(
+            result.thermal_summary.device_temperatures.begin(),
+            result.thermal_summary.device_temperatures.end(),
+            [name](const DeviceThermalTelemetry& row) { return row.device_name == name; });
+        return it == result.thermal_summary.device_temperatures.end() ? nullptr : &*it;
+    };
+
+    const std::array<std::string_view, 2> names = {"R1", "D1"};
+    for (const auto name : names) {
+        const auto* component = component_row_for(name);
+        REQUIRE(component != nullptr);
+
+        const std::string thermal_channel_name = "T(" + std::string(name) + ")";
+        const auto thermal_channel_it = result.virtual_channels.find(thermal_channel_name);
+        REQUIRE(thermal_channel_it != result.virtual_channels.end());
+        const auto& thermal_series = thermal_channel_it->second;
+        REQUIRE(thermal_series.size() == result.time.size());
+
+        const Real final_temperature = thermal_series.back();
+        const Real peak_temperature = *std::max_element(thermal_series.begin(), thermal_series.end());
+        Real thermal_sum = 0.0;
+        for (const Real sample : thermal_series) {
+            thermal_sum += sample;
+        }
+        const Real average_temperature =
+            thermal_sum / static_cast<Real>(thermal_series.size());
+
+        CHECK(component->final_temperature == Approx(final_temperature).margin(1e-6));
+        CHECK(component->peak_temperature == Approx(peak_temperature).margin(1e-6));
+        CHECK(component->average_temperature == Approx(average_temperature).margin(1e-6));
+
+        const auto* thermal = thermal_row_for(name);
+        REQUIRE(thermal != nullptr);
+        CHECK(thermal->final_temperature == Approx(final_temperature).margin(1e-6));
+        CHECK(thermal->peak_temperature == Approx(peak_temperature).margin(1e-6));
+        CHECK(thermal->average_temperature == Approx(average_temperature).margin(1e-6));
+
+        const std::string loss_channel_name = "Ploss(" + std::string(name) + ")";
+        const auto loss_channel_it = result.virtual_channels.find(loss_channel_name);
+        REQUIRE(loss_channel_it != result.virtual_channels.end());
+        const auto& loss_series = loss_channel_it->second;
+        REQUIRE(loss_series.size() == result.time.size());
+
+        Real energy = 0.0;
+        for (std::size_t i = 1; i < result.time.size(); ++i) {
+            const Real dt = result.time[i] - result.time[i - 1];
+            energy += loss_series[i] * dt;
+        }
+        const Real average_power = energy / duration;
+        const Real energy_tol = std::max<Real>(1e-8, std::abs(energy) * 1e-3);
+        const Real power_tol = std::max<Real>(1e-8, std::abs(average_power) * 1e-3);
+        CHECK(component->total_energy == Approx(energy).margin(energy_tol));
+        CHECK(component->total_loss == Approx(average_power).margin(power_tol));
+    }
+}
+
 TEST_CASE("v1 direct formulation runs through DAE solve path with direct telemetry",
           "[v1][formulation][direct]") {
     Circuit circuit;

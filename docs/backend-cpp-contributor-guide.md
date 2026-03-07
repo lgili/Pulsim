@@ -136,7 +136,7 @@ Module-scoped checks (recommended before full suite):
 ctest --test-dir build --output-on-failure -R "runtime module"
 
 # switching/loss/thermal channel path (telemetry_channels + loss/thermal adapters)
-ctest --test-dir build --output-on-failure -R "v1 switching loss accumulation|v1 fixed-step resolves multiple switching events inside one macro interval|v1 backend telemetry reports topology-driven linear cache invalidation"
+ctest --test-dir build --output-on-failure -R "v1 switching loss accumulation|v1 fixed-step resolves multiple switching events inside one macro interval|v1 backend telemetry reports topology-driven linear cache invalidation|v1 modular electrothermal fixed-step run avoids hot-path reallocations|v1 modular electrothermal channels stay summary-consistent"
 
 # Python contract and thermal/loss consistency
 PYTHONPATH=build/python pytest -q \

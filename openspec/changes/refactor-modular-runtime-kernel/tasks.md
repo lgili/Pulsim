@@ -24,8 +24,8 @@
 
 ## 4. Quality and performance gates
 - [x] 4.1 Add deterministic replay tests for module output order.
-- [ ] 4.2 Add hot-path allocation tests for stable-topology stepping.
-- [ ] 4.3 Add channel/summary consistency tests under modular execution.
+- [x] 4.2 Add hot-path allocation tests for stable-topology stepping.
+- [x] 4.3 Add channel/summary consistency tests under modular execution.
 - [ ] 4.4 Run benchmark/parity/stress and compare against frozen baseline.
 
 ## 5. Documentation and contributor onboarding
