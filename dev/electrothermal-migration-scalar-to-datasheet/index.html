@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/troubleshooting/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/electrothermal-migration-scalar-to-datasheet/">
       
       
-        <link rel="prev" href="../convergence-tuning-guide/">
+        <link rel="prev" href="../electrothermal-workflow/">
       
       
-        <link rel="next" href="../api-reference/">
+        <link rel="next" href="../examples-and-results/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Troubleshooting - PulsimCore</title>
+        <title>Electrothermal Migration (Scalar to Datasheet) - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#troubleshooting" class="md-skip">
+        <a href="#electrothermal-migration-scalar-to-datasheet" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Troubleshooting
+              Electrothermal Migration (Scalar to Datasheet)
             
           </span>
         </div>
@@ -615,10 +615,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../electrothermal-migration-scalar-to-datasheet/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Electrothermal Migration (Scalar to Datasheet)
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -627,6 +647,71 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-scalar-baseline-current" class="md-nav__link">
+    <span class="md-ellipsis">
+      1) Scalar Baseline (Current)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-datasheet-loss-axes" class="md-nav__link">
+    <span class="md-ellipsis">
+      2) Datasheet Loss Axes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-upgrade-thermal-network-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      3) Upgrade Thermal Network (Optional)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-validation-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      4) Validation Checklist
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-common-migration-pitfalls" class="md-nav__link">
+    <span class="md-ellipsis">
+      5) Common Migration Pitfalls
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -720,30 +805,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Troubleshooting
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -752,107 +817,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsim_pulsim" class="md-nav__link">
-    <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim._pulsim
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsimsignal_evaluator" class="md-nav__link">
-    <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim.signal_evaluator
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#macos-import-fails-with-clibc-symbols" class="md-nav__link">
-    <span class="md-ellipsis">
-      macOS import fails with C++/libc++ symbols
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tests-fail-due-to-wrong-module-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      Tests fail due to wrong module path
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#docs-build-fails-mkdocs-strict" class="md-nav__link">
-    <span class="md-ellipsis">
-      Docs build fails (mkdocs --strict)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#parity-script-fails-with-ltspice-backend" class="md-nav__link">
-    <span class="md-ellipsis">
-      Parity script fails with LTspice backend
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#slow-or-unstable-switched-converter-runs" class="md-nav__link">
-    <span class="md-ellipsis">
-      Slow or unstable switched-converter runs
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-loop buck converges in open-loop but struggles in closed-loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#thermal-yaml-errors-on-valid-converter-netlists" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal YAML errors on valid converter netlists
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1249,81 +1213,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsim_pulsim" class="md-nav__link">
+  <a href="#1-scalar-baseline-current" class="md-nav__link">
     <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim._pulsim
+      1) Scalar Baseline (Current)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsimsignal_evaluator" class="md-nav__link">
+  <a href="#2-datasheet-loss-axes" class="md-nav__link">
     <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim.signal_evaluator
+      2) Datasheet Loss Axes
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#macos-import-fails-with-clibc-symbols" class="md-nav__link">
+  <a href="#3-upgrade-thermal-network-optional" class="md-nav__link">
     <span class="md-ellipsis">
-      macOS import fails with C++/libc++ symbols
+      3) Upgrade Thermal Network (Optional)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#tests-fail-due-to-wrong-module-path" class="md-nav__link">
+  <a href="#4-validation-checklist" class="md-nav__link">
     <span class="md-ellipsis">
-      Tests fail due to wrong module path
+      4) Validation Checklist
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#docs-build-fails-mkdocs-strict" class="md-nav__link">
+  <a href="#5-common-migration-pitfalls" class="md-nav__link">
     <span class="md-ellipsis">
-      Docs build fails (mkdocs --strict)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#parity-script-fails-with-ltspice-backend" class="md-nav__link">
-    <span class="md-ellipsis">
-      Parity script fails with LTspice backend
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#slow-or-unstable-switched-converter-runs" class="md-nav__link">
-    <span class="md-ellipsis">
-      Slow or unstable switched-converter runs
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-loop buck converges in open-loop but struggles in closed-loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#thermal-yaml-errors-on-valid-converter-netlists" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal YAML errors on valid converter netlists
+      5) Common Migration Pitfalls
     </span>
   </a>
   
@@ -1344,7 +1272,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/troubleshooting.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/electrothermal-migration-scalar-to-datasheet.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1353,113 +1281,93 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/troubleshooting.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/electrothermal-migration-scalar-to-datasheet.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
-<h2 id="modulenotfounderror-pulsim_pulsim"><code>ModuleNotFoundError: pulsim._pulsim</code><a class="headerlink" href="#modulenotfounderror-pulsim_pulsim" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>Python cannot find the compiled extension for your interpreter ABI.</li>
-</ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim; print(pulsim.__version__)&quot;</span>
+<h1 id="electrothermal-migration-scalar-to-datasheet">Electrothermal Migration: Scalar to Datasheet<a class="headerlink" href="#electrothermal-migration-scalar-to-datasheet" title="Permanent link">&para;</a></h1>
+<p>This guide shows how to migrate a component from scalar switching-loss setup to datasheet-grade loss + staged thermal modeling.</p>
+<h2 id="1-scalar-baseline-current">1) Scalar Baseline (Current)<a class="headerlink" href="#1-scalar-baseline-current" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
+<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gate</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">vth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3.0</span>
+<span class="w">    </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.35</span>
+<span class="w">    </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-8</span>
+<span class="w">    </span><span class="nt">loss</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">eon</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0e-6</span>
+<span class="w">      </span><span class="nt">eoff</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3.0e-6</span>
+<span class="w">      </span><span class="nt">err</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">      </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.8</span>
+<span class="w">      </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.03</span>
+<span class="w">      </span><span class="nt">temp_init</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25</span>
+<span class="w">      </span><span class="nt">temp_ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25</span>
+<span class="w">      </span><span class="nt">alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.004</span>
 </code></pre></div>
-<h2 id="modulenotfounderror-pulsimsignal_evaluator"><code>ModuleNotFoundError: pulsim.signal_evaluator</code><a class="headerlink" href="#modulenotfounderror-pulsimsignal_evaluator" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>stale build/package path missing companion Python modules.</li>
-</ul>
-<p>Fix:</p>
-<ul>
-<li>rebuild and ensure <code>build/python/pulsim/signal_evaluator.py</code> exists;</li>
-<li>avoid stale <code>build/cp*/python</code> directories from old builds.</li>
-</ul>
-<h2 id="macos-import-fails-with-clibc-symbols">macOS import fails with C++/libc++ symbols<a class="headerlink" href="#macos-import-fails-with-clibc-symbols" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>ABI mismatch when building bindings with non-Apple clang toolchain.</li>
-</ul>
-<p>Fix:</p>
-<ul>
-<li>use AppleClang for macOS Python builds (project CMake already enforces this path when possible);</li>
-<li>clean and rebuild.</li>
-</ul>
-<h2 id="tests-fail-due-to-wrong-module-path">Tests fail due to wrong module path<a class="headerlink" href="#tests-fail-due-to-wrong-module-path" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>environment points to stale build artifacts.</li>
-</ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Verify active module origin</span>
-python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim</span>
-<span class="s">print(pulsim.__file__)</span>
-<span class="s">PY</span>
+<p>Use this when you only have single representative switching energies.</p>
+<h2 id="2-datasheet-loss-axes">2) Datasheet Loss Axes<a class="headerlink" href="#2-datasheet-loss-axes" title="Permanent link">&para;</a></h2>
+<p>Replace scalar loss with <code>loss.model: datasheet</code> and explicit axes:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">loss</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">datasheet</span>
+<span class="w">  </span><span class="nt">axes</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">current</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">5</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">10</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">voltage</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">20</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">40</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">25</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">75</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">125</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">eon</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">... N entries ...</span><span class="w"> </span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">eoff</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">... N entries ...</span><span class="w"> </span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">err</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">... N entries ...</span><span class="w"> </span><span class="p p-Indicator">]</span>
 </code></pre></div>
-<p>Ensure it points to either:</p>
+<p>Rules:</p>
 <ul>
-<li>installed package in active venv/site-packages, or</li>
-<li>current <code>build/python/pulsim</code> tree.</li>
+<li>axes must be finite and strictly increasing.</li>
+<li>table length must be <code>len(I) * len(V) * len(T)</code>.</li>
+<li>all energy values must be finite and <code>&gt;= 0</code>.</li>
 </ul>
-<h2 id="docs-build-fails-mkdocs-strict">Docs build fails (<code>mkdocs --strict</code>)<a class="headerlink" href="#docs-build-fails-mkdocs-strict" title="Permanent link">&para;</a></h2>
-<p>Typical causes:</p>
-<ul>
-<li>broken links after page renaming</li>
-<li>missing dependencies in docs environment</li>
-</ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>docs/requirements.txt
-mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
+<h2 id="3-upgrade-thermal-network-optional">3) Upgrade Thermal Network (Optional)<a class="headerlink" href="#3-upgrade-thermal-network-optional" title="Permanent link">&para;</a></h2>
+<p>If you need multi-time-constant behavior:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">thermal</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">network</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">foster</span><span class="w">   </span><span class="c1"># single_rc | foster | cauer</span>
+<span class="w">  </span><span class="nt">rth_stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.4</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.3</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">cth_stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.005</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.03</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.2</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">temp_init</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25</span>
+<span class="w">  </span><span class="nt">temp_ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25</span>
+<span class="w">  </span><span class="nt">alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.004</span>
 </code></pre></div>
-<h2 id="parity-script-fails-with-ltspice-backend">Parity script fails with LTspice backend<a class="headerlink" href="#parity-script-fails-with-ltspice-backend" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>LTspice executable path missing or incorrect.</li>
-</ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_ngspice.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--backend<span class="w"> </span>ltspice<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--ltspice-exe<span class="w"> </span><span class="s2">&quot;/Applications/LTspice.app/Contents/MacOS/LTspice&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/ltspice_out
+<p>If multiple devices share one heatsink:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">thermal</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
+<span class="w">  </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.02</span>
+<span class="w">  </span><span class="nt">shared_sink_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hs_main</span>
+<span class="w">  </span><span class="nt">shared_sink_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.35</span>
+<span class="w">  </span><span class="nt">shared_sink_cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.10</span>
 </code></pre></div>
-<h2 id="slow-or-unstable-switched-converter-runs">Slow or unstable switched-converter runs<a class="headerlink" href="#slow-or-unstable-switched-converter-runs" title="Permanent link">&para;</a></h2>
-<p>Recommendations:</p>
+<p>All members of the same <code>shared_sink_id</code> must use the same sink <code>rth/cth</code>.</p>
+<h2 id="4-validation-checklist">4) Validation Checklist<a class="headerlink" href="#4-validation-checklist" title="Permanent link">&para;</a></h2>
+<p>After migration, confirm:</p>
 <ul>
-<li>use variable timestep first;</li>
-<li>inspect fallback and rejection telemetry before tuning manually;</li>
-<li>run benchmark matrix to compare integrators and solver stacks in a controlled way.</li>
+<li>parser has no errors (<code>parser.errors == []</code>).</li>
+<li>canonical channels exist (<code>T(M1)</code>, <code>Pcond(M1)</code>, <code>Psw_on(M1)</code>, <code>Psw_off(M1)</code>, <code>Prr(M1)</code>, <code>Ploss(M1)</code>).</li>
+<li><code>len(channel) == len(result.time)</code> for each channel.</li>
+<li>summary consistency holds:</li>
+<li><code>final_temperature == last(T(M1))</code></li>
+<li><code>peak_temperature == max(T(M1))</code></li>
+<li><code>average_temperature == mean(T(M1))</code></li>
 </ul>
-<h2 id="closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop">Closed-loop buck converges in open-loop but struggles in closed-loop<a class="headerlink" href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" title="Permanent link">&para;</a></h2>
-<p>Common causes:</p>
+<h2 id="5-common-migration-pitfalls">5) Common Migration Pitfalls<a class="headerlink" href="#5-common-migration-pitfalls" title="Permanent link">&para;</a></h2>
 <ul>
-<li>control running effectively faster than desired for the selected switching setup;</li>
-<li>PI/PID output saturating without proper limits;</li>
-<li>mismatch between PWM frequency and controller update cadence.</li>
-</ul>
-<p>Fix checklist:</p>
-<ul>
-<li>set <code>simulation.control.mode: auto</code> to infer sample time from PWM frequency;</li>
-<li>or force <code>simulation.control.mode: discrete</code> with explicit <code>simulation.control.sample_time</code>;</li>
-<li>ensure PI/PID has <code>output_min</code>, <code>output_max</code>, and <code>anti_windup: 1.0</code>;</li>
-<li>verify <code>pwm_generator.target_component</code> points to the intended switch device.</li>
-</ul>
-<h2 id="thermal-yaml-errors-on-valid-converter-netlists">Thermal YAML errors on valid converter netlists<a class="headerlink" href="#thermal-yaml-errors-on-valid-converter-netlists" title="Permanent link">&para;</a></h2>
-<p>If parsing fails with thermal diagnostics:</p>
-<ul>
-<li><code>PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT</code>: thermal enabled on unsupported type.</li>
-<li><code>PULSIM_YAML_E_THERMAL_MISSING_REQUIRED</code>: strict mode requires explicit <code>rth</code>/<code>cth</code>.</li>
-<li><code>PULSIM_YAML_E_THERMAL_RANGE_INVALID</code>: invalid finite/range checks for thermal values.</li>
-</ul>
-<p>Thermal-enabled types currently supported:</p>
-<ul>
-<li><code>resistor</code>, <code>diode</code>, <code>mosfet</code>, <code>igbt</code>, <code>bjt_npn</code>, <code>bjt_pnp</code>.</li>
+<li>Using non-monotonic axes.</li>
+<li>Wrong table length for datasheet arrays.</li>
+<li>Setting <code>shared_sink_rth/shared_sink_cth</code> without <code>shared_sink_id</code>.</li>
+<li>Mixing different sink values inside one shared sink id.</li>
+<li>Reconstructing losses/temperature in GUI instead of using backend canonical channels.</li>
 </ul>
 
 
@@ -1496,7 +1404,7 @@ mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../convergence-tuning-guide/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Convergence Tuning">
+          <a href="../electrothermal-workflow/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Electrothermal Workflow">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1506,20 +1414,20 @@ mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
                 Previous
               </span>
               <div class="md-ellipsis">
-                Convergence Tuning
+                Electrothermal Workflow
               </div>
             </div>
           </a>
         
         
           
-          <a href="../api-reference/" class="md-footer__link md-footer__link--next" aria-label="Next: API Reference">
+          <a href="../examples-and-results/" class="md-footer__link md-footer__link--next" aria-label="Next: Examples and Results">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                API Reference
+                Examples and Results
               </div>
             </div>
             <div class="md-footer__button md-icon">

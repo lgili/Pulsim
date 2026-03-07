@@ -10,13 +10,11 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/troubleshooting/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/pr-electrothermal-datasheet-parity-package/">
       
       
-        <link rel="prev" href="../convergence-tuning-guide/">
+        <link rel="prev" href="../release-notes-electrothermal-parity/">
       
-      
-        <link rel="next" href="../api-reference/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +22,7 @@
     
     
       
-        <title>Troubleshooting - PulsimCore</title>
+        <title>PR Package (Electrothermal) - PulsimCore</title>
       
     
     
@@ -80,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#troubleshooting" class="md-skip">
+        <a href="#pr-package-electrothermal-datasheet-parity" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +117,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Troubleshooting
+              PR Package (Electrothermal)
             
           </span>
         </div>
@@ -228,12 +226,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -284,10 +280,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../configuration/" class="md-tabs__link">
           
   
@@ -465,30 +463,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -499,7 +494,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -720,30 +715,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Troubleshooting
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -752,107 +727,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsim_pulsim" class="md-nav__link">
-    <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim._pulsim
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsimsignal_evaluator" class="md-nav__link">
-    <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim.signal_evaluator
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#macos-import-fails-with-clibc-symbols" class="md-nav__link">
-    <span class="md-ellipsis">
-      macOS import fails with C++/libc++ symbols
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tests-fail-due-to-wrong-module-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      Tests fail due to wrong module path
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#docs-build-fails-mkdocs-strict" class="md-nav__link">
-    <span class="md-ellipsis">
-      Docs build fails (mkdocs --strict)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#parity-script-fails-with-ltspice-backend" class="md-nav__link">
-    <span class="md-ellipsis">
-      Parity script fails with LTspice backend
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#slow-or-unstable-switched-converter-runs" class="md-nav__link">
-    <span class="md-ellipsis">
-      Slow or unstable switched-converter runs
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-loop buck converges in open-loop but struggles in closed-loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#thermal-yaml-errors-on-valid-converter-netlists" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal YAML errors on valid converter netlists
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1093,27 +967,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -1124,7 +1001,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             Operations
@@ -1198,10 +1075,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../pr-electrothermal-datasheet-parity-package/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    PR Package (Electrothermal)
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -1210,6 +1107,224 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#suggested-pr-title" class="md-nav__link">
+    <span class="md-ellipsis">
+      Suggested PR Title
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scope-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scope Summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#included-commits" class="md-nav__link">
+    <span class="md-ellipsis">
+      Included Commits
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changelog" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changelog
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Changelog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Documentation
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#backend-contract-snapshot-frontend-critical" class="md-nav__link">
+    <span class="md-ellipsis">
+      Backend Contract Snapshot (Frontend-Critical)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Backend Contract Snapshot (Frontend-Critical)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#canonical-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      Canonical channels
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#emission-conditions-for-thermal-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      Emission conditions for thermal channels
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#required-consistency" class="md-nav__link">
+    <span class="md-ellipsis">
+      Required consistency
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#metadata-expectation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Metadata expectation
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frontend-integration-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      Frontend Integration Checklist
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Frontend Integration Checklist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#must-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      Must do
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#must-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      Must not do
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation Evidence
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-files-for-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      Key Files for Review
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#residual-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Residual Risks
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ready-to-copy-pr-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      Ready-to-Copy PR Body
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1249,81 +1364,198 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsim_pulsim" class="md-nav__link">
+  <a href="#suggested-pr-title" class="md-nav__link">
     <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim._pulsim
+      Suggested PR Title
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#modulenotfounderror-pulsimsignal_evaluator" class="md-nav__link">
+  <a href="#scope-summary" class="md-nav__link">
     <span class="md-ellipsis">
-      ModuleNotFoundError: pulsim.signal_evaluator
+      Scope Summary
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#macos-import-fails-with-clibc-symbols" class="md-nav__link">
+  <a href="#included-commits" class="md-nav__link">
     <span class="md-ellipsis">
-      macOS import fails with C++/libc++ symbols
+      Included Commits
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#tests-fail-due-to-wrong-module-path" class="md-nav__link">
+  <a href="#changelog" class="md-nav__link">
     <span class="md-ellipsis">
-      Tests fail due to wrong module path
+      Changelog
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Changelog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Documentation
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#backend-contract-snapshot-frontend-critical" class="md-nav__link">
+    <span class="md-ellipsis">
+      Backend Contract Snapshot (Frontend-Critical)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Backend Contract Snapshot (Frontend-Critical)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#canonical-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      Canonical channels
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#emission-conditions-for-thermal-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      Emission conditions for thermal channels
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#required-consistency" class="md-nav__link">
+    <span class="md-ellipsis">
+      Required consistency
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#metadata-expectation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Metadata expectation
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frontend-integration-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      Frontend Integration Checklist
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Frontend Integration Checklist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#must-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      Must do
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#must-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      Must not do
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation Evidence
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#docs-build-fails-mkdocs-strict" class="md-nav__link">
+  <a href="#key-files-for-review" class="md-nav__link">
     <span class="md-ellipsis">
-      Docs build fails (mkdocs --strict)
+      Key Files for Review
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#parity-script-fails-with-ltspice-backend" class="md-nav__link">
+  <a href="#residual-risks" class="md-nav__link">
     <span class="md-ellipsis">
-      Parity script fails with LTspice backend
+      Residual Risks
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#slow-or-unstable-switched-converter-runs" class="md-nav__link">
+  <a href="#ready-to-copy-pr-body" class="md-nav__link">
     <span class="md-ellipsis">
-      Slow or unstable switched-converter runs
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" class="md-nav__link">
-    <span class="md-ellipsis">
-      Closed-loop buck converges in open-loop but struggles in closed-loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#thermal-yaml-errors-on-valid-converter-netlists" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal YAML errors on valid converter netlists
+      Ready-to-Copy PR Body
     </span>
   </a>
   
@@ -1344,7 +1576,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/troubleshooting.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/pr-electrothermal-datasheet-parity-package.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1353,114 +1585,163 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/troubleshooting.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/pr-electrothermal-datasheet-parity-package.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
-<h2 id="modulenotfounderror-pulsim_pulsim"><code>ModuleNotFoundError: pulsim._pulsim</code><a class="headerlink" href="#modulenotfounderror-pulsim_pulsim" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
+<h1 id="pr-package-electrothermal-datasheet-parity">PR Package - Electrothermal Datasheet Parity<a class="headerlink" href="#pr-package-electrothermal-datasheet-parity" title="Permanent link">&para;</a></h1>
+<h2 id="suggested-pr-title">Suggested PR Title<a class="headerlink" href="#suggested-pr-title" title="Permanent link">&para;</a></h2>
+<p><code>feat(core): datasheet-grade electrothermal modeling with shared sink coupling and deterministic runtime contract</code></p>
+<h2 id="scope-summary">Scope Summary<a class="headerlink" href="#scope-summary" title="Permanent link">&para;</a></h2>
+<p>This PR package consolidates the electrothermal parity work for backend-first physics, frontend-safe contracts, and deterministic runtime behavior.</p>
+<p>It includes:</p>
 <ul>
-<li>Python cannot find the compiled extension for your interpreter ABI.</li>
+<li>Datasheet switching-loss surfaces (<code>Eon/Eoff/Err</code>) with strict parser validation.</li>
+<li>Thermal networks (<code>single_rc</code>, <code>foster</code>, <code>cauer</code>) with stable integration.</li>
+<li>Shared sink thermal coupling for multiple components.</li>
+<li>Canonical per-sample thermal/loss channels and metadata guarantees.</li>
+<li>Closed-loop buck regression (PI + PWM + losses + thermal).</li>
+<li>Determinism and allocation gates in runtime tests.</li>
+<li>Frontend integration contract and migration docs.</li>
 </ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim; print(pulsim.__version__)&quot;</span>
+<h2 id="included-commits">Included Commits<a class="headerlink" href="#included-commits" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>a223985</code> - <code>fix: stabilize cauer thermal integration for stiff ladders</code></li>
+<li><code>77178a4</code> - <code>feat: add shared-sink electrothermal coupling and validation</code></li>
+<li><code>7034a50</code> - <code>test: add electrothermal allocation gate for closed-loop buck</code></li>
+<li><code>d7d5217</code> - <code>docs/test: complete electrothermal parity contract and gates</code></li>
+</ul>
+<h2 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h2>
+<h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>ThermalDeviceConfig</code> shared sink fields:</li>
+<li><code>shared_sink_id</code></li>
+<li><code>shared_sink_rth</code></li>
+<li><code>shared_sink_cth</code></li>
+<li>Runtime shared sink coupling model with deterministic sink aggregation.</li>
+<li>Parser/schema support for shared sink thermal descriptors.</li>
+<li>New migration guide from scalar to datasheet electrothermal setup.</li>
+<li>OpenSpec acceptance notes with executed evidence and residual risks.</li>
+</ul>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Cauer thermal integration moved to an implicit tridiagonal (Backward Euler) solve for stiff stability.</li>
+<li>Thermal service now supports local device rise plus optional common sink rise composition.</li>
+<li>Runtime thermal and loss tests expanded to include coupling, determinism, and allocation gates.</li>
+</ul>
+<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Numerical instability in stiff Cauer ladders with large timesteps.</li>
+<li>Parser/runtime consistency checks for mixed shared sink parameters across devices.</li>
+</ul>
+<h3 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Backend electrothermal contract clarified with explicit channel/metadata guarantees.</li>
+<li>GUI responsibility boundaries and forbidden behaviors documented.</li>
+<li>User guide linked to the new migration path.</li>
+</ul>
+<h2 id="backend-contract-snapshot-frontend-critical">Backend Contract Snapshot (Frontend-Critical)<a class="headerlink" href="#backend-contract-snapshot-frontend-critical" title="Permanent link">&para;</a></h2>
+<h3 id="canonical-channels">Canonical channels<a class="headerlink" href="#canonical-channels" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Thermal: <code>T(&lt;component_name&gt;)</code></li>
+<li>Losses: <code>Pcond(&lt;component&gt;)</code>, <code>Psw_on(&lt;component&gt;)</code>, <code>Psw_off(&lt;component&gt;)</code>, <code>Prr(&lt;component&gt;)</code>, <code>Ploss(&lt;component&gt;)</code></li>
+</ul>
+<h3 id="emission-conditions-for-thermal-channels">Emission conditions for thermal channels<a class="headerlink" href="#emission-conditions-for-thermal-channels" title="Permanent link">&para;</a></h3>
+<p><code>T(...)</code> is exported only when all are true:</p>
+<ul>
+<li><code>simulation.enable_losses = true</code></li>
+<li><code>simulation.thermal.enabled = true</code></li>
+<li>component thermal is enabled</li>
+</ul>
+<h3 id="required-consistency">Required consistency<a class="headerlink" href="#required-consistency" title="Permanent link">&para;</a></h3>
+<p>For each thermal-enabled component <code>X</code>:</p>
+<ul>
+<li><code>len(T(X)) == len(result.time)</code></li>
+<li><code>component_electrothermal[X].final_temperature == last(T(X))</code></li>
+<li><code>component_electrothermal[X].peak_temperature == max(T(X))</code></li>
+<li><code>component_electrothermal[X].average_temperature == mean(T(X))</code></li>
+</ul>
+<h3 id="metadata-expectation">Metadata expectation<a class="headerlink" href="#metadata-expectation" title="Permanent link">&para;</a></h3>
+<p><code>result.virtual_channel_metadata[name]</code> is authoritative for routing and units.
+Frontend must not infer domain by channel-name regex when metadata is available.</p>
+<h2 id="frontend-integration-checklist">Frontend Integration Checklist<a class="headerlink" href="#frontend-integration-checklist" title="Permanent link">&para;</a></h2>
+<h3 id="must-do">Must do<a class="headerlink" href="#must-do" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Route channels by metadata (<code>domain</code>, <code>source_component</code>, <code>unit</code>, <code>component_type</code>).</li>
+<li>Treat backend channels as source of truth for thermal and loss plots.</li>
+<li>Validate channel-length alignment against <code>result.time</code> before plotting.</li>
+<li>Show thermal traces only when backend actually exports <code>T(...)</code>.</li>
+</ul>
+<h3 id="must-not-do">Must not do<a class="headerlink" href="#must-not-do" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Generate synthetic thermal traces when backend does not export <code>T(...)</code>.</li>
+<li>Reconstruct switching losses heuristically from electrical traces.</li>
+<li>Overwrite backend physics with UI heuristics/smoothing without explicit user-labeled post-processing.</li>
+</ul>
+<h2 id="validation-evidence">Validation Evidence<a class="headerlink" href="#validation-evidence" title="Permanent link">&para;</a></h2>
+<p>Executed on 2026-03-07:</p>
+<ul>
+<li><code>make python -j4</code></li>
+<li><code>PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py</code></li>
+<li>result: <code>83 passed</code></li>
+<li><code>openspec validate add-electrothermal-datasheet-parity --strict</code></li>
+<li>result: valid</li>
+</ul>
+<p>Targeted gates added/validated:</p>
+<ul>
+<li>Stiff Cauer thermal stability.</li>
+<li>Shared sink parser + runtime coupling behavior.</li>
+<li>Closed-loop buck output-allocation gate (no output reallocations in validated scenario).</li>
+<li>Deterministic loss-channel ordering across repeated runs.</li>
+</ul>
+<h2 id="key-files-for-review">Key Files for Review<a class="headerlink" href="#key-files-for-review" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>core/src/v1/transient_services.cpp</code></li>
+<li><code>core/src/v1/yaml_parser.cpp</code></li>
+<li><code>core/src/v1/simulation.cpp</code></li>
+<li><code>core/include/pulsim/v1/simulation.hpp</code></li>
+<li><code>python/tests/test_runtime_bindings.py</code></li>
+<li><code>docs/electrothermal-workflow.md</code></li>
+<li><code>docs/frontend-control-signals.md</code></li>
+<li><code>docs/electrothermal-migration-scalar-to-datasheet.md</code></li>
+<li><code>openspec/changes/add-electrothermal-datasheet-parity/tasks.md</code></li>
+<li><code>openspec/changes/add-electrothermal-datasheet-parity/notes.md</code></li>
+</ul>
+<h2 id="residual-risks">Residual Risks<a class="headerlink" href="#residual-risks" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Shared sink is modeled as one deterministic common RC sink rise (not a full arbitrary thermal matrix network).</li>
+<li>Datasheet quality still depends on provided tables; parser validates shape/range but cannot infer missing physics.</li>
+</ul>
+<h2 id="ready-to-copy-pr-body">Ready-to-Copy PR Body<a class="headerlink" href="#ready-to-copy-pr-body" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Summary</span>
+This PR delivers backend-first electrothermal parity for closed-loop power converter simulation with deterministic contracts for frontend consumption.
+
+Main outcomes:
+<span class="k">-</span><span class="w"> </span>datasheet switching-loss surfaces (<span class="sb">`Eon/Eoff/Err`</span>) in runtime;
+<span class="k">-</span><span class="w"> </span>thermal networks (<span class="sb">`single_rc`</span>, <span class="sb">`foster`</span>, <span class="sb">`cauer`</span>) with stable integration;
+<span class="k">-</span><span class="w"> </span>shared sink coupling (<span class="sb">`shared_sink_id`</span>) across components;
+<span class="k">-</span><span class="w"> </span>canonical sampled channels for thermal/loss with metadata and strict consistency checks;
+<span class="k">-</span><span class="w"> </span>expanded regression, determinism, and allocation gates;
+<span class="k">-</span><span class="w"> </span>migration and frontend-boundary documentation.
+
+<span class="gu">## Validation</span>
+<span class="k">-</span><span class="w"> </span><span class="sb">`make python -j4`</span>
+<span class="k">-</span><span class="w"> </span><span class="sb">`PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py`</span> -&gt; <span class="sb">`83 passed`</span>
+<span class="k">-</span><span class="w"> </span><span class="sb">`openspec validate add-electrothermal-datasheet-parity --strict`</span> -&gt; valid
+
+<span class="gu">## Frontend Contract</span>
+<span class="k">-</span><span class="w"> </span>thermal channel: <span class="sb">`T(&lt;component&gt;)`</span>
+<span class="k">-</span><span class="w"> </span>loss channels: <span class="sb">`Pcond/Psw_on/Psw_off/Prr/Ploss(&lt;component&gt;)`</span>
+<span class="k">-</span><span class="w"> </span>consume metadata from <span class="sb">`result.virtual_channel_metadata`</span>
+<span class="k">-</span><span class="w"> </span>do not synthesize thermal or loss curves in GUI
+
+<span class="gu">## Risks</span>
+<span class="k">-</span><span class="w"> </span>shared sink currently uses common RC aggregation, not a full thermal matrix.
+<span class="k">-</span><span class="w"> </span>datasheet fidelity depends on user-provided table quality.
 </code></pre></div>
-<h2 id="modulenotfounderror-pulsimsignal_evaluator"><code>ModuleNotFoundError: pulsim.signal_evaluator</code><a class="headerlink" href="#modulenotfounderror-pulsimsignal_evaluator" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>stale build/package path missing companion Python modules.</li>
-</ul>
-<p>Fix:</p>
-<ul>
-<li>rebuild and ensure <code>build/python/pulsim/signal_evaluator.py</code> exists;</li>
-<li>avoid stale <code>build/cp*/python</code> directories from old builds.</li>
-</ul>
-<h2 id="macos-import-fails-with-clibc-symbols">macOS import fails with C++/libc++ symbols<a class="headerlink" href="#macos-import-fails-with-clibc-symbols" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>ABI mismatch when building bindings with non-Apple clang toolchain.</li>
-</ul>
-<p>Fix:</p>
-<ul>
-<li>use AppleClang for macOS Python builds (project CMake already enforces this path when possible);</li>
-<li>clean and rebuild.</li>
-</ul>
-<h2 id="tests-fail-due-to-wrong-module-path">Tests fail due to wrong module path<a class="headerlink" href="#tests-fail-due-to-wrong-module-path" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>environment points to stale build artifacts.</li>
-</ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Verify active module origin</span>
-python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim</span>
-<span class="s">print(pulsim.__file__)</span>
-<span class="s">PY</span>
-</code></pre></div>
-<p>Ensure it points to either:</p>
-<ul>
-<li>installed package in active venv/site-packages, or</li>
-<li>current <code>build/python/pulsim</code> tree.</li>
-</ul>
-<h2 id="docs-build-fails-mkdocs-strict">Docs build fails (<code>mkdocs --strict</code>)<a class="headerlink" href="#docs-build-fails-mkdocs-strict" title="Permanent link">&para;</a></h2>
-<p>Typical causes:</p>
-<ul>
-<li>broken links after page renaming</li>
-<li>missing dependencies in docs environment</li>
-</ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>docs/requirements.txt
-mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
-</code></pre></div>
-<h2 id="parity-script-fails-with-ltspice-backend">Parity script fails with LTspice backend<a class="headerlink" href="#parity-script-fails-with-ltspice-backend" title="Permanent link">&para;</a></h2>
-<p>Cause:</p>
-<ul>
-<li>LTspice executable path missing or incorrect.</li>
-</ul>
-<p>Fix:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_ngspice.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--backend<span class="w"> </span>ltspice<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--ltspice-exe<span class="w"> </span><span class="s2">&quot;/Applications/LTspice.app/Contents/MacOS/LTspice&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/ltspice_out
-</code></pre></div>
-<h2 id="slow-or-unstable-switched-converter-runs">Slow or unstable switched-converter runs<a class="headerlink" href="#slow-or-unstable-switched-converter-runs" title="Permanent link">&para;</a></h2>
-<p>Recommendations:</p>
-<ul>
-<li>use variable timestep first;</li>
-<li>inspect fallback and rejection telemetry before tuning manually;</li>
-<li>run benchmark matrix to compare integrators and solver stacks in a controlled way.</li>
-</ul>
-<h2 id="closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop">Closed-loop buck converges in open-loop but struggles in closed-loop<a class="headerlink" href="#closed-loop-buck-converges-in-open-loop-but-struggles-in-closed-loop" title="Permanent link">&para;</a></h2>
-<p>Common causes:</p>
-<ul>
-<li>control running effectively faster than desired for the selected switching setup;</li>
-<li>PI/PID output saturating without proper limits;</li>
-<li>mismatch between PWM frequency and controller update cadence.</li>
-</ul>
-<p>Fix checklist:</p>
-<ul>
-<li>set <code>simulation.control.mode: auto</code> to infer sample time from PWM frequency;</li>
-<li>or force <code>simulation.control.mode: discrete</code> with explicit <code>simulation.control.sample_time</code>;</li>
-<li>ensure PI/PID has <code>output_min</code>, <code>output_max</code>, and <code>anti_windup: 1.0</code>;</li>
-<li>verify <code>pwm_generator.target_component</code> points to the intended switch device.</li>
-</ul>
-<h2 id="thermal-yaml-errors-on-valid-converter-netlists">Thermal YAML errors on valid converter netlists<a class="headerlink" href="#thermal-yaml-errors-on-valid-converter-netlists" title="Permanent link">&para;</a></h2>
-<p>If parsing fails with thermal diagnostics:</p>
-<ul>
-<li><code>PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT</code>: thermal enabled on unsupported type.</li>
-<li><code>PULSIM_YAML_E_THERMAL_MISSING_REQUIRED</code>: strict mode requires explicit <code>rth</code>/<code>cth</code>.</li>
-<li><code>PULSIM_YAML_E_THERMAL_RANGE_INVALID</code>: invalid finite/range checks for thermal values.</li>
-</ul>
-<p>Thermal-enabled types currently supported:</p>
-<ul>
-<li><code>resistor</code>, <code>diode</code>, <code>mosfet</code>, <code>igbt</code>, <code>bjt_npn</code>, <code>bjt_pnp</code>.</li>
-</ul>
 
 
 
@@ -1496,7 +1777,7 @@ mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../convergence-tuning-guide/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Convergence Tuning">
+          <a href="../release-notes-electrothermal-parity/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Release Notes (Electrothermal Parity)">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1506,27 +1787,11 @@ mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
                 Previous
               </span>
               <div class="md-ellipsis">
-                Convergence Tuning
+                Release Notes (Electrothermal Parity)
               </div>
             </div>
           </a>
         
-        
-          
-          <a href="../api-reference/" class="md-footer__link md-footer__link--next" aria-label="Next: API Reference">
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Next
-              </span>
-              <div class="md-ellipsis">
-                API Reference
-              </div>
-            </div>
-            <div class="md-footer__button md-icon">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
-            </div>
-          </a>
         
       </nav>
     

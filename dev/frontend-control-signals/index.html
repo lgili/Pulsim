@@ -270,7 +270,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../gui-component-parity/" class="md-tabs__link">
+        <a href="../supported-components-catalog/" class="md-tabs__link">
           
   
   Compatibility
@@ -534,6 +534,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../backend-cpp-contributor-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backend C++ Contributor Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../netlist-format/" class="md-nav__link">
         
   
@@ -673,6 +694,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#perdas-potencia-por-componente" class="md-nav__link">
+    <span class="md-ellipsis">
+      Perdas (potência por componente)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -714,6 +744,24 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-responsabilidades-gui-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      9) Responsabilidades GUI-only
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-comportamentos-proibidos-no-gui" class="md-nav__link">
+    <span class="md-ellipsis">
+      10) Comportamentos proibidos no GUI
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -735,6 +783,27 @@
   
   <span class="md-ellipsis">
     Electrothermal Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../electrothermal-migration-scalar-to-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Electrothermal Migration (Scalar to Datasheet)
   </span>
   
 
@@ -996,6 +1065,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../supported-components-catalog/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Supported Components Catalog
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../gui-component-parity/" class="md-nav__link">
         
   
@@ -1143,6 +1233,48 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-notes-electrothermal-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Release Notes (Electrothermal Parity)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pr-electrothermal-datasheet-parity-package/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PR Package (Electrothermal)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1249,6 +1381,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#perdas-potencia-por-componente" class="md-nav__link">
+    <span class="md-ellipsis">
+      Perdas (potência por componente)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1285,6 +1426,24 @@
   <a href="#8-erros-comuns-no-front" class="md-nav__link">
     <span class="md-ellipsis">
       8) Erros comuns no front
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-responsabilidades-gui-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      9) Responsabilidades GUI-only
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-comportamentos-proibidos-no-gui" class="md-nav__link">
+    <span class="md-ellipsis">
+      10) Comportamentos proibidos no GUI
     </span>
   </a>
   
@@ -1401,6 +1560,19 @@
 <li><code>THERMAL_SCOPE</code> <strong>não</strong> é a temperatura de junção do componente.</li>
 <li>para temperatura de dispositivo, use sempre <code>T(&lt;component&gt;)</code>.</li>
 </ul>
+<h3 id="perdas-potencia-por-componente">Perdas (potência por componente)<a class="headerlink" href="#perdas-potencia-por-componente" title="Permanent link">&para;</a></h3>
+<p>Canais canônicos de perdas instantâneas (amostrados por passo aceito):</p>
+<ul>
+<li><code>Pcond(&lt;component_name&gt;)</code>: potência de condução (W)</li>
+<li><code>Psw_on(&lt;component_name&gt;)</code>: potência equivalente de turn-on no passo (W)</li>
+<li><code>Psw_off(&lt;component_name&gt;)</code>: potência equivalente de turn-off no passo (W)</li>
+<li><code>Prr(&lt;component_name&gt;)</code>: potência equivalente de reverse recovery no passo (W)</li>
+<li><code>Ploss(&lt;component_name&gt;)</code>: potência total (<code>Pcond + Psw_on + Psw_off + Prr</code>) (W)</li>
+</ul>
+<p>Condição para existir:</p>
+<ul>
+<li><code>simulation.enable_losses: true</code></li>
+</ul>
 <h2 id="5-metadata-obrigatoria-para-roteamento-no-front">5) Metadata obrigatória para roteamento no front<a class="headerlink" href="#5-metadata-obrigatoria-para-roteamento-no-front" title="Permanent link">&para;</a></h2>
 <p>Não use heurística por nome; use <code>result.virtual_channel_metadata[channel]</code>.</p>
 <p>Para canal térmico canônico:</p>
@@ -1409,6 +1581,12 @@
 <li><code>component_type == "thermal_trace"</code></li>
 <li><code>source_component == "&lt;component_name&gt;"</code></li>
 <li><code>unit == "degC"</code></li>
+</ul>
+<p>Para canal canônico de perdas:</p>
+<ul>
+<li><code>domain == "loss"</code></li>
+<li><code>source_component == "&lt;component_name&gt;"</code></li>
+<li><code>unit == "W"</code></li>
 </ul>
 <p>Para controle/eventos/instrumentação:</p>
 <ul>
@@ -1444,6 +1622,20 @@
 <li>Plotar <code>PWM1</code> como se fosse duty (o correto é <code>PWM1.duty</code>).</li>
 <li>Ignorar <code>control.mode=discrete</code> e esperar atualização contínua de PI/PID.</li>
 <li>Ignorar <code>virtual_channel_metadata</code> e inferir domínio por regex de nome.</li>
+</ul>
+<h2 id="9-responsabilidades-gui-only">9) Responsabilidades GUI-only<a class="headerlink" href="#9-responsabilidades-gui-only" title="Permanent link">&para;</a></h2>
+<ul>
+<li>UX de entrada de dados (formularios, validações visuais, assistentes).</li>
+<li>Importação/digitalização de curvas para gerar arrays numéricos de entrada.</li>
+<li>Organização de painéis, legenda, escala e interação de plots.</li>
+<li>Conversão/apresentação de unidades no nível de interface.</li>
+</ul>
+<h2 id="10-comportamentos-proibidos-no-gui">10) Comportamentos proibidos no GUI<a class="headerlink" href="#10-comportamentos-proibidos-no-gui" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Criar curva térmica sintética quando <code>T(...)</code> não existe no resultado.</li>
+<li>Inferir perdas por heurística local sem usar canais <code>Pcond/Psw_on/Psw_off/Prr/Ploss</code>.</li>
+<li>Reescrever, filtrar ou suavizar fisicamente os traços do backend sem sinalizar que é pós-processamento.</li>
+<li>Corrigir inconsistências de resumo no frontend em vez de reportar erro de contrato.</li>
 </ul>
 
 
