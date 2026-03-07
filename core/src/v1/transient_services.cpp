@@ -819,6 +819,18 @@ public:
         return thermal_scale_;
     }
 
+    [[nodiscard]] bool is_device_enabled(std::size_t device_index) const override {
+        return device_index < states_.size() && states_[device_index].enabled;
+    }
+
+    [[nodiscard]] Real device_temperature(std::size_t device_index) const override {
+        if (device_index >= states_.size()) {
+            return options_.thermal.ambient;
+        }
+        const auto& state = states_[device_index];
+        return state.enabled ? state.temperature : options_.thermal.ambient;
+    }
+
     void commit_accepted_segment(Real dt,
                                  std::span<const Real> device_power) override {
         if (!options_.thermal.enable || dt <= 0.0) {

@@ -109,6 +109,7 @@ nav:
       - Getting Started: getting-started.md
   - Guides:
       - User Guide: user-guide.md
+      - Backend C++ Contributor Guide: backend-cpp-contributor-guide.md
       - Netlist YAML Format: netlist-format.md
       - Frontend Control and Signals Contract: frontend-control-signals.md
       - Electrothermal Workflow: electrothermal-workflow.md

@@ -63,6 +63,14 @@
 
   [Docs Versioning and Release](versioning-and-release.md)
 
+- :material-source-pull: **Contribute to the C++ backend**
+
+  ---
+
+  Follow architecture and hot-path guidance before changing transient runtime internals.
+
+  [Backend C++ Contributor Guide](backend-cpp-contributor-guide.md)
+
 </div>
 
 ## Backend In One Command
@@ -80,3 +88,4 @@ PYTHONPATH=build/python python3 -c "import pulsim as ps; print(ps.__version__)"
 5. Run [Examples and Results](examples-and-results.md) end-to-end.
 6. Use [Benchmarks and Parity](benchmarks-and-parity.md) to set CI quality gates.
 7. Integrate against [API Reference](api-reference.md).
+8. If you plan to contribute backend code, follow [Backend C++ Contributor Guide](backend-cpp-contributor-guide.md).

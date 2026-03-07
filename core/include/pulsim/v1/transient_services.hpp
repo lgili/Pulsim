@@ -219,6 +219,8 @@ public:
     virtual void reset() = 0;
     [[nodiscard]] virtual Real thermal_scale_factor(std::size_t device_index) const = 0;
     [[nodiscard]] virtual std::span<const Real> thermal_scale_vector() const = 0;
+    [[nodiscard]] virtual bool is_device_enabled(std::size_t device_index) const = 0;
+    [[nodiscard]] virtual Real device_temperature(std::size_t device_index) const = 0;
     virtual void commit_accepted_segment(Real dt,
                                          std::span<const Real> device_power) = 0;
     [[nodiscard]] virtual ThermalServiceSummary finalize() const = 0;

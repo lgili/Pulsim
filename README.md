@@ -49,9 +49,11 @@ PY
 - Netlist format (including `simulation.control`): [`docs/netlist-format.md`](docs/netlist-format.md)
 - Frontend control/signal contract: [`docs/frontend-control-signals.md`](docs/frontend-control-signals.md)
 - Electrothermal workflow: [`docs/electrothermal-workflow.md`](docs/electrothermal-workflow.md)
+- Backend C++ contributor guide: [`docs/backend-cpp-contributor-guide.md`](docs/backend-cpp-contributor-guide.md)
 - Configuration guide (solver/control/thermal): [`docs/configuration.md`](docs/configuration.md)
 - API reference: [`docs/api-reference.md`](docs/api-reference.md)
 - Benchmarks and parity: [`docs/benchmarks-and-parity.md`](docs/benchmarks-and-parity.md)
+- Contribution guidelines: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## Closed-Loop + Thermal Quickstart
 

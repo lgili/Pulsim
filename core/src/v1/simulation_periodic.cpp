@@ -238,8 +238,9 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
     hb_newton.min_damping = options.relaxation;
     hb_newton.auto_damping = false;
     hb_newton.tolerances.residual_tol = options.tolerance;
-    hb_newton.krylov_residual_cache_tolerance = 1e-3;
     hb_newton.krylov_tolerance = std::max(options.tolerance * 0.1, Real{1e-10});
+    // Disable cached Krylov residual reuse for HB finite-difference Jacobians.
+    // The Jacobian changes numerically across every HB Newton iteration.
     hb_newton.krylov_residual_cache_tolerance = -1.0;
     hb_newton.enable_newton_krylov = true;
     hb_newton.reuse_jacobian_pattern = false;

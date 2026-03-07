@@ -1037,6 +1037,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
     circuit_.update_history(x, true);
 
+    struct ThermalTraceBinding {
+        std::size_t device_index = 0;
+        std::string channel_name;
+    };
+    std::vector<ThermalTraceBinding> thermal_trace_bindings;
+    bool thermal_trace_initialized = false;
+    bool virtual_metadata_initialized = false;
+
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const bool has_virtual_components = circuit_.num_virtual_components() > 0;
         const bool has_thermal_trace =
@@ -1047,9 +1055,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             return;
         }
 
-        if (result.virtual_channel_metadata.empty()) {
+        if (!virtual_metadata_initialized) {
             result.virtual_channel_metadata = circuit_.virtual_channel_metadata();
             result.virtual_channels.reserve(result.virtual_channel_metadata.size());
+            virtual_metadata_initialized = true;
         }
 
         std::optional<MixedDomainStepResult> mixed_step;
@@ -1096,34 +1105,51 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        if (has_thermal_trace) {
-            const auto thermal_summary = transient_services_.thermal_service->finalize();
-            for (const auto& item : thermal_summary.device_temperatures) {
-                if (!item.enabled) {
+        if (has_thermal_trace && !thermal_trace_initialized) {
+            // Register canonical thermal channels once and reuse indexed reads
+            // per sample to avoid rebuilding thermal summaries in the hot loop.
+            const auto& conns = circuit_.connections();
+            thermal_trace_bindings.reserve(conns.size());
+            if (sample_reserve > 0) {
+                result.virtual_channels.reserve(result.virtual_channels.size() + conns.size());
+            }
+            for (std::size_t i = 0; i < conns.size(); ++i) {
+                if (!transient_services_.thermal_service->is_device_enabled(i)) {
                     continue;
                 }
-
-                const std::string channel = "T(" + item.device_name + ")";
+                const std::string channel = "T(" + conns[i].name + ")";
                 auto [it, inserted] = result.virtual_channels.try_emplace(channel);
-                auto& series = it->second;
                 if (inserted && sample_reserve > 0) {
-                    series.reserve(sample_reserve);
+                    it->second.reserve(sample_reserve);
                 }
-                while (series.size() + 1 < sample_count) {
-                    append_series_value(series, nan);
-                }
-                append_series_value(series, item.final_temperature);
-
-                if (!result.virtual_channel_metadata.contains(channel)) {
-                    result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
+                result.virtual_channel_metadata.try_emplace(
+                    channel,
+                    VirtualChannelMetadata{
                         "thermal_trace",
                         channel,
-                        item.device_name,
+                        conns[i].name,
                         "thermal",
                         "degC",
                         {}
-                    };
+                    });
+                thermal_trace_bindings.push_back(ThermalTraceBinding{i, channel});
+            }
+            thermal_trace_initialized = true;
+        }
+
+        if (has_thermal_trace) {
+            for (const auto& binding : thermal_trace_bindings) {
+                auto channel_it = result.virtual_channels.find(binding.channel_name);
+                if (channel_it == result.virtual_channels.end()) {
+                    continue;
                 }
+                auto& series = channel_it->second;
+                while (series.size() + 1 < sample_count) {
+                    append_series_value(series, nan);
+                }
+                append_series_value(
+                    series,
+                    transient_services_.thermal_service->device_temperature(binding.device_index));
             }
         }
 
