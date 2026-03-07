@@ -12,6 +12,117 @@
 
 namespace pulsim::v1 {
 
+EventTopologyModule::EventTopologyModule(const SimulationOptions& options,
+                                         Circuit& circuit,
+                                         std::vector<ForcedSwitchEventMonitor> forced_monitors)
+    : options_(options),
+      circuit_(circuit),
+      forced_monitors_(std::move(forced_monitors)) {}
+
+void EventTopologyModule::on_run_initialize() {
+    for (auto& monitor : forced_monitors_) {
+        monitor.was_forced_on = circuit_.forced_state_for_device(monitor.device_index);
+    }
+}
+
+void EventTopologyModule::on_sample_emit(const Vector& state,
+                                         Real sample_time,
+                                         std::size_t sample_count,
+                                         bool is_terminal_sample,
+                                         const ForcedSwitchEventEmitter& emit_event) {
+    if (!options_.enable_events) {
+        return;
+    }
+    if (sample_count <= 1 || is_terminal_sample || forced_monitors_.empty()) {
+        return;
+    }
+
+    for (auto& monitor : forced_monitors_) {
+        const std::optional<bool> current_forced =
+            circuit_.forced_state_for_device(monitor.device_index);
+        if (!monitor.was_forced_on.has_value()) {
+            monitor.was_forced_on = current_forced;
+            continue;
+        }
+
+        if (monitor.was_forced_on.has_value() &&
+            current_forced.has_value() &&
+            *monitor.was_forced_on != *current_forced) {
+            emit_event(monitor, state, sample_time, *current_forced);
+        }
+
+        monitor.was_forced_on = current_forced;
+    }
+}
+
+ControlMixedDomainModule::ControlMixedDomainModule(Circuit& circuit,
+                                                   SimulationResult& result,
+                                                   std::size_t sample_reserve)
+    : circuit_(circuit),
+      result_(result),
+      sample_reserve_(sample_reserve) {}
+
+void ControlMixedDomainModule::ensure_base_metadata() {
+    if (metadata_initialized_) {
+        return;
+    }
+    result_.virtual_channel_metadata = circuit_.virtual_channel_metadata();
+    result_.virtual_channels.reserve(result_.virtual_channel_metadata.size());
+    metadata_initialized_ = true;
+}
+
+void ControlMixedDomainModule::push_series_value(std::vector<Real>& series, Real value) {
+    const std::size_t capacity_before = series.capacity();
+    series.push_back(value);
+    if (series.capacity() != capacity_before) {
+        result_.backend_telemetry.virtual_channel_reallocations += 1;
+    }
+}
+
+void ControlMixedDomainModule::ensure_prefix(std::vector<Real>& series,
+                                             std::size_t sample_count,
+                                             Real fill_value) {
+    while (series.size() + 1 < sample_count) {
+        push_series_value(series, fill_value);
+    }
+}
+
+void ControlMixedDomainModule::on_sample_emit(const Vector& state,
+                                              Real sample_time,
+                                              std::size_t sample_count) {
+    if (circuit_.num_virtual_components() == 0) {
+        return;
+    }
+    ensure_base_metadata();
+
+    const MixedDomainStepResult mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
+    if (result_.mixed_domain_phase_order.empty()) {
+        result_.mixed_domain_phase_order = mixed_step.phase_order;
+    }
+
+    const Real nan = std::numeric_limits<Real>::quiet_NaN();
+    for (const auto& [channel, value] : mixed_step.channel_values) {
+        auto [it, inserted] = result_.virtual_channels.try_emplace(channel);
+        auto& series = it->second;
+        if (inserted && sample_reserve_ > 0) {
+            series.reserve(sample_reserve_);
+        }
+        ensure_prefix(series, sample_count, nan);
+        push_series_value(series, value);
+
+        if (!result_.virtual_channel_metadata.contains(channel)) {
+            result_.virtual_channel_metadata[channel] = VirtualChannelMetadata{
+                "virtual",
+                channel,
+                channel,
+                "control",
+                "",
+                {}
+            };
+        }
+    }
+}
+
 ElectrothermalTelemetryModule::ElectrothermalTelemetryModule(
     const Circuit& circuit,
     const SimulationOptions& options,

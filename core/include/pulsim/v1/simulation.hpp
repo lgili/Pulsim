@@ -599,7 +599,6 @@ private:
         std::size_t device_index = 0;
         Index t1 = -1;
         Index t2 = -1;
-        std::optional<bool> was_forced_on;
     };
 
     [[nodiscard]] SimulationResult run_transient_native_impl(

@@ -43,7 +43,10 @@ Rules:
   `result.backend_telemetry.runtime_module_order`.
 
 Current non-breaking extraction status:
+- `events_topology` adapter (forced-switch sampled transitions): `core/src/v1/runtime_module_adapters.hpp/.cpp`
+- `control_mixed_domain` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
 - `telemetry_channels` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
+- orchestrator delegates mixed-domain block execution/channel append via module hook (`on_sample_emit`)
 - orchestrator now delegates canonical `P*` and `T(*)` trace emission through module hooks (`on_step_accepted`, `on_sample_emit`)
 - channel names, metadata, and Python/YAML-facing behavior remain unchanged
 

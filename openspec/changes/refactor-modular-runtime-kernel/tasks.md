@@ -11,7 +11,7 @@
 
 ## 2. Non-breaking extraction adapters
 - [ ] 2.1 Extract event/topology logic into `events_topology_module` adapters.
-- [ ] 2.2 Extract mixed-domain control scheduler logic into `control_mixed_domain_module`.
+- [x] 2.2 Extract mixed-domain control scheduler logic into `control_mixed_domain_module`.
 - [ ] 2.3 Extract loss tracking path into `loss_module`.
 - [ ] 2.4 Extract thermal tracking path into `thermal_module`.
 - [x] 2.5 Extract channel/metadata emission into `telemetry_channels_module`.

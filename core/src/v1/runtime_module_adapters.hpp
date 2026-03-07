@@ -8,10 +8,83 @@
 #include "pulsim/v1/simulation.hpp"
 
 #include <cstddef>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace pulsim::v1 {
+
+/**
+ * @brief Runtime watcher state for forced-switch event transitions.
+ */
+struct ForcedSwitchEventMonitor {
+    std::string name;
+    std::size_t device_index = 0;
+    Index t1 = -1;
+    Index t2 = -1;
+    std::optional<bool> was_forced_on;
+};
+
+/// Callback invoked when forced-switch state transition should emit an event.
+using ForcedSwitchEventEmitter = std::function<void(
+    const ForcedSwitchEventMonitor& monitor,
+    const Vector& state,
+    Real event_time,
+    bool new_state)>;
+
+/**
+ * @brief Detects forced-switch transitions and emits deterministic switch events.
+ */
+class EventTopologyModule final {
+public:
+    EventTopologyModule(const SimulationOptions& options,
+                        Circuit& circuit,
+                        std::vector<ForcedSwitchEventMonitor> forced_monitors);
+
+    /// Captures initial forced states so first sampled point does not emit false transitions.
+    void on_run_initialize();
+
+    /// Checks forced-state transitions and emits events for this output sample.
+    void on_sample_emit(const Vector& state,
+                        Real sample_time,
+                        std::size_t sample_count,
+                        bool is_terminal_sample,
+                        const ForcedSwitchEventEmitter& emit_event);
+
+private:
+    const SimulationOptions& options_;
+    Circuit& circuit_;
+    std::vector<ForcedSwitchEventMonitor> forced_monitors_;
+};
+
+/**
+ * @brief Emits mixed-domain control channels through module-style sample hooks.
+ *
+ * The module owns mixed-domain channel registration/append semantics while
+ * preserving existing metadata and channel naming contracts.
+ */
+class ControlMixedDomainModule final {
+public:
+    ControlMixedDomainModule(Circuit& circuit,
+                             SimulationResult& result,
+                             std::size_t sample_reserve);
+
+    /// Ensures base virtual-channel metadata from runtime circuit is present.
+    void ensure_base_metadata();
+
+    /// Appends mixed-domain channel samples for the current accepted output sample.
+    void on_sample_emit(const Vector& state, Real sample_time, std::size_t sample_count);
+
+private:
+    void push_series_value(std::vector<Real>& series, Real value);
+    void ensure_prefix(std::vector<Real>& series, std::size_t sample_count, Real fill_value);
+
+    Circuit& circuit_;
+    SimulationResult& result_;
+    std::size_t sample_reserve_ = 0;
+    bool metadata_initialized_ = false;
+};
 
 /**
  * @brief Emits canonical loss/thermal virtual channels through module-style hooks.

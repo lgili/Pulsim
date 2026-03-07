@@ -1245,7 +1245,24 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
     circuit_.update_history(x, true);
 
-    bool virtual_metadata_initialized = false;
+    ControlMixedDomainModule control_mixed_module(circuit_, result, sample_reserve);
+    std::vector<ForcedSwitchEventMonitor> forced_event_monitors;
+    forced_event_monitors.reserve(forced_switch_monitors_.size());
+    for (const auto& monitor : forced_switch_monitors_) {
+        forced_event_monitors.push_back(ForcedSwitchEventMonitor{
+            monitor.name,
+            monitor.device_index,
+            monitor.t1,
+            monitor.t2,
+            std::nullopt
+        });
+    }
+    EventTopologyModule event_topology_module(
+        options_,
+        circuit_,
+        std::move(forced_event_monitors));
+    event_topology_module.on_run_initialize();
+
     ElectrothermalTelemetryModule electrothermal_module(
         circuit_,
         options_,
@@ -1267,54 +1284,32 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             return;
         }
 
-        if (!virtual_metadata_initialized) {
-            result.virtual_channel_metadata = circuit_.virtual_channel_metadata();
-            result.virtual_channels.reserve(result.virtual_channel_metadata.size());
-            virtual_metadata_initialized = true;
-        }
-
-        std::optional<MixedDomainStepResult> mixed_step;
-        if (has_virtual_components) {
-            mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
-            if (result.mixed_domain_phase_order.empty()) {
-                result.mixed_domain_phase_order = mixed_step->phase_order;
-            }
-        }
+        control_mixed_module.ensure_base_metadata();
 
         const std::size_t sample_count = result.time.size();
         const Real nan = std::numeric_limits<Real>::quiet_NaN();
 
-        if (options_.enable_events &&
-            sample_count > 1 &&
-            !nearly_same_time(sample_time, options_.tstop) &&
-            !forced_switch_monitors_.empty()) {
-            for (auto& monitor : forced_switch_monitors_) {
-                const std::optional<bool> current_forced =
-                    circuit_.forced_state_for_device(monitor.device_index);
-                if (!monitor.was_forced_on.has_value()) {
-                    monitor.was_forced_on = current_forced;
-                    continue;
-                }
-
-                if (monitor.was_forced_on.has_value() &&
-                    current_forced.has_value() &&
-                    *monitor.was_forced_on != *current_forced) {
-                    SwitchMonitor event_monitor;
-                    event_monitor.name = monitor.name;
-                    event_monitor.t1 = monitor.t1;
-                    event_monitor.t2 = monitor.t2;
-                    record_switch_event(
-                        event_monitor,
-                        sample_time,
-                        state,
-                        *current_forced,
-                        result,
-                        event_callback);
-                }
-
-                monitor.was_forced_on = current_forced;
-            }
-        }
+        event_topology_module.on_sample_emit(
+            state,
+            sample_time,
+            sample_count,
+            nearly_same_time(sample_time, options_.tstop),
+            [&](const ForcedSwitchEventMonitor& monitor,
+                const Vector& event_state,
+                Real event_time,
+                bool new_state) {
+                SwitchMonitor event_monitor;
+                event_monitor.name = monitor.name;
+                event_monitor.t1 = monitor.t1;
+                event_monitor.t2 = monitor.t2;
+                record_switch_event(
+                    event_monitor,
+                    event_time,
+                    event_state,
+                    new_state,
+                    result,
+                    event_callback);
+            });
 
         auto append_series_value = [&](std::vector<Real>& series, Real value) {
             const std::size_t capacity_before = series.capacity();
@@ -1330,24 +1325,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        if (mixed_step.has_value()) {
-            for (const auto& [channel, value] : mixed_step->channel_values) {
-                auto [it, inserted] = result.virtual_channels.try_emplace(channel);
-                auto& series = it->second;
-                if (inserted && sample_reserve > 0) {
-                    series.reserve(sample_reserve);
-                }
-                while (series.size() + 1 < sample_count) {
-                    append_series_value(series, nan);
-                }
-                append_series_value(series, value);
-
-                if (!result.virtual_channel_metadata.contains(channel)) {
-                    result.virtual_channel_metadata[channel] = VirtualChannelMetadata{
-                        "virtual", channel, channel, "control", "", {}
-                    };
-                }
-            }
+        if (has_virtual_components) {
+            control_mixed_module.on_sample_emit(state, sample_time, sample_count);
         }
 
         electrothermal_module.on_sample_emit(sample_time, sample_count);
@@ -1383,10 +1362,6 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         Real v_ctrl = (sw.ctrl >= 0) ? x[sw.ctrl] : 0.0;
         sw.was_on = v_ctrl > sw.v_threshold;
     }
-    for (auto& sw : forced_switch_monitors_) {
-        sw.was_forced_on = circuit_.forced_state_for_device(sw.device_index);
-    }
-
     int lte_discontinuity_grace_steps = 0;
 
     while (t < options_.tstop) {
