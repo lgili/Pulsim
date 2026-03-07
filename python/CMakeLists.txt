@@ -101,6 +101,11 @@ configure_file(
     ${CMAKE_BINARY_DIR}/python/pulsim/__init__.pyi
     COPYONLY
 )
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/post_processing.py
+    ${CMAKE_BINARY_DIR}/python/pulsim/post_processing.py
+    COPYONLY
+)
 
 # Install targets
 install(TARGETS _pulsim
@@ -111,5 +116,6 @@ install(FILES
     pulsim/__init__.py
     pulsim/netlist.py
     pulsim/signal_evaluator.py
+    pulsim/post_processing.py
     DESTINATION pulsim
 )

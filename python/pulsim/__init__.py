@@ -206,6 +206,25 @@ from .signal_evaluator import (
     SIGNAL_TYPES,
 )
 
+# Waveform Post-Processing (Pure Python, backend-owned metric pipeline)
+from .post_processing import (
+    PostProcessingWindowMode,
+    PostProcessingJobKind,
+    PostProcessingDiagnosticCode,
+    WindowFunction,
+    PostProcessingWindowSpec,
+    PostProcessingJob,
+    PostProcessingOptions,
+    ScalarMetric,
+    SpectralBin,
+    HarmonicEntry,
+    UndefinedMetricEntry,
+    PostProcessingJobResult,
+    PostProcessingResult,
+    run_post_processing,
+    parse_post_processing_yaml,
+)
+
 
 _AUTO_BLEEDER_CIRCUITS = weakref.WeakSet()
 

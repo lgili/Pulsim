@@ -750,7 +750,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
                             "direct_formulation_fallback", "control", "control_mode", "control_sample_time",
-                            "frequency_analysis", "ac_sweep", "averaged_converter",
+                            "frequency_analysis", "ac_sweep", "averaged_converter", "post_processing",
                             "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
