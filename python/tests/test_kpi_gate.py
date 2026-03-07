@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import platform
 from pathlib import Path
 
 import yaml
@@ -34,7 +35,9 @@ def _write_baseline_with_manifest(
     source_bench_results: Path,
     metrics: dict,
     source_artifacts_root: Path | None = None,
+    machine_class: str | None = None,
 ) -> None:
+    effective_machine_class = machine_class or (platform.machine() or "unknown")
     captured_at = "2026-02-25T00:00:00Z"
     baseline = {
         "schema_version": "pulsim-kpi-baseline-v1",
@@ -45,7 +48,7 @@ def _write_baseline_with_manifest(
         "environment": {
             "os": "test-os",
             "python": "Python 3.13",
-            "machine_class": "ci",
+            "machine_class": effective_machine_class,
             "compiler": "clang test",
             "cc": "clang test",
             "cmake": "cmake test",
@@ -567,3 +570,64 @@ def test_kpi_gate_can_continue_when_strict_provenance_is_disabled(tmp_path: Path
 
     assert report["blocked_by_provenance"] is False
     assert report["comparisons"]["runtime_p95"]["status"] == "passed"
+
+
+def test_kpi_gate_skips_runtime_metrics_on_machine_class_mismatch(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {"benchmark_id": "a", "scenario": "s0", "status": "passed", "runtime_s": 0.80},
+            {"benchmark_id": "b", "scenario": "s0", "status": "passed", "runtime_s": 0.90},
+        ]
+    }
+    thresholds = {
+        "metrics": {
+            "runtime_p95": {
+                "direction": "lower_is_better",
+                "max_regression_rel": 0.05,
+                "required": True,
+            },
+        }
+    }
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics={"runtime_p95": 0.10},
+        machine_class="mismatch-machine-class",
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+
+    assert report["overall_status"] == "passed"
+    assert report["comparisons"]["runtime_p95"]["status"] == "skipped"
+    assert "machine_class mismatch" in report["comparisons"]["runtime_p95"]["message"]
+
+
+def test_compare_metric_uses_epsilon_guard_for_near_zero_baseline() -> None:
+    cmp = kpi_gate.compare_metric(
+        name="loss_energy_balance_error",
+        current_value=3.4399697850963737e-17,
+        baseline_value=3.271133600931126e-17,
+        rules={
+            "direction": "lower_is_better",
+            "max_regression_rel": 0.05,
+            "required": True,
+        },
+    )
+
+    assert cmp.status == "passed"
+    assert cmp.regression_abs is not None
+    assert cmp.regression_rel == 0.0

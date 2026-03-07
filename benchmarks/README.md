@@ -92,6 +92,8 @@ Current default scope is the stiff-variable set (`stiff_rlc` scenarios) and can 
 `kpi_gate.py` validates baseline/manifest provenance in strict mode by default
 and fails early when metadata or artifact hashes are inconsistent.
 Use `--no-strict-provenance` only for local debugging.
+Runtime latency KPIs (`runtime_p50`, `runtime_p95`) are auto-skipped when
+`environment.machine_class` differs between baseline and current runner.
 
 `local_limit_suite.py` is intended for PC-local stress discovery and reports
 exact failure reasons per circuit/scenario. It always supports:

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+import platform
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -614,6 +615,7 @@ def compare_metric(
     required = bool(rules.get("required", True))
     max_reg_abs = rules.get("max_regression_abs")
     max_reg_rel = rules.get("max_regression_rel")
+    rel_epsilon = float(rules.get("relative_epsilon", 1e-12))
 
     max_reg_abs = float(max_reg_abs) if max_reg_abs is not None else None
     max_reg_rel = float(max_reg_rel) if max_reg_rel is not None else None
@@ -671,8 +673,10 @@ def compare_metric(
             required=required,
         )
 
-    if baseline_value == 0.0:
-        regression_rel = 0.0 if regression_abs == 0.0 else float("inf")
+    # Near-zero baselines are dominated by floating-point noise; use an epsilon
+    # guard so tiny absolute deltas do not trigger spurious relative regressions.
+    if abs(baseline_value) <= rel_epsilon:
+        regression_rel = 0.0 if regression_abs <= rel_epsilon else float("inf")
     else:
         regression_rel = regression_abs / abs(baseline_value)
 
@@ -761,11 +765,49 @@ def run_gate(
         metric_rules = {}
     comparisons: Dict[str, Dict[str, Any]] = {}
 
+    baseline_env = baseline_payload.get("environment", {})
+    if not isinstance(baseline_env, dict):
+        baseline_env = {}
+    baseline_machine_class_raw = baseline_env.get("machine_class")
+    baseline_machine_class = (
+        baseline_machine_class_raw.strip().lower()
+        if isinstance(baseline_machine_class_raw, str)
+        else ""
+    )
+    current_machine_class = (platform.machine() or "unknown").strip().lower()
+    machine_class_match = (
+        baseline_machine_class == current_machine_class
+        if baseline_machine_class
+        else None
+    )
+
     failed_required = 0
     skipped_optional = 0
 
     if not (blocked_by_provenance and strict_provenance):
         for metric_name, rules in metric_rules.items():
+            if (
+                metric_name in ("runtime_p50", "runtime_p95")
+                and machine_class_match is False
+            ):
+                comparisons[metric_name] = {
+                    "status": "skipped",
+                    "message": (
+                        "runtime KPI skipped due to machine_class mismatch "
+                        f"(baseline={baseline_machine_class_raw}, current={current_machine_class})"
+                    ),
+                    "current": current_metrics.get(metric_name),
+                    "baseline": baseline_metrics.get(metric_name),
+                    "direction": str((rules or {}).get("direction", "lower_is_better")).strip(),
+                    "regression_abs": None,
+                    "regression_rel": None,
+                    "max_regression_abs": (rules or {}).get("max_regression_abs"),
+                    "max_regression_rel": (rules or {}).get("max_regression_rel"),
+                    "required": False,
+                }
+                skipped_optional += 1
+                continue
+
             cmp = compare_metric(
                 name=metric_name,
                 current_value=current_metrics.get(metric_name),
@@ -808,6 +850,11 @@ def run_gate(
             "strict_mode": strict_provenance,
             "baseline": baseline_provenance,
             "thresholds": threshold_provenance,
+            "environment_compatibility": {
+                "baseline_machine_class": baseline_machine_class_raw,
+                "current_machine_class": current_machine_class,
+                "machine_class_match": machine_class_match,
+            },
         },
     }
     return report
