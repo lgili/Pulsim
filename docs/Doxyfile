@@ -8,7 +8,7 @@ PROJECT_NAME           = "Pulsim"
 PROJECT_NUMBER         = "0.6.5"
 PROJECT_BRIEF          = "High-Performance Circuit Simulator for Power Electronics"
 PROJECT_LOGO           =
-OUTPUT_DIRECTORY       = api-reference/cpp
+OUTPUT_DIRECTORY       = cpp-api-reference
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = NO
 OUTPUT_LANGUAGE        = English
@@ -98,8 +98,7 @@ WARN_FORMAT            = "$file:$line: $text"
 #---------------------------------------------------------------------------
 
 INPUT                  = ../core/include \
-                         ../api-grpc/include \
-                         ../cli/src \
+                         ../core/src \
                          mainpage.md
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.hpp \
@@ -146,7 +145,6 @@ VERBATIM_HEADERS       = YES
 #---------------------------------------------------------------------------
 
 ALPHABETICAL_INDEX     = YES
-COLS_IN_ALPHA_INDEX    = 5
 IGNORE_PREFIX          =
 
 #---------------------------------------------------------------------------
@@ -164,7 +162,6 @@ HTML_EXTRA_FILES       =
 HTML_COLORSTYLE_HUE    = 220
 HTML_COLORSTYLE_SAT    = 100
 HTML_COLORSTYLE_GAMMA  = 80
-HTML_TIMESTAMP         = NO
 HTML_DYNAMIC_MENUS     = YES
 HTML_DYNAMIC_SECTIONS  = NO
 HTML_INDEX_NUM_ENTRIES = 100
@@ -177,7 +174,6 @@ ENUM_VALUES_PER_LINE   = 4
 TREEVIEW_WIDTH         = 250
 EXT_LINKS_IN_WINDOW    = NO
 FORMULA_FONTSIZE       = 10
-FORMULA_TRANSPARENT    = YES
 USE_MATHJAX            = YES
 MATHJAX_FORMAT         = HTML-CSS
 MATHJAX_RELPATH        = https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/
@@ -261,13 +257,10 @@ EXTERNAL_PAGES         = YES
 # Configuration options related to the dot tool
 #---------------------------------------------------------------------------
 
-CLASS_DIAGRAMS         = YES
 DIA_PATH               =
 HIDE_UNDOC_RELATIONS   = YES
 HAVE_DOT               = YES
 DOT_NUM_THREADS        = 0
-DOT_FONTNAME           = Helvetica
-DOT_FONTSIZE           = 10
 DOT_FONTPATH           =
 CLASS_GRAPH            = YES
 COLLABORATION_GRAPH    = YES
@@ -292,7 +285,6 @@ PLANTUML_CFG_FILE      =
 PLANTUML_INCLUDE_PATH  =
 DOT_GRAPH_MAX_NODES    = 50
 MAX_DOT_GRAPH_DEPTH    = 0
-DOT_TRANSPARENT        = NO
 DOT_MULTI_TARGETS      = NO
 GENERATE_LEGEND        = YES
 DOT_CLEANUP            = YES

@@ -62,6 +62,19 @@ See:
 - `docs/electrothermal-workflow.md`
 - `docs/backend-cpp-contributor-guide.md`
 
+## Doxygen Documentation
+
+Backend `.cpp` files are part of the reference docs and must stay documented.
+
+Generate local Doxygen output with:
+
+```bash
+cd docs
+doxygen Doxyfile
+```
+
+When changing backend runtime behavior, update function/file Doxygen blocks in `core/src`.
+
 ## Pull Request Checklist
 
 - Tests pass locally.

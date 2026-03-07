@@ -1,3 +1,8 @@
+/**
+ * @file simulation_periodic.cpp
+ * @brief Periodic steady-state solvers (shooting and harmonic balance) for the v1 runtime.
+ */
+
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
@@ -9,6 +14,12 @@ namespace pulsim::v1 {
 
 namespace {
 
+/**
+ * @brief Builds first-order spectral differentiation matrix for one period.
+ * @param samples Number of collocation samples.
+ * @param period Fundamental period.
+ * @return Dense spectral differentiation matrix.
+ */
 Matrix spectral_diff_matrix(int samples, Real period) {
     Matrix D = Matrix::Zero(samples, samples);
     if (samples <= 1 || period <= 0.0) {
@@ -36,6 +47,11 @@ Matrix spectral_diff_matrix(int samples, Real period) {
 
 }  // namespace
 
+/**
+ * @brief Runs periodic shooting starting from DC operating point.
+ * @param options Shooting solver configuration.
+ * @return Periodic steady-state result with convergence diagnostics.
+ */
 PeriodicSteadyStateResult Simulator::run_periodic_shooting(const PeriodicSteadyStateOptions& options) {
     auto dc = dc_operating_point();
     if (!dc.success) {
@@ -49,6 +65,12 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const PeriodicSteadyS
     return run_periodic_shooting(dc.newton_result.solution, options);
 }
 
+/**
+ * @brief Runs periodic shooting from explicit initial state.
+ * @param x0 Initial state guess.
+ * @param options Shooting solver configuration.
+ * @return Periodic steady-state result with last-cycle telemetry.
+ */
 PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
                                                           const PeriodicSteadyStateOptions& options) {
     PeriodicSteadyStateResult result;
@@ -125,6 +147,11 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
     return result;
 }
 
+/**
+ * @brief Runs harmonic balance starting from DC operating point.
+ * @param options Harmonic balance configuration.
+ * @return Harmonic-balance convergence result.
+ */
 HarmonicBalanceResult Simulator::run_harmonic_balance(const HarmonicBalanceOptions& options) {
     auto dc = dc_operating_point();
     if (!dc.success) {
@@ -138,6 +165,12 @@ HarmonicBalanceResult Simulator::run_harmonic_balance(const HarmonicBalanceOptio
     return run_harmonic_balance(dc.newton_result.solution, options);
 }
 
+/**
+ * @brief Runs harmonic balance from explicit initial state.
+ * @param x0 Initial stacked state guess for harmonic-balance unknowns.
+ * @param options Harmonic balance configuration.
+ * @return Harmonic-balance convergence result and solution vector.
+ */
 HarmonicBalanceResult Simulator::run_harmonic_balance(const Vector& x0,
                                                      const HarmonicBalanceOptions& options) {
     HarmonicBalanceResult result;

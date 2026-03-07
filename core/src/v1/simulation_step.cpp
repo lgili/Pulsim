@@ -1,3 +1,8 @@
+/**
+ * @file simulation_step.cpp
+ * @brief Step-level solve paths and per-step post-processing for transient simulation.
+ */
+
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
@@ -10,12 +15,14 @@ namespace pulsim::v1 {
 namespace {
 constexpr int kMaxBisections = 12;
 
+/// Legacy heuristic used when only dt_min/dt_max are provided.
 [[nodiscard]] bool legacy_fixed_timestep_heuristic(const SimulationOptions& options) {
     const Real span = std::abs(options.dt_max - options.dt_min);
     const Real scale = std::max<Real>({Real{1.0}, std::abs(options.dt), std::abs(options.dt_max)});
     return span <= scale * Real{1e-12};
 }
 
+/// Resolves canonical fixed/variable stepping mode from simulation options.
 [[nodiscard]] TransientStepMode resolve_step_mode(const SimulationOptions& options) {
     if (options.step_mode_explicit) {
         return options.step_mode;
@@ -27,6 +34,7 @@ constexpr int kMaxBisections = 12;
                                                     : TransientStepMode::Variable;
 }
 
+/// RAII guard that always clears stage context across multi-stage integrator paths.
 class ScopedStageContext final {
 public:
     explicit ScopedStageContext(Circuit& circuit)
@@ -48,6 +56,13 @@ private:
 };
 }  // namespace
 
+/**
+ * @brief Solves one accepted transient step using primary segment path with DAE fallback.
+ * @param t_next Target time for this step.
+ * @param dt Candidate timestep.
+ * @param x_prev Previous accepted state.
+ * @return Newton solve result for the chosen path.
+ */
 NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     last_step_segment_cache_hit_ = false;
     last_step_segment_attempted_ = false;
@@ -179,6 +194,13 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
     return solve_segment_primary(false);
 }
 
+/**
+ * @brief Solves one TR-BDF2 step using two implicit stages.
+ * @param t_next Target time for this step.
+ * @param dt Candidate timestep.
+ * @param x_prev Previous accepted state.
+ * @return Stage-2 Newton result (or stage-1 failure).
+ */
 NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_prev) {
     last_step_solve_path_ = StepSolvePath::DaeFallback;
     last_step_solve_reason_ = "trbdf2_multistage";
@@ -217,6 +239,14 @@ NewtonResult Simulator::solve_trbdf2_step(Real t_next, Real dt, const Vector& x_
     return stage2;
 }
 
+/**
+ * @brief Solves one SDIRK2/Rosenbrock-W step using two implicit stages.
+ * @param t_next Target time for this step.
+ * @param dt Candidate timestep.
+ * @param x_prev Previous accepted state.
+ * @param method Active SDIRK2-family integrator.
+ * @return Stage-2 Newton result (or stage-1 failure).
+ */
 NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_prev, Integrator method) {
     last_step_solve_path_ = StepSolvePath::DaeFallback;
     last_step_solve_reason_ = "sdirk2_multistage";
@@ -261,6 +291,16 @@ NewtonResult Simulator::solve_sdirk2_step(Real t_next, Real dt, const Vector& x_
     return stage2;
 }
 
+/**
+ * @brief Locates switching threshold crossing time via bisection and sub-solves.
+ * @param sw Switch monitor descriptor.
+ * @param t_start Step start time.
+ * @param t_end Step end time.
+ * @param x_start State at @p t_start.
+ * @param t_event Output event time.
+ * @param x_event Output state at event time.
+ * @return `true` when an event time is found; `false` on solver failure.
+ */
 bool Simulator::find_switch_event_time(const SwitchMonitor& sw,
                                        Real t_start, Real t_end,
                                        const Vector& x_start,
@@ -319,6 +359,15 @@ bool Simulator::find_switch_event_time(const SwitchMonitor& sw,
     return true;
 }
 
+/**
+ * @brief Records a switch transition event and optional switching-energy contribution.
+ * @param sw Monitored switch descriptor.
+ * @param time Event timestamp.
+ * @param x_state State used to estimate event voltage/current.
+ * @param new_state New logical state (`true`=on, `false`=off).
+ * @param result Simulation result accumulator.
+ * @param event_callback Optional streaming callback.
+ */
 void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
                                     const Vector& x_state, bool new_state,
                                     SimulationResult& result, EventCallback event_callback) {
@@ -371,6 +420,7 @@ void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
     }
 }
 
+/// Accumulates discrete turn-on/off switching energy into the loss service.
 void Simulator::accumulate_switching_loss(const std::string& name, bool turning_on, Real energy) {
     if (!transient_services_.loss_service) {
         return;
@@ -378,6 +428,7 @@ void Simulator::accumulate_switching_loss(const std::string& name, bool turning_
     transient_services_.loss_service->commit_switching_event(name, turning_on, energy);
 }
 
+/// Accumulates reverse-recovery energy into the loss service.
 void Simulator::accumulate_reverse_recovery_loss(const std::string& name, Real energy) {
     if (!transient_services_.loss_service) {
         return;
@@ -385,6 +436,7 @@ void Simulator::accumulate_reverse_recovery_loss(const std::string& name, Real e
     transient_services_.loss_service->commit_reverse_recovery_event(name, energy);
 }
 
+/// Commits conduction losses for an accepted electrical state interval.
 void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
     if (!transient_services_.loss_service || !transient_services_.thermal_service) {
         return;
@@ -395,6 +447,7 @@ void Simulator::accumulate_conduction_losses(const Vector& x, Real dt) {
         transient_services_.thermal_service->thermal_scale_vector());
 }
 
+/// Advances thermal state using the latest per-device power trace.
 void Simulator::update_thermal_state(Real dt) {
     if (!transient_services_.thermal_service || !transient_services_.loss_service) {
         return;
@@ -404,6 +457,7 @@ void Simulator::update_thermal_state(Real dt) {
         transient_services_.loss_service->last_device_power());
 }
 
+/// Finalizes aggregate loss summary after transient completion.
 void Simulator::finalize_loss_summary(SimulationResult& result) {
     if (!transient_services_.loss_service) {
         return;
@@ -416,6 +470,7 @@ void Simulator::finalize_loss_summary(SimulationResult& result) {
     result.loss_summary = transient_services_.loss_service->finalize(duration);
 }
 
+/// Finalizes thermal summary after transient completion.
 void Simulator::finalize_thermal_summary(SimulationResult& result) {
     if (!transient_services_.thermal_service) {
         return;
@@ -439,6 +494,7 @@ void Simulator::finalize_thermal_summary(SimulationResult& result) {
     result.thermal_summary = std::move(summary);
 }
 
+/// Joins loss and thermal summaries into per-component electrothermal telemetry.
 void Simulator::finalize_component_electrothermal(SimulationResult& result) {
     const auto& conns = circuit_.connections();
     result.component_electrothermal.clear();

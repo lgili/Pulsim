@@ -1,3 +1,8 @@
+/**
+ * @file simulation.cpp
+ * @brief Core transient runtime orchestration, recovery policies, and result assembly.
+ */
+
 #include "pulsim/v1/simulation.hpp"
 
 #include <algorithm>
@@ -17,11 +22,13 @@ constexpr int kMaxDtMinHoldAdvances = 128;
 constexpr std::size_t kMaxSampleReserve = 1'000'000;
 constexpr std::size_t kMaxFallbackReserve = 2'000'000;
 
+/// Converts 64-bit counters to int while clamping at int max.
 [[nodiscard]] int saturating_int(std::uint64_t value) {
     constexpr std::uint64_t max_int = static_cast<std::uint64_t>(std::numeric_limits<int>::max());
     return static_cast<int>(std::min(value, max_int));
 }
 
+/// Estimates output buffer reservation size for time/state samples.
 [[nodiscard]] std::size_t estimate_output_sample_reserve(const SimulationOptions& options) {
     if (!std::isfinite(options.tstart) || !std::isfinite(options.tstop) || options.tstop <= options.tstart) {
         return 0;
@@ -47,6 +54,7 @@ constexpr std::size_t kMaxFallbackReserve = 2'000'000;
     return static_cast<std::size_t>(capped);
 }
 
+/// Aggregates topology characteristics used to auto-tune robust defaults.
 struct CircuitRobustnessHints {
     int switching_devices = 0;
     int nonlinear_devices = 0;
@@ -54,11 +62,17 @@ struct CircuitRobustnessHints {
     int control_blocks = 0;
 };
 
+/// Returns whether linear solver order remains the default single SparseLU profile.
 [[nodiscard]] bool is_default_linear_order(const LinearSolverStackConfig& cfg) {
     return cfg.order.empty() ||
            (cfg.order.size() == 1 && cfg.order.front() == LinearSolverKind::SparseLU);
 }
 
+/**
+ * @brief Applies robust linear solver defaults for switched/nonlinear transients.
+ * @param cfg Solver stack configuration to update.
+ * @param force When false, only adjusts fields still matching default profile.
+ */
 void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg, bool force = true) {
     const bool has_default_order = is_default_linear_order(cfg);
     if (!force && !has_default_order) {
@@ -101,6 +115,7 @@ void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg, bool forc
     it.ilut_fill_factor = std::max(it.ilut_fill_factor, Real{10.0});
 }
 
+/// Returns whether Newton options still match conservative defaults.
 [[nodiscard]] bool is_default_newton_profile(const NewtonOptions& opts) {
     NewtonOptions defaults;
     return opts.max_iterations <= defaults.max_iterations &&
@@ -111,6 +126,11 @@ void apply_robust_linear_solver_defaults(LinearSolverStackConfig& cfg, bool forc
            opts.min_damping >= defaults.min_damping;
 }
 
+/**
+ * @brief Applies robust Newton globalization defaults for difficult transients.
+ * @param opts Newton options to update.
+ * @param force When false, only adjusts fields still matching default profile.
+ */
 void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     if (!force && !is_default_newton_profile(opts)) {
         return;
@@ -129,6 +149,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     opts.detect_stall = false;
 }
 
+/// Detects switching and control complexity hints used for automatic profile tuning.
 [[nodiscard]] CircuitRobustnessHints analyze_circuit_robustness(const Circuit& circuit) {
     CircuitRobustnessHints hints;
     const auto& devices = circuit.devices();
@@ -164,6 +185,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     return hints;
 }
 
+/// Infers control sample time from highest PWM frequency present in circuit.
 [[nodiscard]] std::optional<Real> infer_control_sample_time_from_pwm(const Circuit& circuit) {
     Real max_pwm_frequency = 0.0;
 
@@ -199,6 +221,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     return Real{1.0} / max_pwm_frequency;
 }
 
+/// Resolves effective control sampling period from explicit mode and circuit hints.
 [[nodiscard]] Real resolve_control_sample_time(const SimulationOptions& options, const Circuit& circuit) {
     auto sanitize = [](Real value) -> Real {
         return (std::isfinite(value) && value > 0.0) ? value : Real{0.0};
@@ -225,12 +248,14 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     }
 }
 
+/// Backward-compatible heuristic for fixed stepping inferred from dt bounds.
 [[nodiscard]] bool legacy_fixed_timestep_heuristic(const SimulationOptions& options) {
     const Real span = std::abs(options.dt_max - options.dt_min);
     const Real scale = std::max<Real>({Real{1.0}, std::abs(options.dt), std::abs(options.dt_max)});
     return span <= scale * Real{1e-12};
 }
 
+/// Resolves canonical fixed/variable transient mode from current options.
 [[nodiscard]] TransientStepMode resolve_step_mode(const SimulationOptions& options) {
     if (options.step_mode_explicit) {
         return options.step_mode;
@@ -242,6 +267,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
                                                     : TransientStepMode::Variable;
 }
 
+/// Enforces explicit step mode onto legacy adaptive_timestep fields.
 void enforce_explicit_step_mode(SimulationOptions& options) {
     if (!options.step_mode_explicit) {
         return;
@@ -249,6 +275,11 @@ void enforce_explicit_step_mode(SimulationOptions& options) {
     options.adaptive_timestep = (options.step_mode == TransientStepMode::Variable);
 }
 
+/**
+ * @brief Auto-tunes transient profile for switching topologies when fallback is enabled.
+ * @param options Simulation options to mutate in-place.
+ * @param circuit Runtime circuit used to infer topology complexity.
+ */
 void apply_auto_transient_profile(SimulationOptions& options, const Circuit& circuit) {
     // Respect explicit strict mode: users can disable fallback for deterministic debugging.
     if (!options.linear_solver.allow_fallback) {
@@ -330,6 +361,7 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     apply_robust_linear_solver_defaults(options.linear_solver, false);
 }
 
+/// Maps typed diagnostic code to stable telemetry reason string.
 [[nodiscard]] std::string_view diagnostic_code_to_reason(SimulationDiagnosticCode code) {
     switch (code) {
         case SimulationDiagnosticCode::None:
@@ -368,11 +400,16 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
     return "";
 }
 
+/// Validation issue structure for early transient input rejection.
 struct TransientInputIssue {
     SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
     std::string message;
 };
 
+/**
+ * @brief Validates initial state, timestep window, and thermal configuration.
+ * @return Optional validation issue; empty when inputs are valid.
+ */
 [[nodiscard]] std::optional<TransientInputIssue> validate_transient_inputs(
     const Circuit& circuit,
     const SimulationOptions& options,
@@ -513,11 +550,13 @@ struct TransientInputIssue {
     return std::nullopt;
 }
 
+/// Relative-epsilon time comparison used near stop/macro boundaries.
 [[nodiscard]] bool nearly_same_time(Real a, Real b) {
     const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
     return std::abs(a - b) <= scale * Real{1e-12};
 }
 
+/// Adapter around AdvancedTimestepController with safety guard bands.
 class VariableStepPolicy final {
 public:
     VariableStepPolicy() = default;
@@ -582,6 +621,7 @@ private:
     Real max_growth_factor_ = 2.0;
 };
 
+/// Fixed-step macro-grid policy that allows bounded internal sub-stepping for events.
 class FixedStepPolicy final {
 public:
     FixedStepPolicy() = default;
@@ -685,6 +725,11 @@ private:
 
 }
 
+/**
+ * @brief Builds simulator runtime state and default transient service registry.
+ * @param circuit Mutable runtime circuit reference.
+ * @param options User and parser-provided simulation options.
+ */
 Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     : circuit_(circuit)
     , options_(options)
@@ -743,6 +788,7 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     initialize_loss_tracking();
 }
 
+/// Initializes loss and thermal tracking services for a new run.
 void Simulator::initialize_loss_tracking() {
     if (transient_services_.loss_service) {
         transient_services_.loss_service->reset();
@@ -750,6 +796,11 @@ void Simulator::initialize_loss_tracking() {
     initialize_thermal_tracking();
 }
 
+/**
+ * @brief Overrides per-device switching energies used in event-based loss accounting.
+ * @param device_name Component name.
+ * @param energy Turn-on/off/recovery energy configuration.
+ */
 void Simulator::set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy) {
     options_.switching_energy[device_name] = energy;
     if (transient_services_.loss_service) {
@@ -757,6 +808,7 @@ void Simulator::set_switching_energy(const std::string& device_name, const Switc
     }
 }
 
+/// Converts formulation mode enum to stable telemetry string.
 [[nodiscard]] std::string_view formulation_mode_to_string(FormulationMode mode) {
     switch (mode) {
         case FormulationMode::ProjectedWrapper:
@@ -768,6 +820,17 @@ void Simulator::set_switching_energy(const std::string& device_name, const Switc
     }
 }
 
+/**
+ * @brief Appends one fallback/recovery trace entry for diagnostics.
+ * @param result Simulation result accumulator.
+ * @param step_index Accepted-step index.
+ * @param retry_index Retry number inside the current step.
+ * @param time Current simulation time.
+ * @param dt Candidate timestep at logging instant.
+ * @param reason Typed fallback reason code.
+ * @param solver_status Solver status at logging instant.
+ * @param action Human-readable action tag.
+ */
 void Simulator::record_fallback_event(SimulationResult& result,
                                       int step_index,
                                       int retry_index,
@@ -790,12 +853,17 @@ void Simulator::record_fallback_event(SimulationResult& result,
     result.fallback_trace.push_back(std::move(entry));
 }
 
+/// Resets thermal-service runtime state for a new transient run.
 void Simulator::initialize_thermal_tracking() {
     if (transient_services_.thermal_service) {
         transient_services_.thermal_service->reset();
     }
 }
 
+/**
+ * @brief Computes DC operating point using convergence-aided nonlinear solve.
+ * @return DC analysis result including solver telemetry.
+ */
 DCAnalysisResult Simulator::dc_operating_point() {
     // Large timestep to emulate DC for dynamic elements
     circuit_.set_timestep(1e6);
@@ -812,6 +880,13 @@ DCAnalysisResult Simulator::dc_operating_point() {
     return solver.solve(x0, circuit_.num_nodes(), circuit_.num_branches(), system_func, nullptr);
 }
 
+/**
+ * @brief Runs transient starting from DC operating point with startup fallback path.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional event callback.
+ * @param control Optional pause/stop control handle.
+ * @return Completed transient result.
+ */
 SimulationResult Simulator::run_transient(SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
@@ -874,6 +949,14 @@ SimulationResult Simulator::run_transient(SimulationCallback callback,
     return result;
 }
 
+/**
+ * @brief Runs transient from explicit initial state after validating inputs.
+ * @param x0 Initial state vector.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional event callback.
+ * @param control Optional pause/stop control handle.
+ * @return Completed transient result.
+ */
 SimulationResult Simulator::run_transient(const Vector& x0,
                                           SimulationCallback callback,
                                           EventCallback event_callback,
@@ -913,6 +996,14 @@ SimulationResult Simulator::run_transient(const Vector& x0,
     return native_result;
 }
 
+/**
+ * @brief Executes native transient loop (fixed/variable) and assembles result payload.
+ * @param x0 Initial state vector.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional switch-event callback.
+ * @param control Optional pause/stop control handle.
+ * @return Detailed simulation result with waveforms and telemetry.
+ */
 SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                                       SimulationCallback callback,
                                                       EventCallback event_callback,
@@ -2107,6 +2198,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     return result;
 }
 
+/**
+ * @brief Runs transient with throttled progress callback emission.
+ * @param callback Optional per-sample callback.
+ * @param event_callback Optional switch-event callback.
+ * @param control Optional pause/stop control handle.
+ * @param progress_config Progress callback cadence configuration.
+ * @return Completed simulation result.
+ */
 SimulationResult Simulator::run_transient_with_progress(
     SimulationCallback callback,
     EventCallback event_callback,

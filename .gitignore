@@ -6,6 +6,7 @@ build-sundials/
 build-sundials-py313/
 build-ci/
 docs/_build/
+docs/cpp-api-reference/
 site/
 cmake-build-*/
 benchmarks/out_*/

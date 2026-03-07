@@ -1,7 +1,13 @@
+/**
+ * @file simulation_control.cpp
+ * @brief Thread-safe pause/resume/stop coordination used by long-running simulations.
+ */
+
 #include "pulsim/simulation_control.hpp"
 
 namespace pulsim {
 
+/// Requests transition from Running to Paused state.
 void SimulationController::request_pause() {
     std::lock_guard<std::mutex> lock(mutex_);
     SimulationState current = state_.load(std::memory_order_acquire);
@@ -11,6 +17,7 @@ void SimulationController::request_pause() {
     }
 }
 
+/// Requests transition from Paused to Running state.
 void SimulationController::request_resume() {
     std::lock_guard<std::mutex> lock(mutex_);
     SimulationState current = state_.load(std::memory_order_acquire);
@@ -20,6 +27,7 @@ void SimulationController::request_resume() {
     }
 }
 
+/// Requests cooperative stop when simulation is Running or Paused.
 void SimulationController::request_stop() {
     std::lock_guard<std::mutex> lock(mutex_);
     SimulationState current = state_.load(std::memory_order_acquire);
@@ -29,12 +37,14 @@ void SimulationController::request_stop() {
     }
 }
 
+/// Resets controller to Idle state and wakes all waiters.
 void SimulationController::reset() {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.store(SimulationState::Idle, std::memory_order_release);
     cv_.notify_all();
 }
 
+/// Waits until the internal state reaches the requested target state.
 bool SimulationController::wait_for_state(SimulationState target, int timeout_ms) {
     std::unique_lock<std::mutex> lock(mutex_);
 
@@ -52,12 +62,17 @@ bool SimulationController::wait_for_state(SimulationState target, int timeout_ms
     }
 }
 
+/// Forces state transition and notifies all waiters.
 void SimulationController::set_state(SimulationState new_state) {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.store(new_state, std::memory_order_release);
     cv_.notify_all();
 }
 
+/**
+ * @brief Handles pause semantics in cooperative simulation loops.
+ * @return `false` when loop should terminate due to stop request; `true` otherwise.
+ */
 bool SimulationController::check_and_handle_pause() {
     SimulationState current = state_.load(std::memory_order_acquire);
 
@@ -85,6 +100,7 @@ bool SimulationController::check_and_handle_pause() {
 }
 
 // Legacy compatibility
+/// Returns whether simulation should stop according to legacy state semantics.
 bool SimulationController::should_stop() const {
     SimulationState current = state_.load(std::memory_order_acquire);
     return current == SimulationState::Stopping ||
@@ -92,10 +108,12 @@ bool SimulationController::should_stop() const {
            current == SimulationState::Error;
 }
 
+/// Returns whether simulation is currently paused.
 bool SimulationController::should_pause() const {
     return state_.load(std::memory_order_acquire) == SimulationState::Paused;
 }
 
+/// Blocks while state remains Paused.
 void SimulationController::wait_until_resumed() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this]() {

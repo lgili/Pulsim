@@ -92,7 +92,18 @@ If you modify parser/runtime contract fields, also validate docs and Python stub
 - Runtime overhead added in hot path.
 - Test coverage for new/changed behavior.
 
-## 8. Safe optimization strategy
+## 8. Doxygen standard for backend `.cpp`
+
+Keep `.cpp` files self-documented for community contributors:
+
+- Add `@file` header to each backend `.cpp`.
+- Document non-trivial helper functions and all `Simulator` runtime entrypoints.
+- Keep parameter/return semantics explicit in comments for stateful flows.
+- Update docs whenever behavior contracts change.
+
+Doxygen input includes `core/src`, so these comments appear in generated reference docs.
+
+## 9. Safe optimization strategy
 
 1. Confirm bottleneck with telemetry or benchmark.
 2. Optimize smallest high-impact region first.

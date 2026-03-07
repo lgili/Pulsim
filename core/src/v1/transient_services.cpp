@@ -1,3 +1,8 @@
+/**
+ * @file transient_services.cpp
+ * @brief Default transient service implementations for assembly, solving, events, losses, and thermal.
+ */
+
 #include "pulsim/v1/transient_services.hpp"
 
 #include "pulsim/v1/simulation.hpp"
@@ -22,16 +27,19 @@ namespace {
 constexpr std::uint64_t kFnvOffset = 1469598103934665603ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 
+/// Relative-value compare used for cached transient state checks.
 [[nodiscard]] inline bool nearly_same_value(Real a, Real b) {
     const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
     return std::abs(a - b) <= scale * Real{1e-12};
 }
 
+/// FNV-1a style hash mix helper used in topology/signature hashing.
 inline void hash_mix(std::uint64_t& seed, std::uint64_t value) {
     seed ^= value;
     seed *= kFnvPrime;
 }
 
+/// Hashes sparse matrix numeric pattern and values for factorization cache validation.
 [[nodiscard]] std::uint64_t hash_sparse_numeric_signature(const SparseMatrix& matrix) {
     std::uint64_t hash = kFnvOffset;
     hash_mix(hash, static_cast<std::uint64_t>(matrix.rows()));
@@ -48,6 +56,7 @@ inline void hash_mix(std::uint64_t& seed, std::uint64_t value) {
     return hash;
 }
 
+/// Default equation assembler with transient gmin injection and timing telemetry.
 class DefaultEquationAssemblerService final : public EquationAssemblerService {
 public:
     DefaultEquationAssemblerService(Circuit& circuit, const SimulationOptions& options)
@@ -140,6 +149,7 @@ private:
     EquationAssemblerTelemetry telemetry_{};
 };
 
+/// Segment model builder that derives piecewise-linear state-space from current topology.
 class DefaultSegmentModelService final : public SegmentModelService {
 public:
     DefaultSegmentModelService(Circuit& circuit,
@@ -253,6 +263,7 @@ private:
     mutable std::unordered_map<std::uint64_t, CacheEntry> topology_cache_;
 };
 
+/// Segment stepper that reuses linear factorizations when topology/numeric signature allows.
 class DefaultSegmentStepperService final : public SegmentStepperService {
 public:
     DefaultSegmentStepperService(
@@ -428,6 +439,7 @@ private:
     Index cached_state_size_ = 0;
 };
 
+/// Adapter exposing Newton solve service over the configured equation assembler.
 class DefaultNonlinearSolveService final : public NonlinearSolveService {
 public:
     DefaultNonlinearSolveService(NewtonRaphsonSolver<RuntimeLinearSolver>& solver,
@@ -462,6 +474,7 @@ private:
     std::shared_ptr<EquationAssemblerService> assembler_;
 };
 
+/// Thin adapter exposing the runtime linear solver through service registry.
 class DefaultLinearSolveService final : public LinearSolveService {
 public:
     explicit DefaultLinearSolveService(RuntimeLinearSolver& solver)
@@ -479,6 +492,7 @@ private:
     RuntimeLinearSolver& solver_;
 };
 
+/// Default electrothermal loss accumulation service for accepted segments and switch events.
 class DefaultLossService final : public LossService {
 public:
     DefaultLossService(Circuit& circuit, const SimulationOptions& options)
@@ -752,6 +766,7 @@ private:
     std::vector<Real> last_device_power_;
 };
 
+/// Default thermal RC service coupled to per-device power dissipation.
 class DefaultThermalService final : public ThermalService {
 public:
     DefaultThermalService(Circuit& circuit, const SimulationOptions& options)
@@ -938,6 +953,7 @@ private:
     std::vector<Real> thermal_scale_;
 };
 
+/// Default scheduler for PWM/dead-time and other event boundaries.
 class DefaultEventSchedulerService final : public EventSchedulerService {
 public:
     DefaultEventSchedulerService(const Circuit& circuit, const SimulationOptions& options)
@@ -1250,6 +1266,7 @@ private:
     std::vector<std::size_t> virtual_pwm_indices_;
 };
 
+/// Default step-recovery policy manager for retry/backoff/escalation flow.
 class DefaultRecoveryManagerService final : public RecoveryManagerService {
 public:
     explicit DefaultRecoveryManagerService(Real backoff)
@@ -1306,6 +1323,7 @@ private:
     Real backoff_;
 };
 
+/// No-op telemetry collector; hooks reserved for instrumentation extensions.
 class DefaultTelemetryCollectorService final : public TelemetryCollectorService {
 public:
     void on_step_attempt(const TransientStepRequest& /*request*/) override {}
@@ -1313,6 +1331,7 @@ public:
     void on_step_reject(const RecoveryDecision& /*decision*/) override {}
 };
 
+/// Builder wiring all default transient services into a complete registry.
 class DefaultTransientServiceBuilder final {
 public:
     [[nodiscard]] bool supports_fixed_mode(const SimulationOptions& /*options*/) const {
@@ -1384,6 +1403,13 @@ public:
 
 }  // namespace
 
+/**
+ * @brief Creates the default transient service registry used by Simulator.
+ * @param circuit Runtime circuit reference.
+ * @param options Active simulation options.
+ * @param newton_solver Newton solver instance shared by services.
+ * @return Fully wired transient service registry.
+ */
 TransientServiceRegistry make_default_transient_service_registry(
     Circuit& circuit,
     const SimulationOptions& options,

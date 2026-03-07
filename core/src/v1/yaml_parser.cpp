@@ -1,3 +1,8 @@
+/**
+ * @file yaml_parser.cpp
+ * @brief YAML schema v1 parser: maps netlist documents into Circuit + SimulationOptions.
+ */
+
 #include "pulsim/v1/parser/yaml_parser.hpp"
 
 #include <yaml-cpp/yaml.h>
@@ -35,13 +40,16 @@ constexpr const char* kDiagThermalMissingRequired = "PULSIM_YAML_E_THERMAL_MISSI
 constexpr const char* kDiagThermalInvalidRange = "PULSIM_YAML_E_THERMAL_RANGE_INVALID";
 constexpr const char* kDiagThermalDefaultApplied = "PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED";
 
+/// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
 
+/// Lowercases ASCII characters for key normalization.
 std::string to_lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
+/// Normalizes schema keys by lowercasing and removing non-alphanumeric chars.
 std::string normalize_key(std::string s) {
     s = to_lower(s);
     std::string out;
@@ -54,10 +62,12 @@ std::string normalize_key(std::string s) {
     return out;
 }
 
+/// Returns whether a normalized key belongs to an allowed-key set.
 bool is_known_key(const std::string& key, const std::unordered_set<std::string>& allowed) {
     return allowed.find(key) != allowed.end();
 }
 
+/// Returns whether canonical component type supports electrothermal options.
 [[nodiscard]] bool component_type_supports_thermal(const std::string& canonical_type) {
     return canonical_type == "resistor" ||
            canonical_type == "diode" ||
@@ -67,18 +77,22 @@ bool is_known_key(const std::string& key, const std::unordered_set<std::string>&
            canonical_type == "bjt_pnp";
 }
 
+/// Prefixes diagnostics with stable machine-readable error code.
 std::string with_diag_code(const std::string& code, const std::string& message) {
     return "[" + code + "] " + message;
 }
 
+/// Appends one structured parser error.
 void push_error(std::vector<std::string>& errors, const std::string& code, const std::string& message) {
     errors.push_back(with_diag_code(code, message));
 }
 
+/// Appends one structured parser warning.
 void push_warning(std::vector<std::string>& warnings, const std::string& code, const std::string& message) {
     warnings.push_back(with_diag_code(code, message));
 }
 
+/// Classifies YAML node type for error reporting.
 std::string yaml_node_class(const YAML::Node& node) {
     if (!node || node.IsNull()) {
         return "null";
@@ -95,6 +109,7 @@ std::string yaml_node_class(const YAML::Node& node) {
     return "unknown";
 }
 
+/// Emits standardized type mismatch parser diagnostic.
 void push_type_mismatch_error(std::vector<std::string>& errors,
                               const std::string& path,
                               const std::string& expected,
@@ -106,6 +121,7 @@ void push_type_mismatch_error(std::vector<std::string>& errors,
             ", got " + yaml_node_class(received) + ")");
 }
 
+/// Parses optional boolean scalar while validating type.
 std::optional<bool> parse_bool_scalar(const YAML::Node& node,
                                       const std::string& path,
                                       std::vector<std::string>& errors) {
@@ -124,6 +140,7 @@ std::optional<bool> parse_bool_scalar(const YAML::Node& node,
     }
 }
 
+/// Parses optional integer scalar while validating type.
 std::optional<int> parse_int_scalar(const YAML::Node& node,
                                     const std::string& path,
                                     std::vector<std::string>& errors) {
@@ -142,6 +159,7 @@ std::optional<int> parse_int_scalar(const YAML::Node& node,
     }
 }
 
+/// Parses optional string scalar while validating type.
 std::optional<std::string> parse_string_scalar(const YAML::Node& node,
                                                const std::string& path,
                                                std::vector<std::string>& errors) {
@@ -586,9 +604,18 @@ YAML::Node merge_nodes(const YAML::Node& base, const YAML::Node& overrides) {
 
 }  // namespace
 
+/**
+ * @brief Creates parser instance with strict/lenient behavior options.
+ * @param options Parser behavior options.
+ */
 YamlParser::YamlParser(YamlParserOptions options)
     : options_(options) {}
 
+/**
+ * @brief Loads YAML netlist from file path.
+ * @param path Source YAML file path.
+ * @return Pair `(Circuit, SimulationOptions)`; parser errors are exposed via `errors()`.
+ */
 std::pair<Circuit, SimulationOptions> YamlParser::load(const std::filesystem::path& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -601,6 +628,11 @@ std::pair<Circuit, SimulationOptions> YamlParser::load(const std::filesystem::pa
     return load_string(buffer.str());
 }
 
+/**
+ * @brief Loads YAML netlist from in-memory string.
+ * @param content YAML document string.
+ * @return Pair `(Circuit, SimulationOptions)`; parser errors are exposed via `errors()`.
+ */
 std::pair<Circuit, SimulationOptions> YamlParser::load_string(const std::string& content) {
     Circuit circuit;
     SimulationOptions options;
@@ -611,6 +643,12 @@ std::pair<Circuit, SimulationOptions> YamlParser::load_string(const std::string&
     return {circuit, options};
 }
 
+/**
+ * @brief Parses YAML document into runtime circuit and simulation options.
+ * @param content YAML netlist content.
+ * @param circuit Output runtime circuit.
+ * @param options Output simulation options.
+ */
 void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, SimulationOptions& options) {
     const auto first_non_space = content.find_first_not_of(" \t\r\n");
     if (first_non_space != std::string::npos) {
