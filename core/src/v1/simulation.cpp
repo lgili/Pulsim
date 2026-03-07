@@ -490,6 +490,7 @@ struct TransientInputIssue {
 
     const auto& devices = circuit.devices();
     const auto& conns = circuit.connections();
+    std::unordered_map<std::string, std::pair<Real, Real>> shared_sink_by_id;
     for (std::size_t i = 0; i < devices.size() && i < conns.size(); ++i) {
         bool supports_thermal = false;
         std::visit([&](const auto& dev) {
@@ -564,6 +565,34 @@ struct TransientInputIssue {
         }
         if (!std::isfinite(cfg.alpha)) {
             return fail("alpha", "must be finite");
+        }
+        if (cfg.shared_sink_id.empty()) {
+            if (cfg.shared_sink_rth != 0.0 || cfg.shared_sink_cth != 0.0) {
+                return fail("shared_sink_rth/shared_sink_cth",
+                            "require non-empty shared_sink_id");
+            }
+        } else {
+            if (!std::isfinite(cfg.shared_sink_rth) || cfg.shared_sink_rth <= 0.0) {
+                return fail("shared_sink_rth", "must be finite and > 0 when shared_sink_id is set");
+            }
+            if (!std::isfinite(cfg.shared_sink_cth) || cfg.shared_sink_cth < 0.0) {
+                return fail("shared_sink_cth", "must be finite and >= 0 when shared_sink_id is set");
+            }
+            if (const auto sink_it = shared_sink_by_id.find(cfg.shared_sink_id);
+                sink_it == shared_sink_by_id.end()) {
+                shared_sink_by_id.emplace(cfg.shared_sink_id,
+                                          std::make_pair(cfg.shared_sink_rth, cfg.shared_sink_cth));
+            } else {
+                const auto nearly_same = [](Real a, Real b) {
+                    const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
+                    return std::abs(a - b) <= scale * Real{1e-12};
+                };
+                if (!nearly_same(cfg.shared_sink_rth, sink_it->second.first) ||
+                    !nearly_same(cfg.shared_sink_cth, sink_it->second.second)) {
+                    return fail("shared_sink_rth/shared_sink_cth",
+                                "must match all components using shared_sink_id='" + cfg.shared_sink_id + "'");
+                }
+            }
         }
     }
 

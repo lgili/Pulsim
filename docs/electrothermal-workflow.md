@@ -125,6 +125,41 @@ Deterministic diagnostics:
 - `PULSIM_YAML_E_THERMAL_NETWORK_INVALID`
 - `PULSIM_YAML_E_THERMAL_DIMENSION_INVALID`
 
+Optional shared sink coupling (multiple devices on one heatsink):
+
+```yaml
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, vin, sw]
+    thermal:
+      enabled: true
+      rth: 0.7
+      cth: 0.02
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.35
+      shared_sink_cth: 0.10
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    thermal:
+      enabled: true
+      rth: 1.2
+      cth: 0.03
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.35
+      shared_sink_cth: 0.10
+```
+
+Shared sink rules:
+
+- `shared_sink_id` groups devices into one common sink.
+- all devices in the same `shared_sink_id` must use identical
+  `shared_sink_rth/shared_sink_cth`.
+- `shared_sink_rth` must be finite and `> 0`.
+- `shared_sink_cth` must be finite and `>= 0`.
+- `shared_sink_rth/shared_sink_cth` without `shared_sink_id` is invalid.
+
 ## 4) Closed-Loop Control Sampling (Important for Stability)
 
 Control update policy is configured with `simulation.control`:

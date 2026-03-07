@@ -1351,7 +1351,10 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("stage_cth", &ThermalDeviceConfig::stage_cth)
         .def_readwrite("temp_init", &ThermalDeviceConfig::temp_init)
         .def_readwrite("temp_ref", &ThermalDeviceConfig::temp_ref)
-        .def_readwrite("alpha", &ThermalDeviceConfig::alpha);
+        .def_readwrite("alpha", &ThermalDeviceConfig::alpha)
+        .def_readwrite("shared_sink_id", &ThermalDeviceConfig::shared_sink_id)
+        .def_readwrite("shared_sink_rth", &ThermalDeviceConfig::shared_sink_rth)
+        .def_readwrite("shared_sink_cth", &ThermalDeviceConfig::shared_sink_cth);
 
     py::class_<DeviceThermalTelemetry>(v2, "DeviceThermalTelemetry",
         "Per-device thermal telemetry")

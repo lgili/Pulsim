@@ -369,6 +369,11 @@ struct ThermalDeviceConfig {
     Real temp_init = 25.0;
     Real temp_ref = 25.0;
     Real alpha = 0.004;
+    // Optional shared sink descriptor. Devices with the same non-empty id
+    // contribute power to a common sink RC and inherit its temperature rise.
+    std::string shared_sink_id;
+    Real shared_sink_rth = 0.0;
+    Real shared_sink_cth = 0.0;
 };
 
 struct DeviceThermalTelemetry {

@@ -1560,6 +1560,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
     }
 
     YAML::Node components = root["components"];
+    std::unordered_map<std::string, std::pair<Real, Real>> shared_sink_defs;
 
     for (const auto& comp_node_raw : components) {
         YAML::Node comp_node = comp_node_raw;
@@ -1798,7 +1799,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             validate_keys(
                 thermal,
                 {"enabled", "network", "rth", "cth", "rth_stages", "cth_stages",
-                 "temp_init", "temp_ref", "alpha"},
+                 "temp_init", "temp_ref", "alpha",
+                 "shared_sink_id", "shared_sink_rth", "shared_sink_cth"},
                           name + ".thermal", errors_, options_.strict);
             ThermalDeviceConfig cfg;
             if (const auto enabled = parse_bool_scalar(
@@ -1936,6 +1938,55 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (thermal["temp_init"]) cfg.temp_init = parse_real(thermal["temp_init"], name + ".thermal.temp_init", errors_);
             if (thermal["temp_ref"]) cfg.temp_ref = parse_real(thermal["temp_ref"], name + ".thermal.temp_ref", errors_);
             if (thermal["alpha"]) cfg.alpha = parse_real(thermal["alpha"], name + ".thermal.alpha", errors_);
+            if (const auto sink_id = parse_string_scalar(
+                    thermal["shared_sink_id"], name + ".thermal.shared_sink_id", errors_);
+                sink_id.has_value()) {
+                cfg.shared_sink_id = *sink_id;
+            }
+
+            const bool has_shared_sink_rth = is_set(thermal["shared_sink_rth"]);
+            const bool has_shared_sink_cth = is_set(thermal["shared_sink_cth"]);
+            if (!cfg.shared_sink_id.empty()) {
+                if (has_shared_sink_rth) {
+                    cfg.shared_sink_rth = parse_real(
+                        thermal["shared_sink_rth"],
+                        name + ".thermal.shared_sink_rth",
+                        errors_);
+                } else if (options_.strict) {
+                    push_error(errors_,
+                               kDiagThermalMissingRequired,
+                               "Missing required field '" + name +
+                                   ".thermal.shared_sink_rth' when shared_sink_id is set");
+                } else {
+                    cfg.shared_sink_rth = options.thermal.default_rth;
+                    push_warning(
+                        warnings_,
+                        kDiagThermalDefaultApplied,
+                        "Applied simulation.thermal.default_rth to '" + name + ".thermal.shared_sink_rth'");
+                }
+
+                if (has_shared_sink_cth) {
+                    cfg.shared_sink_cth = parse_real(
+                        thermal["shared_sink_cth"],
+                        name + ".thermal.shared_sink_cth",
+                        errors_);
+                } else if (options_.strict) {
+                    push_error(errors_,
+                               kDiagThermalMissingRequired,
+                               "Missing required field '" + name +
+                                   ".thermal.shared_sink_cth' when shared_sink_id is set");
+                } else {
+                    cfg.shared_sink_cth = options.thermal.default_cth;
+                    push_warning(
+                        warnings_,
+                        kDiagThermalDefaultApplied,
+                        "Applied simulation.thermal.default_cth to '" + name + ".thermal.shared_sink_cth'");
+                }
+            } else if (has_shared_sink_rth || has_shared_sink_cth) {
+                push_error(errors_,
+                           kDiagThermalInvalidRange,
+                           name + ".thermal.shared_sink_rth/shared_sink_cth require non-empty shared_sink_id");
+            }
 
             if (cfg.enabled) {
                 if (!std::isfinite(cfg.rth) || cfg.rth <= 0.0) {
@@ -1957,6 +2008,42 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 if (!std::isfinite(cfg.alpha)) {
                     push_error(errors_, kDiagThermalInvalidRange,
                                name + ".thermal.alpha must be finite");
+                }
+                if (!cfg.shared_sink_id.empty()) {
+                    if (!std::isfinite(cfg.shared_sink_rth) || cfg.shared_sink_rth <= 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.shared_sink_rth must be finite and > 0");
+                    }
+                    if (!std::isfinite(cfg.shared_sink_cth) || cfg.shared_sink_cth < 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.shared_sink_cth must be finite and >= 0");
+                    }
+                    if (std::isfinite(cfg.shared_sink_rth) &&
+                        std::isfinite(cfg.shared_sink_cth) &&
+                        cfg.shared_sink_rth > 0.0 &&
+                        cfg.shared_sink_cth >= 0.0) {
+                        if (const auto sink_it = shared_sink_defs.find(cfg.shared_sink_id);
+                            sink_it == shared_sink_defs.end()) {
+                            shared_sink_defs.emplace(
+                                cfg.shared_sink_id,
+                                std::make_pair(cfg.shared_sink_rth, cfg.shared_sink_cth));
+                        } else {
+                            const auto nearly_same = [](Real a, Real b) {
+                                const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
+                                return std::abs(a - b) <= scale * Real{1e-12};
+                            };
+                            if (!nearly_same(cfg.shared_sink_rth, sink_it->second.first) ||
+                                !nearly_same(cfg.shared_sink_cth, sink_it->second.second)) {
+                                push_error(
+                                    errors_,
+                                    kDiagThermalInvalidRange,
+                                    name + ".thermal shared sink '" + cfg.shared_sink_id +
+                                        "' must reuse the same shared_sink_rth/shared_sink_cth as other members");
+                            }
+                        }
+                    }
                 }
             }
 

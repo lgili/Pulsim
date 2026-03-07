@@ -516,6 +516,9 @@ class ThermalDeviceConfig:
     temp_init: float
     temp_ref: float
     alpha: float
+    shared_sink_id: str
+    shared_sink_rth: float
+    shared_sink_cth: float
 
     def __init__(self) -> None: ...
 

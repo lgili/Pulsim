@@ -907,11 +907,15 @@ public:
         const auto& conns = circuit_.connections();
         states_.assign(devices.size(), DeviceThermalState{});
         thermal_scale_.assign(devices.size(), 1.0);
+        device_sink_index_.assign(devices.size(), -1);
+        shared_sinks_.clear();
 
         if (!options_.thermal.enable) {
             circuit_.reset_device_temperature_scales();
             return;
         }
+
+        std::unordered_map<std::string, std::size_t, TransparentStringHash, std::equal_to<>> sink_by_id;
 
         for (std::size_t i = 0; i < devices.size(); ++i) {
             bool supports_thermal = false;
@@ -947,6 +951,20 @@ public:
             const Real ambient = options_.thermal.ambient;
             const Real delta_init = state.config.temp_init - ambient;
 
+            if (!state.config.shared_sink_id.empty()) {
+                const auto [it, inserted] = sink_by_id.try_emplace(
+                    state.config.shared_sink_id,
+                    shared_sinks_.size());
+                if (inserted) {
+                    SharedSinkState sink;
+                    sink.id = state.config.shared_sink_id;
+                    sink.rth = std::max<Real>(state.config.shared_sink_rth, 1e-12);
+                    sink.cth = std::max<Real>(state.config.shared_sink_cth, 0.0);
+                    shared_sinks_.push_back(std::move(sink));
+                }
+                device_sink_index_[i] = static_cast<int>(it->second);
+            }
+
             if (state.config.network_kind == ThermalNetworkKind::Foster &&
                 state.config.stage_rth.size() == state.config.stage_cth.size() &&
                 !state.config.stage_rth.empty()) {
@@ -962,22 +980,22 @@ public:
                 } else if (!state.stage_temperature_rise.empty()) {
                     state.stage_temperature_rise[0] = delta_init;
                 }
-                state.temperature =
-                    ambient + std::accumulate(
-                                  state.stage_temperature_rise.begin(),
-                                  state.stage_temperature_rise.end(),
-                                  Real{0.0});
+                state.local_temperature_rise = std::accumulate(
+                    state.stage_temperature_rise.begin(),
+                    state.stage_temperature_rise.end(),
+                    Real{0.0});
             } else if (state.config.network_kind == ThermalNetworkKind::Cauer &&
                        state.config.stage_rth.size() == state.config.stage_cth.size() &&
                        !state.config.stage_rth.empty()) {
                 state.stage_temperature_rise.assign(state.config.stage_rth.size(), delta_init);
                 state.stage_work.assign(state.config.stage_rth.size(), 0.0);
-                state.temperature = ambient + state.stage_temperature_rise.front();
+                state.local_temperature_rise = state.stage_temperature_rise.front();
             } else {
                 state.config.network_kind = ThermalNetworkKind::SingleRC;
-                state.temperature = state.config.temp_init;
+                state.local_temperature_rise = delta_init;
                 state.stage_work.clear();
             }
+            state.temperature = ambient + state.local_temperature_rise;
             state.peak_temperature = state.temperature;
             // Keep summary average consistent with exported time traces, which include t=tstart.
             state.sum_temperature = state.temperature;
@@ -1019,6 +1037,36 @@ public:
             return;
         }
 
+        if (!shared_sinks_.empty()) {
+            for (auto& sink : shared_sinks_) {
+                sink.step_power = 0.0;
+            }
+            for (std::size_t i = 0; i < states_.size() && i < device_sink_index_.size(); ++i) {
+                if (!states_[i].enabled) {
+                    continue;
+                }
+                const int sink_index = device_sink_index_[i];
+                if (sink_index < 0 || static_cast<std::size_t>(sink_index) >= shared_sinks_.size()) {
+                    continue;
+                }
+                shared_sinks_[static_cast<std::size_t>(sink_index)].step_power +=
+                    std::max<Real>(0.0, device_power[i]);
+            }
+            for (auto& sink : shared_sinks_) {
+                const Real rth = std::max<Real>(sink.rth, 1e-12);
+                if (sink.cth <= 0.0) {
+                    sink.temperature_rise = sink.step_power * rth;
+                } else {
+                    const Real tau = std::max<Real>(rth * sink.cth, 1e-18);
+                    const Real a = std::exp(-dt / tau);
+                    sink.temperature_rise = sink.temperature_rise * a + (sink.step_power * rth) * (1.0 - a);
+                }
+                if (!std::isfinite(sink.temperature_rise)) {
+                    sink.temperature_rise = 0.0;
+                }
+            }
+        }
+
         for (std::size_t i = 0; i < states_.size(); ++i) {
             auto& state = states_[i];
             if (!state.enabled) {
@@ -1027,19 +1075,26 @@ public:
 
             const Real power = std::max<Real>(0.0, device_power[i]);
             const Real ambient = options_.thermal.ambient;
+            Real sink_rise = 0.0;
+            if (i < device_sink_index_.size()) {
+                const int sink_index = device_sink_index_[i];
+                if (sink_index >= 0 && static_cast<std::size_t>(sink_index) < shared_sinks_.size()) {
+                    sink_rise = shared_sinks_[static_cast<std::size_t>(sink_index)].temperature_rise;
+                }
+            }
 
             switch (state.config.network_kind) {
                 case ThermalNetworkKind::SingleRC: {
                     const Real rth = std::max<Real>(state.config.rth, 1e-12);
                     const Real cth = state.config.cth;
                     if (cth <= 0.0) {
-                        state.temperature = ambient + power * rth;
+                        state.local_temperature_rise = power * rth;
                     } else {
                         const Real tau = std::max<Real>(rth * cth, 1e-18);
-                        const Real delta = state.temperature - ambient;
                         const Real a = std::exp(-dt / tau);
                         const Real delta_ss = power * rth;
-                        state.temperature = ambient + delta * a + delta_ss * (1.0 - a);
+                        state.local_temperature_rise =
+                            state.local_temperature_rise * a + delta_ss * (1.0 - a);
                     }
                     break;
                 }
@@ -1064,7 +1119,7 @@ public:
                         state.stage_temperature_rise.begin(),
                         state.stage_temperature_rise.end(),
                         Real{0.0});
-                    state.temperature = ambient + delta;
+                    state.local_temperature_rise = delta;
                     break;
                 }
                 case ThermalNetworkKind::Cauer: {
@@ -1110,13 +1165,17 @@ public:
                         theta[stage - 1] -= cprime[stage - 1] * theta[stage];
                     }
 
-                    state.temperature = ambient + state.stage_temperature_rise.front();
+                    state.local_temperature_rise = state.stage_temperature_rise.front();
                     break;
                 }
             }
 
+            if (!std::isfinite(state.local_temperature_rise)) {
+                state.local_temperature_rise = 0.0;
+            }
+            state.temperature = ambient + sink_rise + state.local_temperature_rise;
             if (!std::isfinite(state.temperature)) {
-                state.temperature = ambient;
+                state.temperature = ambient + sink_rise;
             }
 
             state.peak_temperature = std::max(state.peak_temperature, state.temperature);
@@ -1159,12 +1218,21 @@ public:
         return summary;
     }
 
-private:
+    private:
+    struct SharedSinkState {
+        std::string id;
+        Real rth = 0.0;
+        Real cth = 0.0;
+        Real temperature_rise = 0.0;
+        Real step_power = 0.0;
+    };
+
     struct DeviceThermalState {
         bool enabled = false;
         ThermalDeviceConfig config{};
         std::vector<Real> stage_temperature_rise;
         std::vector<Real> stage_work;
+        Real local_temperature_rise = 0.0;
         Real temperature = 25.0;
         Real peak_temperature = 25.0;
         Real sum_temperature = 0.0;
@@ -1197,6 +1265,8 @@ private:
     const SimulationOptions& options_;
     std::vector<DeviceThermalState> states_;
     std::vector<Real> thermal_scale_;
+    std::vector<int> device_sink_index_;
+    std::vector<SharedSinkState> shared_sinks_;
 };
 
 /// Default scheduler for PWM/dead-time and other event boundaries.

@@ -12,8 +12,8 @@
 
 ## 3. Kernel Thermal Engine
 - [x] 3.1 Implement thermal solver support for `single_rc`, `foster`, and `cauer` networks.
-- [ ] 3.2 Implement optional shared thermal coupling for multiple components on common sink context.
-- [ ] 3.3 Guarantee stable, deterministic thermal integration and bounded temperature-scaling behavior.
+- [x] 3.2 Implement optional shared thermal coupling for multiple components on common sink context.
+- [x] 3.3 Guarantee stable, deterministic thermal integration and bounded temperature-scaling behavior.
 
 ## 4. Runtime Outputs and Metadata
 - [x] 4.1 Export canonical loss channels per component: `Pcond`, `Psw_on`, `Psw_off`, `Prr`, `Ploss`.
@@ -28,7 +28,7 @@
 
 ## 6. Validation and Benchmarking
 - [x] 6.1 Add closed-loop buck electrothermal regression validating PI+PWM control with non-zero semiconductor switching losses.
-- [ ] 6.2 Add component-minimum thermal tests comparing simulated traces against theoretical/expected behavior.
+- [x] 6.2 Add component-minimum thermal tests comparing simulated traces against theoretical/expected behavior.
 - [x] 6.3 Add parser contract tests for strict and non-strict datasheet/thermal definitions.
 - [ ] 6.4 Add electrothermal performance gates (runtime/memory/allocation counters) for rich-loss scenarios.
 

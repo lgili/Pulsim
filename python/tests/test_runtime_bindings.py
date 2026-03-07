@@ -353,6 +353,74 @@ components:
     assert abs(cfg.rth - 1.0) < 1e-12
 
 
+def test_yaml_parser_maps_shared_sink_thermal_fields() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.7
+      cth: 0.02
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.5
+      shared_sink_cth: 0.08
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+
+    assert parser.errors == []
+    cfg = options.thermal_devices["R1"]
+    assert cfg.shared_sink_id == "hs_main"
+    assert abs(cfg.shared_sink_rth - 0.5) < 1e-12
+    assert abs(cfg.shared_sink_cth - 0.08) < 1e-12
+
+
+def test_yaml_parser_rejects_inconsistent_shared_sink_parameters() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [n1, 0]
+    value: 10
+    thermal:
+      enabled: true
+      rth: 0.7
+      cth: 0.02
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.5
+      shared_sink_cth: 0.08
+  - type: resistor
+    name: R2
+    nodes: [n2, 0]
+    value: 20
+    thermal:
+      enabled: true
+      rth: 0.8
+      cth: 0.03
+      shared_sink_id: hs_main
+      shared_sink_rth: 0.4
+      shared_sink_cth: 0.08
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_THERMAL_RANGE_INVALID" in msg for msg in parser.errors)
+    assert any("shared sink 'hs_main'" in msg for msg in parser.errors)
+
+
 def test_yaml_parser_rejects_invalid_thermal_stage_dimensions() -> None:
     content = """
 schema: pulsim-v1
@@ -660,6 +728,69 @@ def test_stiff_cauer_network_remains_finite_with_large_timestep() -> None:
     trace = [float(v) for v in result.virtual_channels["T(R1)"]]
     assert all(math.isfinite(value) for value in trace)
     assert trace[-1] >= trace[0]
+
+
+def test_shared_sink_coupling_heats_other_members() -> None:
+    def run_case(with_shared_sink: bool) -> ps.TransientResult:
+        circuit = ps.Circuit()
+        n_in = circuit.add_node("in")
+        gnd = circuit.ground()
+        circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+        circuit.add_resistor("Rhot", n_in, gnd, 10.0)
+        circuit.add_resistor("Rcool", n_in, gnd, 100.0)
+
+        opts = ps.SimulationOptions()
+        opts.tstart = 0.0
+        opts.tstop = 3e-3
+        opts.dt = 2e-5
+        opts.dt_min = opts.dt
+        opts.dt_max = opts.dt
+        opts.adaptive_timestep = False
+        opts.enable_losses = True
+        opts.thermal.enable = True
+        opts.thermal.ambient = 25.0
+
+        cfg_hot = ps.ThermalDeviceConfig()
+        cfg_hot.enabled = True
+        cfg_hot.rth = 0.3
+        cfg_hot.cth = 0.02
+        cfg_hot.temp_init = 25.0
+        cfg_hot.temp_ref = 25.0
+        cfg_hot.alpha = 0.0
+
+        cfg_cool = ps.ThermalDeviceConfig()
+        cfg_cool.enabled = True
+        cfg_cool.rth = 0.3
+        cfg_cool.cth = 0.02
+        cfg_cool.temp_init = 25.0
+        cfg_cool.temp_ref = 25.0
+        cfg_cool.alpha = 0.0
+
+        if with_shared_sink:
+            cfg_hot.shared_sink_id = "HS1"
+            cfg_hot.shared_sink_rth = 0.25
+            cfg_hot.shared_sink_cth = 0.04
+            cfg_cool.shared_sink_id = "HS1"
+            cfg_cool.shared_sink_rth = 0.25
+            cfg_cool.shared_sink_cth = 0.04
+
+        opts.thermal_devices = {"Rhot": cfg_hot, "Rcool": cfg_cool}
+        result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+        assert result.success
+        return result
+
+    isolated = run_case(with_shared_sink=False)
+    coupled = run_case(with_shared_sink=True)
+
+    t_cool_iso = [float(v) for v in isolated.virtual_channels["T(Rcool)"]]
+    t_cool_cpl = [float(v) for v in coupled.virtual_channels["T(Rcool)"]]
+    t_hot_iso = [float(v) for v in isolated.virtual_channels["T(Rhot)"]]
+    t_hot_cpl = [float(v) for v in coupled.virtual_channels["T(Rhot)"]]
+
+    assert len(t_cool_iso) == len(t_cool_cpl)
+    assert len(t_hot_iso) == len(t_hot_cpl)
+    assert t_cool_cpl[-1] > t_cool_iso[-1] + 0.25
+    assert t_hot_cpl[-1] > t_hot_iso[-1] + 0.25
 
 
 def test_datasheet_switching_surface_drives_event_loss_channels() -> None:
