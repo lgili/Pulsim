@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import yaml
@@ -314,6 +315,10 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
                     "dae_fallback_steps": 2.0,
                     "loss_energy_balance_error": 0.012,
                     "thermal_peak_temperature_delta": 18.0,
+                    "runtime_module_order_crc32": 101.0,
+                    "runtime_module_count_match": 1.0,
+                    "output_reallocation_total": 0.0,
+                    "output_reallocation_free": 1.0,
                     "component_coverage_rate": 1.0,
                     "component_coverage_gap": 0.0,
                     "component_loss_summary_consistency_error": 0.0,
@@ -328,6 +333,10 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
                     "dae_fallback_steps": 4.0,
                     "loss_energy_balance_error": 0.008,
                     "thermal_peak_temperature_delta": 22.0,
+                    "runtime_module_order_crc32": 101.0,
+                    "runtime_module_count_match": 1.0,
+                    "output_reallocation_total": 0.0,
+                    "output_reallocation_free": 1.0,
                     "component_coverage_rate": 0.9,
                     "component_coverage_gap": 0.1,
                     "component_loss_summary_consistency_error": 1.0e-4,
@@ -342,12 +351,44 @@ def test_compute_metrics_includes_electrothermal_metrics(tmp_path: Path) -> None
     metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
     assert metrics["state_space_primary_ratio"] == 14.0 / 20.0
     assert metrics["dae_fallback_ratio"] == 6.0 / 20.0
+    assert metrics["module_order_mismatch_rate"] == 0.0
+    assert metrics["module_order_count_match_rate"] == 1.0
+    assert metrics["module_output_reallocation_p95"] == 0.0
+    assert metrics["module_output_reallocation_free_rate"] == 1.0
     assert metrics["loss_energy_balance_error"] == 0.01
     assert metrics["thermal_peak_temperature_delta"] == 20.0
     assert metrics["component_coverage_rate"] == 0.95
     assert metrics["component_coverage_gap"] == 0.05
     assert metrics["component_loss_summary_consistency_error"] == 5.0e-5
     assert metrics["component_thermal_summary_consistency_error"] == 2.5e-5
+
+
+def test_compute_metrics_detects_module_order_mismatch_rate(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {"runtime_module_order_crc32": 55.0, "output_reallocation_total": 0.0},
+            },
+            {
+                "status": "passed",
+                "runtime_s": 0.11,
+                "telemetry": {"runtime_module_order_crc32": 55.0, "output_reallocation_total": 0.0},
+            },
+            {
+                "status": "passed",
+                "runtime_s": 0.12,
+                "telemetry": {"runtime_module_order_crc32": 99.0, "output_reallocation_total": 1.0},
+            },
+        ]
+    }
+    bench_path = tmp_path / "bench.json"
+    _write_json(bench_path, bench_results)
+
+    metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
+    assert metrics["module_order_mismatch_rate"] == 1.0 / 3.0
+    assert math.isclose(float(metrics["module_output_reallocation_p95"]), 0.9, rel_tol=0.0, abs_tol=1e-12)
 
 
 def test_compute_metrics_runtime_quantiles_can_use_case_filter(tmp_path: Path) -> None:

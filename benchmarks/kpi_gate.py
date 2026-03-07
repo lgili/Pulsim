@@ -511,7 +511,7 @@ def compute_metrics(
         else None
     )
 
-    def telemetry_mean(metric_name: str) -> Optional[float]:
+    def telemetry_values(metric_name: str) -> list[float]:
         values: list[float] = []
         for row in executed:
             telemetry = row.get("telemetry")
@@ -524,9 +524,33 @@ def compute_metrics(
             if not math.isfinite(numeric):
                 continue
             values.append(numeric)
+        return values
+
+    def telemetry_mean(metric_name: str) -> Optional[float]:
+        values = telemetry_values(metric_name)
         if not values:
             return None
         return float(sum(values) / len(values))
+
+    module_order_crc_values = telemetry_values("runtime_module_order_crc32")
+    if module_order_crc_values:
+        histogram: Dict[int, int] = {}
+        for value in module_order_crc_values:
+            key = int(round(value))
+            histogram[key] = histogram.get(key, 0) + 1
+        dominant_count = max(histogram.values()) if histogram else 0
+        metrics["module_order_mismatch_rate"] = (
+            float(len(module_order_crc_values) - dominant_count) / float(len(module_order_crc_values))
+            if module_order_crc_values
+            else None
+        )
+    else:
+        metrics["module_order_mismatch_rate"] = None
+    metrics["module_order_count_match_rate"] = telemetry_mean("runtime_module_count_match")
+
+    output_reallocation_values = telemetry_values("output_reallocation_total")
+    metrics["module_output_reallocation_p95"] = _quantile(output_reallocation_values, 0.95)
+    metrics["module_output_reallocation_free_rate"] = telemetry_mean("output_reallocation_free")
 
     metrics["loss_energy_balance_error"] = telemetry_mean("loss_energy_balance_error")
     metrics["thermal_peak_temperature_delta"] = telemetry_mean("thermal_peak_temperature_delta")
@@ -794,7 +818,7 @@ def main() -> int:
     parser.add_argument(
         "--baseline",
         type=Path,
-        default=Path("benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json"),
+        default=Path("benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json"),
     )
     parser.add_argument(
         "--thresholds",

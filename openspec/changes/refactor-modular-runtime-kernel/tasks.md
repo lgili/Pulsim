@@ -1,7 +1,7 @@
 ## 0. Baseline and guardrails
-- [ ] 0.1 Freeze runtime benchmark and telemetry baselines before extraction.
-- [ ] 0.2 Define module-level regression KPIs (`determinism`, `allocation`, `runtime_p95`).
-- [ ] 0.3 Add CI gate for module-level KPI regression.
+- [x] 0.1 Freeze runtime benchmark and telemetry baselines before extraction.
+- [x] 0.2 Define module-level regression KPIs (`determinism`, `allocation`, `runtime_p95`).
+- [x] 0.3 Add CI gate for module-level KPI regression.
 
 ## 1. Module contract scaffolding
 - [x] 1.1 Introduce runtime module interface and lifecycle hook contracts.
@@ -26,7 +26,7 @@
 - [x] 4.1 Add deterministic replay tests for module output order.
 - [x] 4.2 Add hot-path allocation tests for stable-topology stepping.
 - [x] 4.3 Add channel/summary consistency tests under modular execution.
-- [ ] 4.4 Run benchmark/parity/stress and compare against frozen baseline.
+- [x] 4.4 Run benchmark/parity/stress and compare against frozen baseline.
 
 ## 5. Documentation and contributor onboarding
 - [x] 5.1 Document module architecture and extension points for contributors.

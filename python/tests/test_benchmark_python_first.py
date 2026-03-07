@@ -107,6 +107,9 @@ def test_run_benchmarks_uses_python_backend_without_cli(tmp_path: Path) -> None:
     assert result.telemetry.get("component_declared_count") == 3.0
     assert result.telemetry.get("component_reported_count") == 3.0
     assert result.telemetry.get("component_coverage_rate") == 1.0
+    assert result.telemetry.get("runtime_module_count", 0.0) >= 5.0
+    assert result.telemetry.get("runtime_module_count_match") == 1.0
+    assert result.telemetry.get("output_reallocation_total", 0.0) >= 0.0
 
 
 def test_reference_validation_missing_baseline_is_failed_not_skipped(tmp_path: Path) -> None:

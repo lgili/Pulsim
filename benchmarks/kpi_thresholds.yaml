@@ -9,6 +9,14 @@ metrics:
     direction: lower_is_better
     max_regression_rel: 0.05
     required: true
+  module_order_mismatch_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
+  module_output_reallocation_p95:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
   state_space_primary_ratio:
     direction: higher_is_better
     max_regression_abs: 0.01

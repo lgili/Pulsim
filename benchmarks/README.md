@@ -39,7 +39,7 @@ python3 benchmarks/kpi_gate.py \
 
 # Freeze a new baseline snapshot from a validated run
 python3 benchmarks/freeze_kpi_baseline.py \
-  --baseline-id phase0_2026-02-25 \
+  --baseline-id modular_runtime_phase13_2026-03-07 \
   --bench-results benchmarks/out/results.json \
   --stress-summary benchmarks/stress_out/stress_summary.json \
   --source-artifacts-root benchmarks/out
@@ -120,7 +120,8 @@ Python-first runtime defaults (fixed-step unless explicitly overridden).
 Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `state_space_primary_ratio`, `dae_fallback_ratio`, `loss_energy_balance_error`,
 `thermal_peak_temperature_delta`, `component_coverage_rate`, `component_coverage_gap`,
-`component_loss_summary_consistency_error`, and `component_thermal_summary_consistency_error`.
+`component_loss_summary_consistency_error`, `component_thermal_summary_consistency_error`,
+`runtime_module_order_crc32`, `runtime_module_count_match`, and `output_reallocation_total`.
 
 `benchmark_ngspice.py` also emits:
 

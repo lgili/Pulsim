@@ -7,6 +7,7 @@ import csv
 import importlib
 import sys
 import time
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -174,6 +175,59 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
     linear_factor_cache_misses = (
         float(getattr(backend, "linear_factor_cache_misses", 0.0)) if backend is not None else None
     )
+    runtime_module_count = (
+        float(getattr(backend, "runtime_module_count", 0.0)) if backend is not None else None
+    )
+    runtime_module_order_crc32: Optional[float] = None
+    runtime_module_count_match: Optional[float] = None
+    if backend is not None:
+        try:
+            runtime_module_order = str(getattr(backend, "runtime_module_order", "")).strip()
+            if runtime_module_order:
+                runtime_module_order_crc32 = float(
+                    zlib.crc32(runtime_module_order.encode("utf-8")) & 0xFFFFFFFF
+                )
+                normalized_order = runtime_module_order.replace(">", ",")
+                order_tokens = [
+                    token.strip()
+                    for token in normalized_order.split(",")
+                    if token.strip()
+                ]
+                if runtime_module_count is not None and runtime_module_count > 0.0:
+                    runtime_module_count_match = (
+                        1.0 if int(runtime_module_count) == len(order_tokens) else 0.0
+                    )
+        except Exception:
+            runtime_module_order_crc32 = None
+            runtime_module_count_match = None
+
+    reserved_output_samples = (
+        float(getattr(backend, "reserved_output_samples", 0.0)) if backend is not None else None
+    )
+    time_series_reallocations = (
+        float(getattr(backend, "time_series_reallocations", 0.0)) if backend is not None else None
+    )
+    state_series_reallocations = (
+        float(getattr(backend, "state_series_reallocations", 0.0)) if backend is not None else None
+    )
+    virtual_channel_reallocations = (
+        float(getattr(backend, "virtual_channel_reallocations", 0.0))
+        if backend is not None
+        else None
+    )
+    output_reallocation_total: Optional[float] = None
+    output_reallocation_free: Optional[float] = None
+    if (
+        time_series_reallocations is not None
+        and state_series_reallocations is not None
+        and virtual_channel_reallocations is not None
+    ):
+        output_reallocation_total = (
+            time_series_reallocations
+            + state_series_reallocations
+            + virtual_channel_reallocations
+        )
+        output_reallocation_free = 1.0 if output_reallocation_total == 0.0 else 0.0
 
     state_space_primary_ratio: Optional[float]
     if state_space_primary_steps is None or dae_fallback_steps is None:
@@ -329,6 +383,15 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         "segment_model_cache_misses": segment_model_cache_misses,
         "linear_factor_cache_hits": linear_factor_cache_hits,
         "linear_factor_cache_misses": linear_factor_cache_misses,
+        "runtime_module_count": runtime_module_count,
+        "runtime_module_order_crc32": runtime_module_order_crc32,
+        "runtime_module_count_match": runtime_module_count_match,
+        "reserved_output_samples": reserved_output_samples,
+        "time_series_reallocations": time_series_reallocations,
+        "state_series_reallocations": state_series_reallocations,
+        "virtual_channel_reallocations": virtual_channel_reallocations,
+        "output_reallocation_total": output_reallocation_total,
+        "output_reallocation_free": output_reallocation_free,
         "state_space_primary_ratio": state_space_primary_ratio,
         "dae_fallback_ratio": dae_fallback_ratio,
         "loss_total_power_w": loss_total_power_w,

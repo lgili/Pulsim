@@ -81,7 +81,7 @@ python3 benchmarks/kpi_gate.py \
 
 Baseline and threshold files:
 
-- `benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json`
+- `benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json`
 - `benchmarks/kpi_thresholds.yaml`
 
 ## Artifact Contract
@@ -102,3 +102,6 @@ Primary hybrid/electro-thermal KPI keys emitted in benchmark outputs:
 - `component_coverage_gap`
 - `component_loss_summary_consistency_error`
 - `component_thermal_summary_consistency_error`
+- `runtime_module_order_crc32`
+- `runtime_module_count_match`
+- `output_reallocation_total`

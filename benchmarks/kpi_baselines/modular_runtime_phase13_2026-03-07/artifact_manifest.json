@@ -1,0 +1,27 @@
+{
+  "baseline_id": "modular_runtime_phase13_2026-03-07",
+  "captured_at_utc": "2026-03-07T19:12:11.759520+00:00",
+  "files": [
+    {
+      "path": "benchmarks/phase13_artifacts/benchmarks/results.json",
+      "sha256": "5e2d50daa8754d14816d9ed9ae136a349808903e8bce6acc1a6a9883822775f3",
+      "size_bytes": 54769
+    },
+    {
+      "path": "benchmarks/phase13_artifacts/stress/stress_summary.json",
+      "sha256": "46da83928acfa364d5fa4efd0b0a6143d0f3699be1bbf87aa82a293f4cff8a38",
+      "size_bytes": 1373
+    },
+    {
+      "path": "benchmarks/phase13_artifacts/parity_ltspice/parity_results.json",
+      "sha256": "25ac7367ca27b0b08e194dd435b193891d8b5d89787698a5ec274cc3b0804428",
+      "size_bytes": 19874
+    },
+    {
+      "path": "benchmarks/phase13_artifacts/parity_ngspice/parity_results.json",
+      "sha256": "7714953f00466f371aa53df42f52112749379db14fd2600b3664a9841947989c",
+      "size_bytes": 16733
+    }
+  ],
+  "schema_version": "pulsim-kpi-baseline-manifest-v1"
+}
