@@ -1132,6 +1132,29 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("eoff", &SwitchingEnergy::eoff)
         .def_readwrite("err", &SwitchingEnergy::err);
 
+    py::class_<SwitchingEnergySurface3D>(
+        v2,
+        "SwitchingEnergySurface3D",
+        "Datasheet switching-energy surface in (current, voltage, temperature)")
+        .def(py::init<>())
+        .def_readwrite("current_axis", &SwitchingEnergySurface3D::current_axis)
+        .def_readwrite("voltage_axis", &SwitchingEnergySurface3D::voltage_axis)
+        .def_readwrite("temperature_axis", &SwitchingEnergySurface3D::temperature_axis)
+        .def_readwrite("eon_table", &SwitchingEnergySurface3D::eon_table)
+        .def_readwrite("eoff_table", &SwitchingEnergySurface3D::eoff_table)
+        .def_readwrite("err_table", &SwitchingEnergySurface3D::err_table)
+        .def("has_eon", &SwitchingEnergySurface3D::has_eon)
+        .def("has_eoff", &SwitchingEnergySurface3D::has_eoff)
+        .def("has_err", &SwitchingEnergySurface3D::has_err)
+        .def("expected_table_size", &SwitchingEnergySurface3D::expected_table_size)
+        .def("valid_shape", &SwitchingEnergySurface3D::valid_shape)
+        .def("evaluate_eon", &SwitchingEnergySurface3D::evaluate_eon,
+             py::arg("current"), py::arg("voltage"), py::arg("temperature"))
+        .def("evaluate_eoff", &SwitchingEnergySurface3D::evaluate_eoff,
+             py::arg("current"), py::arg("voltage"), py::arg("temperature"))
+        .def("evaluate_err", &SwitchingEnergySurface3D::evaluate_err,
+             py::arg("current"), py::arg("voltage"), py::arg("temperature"));
+
     py::class_<LinearSolverTelemetry>(v2, "LinearSolverTelemetry",
         "Linear solver runtime telemetry")
         .def(py::init<>())
@@ -1401,6 +1424,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("enable_events", &SimulationOptions::enable_events)
         .def_readwrite("enable_losses", &SimulationOptions::enable_losses)
         .def_readwrite("switching_energy", &SimulationOptions::switching_energy)
+        .def_readwrite("switching_energy_surfaces", &SimulationOptions::switching_energy_surfaces)
         .def_readwrite("thermal", &SimulationOptions::thermal)
         .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
@@ -1489,6 +1513,8 @@ void init_v2_module(py::module_& v2) {
            "Run harmonic balance with explicit initial state")
         .def("set_switching_energy", &Simulator::set_switching_energy,
              py::arg("device_name"), py::arg("energy"))
+        .def("set_switching_energy_surface", &Simulator::set_switching_energy_surface,
+             py::arg("device_name"), py::arg("surface"))
         .def_property("options",
             [](const Simulator& sim) { return sim.options(); },
             &Simulator::set_options,

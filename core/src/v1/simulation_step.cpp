@@ -441,12 +441,42 @@ void Simulator::record_switch_event(const SwitchMonitor& sw, Real time,
         event_callback(se);
     }
 
-    // Accumulate switching energy if configured
-    const auto it = options_.switching_energy.find(sw.name);
-    if (it != options_.switching_energy.end()) {
-        const Real e = new_state ? it->second.eon : it->second.eoff;
+    // Accumulate switching energy from scalar or datasheet surface model.
+    const Real e = resolve_switching_event_energy(sw.name, new_state, v_switch, i_switch);
+    if (e > 0.0) {
         accumulate_switching_loss(sw.name, new_state, e);
     }
+}
+
+/// Resolves event switching energy from scalar or datasheet loss models.
+[[nodiscard]] Real Simulator::resolve_switching_event_energy(const std::string& name,
+                                                             bool turning_on,
+                                                             Real voltage,
+                                                             Real current) const {
+    const Real i_abs = std::abs(current);
+    const Real v_abs = std::abs(voltage);
+
+    if (const auto it = options_.switching_energy_surfaces.find(name);
+        it != options_.switching_energy_surfaces.end()) {
+        Real temperature = options_.thermal.ambient;
+        const auto index_it = device_index_.find(name);
+        if (index_it != device_index_.end() && transient_services_.thermal_service) {
+            temperature = transient_services_.thermal_service->device_temperature(index_it->second);
+        }
+
+        const Real e = turning_on
+            ? it->second.evaluate_eon(i_abs, v_abs, temperature)
+            : it->second.evaluate_eoff(i_abs, v_abs, temperature);
+        return std::max<Real>(0.0, e);
+    }
+
+    if (const auto it = options_.switching_energy.find(name);
+        it != options_.switching_energy.end()) {
+        const Real e = turning_on ? it->second.eon : it->second.eoff;
+        return std::max<Real>(0.0, e);
+    }
+
+    return 0.0;
 }
 
 /// Accumulates discrete turn-on/off switching energy into the loss service.

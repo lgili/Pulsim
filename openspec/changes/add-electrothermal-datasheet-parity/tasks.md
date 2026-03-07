@@ -1,13 +1,13 @@
 ## 1. Schema and Contracts
-- [ ] 1.1 Extend YAML schema for datasheet loss characterization (`scalar` and `datasheet` modes) with strict validation.
+- [x] 1.1 Extend YAML schema for datasheet loss characterization (`scalar` and `datasheet` modes) with strict validation.
 - [ ] 1.2 Extend YAML schema for thermal network kinds (`single_rc`, `foster`, `cauer`) and optional shared coupling descriptors.
-- [ ] 1.3 Add deterministic diagnostics for dimensional mismatch, invalid ranges, and unsupported combinations.
-- [ ] 1.4 Preserve backward compatibility mappings for existing `loss` and `thermal` blocks.
+- [x] 1.3 Add deterministic diagnostics for dimensional mismatch, invalid ranges, and unsupported combinations.
+- [x] 1.4 Preserve backward compatibility mappings for existing `loss` and `thermal` blocks.
 
 ## 2. Kernel Loss Engine
-- [ ] 2.1 Implement multidimensional interpolation path for `Eon/Eoff/Err` and temperature-dependent conduction models.
+- [x] 2.1 Implement multidimensional interpolation path for `Eon/Eoff/Err` and temperature-dependent conduction models.
 - [x] 2.2 Generalize switching-event detection to include forced `MOSFET`/`IGBT` transitions and native switching components.
-- [ ] 2.3 Ensure diode reverse-recovery loss accounting is consistent with event transitions and configured data.
+- [x] 2.3 Ensure diode reverse-recovery loss accounting is consistent with event transitions and configured data.
 - [ ] 2.4 Keep deterministic ordering and no unplanned hot-loop allocations after warm-up.
 
 ## 3. Kernel Thermal Engine
@@ -22,14 +22,14 @@
 - [x] 4.4 Enforce exact consistency checks between channel reductions and summary telemetry surfaces.
 
 ## 5. Python Bindings
-- [ ] 5.1 Expose typed Python API for new loss characterization and thermal network structures.
-- [ ] 5.2 Expose runtime result channels/metadata without requiring name-based heuristics.
-- [ ] 5.3 Preserve backward-compatible summaries and existing procedural/class APIs.
+- [x] 5.1 Expose typed Python API for new loss characterization and thermal network structures.
+- [x] 5.2 Expose runtime result channels/metadata without requiring name-based heuristics.
+- [x] 5.3 Preserve backward-compatible summaries and existing procedural/class APIs.
 
 ## 6. Validation and Benchmarking
 - [x] 6.1 Add closed-loop buck electrothermal regression validating PI+PWM control with non-zero semiconductor switching losses.
 - [ ] 6.2 Add component-minimum thermal tests comparing simulated traces against theoretical/expected behavior.
-- [ ] 6.3 Add parser contract tests for strict and non-strict datasheet/thermal definitions.
+- [x] 6.3 Add parser contract tests for strict and non-strict datasheet/thermal definitions.
 - [ ] 6.4 Add electrothermal performance gates (runtime/memory/allocation counters) for rich-loss scenarios.
 
 ## 7. Documentation and GUI Boundary

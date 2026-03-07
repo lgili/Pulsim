@@ -377,6 +377,76 @@ components:
     assert any("M1.loss.err" in msg for msg in parser.errors)
 
 
+def test_yaml_parser_rejects_invalid_datasheet_loss_dimensions() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [g, d, s]
+    vth: 2.5
+    kp: 0.2
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0]
+        voltage: [0.0, 20.0]
+        temperature: [25.0, 125.0]
+      eon: [1e-6, 1e-6, 1e-6]
+      eoff: [2e-6, 2e-6, 2e-6, 2e-6]
+  - type: resistor
+    name: R1
+    nodes: [s, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_LOSS_DIMENSION_INVALID" in msg for msg in parser.errors)
+    assert any("M1.loss.eon" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_accepts_valid_datasheet_loss_in_strict_mode() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [g, d, s]
+    vth: 2.5
+    kp: 0.2
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0]
+        voltage: [0.0, 20.0]
+        temperature: [25.0, 125.0]
+      eon: [1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6]
+      eoff: [2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6]
+  - type: resistor
+    name: R1
+    nodes: [s, 0]
+    value: 10
+"""
+    parser_opts = ps.YamlParserOptions()
+    parser_opts.strict = True
+    parser = ps.YamlParser(parser_opts)
+    parser.load_string(content)
+    assert parser.errors == []
+
+
 def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     circuit = ps.Circuit()
     n_gate = circuit.add_node("gate")
@@ -427,6 +497,132 @@ def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     rload = next(item for item in result.component_electrothermal if item.component_name == "Rload")
     assert rload.thermal_enabled
     assert rload.final_temperature >= result.thermal_summary.ambient
+
+
+def test_datasheet_switching_surface_drives_event_loss_channels() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-3
+  dt: 1e-6
+  step_mode: fixed
+  enable_events: true
+  enable_losses: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 20}
+  - type: mosfet
+    name: M1
+    nodes: [0, vin, out]
+    vth: 3.0
+    kp: 0.35
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0]
+        voltage: [0.0, 20.0]
+        temperature: [25.0, 125.0]
+      eon: [2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6, 2e-6]
+      eoff: [3e-6, 3e-6, 3e-6, 3e-6, 3e-6, 3e-6, 3e-6, 3e-6]
+      err: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10
+  - type: pwm_generator
+    name: PWM1
+    nodes: [0]
+    frequency: 10000.0
+    duty: 0.4
+    v_high: 10.0
+    v_low: 0.0
+    target_component: M1
+"""
+    parser = ps.YamlParser()
+    circuit, options = parser.load_string(content)
+    assert parser.errors == []
+
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success
+    assert "Psw_on(M1)" in result.virtual_channels
+    assert "Psw_off(M1)" in result.virtual_channels
+    p_on = [float(v) for v in result.virtual_channels["Psw_on(M1)"]]
+    p_off = [float(v) for v in result.virtual_channels["Psw_off(M1)"]]
+    assert len(p_on) == len(result.time)
+    assert len(p_off) == len(result.time)
+    assert max(p_on) > 0.0
+    assert max(p_off) > 0.0
+
+    def integrate(power: list[float]) -> float:
+        return sum(
+            power[i] * (float(result.time[i]) - float(result.time[i - 1]))
+            for i in range(1, len(result.time))
+        )
+
+    e_on = integrate(p_on)
+    e_off = integrate(p_off)
+    on_events = sum(1 for value in p_on if value > 0.0)
+    off_events = sum(1 for value in p_off if value > 0.0)
+    assert on_events > 0
+    assert off_events > 0
+    assert abs(e_on - on_events * 2e-6) < 1e-11
+    assert abs(e_off - off_events * 3e-6) < 1e-11
+
+
+def test_python_api_switching_energy_surface_override_is_used() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser = ps.YamlParser()
+    circuit, options = parser.load(str(example_path))
+    assert parser.errors == []
+    options.newton_options.num_nodes = int(circuit.num_nodes())
+    options.newton_options.num_branches = int(circuit.num_branches())
+
+    surface = ps.SwitchingEnergySurface3D()
+    surface.current_axis = [0.0, 10.0]
+    surface.voltage_axis = [0.0, 20.0]
+    surface.temperature_axis = [25.0, 125.0]
+    surface.eon_table = [1e-6] * 8
+    surface.eoff_table = [1.5e-6] * 8
+    assert surface.valid_shape()
+    assert surface.expected_table_size() == 8
+    assert abs(surface.evaluate_eon(4.0, 12.0, 60.0) - 1e-6) < 1e-18
+
+    sim = ps.Simulator(circuit, options)
+    sim.set_switching_energy_surface("M1", surface)
+    result = sim.run_transient(circuit.initial_state())
+    assert result.success
+
+    p_on = [float(v) for v in result.virtual_channels["Psw_on(M1)"]]
+    p_off = [float(v) for v in result.virtual_channels["Psw_off(M1)"]]
+
+    def integrate(power: list[float]) -> float:
+        return sum(
+            power[i] * (float(result.time[i]) - float(result.time[i - 1]))
+            for i in range(1, len(result.time))
+        )
+
+    e_on = integrate(p_on)
+    e_off = integrate(p_off)
+    on_events = sum(1 for value in p_on if value > 0.0)
+    off_events = sum(1 for value in p_off if value > 0.0)
+    assert on_events > 0
+    assert off_events > 0
+    assert abs(e_on / on_events - 1e-6) < 1e-11
+    assert abs(e_off / off_events - 1.5e-6) < 1e-11
 
 
 def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal() -> None:

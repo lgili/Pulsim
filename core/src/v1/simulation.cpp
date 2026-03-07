@@ -829,6 +829,21 @@ void Simulator::initialize_loss_tracking() {
  */
 void Simulator::set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy) {
     options_.switching_energy[device_name] = energy;
+    options_.switching_energy_surfaces.erase(device_name);
+    if (transient_services_.loss_service) {
+        transient_services_.loss_service->reset();
+    }
+}
+
+/**
+ * @brief Overrides per-device datasheet switching-energy surface model.
+ * @param device_name Component name.
+ * @param surface 3D datasheet surface in (I, V, Tj).
+ */
+void Simulator::set_switching_energy_surface(const std::string& device_name,
+                                             const SwitchingEnergySurface3D& surface) {
+    options_.switching_energy_surfaces[device_name] = surface;
+    options_.switching_energy.erase(device_name);
     if (transient_services_.loss_service) {
         transient_services_.loss_service->reset();
     }

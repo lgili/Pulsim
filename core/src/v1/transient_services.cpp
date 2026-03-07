@@ -506,7 +506,9 @@ public:
         const auto& conns = circuit_.connections();
         states_.assign(devices.size(), DeviceLossState{});
         switching_energy_.assign(devices.size(), std::nullopt);
+        switching_energy_surfaces_.assign(devices.size(), std::nullopt);
         diode_conducting_.assign(devices.size(), false);
+        diode_last_forward_current_.assign(devices.size(), 0.0);
         pending_turn_on_energy_.assign(devices.size(), 0.0);
         pending_turn_off_energy_.assign(devices.size(), 0.0);
         pending_reverse_recovery_energy_.assign(devices.size(), 0.0);
@@ -523,6 +525,10 @@ public:
             auto it = options_.switching_energy.find(name);
             if (it != options_.switching_energy.end()) {
                 switching_energy_[i] = it->second;
+            }
+            auto surf_it = options_.switching_energy_surfaces.find(name);
+            if (surf_it != options_.switching_energy_surfaces.end()) {
+                switching_energy_surfaces_[i] = surf_it->second;
             }
         }
     }
@@ -650,11 +656,26 @@ public:
                     const Real g = conducting ? dev.g_on() : dev.g_off();
                     const Real i_dev = g * v;
                     p_cond = std::max<Real>(0.0, v * i_dev);
+                    if (conducting) {
+                        diode_last_forward_current_[i] = std::max<Real>(0.0, i_dev);
+                    }
 
                     if (diode_conducting_[i] && !conducting) {
-                        const auto& energy_opt = switching_energy_[i];
-                        if (energy_opt.has_value() && energy_opt->err > 0.0) {
-                            commit_reverse_recovery_event(conn.name, energy_opt->err);
+                        Real rr_energy = 0.0;
+                        if (const auto& surface_opt = switching_energy_surfaces_[i];
+                            surface_opt.has_value() && surface_opt->has_err()) {
+                            const Real ifwd = diode_last_forward_current_[i];
+                            const Real vr = std::max<Real>(0.0, -v);
+                            const Real tj = estimate_junction_temperature(i, conn.name, thermal_scale_i);
+                            rr_energy = surface_opt->evaluate_err(ifwd, vr, tj);
+                        } else {
+                            const auto& energy_opt = switching_energy_[i];
+                            if (energy_opt.has_value()) {
+                                rr_energy = energy_opt->err;
+                            }
+                        }
+                        if (rr_energy > 0.0) {
+                            commit_reverse_recovery_event(conn.name, rr_energy);
                         }
                     }
                     diode_conducting_[i] = conducting;
@@ -822,11 +843,44 @@ private:
         return it->second;
     }
 
+    [[nodiscard]] Real estimate_junction_temperature(std::size_t device_index,
+                                                     const std::string& device_name,
+                                                     Real thermal_scale) const {
+        if (!options_.thermal.enable ||
+            options_.thermal.policy == ThermalCouplingPolicy::LossOnly) {
+            return options_.thermal.ambient;
+        }
+
+        Real temp_ref = options_.thermal.ambient;
+        Real alpha = 0.0;
+        if (const auto cfg_it = options_.thermal_devices.find(device_name);
+            cfg_it != options_.thermal_devices.end()) {
+            temp_ref = cfg_it->second.temp_ref;
+            alpha = cfg_it->second.alpha;
+        }
+
+        if (std::abs(alpha) < 1e-12 || !std::isfinite(thermal_scale)) {
+            if (device_index < switching_energy_surfaces_.size() &&
+                switching_energy_surfaces_[device_index].has_value()) {
+                const auto& surface = *switching_energy_surfaces_[device_index];
+                if (!surface.temperature_axis.empty()) {
+                    return surface.temperature_axis.front();
+                }
+            }
+            return temp_ref;
+        }
+
+        const Real scale = std::clamp(thermal_scale, Real{0.05}, Real{4.0});
+        return temp_ref + (scale - 1.0) / alpha;
+    }
+
     Circuit& circuit_;
     const SimulationOptions& options_;
     std::vector<DeviceLossState> states_;
     std::vector<std::optional<SwitchingEnergy>> switching_energy_;
+    std::vector<std::optional<SwitchingEnergySurface3D>> switching_energy_surfaces_;
     std::vector<bool> diode_conducting_;
+    std::vector<Real> diode_last_forward_current_;
     std::vector<Real> pending_turn_on_energy_;
     std::vector<Real> pending_turn_off_energy_;
     std::vector<Real> pending_reverse_recovery_energy_;

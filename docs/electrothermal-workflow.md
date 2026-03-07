@@ -63,6 +63,33 @@ components:
       alpha: 0.004
 ```
 
+Datasheet switching-loss surface (optional, backend-evaluated):
+
+```yaml
+components:
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, source]
+    loss:
+      model: datasheet
+      axes:
+        current: [0.0, 10.0, 20.0]      # A
+        voltage: [0.0, 200.0, 400.0]    # V
+        temperature: [25.0, 125.0]      # degC
+      eon:  [ ... flat table ... ]      # J
+      eoff: [ ... flat table ... ]      # J
+      err:  [ ... flat table ... ]      # J (optional)
+```
+
+Table order is row-major `(current, voltage, temperature)`:
+`index = ((i_current * N_voltage) + i_voltage) * N_temperature + i_temperature`.
+
+Validation for datasheet loss model:
+
+- `axes.current/voltage/temperature` must be finite and strictly increasing
+- each table length must match `N_current * N_voltage * N_temperature`
+- each energy sample must be finite and `>= 0`
+
 Validation rules when `thermal.enabled: true`:
 
 - `rth` finite and `> 0`
@@ -253,6 +280,10 @@ Notes:
   `result.virtual_channel_metadata` with `domain="loss"` and `unit="W"`.
 - YAML parser validates `loss.eon/eoff/err` as finite and non-negative; invalid values
   fail deterministically with `PULSIM_YAML_E_LOSS_RANGE_INVALID`.
+- Datasheet loss schema errors are deterministic:
+  - `PULSIM_YAML_E_LOSS_MODEL_INVALID`
+  - `PULSIM_YAML_E_LOSS_AXIS_INVALID`
+  - `PULSIM_YAML_E_LOSS_DIMENSION_INVALID`
 - Runtime now enforces a deterministic post-run consistency guard between canonical
   electrothermal channels and summary surfaces (`loss_summary`, `thermal_summary`,
   `component_electrothermal`). Any mismatch beyond tolerance fails the run with a

@@ -15,6 +15,7 @@
 #include "pulsim/v1/transient_services.hpp"
 #include "pulsim/simulation_control.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -62,6 +63,137 @@ struct SwitchingEnergy {
     Real eon = 0.0;
     Real eoff = 0.0;
     Real err = 0.0;
+};
+
+/**
+ * @brief 3D datasheet surface for switching energies vs (I, V, Tj).
+ *
+ * Table layout is row-major in `(current, voltage, temperature)` order:
+ * `index = ((i_current * N_voltage) + i_voltage) * N_temperature + i_temperature`.
+ */
+struct SwitchingEnergySurface3D {
+    std::vector<Real> current_axis;
+    std::vector<Real> voltage_axis;
+    std::vector<Real> temperature_axis;
+    std::vector<Real> eon_table;
+    std::vector<Real> eoff_table;
+    std::vector<Real> err_table;
+
+    [[nodiscard]] bool has_eon() const { return !eon_table.empty(); }
+    [[nodiscard]] bool has_eoff() const { return !eoff_table.empty(); }
+    [[nodiscard]] bool has_err() const { return !err_table.empty(); }
+
+    [[nodiscard]] std::size_t expected_table_size() const {
+        if (current_axis.empty() || voltage_axis.empty() || temperature_axis.empty()) {
+            return 0;
+        }
+        return current_axis.size() * voltage_axis.size() * temperature_axis.size();
+    }
+
+    [[nodiscard]] bool valid_shape() const {
+        const std::size_t n = expected_table_size();
+        if (n == 0) {
+            return false;
+        }
+        auto table_ok = [n](const std::vector<Real>& table) {
+            return table.empty() || table.size() == n;
+        };
+        return table_ok(eon_table) && table_ok(eoff_table) && table_ok(err_table);
+    }
+
+    [[nodiscard]] Real evaluate_eon(Real current, Real voltage, Real temperature) const {
+        return evaluate_table(eon_table, current, voltage, temperature);
+    }
+
+    [[nodiscard]] Real evaluate_eoff(Real current, Real voltage, Real temperature) const {
+        return evaluate_table(eoff_table, current, voltage, temperature);
+    }
+
+    [[nodiscard]] Real evaluate_err(Real current, Real voltage, Real temperature) const {
+        return evaluate_table(err_table, current, voltage, temperature);
+    }
+
+private:
+    struct AxisBracket {
+        std::size_t i0 = 0;
+        std::size_t i1 = 0;
+        Real w = 0.0;
+    };
+
+    [[nodiscard]] static AxisBracket bracket_axis(const std::vector<Real>& axis, Real x) {
+        AxisBracket bracket{};
+        if (axis.empty()) {
+            return bracket;
+        }
+        if (axis.size() == 1 || x <= axis.front()) {
+            bracket.i0 = 0;
+            bracket.i1 = 0;
+            bracket.w = 0.0;
+            return bracket;
+        }
+        if (x >= axis.back()) {
+            const std::size_t last = axis.size() - 1;
+            bracket.i0 = last;
+            bracket.i1 = last;
+            bracket.w = 0.0;
+            return bracket;
+        }
+
+        const auto upper = std::upper_bound(axis.begin(), axis.end(), x);
+        const std::size_t i1 = static_cast<std::size_t>(std::distance(axis.begin(), upper));
+        const std::size_t i0 = i1 - 1;
+        const Real a0 = axis[i0];
+        const Real a1 = axis[i1];
+        const Real denom = a1 - a0;
+        bracket.i0 = i0;
+        bracket.i1 = i1;
+        bracket.w = denom > 0.0 ? std::clamp((x - a0) / denom, Real{0.0}, Real{1.0}) : 0.0;
+        return bracket;
+    }
+
+    [[nodiscard]] std::size_t flat_index(std::size_t i_current,
+                                         std::size_t i_voltage,
+                                         std::size_t i_temperature) const {
+        return ((i_current * voltage_axis.size()) + i_voltage) * temperature_axis.size() + i_temperature;
+    }
+
+    [[nodiscard]] Real evaluate_table(const std::vector<Real>& table,
+                                      Real current,
+                                      Real voltage,
+                                      Real temperature) const {
+        if (!valid_shape() || table.empty()) {
+            return 0.0;
+        }
+
+        const AxisBracket ic = bracket_axis(current_axis, current);
+        const AxisBracket iv = bracket_axis(voltage_axis, voltage);
+        const AxisBracket it = bracket_axis(temperature_axis, temperature);
+
+        const auto value_at = [&](std::size_t i, std::size_t v, std::size_t t) -> Real {
+            return table[flat_index(i, v, t)];
+        };
+
+        const Real c000 = value_at(ic.i0, iv.i0, it.i0);
+        const Real c001 = value_at(ic.i0, iv.i0, it.i1);
+        const Real c010 = value_at(ic.i0, iv.i1, it.i0);
+        const Real c011 = value_at(ic.i0, iv.i1, it.i1);
+        const Real c100 = value_at(ic.i1, iv.i0, it.i0);
+        const Real c101 = value_at(ic.i1, iv.i0, it.i1);
+        const Real c110 = value_at(ic.i1, iv.i1, it.i0);
+        const Real c111 = value_at(ic.i1, iv.i1, it.i1);
+
+        const Real wi = ic.w;
+        const Real wv = iv.w;
+        const Real wt = it.w;
+
+        const Real c00 = c000 * (1.0 - wi) + c100 * wi;
+        const Real c01 = c001 * (1.0 - wi) + c101 * wi;
+        const Real c10 = c010 * (1.0 - wi) + c110 * wi;
+        const Real c11 = c011 * (1.0 - wi) + c111 * wi;
+        const Real c0 = c00 * (1.0 - wv) + c10 * wv;
+        const Real c1 = c01 * (1.0 - wv) + c11 * wv;
+        return c0 * (1.0 - wt) + c1 * wt;
+    }
 };
 
 struct StiffnessConfig {
@@ -312,6 +444,7 @@ struct SimulationOptions {
     bool enable_events = true;
     bool enable_losses = true;
     std::unordered_map<std::string, SwitchingEnergy> switching_energy;
+    std::unordered_map<std::string, SwitchingEnergySurface3D> switching_energy_surfaces;
     ThermalCouplingOptions thermal{};
     std::unordered_map<std::string, ThermalDeviceConfig> thermal_devices;
 
@@ -412,6 +545,9 @@ public:
 
     // Loss model attachment (optional)
     void set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy);
+    void set_switching_energy_surface(
+        const std::string& device_name,
+        const SwitchingEnergySurface3D& surface);
 
     // Accessors
     [[nodiscard]] const SimulationOptions& options() const { return options_; }
@@ -463,6 +599,11 @@ private:
     void record_switch_event(const SwitchMonitor& sw, Real time,
                              const Vector& x_state, bool new_state,
                              SimulationResult& result, EventCallback event_callback);
+    [[nodiscard]] Real resolve_switching_event_energy(
+        const std::string& name,
+        bool turning_on,
+        Real voltage,
+        Real current) const;
 
     void accumulate_conduction_losses(const Vector& x, Real dt);
     void accumulate_switching_loss(const std::string& name, bool turning_on, Real energy);

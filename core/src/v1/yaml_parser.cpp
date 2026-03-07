@@ -40,6 +40,9 @@ constexpr const char* kDiagThermalMissingRequired = "PULSIM_YAML_E_THERMAL_MISSI
 constexpr const char* kDiagThermalInvalidRange = "PULSIM_YAML_E_THERMAL_RANGE_INVALID";
 constexpr const char* kDiagThermalDefaultApplied = "PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED";
 constexpr const char* kDiagLossInvalidRange = "PULSIM_YAML_E_LOSS_RANGE_INVALID";
+constexpr const char* kDiagLossModelInvalid = "PULSIM_YAML_E_LOSS_MODEL_INVALID";
+constexpr const char* kDiagLossAxisInvalid = "PULSIM_YAML_E_LOSS_AXIS_INVALID";
+constexpr const char* kDiagLossDimensionInvalid = "PULSIM_YAML_E_LOSS_DIMENSION_INVALID";
 
 /// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
@@ -578,6 +581,40 @@ std::vector<std::string> parse_nodes(const YAML::Node& node,
     }
 
     return nodes;
+}
+
+std::vector<Real> parse_real_sequence(const YAML::Node& node,
+                                      const std::string& context,
+                                      std::vector<std::string>& errors) {
+    std::vector<Real> values;
+    if (!node) {
+        return values;
+    }
+    if (!node.IsSequence()) {
+        push_type_mismatch_error(errors, context, "sequence", node);
+        return values;
+    }
+
+    values.reserve(node.size());
+    for (std::size_t i = 0; i < node.size(); ++i) {
+        values.push_back(parse_real(node[i], context + "[" + std::to_string(i) + "]", errors));
+    }
+    return values;
+}
+
+[[nodiscard]] bool is_strictly_increasing(const std::vector<Real>& values) {
+    if (values.empty()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (!std::isfinite(values[i])) {
+            return false;
+        }
+        if (i > 0 && !(values[i] > values[i - 1])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 YAML::Node merge_nodes(const YAML::Node& base, const YAML::Node& overrides) {
@@ -1631,11 +1668,29 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         // Loss model (switching energy)
         if (comp["loss"]) {
             YAML::Node loss = comp["loss"];
-            validate_keys(loss, {"eon", "eoff", "err"}, name + ".loss", errors_, options_.strict);
-            SwitchingEnergy energy;
-            if (loss["eon"]) energy.eon = parse_real(loss["eon"], name + ".loss.eon", errors_);
-            if (loss["eoff"]) energy.eoff = parse_real(loss["eoff"], name + ".loss.eoff", errors_);
-            if (loss["err"]) energy.err = parse_real(loss["err"], name + ".loss.err", errors_);
+            validate_keys(loss, {"model", "axes", "eon", "eoff", "err"}, name + ".loss", errors_, options_.strict);
+
+            const bool has_axes = loss["axes"] && !loss["axes"].IsNull();
+            const bool has_table_values =
+                (loss["eon"] && loss["eon"].IsSequence()) ||
+                (loss["eoff"] && loss["eoff"].IsSequence()) ||
+                (loss["err"] && loss["err"].IsSequence());
+
+            bool datasheet_mode = has_axes || has_table_values;
+            if (const auto model_raw = parse_string_scalar(loss["model"], name + ".loss.model", errors_);
+                model_raw.has_value()) {
+                const std::string model = normalize_key(*model_raw);
+                if (model == "scalar") {
+                    datasheet_mode = false;
+                } else if (model == "datasheet") {
+                    datasheet_mode = true;
+                } else {
+                    push_error(errors_,
+                               kDiagLossModelInvalid,
+                               "Unsupported " + name + ".loss.model '" + *model_raw +
+                                   "' (expected 'scalar' or 'datasheet')");
+                }
+            }
 
             auto validate_loss_energy = [&](Real value, const std::string& field_path) {
                 if (!std::isfinite(value) || value < 0.0) {
@@ -1644,10 +1699,96 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                                field_path + " must be finite and >= 0");
                 }
             };
-            validate_loss_energy(energy.eon, name + ".loss.eon");
-            validate_loss_energy(energy.eoff, name + ".loss.eoff");
-            validate_loss_energy(energy.err, name + ".loss.err");
-            options.switching_energy[name] = energy;
+
+            if (datasheet_mode) {
+                if (!loss["axes"] || !loss["axes"].IsMap()) {
+                    if (loss["axes"]) {
+                        push_type_mismatch_error(errors_, name + ".loss.axes", "map", loss["axes"]);
+                    } else {
+                        push_error(errors_,
+                                   kDiagLossModelInvalid,
+                                   "Missing required field '" + name + ".loss.axes' for datasheet model");
+                    }
+                } else {
+                    const YAML::Node axes = loss["axes"];
+                    validate_keys(
+                        axes,
+                        {"current", "voltage", "temperature"},
+                        name + ".loss.axes",
+                        errors_,
+                        options_.strict);
+
+                    SwitchingEnergySurface3D surface;
+                    surface.current_axis =
+                        parse_real_sequence(axes["current"], name + ".loss.axes.current", errors_);
+                    surface.voltage_axis =
+                        parse_real_sequence(axes["voltage"], name + ".loss.axes.voltage", errors_);
+                    surface.temperature_axis =
+                        parse_real_sequence(axes["temperature"], name + ".loss.axes.temperature", errors_);
+
+                    if (!is_strictly_increasing(surface.current_axis)) {
+                        push_error(errors_,
+                                   kDiagLossAxisInvalid,
+                                   name + ".loss.axes.current must be finite and strictly increasing");
+                    }
+                    if (!is_strictly_increasing(surface.voltage_axis)) {
+                        push_error(errors_,
+                                   kDiagLossAxisInvalid,
+                                   name + ".loss.axes.voltage must be finite and strictly increasing");
+                    }
+                    if (!is_strictly_increasing(surface.temperature_axis)) {
+                        push_error(errors_,
+                                   kDiagLossAxisInvalid,
+                                   name + ".loss.axes.temperature must be finite and strictly increasing");
+                    }
+
+                    const std::size_t expected_size = surface.expected_table_size();
+                    auto parse_table = [&](const char* key,
+                                           std::vector<Real>& dest,
+                                           const std::string& path) {
+                        if (!loss[key]) {
+                            return;
+                        }
+                        dest = parse_real_sequence(loss[key], path, errors_);
+                        if (!dest.empty() && dest.size() != expected_size) {
+                            push_error(
+                                errors_,
+                                kDiagLossDimensionInvalid,
+                                path + " size mismatch (expected " + std::to_string(expected_size) +
+                                    ", got " + std::to_string(dest.size()) + ")");
+                        }
+                        for (std::size_t i = 0; i < dest.size(); ++i) {
+                            validate_loss_energy(dest[i], path + "[" + std::to_string(i) + "]");
+                        }
+                    };
+
+                    parse_table("eon", surface.eon_table, name + ".loss.eon");
+                    parse_table("eoff", surface.eoff_table, name + ".loss.eoff");
+                    parse_table("err", surface.err_table, name + ".loss.err");
+
+                    if (!surface.has_eon() && !surface.has_eoff() && !surface.has_err()) {
+                        push_error(errors_,
+                                   kDiagLossModelInvalid,
+                                   "Datasheet loss model for '" + name +
+                                       "' must define at least one table among eon/eoff/err");
+                    }
+
+                    if (surface.valid_shape()) {
+                        options.switching_energy_surfaces[name] = surface;
+                        options.switching_energy.erase(name);
+                    }
+                }
+            } else {
+                SwitchingEnergy energy;
+                if (loss["eon"]) energy.eon = parse_real(loss["eon"], name + ".loss.eon", errors_);
+                if (loss["eoff"]) energy.eoff = parse_real(loss["eoff"], name + ".loss.eoff", errors_);
+                if (loss["err"]) energy.err = parse_real(loss["err"], name + ".loss.err", errors_);
+                validate_loss_energy(energy.eon, name + ".loss.eon");
+                validate_loss_energy(energy.eoff, name + ".loss.eoff");
+                validate_loss_energy(energy.err, name + ".loss.err");
+                options.switching_energy[name] = energy;
+                options.switching_energy_surfaces.erase(name);
+            }
         }
 
         if (comp["thermal"]) {
