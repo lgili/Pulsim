@@ -118,6 +118,13 @@ class FrequencyMetricUndefinedReason(Enum):
     NoGainCrossover = ...
     NoPhaseCrossover = ...
 
+class AveragedConverterTopology(Enum):
+    Buck = ...
+
+class AveragedEnvelopePolicy(Enum):
+    Strict = ...
+    Warn = ...
+
 # =============================================================================
 # Device Classes
 # =============================================================================
@@ -464,6 +471,23 @@ class FrequencyAnalysisOptions:
     output_port: FrequencyAnalysisPort
     def __init__(self) -> None: ...
 
+class AveragedConverterOptions:
+    enabled: bool
+    topology: AveragedConverterTopology
+    envelope_policy: AveragedEnvelopePolicy
+    vin_source: str
+    inductor: str
+    capacitor: str
+    load_resistor: str
+    output_node: str
+    duty: float
+    duty_min: float
+    duty_max: float
+    initial_inductor_current: float
+    initial_output_voltage: float
+    ccm_current_threshold: float
+    def __init__(self) -> None: ...
+
 class SwitchingEnergy:
     eon: float
     eoff: float
@@ -716,6 +740,7 @@ class SimulationOptions:
     enable_harmonic_balance: bool
     harmonic_balance: HarmonicBalanceOptions
     frequency_analysis: FrequencyAnalysisOptions
+    averaged_converter: AveragedConverterOptions
     enable_events: bool
     enable_losses: bool
     switching_energy: Dict[str, SwitchingEnergy]

@@ -46,6 +46,7 @@ constexpr const char* kDiagLossModelInvalid = "PULSIM_YAML_E_LOSS_MODEL_INVALID"
 constexpr const char* kDiagLossAxisInvalid = "PULSIM_YAML_E_LOSS_AXIS_INVALID";
 constexpr const char* kDiagLossDimensionInvalid = "PULSIM_YAML_E_LOSS_DIMENSION_INVALID";
 constexpr const char* kDiagFrequencyInvalid = "PULSIM_YAML_E_FREQ_CONFIG_INVALID";
+constexpr const char* kDiagAveragedInvalid = "PULSIM_YAML_E_AVERAGED_CONFIG_INVALID";
 
 /// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
@@ -749,7 +750,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
                             "direct_formulation_fallback", "control", "control_mode", "control_sample_time",
-                            "frequency_analysis", "ac_sweep",
+                            "frequency_analysis", "ac_sweep", "averaged_converter",
                             "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
@@ -1672,6 +1673,146 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     errors_,
                     kDiagFrequencyInvalid,
                     "simulation.frequency_analysis.injection_current_amplitude must be finite and non-zero");
+            }
+        }
+
+        YAML::Node averaged = sim["averaged_converter"];
+        if (averaged) {
+            validate_keys(
+                averaged,
+                {"enabled", "topology", "envelope_policy", "vin_source", "inductor",
+                 "capacitor", "load_resistor", "output_node", "duty", "duty_min", "duty_max",
+                 "initial_inductor_current", "initial_output_voltage", "ccm_current_threshold"},
+                "simulation.averaged_converter",
+                errors_,
+                options_.strict);
+
+            options.averaged_converter.enabled = true;
+            if (const auto enabled = parse_bool_scalar(
+                    averaged["enabled"], "simulation.averaged_converter.enabled", errors_)) {
+                options.averaged_converter.enabled = *enabled;
+            }
+
+            if (const auto topology_raw = parse_string_scalar(
+                    averaged["topology"], "simulation.averaged_converter.topology", errors_)) {
+                const std::string topology = normalize_key(*topology_raw);
+                if (topology == "buck") {
+                    options.averaged_converter.topology = AveragedConverterTopology::Buck;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "Invalid simulation.averaged_converter.topology: '" + *topology_raw + "'");
+                }
+            }
+
+            if (const auto policy_raw = parse_string_scalar(
+                    averaged["envelope_policy"],
+                    "simulation.averaged_converter.envelope_policy",
+                    errors_)) {
+                const std::string policy = normalize_key(*policy_raw);
+                if (policy == "strict") {
+                    options.averaged_converter.envelope_policy = AveragedEnvelopePolicy::Strict;
+                } else if (policy == "warn" || policy == "warning") {
+                    options.averaged_converter.envelope_policy = AveragedEnvelopePolicy::Warn;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "Invalid simulation.averaged_converter.envelope_policy: '" + *policy_raw +
+                            "' (expected 'strict' or 'warn')");
+                }
+            }
+
+            if (const auto vin = parse_string_scalar(
+                    averaged["vin_source"], "simulation.averaged_converter.vin_source", errors_)) {
+                options.averaged_converter.vin_source = *vin;
+            }
+            if (const auto ind = parse_string_scalar(
+                    averaged["inductor"], "simulation.averaged_converter.inductor", errors_)) {
+                options.averaged_converter.inductor = *ind;
+            }
+            if (const auto cap = parse_string_scalar(
+                    averaged["capacitor"], "simulation.averaged_converter.capacitor", errors_)) {
+                options.averaged_converter.capacitor = *cap;
+            }
+            if (const auto load = parse_string_scalar(
+                    averaged["load_resistor"], "simulation.averaged_converter.load_resistor", errors_)) {
+                options.averaged_converter.load_resistor = *load;
+            }
+            if (const auto out = parse_string_scalar(
+                    averaged["output_node"], "simulation.averaged_converter.output_node", errors_)) {
+                options.averaged_converter.output_node = *out;
+            }
+
+            if (averaged["duty"]) {
+                options.averaged_converter.duty = parse_real(
+                    averaged["duty"], "simulation.averaged_converter.duty", errors_);
+            }
+            if (averaged["duty_min"]) {
+                options.averaged_converter.duty_min = parse_real(
+                    averaged["duty_min"], "simulation.averaged_converter.duty_min", errors_);
+            }
+            if (averaged["duty_max"]) {
+                options.averaged_converter.duty_max = parse_real(
+                    averaged["duty_max"], "simulation.averaged_converter.duty_max", errors_);
+            }
+            if (averaged["initial_inductor_current"]) {
+                options.averaged_converter.initial_inductor_current = parse_real(
+                    averaged["initial_inductor_current"],
+                    "simulation.averaged_converter.initial_inductor_current",
+                    errors_);
+            }
+            if (averaged["initial_output_voltage"]) {
+                options.averaged_converter.initial_output_voltage = parse_real(
+                    averaged["initial_output_voltage"],
+                    "simulation.averaged_converter.initial_output_voltage",
+                    errors_);
+            }
+            if (averaged["ccm_current_threshold"]) {
+                options.averaged_converter.ccm_current_threshold = parse_real(
+                    averaged["ccm_current_threshold"],
+                    "simulation.averaged_converter.ccm_current_threshold",
+                    errors_);
+            }
+
+            if (options.averaged_converter.enabled) {
+                auto require_non_empty = [&](const std::string& value, const std::string& field) {
+                    if (value.empty()) {
+                        push_error(
+                            errors_,
+                            kDiagAveragedInvalid,
+                            "simulation.averaged_converter." + field + " is required when enabled=true");
+                    }
+                };
+
+                require_non_empty(options.averaged_converter.vin_source, "vin_source");
+                require_non_empty(options.averaged_converter.inductor, "inductor");
+                require_non_empty(options.averaged_converter.capacitor, "capacitor");
+                require_non_empty(options.averaged_converter.load_resistor, "load_resistor");
+                require_non_empty(options.averaged_converter.output_node, "output_node");
+
+                if (!(std::isfinite(options.averaged_converter.duty_min) &&
+                      std::isfinite(options.averaged_converter.duty_max) &&
+                      std::isfinite(options.averaged_converter.duty) &&
+                      options.averaged_converter.duty_min >= 0.0 &&
+                      options.averaged_converter.duty_max <= 1.0 &&
+                      options.averaged_converter.duty_min <= options.averaged_converter.duty_max &&
+                      options.averaged_converter.duty >= options.averaged_converter.duty_min &&
+                      options.averaged_converter.duty <= options.averaged_converter.duty_max)) {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "simulation.averaged_converter requires finite duty bounds "
+                        "0 <= duty_min <= duty <= duty_max <= 1");
+                }
+                if (!(std::isfinite(options.averaged_converter.ccm_current_threshold) &&
+                      options.averaged_converter.ccm_current_threshold >= 0.0)) {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "simulation.averaged_converter.ccm_current_threshold must be finite and >= 0");
+                }
             }
         }
     }

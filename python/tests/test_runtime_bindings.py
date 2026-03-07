@@ -57,6 +57,19 @@ def _build_sine_rc_frequency_circuit() -> ps.Circuit:
     return circuit
 
 
+def _build_buck_averaged_circuit() -> ps.Circuit:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0)
+    circuit.add_inductor("L1", n_in, n_out, 100e-6, 0.0)
+    circuit.add_capacitor("C1", n_out, gnd, 220e-6, 0.0)
+    circuit.add_resistor("Rload", n_out, gnd, 10.0)
+    return circuit
+
+
 def test_simulator_with_simulation_options_runs_transient() -> None:
     circuit = _build_rc_circuit()
 
@@ -294,6 +307,102 @@ components:
     assert any("PULSIM_YAML_E_FREQ_CONFIG_INVALID" in msg for msg in parser.errors)
 
 
+def test_yaml_parser_maps_averaged_converter_block() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-4
+  dt: 1e-6
+  averaged_converter:
+    enabled: true
+    topology: buck
+    envelope_policy: warn
+    vin_source: Vin
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 0.42
+    duty_min: 0.1
+    duty_max: 0.9
+    initial_inductor_current: 0.2
+    initial_output_voltage: 4.5
+    ccm_current_threshold: 0.0
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: inductor
+    name: L1
+    nodes: [in, out]
+    value: 100u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 220u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+
+    assert parser.errors == []
+    assert options.averaged_converter.enabled is True
+    assert options.averaged_converter.topology == ps.AveragedConverterTopology.Buck
+    assert options.averaged_converter.envelope_policy == ps.AveragedEnvelopePolicy.Warn
+    assert options.averaged_converter.vin_source == "Vin"
+    assert options.averaged_converter.inductor == "L1"
+    assert options.averaged_converter.capacitor == "C1"
+    assert options.averaged_converter.load_resistor == "Rload"
+    assert options.averaged_converter.output_node == "out"
+    assert abs(options.averaged_converter.duty - 0.42) < 1e-12
+
+
+def test_yaml_parser_rejects_invalid_averaged_duty_bounds() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  averaged_converter:
+    enabled: true
+    topology: buck
+    vin_source: Vin
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 1.1
+    duty_min: 0.0
+    duty_max: 0.9
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: inductor
+    name: L1
+    nodes: [in, out]
+    value: 100u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 220u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_AVERAGED_CONFIG_INVALID" in msg for msg in parser.errors)
+
+
 def test_frequency_analysis_rc_lowpass_behaves_physically() -> None:
     circuit = _build_rc_frequency_circuit()
     options = ps.SimulationOptions()
@@ -325,6 +434,71 @@ def test_frequency_analysis_rc_lowpass_behaves_physically() -> None:
     f_cutoff = 1.0 / (2.0 * math.pi * 1_000.0 * 1e-6)
     idx = min(range(len(result.frequency_hz)), key=lambda i: abs(result.frequency_hz[i] - f_cutoff))
     assert abs(result.magnitude_db[idx] + 3.0) < 1.5
+
+
+def test_averaged_buck_transient_runs_with_expected_channels() -> None:
+    circuit = _build_buck_averaged_circuit()
+    options = ps.SimulationOptions()
+    options.tstart = 0.0
+    options.tstop = 2e-4
+    options.dt = 1e-6
+
+    options.averaged_converter.enabled = True
+    options.averaged_converter.topology = ps.AveragedConverterTopology.Buck
+    options.averaged_converter.envelope_policy = ps.AveragedEnvelopePolicy.Warn
+    options.averaged_converter.vin_source = "Vin"
+    options.averaged_converter.inductor = "L1"
+    options.averaged_converter.capacitor = "C1"
+    options.averaged_converter.load_resistor = "Rload"
+    options.averaged_converter.output_node = "out"
+    options.averaged_converter.duty = 0.42
+    options.averaged_converter.duty_min = 0.0
+    options.averaged_converter.duty_max = 0.95
+    options.averaged_converter.initial_inductor_current = 0.0
+    options.averaged_converter.initial_output_voltage = 0.0
+    options.averaged_converter.ccm_current_threshold = 0.0
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is True
+    assert result.diagnostic.name == "None"
+    assert result.backend_telemetry.solver_family == "averaged_converter"
+    assert len(result.time) > 10
+    assert "Iavg(L1)" in result.virtual_channels
+    assert "Vavg(out)" in result.virtual_channels
+    assert "Davg" in result.virtual_channels
+    assert len(result.virtual_channels["Iavg(L1)"]) == len(result.time)
+    assert len(result.virtual_channels["Vavg(out)"]) == len(result.time)
+    assert len(result.virtual_channels["Davg"]) == len(result.time)
+    assert result.virtual_channels["Vavg(out)"][-1] > 0.0
+
+
+def test_averaged_buck_strict_envelope_reports_typed_diagnostic() -> None:
+    circuit = _build_buck_averaged_circuit()
+    options = ps.SimulationOptions()
+    options.tstart = 0.0
+    options.tstop = 5e-5
+    options.dt = 1e-6
+
+    options.averaged_converter.enabled = True
+    options.averaged_converter.topology = ps.AveragedConverterTopology.Buck
+    options.averaged_converter.envelope_policy = ps.AveragedEnvelopePolicy.Strict
+    options.averaged_converter.vin_source = "Vin"
+    options.averaged_converter.inductor = "L1"
+    options.averaged_converter.capacitor = "C1"
+    options.averaged_converter.load_resistor = "Rload"
+    options.averaged_converter.output_node = "out"
+    options.averaged_converter.duty = 0.2
+    options.averaged_converter.duty_min = 0.0
+    options.averaged_converter.duty_max = 0.95
+    options.averaged_converter.initial_inductor_current = 0.0
+    options.averaged_converter.initial_output_voltage = 0.0
+    options.averaged_converter.ccm_current_threshold = 5.0
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is False
+    assert result.diagnostic.name == "AveragedOutOfEnvelope"
 
 
 def test_frequency_analysis_exposes_metadata_and_undefined_metric_reasons() -> None:

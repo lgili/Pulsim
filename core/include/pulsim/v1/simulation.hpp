@@ -316,7 +316,11 @@ enum class SimulationDiagnosticCode {
     HarmonicSolverFailure,
     FrequencyInvalidConfiguration,
     FrequencyUnsupportedConfiguration,
-    FrequencySolverFailure
+    FrequencySolverFailure,
+    AveragedInvalidConfiguration,
+    AveragedUnsupportedConfiguration,
+    AveragedOutOfEnvelope,
+    AveragedSolverFailure
 };
 
 enum class FormulationMode {
@@ -418,6 +422,38 @@ struct FrequencyAnalysisResult {
         FrequencyMetricUndefinedReason::NotTransferMode;
     FrequencyMetricUndefinedReason gain_margin_reason =
         FrequencyMetricUndefinedReason::NotTransferMode;
+};
+
+enum class AveragedConverterTopology {
+    Buck
+};
+
+enum class AveragedEnvelopePolicy {
+    Strict,
+    Warn
+};
+
+struct AveragedConverterOptions {
+    bool enabled = false;
+    AveragedConverterTopology topology = AveragedConverterTopology::Buck;
+    AveragedEnvelopePolicy envelope_policy = AveragedEnvelopePolicy::Strict;
+
+    // Component-name mapping for topology extraction.
+    std::string vin_source;
+    std::string inductor;
+    std::string capacitor;
+    std::string load_resistor;
+    std::string output_node = "out";
+
+    // Duty and initial condition configuration.
+    Real duty = 0.5;
+    Real duty_min = 0.0;
+    Real duty_max = 1.0;
+    Real initial_inductor_current = 0.0;
+    Real initial_output_voltage = 0.0;
+
+    // Envelope check: require iL >= ccm_current_threshold for strict CCM policy.
+    Real ccm_current_threshold = 0.0;
 };
 
 enum class ThermalCouplingPolicy {
@@ -534,6 +570,7 @@ struct SimulationOptions {
     bool enable_harmonic_balance = false;
     HarmonicBalanceOptions harmonic_balance{};
     FrequencyAnalysisOptions frequency_analysis{};
+    AveragedConverterOptions averaged_converter{};
 
     // Events & losses
     bool enable_events = true;
@@ -683,6 +720,12 @@ private:
     };
 
     [[nodiscard]] SimulationResult run_transient_native_impl(
+        const Vector& x0,
+        SimulationCallback callback,
+        EventCallback event_callback,
+        SimulationControl* control);
+
+    [[nodiscard]] SimulationResult run_transient_averaged_impl(
         const Vector& x0,
         SimulationCallback callback,
         EventCallback event_callback,

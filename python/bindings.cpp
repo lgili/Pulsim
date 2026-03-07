@@ -1253,6 +1253,17 @@ void init_v2_module(py::module_& v2) {
         .value("NoPhaseCrossover", FrequencyMetricUndefinedReason::NoPhaseCrossover)
         .export_values();
 
+    py::enum_<AveragedConverterTopology>(v2, "AveragedConverterTopology",
+        "Supported topology for averaged-converter transient mode")
+        .value("Buck", AveragedConverterTopology::Buck)
+        .export_values();
+
+    py::enum_<AveragedEnvelopePolicy>(v2, "AveragedEnvelopePolicy",
+        "Operating-envelope policy for averaged-converter mode")
+        .value("Strict", AveragedEnvelopePolicy::Strict)
+        .value("Warn", AveragedEnvelopePolicy::Warn)
+        .export_values();
+
     py::enum_<SimulationDiagnosticCode>(v2, "SimulationDiagnosticCode",
         "Typed simulation diagnostic code")
         .value("None", SimulationDiagnosticCode::None)
@@ -1274,6 +1285,10 @@ void init_v2_module(py::module_& v2) {
         .value("FrequencyInvalidConfiguration", SimulationDiagnosticCode::FrequencyInvalidConfiguration)
         .value("FrequencyUnsupportedConfiguration", SimulationDiagnosticCode::FrequencyUnsupportedConfiguration)
         .value("FrequencySolverFailure", SimulationDiagnosticCode::FrequencySolverFailure)
+        .value("AveragedInvalidConfiguration", SimulationDiagnosticCode::AveragedInvalidConfiguration)
+        .value("AveragedUnsupportedConfiguration", SimulationDiagnosticCode::AveragedUnsupportedConfiguration)
+        .value("AveragedOutOfEnvelope", SimulationDiagnosticCode::AveragedOutOfEnvelope)
+        .value("AveragedSolverFailure", SimulationDiagnosticCode::AveragedSolverFailure)
         .export_values();
 
     py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
@@ -1471,6 +1486,24 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("phase_margin_reason", &FrequencyAnalysisResult::phase_margin_reason)
         .def_readwrite("gain_margin_reason", &FrequencyAnalysisResult::gain_margin_reason);
 
+    py::class_<AveragedConverterOptions>(v2, "AveragedConverterOptions",
+        "Averaged-converter runtime configuration (MVP buck)")
+        .def(py::init<>())
+        .def_readwrite("enabled", &AveragedConverterOptions::enabled)
+        .def_readwrite("topology", &AveragedConverterOptions::topology)
+        .def_readwrite("envelope_policy", &AveragedConverterOptions::envelope_policy)
+        .def_readwrite("vin_source", &AveragedConverterOptions::vin_source)
+        .def_readwrite("inductor", &AveragedConverterOptions::inductor)
+        .def_readwrite("capacitor", &AveragedConverterOptions::capacitor)
+        .def_readwrite("load_resistor", &AveragedConverterOptions::load_resistor)
+        .def_readwrite("output_node", &AveragedConverterOptions::output_node)
+        .def_readwrite("duty", &AveragedConverterOptions::duty)
+        .def_readwrite("duty_min", &AveragedConverterOptions::duty_min)
+        .def_readwrite("duty_max", &AveragedConverterOptions::duty_max)
+        .def_readwrite("initial_inductor_current", &AveragedConverterOptions::initial_inductor_current)
+        .def_readwrite("initial_output_voltage", &AveragedConverterOptions::initial_output_voltage)
+        .def_readwrite("ccm_current_threshold", &AveragedConverterOptions::ccm_current_threshold);
+
     py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
         .def(py::init<>())
         .def_readwrite("tstart", &SimulationOptions::tstart)
@@ -1516,6 +1549,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("enable_harmonic_balance", &SimulationOptions::enable_harmonic_balance)
         .def_readwrite("harmonic_balance", &SimulationOptions::harmonic_balance)
         .def_readwrite("frequency_analysis", &SimulationOptions::frequency_analysis)
+        .def_readwrite("averaged_converter", &SimulationOptions::averaged_converter)
         .def_readwrite("enable_events", &SimulationOptions::enable_events)
         .def_readwrite("enable_losses", &SimulationOptions::enable_losses)
         .def_readwrite("switching_energy", &SimulationOptions::switching_energy)

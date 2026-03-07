@@ -26,6 +26,8 @@ from ._pulsim import (
     FrequencyAnchorMode,
     FrequencySweepScale,
     FrequencyMetricUndefinedReason,
+    AveragedConverterTopology,
+    AveragedEnvelopePolicy,
 
     # Device Classes - Linear
     Resistor,
@@ -86,6 +88,7 @@ from ._pulsim import (
     FrequencyAnalysisPort,
     FrequencyAnalysisOptions,
     FrequencyAnalysisResult,
+    AveragedConverterOptions,
     StiffnessConfig,
     SwitchingEnergy,
     SwitchingEnergySurface3D,
@@ -569,6 +572,8 @@ __all__ = [
     "FrequencyAnchorMode",
     "FrequencySweepScale",
     "FrequencyMetricUndefinedReason",
+    "AveragedConverterTopology",
+    "AveragedEnvelopePolicy",
 
     # Device Classes - Linear
     "Resistor",
@@ -630,6 +635,7 @@ __all__ = [
     "FrequencyAnalysisPort",
     "FrequencyAnalysisOptions",
     "FrequencyAnalysisResult",
+    "AveragedConverterOptions",
     "StiffnessConfig",
     "SwitchingEnergy",
     "SwitchingEnergySurface3D",
