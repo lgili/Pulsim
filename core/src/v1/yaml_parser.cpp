@@ -39,6 +39,7 @@ constexpr const char* kDiagThermalUnsupportedComponent = "PULSIM_YAML_E_THERMAL_
 constexpr const char* kDiagThermalMissingRequired = "PULSIM_YAML_E_THERMAL_MISSING_REQUIRED";
 constexpr const char* kDiagThermalInvalidRange = "PULSIM_YAML_E_THERMAL_RANGE_INVALID";
 constexpr const char* kDiagThermalDefaultApplied = "PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED";
+constexpr const char* kDiagLossInvalidRange = "PULSIM_YAML_E_LOSS_RANGE_INVALID";
 
 /// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
@@ -1635,6 +1636,17 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (loss["eon"]) energy.eon = parse_real(loss["eon"], name + ".loss.eon", errors_);
             if (loss["eoff"]) energy.eoff = parse_real(loss["eoff"], name + ".loss.eoff", errors_);
             if (loss["err"]) energy.err = parse_real(loss["err"], name + ".loss.err", errors_);
+
+            auto validate_loss_energy = [&](Real value, const std::string& field_path) {
+                if (!std::isfinite(value) || value < 0.0) {
+                    push_error(errors_,
+                               kDiagLossInvalidRange,
+                               field_path + " must be finite and >= 0");
+                }
+            };
+            validate_loss_energy(energy.eon, name + ".loss.eon");
+            validate_loss_energy(energy.eoff, name + ".loss.eoff");
+            validate_loss_energy(energy.err, name + ".loss.err");
             options.switching_energy[name] = energy;
         }
 

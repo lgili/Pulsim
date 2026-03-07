@@ -345,6 +345,38 @@ components:
     assert any("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT" in msg for msg in parser.errors)
 
 
+def test_yaml_parser_rejects_invalid_loss_ranges() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: mosfet
+    name: M1
+    nodes: [g, d, s]
+    vth: 2.5
+    kp: 0.1
+    lambda: 0.0
+    g_off: 1e-8
+    loss:
+      eon: -2e-6
+      eoff: 3e-6
+      err: -1e-6
+  - type: resistor
+    name: R1
+    nodes: [s, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_LOSS_RANGE_INVALID" in msg for msg in parser.errors)
+    assert any("M1.loss.eon" in msg for msg in parser.errors)
+    assert any("M1.loss.err" in msg for msg in parser.errors)
+
+
 def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     circuit = ps.Circuit()
     n_gate = circuit.add_node("gate")

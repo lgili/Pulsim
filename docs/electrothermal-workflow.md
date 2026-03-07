@@ -251,6 +251,8 @@ Notes:
   - `Ploss(<component>)`
   All these channels are aligned with `result.time` and tagged in
   `result.virtual_channel_metadata` with `domain="loss"` and `unit="W"`.
+- YAML parser validates `loss.eon/eoff/err` as finite and non-negative; invalid values
+  fail deterministically with `PULSIM_YAML_E_LOSS_RANGE_INVALID`.
 - Runtime now enforces a deterministic post-run consistency guard between canonical
   electrothermal channels and summary surfaces (`loss_summary`, `thermal_summary`,
   `component_electrothermal`). Any mismatch beyond tolerance fails the run with a
