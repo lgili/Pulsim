@@ -598,6 +598,24 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#21-runtime-module-contracts-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 Runtime module contracts (new)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#22-dependency-rules-and-anti-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Dependency rules and anti-patterns
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#3-hot-loop-coding-rules" class="md-nav__link">
     <span class="md-ellipsis">
       3. Hot-loop coding rules
@@ -1159,6 +1177,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../psim-plecs-gap-and-modular-architecture-roadmap/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PSIM/PLECS Gap and Modular Roadmap
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../versioning-and-release/" class="md-nav__link">
         
   
@@ -1261,6 +1300,24 @@
   <a href="#2-runtime-architecture-in-practice" class="md-nav__link">
     <span class="md-ellipsis">
       2. Runtime architecture in practice
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#21-runtime-module-contracts-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 Runtime module contracts (new)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#22-dependency-rules-and-anti-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Dependency rules and anti-patterns
     </span>
   </a>
   
@@ -1383,9 +1440,47 @@
 <p>Key boundaries:</p>
 <ul>
 <li><code>TransientService</code> interfaces in <code>core/include/pulsim/v1/transient_services.hpp</code></li>
+<li>Runtime module contracts in <code>core/include/pulsim/v1/runtime_modules.hpp</code></li>
 <li>Circuit mixed-domain execution in <code>RuntimeCircuit</code></li>
 <li>Python ABI surface in <code>python/bindings.cpp</code></li>
 </ul>
+<h2 id="21-runtime-module-contracts-new">2.1 Runtime module contracts (new)<a class="headerlink" href="#21-runtime-module-contracts-new" title="Permanent link">&para;</a></h2>
+<p>The runtime now exposes deterministic module dependency resolution for core concerns (<code>events_topology</code>, <code>control_mixed_domain</code>, <code>loss_accounting</code>, <code>thermal_coupling</code>, <code>telemetry_channels</code>).</p>
+<p>Rules:
+- add a module by declaring <code>module_id</code>, <code>provides_capabilities</code>, <code>requires_capabilities</code>, and lifecycle hooks;
+- dependency graph must resolve deterministically (no missing providers, no cycles, no duplicate module IDs);
+- keep module ownership explicit for channel/telemetry outputs.
+- check runtime resolution through <code>result.backend_telemetry.runtime_module_count</code> and
+  <code>result.backend_telemetry.runtime_module_order</code>.</p>
+<p>Current non-breaking extraction status:
+- <code>events_topology</code> adapter (<code>EventTopologyModule</code>):
+  - threshold proximity detection + crossing refinement hooks,
+  - event-aligned split candidate selection,
+  - accepted-step switch transition emission,
+  - forced-switch sampled transition emission
+- <code>control_mixed_domain</code> adapter: <code>core/src/v1/runtime_module_adapters.hpp/.cpp</code>
+- <code>loss_accounting</code> adapter (<code>LossAccountingModule</code>): <code>core/src/v1/runtime_module_adapters.hpp/.cpp</code>
+- <code>thermal_coupling</code> adapter (<code>ThermalCouplingModule</code>): <code>core/src/v1/runtime_module_adapters.hpp/.cpp</code>
+- <code>telemetry_channels</code> adapter (<code>ElectrothermalTelemetryModule</code>): <code>core/src/v1/runtime_module_adapters.hpp/.cpp</code>
+- <code>RuntimeModuleOrchestrator</code> composes these adapters and exposes unified hooks:
+  - <code>on_run_initialize</code>
+  - <code>on_sample_emit</code>
+  - <code>on_step_accepted</code>
+  - <code>on_hold_step_accepted</code>
+  - <code>on_finalize</code>
+- <code>simulation.cpp</code> now stays policy-focused and interacts with module internals only through the orchestrator boundary.
+- channel names, metadata, and Python/YAML-facing behavior remain unchanged</p>
+<h2 id="22-dependency-rules-and-anti-patterns">2.2 Dependency rules and anti-patterns<a class="headerlink" href="#22-dependency-rules-and-anti-patterns" title="Permanent link">&para;</a></h2>
+<p>Dependency rules:
+- depend on capabilities, never on module IDs for runtime data flow;
+- one capability must have exactly one provider;
+- modules must be acyclic and deterministic (lexical tie-break in resolver);
+- module state must be self-owned; shared mutation must go through typed contracts.</p>
+<p>Anti-patterns to avoid:
+- reading internal state from another module implementation;
+- emitting channels in multiple modules for the same canonical signal;
+- adding hidden ordering assumptions not declared in <code>requires_capabilities</code>;
+- allocating large buffers inside per-step/per-sample hooks when size is predictable.</p>
 <h2 id="3-hot-loop-coding-rules">3. Hot-loop coding rules<a class="headerlink" href="#3-hot-loop-coding-rules" title="Permanent link">&para;</a></h2>
 <p>Inside per-step and per-sample paths:</p>
 <ul>
@@ -1430,6 +1525,20 @@
 ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure<span class="w"> </span>-R<span class="w"> </span><span class="s2">&quot;^v1 &quot;</span>
 </code></pre></div>
 <p>If you modify parser/runtime contract fields, also validate docs and Python stubs.</p>
+<p>Module-scoped checks (recommended before full suite):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># runtime-module contracts and ordering</span>
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure<span class="w"> </span>-R<span class="w"> </span><span class="s2">&quot;runtime module&quot;</span>
+
+<span class="c1"># switching/loss/thermal channel path (telemetry_channels + loss/thermal adapters)</span>
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure<span class="w"> </span>-R<span class="w"> </span><span class="s2">&quot;v1 switching loss accumulation|v1 fixed-step resolves multiple switching events inside one macro interval|v1 backend telemetry reports topology-driven linear cache invalidation|v1 modular electrothermal fixed-step run avoids hot-path reallocations|v1 modular electrothermal channels stay summary-consistent&quot;</span>
+
+<span class="c1"># Python contract and thermal/loss consistency</span>
+<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>-q<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>python/tests/test_runtime_bindings.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>python/tests/test_benchmark_python_first.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>python/tests/test_thermal_component_theoretical.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>python/tests/test_docs_release_config.py
+</code></pre></div>
 <h2 id="7-what-reviewers-will-prioritize">7. What reviewers will prioritize<a class="headerlink" href="#7-what-reviewers-will-prioritize" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Numerical correctness and deterministic behavior.</li>
