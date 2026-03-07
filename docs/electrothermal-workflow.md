@@ -100,6 +100,31 @@ Invalid ranges fail with:
 
 - `PULSIM_YAML_E_THERMAL_RANGE_INVALID`
 
+Optional staged thermal networks:
+
+```yaml
+thermal:
+  enabled: true
+  network: foster      # single_rc | foster | cauer
+  rth_stages: [0.3, 0.7]
+  cth_stages: [0.01, 0.05]
+  temp_init: 25.0
+  temp_ref: 25.0
+  alpha: 0.004
+```
+
+Staged thermal validation:
+
+- `rth_stages` and `cth_stages` are required for `foster`/`cauer`
+- stage arrays must be non-empty and same size
+- each `rth_stages[i]` finite and `> 0`
+- each `cth_stages[i]` finite and `>= 0`
+
+Deterministic diagnostics:
+
+- `PULSIM_YAML_E_THERMAL_NETWORK_INVALID`
+- `PULSIM_YAML_E_THERMAL_DIMENSION_INVALID`
+
 ## 4) Closed-Loop Control Sampling (Important for Stability)
 
 Control update policy is configured with `simulation.control`:

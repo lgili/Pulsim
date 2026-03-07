@@ -433,6 +433,11 @@ class ThermalCouplingPolicy(Enum):
     LossOnly = ...
     LossWithTemperatureScaling = ...
 
+class ThermalNetworkKind(Enum):
+    SingleRC = ...
+    Foster = ...
+    Cauer = ...
+
 class SimulationEvent:
     time: float
     type: SimulationEventType
@@ -503,8 +508,11 @@ class ThermalCouplingOptions:
 
 class ThermalDeviceConfig:
     enabled: bool
+    network_kind: ThermalNetworkKind
     rth: float
     cth: float
+    stage_rth: List[float]
+    stage_cth: List[float]
     temp_init: float
     temp_ref: float
     alpha: float

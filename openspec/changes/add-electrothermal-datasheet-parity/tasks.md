@@ -1,6 +1,6 @@
 ## 1. Schema and Contracts
 - [x] 1.1 Extend YAML schema for datasheet loss characterization (`scalar` and `datasheet` modes) with strict validation.
-- [ ] 1.2 Extend YAML schema for thermal network kinds (`single_rc`, `foster`, `cauer`) and optional shared coupling descriptors.
+- [x] 1.2 Extend YAML schema for thermal network kinds (`single_rc`, `foster`, `cauer`) and optional shared coupling descriptors.
 - [x] 1.3 Add deterministic diagnostics for dimensional mismatch, invalid ranges, and unsupported combinations.
 - [x] 1.4 Preserve backward compatibility mappings for existing `loss` and `thermal` blocks.
 
@@ -11,7 +11,7 @@
 - [ ] 2.4 Keep deterministic ordering and no unplanned hot-loop allocations after warm-up.
 
 ## 3. Kernel Thermal Engine
-- [ ] 3.1 Implement thermal solver support for `single_rc`, `foster`, and `cauer` networks.
+- [x] 3.1 Implement thermal solver support for `single_rc`, `foster`, and `cauer` networks.
 - [ ] 3.2 Implement optional shared thermal coupling for multiple components on common sink context.
 - [ ] 3.3 Guarantee stable, deterministic thermal integration and bounded temperature-scaling behavior.
 

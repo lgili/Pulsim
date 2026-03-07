@@ -1197,6 +1197,13 @@ void init_v2_module(py::module_& v2) {
         .value("LossWithTemperatureScaling", ThermalCouplingPolicy::LossWithTemperatureScaling)
         .export_values();
 
+    py::enum_<ThermalNetworkKind>(v2, "ThermalNetworkKind",
+        "Per-device thermal network kind")
+        .value("SingleRC", ThermalNetworkKind::SingleRC)
+        .value("Foster", ThermalNetworkKind::Foster)
+        .value("Cauer", ThermalNetworkKind::Cauer)
+        .export_values();
+
     py::enum_<TransientStepMode>(v2, "StepMode",
         "Canonical transient timestep mode")
         .value("Fixed", TransientStepMode::Fixed)
@@ -1337,8 +1344,11 @@ void init_v2_module(py::module_& v2) {
         "Per-device thermal configuration for electro-thermal coupling")
         .def(py::init<>())
         .def_readwrite("enabled", &ThermalDeviceConfig::enabled)
+        .def_readwrite("network_kind", &ThermalDeviceConfig::network_kind)
         .def_readwrite("rth", &ThermalDeviceConfig::rth)
         .def_readwrite("cth", &ThermalDeviceConfig::cth)
+        .def_readwrite("stage_rth", &ThermalDeviceConfig::stage_rth)
+        .def_readwrite("stage_cth", &ThermalDeviceConfig::stage_cth)
         .def_readwrite("temp_init", &ThermalDeviceConfig::temp_init)
         .def_readwrite("temp_ref", &ThermalDeviceConfig::temp_ref)
         .def_readwrite("alpha", &ThermalDeviceConfig::alpha);

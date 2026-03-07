@@ -345,6 +345,12 @@ enum class ThermalCouplingPolicy {
     LossWithTemperatureScaling
 };
 
+enum class ThermalNetworkKind {
+    SingleRC,
+    Foster,
+    Cauer
+};
+
 struct ThermalCouplingOptions {
     bool enable = false;
     Real ambient = 25.0;
@@ -355,8 +361,11 @@ struct ThermalCouplingOptions {
 
 struct ThermalDeviceConfig {
     bool enabled = true;
+    ThermalNetworkKind network_kind = ThermalNetworkKind::SingleRC;
     Real rth = 1.0;
     Real cth = 0.1;
+    std::vector<Real> stage_rth;
+    std::vector<Real> stage_cth;
     Real temp_init = 25.0;
     Real temp_ref = 25.0;
     Real alpha = 0.004;

@@ -323,6 +323,59 @@ components:
     assert any("PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED" in msg for msg in parser.warnings)
 
 
+def test_yaml_parser_maps_foster_thermal_network() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      network: foster
+      rth_stages: [0.4, 0.6]
+      cth_stages: [0.01, 0.05]
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+
+    assert parser.errors == []
+    cfg = options.thermal_devices["R1"]
+    assert cfg.network_kind == ps.ThermalNetworkKind.Foster
+    assert list(cfg.stage_rth) == [0.4, 0.6]
+    assert list(cfg.stage_cth) == [0.01, 0.05]
+    assert abs(cfg.rth - 1.0) < 1e-12
+
+
+def test_yaml_parser_rejects_invalid_thermal_stage_dimensions() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+    thermal:
+      enabled: true
+      network: cauer
+      rth_stages: [0.2, 0.3]
+      cth_stages: [0.01]
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_THERMAL_DIMENSION_INVALID" in msg for msg in parser.errors)
+
+
 def test_yaml_parser_rejects_unsupported_thermal_component_enablement() -> None:
     content = """
 schema: pulsim-v1
@@ -497,6 +550,80 @@ def test_electro_thermal_coupling_emits_thermal_telemetry() -> None:
     rload = next(item for item in result.component_electrothermal if item.component_name == "Rload")
     assert rload.thermal_enabled
     assert rload.final_temperature >= result.thermal_summary.ambient
+
+
+def test_resistor_foster_network_generates_rising_temperature_trace() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    cfg = ps.ThermalDeviceConfig()
+    cfg.enabled = True
+    cfg.network_kind = ps.ThermalNetworkKind.Foster
+    cfg.stage_rth = [0.3, 0.7]
+    cfg.stage_cth = [0.01, 0.05]
+    cfg.temp_init = 25.0
+    cfg.temp_ref = 25.0
+    cfg.alpha = 0.0
+    opts.thermal_devices = {"R1": cfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "T(R1)" in result.virtual_channels
+    trace = [float(v) for v in result.virtual_channels["T(R1)"]]
+    assert len(trace) == len(result.time)
+    assert trace[-1] > trace[0]
+    assert max(trace) == trace[-1]
+
+
+def test_resistor_cauer_network_generates_rising_temperature_trace() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    gnd = circuit.ground()
+    circuit.add_voltage_source("V1", n_in, gnd, 12.0)
+    circuit.add_resistor("R1", n_in, gnd, 10.0)
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 5e-4
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_losses = True
+    opts.thermal.enable = True
+    opts.thermal.ambient = 25.0
+
+    cfg = ps.ThermalDeviceConfig()
+    cfg.enabled = True
+    cfg.network_kind = ps.ThermalNetworkKind.Cauer
+    cfg.stage_rth = [0.2, 0.4]
+    cfg.stage_cth = [0.01, 0.03]
+    cfg.temp_init = 25.0
+    cfg.temp_ref = 25.0
+    cfg.alpha = 0.0
+    opts.thermal_devices = {"R1": cfg}
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "T(R1)" in result.virtual_channels
+    trace = [float(v) for v in result.virtual_channels["T(R1)"]]
+    assert len(trace) == len(result.time)
+    assert trace[-1] > trace[0]
+    assert max(trace) == trace[-1]
 
 
 def test_datasheet_switching_surface_drives_event_loss_channels() -> None:

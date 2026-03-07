@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <numeric>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -926,8 +927,11 @@ public:
             auto& state = states_[i];
             state.enabled = true;
             state.config.enabled = true;
+            state.config.network_kind = ThermalNetworkKind::SingleRC;
             state.config.rth = options_.thermal.default_rth;
             state.config.cth = options_.thermal.default_cth;
+            state.config.stage_rth.clear();
+            state.config.stage_cth.clear();
             state.config.temp_init = options_.thermal.ambient;
             state.config.temp_ref = options_.thermal.ambient;
 
@@ -939,7 +943,38 @@ public:
             }
 
             state.enabled = state.config.enabled;
-            state.temperature = state.config.temp_init;
+            state.stage_temperature_rise.clear();
+            const Real ambient = options_.thermal.ambient;
+            const Real delta_init = state.config.temp_init - ambient;
+
+            if (state.config.network_kind == ThermalNetworkKind::Foster &&
+                state.config.stage_rth.size() == state.config.stage_cth.size() &&
+                !state.config.stage_rth.empty()) {
+                state.stage_temperature_rise.assign(state.config.stage_rth.size(), 0.0);
+                const Real total_rth =
+                    std::accumulate(state.config.stage_rth.begin(), state.config.stage_rth.end(), Real{0.0});
+                if (total_rth > 0.0) {
+                    for (std::size_t stage = 0; stage < state.stage_temperature_rise.size(); ++stage) {
+                        state.stage_temperature_rise[stage] =
+                            delta_init * (state.config.stage_rth[stage] / total_rth);
+                    }
+                } else if (!state.stage_temperature_rise.empty()) {
+                    state.stage_temperature_rise[0] = delta_init;
+                }
+                state.temperature =
+                    ambient + std::accumulate(
+                                  state.stage_temperature_rise.begin(),
+                                  state.stage_temperature_rise.end(),
+                                  Real{0.0});
+            } else if (state.config.network_kind == ThermalNetworkKind::Cauer &&
+                       state.config.stage_rth.size() == state.config.stage_cth.size() &&
+                       !state.config.stage_rth.empty()) {
+                state.stage_temperature_rise.assign(state.config.stage_rth.size(), delta_init);
+                state.temperature = ambient + state.stage_temperature_rise.front();
+            } else {
+                state.config.network_kind = ThermalNetworkKind::SingleRC;
+                state.temperature = state.config.temp_init;
+            }
             state.peak_temperature = state.temperature;
             // Keep summary average consistent with exported time traces, which include t=tstart.
             state.sum_temperature = state.temperature;
@@ -989,16 +1024,82 @@ public:
 
             const Real power = std::max<Real>(0.0, device_power[i]);
             const Real ambient = options_.thermal.ambient;
-            const Real rth = std::max<Real>(state.config.rth, 1e-12);
-            const Real cth = state.config.cth;
 
-            if (cth <= 0.0) {
-                state.temperature = ambient + power * rth;
-            } else {
-                const Real tau = std::max<Real>(rth * cth, 1e-12);
-                const Real delta = state.temperature - ambient;
-                const Real delta_dot = (power * rth - delta) / tau;
-                state.temperature = ambient + delta + dt * delta_dot;
+            switch (state.config.network_kind) {
+                case ThermalNetworkKind::SingleRC: {
+                    const Real rth = std::max<Real>(state.config.rth, 1e-12);
+                    const Real cth = state.config.cth;
+                    if (cth <= 0.0) {
+                        state.temperature = ambient + power * rth;
+                    } else {
+                        const Real tau = std::max<Real>(rth * cth, 1e-12);
+                        const Real delta = state.temperature - ambient;
+                        const Real delta_dot = (power * rth - delta) / tau;
+                        state.temperature = ambient + delta + dt * delta_dot;
+                    }
+                    break;
+                }
+                case ThermalNetworkKind::Foster: {
+                    const std::size_t n = state.config.stage_rth.size();
+                    if (n == 0 ||
+                        n != state.config.stage_cth.size() ||
+                        n != state.stage_temperature_rise.size()) {
+                        break;
+                    }
+                    for (std::size_t stage = 0; stage < n; ++stage) {
+                        const Real r = std::max<Real>(state.config.stage_rth[stage], 1e-12);
+                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-12);
+                        const Real tau = std::max<Real>(r * c, 1e-12);
+                        const Real theta = state.stage_temperature_rise[stage];
+                        const Real theta_dot = (power * r - theta) / tau;
+                        const Real theta_new = theta + dt * theta_dot;
+                        state.stage_temperature_rise[stage] =
+                            std::isfinite(theta_new) ? theta_new : (power * r);
+                    }
+                    const Real delta = std::accumulate(
+                        state.stage_temperature_rise.begin(),
+                        state.stage_temperature_rise.end(),
+                        Real{0.0});
+                    state.temperature = ambient + delta;
+                    break;
+                }
+                case ThermalNetworkKind::Cauer: {
+                    const std::size_t n = state.config.stage_rth.size();
+                    if (n == 0 ||
+                        n != state.config.stage_cth.size() ||
+                        n != state.stage_temperature_rise.size()) {
+                        break;
+                    }
+                    const std::vector<Real> previous = state.stage_temperature_rise;
+                    std::vector<Real> updated = previous;
+                    for (std::size_t stage = 0; stage < n; ++stage) {
+                        const Real c = std::max<Real>(state.config.stage_cth[stage], 1e-12);
+
+                        Real inflow = 0.0;
+                        if (stage == 0) {
+                            inflow = power;
+                        } else {
+                            const Real r_up = std::max<Real>(state.config.stage_rth[stage - 1], 1e-12);
+                            inflow = (previous[stage - 1] - previous[stage]) / r_up;
+                        }
+
+                        Real outflow = 0.0;
+                        if (stage + 1 < n) {
+                            const Real r_down = std::max<Real>(state.config.stage_rth[stage], 1e-12);
+                            outflow = (previous[stage] - previous[stage + 1]) / r_down;
+                        } else {
+                            const Real r_ambient = std::max<Real>(state.config.stage_rth[stage], 1e-12);
+                            outflow = previous[stage] / r_ambient;
+                        }
+
+                        const Real theta_dot = (inflow - outflow) / c;
+                        const Real theta_new = previous[stage] + dt * theta_dot;
+                        updated[stage] = std::isfinite(theta_new) ? theta_new : previous[stage];
+                    }
+                    state.stage_temperature_rise = std::move(updated);
+                    state.temperature = ambient + state.stage_temperature_rise.front();
+                    break;
+                }
             }
 
             state.peak_temperature = std::max(state.peak_temperature, state.temperature);
@@ -1045,6 +1146,7 @@ private:
     struct DeviceThermalState {
         bool enabled = false;
         ThermalDeviceConfig config{};
+        std::vector<Real> stage_temperature_rise;
         Real temperature = 25.0;
         Real peak_temperature = 25.0;
         Real sum_temperature = 0.0;

@@ -525,17 +525,36 @@ struct TransientInputIssue {
             };
         };
 
-        if (!std::isfinite(cfg.rth)) {
-            return fail("rth", "must be finite");
-        }
-        if (cfg.rth <= 0.0) {
-            return fail("rth", "must be > 0");
-        }
-        if (!std::isfinite(cfg.cth)) {
-            return fail("cth", "must be finite");
-        }
-        if (cfg.cth < 0.0) {
-            return fail("cth", "must be >= 0");
+        if (cfg.network_kind == ThermalNetworkKind::SingleRC) {
+            if (!std::isfinite(cfg.rth)) {
+                return fail("rth", "must be finite");
+            }
+            if (cfg.rth <= 0.0) {
+                return fail("rth", "must be > 0");
+            }
+            if (!std::isfinite(cfg.cth)) {
+                return fail("cth", "must be finite");
+            }
+            if (cfg.cth < 0.0) {
+                return fail("cth", "must be >= 0");
+            }
+        } else {
+            if (cfg.stage_rth.empty() || cfg.stage_cth.empty()) {
+                return fail("stage_rth/stage_cth", "must be non-empty for staged thermal network");
+            }
+            if (cfg.stage_rth.size() != cfg.stage_cth.size()) {
+                return fail("stage_rth/stage_cth", "must have equal size");
+            }
+            for (std::size_t stage = 0; stage < cfg.stage_rth.size(); ++stage) {
+                const Real r = cfg.stage_rth[stage];
+                const Real c = cfg.stage_cth[stage];
+                if (!std::isfinite(r) || r <= 0.0) {
+                    return fail("stage_rth[" + std::to_string(stage) + "]", "must be finite and > 0");
+                }
+                if (!std::isfinite(c) || c < 0.0) {
+                    return fail("stage_cth[" + std::to_string(stage) + "]", "must be finite and >= 0");
+                }
+            }
         }
         if (!std::isfinite(cfg.temp_init)) {
             return fail("temp_init", "must be finite");

@@ -38,6 +38,8 @@ constexpr const char* kDiagDeprecatedField = "PULSIM_YAML_W_DEPRECATED_FIELD";
 constexpr const char* kDiagThermalUnsupportedComponent = "PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT";
 constexpr const char* kDiagThermalMissingRequired = "PULSIM_YAML_E_THERMAL_MISSING_REQUIRED";
 constexpr const char* kDiagThermalInvalidRange = "PULSIM_YAML_E_THERMAL_RANGE_INVALID";
+constexpr const char* kDiagThermalNetworkInvalid = "PULSIM_YAML_E_THERMAL_NETWORK_INVALID";
+constexpr const char* kDiagThermalDimensionInvalid = "PULSIM_YAML_E_THERMAL_DIMENSION_INVALID";
 constexpr const char* kDiagThermalDefaultApplied = "PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED";
 constexpr const char* kDiagLossInvalidRange = "PULSIM_YAML_E_LOSS_RANGE_INVALID";
 constexpr const char* kDiagLossModelInvalid = "PULSIM_YAML_E_LOSS_MODEL_INVALID";
@@ -1793,7 +1795,10 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
 
         if (comp["thermal"]) {
             YAML::Node thermal = comp["thermal"];
-            validate_keys(thermal, {"enabled", "rth", "cth", "temp_init", "temp_ref", "alpha"},
+            validate_keys(
+                thermal,
+                {"enabled", "network", "rth", "cth", "rth_stages", "cth_stages",
+                 "temp_init", "temp_ref", "alpha"},
                           name + ".thermal", errors_, options_.strict);
             ThermalDeviceConfig cfg;
             if (const auto enabled = parse_bool_scalar(
@@ -1803,39 +1808,128 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             const bool supports_thermal = component_type_supports_thermal(type);
             const bool has_rth = is_set(thermal["rth"]);
             const bool has_cth = is_set(thermal["cth"]);
+            const bool has_rth_stages = is_set(thermal["rth_stages"]);
+            const bool has_cth_stages = is_set(thermal["cth_stages"]);
+
+            bool network_explicit = false;
+            if (const auto network_raw = parse_string_scalar(
+                    thermal["network"], name + ".thermal.network", errors_);
+                network_raw.has_value()) {
+                network_explicit = true;
+                const std::string normalized = normalize_key(*network_raw);
+                if (normalized == "single" ||
+                    normalized == "singlerc" ||
+                    normalized == "single_rc") {
+                    cfg.network_kind = ThermalNetworkKind::SingleRC;
+                } else if (normalized == "foster") {
+                    cfg.network_kind = ThermalNetworkKind::Foster;
+                } else if (normalized == "cauer") {
+                    cfg.network_kind = ThermalNetworkKind::Cauer;
+                } else {
+                    push_error(errors_,
+                               kDiagThermalNetworkInvalid,
+                               "Unsupported " + name + ".thermal.network '" + *network_raw +
+                                   "' (expected single_rc, foster, or cauer)");
+                }
+            }
+
+            const bool stage_mode_requested = has_rth_stages || has_cth_stages;
+            if (stage_mode_requested && !network_explicit) {
+                cfg.network_kind = ThermalNetworkKind::Foster;
+            }
 
             if (cfg.enabled && !supports_thermal) {
                 push_error(errors_, kDiagThermalUnsupportedComponent,
                            "Component '" + name + "' (" + type + ") does not support thermal port enablement");
             }
 
-            if (has_rth) {
-                cfg.rth = parse_real(thermal["rth"], name + ".thermal.rth", errors_);
-            } else if (cfg.enabled) {
-                if (options_.strict) {
-                    push_error(errors_, kDiagThermalMissingRequired,
-                               "Missing required field '" + name + ".thermal.rth' when thermal is enabled");
-                } else {
-                    cfg.rth = options.thermal.default_rth;
-                    push_warning(
-                        warnings_,
-                        kDiagThermalDefaultApplied,
-                        "Applied simulation.thermal.default_rth to '" + name + ".thermal.rth'");
+            if (cfg.network_kind == ThermalNetworkKind::SingleRC) {
+                if (stage_mode_requested) {
+                    push_error(errors_,
+                               kDiagThermalNetworkInvalid,
+                               name + ".thermal.network=single_rc cannot use rth_stages/cth_stages");
                 }
-            }
 
-            if (has_cth) {
-                cfg.cth = parse_real(thermal["cth"], name + ".thermal.cth", errors_);
-            } else if (cfg.enabled) {
-                if (options_.strict) {
-                    push_error(errors_, kDiagThermalMissingRequired,
-                               "Missing required field '" + name + ".thermal.cth' when thermal is enabled");
-                } else {
-                    cfg.cth = options.thermal.default_cth;
-                    push_warning(
-                        warnings_,
-                        kDiagThermalDefaultApplied,
-                        "Applied simulation.thermal.default_cth to '" + name + ".thermal.cth'");
+                if (has_rth) {
+                    cfg.rth = parse_real(thermal["rth"], name + ".thermal.rth", errors_);
+                } else if (cfg.enabled) {
+                    if (options_.strict) {
+                        push_error(errors_, kDiagThermalMissingRequired,
+                                   "Missing required field '" + name + ".thermal.rth' when thermal is enabled");
+                    } else {
+                        cfg.rth = options.thermal.default_rth;
+                        push_warning(
+                            warnings_,
+                            kDiagThermalDefaultApplied,
+                            "Applied simulation.thermal.default_rth to '" + name + ".thermal.rth'");
+                    }
+                }
+
+                if (has_cth) {
+                    cfg.cth = parse_real(thermal["cth"], name + ".thermal.cth", errors_);
+                } else if (cfg.enabled) {
+                    if (options_.strict) {
+                        push_error(errors_, kDiagThermalMissingRequired,
+                                   "Missing required field '" + name + ".thermal.cth' when thermal is enabled");
+                    } else {
+                        cfg.cth = options.thermal.default_cth;
+                        push_warning(
+                            warnings_,
+                            kDiagThermalDefaultApplied,
+                            "Applied simulation.thermal.default_cth to '" + name + ".thermal.cth'");
+                    }
+                }
+                cfg.stage_rth.clear();
+                cfg.stage_cth.clear();
+            } else {
+                if (!has_rth_stages || !has_cth_stages) {
+                    push_error(
+                        errors_,
+                        kDiagThermalMissingRequired,
+                        "Missing required fields '" + name +
+                            ".thermal.rth_stages' and '" + name +
+                            ".thermal.cth_stages' for staged thermal network");
+                }
+                cfg.stage_rth =
+                    parse_real_sequence(thermal["rth_stages"], name + ".thermal.rth_stages", errors_);
+                cfg.stage_cth =
+                    parse_real_sequence(thermal["cth_stages"], name + ".thermal.cth_stages", errors_);
+
+                if (!cfg.stage_rth.empty() &&
+                    !cfg.stage_cth.empty() &&
+                    cfg.stage_rth.size() != cfg.stage_cth.size()) {
+                    push_error(errors_,
+                               kDiagThermalDimensionInvalid,
+                               name + ".thermal stage dimension mismatch: rth_stages has " +
+                                   std::to_string(cfg.stage_rth.size()) +
+                                   " entries but cth_stages has " +
+                                   std::to_string(cfg.stage_cth.size()));
+                }
+                if (cfg.stage_rth.empty() || cfg.stage_cth.empty()) {
+                    push_error(errors_,
+                               kDiagThermalDimensionInvalid,
+                               name + ".thermal staged networks require non-empty rth_stages/cth_stages");
+                }
+
+                cfg.rth = 0.0;
+                cfg.cth = 0.0;
+                for (std::size_t i = 0; i < std::min(cfg.stage_rth.size(), cfg.stage_cth.size()); ++i) {
+                    const Real r = cfg.stage_rth[i];
+                    const Real c = cfg.stage_cth[i];
+                    if (!std::isfinite(r) || r <= 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.rth_stages[" + std::to_string(i) +
+                                       "] must be finite and > 0");
+                    }
+                    if (!std::isfinite(c) || c < 0.0) {
+                        push_error(errors_,
+                                   kDiagThermalInvalidRange,
+                                   name + ".thermal.cth_stages[" + std::to_string(i) +
+                                       "] must be finite and >= 0");
+                    }
+                    cfg.rth += r;
+                    cfg.cth += c;
                 }
             }
 
