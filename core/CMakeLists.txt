@@ -27,6 +27,7 @@ add_library(pulsim::core ALIAS pulsim_core)
 # Compiled pulsim library (Circuit, Simulator, MNA, etc.)
 # =============================================================================
 add_library(pulsim STATIC
+    src/v1/runtime_module_adapters.cpp
     src/v1/simulation.cpp
     src/v1/simulation_periodic.cpp
     src/v1/simulation_step.cpp
@@ -95,6 +96,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_v1_periodic_validation.cpp
         tests/test_v1_stage_context_raii.cpp
         tests/test_extension_registry.cpp
+        tests/test_runtime_modules.cpp
         tests/test_model_regularization.cpp
         tests/test_v1_kernel.cpp
         tests/test_stress_simulation.cpp

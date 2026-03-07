@@ -1288,6 +1288,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("selected_backend", &BackendTelemetry::selected_backend)
         .def_readwrite("solver_family", &BackendTelemetry::solver_family)
         .def_readwrite("formulation_mode", &BackendTelemetry::formulation_mode)
+        .def_readwrite("runtime_module_count", &BackendTelemetry::runtime_module_count)
+        .def_readwrite("runtime_module_order", &BackendTelemetry::runtime_module_order)
         .def_readwrite("function_evaluations", &BackendTelemetry::function_evaluations)
         .def_readwrite("jacobian_evaluations", &BackendTelemetry::jacobian_evaluations)
         .def_readwrite("nonlinear_iterations", &BackendTelemetry::nonlinear_iterations)

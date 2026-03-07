@@ -4,6 +4,7 @@
  */
 
 #include "pulsim/v1/simulation.hpp"
+#include "runtime_module_adapters.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 
@@ -798,6 +800,16 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     options_.newton_options.num_branches = circuit_.num_branches();
     newton_solver_.set_options(options_.newton_options);
     newton_solver_.linear_solver().set_config(options_.linear_solver);
+    runtime_module_resolution_ = resolve_default_runtime_module_plan();
+    if (!runtime_module_resolution_.ok()) {
+        std::ostringstream oss;
+        oss << "Runtime module resolution failed: code="
+            << to_string(runtime_module_resolution_.validation.code)
+            << " module_id=" << runtime_module_resolution_.validation.module_id
+            << " capability=" << runtime_module_resolution_.validation.capability
+            << " message=" << runtime_module_resolution_.validation.message;
+        throw std::invalid_argument(oss.str());
+    }
     transient_services_ =
         make_default_transient_service_registry(circuit_, options_, newton_solver_);
 
@@ -1103,6 +1115,18 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     result.backend_telemetry.selected_backend = "native";
     result.backend_telemetry.solver_family = "native";
     result.backend_telemetry.formulation_mode = formulation_mode;
+    result.backend_telemetry.runtime_module_count = saturating_int(
+        static_cast<std::uint64_t>(runtime_module_resolution_.plan.size()));
+    if (!runtime_module_resolution_.plan.ordered_modules.empty()) {
+        std::ostringstream module_order;
+        for (std::size_t i = 0; i < runtime_module_resolution_.plan.ordered_modules.size(); ++i) {
+            if (i > 0) {
+                module_order << ",";
+            }
+            module_order << runtime_module_resolution_.plan.ordered_modules[i].module_id;
+        }
+        result.backend_telemetry.runtime_module_order = module_order.str();
+    }
     const std::size_t sample_reserve = estimate_output_sample_reserve(options_);
     result.backend_telemetry.reserved_output_samples =
         saturating_int(static_cast<std::uint64_t>(sample_reserve));
@@ -1221,93 +1245,14 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
     circuit_.update_history(x, true);
 
-    struct ThermalTraceBinding {
-        std::size_t device_index = 0;
-        std::string channel_name;
-    };
-    struct LossTraceBinding {
-        std::size_t device_index = 0;
-        std::string conduction_channel;
-        std::string turn_on_channel;
-        std::string turn_off_channel;
-        std::string reverse_recovery_channel;
-        std::string total_channel;
-    };
-    std::vector<ThermalTraceBinding> thermal_trace_bindings;
-    std::vector<LossTraceBinding> loss_trace_bindings;
-    bool thermal_trace_initialized = false;
-    bool loss_trace_initialized = false;
     bool virtual_metadata_initialized = false;
-    // Canonical loss channels are exported on output samples; accumulate segment energy
-    // between samples so fixed-step internal substeps are represented exactly.
-    std::vector<Real> loss_trace_interval_cond_energy;
-    std::vector<Real> loss_trace_interval_turn_on_energy;
-    std::vector<Real> loss_trace_interval_turn_off_energy;
-    std::vector<Real> loss_trace_interval_reverse_recovery_energy;
-    std::vector<Real> loss_trace_interval_total_energy;
-    bool loss_trace_interval_initialized = false;
-    Real loss_trace_interval_start_time = t;
-
-    auto initialize_loss_trace_interval = [&]() {
-        if (!options_.enable_losses || !transient_services_.loss_service) {
-            return;
-        }
-        const std::size_t device_count = circuit_.connections().size();
-        auto reset_bucket = [device_count](std::vector<Real>& bucket) {
-            if (bucket.size() != device_count) {
-                bucket.assign(device_count, 0.0);
-            } else {
-                std::fill(bucket.begin(), bucket.end(), 0.0);
-            }
-        };
-        reset_bucket(loss_trace_interval_cond_energy);
-        reset_bucket(loss_trace_interval_turn_on_energy);
-        reset_bucket(loss_trace_interval_turn_off_energy);
-        reset_bucket(loss_trace_interval_reverse_recovery_energy);
-        reset_bucket(loss_trace_interval_total_energy);
-        loss_trace_interval_start_time = t;
-        loss_trace_interval_initialized = true;
-    };
-
-    auto accumulate_loss_trace_interval = [&](Real dt_segment) {
-        if (!options_.enable_losses || !transient_services_.loss_service || dt_segment <= 0.0) {
-            return;
-        }
-        if (!loss_trace_interval_initialized) {
-            initialize_loss_trace_interval();
-        }
-        if (!loss_trace_interval_initialized) {
-            return;
-        }
-
-        const auto conduction = transient_services_.loss_service->last_device_conduction_power();
-        const auto turn_on = transient_services_.loss_service->last_device_turn_on_power();
-        const auto turn_off = transient_services_.loss_service->last_device_turn_off_power();
-        const auto reverse_recovery =
-            transient_services_.loss_service->last_device_reverse_recovery_power();
-        const auto total = transient_services_.loss_service->last_device_power();
-        const std::size_t device_count = loss_trace_interval_total_energy.size();
-        const auto finite_non_negative = [](Real value) {
-            if (!std::isfinite(value) || value < 0.0) {
-                return Real{0.0};
-            }
-            return value;
-        };
-        for (std::size_t i = 0; i < device_count; ++i) {
-            const Real p_cond = i < conduction.size() ? finite_non_negative(conduction[i]) : 0.0;
-            const Real p_on = i < turn_on.size() ? finite_non_negative(turn_on[i]) : 0.0;
-            const Real p_off = i < turn_off.size() ? finite_non_negative(turn_off[i]) : 0.0;
-            const Real p_rr = i < reverse_recovery.size()
-                ? finite_non_negative(reverse_recovery[i])
-                : 0.0;
-            const Real p_total = i < total.size() ? finite_non_negative(total[i]) : 0.0;
-            loss_trace_interval_cond_energy[i] += p_cond * dt_segment;
-            loss_trace_interval_turn_on_energy[i] += p_on * dt_segment;
-            loss_trace_interval_turn_off_energy[i] += p_off * dt_segment;
-            loss_trace_interval_reverse_recovery_energy[i] += p_rr * dt_segment;
-            loss_trace_interval_total_energy[i] += p_total * dt_segment;
-        }
-    };
+    ElectrothermalTelemetryModule electrothermal_module(
+        circuit_,
+        options_,
+        transient_services_,
+        result,
+        sample_reserve,
+        t);
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         const bool has_virtual_components = circuit_.num_virtual_components() > 0;
@@ -1405,165 +1350,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        if (has_loss_trace && !loss_trace_initialized) {
-            const auto& conns = circuit_.connections();
-            loss_trace_bindings.reserve(conns.size());
-            if (sample_reserve > 0) {
-                result.virtual_channels.reserve(result.virtual_channels.size() + conns.size() * 5);
-            }
-            auto register_loss_channel = [&](const std::string& channel,
-                                             const std::string& source,
-                                             const std::string& quantity) {
-                auto [it, inserted] = result.virtual_channels.try_emplace(channel);
-                if (inserted && sample_reserve > 0) {
-                    it->second.reserve(sample_reserve);
-                }
-                result.virtual_channel_metadata.try_emplace(
-                    channel,
-                    VirtualChannelMetadata{
-                        quantity,
-                        channel,
-                        source,
-                        "loss",
-                        "W",
-                        {}
-                    });
-            };
-
-            for (std::size_t i = 0; i < conns.size(); ++i) {
-                const std::string source = conns[i].name;
-                LossTraceBinding binding;
-                binding.device_index = i;
-                binding.conduction_channel = "Pcond(" + source + ")";
-                binding.turn_on_channel = "Psw_on(" + source + ")";
-                binding.turn_off_channel = "Psw_off(" + source + ")";
-                binding.reverse_recovery_channel = "Prr(" + source + ")";
-                binding.total_channel = "Ploss(" + source + ")";
-                register_loss_channel(binding.conduction_channel, source, "loss_trace_conduction");
-                register_loss_channel(binding.turn_on_channel, source, "loss_trace_turn_on");
-                register_loss_channel(binding.turn_off_channel, source, "loss_trace_turn_off");
-                register_loss_channel(
-                    binding.reverse_recovery_channel,
-                    source,
-                    "loss_trace_reverse_recovery");
-                register_loss_channel(binding.total_channel, source, "loss_trace_total");
-                loss_trace_bindings.push_back(std::move(binding));
-            }
-            loss_trace_initialized = true;
-            if (!loss_trace_interval_initialized) {
-                initialize_loss_trace_interval();
-            }
-        }
-
-        if (has_loss_trace) {
-            if (!loss_trace_interval_initialized) {
-                initialize_loss_trace_interval();
-            }
-            const Real interval_duration = sample_time - loss_trace_interval_start_time;
-            const bool valid_interval =
-                std::isfinite(interval_duration) && interval_duration > 0.0;
-
-            auto sample_loss_channel = [&](const std::string& channel_name, Real value) {
-                auto channel_it = result.virtual_channels.find(channel_name);
-                if (channel_it == result.virtual_channels.end()) {
-                    return;
-                }
-                auto& series = channel_it->second;
-                while (series.size() + 1 < sample_count) {
-                    append_series_value(series, nan);
-                }
-                append_series_value(series, value);
-            };
-
-            for (const auto& binding : loss_trace_bindings) {
-                const std::size_t i = binding.device_index;
-                const auto average_power = [&](const std::vector<Real>& energy_bucket) {
-                    if (!valid_interval || i >= energy_bucket.size()) {
-                        return Real{0.0};
-                    }
-                    return energy_bucket[i] / interval_duration;
-                };
-                const Real p_cond = average_power(loss_trace_interval_cond_energy);
-                const Real p_on = average_power(loss_trace_interval_turn_on_energy);
-                const Real p_off = average_power(loss_trace_interval_turn_off_energy);
-                const Real p_rr = average_power(loss_trace_interval_reverse_recovery_energy);
-                const Real p_total = average_power(loss_trace_interval_total_energy);
-                sample_loss_channel(binding.conduction_channel, p_cond);
-                sample_loss_channel(binding.turn_on_channel, p_on);
-                sample_loss_channel(binding.turn_off_channel, p_off);
-                sample_loss_channel(binding.reverse_recovery_channel, p_rr);
-                sample_loss_channel(binding.total_channel, p_total);
-            }
-
-            if (loss_trace_interval_initialized) {
-                if (valid_interval) {
-                    std::fill(loss_trace_interval_cond_energy.begin(),
-                              loss_trace_interval_cond_energy.end(),
-                              Real{0.0});
-                    std::fill(loss_trace_interval_turn_on_energy.begin(),
-                              loss_trace_interval_turn_on_energy.end(),
-                              Real{0.0});
-                    std::fill(loss_trace_interval_turn_off_energy.begin(),
-                              loss_trace_interval_turn_off_energy.end(),
-                              Real{0.0});
-                    std::fill(loss_trace_interval_reverse_recovery_energy.begin(),
-                              loss_trace_interval_reverse_recovery_energy.end(),
-                              Real{0.0});
-                    std::fill(loss_trace_interval_total_energy.begin(),
-                              loss_trace_interval_total_energy.end(),
-                              Real{0.0});
-                }
-                loss_trace_interval_start_time = sample_time;
-            }
-        }
-
-        if (has_thermal_trace && !thermal_trace_initialized) {
-            // Register canonical thermal channels once and reuse indexed reads
-            // per sample to avoid rebuilding thermal summaries in the hot loop.
-            const auto& conns = circuit_.connections();
-            thermal_trace_bindings.reserve(conns.size());
-            if (sample_reserve > 0) {
-                result.virtual_channels.reserve(result.virtual_channels.size() + conns.size());
-            }
-            for (std::size_t i = 0; i < conns.size(); ++i) {
-                if (!transient_services_.thermal_service->is_device_enabled(i)) {
-                    continue;
-                }
-                const std::string channel = "T(" + conns[i].name + ")";
-                auto [it, inserted] = result.virtual_channels.try_emplace(channel);
-                if (inserted && sample_reserve > 0) {
-                    it->second.reserve(sample_reserve);
-                }
-                result.virtual_channel_metadata.try_emplace(
-                    channel,
-                    VirtualChannelMetadata{
-                        "thermal_trace",
-                        channel,
-                        conns[i].name,
-                        "thermal",
-                        "degC",
-                        {}
-                    });
-                thermal_trace_bindings.push_back(ThermalTraceBinding{i, channel});
-            }
-            thermal_trace_initialized = true;
-        }
-
-        if (has_thermal_trace) {
-            for (const auto& binding : thermal_trace_bindings) {
-                auto channel_it = result.virtual_channels.find(binding.channel_name);
-                if (channel_it == result.virtual_channels.end()) {
-                    continue;
-                }
-                auto& series = channel_it->second;
-                while (series.size() + 1 < sample_count) {
-                    append_series_value(series, nan);
-                }
-                append_series_value(
-                    series,
-                    transient_services_.thermal_service->device_temperature(binding.device_index));
-            }
-        }
+        electrothermal_module.on_sample_emit(sample_time, sample_count);
 
         for (auto& [channel, series] : result.virtual_channels) {
             if (series.size() < sample_count) {
@@ -2279,7 +2066,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
                 accumulate_conduction_losses(step_anchor_state, hold_dt);
                 update_thermal_state(hold_dt);
-                accumulate_loss_trace_interval(hold_dt);
+                electrothermal_module.on_step_accepted(hold_dt);
 
                 t += hold_dt;
                 pending_dt_override = hold_dt;
@@ -2457,7 +2244,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
         accumulate_conduction_losses(step_result.solution, dt_used);
         update_thermal_state(dt_used);
-        accumulate_loss_trace_interval(dt_used);
+        electrothermal_module.on_step_accepted(dt_used);
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);

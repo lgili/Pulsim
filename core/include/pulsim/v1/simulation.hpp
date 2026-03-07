@@ -11,6 +11,7 @@
 #include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/extensions.hpp"
+#include "pulsim/v1/runtime_modules.hpp"
 #include "pulsim/v1/losses.hpp"
 #include "pulsim/v1/transient_services.hpp"
 #include "pulsim/simulation_control.hpp"
@@ -262,6 +263,8 @@ struct BackendTelemetry {
     std::string selected_backend = "native";
     std::string solver_family = "native";
     std::string formulation_mode = "native";
+    int runtime_module_count = 0;
+    std::string runtime_module_order;
     int function_evaluations = 0;
     int jacobian_evaluations = 0;
     int nonlinear_iterations = 0;
@@ -572,6 +575,9 @@ public:
     [[nodiscard]] const ExtensionRegistry& extension_registry() const {
         return kernel_extension_registry();
     }
+    [[nodiscard]] const RuntimeModuleResolution& runtime_module_resolution() const {
+        return runtime_module_resolution_;
+    }
 
 private:
     enum class StepSolvePath {
@@ -652,6 +658,7 @@ private:
     AdaptiveLTEEstimator lte_estimator_;
     BDFOrderController bdf_controller_;
     TransientServiceRegistry transient_services_;
+    RuntimeModuleResolution runtime_module_resolution_;
     StepSolvePath last_step_solve_path_ = StepSolvePath::DaeFallback;
     std::string last_step_solve_reason_ = "init";
     bool last_step_segment_cache_hit_ = false;

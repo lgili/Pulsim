@@ -27,8 +27,39 @@ Core flow:
 Key boundaries:
 
 - `TransientService` interfaces in `core/include/pulsim/v1/transient_services.hpp`
+- Runtime module contracts in `core/include/pulsim/v1/runtime_modules.hpp`
 - Circuit mixed-domain execution in `RuntimeCircuit`
 - Python ABI surface in `python/bindings.cpp`
+
+## 2.1 Runtime module contracts (new)
+
+The runtime now exposes deterministic module dependency resolution for core concerns (`events_topology`, `control_mixed_domain`, `loss_accounting`, `thermal_coupling`, `telemetry_channels`).
+
+Rules:
+- add a module by declaring `module_id`, `provides_capabilities`, `requires_capabilities`, and lifecycle hooks;
+- dependency graph must resolve deterministically (no missing providers, no cycles, no duplicate module IDs);
+- keep module ownership explicit for channel/telemetry outputs.
+- check runtime resolution through `result.backend_telemetry.runtime_module_count` and
+  `result.backend_telemetry.runtime_module_order`.
+
+Current non-breaking extraction status:
+- `telemetry_channels` adapter: `core/src/v1/runtime_module_adapters.hpp/.cpp`
+- orchestrator now delegates canonical `P*` and `T(*)` trace emission through module hooks (`on_step_accepted`, `on_sample_emit`)
+- channel names, metadata, and Python/YAML-facing behavior remain unchanged
+
+## 2.2 Dependency rules and anti-patterns
+
+Dependency rules:
+- depend on capabilities, never on module IDs for runtime data flow;
+- one capability must have exactly one provider;
+- modules must be acyclic and deterministic (lexical tie-break in resolver);
+- module state must be self-owned; shared mutation must go through typed contracts.
+
+Anti-patterns to avoid:
+- reading internal state from another module implementation;
+- emitting channels in multiple modules for the same canonical signal;
+- adding hidden ordering assumptions not declared in `requires_capabilities`;
+- allocating large buffers inside per-step/per-sample hooks when size is predictable.
 
 ## 3. Hot-loop coding rules
 
@@ -83,6 +114,23 @@ ctest --test-dir build --output-on-failure -R "^v1 "
 ```
 
 If you modify parser/runtime contract fields, also validate docs and Python stubs.
+
+Module-scoped checks (recommended before full suite):
+
+```bash
+# runtime-module contracts and ordering
+ctest --test-dir build --output-on-failure -R "runtime module"
+
+# switching/loss/thermal channel path (telemetry_channels + loss/thermal adapters)
+ctest --test-dir build --output-on-failure -R "v1 switching loss accumulation|v1 fixed-step resolves multiple switching events inside one macro interval|v1 backend telemetry reports topology-driven linear cache invalidation"
+
+# Python contract and thermal/loss consistency
+PYTHONPATH=build/python pytest -q \
+  python/tests/test_runtime_bindings.py \
+  python/tests/test_benchmark_python_first.py \
+  python/tests/test_thermal_component_theoretical.py \
+  python/tests/test_docs_release_config.py
+```
 
 ## 7. What reviewers will prioritize
 
