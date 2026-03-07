@@ -180,6 +180,44 @@ Supported values for mode:
 
 In strict parsing, `discrete` requires `sample_time > 0`.
 
+### Frequency Analysis (AC Sweep)
+
+Use `simulation.frequency_analysis` for backend AC sweep workflows:
+
+```yaml
+simulation:
+  frequency_analysis:
+    enabled: true
+    mode: open_loop_transfer
+    anchor: auto
+    sweep:
+      scale: log
+      f_start_hz: 10.0
+      f_stop_hz: 100000.0
+      points: 80
+    injection_current_amplitude: 1.0
+    perturbation: {positive: in, negative: 0}
+    output: {positive: out, negative: 0}
+```
+
+Supported `mode` values:
+
+- `open_loop_transfer`
+- `closed_loop_transfer`
+- `input_impedance`
+- `output_impedance`
+
+Supported `anchor` values:
+
+- `dc`
+- `periodic`
+- `averaged`
+- `auto`
+
+The parser enforces deterministic validation for sweep ranges, point count, and port bindings.
+For full backend contract and Python result usage, see
+[Frequency Analysis (AC Sweep)](frequency-analysis-ac-sweep.md).
+
 ### Control Blocks for Closed-Loop Converters
 
 Common blocks for converter control loops:

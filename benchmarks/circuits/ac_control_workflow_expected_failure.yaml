@@ -1,0 +1,67 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: ac_control_workflow_expected_failure
+  validation:
+    type: none
+  expectations:
+    expected_failure:
+      mode: frequency_analysis
+      diagnostic: FrequencyUnsupportedConfiguration
+      message_contains: probe/scope virtual components only
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 1e-6
+  frequency_analysis:
+    enabled: true
+    mode: open_loop_transfer
+    anchor: dc
+    sweep:
+      scale: log
+      f_start_hz: 10.0
+      f_stop_hz: 10000.0
+      points: 32
+    injection_current_amplitude: 1.0
+    perturbation:
+      positive: in
+      negative: 0
+    output:
+      positive: out
+      negative: 0
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 1k
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1u
+    ic: 0.0
+  - type: voltage_source
+    name: Vref
+    nodes: [vref, 0]
+    waveform: {type: dc, value: 5.0}
+  - type: pi_controller
+    name: PI1
+    nodes: [vref, out, ctrl]
+    kp: 0.08
+    ki: 100.0
+    output_min: 0.0
+    output_max: 0.95
+    anti_windup: 1.0
+  - type: pwm_generator
+    name: PWM1
+    nodes: [ctrl]
+    frequency: 10000.0
+    duty: 0.5
+    duty_min: 0.0
+    duty_max: 0.95
+    duty_from_channel: PI1
+    v_high: 20.0
+    v_low: 0.0

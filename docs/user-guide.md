@@ -38,6 +38,12 @@ sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
 ```
 
+For frequency-domain workflows, configure `options.frequency_analysis` and call:
+
+```python
+ac_result = sim.run_frequency_analysis(options.frequency_analysis)
+```
+
 ## Core Concepts
 
 ### 1. Circuit and Topology
@@ -106,6 +112,7 @@ For switched converters in production-like runs:
 
 - [Netlist YAML Format](netlist-format.md)
 - [Frontend Control and Signals Contract](frontend-control-signals.md)
+- [Frequency Analysis (AC Sweep)](frequency-analysis-ac-sweep.md)
 - [Electrothermal Workflow](electrothermal-workflow.md)
 - [Electrothermal Migration (Scalar to Datasheet)](electrothermal-migration-scalar-to-datasheet.md)
 - [Configuration](configuration.md)

@@ -93,6 +93,28 @@ class FormulationMode(Enum):
     ProjectedWrapper = ...
     Direct = ...
 
+class FrequencyAnalysisMode(Enum):
+    OpenLoopTransfer = ...
+    ClosedLoopTransfer = ...
+    InputImpedance = ...
+    OutputImpedance = ...
+
+class FrequencyAnchorMode(Enum):
+    DC = ...
+    Periodic = ...
+    Averaged = ...
+    Auto = ...
+
+class FrequencySweepScale(Enum):
+    Logarithmic = ...
+    Linear = ...
+
+class FrequencyMetricUndefinedReason(Enum):
+    None = ...
+    NotTransferMode = ...
+    NoGainCrossover = ...
+    NoPhaseCrossover = ...
+
 # =============================================================================
 # Device Classes
 # =============================================================================
@@ -324,6 +346,26 @@ class HarmonicBalanceOptions:
     tolerance: float
     relaxation: float
     initialize_from_transient: bool
+
+    def __init__(self) -> None: ...
+
+class FrequencyAnalysisPort:
+    positive_node: str
+    negative_node: str
+
+    def __init__(self) -> None: ...
+
+class FrequencyAnalysisOptions:
+    enabled: bool
+    mode: FrequencyAnalysisMode
+    anchor_mode: FrequencyAnchorMode
+    sweep_scale: FrequencySweepScale
+    f_start_hz: float
+    f_stop_hz: float
+    points: int
+    injection_current_amplitude: float
+    perturbation_port: FrequencyAnalysisPort
+    output_port: FrequencyAnalysisPort
 
     def __init__(self) -> None: ...
 
@@ -593,6 +635,7 @@ class SimulationOptions:
     periodic_options: PeriodicSteadyStateOptions
     enable_harmonic_balance: bool
     harmonic_balance: HarmonicBalanceOptions
+    frequency_analysis: FrequencyAnalysisOptions
     enable_events: bool
     enable_losses: bool
     switching_energy: Dict[str, SwitchingEnergy]
@@ -649,6 +692,41 @@ class HarmonicBalanceResult:
 
     def __init__(self) -> None: ...
 
+class FrequencyAnalysisResult:
+    success: bool
+    diagnostic: object
+    message: str
+    mode: FrequencyAnalysisMode
+    anchor_mode_selected: FrequencyAnchorMode
+    failed_point_index: int
+    failed_frequency_hz: float
+    frequency_hz: List[float]
+    response_real: List[float]
+    response_imag: List[float]
+    magnitude: List[float]
+    magnitude_db: List[float]
+    phase_deg: List[float]
+    channel_metadata: Dict[str, VirtualChannelMetadata]
+    gain_crossover_hz: float
+    phase_crossover_hz: float
+    phase_margin_deg: float
+    gain_margin_db: float
+    gain_crossover_reason: FrequencyMetricUndefinedReason
+    phase_crossover_reason: FrequencyMetricUndefinedReason
+    phase_margin_reason: FrequencyMetricUndefinedReason
+    gain_margin_reason: FrequencyMetricUndefinedReason
+
+    def __init__(self) -> None: ...
+
+class FrequencyAnalysisError(RuntimeError):
+    diagnostic: object
+    reason_code: str
+    message: str
+    failed_point_index: int
+    failed_frequency_hz: float
+    mode: FrequencyAnalysisMode
+    anchor_mode_selected: FrequencyAnchorMode
+
 class Simulator:
     options: SimulationOptions
 
@@ -665,6 +743,7 @@ class Simulator:
         x0_or_options: Optional[object] = ...,
         options: Optional[HarmonicBalanceOptions] = ...,
     ) -> HarmonicBalanceResult: ...
+    def run_frequency_analysis(self, options: Optional[FrequencyAnalysisOptions] = ...) -> FrequencyAnalysisResult: ...
     def set_switching_energy(self, device_name: str, energy: SwitchingEnergy) -> None: ...
     def set_switching_energy_surface(self, device_name: str, surface: SwitchingEnergySurface3D) -> None: ...
 
@@ -842,3 +921,9 @@ def detect_simd_level() -> SIMDLevel: ...
 def simd_vector_width() -> int: ...
 def backend_capabilities() -> Dict[str, bool]: ...
 def solver_status_to_string(status: SolverStatus) -> str: ...
+def run_frequency_analysis(
+    circuit: Circuit,
+    options: FrequencyAnalysisOptions,
+    *,
+    raise_on_failure: bool = ...,
+) -> FrequencyAnalysisResult: ...

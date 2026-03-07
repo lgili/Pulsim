@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -312,7 +313,10 @@ enum class SimulationDiagnosticCode {
     HarmonicInvalidPeriod,
     HarmonicInvalidInitialState,
     HarmonicDifferentiationFailure,
-    HarmonicSolverFailure
+    HarmonicSolverFailure,
+    FrequencyInvalidConfiguration,
+    FrequencyUnsupportedConfiguration,
+    FrequencySolverFailure
 };
 
 enum class FormulationMode {
@@ -341,6 +345,79 @@ struct HarmonicBalanceOptions {
     Real tolerance = 1e-6;
     Real relaxation = 1.0;
     bool initialize_from_transient = true;
+};
+
+enum class FrequencyAnalysisMode {
+    OpenLoopTransfer,
+    ClosedLoopTransfer,
+    InputImpedance,
+    OutputImpedance
+};
+
+enum class FrequencyAnchorMode {
+    DC,
+    Periodic,
+    Averaged,
+    Auto
+};
+
+enum class FrequencySweepScale {
+    Logarithmic,
+    Linear
+};
+
+enum class FrequencyMetricUndefinedReason {
+    None,
+    NotTransferMode,
+    NoGainCrossover,
+    NoPhaseCrossover
+};
+
+struct FrequencyAnalysisPort {
+    std::string positive_node;
+    std::string negative_node = "0";
+};
+
+struct FrequencyAnalysisOptions {
+    bool enabled = false;
+    FrequencyAnalysisMode mode = FrequencyAnalysisMode::OpenLoopTransfer;
+    FrequencyAnchorMode anchor_mode = FrequencyAnchorMode::Auto;
+    FrequencySweepScale sweep_scale = FrequencySweepScale::Logarithmic;
+    Real f_start_hz = 10.0;
+    Real f_stop_hz = 1e5;
+    int points = 100;
+    Real injection_current_amplitude = 1.0;
+    FrequencyAnalysisPort perturbation_port{};
+    FrequencyAnalysisPort output_port{};
+};
+
+struct FrequencyAnalysisResult {
+    bool success = false;
+    SimulationDiagnosticCode diagnostic = SimulationDiagnosticCode::None;
+    std::string message;
+    FrequencyAnalysisMode mode = FrequencyAnalysisMode::OpenLoopTransfer;
+    FrequencyAnchorMode anchor_mode_selected = FrequencyAnchorMode::Auto;
+    int failed_point_index = -1;
+    Real failed_frequency_hz = std::numeric_limits<Real>::quiet_NaN();
+    std::vector<Real> frequency_hz;
+    std::vector<Real> response_real;
+    std::vector<Real> response_imag;
+    std::vector<Real> magnitude;
+    std::vector<Real> magnitude_db;
+    std::vector<Real> phase_deg;
+    std::unordered_map<std::string, VirtualChannelMetadata> channel_metadata;
+    Real gain_crossover_hz = std::numeric_limits<Real>::quiet_NaN();
+    Real phase_crossover_hz = std::numeric_limits<Real>::quiet_NaN();
+    Real phase_margin_deg = std::numeric_limits<Real>::quiet_NaN();
+    Real gain_margin_db = std::numeric_limits<Real>::quiet_NaN();
+    FrequencyMetricUndefinedReason gain_crossover_reason =
+        FrequencyMetricUndefinedReason::NotTransferMode;
+    FrequencyMetricUndefinedReason phase_crossover_reason =
+        FrequencyMetricUndefinedReason::NotTransferMode;
+    FrequencyMetricUndefinedReason phase_margin_reason =
+        FrequencyMetricUndefinedReason::NotTransferMode;
+    FrequencyMetricUndefinedReason gain_margin_reason =
+        FrequencyMetricUndefinedReason::NotTransferMode;
 };
 
 enum class ThermalCouplingPolicy {
@@ -456,6 +533,7 @@ struct SimulationOptions {
     PeriodicSteadyStateOptions periodic_options{};
     bool enable_harmonic_balance = false;
     HarmonicBalanceOptions harmonic_balance{};
+    FrequencyAnalysisOptions frequency_analysis{};
 
     // Events & losses
     bool enable_events = true;
@@ -559,6 +637,9 @@ public:
     [[nodiscard]] HarmonicBalanceResult run_harmonic_balance(
         const Vector& x0,
         const HarmonicBalanceOptions& options = {});
+
+    [[nodiscard]] FrequencyAnalysisResult run_frequency_analysis(
+        const FrequencyAnalysisOptions& options = {});
 
     // Loss model attachment (optional)
     void set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy);

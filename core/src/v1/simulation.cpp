@@ -399,6 +399,12 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
             return "harmonic_diff_matrix_failure";
         case SimulationDiagnosticCode::HarmonicSolverFailure:
             return "harmonic_solver_failure";
+        case SimulationDiagnosticCode::FrequencyInvalidConfiguration:
+            return "frequency_invalid_configuration";
+        case SimulationDiagnosticCode::FrequencyUnsupportedConfiguration:
+            return "frequency_unsupported_configuration";
+        case SimulationDiagnosticCode::FrequencySolverFailure:
+            return "frequency_solver_failure";
     }
     return "";
 }

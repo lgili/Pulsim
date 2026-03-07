@@ -30,6 +30,20 @@ Checkpoints:
 - ripple remains physically plausible for chosen L/C and switching frequency.
 - telemetry does not show runaway fallback escalation.
 
+## Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only ac_rc_lowpass \
+  --output-dir benchmarks/out_ac_rc
+```
+
+Checkpoints:
+
+- output artifact includes `frequency_hz`, `magnitude_db`, and `phase_deg`.
+- analytical validation (`ac_analytical`) remains within configured magnitude/phase thresholds.
+- benchmark telemetry exposes `ac_sweep_mag_error` and `ac_sweep_phase_error`.
+
 ## Example 3: Closed-Loop Buck (controller + PWM path)
 
 ```bash

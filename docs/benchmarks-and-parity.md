@@ -17,6 +17,14 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
   --output-dir benchmarks/out_converters
 ```
 
+For AC sweep focused coverage:
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only ac_rc_lowpass ac_control_workflow_expected_failure \
+  --output-dir benchmarks/out_ac
+```
+
 ## 2) Solver/Integrator Validation Matrix
 
 ```bash
@@ -83,6 +91,7 @@ Baseline and threshold files:
 
 - `benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json`
 - `benchmarks/kpi_thresholds.yaml`
+- `benchmarks/kpi_thresholds_ac.yaml` (AC-focused KPI gate)
 
 ## Artifact Contract
 
@@ -105,3 +114,6 @@ Primary hybrid/electro-thermal KPI keys emitted in benchmark outputs:
 - `runtime_module_order_crc32`
 - `runtime_module_count_match`
 - `output_reallocation_total`
+- `ac_sweep_mag_error`
+- `ac_sweep_phase_error`
+- `ac_runtime_p95`

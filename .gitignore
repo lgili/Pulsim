@@ -55,3 +55,6 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# OpenSpec local planning notes (do not commit)
+openspec/README_LOCAL_IMPLEMENTATION_SEQUENCE.md

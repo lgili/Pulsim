@@ -45,6 +45,7 @@ constexpr const char* kDiagLossInvalidRange = "PULSIM_YAML_E_LOSS_RANGE_INVALID"
 constexpr const char* kDiagLossModelInvalid = "PULSIM_YAML_E_LOSS_MODEL_INVALID";
 constexpr const char* kDiagLossAxisInvalid = "PULSIM_YAML_E_LOSS_AXIS_INVALID";
 constexpr const char* kDiagLossDimensionInvalid = "PULSIM_YAML_E_LOSS_DIMENSION_INVALID";
+constexpr const char* kDiagFrequencyInvalid = "PULSIM_YAML_E_FREQ_CONFIG_INVALID";
 
 /// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
@@ -748,6 +749,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
                             "direct_formulation_fallback", "control", "control_mode", "control_sample_time",
+                            "frequency_analysis", "ac_sweep",
                             "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
@@ -1513,6 +1515,163 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (hb["initialize_from_transient"]) {
                 options.harmonic_balance.initialize_from_transient =
                     hb["initialize_from_transient"].as<bool>();
+            }
+        }
+
+        YAML::Node frequency = sim["frequency_analysis"] ? sim["frequency_analysis"] : sim["ac_sweep"];
+        if (frequency) {
+            validate_keys(
+                frequency,
+                {"enabled", "mode", "anchor", "sweep", "perturbation", "input", "output",
+                 "injection_current_amplitude", "injection_current"},
+                "simulation.frequency_analysis",
+                errors_,
+                options_.strict);
+
+            options.frequency_analysis.enabled = true;
+            if (const auto enabled = parse_bool_scalar(
+                    frequency["enabled"], "simulation.frequency_analysis.enabled", errors_)) {
+                options.frequency_analysis.enabled = *enabled;
+            }
+
+            if (const auto mode_raw = parse_string_scalar(
+                    frequency["mode"], "simulation.frequency_analysis.mode", errors_)) {
+                const std::string mode = normalize_key(*mode_raw);
+                if (mode == "openloop" || mode == "openlooptransfer" || mode == "transfer") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::OpenLoopTransfer;
+                } else if (mode == "closedloop" || mode == "closedlooptransfer") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::ClosedLoopTransfer;
+                } else if (mode == "inputimpedance" || mode == "zin") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::InputImpedance;
+                } else if (mode == "outputimpedance" || mode == "zout") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::OutputImpedance;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagFrequencyInvalid,
+                        "Invalid simulation.frequency_analysis.mode: '" + *mode_raw + "'");
+                }
+            }
+
+            if (const auto anchor_raw = parse_string_scalar(
+                    frequency["anchor"], "simulation.frequency_analysis.anchor", errors_)) {
+                const std::string anchor = normalize_key(*anchor_raw);
+                if (anchor == "dc") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::DC;
+                } else if (anchor == "periodic" || anchor == "shooting") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::Periodic;
+                } else if (anchor == "averaged" || anchor == "average") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::Averaged;
+                } else if (anchor == "auto") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::Auto;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagFrequencyInvalid,
+                        "Invalid simulation.frequency_analysis.anchor: '" + *anchor_raw + "'");
+                }
+            }
+
+            YAML::Node sweep = frequency["sweep"];
+            if (sweep) {
+                validate_keys(
+                    sweep,
+                    {"scale", "type", "f_start_hz", "f_stop_hz", "points"},
+                    "simulation.frequency_analysis.sweep",
+                    errors_,
+                    options_.strict);
+
+                if (const auto scale_raw = parse_string_scalar(
+                        sweep["scale"] ? sweep["scale"] : sweep["type"],
+                        "simulation.frequency_analysis.sweep.scale",
+                        errors_)) {
+                    const std::string scale = normalize_key(*scale_raw);
+                    if (scale == "log" || scale == "logarithmic") {
+                        options.frequency_analysis.sweep_scale = FrequencySweepScale::Logarithmic;
+                    } else if (scale == "linear" || scale == "lin") {
+                        options.frequency_analysis.sweep_scale = FrequencySweepScale::Linear;
+                    } else {
+                        push_error(
+                            errors_,
+                            kDiagFrequencyInvalid,
+                            "Invalid simulation.frequency_analysis.sweep.scale: '" + *scale_raw + "'");
+                    }
+                }
+
+                if (sweep["f_start_hz"]) {
+                    options.frequency_analysis.f_start_hz = parse_real(
+                        sweep["f_start_hz"], "simulation.frequency_analysis.sweep.f_start_hz", errors_);
+                }
+                if (sweep["f_stop_hz"]) {
+                    options.frequency_analysis.f_stop_hz = parse_real(
+                        sweep["f_stop_hz"], "simulation.frequency_analysis.sweep.f_stop_hz", errors_);
+                }
+                if (const auto points = parse_int_scalar(
+                        sweep["points"], "simulation.frequency_analysis.sweep.points", errors_)) {
+                    options.frequency_analysis.points = *points;
+                }
+            }
+
+            if (frequency["injection_current_amplitude"]) {
+                options.frequency_analysis.injection_current_amplitude =
+                    parse_real(
+                        frequency["injection_current_amplitude"],
+                        "simulation.frequency_analysis.injection_current_amplitude",
+                        errors_);
+            } else if (frequency["injection_current"]) {
+                options.frequency_analysis.injection_current_amplitude =
+                    parse_real(
+                        frequency["injection_current"],
+                        "simulation.frequency_analysis.injection_current",
+                        errors_);
+            }
+
+            auto parse_port = [&](const YAML::Node& node,
+                                  const std::string& path,
+                                  FrequencyAnalysisPort& port) {
+                if (!node) {
+                    return;
+                }
+                validate_keys(node, {"positive", "negative"}, path, errors_, options_.strict);
+                if (const auto pos = parse_string_scalar(node["positive"], path + ".positive", errors_)) {
+                    port.positive_node = *pos;
+                }
+                if (const auto neg = parse_string_scalar(node["negative"], path + ".negative", errors_)) {
+                    port.negative_node = *neg;
+                }
+            };
+
+            parse_port(
+                frequency["perturbation"] ? frequency["perturbation"] : frequency["input"],
+                "simulation.frequency_analysis.perturbation",
+                options.frequency_analysis.perturbation_port);
+            parse_port(
+                frequency["output"],
+                "simulation.frequency_analysis.output",
+                options.frequency_analysis.output_port);
+
+            if (!(std::isfinite(options.frequency_analysis.f_start_hz) &&
+                  std::isfinite(options.frequency_analysis.f_stop_hz)) ||
+                options.frequency_analysis.f_start_hz <= 0.0 ||
+                options.frequency_analysis.f_stop_hz < options.frequency_analysis.f_start_hz) {
+                push_error(
+                    errors_,
+                    kDiagFrequencyInvalid,
+                    "simulation.frequency_analysis sweep range must satisfy finite "
+                    "f_start_hz > 0 and f_stop_hz >= f_start_hz");
+            }
+            if (options.frequency_analysis.points < 2) {
+                push_error(
+                    errors_,
+                    kDiagFrequencyInvalid,
+                    "simulation.frequency_analysis.sweep.points must be >= 2");
+            }
+            if (!(std::isfinite(options.frequency_analysis.injection_current_amplitude) &&
+                  std::abs(options.frequency_analysis.injection_current_amplitude) > 0.0)) {
+                push_error(
+                    errors_,
+                    kDiagFrequencyInvalid,
+                    "simulation.frequency_analysis.injection_current_amplitude must be finite and non-zero");
             }
         }
     }

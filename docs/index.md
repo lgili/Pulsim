@@ -84,11 +84,12 @@ PYTHONPATH=build/python python3 -c "import pulsim as ps; print(ps.__version__)"
 1. Start with [Getting Started](getting-started.md).
 2. Follow the [User Guide](user-guide.md) to understand the canonical runtime flow.
 3. For frontend integration, follow [Frontend Control and Signals Contract](frontend-control-signals.md).
-4. Configure closed-loop + thermal runs with [Electrothermal Workflow](electrothermal-workflow.md).
-5. Run [Examples and Results](examples-and-results.md) end-to-end.
-6. Use [Benchmarks and Parity](benchmarks-and-parity.md) to set CI quality gates.
-7. Integrate against [API Reference](api-reference.md).
-8. If you plan to contribute backend code, follow [Backend C++ Contributor Guide](backend-cpp-contributor-guide.md).
+4. Configure AC workflows with [Frequency Analysis (AC Sweep)](frequency-analysis-ac-sweep.md).
+5. Configure closed-loop + thermal runs with [Electrothermal Workflow](electrothermal-workflow.md).
+6. Run [Examples and Results](examples-and-results.md) end-to-end.
+7. Use [Benchmarks and Parity](benchmarks-and-parity.md) to set CI quality gates.
+8. Integrate against [API Reference](api-reference.md).
+9. If you plan to contribute backend code, follow [Backend C++ Contributor Guide](backend-cpp-contributor-guide.md).
 
 ## Latest Release Notes
 

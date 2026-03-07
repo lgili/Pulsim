@@ -55,6 +55,10 @@ benchmarks:
     scenarios: [trbdf2]
   - path: circuits/stiff_rlc.yaml
     scenarios: [trbdf2, rosenbrockw]
+  - path: circuits/ac_rc_lowpass.yaml
+    scenarios: [direct_trap]
+  - path: circuits/ac_control_workflow_expected_failure.yaml
+    scenarios: [direct_trap]
   - path: circuits/periodic_rc_pwm.yaml
     scenarios: [shooting_default, harmonic_balance]
 scenarios:

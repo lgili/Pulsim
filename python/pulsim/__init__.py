@@ -22,6 +22,10 @@ from ._pulsim import (
     StepMode,
     ControlUpdateMode,
     FormulationMode,
+    FrequencyAnalysisMode,
+    FrequencyAnchorMode,
+    FrequencySweepScale,
+    FrequencyMetricUndefinedReason,
 
     # Device Classes - Linear
     Resistor,
@@ -70,6 +74,7 @@ from ._pulsim import (
 
     # Transient Simulation
     run_transient as _run_transient_native,
+    run_frequency_analysis as _run_frequency_analysis_native,
     run_transient_streaming as _run_transient_streaming_native,
     SimulationOptions,
     SimulationResult,
@@ -78,6 +83,9 @@ from ._pulsim import (
     PeriodicSteadyStateResult,
     HarmonicBalanceOptions,
     HarmonicBalanceResult,
+    FrequencyAnalysisPort,
+    FrequencyAnalysisOptions,
+    FrequencyAnalysisResult,
     StiffnessConfig,
     SwitchingEnergy,
     SwitchingEnergySurface3D,
@@ -473,6 +481,74 @@ def run_transient(
 
 run_transient_streaming = _run_transient_streaming_native
 
+
+_FREQUENCY_DIAGNOSTIC_REASON_CODES = {
+    "FrequencyInvalidConfiguration": "frequency_invalid_configuration",
+    "FrequencyUnsupportedConfiguration": "frequency_unsupported_configuration",
+    "FrequencySolverFailure": "frequency_solver_failure",
+}
+
+
+def _enum_name(value):
+    if value is None:
+        return "Unknown"
+    return getattr(value, "name", str(value))
+
+
+class FrequencyAnalysisError(RuntimeError):
+    """Structured exception for failed frequency-domain analysis runs."""
+
+    def __init__(
+        self,
+        *,
+        diagnostic,
+        reason_code,
+        message,
+        failed_point_index,
+        failed_frequency_hz,
+        mode,
+        anchor_mode_selected,
+    ):
+        summary = f"{reason_code}: {message}" if reason_code else message
+        super().__init__(summary)
+        self.diagnostic = diagnostic
+        self.reason_code = reason_code
+        self.message = message
+        self.failed_point_index = int(failed_point_index)
+        self.failed_frequency_hz = float(failed_frequency_hz)
+        self.mode = mode
+        self.anchor_mode_selected = anchor_mode_selected
+
+    @classmethod
+    def from_result(cls, result):
+        diagnostic = getattr(result, "diagnostic", None)
+        diagnostic_name = _enum_name(diagnostic)
+        reason_code = _FREQUENCY_DIAGNOSTIC_REASON_CODES.get(diagnostic_name, diagnostic_name.lower())
+        return cls(
+            diagnostic=diagnostic,
+            reason_code=reason_code,
+            message=str(getattr(result, "message", "")),
+            failed_point_index=int(getattr(result, "failed_point_index", -1)),
+            failed_frequency_hz=float(getattr(result, "failed_frequency_hz", float("nan"))),
+            mode=getattr(result, "mode", None),
+            anchor_mode_selected=getattr(result, "anchor_mode_selected", None),
+        )
+
+
+def run_frequency_analysis(circuit, options, *, raise_on_failure=False):
+    """Run frequency-domain AC sweep using the procedural API.
+
+    Args:
+        circuit: Pulsim circuit instance.
+        options: Frequency analysis configuration.
+        raise_on_failure: When true, raise ``FrequencyAnalysisError`` on
+            deterministic kernel failures instead of returning ``success=False``.
+    """
+    result = _run_frequency_analysis_native(circuit, options)
+    if raise_on_failure and not bool(getattr(result, "success", False)):
+        raise FrequencyAnalysisError.from_result(result)
+    return result
+
 __all__ = [
     # Version
     "__version__",
@@ -489,6 +565,10 @@ __all__ = [
     "StepMode",
     "ControlUpdateMode",
     "FormulationMode",
+    "FrequencyAnalysisMode",
+    "FrequencyAnchorMode",
+    "FrequencySweepScale",
+    "FrequencyMetricUndefinedReason",
 
     # Device Classes - Linear
     "Resistor",
@@ -537,7 +617,9 @@ __all__ = [
 
     # Transient Simulation
     "run_transient",
+    "run_frequency_analysis",
     "run_transient_streaming",
+    "FrequencyAnalysisError",
     "SimulationOptions",
     "SimulationResult",
     "Simulator",
@@ -545,6 +627,9 @@ __all__ = [
     "PeriodicSteadyStateResult",
     "HarmonicBalanceOptions",
     "HarmonicBalanceResult",
+    "FrequencyAnalysisPort",
+    "FrequencyAnalysisOptions",
+    "FrequencyAnalysisResult",
     "StiffnessConfig",
     "SwitchingEnergy",
     "SwitchingEnergySurface3D",

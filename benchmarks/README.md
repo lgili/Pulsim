@@ -37,6 +37,14 @@ python3 benchmarks/kpi_gate.py \
   --report-out benchmarks/out/kpi_gate_report.json \
   --print-report
 
+# AC-focused KPI gate
+python3 benchmarks/kpi_gate.py \
+  --baseline benchmarks/kpi_baselines/<ac-baseline>/kpi_baseline.json \
+  --bench-results benchmarks/out_ac/results.json \
+  --thresholds benchmarks/kpi_thresholds_ac.yaml \
+  --report-out benchmarks/out_ac/kpi_gate_report.json \
+  --print-report
+
 # Freeze a new baseline snapshot from a validated run
 python3 benchmarks/freeze_kpi_baseline.py \
   --baseline-id modular_runtime_phase13_2026-03-07 \
@@ -48,6 +56,11 @@ python3 benchmarks/freeze_kpi_baseline.py \
 python3 benchmarks/benchmark_runner.py \
   --benchmarks benchmarks/electrothermal_benchmarks.yaml \
   --output-dir benchmarks/out_electrothermal
+
+# AC sweep focused benchmarks
+python3 benchmarks/benchmark_runner.py \
+  --only ac_rc_lowpass ac_control_workflow_expected_failure \
+  --output-dir benchmarks/out_ac
 python3 benchmarks/stress_suite.py \
   --benchmarks benchmarks/electrothermal_benchmarks.yaml \
   --catalog benchmarks/electrothermal_stress_catalog.yaml \
@@ -119,11 +132,14 @@ Each run produces:
 Telemetry fields are sourced from structured simulation result objects and included in `results.json`.
 Analytical `max_error` thresholds in `circuits/*.yaml` are calibrated for the current
 Python-first runtime defaults (fixed-step unless explicitly overridden).
+AC analytical workflows can use `benchmark.validation.type: ac_analytical`
+with model `rc_lowpass` to validate `magnitude_db`/`phase_deg` against theory.
 Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `state_space_primary_ratio`, `dae_fallback_ratio`, `loss_energy_balance_error`,
 `thermal_peak_temperature_delta`, `component_coverage_rate`, `component_coverage_gap`,
 `component_loss_summary_consistency_error`, `component_thermal_summary_consistency_error`,
-`runtime_module_order_crc32`, `runtime_module_count_match`, and `output_reallocation_total`.
+`runtime_module_order_crc32`, `runtime_module_count_match`, `output_reallocation_total`,
+`ac_sweep_mag_error`, and `ac_sweep_phase_error`.
 
 `benchmark_ngspice.py` also emits:
 
@@ -156,8 +172,12 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
    - `ltspice_observables`: `{ column: "V(out)", ltspice_vector: "V(out)" }`
 5. Metric thresholds can be configured under `benchmark.expectations.metrics`:
    - `max_error`, `rms_error`, `phase_error_deg`, `steady_state_max_error`, `steady_state_rms_error`
-6. If using `reference` validation, add a baseline CSV under `baselines/`.
-7. Optional validation window controls:
+6. To model expected deterministic failures (for unsupported workflows), use:
+   - `benchmark.expectations.expected_failure.diagnostic`
+   - `benchmark.expectations.expected_failure.mode`
+   - `benchmark.expectations.expected_failure.message_contains`
+7. If using `reference` validation, add a baseline CSV under `baselines/`.
+8. Optional validation window controls:
    - `benchmark.validation.ignore_initial_samples`: ignore N leading samples.
    - `benchmark.validation.start_time`: compare only from a minimum time.
 

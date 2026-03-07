@@ -21,6 +21,21 @@ class BackendRunResult:
     telemetry: Dict[str, Optional[float]]
 
 
+class BackendRunError(RuntimeError):
+    """Structured backend execution error with optional diagnostic code."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        diagnostic: Optional[str] = None,
+        mode: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.diagnostic = diagnostic
+        self.mode = mode
+
+
 def _import_pulsim():
     ps, _ = _import_pulsim_with_diagnostics()
     return ps
@@ -101,6 +116,7 @@ def _has_runtime_api(ps: object) -> bool:
         "SimulationResult",
         "PeriodicSteadyStateOptions",
         "HarmonicBalanceOptions",
+        "FrequencyAnalysisOptions",
     ]
     return all(hasattr(ps, name) for name in required)
 
@@ -133,6 +149,69 @@ def _write_state_csv(
             writer.writerow(row)
 
     return max(0, len(times) - 1)
+
+
+def _write_frequency_csv(
+    output_path: Path,
+    result: object,
+) -> int:
+    frequency = [float(value) for value in getattr(result, "frequency_hz", [])]
+    response_real = [float(value) for value in getattr(result, "response_real", [])]
+    response_imag = [float(value) for value in getattr(result, "response_imag", [])]
+    magnitude = [float(value) for value in getattr(result, "magnitude", [])]
+    magnitude_db = [float(value) for value in getattr(result, "magnitude_db", [])]
+    phase_deg = [float(value) for value in getattr(result, "phase_deg", [])]
+
+    n_points = len(frequency)
+    vectors = [response_real, response_imag, magnitude, magnitude_db, phase_deg]
+    if any(len(vector) != n_points for vector in vectors):
+        raise RuntimeError("Frequency result vectors have inconsistent lengths")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "frequency_hz",
+                "response_real",
+                "response_imag",
+                "magnitude",
+                "magnitude_db",
+                "phase_deg",
+            ]
+        )
+        for idx in range(n_points):
+            writer.writerow(
+                [
+                    f"{frequency[idx]:.9e}",
+                    f"{response_real[idx]:.9e}",
+                    f"{response_imag[idx]:.9e}",
+                    f"{magnitude[idx]:.9e}",
+                    f"{magnitude_db[idx]:.9e}",
+                    f"{phase_deg[idx]:.9e}",
+                ]
+            )
+
+    return max(0, n_points - 1)
+
+
+def _diagnostic_name_from_result(result: object) -> Optional[str]:
+    diagnostic = getattr(result, "diagnostic", None)
+    if diagnostic is None:
+        return None
+    name = getattr(diagnostic, "name", None)
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    text = str(diagnostic).strip()
+    return text or None
+
+
+def _raise_result_failure(result: object, default_message: str, mode: str) -> None:
+    message = str(getattr(result, "message", "") or default_message)
+    diagnostic = _diagnostic_name_from_result(result)
+    if diagnostic and diagnostic != "None":
+        message = f"{diagnostic}: {message}"
+    raise BackendRunError(message, diagnostic=diagnostic, mode=mode)
 
 
 def _reshape_hb_solution(solution: Sequence[float], state_size: int) -> List[List[float]]:
@@ -449,6 +528,24 @@ def _hb_telemetry(result: object, runtime_s: float, steps: int) -> Dict[str, Opt
     }
 
 
+def _frequency_telemetry(result: object, runtime_s: float, steps: int) -> Dict[str, Optional[float]]:
+    frequency = list(getattr(result, "frequency_hz", []))
+    return {
+        "newton_iterations": None,
+        "linear_iterations": None,
+        "linear_solve_calls": None,
+        "linear_fallbacks": None,
+        "residual_norm": None,
+        "timestep_rejections": None,
+        "runtime_kernel_s": None,
+        "runtime_s": float(runtime_s),
+        "steps": float(steps),
+        "python_backend": 1.0,
+        "ac_sweep_case": 1.0,
+        "ac_sweep_points": float(len(frequency)),
+    }
+
+
 def _run_transient_with_optional_x0(simulator: object, x0: Optional[object]) -> object:
     if x0 is not None:
         return simulator.run_transient(x0)
@@ -466,12 +563,22 @@ def _clone_shooting_options(ps: object, src: object) -> object:
 
 
 def _select_mode(options: object, preferred_mode: Optional[str]) -> str:
-    valid_modes = {"transient", "shooting", "harmonic_balance"}
+    alias = {
+        "frequency": "frequency_analysis",
+        "ac": "frequency_analysis",
+        "ac_sweep": "frequency_analysis",
+    }
+    if preferred_mode in alias:
+        preferred_mode = alias[preferred_mode]
+
+    valid_modes = {"transient", "shooting", "harmonic_balance", "frequency_analysis"}
     if preferred_mode is not None and preferred_mode not in valid_modes:
         raise RuntimeError(f"Invalid preferred mode: {preferred_mode}")
 
     enable_shooting = bool(getattr(options, "enable_periodic_shooting", False))
     enable_hb = bool(getattr(options, "enable_harmonic_balance", False))
+    freq_options = getattr(options, "frequency_analysis", None)
+    enable_frequency = bool(getattr(freq_options, "enabled", False))
 
     if preferred_mode == "transient":
         return "transient"
@@ -483,11 +590,19 @@ def _select_mode(options: object, preferred_mode: Optional[str]) -> str:
         if not enable_hb:
             raise RuntimeError("Scenario requested harmonic_balance mode but simulation.harmonic_balance is not configured")
         return "harmonic_balance"
+    if preferred_mode == "frequency_analysis":
+        if not enable_frequency:
+            raise RuntimeError(
+                "Scenario requested frequency_analysis mode but simulation.frequency_analysis.enabled=false"
+            )
+        return "frequency_analysis"
 
     if enable_shooting and not enable_hb:
         return "shooting"
     if enable_hb and not enable_shooting:
         return "harmonic_balance"
+    if enable_frequency:
+        return "frequency_analysis"
     if enable_shooting and enable_hb:
         return "shooting"
     return "transient"
@@ -584,7 +699,7 @@ def run_from_yaml(
                     used_warm_start = True
 
         if not shooting_result.success:
-            raise RuntimeError(shooting_result.message or "Periodic shooting failed")
+            _raise_result_failure(shooting_result, "Periodic shooting failed", mode="shooting")
 
         cycle = shooting_result.last_cycle
         steps = _write_state_csv(output_path, cycle.time, cycle.states, signal_names)
@@ -610,7 +725,7 @@ def run_from_yaml(
         elapsed = time.perf_counter() - start
 
         if not hb_result.success:
-            raise RuntimeError(hb_result.message or "Harmonic balance failed")
+            _raise_result_failure(hb_result, "Harmonic balance failed", mode="harmonic_balance")
 
         times = list(hb_result.sample_times)
         states = _reshape_hb_solution(hb_result.solution, len(signal_names))
@@ -624,6 +739,27 @@ def run_from_yaml(
             runtime_s=elapsed,
             steps=steps,
             mode="harmonic_balance",
+            telemetry=telemetry,
+        )
+
+    if mode == "frequency_analysis":
+        freq_options = getattr(options, "frequency_analysis", None)
+        if freq_options is None:
+            raise RuntimeError("Simulation options do not expose frequency_analysis")
+
+        start = time.perf_counter()
+        freq_result = simulator.run_frequency_analysis(freq_options)
+        elapsed = time.perf_counter() - start
+
+        if not bool(getattr(freq_result, "success", False)):
+            _raise_result_failure(freq_result, "Frequency analysis failed", mode="frequency_analysis")
+
+        steps = _write_frequency_csv(output_path, freq_result)
+        telemetry = _frequency_telemetry(freq_result, elapsed, steps)
+        return BackendRunResult(
+            runtime_s=elapsed,
+            steps=steps,
+            mode="frequency_analysis",
             telemetry=telemetry,
         )
 
@@ -649,7 +785,7 @@ def run_from_yaml(
     elapsed = time.perf_counter() - start
 
     if not transient_result.success:
-        raise RuntimeError(transient_result.message or "Transient simulation failed")
+        _raise_result_failure(transient_result, "Transient simulation failed", mode="transient")
 
     steps = _write_state_csv(output_path, transient_result.time, transient_result.states, signal_names)
     telemetry = _transient_telemetry(transient_result, elapsed)

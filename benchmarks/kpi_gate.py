@@ -483,6 +483,28 @@ def compute_metrics(
     metrics["runtime_p50"] = _quantile(runtimes, 0.50)
     metrics["runtime_p95"] = _quantile(runtimes, 0.95)
 
+    ac_rows: list[Dict[str, Any]] = []
+    for row in executed:
+        mode = row.get("mode")
+        telemetry = row.get("telemetry")
+        ac_flag = False
+        if isinstance(telemetry, dict):
+            value = telemetry.get("ac_sweep_case")
+            if value is not None:
+                try:
+                    ac_flag = float(value) > 0.0
+                except (TypeError, ValueError):
+                    ac_flag = False
+        if mode == "frequency_analysis" or ac_flag:
+            ac_rows.append(row)
+
+    ac_runtimes = [
+        float(row["runtime_s"])
+        for row in ac_rows
+        if row.get("runtime_s") is not None
+    ]
+    metrics["ac_runtime_p95"] = _quantile(ac_runtimes, 0.95)
+
     state_space_primary_sum = 0.0
     dae_fallback_sum = 0.0
     state_space_total_sum = 0.0
@@ -512,9 +534,10 @@ def compute_metrics(
         else None
     )
 
-    def telemetry_values(metric_name: str) -> list[float]:
+    def telemetry_values(metric_name: str, rows: Optional[list[Dict[str, Any]]] = None) -> list[float]:
+        source_rows = executed if rows is None else rows
         values: list[float] = []
-        for row in executed:
+        for row in source_rows:
             telemetry = row.get("telemetry")
             if not isinstance(telemetry, dict):
                 continue
@@ -527,8 +550,8 @@ def compute_metrics(
             values.append(numeric)
         return values
 
-    def telemetry_mean(metric_name: str) -> Optional[float]:
-        values = telemetry_values(metric_name)
+    def telemetry_mean(metric_name: str, rows: Optional[list[Dict[str, Any]]] = None) -> Optional[float]:
+        values = telemetry_values(metric_name, rows=rows)
         if not values:
             return None
         return float(sum(values) / len(values))
@@ -563,6 +586,8 @@ def compute_metrics(
     metrics["component_thermal_summary_consistency_error"] = telemetry_mean(
         "component_thermal_summary_consistency_error"
     )
+    metrics["ac_sweep_mag_error"] = telemetry_mean("ac_sweep_mag_error", rows=ac_rows)
+    metrics["ac_sweep_phase_error"] = telemetry_mean("ac_sweep_phase_error", rows=ac_rows)
 
     def parity_mean_rms(path: Optional[Path]) -> Optional[float]:
         if path is None:
