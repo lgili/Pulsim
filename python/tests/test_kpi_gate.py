@@ -708,6 +708,60 @@ def test_kpi_gate_can_continue_when_strict_provenance_is_disabled(tmp_path: Path
     assert report["comparisons"]["runtime_p95"]["status"] == "passed"
 
 
+def test_kpi_gate_accepts_manifest_text_artifact_with_crlf_conversion(
+    tmp_path: Path,
+) -> None:
+    bench_results = {"results": [{"status": "passed", "runtime_s": 0.10}]}
+    thresholds = {
+        "metrics": {
+            "runtime_p95": {
+                "direction": "lower_is_better",
+                "max_regression_rel": 0.10,
+                "required": True,
+            },
+        }
+    }
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+
+    _write_json(bench_path, bench_results)
+    # Force LF for baseline digest capture so the later CRLF rewrite is deterministic.
+    lf_text = bench_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    with open(bench_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(lf_text)
+
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase0",
+        source_bench_results=bench_path,
+        metrics={"runtime_p95": 0.20},
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    # Simulate Windows checkout line-ending conversion without changing content.
+    with open(bench_path, "w", encoding="utf-8", newline="\r\n") as handle:
+        handle.write(lf_text)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+
+    assert report["overall_status"] == "passed"
+    assert report["blocked_by_provenance"] is False
+    assert report["provenance"]["baseline"]["status"] == "passed"
+    assert any(
+        "newline normalization matched" in warning
+        for warning in report["provenance"]["baseline"]["warnings"]
+    )
+    assert report["provenance"]["baseline"]["checks"]["eol_normalization_matches"] == 1
+
+
 def test_kpi_gate_skips_runtime_metrics_on_machine_class_mismatch(tmp_path: Path) -> None:
     bench_results = {
         "results": [

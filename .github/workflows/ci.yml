@@ -232,6 +232,60 @@ jobs:
           pytest python/tests -v --ignore=python/tests/validation
 
   # =============================================================================
+  # C-Block Focused Tests (compiler path + runtime ABI smoke)
+  # =============================================================================
+  test_cblock:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        python-version: ['3.11']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja suite-sparse eigen
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build pytest numpy scipy
+
+      - name: Build and install package
+        env:
+          CC: ${{ runner.os == 'Linux' && 'gcc-13' || '' }}
+          CXX: ${{ runner.os == 'Linux' && 'g++-13' || '' }}
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ runner.os == 'Linux' && '2' || '4' }}
+        run: |
+          pip install ".[dev]"
+
+      - name: Run C-Block tests
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export PULSIM_CC="$(which gcc-13 || which gcc)"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            export PULSIM_CC="$(which clang)"
+          fi
+          echo "Using PULSIM_CC=${PULSIM_CC:-unset}"
+          pytest python/tests/test_cblock.py -v
+
+  # =============================================================================
   # Code Quality
   # =============================================================================
   lint:
@@ -252,6 +306,15 @@ jobs:
       - name: Run ruff
         run: |
           ruff check python/
+
+      - name: Run ruff format check (C-Block paths)
+        run: |
+          ruff format --check \
+            python/pulsim/cblock.py \
+            python/pulsim/signal_evaluator.py \
+            python/tests/test_cblock.py \
+            python/tests/test_signal_evaluator.py \
+            python/tests/test_netlist_parser.py
 
       - name: Check v1 layer boundaries
         run: |

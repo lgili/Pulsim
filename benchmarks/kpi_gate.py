@@ -55,6 +55,28 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _sha256_file_with_normalized_eol(path: Path) -> Optional[str]:
+    text_like_suffixes = {
+        ".json",
+        ".yaml",
+        ".yml",
+        ".csv",
+        ".txt",
+        ".md",
+    }
+    if path.suffix.lower() not in text_like_suffixes:
+        return None
+
+    payload = path.read_bytes()
+    if b"\x00" in payload:
+        return None
+
+    normalized = payload.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    digest = hashlib.sha256()
+    digest.update(normalized)
+    return digest.hexdigest()
+
+
 def _parse_utc_timestamp(raw: Any) -> Optional[datetime]:
     if not isinstance(raw, str) or not raw.strip():
         return None
@@ -239,6 +261,7 @@ def validate_baseline_provenance(
     missing_files = 0
     digest_mismatches = 0
     size_mismatches = 0
+    eol_normalization_matches = 0
     bench_results_declared = 0
 
     for idx, entry in enumerate(files):
@@ -270,6 +293,17 @@ def validate_baseline_provenance(
             continue
 
         actual_size = resolved.stat().st_size
+        actual_sha = _sha256_file(resolved)
+        if actual_size != size_value or actual_sha != sha_value:
+            normalized_sha = _sha256_file_with_normalized_eol(resolved)
+            if normalized_sha == sha_value:
+                warnings.append(
+                    f"manifest file entry {idx} newline normalization matched for '{path_value}'"
+                )
+                eol_normalization_matches += 1
+                verified_files += 1
+                continue
+
         if actual_size != size_value:
             errors.append(
                 f"manifest file entry {idx} size mismatch for '{path_value}' "
@@ -278,7 +312,6 @@ def validate_baseline_provenance(
             size_mismatches += 1
             continue
 
-        actual_sha = _sha256_file(resolved)
         if actual_sha != sha_value:
             errors.append(
                 f"manifest file entry {idx} sha256 mismatch for '{path_value}'"
@@ -292,6 +325,7 @@ def validate_baseline_provenance(
     checks["missing_files"] = missing_files
     checks["digest_mismatches"] = digest_mismatches
     checks["size_mismatches"] = size_mismatches
+    checks["eol_normalization_matches"] = eol_normalization_matches
     checks["bench_results_declared"] = bench_results_declared
 
     if bench_results_declared == 0:
@@ -891,15 +925,20 @@ def run_gate(
         else None
     )
 
+    runtime_sensitive_metrics = {
+        "runtime_p50",
+        "runtime_p95",
+        "ac_runtime_p95",
+        "averaged_pair_runtime_speedup_mean",
+        "averaged_pair_runtime_speedup_min",
+    }
+
     failed_required = 0
     skipped_optional = 0
 
     if not (blocked_by_provenance and strict_provenance):
         for metric_name, rules in metric_rules.items():
-            if (
-                metric_name in ("runtime_p50", "runtime_p95")
-                and machine_class_match is False
-            ):
+            if metric_name in runtime_sensitive_metrics and machine_class_match is False:
                 comparisons[metric_name] = {
                     "status": "skipped",
                     "message": (

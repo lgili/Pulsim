@@ -10,6 +10,19 @@ target_include_directories(pulsim_core
         $<INSTALL_INTERFACE:include>
 )
 
+# Expose the public C-Block ABI header through the interface target and
+# install it for downstream C/C++ integrations.
+target_sources(pulsim_core
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/pulsim/v1/cblock_abi.h>
+        $<INSTALL_INTERFACE:include/pulsim/v1/cblock_abi.h>
+)
+
+install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/pulsim/v1/cblock_abi.h
+    DESTINATION include/pulsim/v1
+)
+
 target_compile_features(pulsim_core INTERFACE cxx_std_23)
 
 target_link_libraries(pulsim_core

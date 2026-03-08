@@ -1,6 +1,7 @@
 """Type stubs for PulsimCore High-Performance API."""
 
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from enum import Enum
 
 __version__: str
@@ -795,6 +796,74 @@ class YamlParser:
     def __init__(self, options: YamlParserOptions = ...) -> None: ...
     def load(self, path: str) -> Tuple[Circuit, SimulationOptions]: ...
     def load_string(self, content: str) -> Tuple[Circuit, SimulationOptions]: ...
+
+# =============================================================================
+# C-Block API
+# =============================================================================
+
+class CBlockCompileError(RuntimeError):
+    source: str
+    stderr_output: str
+    compiler_path: Optional[str]
+
+class CBlockABIError(RuntimeError):
+    expected_version: int
+    found_version: Optional[int]
+
+class CBlockRuntimeError(RuntimeError):
+    return_code: int
+    t: float
+    step_index: int
+
+def detect_compiler() -> Optional[str]: ...
+def compile_cblock(
+    source: str | Path,
+    *,
+    output_dir: str | Path | None = ...,
+    name: str = ...,
+    extra_cflags: List[str] | None = ...,
+    compiler: str | None = ...,
+) -> Path: ...
+
+class CBlockLibrary:
+    @property
+    def n_inputs(self) -> int: ...
+    @property
+    def n_outputs(self) -> int: ...
+    @property
+    def name(self) -> str: ...
+
+    def __init__(
+        self,
+        lib_path: str | Path,
+        n_inputs: int = ...,
+        n_outputs: int = ...,
+        name: str = ...,
+    ) -> None: ...
+    def step(self, t: float, dt: float, inputs: Sequence[float]) -> List[float]: ...
+    def reset(self) -> None: ...
+    def __enter__(self) -> "CBlockLibrary": ...
+    def __exit__(self, *args: Any) -> None: ...
+
+class PythonCBlock:
+    @property
+    def n_inputs(self) -> int: ...
+    @property
+    def n_outputs(self) -> int: ...
+    @property
+    def name(self) -> str: ...
+
+    def __init__(
+        self,
+        fn: Callable[..., Any],
+        n_inputs: int = ...,
+        n_outputs: int = ...,
+        name: str = ...,
+    ) -> None: ...
+    def step(self, t: float, dt: float, inputs: Sequence[float]) -> List[float]: ...
+    def reset(self) -> None: ...
+
+capabilities: Dict[str, bool]
 
 # =============================================================================
 # Validation Framework

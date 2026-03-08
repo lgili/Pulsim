@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.7.2"
+__version__ = "0.7.3"
 
 import weakref
 
@@ -29,14 +29,12 @@ from ._pulsim import (
     AveragedConverterTopology,
     AveragedOperatingMode,
     AveragedEnvelopePolicy,
-
     # Device Classes - Linear
     Resistor,
     Capacitor,
     Inductor,
     VoltageSource,
     CurrentSource,
-
     # Device Classes - Nonlinear
     IdealDiode,
     IdealSwitch,
@@ -44,7 +42,6 @@ from ._pulsim import (
     MOSFET,
     IGBTParams,
     IGBT,
-
     # Time-Varying Sources
     PWMParams,
     PWMVoltageSource,
@@ -54,7 +51,6 @@ from ._pulsim import (
     RampGenerator,
     PulseParams,
     PulseVoltageSource,
-
     # Control Blocks
     PIController,
     PIDController,
@@ -64,17 +60,14 @@ from ._pulsim import (
     MovingAverageFilter,
     HysteresisController,
     LookupTable1D,
-
     # Circuit Builder
     Circuit,
     VirtualComponent,
     MixedDomainStepResult,
     VirtualChannelMetadata,
-
     # DC Solver
     solve_dc,
     dc_operating_point,
-
     # Transient Simulation
     run_transient as _run_transient_native,
     run_frequency_analysis as _run_frequency_analysis_native,
@@ -109,18 +102,15 @@ from ._pulsim import (
     LinearSolverTelemetry,
     YamlParserOptions,
     YamlParser,
-
     # Solver Configuration
     Tolerances,
     NewtonOptions,
     NewtonResult,
-
     # Convergence Monitoring
     IterationRecord,
     ConvergenceHistory,
     VariableConvergence,
     PerVariableConvergence,
-
     # Convergence Aids
     GminConfig,
     SourceSteppingConfig,
@@ -128,30 +118,25 @@ from ._pulsim import (
     InitializationConfig,
     DCConvergenceConfig,
     DCAnalysisResult,
-
     # Analytical Solutions (Validation)
     RCAnalytical,
     RLAnalytical,
     RLCAnalytical,
-
     # Validation Framework
     ValidationResult_v2 as ValidationResult,
     compare_waveforms,
     export_validation_csv,
     export_validation_json,
-
     # Benchmark Framework
     BenchmarkTiming,
     BenchmarkResult,
     export_benchmark_csv,
     export_benchmark_json,
-
     # Integration Methods
     BDFOrderConfig,
     TimestepConfig,
     AdvancedTimestepConfig,
     RichardsonLTEConfig,
-
     # High-Performance Features
     LinearSolverConfig,
     LinearSolverKind,
@@ -162,7 +147,6 @@ from ._pulsim import (
     simd_vector_width,
     backend_capabilities,
     solver_status_to_string,
-
     # Thermal Simulation
     FosterStage,
     FosterNetwork,
@@ -174,7 +158,6 @@ from ._pulsim import (
     create_mosfet_thermal_model,
     create_from_datasheet_4param,
     create_simple_thermal_model,
-
     # Power Loss Calculation
     MOSFETLossParams,
     IGBTLossParams,
@@ -186,7 +169,6 @@ from ._pulsim import (
     EfficiencyCalculator,
     LossResult,
     SystemLossSummary,
-
 )
 
 # Netlist Parser (Pure Python)
@@ -204,6 +186,17 @@ from .signal_evaluator import (
     SignalEvaluator,
     AlgebraicLoopError,
     SIGNAL_TYPES,
+)
+
+# Custom C / Python Computation Blocks
+from .cblock import (
+    CBlockCompileError,
+    CBlockABIError,
+    CBlockRuntimeError,
+    detect_compiler,
+    compile_cblock,
+    CBlockLibrary,
+    PythonCBlock,
 )
 
 # Waveform Post-Processing (Pure Python, backend-owned metric pipeline)
@@ -321,7 +314,9 @@ def _parse_run_transient_args(args):
     return x0, newton_options, linear_solver
 
 
-def _run_transient_once(circuit, t_start, t_stop, dt, x0, newton_options, linear_solver):
+def _run_transient_once(
+    circuit, t_start, t_stop, dt, x0, newton_options, linear_solver
+):
     if x0 is None:
         return _run_transient_native(
             circuit, t_start, t_stop, dt, newton_options, linear_solver
@@ -347,12 +342,9 @@ def _is_retryable_failure(message: str) -> bool:
 
 def _tune_linear_solver_for_robust(linear_solver):
     try:
-        has_default_order = (
-            len(linear_solver.order) == 0
-            or (
-                len(linear_solver.order) == 1
-                and linear_solver.order[0] == LinearSolverKind.SparseLU
-            )
+        has_default_order = len(linear_solver.order) == 0 or (
+            len(linear_solver.order) == 1
+            and linear_solver.order[0] == LinearSolverKind.SparseLU
         )
         if has_default_order:
             linear_solver.order = [
@@ -444,7 +436,9 @@ def run_transient(
     x0, user_newton, user_linear = _parse_run_transient_args(args)
 
     base_newton = _copy_newton_options(user_newton)
-    linear_solver = user_linear if user_linear is not None else LinearSolverStackConfig.defaults()
+    linear_solver = (
+        user_linear if user_linear is not None else LinearSolverStackConfig.defaults()
+    )
 
     if robust:
         _tune_newton_for_robust(base_newton)
@@ -546,13 +540,17 @@ class FrequencyAnalysisError(RuntimeError):
     def from_result(cls, result):
         diagnostic = getattr(result, "diagnostic", None)
         diagnostic_name = _enum_name(diagnostic)
-        reason_code = _FREQUENCY_DIAGNOSTIC_REASON_CODES.get(diagnostic_name, diagnostic_name.lower())
+        reason_code = _FREQUENCY_DIAGNOSTIC_REASON_CODES.get(
+            diagnostic_name, diagnostic_name.lower()
+        )
         return cls(
             diagnostic=diagnostic,
             reason_code=reason_code,
             message=str(getattr(result, "message", "")),
             failed_point_index=int(getattr(result, "failed_point_index", -1)),
-            failed_frequency_hz=float(getattr(result, "failed_frequency_hz", float("nan"))),
+            failed_frequency_hz=float(
+                getattr(result, "failed_frequency_hz", float("nan"))
+            ),
             mode=getattr(result, "mode", None),
             anchor_mode_selected=getattr(result, "anchor_mode_selected", None),
         )
@@ -572,10 +570,10 @@ def run_frequency_analysis(circuit, options, *, raise_on_failure=False):
         raise FrequencyAnalysisError.from_result(result)
     return result
 
+
 __all__ = [
     # Version
     "__version__",
-
     # Enums
     "DeviceType",
     "SolverStatus",
@@ -595,14 +593,12 @@ __all__ = [
     "AveragedConverterTopology",
     "AveragedOperatingMode",
     "AveragedEnvelopePolicy",
-
     # Device Classes - Linear
     "Resistor",
     "Capacitor",
     "Inductor",
     "VoltageSource",
     "CurrentSource",
-
     # Device Classes - Nonlinear
     "IdealDiode",
     "IdealSwitch",
@@ -610,7 +606,6 @@ __all__ = [
     "MOSFET",
     "IGBTParams",
     "IGBT",
-
     # Time-Varying Sources
     "PWMParams",
     "PWMVoltageSource",
@@ -620,7 +615,6 @@ __all__ = [
     "RampGenerator",
     "PulseParams",
     "PulseVoltageSource",
-
     # Control Blocks
     "PIController",
     "PIDController",
@@ -630,17 +624,14 @@ __all__ = [
     "MovingAverageFilter",
     "HysteresisController",
     "LookupTable1D",
-
     # Circuit Builder
     "Circuit",
     "VirtualComponent",
     "MixedDomainStepResult",
     "VirtualChannelMetadata",
-
     # DC Solver
     "solve_dc",
     "dc_operating_point",
-
     # Transient Simulation
     "run_transient",
     "run_frequency_analysis",
@@ -676,18 +667,15 @@ __all__ = [
     "LinearSolverTelemetry",
     "YamlParserOptions",
     "YamlParser",
-
     # Solver Configuration
     "Tolerances",
     "NewtonOptions",
     "NewtonResult",
-
     # Convergence Monitoring
     "IterationRecord",
     "ConvergenceHistory",
     "VariableConvergence",
     "PerVariableConvergence",
-
     # Convergence Aids
     "GminConfig",
     "SourceSteppingConfig",
@@ -695,30 +683,25 @@ __all__ = [
     "InitializationConfig",
     "DCConvergenceConfig",
     "DCAnalysisResult",
-
     # Analytical Solutions (Validation)
     "RCAnalytical",
     "RLAnalytical",
     "RLCAnalytical",
-
     # Validation Framework
     "ValidationResult",
     "compare_waveforms",
     "export_validation_csv",
     "export_validation_json",
-
     # Benchmark Framework
     "BenchmarkTiming",
     "BenchmarkResult",
     "export_benchmark_csv",
     "export_benchmark_json",
-
     # Integration Methods
     "BDFOrderConfig",
     "TimestepConfig",
     "AdvancedTimestepConfig",
     "RichardsonLTEConfig",
-
     # High-Performance Features
     "LinearSolverConfig",
     "LinearSolverKind",
@@ -729,7 +712,6 @@ __all__ = [
     "simd_vector_width",
     "backend_capabilities",
     "solver_status_to_string",
-
     # Thermal Simulation
     "FosterStage",
     "FosterNetwork",
@@ -741,7 +723,6 @@ __all__ = [
     "create_mosfet_thermal_model",
     "create_from_datasheet_4param",
     "create_simple_thermal_model",
-
     # Power Loss Calculation
     "MOSFETLossParams",
     "IGBTLossParams",
@@ -753,7 +734,6 @@ __all__ = [
     "EfficiencyCalculator",
     "LossResult",
     "SystemLossSummary",
-
     # Netlist Parser
     "parse_netlist",
     "parse_netlist_verbose",
@@ -761,9 +741,40 @@ __all__ = [
     "NetlistParseError",
     "NetlistWarning",
     "ParsedNetlist",
-
     # Signal-Flow Evaluator
     "SignalEvaluator",
     "AlgebraicLoopError",
     "SIGNAL_TYPES",
+    # Custom C / Python Computation Blocks
+    "CBlockCompileError",
+    "CBlockABIError",
+    "CBlockRuntimeError",
+    "detect_compiler",
+    "compile_cblock",
+    "CBlockLibrary",
+    "PythonCBlock",
+    # Waveform Post-Processing
+    "PostProcessingWindowMode",
+    "PostProcessingJobKind",
+    "PostProcessingDiagnosticCode",
+    "WindowFunction",
+    "PostProcessingWindowSpec",
+    "PostProcessingJob",
+    "PostProcessingOptions",
+    "ScalarMetric",
+    "SpectralBin",
+    "HarmonicEntry",
+    "UndefinedMetricEntry",
+    "PostProcessingJobResult",
+    "PostProcessingResult",
+    "run_post_processing",
+    "parse_post_processing_yaml",
 ]
+
+# ---------------------------------------------------------------------------
+# Module-level capabilities registry
+# ---------------------------------------------------------------------------
+
+capabilities: dict[str, bool] = {
+    "c_block": True,
+}
