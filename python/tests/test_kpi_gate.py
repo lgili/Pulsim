@@ -726,6 +726,11 @@ def test_kpi_gate_accepts_manifest_text_artifact_with_crlf_conversion(
     thresholds_path = tmp_path / "thresholds.yaml"
 
     _write_json(bench_path, bench_results)
+    # Force LF for baseline digest capture so the later CRLF rewrite is deterministic.
+    lf_text = bench_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    with open(bench_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(lf_text)
+
     _write_baseline_with_manifest(
         baseline_path=baseline_path,
         baseline_id="phase0",
@@ -735,7 +740,6 @@ def test_kpi_gate_accepts_manifest_text_artifact_with_crlf_conversion(
     _write_yaml(thresholds_path, thresholds)
 
     # Simulate Windows checkout line-ending conversion without changing content.
-    lf_text = bench_path.read_text(encoding="utf-8").replace("\r\n", "\n")
     with open(bench_path, "w", encoding="utf-8", newline="\r\n") as handle:
         handle.write(lf_text)
 
