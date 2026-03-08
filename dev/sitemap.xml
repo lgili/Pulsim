@@ -112,4 +112,24 @@
          <loc>https://lgili.github.io/Pulsim/latest/versioning-and-release/</loc>
          <lastmod>2026-03-08</lastmod>
     </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/cblock/</loc>
+         <lastmod>2026-03-08</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/cblock/abi-reference/</loc>
+         <lastmod>2026-03-08</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/cblock/api-reference/</loc>
+         <lastmod>2026-03-08</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/cblock/examples/</loc>
+         <lastmod>2026-03-08</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/cblock/user-guide/</loc>
+         <lastmod>2026-03-08</lastmod>
+    </url>
 </urlset>
