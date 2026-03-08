@@ -611,10 +611,11 @@ public:
             "pwm_generator", "integrator", "differentiator",
             "limiter", "rate_limiter", "hysteresis", "lookup_table",
             "transfer_function", "delay_block", "sample_hold",
-            "state_machine", "signal_mux", "signal_demux"
+            "state_machine", "signal_mux", "signal_demux",
+            "c_block"
         };
         const auto is_discrete_control_component = [](std::string_view type) {
-            return type == "pi_controller" || type == "pid_controller";
+            return type == "pi_controller" || type == "pid_controller" || type == "c_block";
         };
 
         // Phase 2: control update
@@ -718,6 +719,13 @@ public:
                 }
                 virtual_signal_state_[integral_key] = integral;
                 virtual_last_input_[prev_error_key] = signal;
+            } else if (component.type == "c_block") {
+                // Core fallback path for custom C blocks in mixed-domain scheduling:
+                // an affine single-output transfer using gain/offset parameters.
+                const Real gain = get_numeric(component, "gain", 1.0);
+                const Real offset = get_numeric(component, "offset", 0.0);
+                output = signal * gain + offset;
+                output = maybe_limit_output(output);
             } else if (component.type == "math_block") {
                 const std::string op = [&]() -> std::string {
                     const auto it = component.metadata.find("operation");

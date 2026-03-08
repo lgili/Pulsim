@@ -740,6 +740,44 @@ TEST_CASE("v1 auto control scheduler samples PI at PWM period",
     CHECK(pi[20] > pi[15]);                         // 200 us: update
 }
 
+TEST_CASE("v1 control scheduler updates c_block channels",
+          "[v1][mixed-domain][control][c_block][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 1.5);
+    circuit.add_resistor("Rin", n_in, gnd, 1e3);
+
+    circuit.add_virtual_component(
+        "c_block", "CB1", {n_in, gnd},
+        {{"gain", 2.0}, {"offset", 0.25}},
+        {});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 40e-6;
+    opts.dt = 10e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.control_mode = ControlUpdateMode::Discrete;
+    opts.control_sample_time = 20e-6;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE(result.virtual_channels.contains("CB1"));
+    const auto& cb = result.virtual_channels.at("CB1");
+    REQUIRE_FALSE(cb.empty());
+    CHECK(cb.front() == Approx(3.25).margin(1e-9));  // 2.0 * 1.5 + 0.25
+    CHECK(cb.back() == Approx(3.25).margin(1e-9));
+}
+
 TEST_CASE("v1 event scheduler applies unified calendar ordering", "[v1][events][scheduler][regression]") {
     Circuit circuit;
     auto n_ctrl = circuit.add_node("ctrl");

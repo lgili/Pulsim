@@ -178,6 +178,7 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
             hints.control_blocks++;
         } else if (component.type == "pi_controller" ||
                    component.type == "pid_controller" ||
+                   component.type == "c_block" ||
                    component.type == "hysteresis" ||
                    component.type == "comparator" ||
                    component.type == "state_machine" ||
