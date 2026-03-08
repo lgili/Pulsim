@@ -891,15 +891,20 @@ def run_gate(
         else None
     )
 
+    runtime_sensitive_metrics = {
+        "runtime_p50",
+        "runtime_p95",
+        "ac_runtime_p95",
+        "averaged_pair_runtime_speedup_mean",
+        "averaged_pair_runtime_speedup_min",
+    }
+
     failed_required = 0
     skipped_optional = 0
 
     if not (blocked_by_provenance and strict_provenance):
         for metric_name, rules in metric_rules.items():
-            if (
-                metric_name in ("runtime_p50", "runtime_p95")
-                and machine_class_match is False
-            ):
+            if metric_name in runtime_sensitive_metrics and machine_class_match is False:
                 comparisons[metric_name] = {
                     "status": "skipped",
                     "message": (

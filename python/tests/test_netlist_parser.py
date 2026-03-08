@@ -1,5 +1,7 @@
 """Tests for SPICE netlist parser."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import yaml
@@ -458,13 +460,14 @@ class TestYamlCBlockParser:
         """Round-trip C_BLOCK fields by re-serializing parsed component metadata."""
         source_path = tmp_path / "gain.c"
         source_path.write_text("/* test */", encoding="utf-8")
+        source_yaml_path = source_path.as_posix()
 
         component_yaml = (
             "  - name: CB_RT\n"
             "    type: c_block\n"
             "    n_inputs: 2\n"
             "    n_outputs: 3\n"
-            f'    source: "{source_path}"\n'
+            f'    source: "{source_yaml_path}"\n'
             "    extra_cflags: ['-O3', '-DTEST=1']\n"
             "    nodes: [a, b]\n"
         )
@@ -495,5 +498,5 @@ class TestYamlCBlockParser:
         vc2 = next(v for v in circuit2.virtual_components() if v.name == "CB_RT")
         assert int(vc2.numeric_params["n_inputs"]) == 2
         assert int(vc2.numeric_params["n_outputs"]) == 3
-        assert vc2.metadata["source"] == str(source_path)
+        assert Path(vc2.metadata["source"]).resolve() == source_path.resolve()
         assert yaml.safe_load(vc2.metadata["extra_cflags"]) == flags
