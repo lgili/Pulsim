@@ -31,6 +31,7 @@ target_link_libraries(pulsim_core
         yaml-cpp
         ${PULSIM_KLU_LIBRARIES}
         ${PULSIM_HYPRE_LIBRARIES}
+        ${CMAKE_DL_LIBS}
 )
 
 # Alias for cleaner usage
@@ -65,6 +66,7 @@ target_link_libraries(pulsim
         yaml-cpp
         ${PULSIM_KLU_LIBRARIES}
         ${PULSIM_HYPRE_LIBRARIES}
+        ${CMAKE_DL_LIBS}
 )
 if(COMMAND pulsim_apply_target_defaults)
     pulsim_apply_target_defaults(pulsim)
@@ -77,6 +79,18 @@ add_library(pulsim::pulsim ALIAS pulsim)
 # Tests
 # =============================================================================
 if(PULSIM_BUILD_TESTS)
+    add_library(pulsim_test_cblock SHARED
+        tests/cblock/test_waveforms.cpp
+    )
+    target_include_directories(pulsim_test_cblock
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_compile_definitions(pulsim_test_cblock
+        PRIVATE
+            PULSIM_BUILDING_CBLOCK
+    )
+
     # Header-only v1/v2 API tests
     add_executable(pulsim_tests
         tests/test_main.cpp
@@ -123,6 +137,11 @@ if(PULSIM_BUILD_TESTS)
             pulsim::core
             Catch2::Catch2WithMain
     )
+    target_compile_definitions(pulsim_simulation_tests
+        PRIVATE
+            PULSIM_TEST_CBLOCK_LIB_PATH="$<TARGET_FILE:pulsim_test_cblock>"
+    )
+    add_dependencies(pulsim_simulation_tests pulsim_test_cblock)
     if(COMMAND pulsim_apply_target_defaults)
         pulsim_apply_target_defaults(pulsim_simulation_tests)
     endif()
