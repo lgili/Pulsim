@@ -597,6 +597,69 @@
   
   
     <li class="md-nav__item">
+      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Analysis (AC Sweep)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Waveform Post-Processing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../averaged-converter-modeling/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Averaged Converter Modeling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../electrothermal-workflow/" class="md-nav__link">
         
   
@@ -1404,6 +1467,16 @@
 <span class="w">  </span>--only<span class="w"> </span>buck_switching<span class="w"> </span>boost_switching_complex<span class="w"> </span>interleaved_buck_3ph<span class="w"> </span>buck_mosfet_nonlinear<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_converters
 </code></pre></div>
+<p>For AC sweep focused coverage:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--only<span class="w"> </span>ac_rc_lowpass<span class="w"> </span>ac_control_workflow_expected_failure<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_ac
+</code></pre></div>
+<p>For averaged-converter paired coverage:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--only<span class="w"> </span>buck_switching_paired<span class="w"> </span>buck_averaged_mvp<span class="w"> </span>buck_averaged_expected_failure<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/phase14_averaged_artifacts/benchmarks
+</code></pre></div>
 <h2 id="2-solverintegrator-validation-matrix">2) Solver/Integrator Validation Matrix<a class="headerlink" href="#2-solverintegrator-validation-matrix" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/validation_matrix.py<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/matrix
@@ -1447,7 +1520,18 @@
 <ul>
 <li><code>benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json</code></li>
 <li><code>benchmarks/kpi_thresholds.yaml</code></li>
+<li><code>benchmarks/kpi_thresholds_ac.yaml</code> (AC-focused KPI gate)</li>
+<li><code>benchmarks/kpi_baselines/averaged_converter_phase14_2026-03-07/kpi_baseline.json</code> (averaged-focused gate)</li>
+<li><code>benchmarks/kpi_thresholds_averaged.yaml</code> (averaged-focused KPI gate)</li>
 </ul>
+<p>Averaged-focused gate command:</p>
+<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>benchmarks/kpi_gate.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--baseline<span class="w"> </span>benchmarks/kpi_baselines/averaged_converter_phase14_2026-03-07/kpi_baseline.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--bench-results<span class="w"> </span>benchmarks/phase14_averaged_artifacts/benchmarks/results.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--thresholds<span class="w"> </span>benchmarks/kpi_thresholds_averaged.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--report-out<span class="w"> </span>benchmarks/phase14_averaged_artifacts/reports/kpi_gate_averaged.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--print-report
+</code></pre></div>
 <h2 id="artifact-contract">Artifact Contract<a class="headerlink" href="#artifact-contract" title="Permanent link">&para;</a></h2>
 <p>These files are the recommended CI contract:</p>
 <ul>
@@ -1468,6 +1552,12 @@
 <li><code>runtime_module_order_crc32</code></li>
 <li><code>runtime_module_count_match</code></li>
 <li><code>output_reallocation_total</code></li>
+<li><code>ac_sweep_mag_error</code></li>
+<li><code>ac_sweep_phase_error</code></li>
+<li><code>ac_runtime_p95</code></li>
+<li><code>averaged_pair_case_count</code></li>
+<li><code>averaged_pair_fidelity_error</code></li>
+<li><code>averaged_pair_runtime_speedup_min</code></li>
 </ul>
 
 

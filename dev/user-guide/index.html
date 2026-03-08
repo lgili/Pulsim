@@ -733,6 +733,69 @@
   
   
     <li class="md-nav__item">
+      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Analysis (AC Sweep)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Waveform Post-Processing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../averaged-converter-modeling/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Averaged Converter Modeling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../electrothermal-workflow/" class="md-nav__link">
         
   
@@ -1446,6 +1509,13 @@
 <span class="n">sim</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
 <span class="n">result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
 </code></pre></div>
+<p>For frequency-domain workflows, configure <code>options.frequency_analysis</code> and call:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ac_result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_frequency_analysis</span><span class="p">(</span><span class="n">options</span><span class="o">.</span><span class="n">frequency_analysis</span><span class="p">)</span>
+</code></pre></div>
+<p>For averaged plant workflows, configure <code>options.averaged_converter.enabled = True</code>
+and run the same transient entrypoint:</p>
+<div class="highlight"><pre><span></span><code><span class="n">avg_result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
+</code></pre></div>
 <h2 id="core-concepts">Core Concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h2>
 <h3 id="1-circuit-and-topology">1. Circuit and Topology<a class="headerlink" href="#1-circuit-and-topology" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1456,6 +1526,7 @@
 <p>Use <code>SimulationOptions</code> to control:</p>
 <ul>
 <li>time window and timestep strategy (<code>Fixed</code> vs <code>Variable</code>)</li>
+<li>averaged-converter mode (<code>simulation.averaged_converter</code>)</li>
 <li>nonlinear convergence (<code>NewtonOptions</code>)</li>
 <li>linear solver stack and fallback behavior</li>
 <li>event handling, periodic methods, and thermal coupling</li>
@@ -1498,6 +1569,13 @@
 <li>monitor rejection ratio and fallback causes</li>
 <li>add KPI regression thresholds before merging solver changes</li>
 </ul>
+<p>For fast control-loop plant iteration in supported envelope:</p>
+<ul>
+<li>use averaged mode (<code>simulation.averaged_converter.enabled: true</code>)</li>
+<li>keep explicit duty bounds and envelope policy</li>
+<li>validate parity against a paired switching case before broad usage</li>
+<li>keep switched/electrothermal as final sign-off runs</li>
+</ul>
 <h2 id="integration-tips">Integration Tips<a class="headerlink" href="#integration-tips" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Always set <code>num_nodes</code> and <code>num_branches</code> when manually composing options.</li>
@@ -1508,6 +1586,8 @@
 <ul>
 <li><a href="../netlist-format/">Netlist YAML Format</a></li>
 <li><a href="../frontend-control-signals/">Frontend Control and Signals Contract</a></li>
+<li><a href="../frequency-analysis-ac-sweep/">Frequency Analysis (AC Sweep)</a></li>
+<li><a href="../averaged-converter-modeling/">Averaged Converter Modeling</a></li>
 <li><a href="../electrothermal-workflow/">Electrothermal Workflow</a></li>
 <li><a href="../electrothermal-migration-scalar-to-datasheet/">Electrothermal Migration (Scalar to Datasheet)</a></li>
 <li><a href="../configuration/">Configuration</a></li>

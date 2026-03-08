@@ -2,102 +2,114 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/api-reference/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/averaged-converter-modeling/</loc>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/backend-architecture/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/backend-cpp-contributor-guide/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/benchmarks-and-parity/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/configuration/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/convergence-tuning-guide/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/device-models/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/electrothermal-migration-scalar-to-datasheet/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/electrothermal-workflow/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/examples-and-results/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/frequency-analysis-ac-sweep/</loc>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/frontend-control-signals/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/getting-started/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/gui-component-parity/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/migration-guide/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/netlist-format/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/notebooks/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/post-processing/</loc>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/pr-electrothermal-datasheet-parity-package/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/psim-plecs-gap-and-modular-architecture-roadmap/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/python-api/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/release-notes-electrothermal-parity/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/supported-components-catalog/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/troubleshooting/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/user-guide/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/versioning-and-release/</loc>
-         <lastmod>2026-03-07</lastmod>
+         <lastmod>2026-03-08</lastmod>
     </url>
 </urlset>

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/release-notes-electrothermal-parity/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/frequency-analysis-ac-sweep/">
       
       
-        <link rel="prev" href="../versioning-and-release/">
+        <link rel="prev" href="../frontend-control-signals/">
       
       
-        <link rel="next" href="../pr-electrothermal-datasheet-parity-package/">
+        <link rel="next" href="../post-processing/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Release Notes (Electrothermal Parity) - PulsimCore</title>
+        <title>Frequency Analysis (AC Sweep) - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#release-notes-electrothermal-parity-2026-03-07" class="md-skip">
+        <a href="#frequency-analysis-ac-sweep" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Release Notes (Electrothermal Parity)
+              Frequency Analysis (AC Sweep)
             
           </span>
         </div>
@@ -228,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -282,12 +284,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../configuration/" class="md-tabs__link">
           
   
@@ -465,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -496,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -591,10 +594,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Frequency Analysis (AC Sweep)
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -603,6 +626,98 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scope
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#yaml-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      YAML Contract
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#python-apis" class="md-nav__link">
+    <span class="md-ellipsis">
+      Python APIs
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#result-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      Result Contract
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-backend-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current Backend Limits
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frontend-responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      Frontend Responsibilities
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-and-kpi-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Benchmark and KPI Coverage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#practical-example-rc-low-pass" class="md-nav__link">
+    <span class="md-ellipsis">
+      Practical Example: RC Low-Pass
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1032,30 +1147,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1066,7 +1178,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             Operations
@@ -1140,30 +1252,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Release Notes (Electrothermal Parity)
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../release-notes-electrothermal-parity/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1172,113 +1264,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      Summary
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#highlights" class="md-nav__link">
-    <span class="md-ellipsis">
-      Highlights
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#frontend-impact" class="md-nav__link">
-    <span class="md-ellipsis">
-      Frontend Impact
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Frontend Impact">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#required-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      Required behavior
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#forbidden-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      Forbidden behavior
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#compatibility" class="md-nav__link">
-    <span class="md-ellipsis">
-      Compatibility
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#migration-notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Migration Notes
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#validation-snapshot" class="md-nav__link">
-    <span class="md-ellipsis">
-      Validation Snapshot
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#known-limits" class="md-nav__link">
-    <span class="md-ellipsis">
-      Known Limits
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1339,87 +1324,72 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#summary" class="md-nav__link">
+  <a href="#scope" class="md-nav__link">
     <span class="md-ellipsis">
-      Summary
+      Scope
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#highlights" class="md-nav__link">
+  <a href="#yaml-contract" class="md-nav__link">
     <span class="md-ellipsis">
-      Highlights
+      YAML Contract
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#frontend-impact" class="md-nav__link">
+  <a href="#python-apis" class="md-nav__link">
     <span class="md-ellipsis">
-      Frontend Impact
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Frontend Impact">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#required-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      Required behavior
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#forbidden-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      Forbidden behavior
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#compatibility" class="md-nav__link">
-    <span class="md-ellipsis">
-      Compatibility
+      Python APIs
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#migration-notes" class="md-nav__link">
+  <a href="#result-contract" class="md-nav__link">
     <span class="md-ellipsis">
-      Migration Notes
+      Result Contract
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#validation-snapshot" class="md-nav__link">
+  <a href="#current-backend-limits" class="md-nav__link">
     <span class="md-ellipsis">
-      Validation Snapshot
+      Current Backend Limits
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#known-limits" class="md-nav__link">
+  <a href="#frontend-responsibilities" class="md-nav__link">
     <span class="md-ellipsis">
-      Known Limits
+      Frontend Responsibilities
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-and-kpi-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Benchmark and KPI Coverage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#practical-example-rc-low-pass" class="md-nav__link">
+    <span class="md-ellipsis">
+      Practical Example: RC Low-Pass
     </span>
   </a>
   
@@ -1440,7 +1410,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/release-notes-electrothermal-parity.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/frequency-analysis-ac-sweep.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1449,74 +1419,150 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/release-notes-electrothermal-parity.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/frequency-analysis-ac-sweep.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="release-notes-electrothermal-parity-2026-03-07">Release Notes - Electrothermal Parity (2026-03-07)<a class="headerlink" href="#release-notes-electrothermal-parity-2026-03-07" title="Permanent link">&para;</a></h1>
-<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
-<p>This release finalizes the backend electrothermal contract for closed-loop power converter simulations with professional-grade loss/thermal observability.</p>
-<p>Main outcome: frontend no longer needs to synthesize thermal or loss curves. Backend exports sampled canonical channels with metadata and consistency guarantees.</p>
-<h2 id="highlights">Highlights<a class="headerlink" href="#highlights" title="Permanent link">&para;</a></h2>
+<h1 id="frequency-analysis-ac-sweep">Frequency Analysis (AC Sweep)<a class="headerlink" href="#frequency-analysis-ac-sweep" title="Permanent link">&para;</a></h1>
+<p>This guide defines the backend contract for frequency-domain simulation in PulsimCore.</p>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>The backend exposes first-class AC sweep execution with deterministic outputs for:</p>
 <ul>
-<li>Datasheet switching-loss surfaces are supported in runtime:</li>
-<li><code>loss.model: datasheet</code></li>
-<li>axes: <code>current</code>, <code>voltage</code>, <code>temperature</code></li>
-<li>tables: <code>eon</code>, <code>eoff</code>, <code>err</code></li>
-<li>Thermal network support expanded and stabilized:</li>
-<li><code>single_rc</code>, <code>foster</code>, <code>cauer</code></li>
-<li>stiff Cauer stability improved with implicit tridiagonal integration</li>
-<li>Shared sink coupling added:</li>
-<li><code>shared_sink_id</code>, <code>shared_sink_rth</code>, <code>shared_sink_cth</code></li>
-<li>multiple devices can share one sink thermal rise</li>
-<li>Canonical sampled channels are enforced:</li>
-<li>thermal: <code>T(&lt;component&gt;)</code></li>
-<li>loss: <code>Pcond</code>, <code>Psw_on</code>, <code>Psw_off</code>, <code>Prr</code>, <code>Ploss</code></li>
-<li>Channel metadata is first-class and required for frontend routing.</li>
-<li>Determinism/performance gates added in tests:</li>
-<li>deterministic loss-channel ordering</li>
-<li>no unplanned output-series reallocations in validated closed-loop scenario</li>
+<li><code>open_loop_transfer</code></li>
+<li><code>closed_loop_transfer</code></li>
+<li><code>input_impedance</code></li>
+<li><code>output_impedance</code></li>
 </ul>
-<h2 id="frontend-impact">Frontend Impact<a class="headerlink" href="#frontend-impact" title="Permanent link">&para;</a></h2>
-<h3 id="required-behavior">Required behavior<a class="headerlink" href="#required-behavior" title="Permanent link">&para;</a></h3>
+<p>Current solver support is intentionally strict and deterministic.</p>
+<h2 id="yaml-contract">YAML Contract<a class="headerlink" href="#yaml-contract" title="Permanent link">&para;</a></h2>
+<p>Use <code>simulation.frequency_analysis</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">frequency_analysis</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">open_loop_transfer</span><span class="w">     </span><span class="c1"># open_loop_transfer | closed_loop_transfer | input_impedance | output_impedance</span>
+<span class="w">    </span><span class="nt">anchor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">                 </span><span class="c1"># dc | periodic | averaged | auto</span>
+<span class="w">    </span><span class="nt">sweep</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">scale</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">log</span><span class="w">                 </span><span class="c1"># log | linear</span>
+<span class="w">      </span><span class="nt">f_start_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">      </span><span class="nt">f_stop_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000.0</span>
+<span class="w">      </span><span class="nt">points</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
+<span class="w">    </span><span class="nt">injection_current_amplitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">    </span><span class="nt">perturbation</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">in</span>
+<span class="w">      </span><span class="nt">negative</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+<span class="w">    </span><span class="nt">output</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">out</span>
+<span class="w">      </span><span class="nt">negative</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
+</code></pre></div>
+<p>Validation is strict for:</p>
 <ul>
-<li>Consume channel metadata from <code>result.virtual_channel_metadata</code>.</li>
-<li>Route charts by metadata domain (<code>control</code>, <code>events</code>, <code>instrumentation</code>, <code>thermal</code>, <code>loss</code>).</li>
-<li>Plot backend thermal/loss channels directly.</li>
+<li>invalid sweep ranges</li>
+<li>invalid point count</li>
+<li>missing perturbation/output ports for selected mode</li>
+<li>malformed node bindings</li>
 </ul>
-<h3 id="forbidden-behavior">Forbidden behavior<a class="headerlink" href="#forbidden-behavior" title="Permanent link">&para;</a></h3>
+<h2 id="python-apis">Python APIs<a class="headerlink" href="#python-apis" title="Permanent link">&para;</a></h2>
+<p>Class API:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+
+<span class="n">sim</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
+<span class="n">ac</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_frequency_analysis</span><span class="p">(</span><span class="n">options</span><span class="o">.</span><span class="n">frequency_analysis</span><span class="p">)</span>
+</code></pre></div>
+<p>Procedural API:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ac</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">run_frequency_analysis</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">options</span><span class="o">.</span><span class="n">frequency_analysis</span><span class="p">)</span>
+</code></pre></div>
+<p>Structured exception surface (optional, recommended in automation):</p>
+<div class="highlight"><pre><span></span><code><span class="k">try</span><span class="p">:</span>
+    <span class="n">ac</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">run_frequency_analysis</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">options</span><span class="o">.</span><span class="n">frequency_analysis</span><span class="p">,</span> <span class="n">raise_on_failure</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">ps</span><span class="o">.</span><span class="n">FrequencyAnalysisError</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">err</span><span class="o">.</span><span class="n">reason_code</span><span class="p">)</span>         <span class="c1"># ex.: frequency_unsupported_configuration</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">err</span><span class="o">.</span><span class="n">diagnostic</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>     <span class="c1"># enum name</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">err</span><span class="o">.</span><span class="n">failed_point_index</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">err</span><span class="o">.</span><span class="n">failed_frequency_hz</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="result-contract">Result Contract<a class="headerlink" href="#result-contract" title="Permanent link">&para;</a></h2>
+<p><code>FrequencyAnalysisResult</code> includes:</p>
 <ul>
-<li>Do not generate synthetic thermal curves.</li>
-<li>Do not reconstruct switching losses heuristically in GUI.</li>
-<li>Do not “fix” backend summary inconsistencies in frontend.</li>
+<li>sweep axis: <code>frequency_hz</code></li>
+<li>complex response: <code>response_real</code>, <code>response_imag</code></li>
+<li>derived response: <code>magnitude</code>, <code>magnitude_db</code>, <code>phase_deg</code></li>
+<li>deterministic diagnostics: <code>success</code>, <code>diagnostic</code>, <code>message</code>, <code>failed_point_index</code>, <code>failed_frequency_hz</code></li>
+<li>deterministic anchor record: <code>anchor_mode_selected</code></li>
+<li>stability metrics: crossover and margins plus explicit undefined reason enums</li>
+<li>metadata routing: <code>channel_metadata</code> for each response channel</li>
 </ul>
-<h2 id="compatibility">Compatibility<a class="headerlink" href="#compatibility" title="Permanent link">&para;</a></h2>
+<p>Undefined metrics are never silently synthesized. The backend returns explicit reason tags:</p>
 <ul>
-<li>Backward compatible for scalar <code>loss</code> and single-RC thermal netlists.</li>
-<li>Richer datasheet and staged thermal blocks are additive.</li>
+<li><code>NotTransferMode</code></li>
+<li><code>NoGainCrossover</code></li>
+<li><code>NoPhaseCrossover</code></li>
 </ul>
-<h2 id="migration-notes">Migration Notes<a class="headerlink" href="#migration-notes" title="Permanent link">&para;</a></h2>
-<p>For teams moving from scalar-only loss setup:</p>
+<h2 id="current-backend-limits">Current Backend Limits<a class="headerlink" href="#current-backend-limits" title="Permanent link">&para;</a></h2>
+<p>Current AC execution supports:</p>
 <ul>
-<li>follow: <a href="../electrothermal-migration-scalar-to-datasheet/"><code>docs/electrothermal-migration-scalar-to-datasheet.md</code></a></li>
-<li>keep this contract reference handy:</li>
-<li><a href="../electrothermal-workflow/"><code>docs/electrothermal-workflow.md</code></a></li>
-<li><a href="../frontend-control-signals/"><code>docs/frontend-control-signals.md</code></a></li>
+<li>passive linear devices (<code>R</code>, <code>L</code>, <code>C</code>)</li>
+<li>independent sources (<code>voltage_source</code>, <code>current_source</code>, sine/pulse/pwm source families)</li>
+<li>passive virtual probes/scopes</li>
 </ul>
-<h2 id="validation-snapshot">Validation Snapshot<a class="headerlink" href="#validation-snapshot" title="Permanent link">&para;</a></h2>
-<p>Validated on March 7, 2026:</p>
+<p>Control/logic virtual components (for example PI/PID/PWM blocks) are currently rejected in AC mode with typed diagnostics. This is deliberate to keep deterministic correctness while full small-signal mixed-domain linearization is not yet enabled.</p>
+<h2 id="frontend-responsibilities">Frontend Responsibilities<a class="headerlink" href="#frontend-responsibilities" title="Permanent link">&para;</a></h2>
+<p>Frontend must:</p>
 <ul>
-<li><code>PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py</code> -&gt; <code>83 passed</code></li>
-<li><code>openspec validate add-electrothermal-datasheet-parity --strict</code> -&gt; valid</li>
+<li>configure AC setup UX (ports, sweep grid, mode, anchor)</li>
+<li>call backend AC API and consume typed arrays directly</li>
+<li>plot <code>magnitude_db</code> and <code>phase_deg</code> over <code>frequency_hz</code></li>
+<li>display diagnostics directly from backend (<code>diagnostic</code>, <code>message</code>, failure context)</li>
 </ul>
-<h2 id="known-limits">Known Limits<a class="headerlink" href="#known-limits" title="Permanent link">&para;</a></h2>
+<p>Frontend must not:</p>
 <ul>
-<li>Shared sink currently uses deterministic common RC aggregation (not a full arbitrary thermal matrix).</li>
-<li>Datasheet fidelity remains dependent on input table quality.</li>
+<li>create synthetic AC curves</li>
+<li>infer failure cause from regex over logs</li>
+<li>fabricate crossover/margin values when backend marks them undefined</li>
 </ul>
+<h2 id="benchmark-and-kpi-coverage">Benchmark and KPI Coverage<a class="headerlink" href="#benchmark-and-kpi-coverage" title="Permanent link">&para;</a></h2>
+<p>AC benchmark coverage includes:</p>
+<ul>
+<li>analytical linear RC low-pass AC reference (<code>ac_analytical</code> validation)</li>
+<li>converter/control workflow expected-failure case with typed diagnostics</li>
+</ul>
+<p>AC KPI keys emitted by the benchmark tooling:</p>
+<ul>
+<li><code>ac_sweep_mag_error</code></li>
+<li><code>ac_sweep_phase_error</code></li>
+<li><code>ac_runtime_p95</code></li>
+</ul>
+<h2 id="practical-example-rc-low-pass">Practical Example: RC Low-Pass<a class="headerlink" href="#practical-example-rc-low-pass" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nt">schema</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pulsim-v1</span>
+<span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">tstart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-3</span>
+<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-6</span>
+<span class="w">  </span><span class="nt">frequency_analysis</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">open_loop_transfer</span>
+<span class="w">    </span><span class="nt">anchor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dc</span>
+<span class="w">    </span><span class="nt">sweep</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">scale</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">log</span>
+<span class="w">      </span><span class="nt">f_start_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">      </span><span class="nt">f_stop_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000.0</span>
+<span class="w">      </span><span class="nt">points</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
+<span class="w">    </span><span class="nt">injection_current_amplitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">    </span><span class="nt">perturbation</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="nt"> negative</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="nt"> negative</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
+<span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resistor</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">R1</span>
+<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1k</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">capacitor</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">C1</span>
+<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1u</span>
+</code></pre></div>
 
 
 
@@ -1552,7 +1598,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../versioning-and-release/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Docs Versioning and Release">
+          <a href="../frontend-control-signals/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Frontend Control and Signals Contract">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1562,20 +1608,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Docs Versioning and Release
+                Frontend Control and Signals Contract
               </div>
             </div>
           </a>
         
         
           
-          <a href="../pr-electrothermal-datasheet-parity-package/" class="md-footer__link md-footer__link--next" aria-label="Next: PR Package (Electrothermal)">
+          <a href="../post-processing/" class="md-footer__link md-footer__link--next" aria-label="Next: Waveform Post-Processing">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                PR Package (Electrothermal)
+                Waveform Post-Processing
               </div>
             </div>
             <div class="md-footer__button md-icon">

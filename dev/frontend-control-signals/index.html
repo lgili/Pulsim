@@ -16,7 +16,7 @@
         <link rel="prev" href="../netlist-format/">
       
       
-        <link rel="next" href="../electrothermal-workflow/">
+        <link rel="next" href="../frequency-analysis-ac-sweep/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -668,6 +668,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#averaged-converter-planta-media" class="md-nav__link">
+    <span class="md-ellipsis">
+      Averaged converter (planta média)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#eventos" class="md-nav__link">
     <span class="md-ellipsis">
       Eventos
@@ -766,6 +775,69 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Analysis (AC Sweep)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Waveform Post-Processing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../averaged-converter-modeling/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Averaged Converter Modeling
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -1376,6 +1448,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#averaged-converter-planta-media" class="md-nav__link">
+    <span class="md-ellipsis">
+      Averaged converter (planta média)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#eventos" class="md-nav__link">
     <span class="md-ellipsis">
       Eventos
@@ -1551,6 +1632,24 @@
 <li>use <code>PWM1.duty</code> para gráfico de duty;</li>
 <li>não derive duty de <code>PWM1</code> (é estado lógico, não razão cíclica).</li>
 </ul>
+<h3 id="averaged-converter-planta-media">Averaged converter (planta média)<a class="headerlink" href="#averaged-converter-planta-media" title="Permanent link">&para;</a></h3>
+<p>Quando <code>simulation.averaged_converter.enabled: true</code>, os canais canônicos são:</p>
+<ul>
+<li><code>Iavg(&lt;inductor_name&gt;)</code></li>
+<li><code>Vavg(&lt;output_node&gt;)</code></li>
+<li><code>Davg</code></li>
+</ul>
+<p>Modos suportados no backend:</p>
+<ul>
+<li><code>operating_mode: ccm | dcm | auto</code></li>
+<li><code>topology: buck | boost | buck_boost</code></li>
+</ul>
+<p>Contrato de consumo no front:</p>
+<ul>
+<li>plote estes canais diretamente quando existirem;</li>
+<li>mantenha alinhamento estrito com <code>result.time</code>;</li>
+<li>use metadata para roteamento (<code>component_type == "averaged_converter"</code> e <code>source_component == "averaged_state"</code>).</li>
+</ul>
 <h3 id="eventos">Eventos<a class="headerlink" href="#eventos" title="Permanent link">&para;</a></h3>
 <ul>
 <li>relay:</li>
@@ -1609,6 +1708,16 @@
 <li><code>source_component == "&lt;component_name&gt;"</code></li>
 <li><code>unit == "W"</code></li>
 </ul>
+<p>Para averaged converter:</p>
+<ul>
+<li><code>component_type == "averaged_converter"</code></li>
+<li><code>source_component == "averaged_state"</code></li>
+<li><code>domain == "time"</code></li>
+<li>unidades esperadas:</li>
+<li><code>Iavg(...)</code>: <code>A</code></li>
+<li><code>Vavg(...)</code>: <code>V</code></li>
+<li><code>Davg</code>: <code>ratio</code></li>
+</ul>
 <p>Para controle/eventos/instrumentação:</p>
 <ul>
 <li>use <code>domain</code> para escolher painel/eixo.</li>
@@ -1643,6 +1752,7 @@
 <li>Plotar <code>PWM1</code> como se fosse duty (o correto é <code>PWM1.duty</code>).</li>
 <li>Ignorar <code>control.mode=discrete</code> e esperar atualização contínua de PI/PID.</li>
 <li>Ignorar <code>virtual_channel_metadata</code> e inferir domínio por regex de nome.</li>
+<li>Sintetizar <code>Iavg/Vavg/Davg</code> localmente quando backend não exportou o canal.</li>
 </ul>
 <h2 id="9-responsabilidades-gui-only">9) Responsabilidades GUI-only<a class="headerlink" href="#9-responsabilidades-gui-only" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1710,13 +1820,13 @@
         
         
           
-          <a href="../electrothermal-workflow/" class="md-footer__link md-footer__link--next" aria-label="Next: Electrothermal Workflow">
+          <a href="../frequency-analysis-ac-sweep/" class="md-footer__link md-footer__link--next" aria-label="Next: Frequency Analysis (AC Sweep)">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Electrothermal Workflow
+                Frequency Analysis (AC Sweep)
               </div>
             </div>
             <div class="md-footer__button md-icon">

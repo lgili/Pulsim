@@ -597,6 +597,69 @@
   
   
     <li class="md-nav__item">
+      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Analysis (AC Sweep)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Waveform Post-Processing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../averaged-converter-modeling/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Averaged Converter Modeling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../electrothermal-workflow/" class="md-nav__link">
         
   
@@ -697,6 +760,24 @@
   <a href="#example-2-buck-converter-switching-transient" class="md-nav__link">
     <span class="md-ellipsis">
       Example 2: Buck Converter (switching transient)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-2a-buck-averaged-pair-switching-reference-averaged-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 2a: Buck Averaged Pair (switching reference + averaged mode)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)
     </span>
   </a>
   
@@ -1285,6 +1366,24 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#example-2a-buck-averaged-pair-switching-reference-averaged-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 2a: Buck Averaged Pair (switching reference + averaged mode)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#example-3-closed-loop-buck-controller-pwm-path" class="md-nav__link">
     <span class="md-ellipsis">
       Example 3: Closed-Loop Buck (controller + PWM path)
@@ -1390,7 +1489,7 @@
 </ul>
 <h2 id="example-2-buck-converter-switching-transient">Example 2: Buck Converter (switching transient)<a class="headerlink" href="#example-2-buck-converter-switching-transient" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--only<span class="w"> </span>buck_converter<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--only<span class="w"> </span>buck_switching<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_buck
 </code></pre></div>
 <p>Checkpoints:</p>
@@ -1398,6 +1497,31 @@
 <li>output settles around expected duty-dependent value.</li>
 <li>ripple remains physically plausible for chosen L/C and switching frequency.</li>
 <li>telemetry does not show runaway fallback escalation.</li>
+</ul>
+<h2 id="example-2a-buck-averaged-pair-switching-reference-averaged-mode">Example 2a: Buck Averaged Pair (switching reference + averaged mode)<a class="headerlink" href="#example-2a-buck-averaged-pair-switching-reference-averaged-mode" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--only<span class="w"> </span>buck_switching_paired<span class="w"> </span>buck_averaged_mvp<span class="w"> </span>buck_averaged_expected_failure<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_buck_averaged
+</code></pre></div>
+<p>Checkpoints:</p>
+<ul>
+<li>both pair runs (<code>buck_switching_paired</code>, <code>buck_averaged_mvp</code>) are <code>passed</code>.</li>
+<li><code>buck_averaged_mvp</code> emits <code>max_error</code> from <code>paired_reference</code> validation.</li>
+<li>expected-failure case matches typed diagnostic (<code>AveragedInvalidConfiguration</code>).</li>
+</ul>
+<p>Runnable Python example:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>examples/run_buck_averaged_mvp.py
+</code></pre></div>
+<h2 id="example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline">Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)<a class="headerlink" href="#example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--only<span class="w"> </span>ac_rc_lowpass<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_ac_rc
+</code></pre></div>
+<p>Checkpoints:</p>
+<ul>
+<li>output artifact includes <code>frequency_hz</code>, <code>magnitude_db</code>, and <code>phase_deg</code>.</li>
+<li>analytical validation (<code>ac_analytical</code>) remains within configured magnitude/phase thresholds.</li>
+<li>benchmark telemetry exposes <code>ac_sweep_mag_error</code> and <code>ac_sweep_phase_error</code>.</li>
 </ul>
 <h2 id="example-3-closed-loop-buck-controller-pwm-path">Example 3: Closed-Loop Buck (controller + PWM path)<a class="headerlink" href="#example-3-closed-loop-buck-controller-pwm-path" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>

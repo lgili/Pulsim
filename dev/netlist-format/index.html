@@ -731,6 +731,24 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#frequency-analysis-ac-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      Frequency Analysis (AC Sweep)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#averaged-converter-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Averaged Converter Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#control-blocks-for-closed-loop-converters" class="md-nav__link">
     <span class="md-ellipsis">
       Control Blocks for Closed-Loop Converters
@@ -801,6 +819,69 @@
   
   <span class="md-ellipsis">
     Frontend Control and Signals Contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Analysis (AC Sweep)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../post-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Waveform Post-Processing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../averaged-converter-modeling/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Averaged Converter Modeling
   </span>
   
 
@@ -1499,6 +1580,24 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#frequency-analysis-ac-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      Frequency Analysis (AC Sweep)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#averaged-converter-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Averaged Converter Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#control-blocks-for-closed-loop-converters" class="md-nav__link">
     <span class="md-ellipsis">
       Control Blocks for Closed-Loop Converters
@@ -1770,6 +1869,76 @@ da superfície suportada de transiente. Use <code>step_mode</code> + <code>formu
 <li><code>discrete</code>: update PI/PID blocks only at sample boundaries.</li>
 </ul>
 <p>In strict parsing, <code>discrete</code> requires <code>sample_time &gt; 0</code>.</p>
+<h3 id="frequency-analysis-ac-sweep">Frequency Analysis (AC Sweep)<a class="headerlink" href="#frequency-analysis-ac-sweep" title="Permanent link">&para;</a></h3>
+<p>Use <code>simulation.frequency_analysis</code> for backend AC sweep workflows:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">frequency_analysis</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">open_loop_transfer</span>
+<span class="w">    </span><span class="nt">anchor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+<span class="w">    </span><span class="nt">sweep</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">scale</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">log</span>
+<span class="w">      </span><span class="nt">f_start_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">      </span><span class="nt">f_stop_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000.0</span>
+<span class="w">      </span><span class="nt">points</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
+<span class="w">    </span><span class="nt">injection_current_amplitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">    </span><span class="nt">perturbation</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="nt"> negative</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="nt"> negative</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Supported <code>mode</code> values:</p>
+<ul>
+<li><code>open_loop_transfer</code></li>
+<li><code>closed_loop_transfer</code></li>
+<li><code>input_impedance</code></li>
+<li><code>output_impedance</code></li>
+</ul>
+<p>Supported <code>anchor</code> values:</p>
+<ul>
+<li><code>dc</code></li>
+<li><code>periodic</code></li>
+<li><code>averaged</code></li>
+<li><code>auto</code></li>
+</ul>
+<p>The parser enforces deterministic validation for sweep ranges, point count, and port bindings.
+For full backend contract and Python result usage, see
+<a href="../frequency-analysis-ac-sweep/">Frequency Analysis (AC Sweep)</a>.</p>
+<h3 id="averaged-converter-mode">Averaged Converter Mode<a class="headerlink" href="#averaged-converter-mode" title="Permanent link">&para;</a></h3>
+<p>Use <code>simulation.averaged_converter</code> for backend averaged plant runs:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">averaged_converter</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">topology</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">buck</span>
+<span class="w">    </span><span class="nt">operating_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
+<span class="w">    </span><span class="nt">envelope_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span>
+<span class="w">    </span><span class="nt">vin_source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vin</span>
+<span class="w">    </span><span class="nt">inductor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L1</span>
+<span class="w">    </span><span class="nt">capacitor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">C1</span>
+<span class="w">    </span><span class="nt">load_resistor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Rload</span>
+<span class="w">    </span><span class="nt">output_node</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">out</span>
+<span class="w">    </span><span class="nt">duty</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.4</span>
+<span class="w">    </span><span class="nt">duty_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">duty_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
+<span class="w">    </span><span class="nt">switching_frequency_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000.0</span>
+<span class="w">    </span><span class="nt">initial_inductor_current</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">initial_output_voltage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">ccm_current_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</code></pre></div>
+<p>Supported values:</p>
+<ul>
+<li><code>topology</code>: <code>buck</code> | <code>boost</code> | <code>buck_boost</code></li>
+<li><code>operating_mode</code>: <code>ccm</code> | <code>dcm</code> | <code>auto</code></li>
+<li><code>envelope_policy</code>: <code>strict</code> | <code>warn</code></li>
+</ul>
+<p>Deterministic checks:</p>
+<ul>
+<li>required mapping fields when <code>enabled=true</code></li>
+<li>valid duty bounds (<code>0 &lt;= duty_min &lt;= duty &lt;= duty_max &lt;= 1</code>)</li>
+<li>finite <code>ccm_current_threshold &gt;= 0</code></li>
+<li>finite <code>switching_frequency_hz &gt; 0</code></li>
+<li>mapped component types (<code>vin_source</code> voltage source, <code>inductor</code> inductor, <code>capacitor</code> capacitor, <code>load_resistor</code> resistor)</li>
+</ul>
+<p>For full runtime/result/frontend contract and migration guidance, see
+<a href="../averaged-converter-modeling/">Averaged Converter Modeling</a>.</p>
 <h3 id="control-blocks-for-closed-loop-converters">Control Blocks for Closed-Loop Converters<a class="headerlink" href="#control-blocks-for-closed-loop-converters" title="Permanent link">&para;</a></h3>
 <p>Common blocks for converter control loops:</p>
 <ul>
