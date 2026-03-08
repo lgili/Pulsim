@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.abspath('../../python/src'))
 project = 'Pulsim Python API'
 copyright = '2024, Pulsim Contributors'
 author = 'Pulsim Contributors'
-version = '0.7.0'
-release = '0.7.0'
+version = '0.7.2'
+release = '0.7.2'
 
 # -- General configuration ---------------------------------------------------
 
