@@ -212,6 +212,24 @@ void ControlMixedDomainModule::ensure_prefix(std::vector<Real>& series,
     }
 }
 
+void ControlMixedDomainModule::evaluate_step(const Vector& state, Real step_time) {
+    const MixedDomainStepResult mixed_step = circuit_.execute_mixed_domain_step(state, step_time);
+    if (result_.mixed_domain_phase_order.empty()) {
+        result_.mixed_domain_phase_order = mixed_step.phase_order;
+    }
+    cached_channel_values_ = mixed_step.channel_values;
+    cached_step_time_ = step_time;
+    has_cached_step_ = true;
+}
+
+void ControlMixedDomainModule::on_step_accepted(const Vector& state, Real step_time) {
+    if (circuit_.num_virtual_components() == 0) {
+        return;
+    }
+    ensure_base_metadata();
+    evaluate_step(state, step_time);
+}
+
 void ControlMixedDomainModule::on_sample_emit(const Vector& state,
                                               Real sample_time,
                                               std::size_t sample_count) {
@@ -220,13 +238,12 @@ void ControlMixedDomainModule::on_sample_emit(const Vector& state,
     }
     ensure_base_metadata();
 
-    const MixedDomainStepResult mixed_step = circuit_.execute_mixed_domain_step(state, sample_time);
-    if (result_.mixed_domain_phase_order.empty()) {
-        result_.mixed_domain_phase_order = mixed_step.phase_order;
+    if (!has_cached_step_ || !nearly_equal(cached_step_time_, sample_time, 1e-12, 1e-15)) {
+        evaluate_step(state, sample_time);
     }
 
     const Real nan = std::numeric_limits<Real>::quiet_NaN();
-    for (const auto& [channel, value] : mixed_step.channel_values) {
+    for (const auto& [channel, value] : cached_channel_values_) {
         auto [it, inserted] = result_.virtual_channels.try_emplace(channel);
         auto& series = it->second;
         if (inserted && sample_reserve_ > 0) {
@@ -1074,6 +1091,8 @@ void RuntimeModuleOrchestrator::on_step_accepted(Real t_start,
             refine_event_time,
             emit_threshold_event);
     }
+
+    control_mixed_module_.on_step_accepted(x_end, t_start + dt_used);
 
     loss_module_.on_step_accepted(
         x_end,

@@ -91,6 +91,18 @@ if(PULSIM_BUILD_TESTS)
             PULSIM_BUILDING_CBLOCK
     )
 
+    add_library(pulsim_test_cblock_constant SHARED
+        tests/cblock/test_constant.cpp
+    )
+    target_include_directories(pulsim_test_cblock_constant
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_compile_definitions(pulsim_test_cblock_constant
+        PRIVATE
+            PULSIM_BUILDING_CBLOCK
+    )
+
     # Header-only v1/v2 API tests
     add_executable(pulsim_tests
         tests/test_main.cpp
@@ -140,8 +152,9 @@ if(PULSIM_BUILD_TESTS)
     target_compile_definitions(pulsim_simulation_tests
         PRIVATE
             PULSIM_TEST_CBLOCK_LIB_PATH="$<TARGET_FILE:pulsim_test_cblock>"
+            PULSIM_TEST_CBLOCK_CONST_LIB_PATH="$<TARGET_FILE:pulsim_test_cblock_constant>"
     )
-    add_dependencies(pulsim_simulation_tests pulsim_test_cblock)
+    add_dependencies(pulsim_simulation_tests pulsim_test_cblock pulsim_test_cblock_constant)
     if(COMMAND pulsim_apply_target_defaults)
         pulsim_apply_target_defaults(pulsim_simulation_tests)
     endif()

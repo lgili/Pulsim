@@ -12,6 +12,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulsim::v1 {
@@ -126,17 +127,24 @@ public:
     /// Ensures base virtual-channel metadata from runtime circuit is present.
     void ensure_base_metadata();
 
+    /// Evaluates mixed-domain control once per accepted electrical step.
+    void on_step_accepted(const Vector& state, Real step_time);
+
     /// Appends mixed-domain channel samples for the current accepted output sample.
     void on_sample_emit(const Vector& state, Real sample_time, std::size_t sample_count);
 
 private:
     void push_series_value(std::vector<Real>& series, Real value);
     void ensure_prefix(std::vector<Real>& series, std::size_t sample_count, Real fill_value);
+    void evaluate_step(const Vector& state, Real step_time);
 
     Circuit& circuit_;
     SimulationResult& result_;
     std::size_t sample_reserve_ = 0;
     bool metadata_initialized_ = false;
+    bool has_cached_step_ = false;
+    Real cached_step_time_ = 0.0;
+    std::unordered_map<std::string, Real> cached_channel_values_;
 };
 
 /**
