@@ -746,12 +746,70 @@ TEST_CASE("v1 control scheduler updates c_block channels",
     const auto n_in = circuit.add_node("in");
     const auto gnd = Circuit::ground();
 
-    circuit.add_voltage_source("Vin", n_in, gnd, 1.5);
+    circuit.add_voltage_source("Vin", n_in, gnd, 0.0);
     circuit.add_resistor("Rin", n_in, gnd, 1e3);
 
     circuit.add_virtual_component(
-        "c_block", "CB1", {n_in, gnd},
-        {{"gain", 2.0}, {"offset", 0.25}},
+        "c_block", "CB1", {n_in},
+        {{"n_inputs", 1.0}, {"n_outputs", 2.0}},
+        {{"lib_path", PULSIM_TEST_CBLOCK_LIB_PATH}});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 1.5e-3;
+    opts.dt = 0.25e-3;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.control_mode = ControlUpdateMode::Continuous;
+    opts.control_sample_time = 0.0;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE(result.virtual_channels.contains("CB1"));
+    REQUIRE(result.virtual_channels.contains("CB1.out0"));
+    REQUIRE(result.virtual_channels.contains("CB1.out1"));
+
+    const auto& cb = result.virtual_channels.at("CB1");
+    const auto& out0 = result.virtual_channels.at("CB1.out0");
+    const auto& out1 = result.virtual_channels.at("CB1.out1");
+
+    REQUIRE_FALSE(cb.empty());
+    REQUIRE(cb.size() == out0.size());
+    REQUIRE(cb.size() == out1.size());
+
+    const auto [out0_min_it, out0_max_it] = std::minmax_element(out0.begin(), out0.end());
+    REQUIRE(out0_min_it != out0.end());
+    REQUIRE(out0_max_it != out0.end());
+    CHECK(*out0_min_it < -0.1);
+    CHECK(*out0_max_it > 0.1);
+
+    bool saw_high = false;
+    bool saw_low = false;
+    for (const Real value : out1) {
+        if (value > 0.5) saw_high = true;
+        if (value < -0.5) saw_low = true;
+    }
+    CHECK(saw_high);
+    CHECK(saw_low);
+}
+
+TEST_CASE("v1 c_block without runtime library fails fast",
+          "[v1][mixed-domain][control][c_block][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 1.0);
+    circuit.add_resistor("Rin", n_in, gnd, 1e3);
+    circuit.add_virtual_component(
+        "c_block", "CB_MISSING_LIB", {n_in},
+        {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
         {});
 
     SimulationOptions opts;
@@ -762,20 +820,11 @@ TEST_CASE("v1 control scheduler updates c_block channels",
     opts.step_mode_explicit = true;
     opts.dt_min = opts.dt;
     opts.dt_max = opts.dt;
-    opts.control_mode = ControlUpdateMode::Discrete;
-    opts.control_sample_time = 20e-6;
     opts.newton_options.num_nodes = circuit.num_nodes();
     opts.newton_options.num_branches = circuit.num_branches();
 
     Simulator sim(circuit, opts);
-    const auto result = sim.run_transient(circuit.initial_state());
-
-    REQUIRE(result.success);
-    REQUIRE(result.virtual_channels.contains("CB1"));
-    const auto& cb = result.virtual_channels.at("CB1");
-    REQUIRE_FALSE(cb.empty());
-    CHECK(cb.front() == Approx(3.25).margin(1e-9));  // 2.0 * 1.5 + 0.25
-    CHECK(cb.back() == Approx(3.25).margin(1e-9));
+    REQUIRE_THROWS_AS(sim.run_transient(circuit.initial_state()), std::runtime_error);
 }
 
 TEST_CASE("v1 event scheduler applies unified calendar ordering", "[v1][events][scheduler][regression]") {

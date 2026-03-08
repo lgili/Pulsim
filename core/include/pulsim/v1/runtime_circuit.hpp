@@ -14,6 +14,7 @@
 // =============================================================================
 
 #include "pulsim/v1/device_base.hpp"
+#include "pulsim/v1/cblock_abi.h"
 #include "pulsim/v1/solver.hpp"
 #include "pulsim/v1/sources.hpp"
 #include "pulsim/v1/integration.hpp"
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <deque>
 #include <functional>
 #include <limits>
@@ -29,11 +31,21 @@
 #include <unordered_set>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 #include <stdexcept>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace pulsim::v1 {
 
@@ -563,6 +575,20 @@ public:
                 auto carrier = base;
                 carrier.domain = "control";
                 metadata.emplace(component.name + ".carrier", std::move(carrier));
+            } else if (component.type == "c_block") {
+                int n_outputs = 1;
+                if (const auto it = component.numeric_params.find("n_outputs");
+                    it != component.numeric_params.end() && std::isfinite(it->second) && it->second >= 1.0) {
+                    n_outputs = std::max(1, static_cast<int>(std::llround(it->second)));
+                }
+
+                auto control = base;
+                control.domain = "control";
+                for (int output_index = 0; output_index < n_outputs; ++output_index) {
+                    metadata.emplace(
+                        component.name + ".out" + std::to_string(output_index),
+                        control);
+                }
             } else if (component.type == "saturable_inductor") {
                 auto electrical = base;
                 electrical.domain = "electrical";
@@ -720,12 +746,59 @@ public:
                 virtual_signal_state_[integral_key] = integral;
                 virtual_last_input_[prev_error_key] = signal;
             } else if (component.type == "c_block") {
-                // Core fallback path for custom C blocks in mixed-domain scheduling:
-                // an affine single-output transfer using gain/offset parameters.
-                const Real gain = get_numeric(component, "gain", 1.0);
-                const Real offset = get_numeric(component, "offset", 0.0);
-                output = signal * gain + offset;
-                output = maybe_limit_output(output);
+                auto runtime = ensure_c_block_runtime(component);
+                if (!runtime || runtime->step_fn == nullptr) {
+                    throw std::runtime_error(
+                        "C_BLOCK '" + component.name + "' failed to initialize runtime step function");
+                }
+
+                std::vector<Real> inputs(
+                    static_cast<std::size_t>(runtime->n_inputs), Real{0.0});
+                if (runtime->n_inputs == 1) {
+                    if (component.nodes.size() >= 2) {
+                        inputs[0] = in0 - in1;
+                    } else if (component.nodes.size() == 1) {
+                        inputs[0] = in0;
+                    }
+                } else {
+                    if (component.nodes.size() < static_cast<std::size_t>(runtime->n_inputs)) {
+                        std::ostringstream oss;
+                        oss << "C_BLOCK '" << component.name << "' expects at least "
+                            << runtime->n_inputs << " input nodes, got "
+                            << component.nodes.size();
+                        throw std::runtime_error(oss.str());
+                    }
+                    for (int input_index = 0; input_index < runtime->n_inputs; ++input_index) {
+                        inputs[static_cast<std::size_t>(input_index)] =
+                            node_voltage(component.nodes[static_cast<std::size_t>(input_index)]);
+                    }
+                }
+
+                std::vector<Real> outputs(
+                    static_cast<std::size_t>(runtime->n_outputs), Real{0.0});
+                const int rc = runtime->step_fn(
+                    runtime->ctx,
+                    static_cast<double>(time),
+                    static_cast<double>(dt),
+                    reinterpret_cast<const double*>(inputs.data()),
+                    reinterpret_cast<double*>(outputs.data()));
+                if (rc != 0) {
+                    std::ostringstream oss;
+                    oss << "C_BLOCK '" << component.name
+                        << "' step returned non-zero code " << rc
+                        << " at t=" << time;
+                    throw std::runtime_error(oss.str());
+                }
+
+                output = maybe_limit_output(outputs.front());
+                for (int output_index = 0; output_index < runtime->n_outputs; ++output_index) {
+                    const std::string channel_name =
+                        component.name + ".out" + std::to_string(output_index);
+                    const Real channel_value = maybe_limit_output(
+                        outputs[static_cast<std::size_t>(output_index)]);
+                    virtual_signal_state_[channel_name] = channel_value;
+                    result.channel_values[channel_name] = channel_value;
+                }
             } else if (component.type == "math_block") {
                 const std::string op = [&]() -> std::string {
                     const auto it = component.metadata.find("operation");
@@ -2537,6 +2610,213 @@ private:
         }
     }
 
+    struct CBlockRuntimeState {
+#if defined(_WIN32)
+        HMODULE handle = nullptr;
+#else
+        void* handle = nullptr;
+#endif
+        PulsimCBlockCtx* ctx = nullptr;
+        pulsim_cblock_init_fn init_fn = nullptr;
+        pulsim_cblock_step_fn step_fn = nullptr;
+        pulsim_cblock_destroy_fn destroy_fn = nullptr;
+        int n_inputs = 0;
+        int n_outputs = 0;
+        std::string block_name;
+        std::string library_path;
+
+        ~CBlockRuntimeState() {
+            if (destroy_fn != nullptr && ctx != nullptr) {
+                destroy_fn(ctx);
+                ctx = nullptr;
+            }
+#if defined(_WIN32)
+            if (handle != nullptr) {
+                FreeLibrary(handle);
+                handle = nullptr;
+            }
+#else
+            if (handle != nullptr) {
+                dlclose(handle);
+                handle = nullptr;
+            }
+#endif
+        }
+    };
+
+    [[nodiscard]] static int read_positive_int_param(
+        const VirtualComponent& component,
+        std::string_view key,
+        int fallback) {
+        const auto it = component.numeric_params.find(std::string(key));
+        if (it == component.numeric_params.end()) {
+            return fallback;
+        }
+        const Real value = it->second;
+        if (!std::isfinite(value) || value < 1.0) {
+            std::ostringstream oss;
+            oss << "C_BLOCK '" << component.name << "' has invalid '" << key
+                << "' (must be integer >= 1)";
+            throw std::runtime_error(oss.str());
+        }
+        return std::max(1, static_cast<int>(std::llround(value)));
+    }
+
+    [[nodiscard]] static std::optional<std::string> metadata_value(
+        const VirtualComponent& component,
+        std::string_view key) {
+        const auto it = component.metadata.find(std::string(key));
+        if (it == component.metadata.end()) {
+            return std::nullopt;
+        }
+        if (it->second.empty()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
+#if defined(_WIN32)
+    [[nodiscard]] static std::string win32_last_error_message(const std::string& action) {
+        const DWORD error_code = GetLastError();
+        LPSTR message_buffer = nullptr;
+        const DWORD size = FormatMessageA(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            nullptr,
+            error_code,
+            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            reinterpret_cast<LPSTR>(&message_buffer),
+            0,
+            nullptr);
+        std::string message = action + " failed";
+        if (size > 0 && message_buffer != nullptr) {
+            message += ": ";
+            message.append(message_buffer, size);
+            LocalFree(message_buffer);
+        } else {
+            message += " (error code " + std::to_string(static_cast<unsigned long>(error_code)) + ")";
+        }
+        return message;
+    }
+#endif
+
+    [[nodiscard]] std::shared_ptr<CBlockRuntimeState> load_c_block_runtime(
+        const VirtualComponent& component) {
+        const auto lib_path_opt = metadata_value(component, "lib_path");
+        const auto source_opt = metadata_value(component, "source");
+
+        if (!lib_path_opt.has_value()) {
+            if (source_opt.has_value()) {
+                throw std::runtime_error(
+                    "C_BLOCK '" + component.name +
+                    "' source compilation is not available in core runtime; provide 'lib_path'");
+            }
+            throw std::runtime_error(
+                "C_BLOCK '" + component.name + "' missing required 'lib_path'");
+        }
+
+        const int n_inputs = read_positive_int_param(component, "n_inputs", 1);
+        const int n_outputs = read_positive_int_param(component, "n_outputs", 1);
+
+        std::filesystem::path library_path = std::filesystem::path(*lib_path_opt);
+        if (library_path.is_relative()) {
+            library_path = std::filesystem::absolute(library_path);
+        }
+        if (!std::filesystem::exists(library_path)) {
+            throw std::runtime_error(
+                "C_BLOCK '" + component.name + "' library path does not exist: " + library_path.string());
+        }
+
+        auto runtime = std::make_shared<CBlockRuntimeState>();
+        runtime->n_inputs = n_inputs;
+        runtime->n_outputs = n_outputs;
+        runtime->block_name = component.name;
+        runtime->library_path = library_path.string();
+
+#if defined(_WIN32)
+        runtime->handle = LoadLibraryA(runtime->library_path.c_str());
+        if (runtime->handle == nullptr) {
+            throw std::runtime_error(
+                "C_BLOCK '" + component.name + "': " +
+                win32_last_error_message("LoadLibrary(" + runtime->library_path + ")"));
+        }
+
+        auto* version_ptr = reinterpret_cast<int*>(
+            GetProcAddress(runtime->handle, PULSIM_CBLOCK_SYM_VERSION));
+        runtime->step_fn = reinterpret_cast<pulsim_cblock_step_fn>(
+            GetProcAddress(runtime->handle, PULSIM_CBLOCK_SYM_STEP));
+        runtime->init_fn = reinterpret_cast<pulsim_cblock_init_fn>(
+            GetProcAddress(runtime->handle, PULSIM_CBLOCK_SYM_INIT));
+        runtime->destroy_fn = reinterpret_cast<pulsim_cblock_destroy_fn>(
+            GetProcAddress(runtime->handle, PULSIM_CBLOCK_SYM_DESTROY));
+#else
+        runtime->handle = dlopen(runtime->library_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (runtime->handle == nullptr) {
+            const char* dl_err = dlerror();
+            throw std::runtime_error(
+                "C_BLOCK '" + component.name + "': dlopen(" + runtime->library_path +
+                ") failed: " + std::string(dl_err != nullptr ? dl_err : "unknown error"));
+        }
+
+        auto* version_ptr = reinterpret_cast<int*>(
+            dlsym(runtime->handle, PULSIM_CBLOCK_SYM_VERSION));
+        runtime->step_fn = reinterpret_cast<pulsim_cblock_step_fn>(
+            dlsym(runtime->handle, PULSIM_CBLOCK_SYM_STEP));
+        runtime->init_fn = reinterpret_cast<pulsim_cblock_init_fn>(
+            dlsym(runtime->handle, PULSIM_CBLOCK_SYM_INIT));
+        runtime->destroy_fn = reinterpret_cast<pulsim_cblock_destroy_fn>(
+            dlsym(runtime->handle, PULSIM_CBLOCK_SYM_DESTROY));
+#endif
+
+        if (version_ptr == nullptr) {
+            throw std::runtime_error(
+                "C_BLOCK '" + component.name +
+                "' missing required ABI version symbol '" PULSIM_CBLOCK_SYM_VERSION "'");
+        }
+        if (*version_ptr != PULSIM_CBLOCK_ABI_VERSION) {
+            std::ostringstream oss;
+            oss << "C_BLOCK '" << component.name << "' ABI mismatch: expected "
+                << PULSIM_CBLOCK_ABI_VERSION << ", found " << *version_ptr;
+            throw std::runtime_error(oss.str());
+        }
+        if (runtime->step_fn == nullptr) {
+            throw std::runtime_error(
+                "C_BLOCK '" + component.name +
+                "' missing required step symbol '" PULSIM_CBLOCK_SYM_STEP "'");
+        }
+
+        if (runtime->init_fn != nullptr) {
+            PulsimCBlockInfo info{};
+            info.abi_version = PULSIM_CBLOCK_ABI_VERSION;
+            info.n_inputs = runtime->n_inputs;
+            info.n_outputs = runtime->n_outputs;
+            info.name = runtime->block_name.c_str();
+
+            PulsimCBlockCtx* ctx = nullptr;
+            const int rc = runtime->init_fn(&ctx, &info);
+            if (rc != 0) {
+                std::ostringstream oss;
+                oss << "C_BLOCK '" << component.name
+                    << "' init returned non-zero code " << rc;
+                throw std::runtime_error(oss.str());
+            }
+            runtime->ctx = ctx;
+        }
+
+        return runtime;
+    }
+
+    [[nodiscard]] std::shared_ptr<CBlockRuntimeState> ensure_c_block_runtime(
+        const VirtualComponent& component) {
+        auto it = cblock_runtime_states_.find(component.name);
+        if (it != cblock_runtime_states_.end() && it->second != nullptr) {
+            return it->second;
+        }
+
+        auto runtime = load_c_block_runtime(component);
+        cblock_runtime_states_[component.name] = runtime;
+        return runtime;
+    }
+
     std::vector<DeviceVariant> devices_;
     std::vector<VirtualComponent> virtual_components_;
     std::unordered_map<std::string, Real> virtual_signal_state_;
@@ -2556,6 +2836,7 @@ private:
     std::vector<std::optional<bool>> forced_switch_state_;
     std::unordered_map<std::string, std::string, TransparentStringHash, TransparentStringEqual>
         switch_driver_bindings_;
+    std::unordered_map<std::string, std::shared_ptr<CBlockRuntimeState>> cblock_runtime_states_;
     std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index, TransparentStringHash, TransparentStringEqual> node_map_;
     std::vector<std::string> node_names_;
