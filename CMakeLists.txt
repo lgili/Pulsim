@@ -22,7 +22,7 @@ if(APPLE AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED CMAKE_CXX_COMPILER)
     endif()
 endif()
 
-project(pulsim VERSION 0.7.5 LANGUAGES CXX)
+project(pulsim VERSION 0.7.6 LANGUAGES CXX)
 
 # =============================================================================
 # C++ Standard Configuration
