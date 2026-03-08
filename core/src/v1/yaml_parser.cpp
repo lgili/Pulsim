@@ -17,6 +17,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -309,6 +310,7 @@ const std::unordered_map<std::string, std::string>& component_alias_map() {
         add_aliases("thermal_scope", {"thermalscope"});
         add_aliases("signal_mux", {"signalmux", "mux"});
         add_aliases("signal_demux", {"signaldemux", "demux"});
+        add_aliases("c_block", {"cblock", "c-block", "custom_block"});
 
         return map;
     }();
@@ -363,7 +365,8 @@ const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>>& comp
         {"electrical_scope", {1, std::numeric_limits<std::size_t>::max()}},
         {"thermal_scope", {1, std::numeric_limits<std::size_t>::max()}},
         {"signal_mux", {2, std::numeric_limits<std::size_t>::max()}},
-        {"signal_demux", {2, std::numeric_limits<std::size_t>::max()}}
+        {"signal_demux", {2, std::numeric_limits<std::size_t>::max()}},
+        {"c_block", {0, std::numeric_limits<std::size_t>::max()}}
     };
     return arity;
 }
@@ -396,7 +399,8 @@ const std::unordered_set<std::string>& virtual_component_types() {
         "electrical_scope",
         "thermal_scope",
         "signal_mux",
-        "signal_demux"
+        "signal_demux",
+        "c_block"
     };
     return types;
 }
@@ -1938,7 +1942,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "duty_from_channel", "v_high", "v_low",
              "alpha", "anti_windup", "min", "max", "output_min", "output_max",
              "rising_rate", "falling_rate",
-             "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping"},
+             "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping",
+             "n_inputs", "n_outputs", "lib_path", "source", "extra_cflags"},
             "component", errors_, options_.strict);
 
         if (!comp["type"] || !comp["name"]) {
@@ -3015,6 +3020,132 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                         push_error(errors_, kDiagInvalidParameter,
                                    "operation must be add/sub/mul/div for " + name);
                         continue;
+                    }
+                }
+            } else if (type == "c_block") {
+                // n_inputs is required (int >= 1)
+                const YAML::Node n_inputs_node = get_param("n_inputs");
+                if (!n_inputs_node) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "c_block '" + name + "' missing required parameter 'n_inputs'");
+                    continue;
+                }
+                const std::optional<int> n_inputs =
+                    parse_int_scalar(n_inputs_node, name + ".n_inputs", errors_);
+                if (!n_inputs) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "c_block '" + name + "' n_inputs must be an integer >= 1");
+                    continue;
+                }
+                if (*n_inputs < 1) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "c_block '" + name + "' n_inputs must be >= 1");
+                    continue;
+                }
+                numeric_params["n_inputs"] = static_cast<Real>(*n_inputs);
+
+                // n_outputs is required (int >= 1)
+                const YAML::Node n_outputs_node = get_param("n_outputs");
+                if (!n_outputs_node) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "c_block '" + name + "' missing required parameter 'n_outputs'");
+                    continue;
+                }
+                const std::optional<int> n_outputs =
+                    parse_int_scalar(n_outputs_node, name + ".n_outputs", errors_);
+                if (!n_outputs) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "c_block '" + name + "' n_outputs must be an integer >= 1");
+                    continue;
+                }
+                if (*n_outputs < 1) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "c_block '" + name + "' n_outputs must be >= 1");
+                    continue;
+                }
+                numeric_params["n_outputs"] = static_cast<Real>(*n_outputs);
+
+                // Optional extra_cflags: must be a sequence of strings.
+                const YAML::Node extra_cflags_node = get_param("extra_cflags");
+                if (extra_cflags_node && !extra_cflags_node.IsNull()) {
+                    if (!extra_cflags_node.IsSequence()) {
+                        push_type_mismatch_error(
+                            errors_,
+                            name + ".extra_cflags",
+                            "sequence[string]",
+                            extra_cflags_node);
+                        continue;
+                    }
+
+                    bool flag_type_error = false;
+                    for (std::size_t flag_index = 0; flag_index < extra_cflags_node.size(); ++flag_index) {
+                        const YAML::Node flag_node = extra_cflags_node[flag_index];
+                        if (!flag_node.IsScalar()) {
+                            push_type_mismatch_error(
+                                errors_,
+                                name + ".extra_cflags[" + std::to_string(flag_index) + "]",
+                                "string",
+                                flag_node);
+                            flag_type_error = true;
+                            continue;
+                        }
+                        try {
+                            (void)flag_node.as<std::string>();
+                        } catch (...) {
+                            push_type_mismatch_error(
+                                errors_,
+                                name + ".extra_cflags[" + std::to_string(flag_index) + "]",
+                                "string",
+                                flag_node);
+                            flag_type_error = true;
+                        }
+                    }
+                    if (flag_type_error) {
+                        continue;
+                    }
+                }
+
+                // Exactly one of lib_path or source may be specified.
+                const YAML::Node lib_path_node = get_param("lib_path");
+                const YAML::Node source_node = get_param("source");
+                const bool has_lib_path = lib_path_node && !lib_path_node.IsNull();
+                const bool has_source = source_node && !source_node.IsNull();
+                if (has_lib_path && has_source) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "c_block '" + name + "' specifies both 'lib_path' and 'source'; only one is allowed");
+                    continue;
+                }
+
+                std::optional<std::string> lib_path;
+                if (has_lib_path) {
+                    lib_path = parse_string_scalar(lib_path_node, name + ".lib_path", errors_);
+                    if (!lib_path) {
+                        continue;
+                    }
+                    metadata["lib_path"] = *lib_path;
+                }
+
+                std::optional<std::string> source_path;
+                if (has_source) {
+                    source_path = parse_string_scalar(source_node, name + ".source", errors_);
+                    if (!source_path) {
+                        continue;
+                    }
+                    metadata["source"] = *source_path;
+                }
+
+                if (!has_lib_path && !has_source) {
+                    push_warning(warnings_, kDiagVirtualComponent,
+                                 "c_block '" + name + "' has neither 'lib_path' nor 'source'; valid for Python-only usage");
+                } else if (lib_path.has_value()) {
+                    if (!std::filesystem::exists(*lib_path)) {
+                        push_warning(warnings_, kDiagVirtualComponent,
+                                     "c_block '" + name + "' lib_path '" + *lib_path + "' does not exist at parse time");
+                    }
+                } else if (source_path.has_value()) {
+                    if (!std::filesystem::exists(*source_path)) {
+                        push_warning(warnings_, kDiagVirtualComponent,
+                                     "c_block '" + name + "' source '" + *source_path + "' does not exist at parse time");
                     }
                 }
             }

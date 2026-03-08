@@ -106,6 +106,20 @@ configure_file(
     ${CMAKE_BINARY_DIR}/python/pulsim/post_processing.py
     COPYONLY
 )
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/cblock.py
+    ${CMAKE_BINARY_DIR}/python/pulsim/cblock.py
+    COPYONLY
+)
+
+# Package CBlock ABI header with the Python module so compile_cblock() works
+# from installed wheels, not only from source checkouts.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim/include/pulsim/v1")
+configure_file(
+    ${CMAKE_SOURCE_DIR}/core/include/pulsim/v1/cblock_abi.h
+    ${CMAKE_BINARY_DIR}/python/pulsim/include/pulsim/v1/cblock_abi.h
+    COPYONLY
+)
 
 # Install targets
 install(TARGETS _pulsim
@@ -114,8 +128,15 @@ install(TARGETS _pulsim
 
 install(FILES
     pulsim/__init__.py
+    pulsim/__init__.pyi
     pulsim/netlist.py
     pulsim/signal_evaluator.py
     pulsim/post_processing.py
+    pulsim/cblock.py
     DESTINATION pulsim
+)
+
+install(FILES
+    ${CMAKE_SOURCE_DIR}/core/include/pulsim/v1/cblock_abi.h
+    DESTINATION pulsim/include/pulsim/v1
 )

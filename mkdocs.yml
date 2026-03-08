@@ -122,6 +122,12 @@ nav:
       - Notebooks: notebooks.md
       - Convergence Tuning: convergence-tuning-guide.md
       - Troubleshooting: troubleshooting.md
+  - Signal Domain:
+      - C-Block Overview: cblock/index.md
+      - C-Block User Guide: cblock/user-guide.md
+      - C ABI Reference: cblock/abi-reference.md
+      - Python API Reference: cblock/api-reference.md
+      - Examples Walkthrough: cblock/examples.md
   - API:
       - API Reference: api-reference.md
       - Python API (Legacy Notes): python-api.md

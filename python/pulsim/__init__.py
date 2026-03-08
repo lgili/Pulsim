@@ -206,6 +206,17 @@ from .signal_evaluator import (
     SIGNAL_TYPES,
 )
 
+# Custom C / Python Computation Blocks
+from .cblock import (
+    CBlockCompileError,
+    CBlockABIError,
+    CBlockRuntimeError,
+    detect_compiler,
+    compile_cblock,
+    CBlockLibrary,
+    PythonCBlock,
+)
+
 # Waveform Post-Processing (Pure Python, backend-owned metric pipeline)
 from .post_processing import (
     PostProcessingWindowMode,
@@ -766,4 +777,21 @@ __all__ = [
     "SignalEvaluator",
     "AlgebraicLoopError",
     "SIGNAL_TYPES",
+
+    # Custom C / Python Computation Blocks
+    "CBlockCompileError",
+    "CBlockABIError",
+    "CBlockRuntimeError",
+    "detect_compiler",
+    "compile_cblock",
+    "CBlockLibrary",
+    "PythonCBlock",
 ]
+
+# ---------------------------------------------------------------------------
+# Module-level capabilities registry
+# ---------------------------------------------------------------------------
+
+capabilities: dict[str, bool] = {
+    "c_block": True,
+}

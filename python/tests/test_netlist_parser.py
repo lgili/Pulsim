@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import yaml
 
 import pulsim as ps
 from pulsim.netlist import (
@@ -16,53 +17,53 @@ class TestParseValue:
     """Tests for parse_value function."""
 
     def test_plain_integers(self):
-        assert parse_value('100') == 100.0
-        assert parse_value('0') == 0.0
-        assert parse_value('-5') == -5.0
+        assert parse_value("100") == 100.0
+        assert parse_value("0") == 0.0
+        assert parse_value("-5") == -5.0
 
     def test_plain_floats(self):
-        assert parse_value('1.5') == 1.5
-        assert parse_value('0.001') == 0.001
-        assert parse_value('-3.14') == -3.14
+        assert parse_value("1.5") == 1.5
+        assert parse_value("0.001") == 0.001
+        assert parse_value("-3.14") == -3.14
 
     def test_scientific_notation(self):
-        assert parse_value('1e-6') == 1e-6
-        assert parse_value('1E-6') == 1e-6
-        assert parse_value('1.5e3') == 1500.0
-        assert parse_value('2.5E+3') == 2500.0
+        assert parse_value("1e-6") == 1e-6
+        assert parse_value("1E-6") == 1e-6
+        assert parse_value("1.5e3") == 1500.0
+        assert parse_value("2.5E+3") == 2500.0
 
     def test_engineering_suffixes(self):
         # Femto, pico, nano, micro, milli
-        assert parse_value('1f') == pytest.approx(1e-15)
-        assert parse_value('10p') == pytest.approx(10e-12)
-        assert parse_value('100n') == pytest.approx(100e-9)
-        assert parse_value('1u') == pytest.approx(1e-6)
-        assert parse_value('10m') == pytest.approx(10e-3)
+        assert parse_value("1f") == pytest.approx(1e-15)
+        assert parse_value("10p") == pytest.approx(10e-12)
+        assert parse_value("100n") == pytest.approx(100e-9)
+        assert parse_value("1u") == pytest.approx(1e-6)
+        assert parse_value("10m") == pytest.approx(10e-3)
 
         # Kilo, mega, giga, tera
-        assert parse_value('10k') == pytest.approx(10e3)
-        assert parse_value('1.5meg') == pytest.approx(1.5e6)
-        assert parse_value('1g') == pytest.approx(1e9)
-        assert parse_value('1t') == pytest.approx(1e12)
+        assert parse_value("10k") == pytest.approx(10e3)
+        assert parse_value("1.5meg") == pytest.approx(1.5e6)
+        assert parse_value("1g") == pytest.approx(1e9)
+        assert parse_value("1t") == pytest.approx(1e12)
 
     def test_case_insensitive(self):
-        assert parse_value('10K') == pytest.approx(10e3)
-        assert parse_value('1MEG') == pytest.approx(1e6)
-        assert parse_value('100U') == pytest.approx(100e-6)
-        assert parse_value('1N') == pytest.approx(1e-9)
+        assert parse_value("10K") == pytest.approx(10e3)
+        assert parse_value("1MEG") == pytest.approx(1e6)
+        assert parse_value("100U") == pytest.approx(100e-6)
+        assert parse_value("1N") == pytest.approx(1e-9)
 
     def test_combined_suffix(self):
-        assert parse_value('4.7k') == pytest.approx(4700.0)
-        assert parse_value('100n') == pytest.approx(100e-9)
-        assert parse_value('2.2u') == pytest.approx(2.2e-6)
+        assert parse_value("4.7k") == pytest.approx(4700.0)
+        assert parse_value("100n") == pytest.approx(100e-9)
+        assert parse_value("2.2u") == pytest.approx(2.2e-6)
 
     def test_invalid_value(self):
         with pytest.raises(NetlistParseError):
-            parse_value('abc')
+            parse_value("abc")
         with pytest.raises(NetlistParseError):
-            parse_value('10x')
+            parse_value("10x")
         with pytest.raises(NetlistParseError):
-            parse_value('')
+            parse_value("")
 
 
 class TestBasicParsing:
@@ -119,9 +120,9 @@ class TestBasicParsing:
         R2 node_b node_c 2k
         """
         result = parse_netlist_verbose(netlist)
-        assert 'node_a' in result.node_map
-        assert 'node_b' in result.node_map
-        assert 'node_c' in result.node_map
+        assert "node_a" in result.node_map
+        assert "node_b" in result.node_map
+        assert "node_c" in result.node_map
 
 
 class TestGroundAliases:
@@ -236,8 +237,8 @@ class TestModelDirective:
         .MODEL MYMOS NMOS (VTH=2 KP=0.5)
         """
         result = parse_netlist_verbose(netlist)
-        assert 'MYMOS' in result.models
-        model = result.models['MYMOS']
+        assert "MYMOS" in result.models
+        model = result.models["MYMOS"]
         assert model.vth == 2.0
         assert model.kp == 0.5
         assert model.is_nmos
@@ -248,7 +249,7 @@ class TestModelDirective:
         .MODEL PMODEL PMOS (VTH=-1.5)
         """
         result = parse_netlist_verbose(netlist)
-        model = result.models['PMODEL']
+        model = result.models["PMODEL"]
         assert not model.is_nmos
 
 
@@ -343,3 +344,156 @@ class TestIntegration:
         assert dc.success()
         # In DC, inductor is short circuit, so v_out = 0
         # Current through R = 10V / 100Ω = 0.1A
+
+
+# ---------------------------------------------------------------------------
+# 6.3  YAML netlist parser — C_BLOCK component tests
+# ---------------------------------------------------------------------------
+
+
+class TestYamlCBlockParser:
+    """YAML netlist round-trip tests for c_block components (task 6.3)."""
+
+    _HEADER = (
+        "schema: pulsim-v1\n"
+        "version: 1\n"
+        "simulation:\n"
+        "  tstop: 1e-3\n"
+        "  dt: 1e-6\n"
+        "components:\n"
+    )
+
+    def _parse(self, component_yaml: str) -> ps.YamlParser:
+        p = ps.YamlParser()
+        p.load_string(self._HEADER + component_yaml)
+        return p
+
+    def _has_error_code(self, errors: list, code: str) -> bool:
+        return any(code in e for e in errors)
+
+    # 6.3.1 — valid c_block with lib_path produces no ERROR diagnostics
+    def test_yaml_cblock_valid_lib_path(self, tmp_path) -> None:
+        """Parse valid c_block with lib_path; no ERROR-level diagnostics."""
+        lib = tmp_path / "gain.so"
+        lib.write_bytes(b"")  # create empty file so existence check passes
+        p = self._parse(
+            f"  - {{name: CB1, type: c_block, n_inputs: 1, n_outputs: 1,"
+            f" lib_path: {lib}, nodes: [a, b]}}\n"
+        )
+        # No error-level diagnostics
+        assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
+
+    # 6.3.2 — valid c_block with source path (existing file)
+    def test_yaml_cblock_valid_source(self, tmp_path) -> None:
+        """Parse valid c_block with source path; no error-level diagnostics."""
+        src = tmp_path / "gain.c"
+        src.write_text("// dummy")
+        p = self._parse(
+            f"  - {{name: CB2, type: c_block, n_inputs: 1, n_outputs: 1,"
+            f" source: {src}, nodes: [a, b]}}\n"
+        )
+        assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
+
+    # 6.3.3 — both lib_path and source → error
+    def test_yaml_cblock_both_specified_error(self, tmp_path) -> None:
+        """Specifying both lib_path and source yields a PARAM_INVALID error."""
+        p = self._parse(
+            "  - {name: CB3, type: c_block, n_inputs: 1, n_outputs: 1,"
+            " lib_path: /tmp/x.so, source: /tmp/x.c, nodes: [a, b]}\n"
+        )
+        assert self._has_error_code(p.errors, "PARAM_INVALID"), p.errors
+
+    # 6.3.4 — missing n_inputs → error
+    def test_yaml_cblock_missing_n_inputs_error(self) -> None:
+        """Missing n_inputs yields a PARAM_INVALID error."""
+        p = self._parse(
+            "  - {name: CB4, type: c_block, n_outputs: 1,"
+            " lib_path: /tmp/x.so, nodes: [a, b]}\n"
+        )
+        assert self._has_error_code(p.errors, "PARAM_INVALID"), p.errors
+
+    # 6.3.5 — neither lib_path nor source → no error (Python-only usage)
+    def test_yaml_cblock_neither_path_nor_source_info(self) -> None:
+        """Neither lib_path nor source is valid for Python-only usage (no ERROR)."""
+        p = self._parse(
+            "  - {name: CB5, type: c_block, n_inputs: 1, n_outputs: 1, nodes: [a, b]}\n"
+        )
+        # No error-level (PARAM_INVALID) diagnostics — only warnings
+        assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
+        # A warning must be emitted (Python-only hint)
+        assert any("VIRTUAL" in w or "neither" in w.lower() for w in p.warnings), (
+            p.warnings
+        )
+
+    # 4.2 / 6.3 — extra_cflags must be list[str]
+    def test_yaml_cblock_extra_cflags_must_be_list_of_strings(self) -> None:
+        """extra_cflags must be a sequence where each element is a string."""
+        p_not_list = self._parse(
+            "  - {name: CB6, type: c_block, n_inputs: 1, n_outputs: 1,"
+            " source: /tmp/x.c, extra_cflags: -O3, nodes: [a, b]}\n"
+        )
+        assert self._has_error_code(p_not_list.errors, "TYPE_MISMATCH"), (
+            p_not_list.errors
+        )
+
+        p_bad_item = self._parse(
+            "  - {name: CB7, type: c_block, n_inputs: 1, n_outputs: 1,"
+            " source: /tmp/x.c, extra_cflags: ['-O3', [123]], nodes: [a, b]}\n"
+        )
+        assert self._has_error_code(p_bad_item.errors, "TYPE_MISMATCH"), (
+            p_bad_item.errors
+        )
+
+    # 4.2 — n_inputs/n_outputs must be integer >= 1
+    def test_yaml_cblock_n_inputs_n_outputs_must_be_integer(self) -> None:
+        """Fractional n_inputs/n_outputs must be rejected."""
+        p = self._parse(
+            "  - {name: CB8, type: c_block, n_inputs: 1.5, n_outputs: 1,"
+            " source: /tmp/x.c, nodes: [a, b]}\n"
+        )
+        assert self._has_error_code(p.errors, "TYPE_MISMATCH"), p.errors
+
+    # 4.4 — parse -> re-serialize -> parse contract
+    def test_yaml_cblock_round_trip_parse_serialize_parse(self, tmp_path) -> None:
+        """Round-trip C_BLOCK fields by re-serializing parsed component metadata."""
+        source_path = tmp_path / "gain.c"
+        source_path.write_text("/* test */", encoding="utf-8")
+
+        component_yaml = (
+            "  - name: CB_RT\n"
+            "    type: c_block\n"
+            "    n_inputs: 2\n"
+            "    n_outputs: 3\n"
+            f'    source: "{source_path}"\n'
+            "    extra_cflags: ['-O3', '-DTEST=1']\n"
+            "    nodes: [a, b]\n"
+        )
+        p = self._parse(component_yaml)
+        assert p.errors == [], p.errors
+
+        p_roundtrip = ps.YamlParser()
+        circuit, _ = p_roundtrip.load_string(self._HEADER + component_yaml)
+        assert p_roundtrip.errors == [], p_roundtrip.errors
+        vc = next(v for v in circuit.virtual_components() if v.name == "CB_RT")
+        flags = yaml.safe_load(vc.metadata["extra_cflags"])
+        assert flags == ["-O3", "-DTEST=1"]
+
+        roundtrip_yaml = (
+            self._HEADER
+            + "  - name: CB_RT\n"
+            + "    type: c_block\n"
+            + f"    n_inputs: {int(vc.numeric_params['n_inputs'])}\n"
+            + f"    n_outputs: {int(vc.numeric_params['n_outputs'])}\n"
+            + f'    source: "{vc.metadata["source"]}"\n'
+            + f"    extra_cflags: {yaml.safe_dump(flags, default_flow_style=True).strip()}\n"
+            + "    nodes: [a, b]\n"
+        )
+
+        p2 = ps.YamlParser()
+        circuit2, _ = p2.load_string(roundtrip_yaml)
+        assert p2.errors == [], p2.errors
+        vc2 = next(v for v in circuit2.virtual_components() if v.name == "CB_RT")
+        assert int(vc2.numeric_params["n_inputs"]) == 2
+        assert int(vc2.numeric_params["n_outputs"]) == 3
+        assert vc2.metadata["source"] == str(source_path)
+        assert yaml.safe_load(vc2.metadata["extra_cflags"]) == flags

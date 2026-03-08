@@ -74,6 +74,7 @@ log = logging.getLogger(__name__)
 # Lazy native C++ controller imports – do not crash if binding not installed
 # ---------------------------------------------------------------------------
 
+
 def _try_import_native() -> dict[str, Any]:
     """Try to import C++ control classes from the pulsim binding."""
     native: dict[str, Any] = {}
@@ -85,6 +86,7 @@ def _try_import_native() -> dict[str, Any]:
             HysteresisController,
             SampleHold,
         )
+
         native["PIController"] = PIController
         native["PIDController"] = PIDController
         native["RateLimiter"] = RateLimiter
@@ -103,63 +105,70 @@ _NATIVE = _try_import_native()
 # ---------------------------------------------------------------------------
 
 # String names matching the component type field in circuit_data dicts.
-SIGNAL_TYPES: frozenset[str] = frozenset({
-    "CONSTANT",
-    "GAIN",
-    "SUM",
-    "SUBTRACTOR",
-    "LIMITER",
-    "RATE_LIMITER",
-    "PI_CONTROLLER",
-    "PID_CONTROLLER",
-    "PWM_GENERATOR",
-    "VOLTAGE_PROBE",
-    "CURRENT_PROBE",
-    "POWER_PROBE",
-    "INTEGRATOR",
-    "DIFFERENTIATOR",
-    "HYSTERESIS",
-    "SAMPLE_HOLD",
-    "MATH_BLOCK",
-    "SIGNAL_MUX",
-    "SIGNAL_DEMUX",
-})
+SIGNAL_TYPES: frozenset[str] = frozenset(
+    {
+        "CONSTANT",
+        "GAIN",
+        "SUM",
+        "SUBTRACTOR",
+        "LIMITER",
+        "RATE_LIMITER",
+        "PI_CONTROLLER",
+        "PID_CONTROLLER",
+        "PWM_GENERATOR",
+        "VOLTAGE_PROBE",
+        "CURRENT_PROBE",
+        "POWER_PROBE",
+        "INTEGRATOR",
+        "DIFFERENTIATOR",
+        "HYSTERESIS",
+        "SAMPLE_HOLD",
+        "MATH_BLOCK",
+        "SIGNAL_MUX",
+        "SIGNAL_DEMUX",
+        "C_BLOCK",
+    }
+)
 
 # Types that are pure sources (no signal input pins).
-_SOURCE_TYPES: frozenset[str] = frozenset({
-    "CONSTANT",
-    "VOLTAGE_PROBE",
-    "CURRENT_PROBE",
-    "POWER_PROBE",
-})
+_SOURCE_TYPES: frozenset[str] = frozenset(
+    {
+        "CONSTANT",
+        "VOLTAGE_PROBE",
+        "CURRENT_PROBE",
+        "POWER_PROBE",
+    }
+)
 
 # Output pin names per type (first matching name is treated as output).
 _OUTPUT_PIN_NAMES: dict[str, list[str]] = {
-    "CONSTANT":        ["OUT"],
-    "GAIN":            ["OUT"],
-    "SUM":             ["OUT"],
-    "SUBTRACTOR":      ["OUT"],
-    "LIMITER":         ["OUT"],
-    "RATE_LIMITER":    ["OUT"],
-    "PI_CONTROLLER":   ["OUT"],
-    "PID_CONTROLLER":  ["OUT"],
-    "INTEGRATOR":      ["OUT"],
-    "DIFFERENTIATOR":  ["OUT"],
-    "HYSTERESIS":      ["OUT"],
-    "SIGNAL_MUX":      ["OUT"],
-    "SIGNAL_DEMUX":    ["OUT1", "OUT2", "OUT3", "OUT4", "OUT5", "OUT6", "OUT7", "OUT8"],
-    "VOLTAGE_PROBE":   ["OUT"],
-    "CURRENT_PROBE":   ["MEAS"],
-    "POWER_PROBE":     ["OUT"],
-    "PWM_GENERATOR":   ["OUT"],
-    "MATH_BLOCK":      ["OUT"],
-    "SAMPLE_HOLD":     ["OUT"],
+    "CONSTANT": ["OUT"],
+    "GAIN": ["OUT"],
+    "SUM": ["OUT"],
+    "SUBTRACTOR": ["OUT"],
+    "LIMITER": ["OUT"],
+    "RATE_LIMITER": ["OUT"],
+    "PI_CONTROLLER": ["OUT"],
+    "PID_CONTROLLER": ["OUT"],
+    "INTEGRATOR": ["OUT"],
+    "DIFFERENTIATOR": ["OUT"],
+    "HYSTERESIS": ["OUT"],
+    "SIGNAL_MUX": ["OUT"],
+    "SIGNAL_DEMUX": ["OUT1", "OUT2", "OUT3", "OUT4", "OUT5", "OUT6", "OUT7", "OUT8"],
+    "VOLTAGE_PROBE": ["OUT"],
+    "CURRENT_PROBE": ["MEAS"],
+    "POWER_PROBE": ["OUT"],
+    "PWM_GENERATOR": ["OUT"],
+    "MATH_BLOCK": ["OUT"],
+    "SAMPLE_HOLD": ["OUT"],
+    "C_BLOCK": ["OUT"],
 }
 
 
 # ---------------------------------------------------------------------------
 # Public exceptions
 # ---------------------------------------------------------------------------
+
 
 class AlgebraicLoopError(RuntimeError):
     """Raised when a cycle is detected in the signal-flow graph.
@@ -183,6 +192,7 @@ class AlgebraicLoopError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Main class
 # ---------------------------------------------------------------------------
+
 
 class SignalEvaluator:
     """Evaluates a signal-flow DAG from a circuit description dict each step.
@@ -210,10 +220,11 @@ class SignalEvaluator:
 
         # Component registry: {comp_id: comp_dict}
         self._comps: dict[str, dict] = {}
-        # Signal DAG adjacency: src_comp_id → [(dst_comp_id, dst_pin_name)]
-        self._adj: dict[str, list[tuple[str, str]]] = {}
+        # Signal DAG adjacency:
+        # src_comp_id -> [(dst_comp_id, dst_pin_name, src_pin_name)].
+        self._adj: dict[str, list[tuple[str, str, str]]] = {}
         # Current output value per component
-        self._state: dict[str, float] = {}
+        self._state: dict[str, Any] = {}
         # Stateful controller objects (C++ or Python dict) keyed by comp_id
         self._controllers: dict[str, Any] = {}
         # Evaluation order (topologically sorted comp_ids)
@@ -222,6 +233,12 @@ class SignalEvaluator:
         self._pwm_names: dict[str, str] = {}
         # Probe node names for diagnostics
         self._probe_nodes: dict[str, str] = {}
+        # Previous simulation time (for dt computation in C_BLOCK)
+        self._prev_t: float = -1.0
+        # Cache compiled source-based C_BLOCK libraries by source timestamp.
+        self._compiled_cblock_cache: dict[
+            tuple[str, tuple[str, ...], str | None], tuple[int, str]
+        ] = {}
 
     # =========================================================================
     # Public API
@@ -252,14 +269,10 @@ class SignalEvaluator:
 
         # Only expose PWM components that have at least one incoming signal wire.
         connected_ids: set[str] = {
-            dst_id
-            for edges in self._adj.values()
-            for dst_id, _ in edges
+            dst_id for edges in self._adj.values() for dst_id, _, _ in edges
         }
         self._pwm_names = {
-            cid: name
-            for cid, name in self._pwm_names.items()
-            if cid in connected_ids
+            cid: name for cid, name in self._pwm_names.items() if cid in connected_ids
         }
 
         log.debug(
@@ -293,7 +306,7 @@ class SignalEvaluator:
             if comp_id in self._comps:
                 self._state[comp_id] = float(value)
 
-    def step(self, t: float) -> dict[str, float]:
+    def step(self, t: float) -> dict[str, Any]:
         """Evaluate all signal blocks in topological order at time *t*.
 
         Parameters
@@ -303,7 +316,7 @@ class SignalEvaluator:
 
         Returns
         -------
-        dict[str, float]
+        dict[str, Any]
             ``{comp_id: output_value}`` for every signal block.
             PWM duty values are clamped to ``[0, 1]``.
         """
@@ -359,7 +372,10 @@ class SignalEvaluator:
                     dt = (t - t_prev) if t_prev >= 0 else 0.0
                     ctl["t_prev"] = t
                     k = float(params.get("gain", 1.0))
-                    ctl["integral"] = ctl.get("integral", 0.0) + k * (inputs[0] if inputs else 0.0) * dt
+                    ctl["integral"] = (
+                        ctl.get("integral", 0.0)
+                        + k * (inputs[0] if inputs else 0.0) * dt
+                    )
                     lo = float(params.get("output_min", -1e6))
                     hi = float(params.get("output_max", 1e6))
                     self._state[comp_id] = max(lo, min(hi, ctl["integral"]))
@@ -408,15 +424,43 @@ class SignalEvaluator:
                     self._state[comp_id] = inputs[0] if inputs else 0.0
 
             elif ctype in ("SIGNAL_MUX", "SIGNAL_DEMUX"):
-                self._state[comp_id] = inputs[0] if inputs else 0.0
+                if not inputs:
+                    self._state[comp_id] = []
+                elif len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
+                    self._state[comp_id] = [float(v) for v in inputs[0]]
+                else:
+                    self._state[comp_id] = [float(v) for v in inputs]
 
             elif ctype == "PWM_GENERATOR":
                 duty = inputs[0] if inputs else float(params.get("duty_cycle", 0.5))
                 self._state[comp_id] = max(0.0, min(1.0, duty))
 
+            elif ctype == "C_BLOCK":
+                ctl = self._controllers.get(comp_id)
+                if ctl is not None:
+                    dt = (t - self._prev_t) if self._prev_t >= 0.0 else 0.0
+                    ctl_inputs = inputs if inputs else [0.0] * int(ctl.n_inputs)
+                    outputs = [float(v) for v in ctl.step(t, dt, ctl_inputs)]
+                    expected_outputs = int(getattr(ctl, "n_outputs", len(outputs)))
+                    if len(outputs) != expected_outputs:
+                        raise ValueError(
+                            f"C_BLOCK '{comp_id}' produced {len(outputs)} outputs, "
+                            f"expected {expected_outputs}"
+                        )
+                    if expected_outputs == 1:
+                        self._state[comp_id] = outputs[0] if outputs else 0.0
+                    else:
+                        self._state[comp_id] = outputs
+                else:
+                    raise RuntimeError(
+                        f"C_BLOCK '{comp_id}' has no initialized controller. "
+                        "Check lib_path/source/python_fn and build diagnostics."
+                    )
+
             else:
                 self._state[comp_id] = inputs[0] if inputs else 0.0
 
+        self._prev_t = t
         return dict(self._state)
 
     def get_pwm_duty(self, comp_id: str) -> float:
@@ -430,6 +474,7 @@ class SignalEvaluator:
                 ctl.reset()
             elif isinstance(ctl, dict):
                 ctl.update({"integral": 0.0, "t_prev": -1.0})
+        self._prev_t = -1.0
         log.debug("SignalEvaluator: all controller states reset")
 
     # =========================================================================
@@ -470,46 +515,42 @@ class SignalEvaluator:
 
             if src_id not in self._comps or dst_id not in self._comps:
                 continue
-            if (src_id, src_pin) not in comp_pin_set or (dst_id, dst_pin) not in comp_pin_set:
+            if (src_id, src_pin) not in comp_pin_set or (
+                dst_id,
+                dst_pin,
+            ) not in comp_pin_set:
                 continue
 
             src_comp = self._comps[src_id]
-            src_type = src_comp.get("type", "")
-            output_names = _OUTPUT_PIN_NAMES.get(src_type, ["OUT"])
             src_pin_name = self._pin_name(src_comp, src_pin)
 
-            if src_pin_name not in output_names:
+            if not self._is_output_pin(src_comp, src_pin_name):
                 # Wire might be stored in reverse order – try swapping
                 dst_comp = self._comps[dst_id]
-                dst_type = dst_comp.get("type", "")
-                dst_output_names = _OUTPUT_PIN_NAMES.get(dst_type, ["OUT"])
                 dst_pin_name = self._pin_name(dst_comp, dst_pin)
-                if dst_pin_name in dst_output_names:
+                if self._is_output_pin(dst_comp, dst_pin_name):
                     src_id, dst_id = dst_id, src_id
                     src_pin, dst_pin = dst_pin, src_pin
                     src_comp, dst_comp = dst_comp, src_comp
-                    src_type, dst_type = dst_type, src_type
                     src_pin_name, dst_pin_name = dst_pin_name, src_pin_name
                 else:
                     continue
 
             dst_pin_name = self._pin_name(self._comps[dst_id], dst_pin)
-            self._adj[src_id].append((dst_id, dst_pin_name))
+            self._adj[src_id].append((dst_id, dst_pin_name, src_pin_name))
 
     def _topological_sort(self) -> list[str]:
         in_degree: dict[str, int] = {cid: 0 for cid in self._comps}
         for src_id, edges in self._adj.items():
-            for dst_id, _ in edges:
+            for dst_id, _, _ in edges:
                 in_degree[dst_id] = in_degree.get(dst_id, 0) + 1
 
-        queue: deque[str] = deque(
-            cid for cid, deg in in_degree.items() if deg == 0
-        )
+        queue: deque[str] = deque(cid for cid, deg in in_degree.items() if deg == 0)
         order: list[str] = []
         while queue:
             cid = queue.popleft()
             order.append(cid)
-            for dst_id, _ in self._adj.get(cid, []):
+            for dst_id, _, _ in self._adj.get(cid, []):
                 in_degree[dst_id] -= 1
                 if in_degree[dst_id] == 0:
                     queue.append(dst_id)
@@ -599,18 +640,159 @@ class SignalEvaluator:
             elif ctype == "INTEGRATOR":
                 self._controllers[comp_id] = {"integral": 0.0, "t_prev": -1.0}
 
-    def _collect_inputs(self, comp_id: str, comp: dict) -> list[float]:
-        pin_values: dict[int, float] = {}
+            elif ctype == "C_BLOCK":
+                self._init_cblock_controller(comp_id, comp)
+
+    def _init_cblock_controller(self, comp_id: str, comp: dict) -> None:
+        """Instantiate a CBlockLibrary or PythonCBlock for a C_BLOCK component."""
+        from pulsim.cblock import CBlockLibrary, PythonCBlock  # local import
+
+        params = comp.get("parameters") or {}
+        n_in = int(params.get("n_inputs", 1))
+        n_out = int(params.get("n_outputs", 1))
+        block_name = comp.get("name") or comp_id
+
+        # Python callable block?
+        python_fn = params.get("python_fn")
+        if python_fn is not None and callable(python_fn):
+            self._controllers[comp_id] = PythonCBlock(
+                python_fn, n_inputs=n_in, n_outputs=n_out, name=block_name
+            )
+            return
+
+        # Pre-compiled shared library block.
+        lib_path = params.get("lib_path")
+        if lib_path is not None:
+            self._controllers[comp_id] = CBlockLibrary(
+                lib_path, n_inputs=n_in, n_outputs=n_out, name=block_name
+            )
+            return
+
+        # Compile-from-source block.
+        source = params.get("source")
+        if source is not None:
+            from pathlib import Path
+            from pulsim.cblock import compile_cblock  # local import
+
+            source_path = Path(source).resolve()
+            extra_cflags_raw = params.get("extra_cflags", [])
+            if isinstance(extra_cflags_raw, list):
+                extra_cflags = [str(flag) for flag in extra_cflags_raw]
+            elif isinstance(extra_cflags_raw, str):
+                extra_cflags = [flag for flag in extra_cflags_raw.split() if flag]
+            else:
+                extra_cflags = []
+            compiler_raw = params.get("compiler")
+            compiler = (
+                str(compiler_raw)
+                if isinstance(compiler_raw, str) and compiler_raw.strip()
+                else None
+            )
+
+            cache_key = (str(source_path), tuple(extra_cflags), compiler)
+            source_mtime_ns = source_path.stat().st_mtime_ns
+            cached = self._compiled_cblock_cache.get(cache_key)
+
+            if cached and cached[0] == source_mtime_ns:
+                compiled_path = Path(cached[1])
+                if not compiled_path.is_file():
+                    cached = None
+
+            if cached is None:
+                compiled_path = compile_cblock(
+                    source_path,
+                    name=block_name,
+                    extra_cflags=extra_cflags,
+                    compiler=compiler,
+                )
+                self._compiled_cblock_cache[cache_key] = (
+                    source_mtime_ns,
+                    str(compiled_path),
+                )
+
+            self._controllers[comp_id] = CBlockLibrary(
+                compiled_path, n_inputs=n_in, n_outputs=n_out, name=block_name
+            )
+            return
+
+        raise ValueError(
+            f"C_BLOCK '{block_name}' missing implementation: set one of "
+            "'python_fn', 'lib_path', or 'source'"
+        )
+
+    def _collect_inputs(self, comp_id: str, comp: dict) -> list[Any]:
+        pin_values: dict[int, Any] = {}
+        is_demux_target = str(comp.get("type", "")) == "SIGNAL_DEMUX"
         for src_id, edges in self._adj.items():
-            for dst_id, dst_pin_name in edges:
+            for dst_id, dst_pin_name, src_pin_name in edges:
                 if dst_id != comp_id:
                     continue
                 for pin in comp.get("pins") or []:
                     if pin.get("name") == dst_pin_name:
-                        pin_values[int(pin["index"])] = self._state.get(src_id, 0.0)
+                        if is_demux_target and isinstance(
+                            self._state.get(src_id), (list, tuple)
+                        ):
+                            pin_values[int(pin["index"])] = [
+                                float(v) for v in self._state.get(src_id, [])
+                            ]
+                        else:
+                            pin_values[int(pin["index"])] = self._output_value_for_pin(
+                                src_id, src_pin_name
+                            )
         if not pin_values:
             return []
         return [v for _, v in sorted(pin_values.items())]
+
+    def _output_value_for_pin(self, comp_id: str, pin_name: str) -> Any:
+        value = self._state.get(comp_id, 0.0)
+        if isinstance(value, (list, tuple)):
+            idx = self._output_index_for_pin(comp_id, pin_name)
+            if idx < 0 or idx >= len(value):
+                return 0.0
+            return float(value[idx])
+        return value
+
+    def _output_index_for_pin(self, comp_id: str, pin_name: str) -> int:
+        if pin_name == "OUT":
+            return 0
+        if not pin_name.startswith("OUT"):
+            return 0
+
+        suffix = pin_name[3:]
+        if not suffix.isdigit():
+            return 0
+
+        n = int(suffix)
+        ctype = self._comps.get(comp_id, {}).get("type", "")
+        if ctype == "SIGNAL_DEMUX":
+            return max(n - 1, 0)
+
+        if ctype == "C_BLOCK":
+            pin_names = {
+                str(pin.get("name", ""))
+                for pin in (self._comps.get(comp_id, {}).get("pins") or [])
+            }
+            if "OUT0" in pin_names:
+                return n
+            if "OUT1" in pin_names and "OUT0" not in pin_names:
+                return max(n - 1, 0)
+            return n
+
+        return max(n - 1, 0)
+
+    @staticmethod
+    def _is_output_pin(comp: dict, pin_name: str) -> bool:
+        ctype = str(comp.get("type", ""))
+        if not pin_name:
+            return False
+        if pin_name in _OUTPUT_PIN_NAMES.get(ctype, ["OUT"]):
+            return True
+        if ctype in {"C_BLOCK", "SIGNAL_DEMUX"}:
+            if pin_name == "OUT":
+                return True
+            if pin_name.startswith("OUT") and pin_name[3:].isdigit():
+                return True
+        return False
 
     @staticmethod
     def _pin_name(comp: dict, pin_index: int) -> str:
