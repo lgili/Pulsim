@@ -1,0 +1,126 @@
+schema: pulsim-kpi-gates-v1
+version: 1
+# KPI gates for waveform post-processing correctness, determinism, and overhead.
+# All thresholds were validated on the canonical fixture suite in
+# python/tests/test_post_processing.py (65 tests, 65 passed, ~0.38s on arm64).
+metrics:
+
+  # -------------------------------------------------------------------------
+  # Correctness gates
+  # -------------------------------------------------------------------------
+  post_processing_test_pass_rate:
+    description: >
+      Fraction of post-processing test cases that pass (out of 65 canonical
+      fixtures). Must remain 1.0 — any regression is a hard failure.
+    direction: higher_is_better
+    max_regression_abs: 0.0
+    required: true
+
+  post_processing_rms_error:
+    description: >
+      Maximum absolute error between computed RMS and theoretical value
+      (A/sqrt(2)) across RMS fixture cases. Threshold: 1e-3 (relative to signal
+      amplitude), matching test tolerance.
+    direction: lower_is_better
+    max_regression_abs: 0.001
+    required: true
+
+  post_processing_thd_pure_sine_pct:
+    description: >
+      THD computed from a pure sine-wave fixture. Must stay below 5% (the
+      residual represents only spectral leakage, not genuine harmonics).
+    direction: lower_is_better
+    max_regression_abs: 5.0
+    required: true
+
+  post_processing_thd_known_harmonic_error_pct:
+    description: >
+      Absolute error between computed THD and theoretical value for a signal
+      with a known 3rd harmonic (A3/A1 = 0.1 → THD_theory = 10%). Threshold: 3%.
+    direction: lower_is_better
+    max_regression_abs: 3.0
+    required: true
+
+  post_processing_efficiency_error_pct:
+    description: >
+      Maximum absolute error in efficiency (%) on canonical fixed-value
+      fixtures with known P_in/P_out. Threshold: 1e-4%.
+    direction: lower_is_better
+    max_regression_abs: 0.0001
+    required: true
+
+  post_processing_power_factor_unity_error:
+    description: >
+      Absolute error in power factor for in-phase V/I (should be 1.0).
+      Threshold: 0.01.
+    direction: lower_is_better
+    max_regression_abs: 0.01
+    required: true
+
+  post_processing_ripple_error_rel:
+    description: >
+      Relative error in ripple (p2p/|mean|) for a DC+small-AC fixture.
+      Threshold: 1% relative.
+    direction: lower_is_better
+    max_regression_rel: 0.01
+    required: false
+
+  post_processing_crest_factor_error:
+    description: >
+      Absolute error in crest factor for a pure sine wave (theory: sqrt(2)).
+      Threshold: 0.01.
+    direction: lower_is_better
+    max_regression_abs: 0.01
+    required: true
+
+  # -------------------------------------------------------------------------
+  # Undefined-metric / robustness gates
+  # -------------------------------------------------------------------------
+  post_processing_undefined_metric_rate:
+    description: >
+      Fraction of jobs reporting unexpected undefined metrics on well-formed
+      fixtures (fixtures that should always succeed). Must be 0.
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
+
+  post_processing_invalid_config_unhandled_rate:
+    description: >
+      Fraction of deliberately-invalid jobs that do NOT produce the expected
+      diagnostic code. Must be 0 — every invalid config must produce a typed
+      diagnostic.
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
+
+  # -------------------------------------------------------------------------
+  # Determinism gates
+  # -------------------------------------------------------------------------
+  post_processing_determinism_failures:
+    description: >
+      Number of determinism regressions across repeated identical runs. Must
+      remain 0.
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
+
+  # -------------------------------------------------------------------------
+  # Runtime overhead gates
+  # -------------------------------------------------------------------------
+  post_processing_runtime_full_suite_s:
+    description: >
+      Wall-clock seconds to run all 65 post-processing tests. Baseline: ~0.38s
+      on arm64. Max regression: 5× baseline (2.0s) to allow for CI runner
+      variability while catching pathological regressions.
+    direction: lower_is_better
+    max_regression_abs: 2.0
+    required: false
+
+  post_processing_runtime_per_job_p95_ms:
+    description: >
+      95th-percentile individual job runtime in milliseconds across all
+      benchmark runs. Threshold: 50ms per job (post-processing must never
+      dominate simulation wall-time in a typical transient workflow).
+    direction: lower_is_better
+    max_regression_abs: 50.0
+    required: false

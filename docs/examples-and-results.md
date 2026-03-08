@@ -20,7 +20,7 @@ Expected behavior:
 
 ```bash
 PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
-  --only buck_converter \
+  --only buck_switching \
   --output-dir benchmarks/out_buck
 ```
 
@@ -29,6 +29,40 @@ Checkpoints:
 - output settles around expected duty-dependent value.
 - ripple remains physically plausible for chosen L/C and switching frequency.
 - telemetry does not show runaway fallback escalation.
+
+## Example 2a: Buck Averaged Pair (switching reference + averaged mode)
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only buck_switching_paired buck_averaged_mvp buck_averaged_expected_failure \
+  --output-dir benchmarks/out_buck_averaged
+```
+
+Checkpoints:
+
+- both pair runs (`buck_switching_paired`, `buck_averaged_mvp`) are `passed`.
+- `buck_averaged_mvp` emits `max_error` from `paired_reference` validation.
+- expected-failure case matches typed diagnostic (`AveragedInvalidConfiguration`).
+
+Runnable Python example:
+
+```bash
+PYTHONPATH=build/python python3 examples/run_buck_averaged_mvp.py
+```
+
+## Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)
+
+```bash
+PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py \
+  --only ac_rc_lowpass \
+  --output-dir benchmarks/out_ac_rc
+```
+
+Checkpoints:
+
+- output artifact includes `frequency_hz`, `magnitude_db`, and `phase_deg`.
+- analytical validation (`ac_analytical`) remains within configured magnitude/phase thresholds.
+- benchmark telemetry exposes `ac_sweep_mag_error` and `ac_sweep_phase_error`.
 
 ## Example 3: Closed-Loop Buck (controller + PWM path)
 

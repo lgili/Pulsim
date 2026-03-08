@@ -45,6 +45,8 @@ constexpr const char* kDiagLossInvalidRange = "PULSIM_YAML_E_LOSS_RANGE_INVALID"
 constexpr const char* kDiagLossModelInvalid = "PULSIM_YAML_E_LOSS_MODEL_INVALID";
 constexpr const char* kDiagLossAxisInvalid = "PULSIM_YAML_E_LOSS_AXIS_INVALID";
 constexpr const char* kDiagLossDimensionInvalid = "PULSIM_YAML_E_LOSS_DIMENSION_INVALID";
+constexpr const char* kDiagFrequencyInvalid = "PULSIM_YAML_E_FREQ_CONFIG_INVALID";
+constexpr const char* kDiagAveragedInvalid = "PULSIM_YAML_E_AVERAGED_CONFIG_INVALID";
 
 /// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
@@ -748,6 +750,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
                             "direct_formulation_fallback", "control", "control_mode", "control_sample_time",
+                            "frequency_analysis", "ac_sweep", "averaged_converter", "post_processing",
                             "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
@@ -1513,6 +1516,342 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (hb["initialize_from_transient"]) {
                 options.harmonic_balance.initialize_from_transient =
                     hb["initialize_from_transient"].as<bool>();
+            }
+        }
+
+        YAML::Node frequency = sim["frequency_analysis"] ? sim["frequency_analysis"] : sim["ac_sweep"];
+        if (frequency) {
+            validate_keys(
+                frequency,
+                {"enabled", "mode", "anchor", "sweep", "perturbation", "input", "output",
+                 "injection_current_amplitude", "injection_current"},
+                "simulation.frequency_analysis",
+                errors_,
+                options_.strict);
+
+            options.frequency_analysis.enabled = true;
+            if (const auto enabled = parse_bool_scalar(
+                    frequency["enabled"], "simulation.frequency_analysis.enabled", errors_)) {
+                options.frequency_analysis.enabled = *enabled;
+            }
+
+            if (const auto mode_raw = parse_string_scalar(
+                    frequency["mode"], "simulation.frequency_analysis.mode", errors_)) {
+                const std::string mode = normalize_key(*mode_raw);
+                if (mode == "openloop" || mode == "openlooptransfer" || mode == "transfer") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::OpenLoopTransfer;
+                } else if (mode == "closedloop" || mode == "closedlooptransfer") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::ClosedLoopTransfer;
+                } else if (mode == "inputimpedance" || mode == "zin") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::InputImpedance;
+                } else if (mode == "outputimpedance" || mode == "zout") {
+                    options.frequency_analysis.mode = FrequencyAnalysisMode::OutputImpedance;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagFrequencyInvalid,
+                        "Invalid simulation.frequency_analysis.mode: '" + *mode_raw + "'");
+                }
+            }
+
+            if (const auto anchor_raw = parse_string_scalar(
+                    frequency["anchor"], "simulation.frequency_analysis.anchor", errors_)) {
+                const std::string anchor = normalize_key(*anchor_raw);
+                if (anchor == "dc") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::DC;
+                } else if (anchor == "periodic" || anchor == "shooting") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::Periodic;
+                } else if (anchor == "averaged" || anchor == "average") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::Averaged;
+                } else if (anchor == "auto") {
+                    options.frequency_analysis.anchor_mode = FrequencyAnchorMode::Auto;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagFrequencyInvalid,
+                        "Invalid simulation.frequency_analysis.anchor: '" + *anchor_raw + "'");
+                }
+            }
+
+            YAML::Node sweep = frequency["sweep"];
+            if (sweep) {
+                validate_keys(
+                    sweep,
+                    {"scale", "type", "f_start_hz", "f_stop_hz", "points"},
+                    "simulation.frequency_analysis.sweep",
+                    errors_,
+                    options_.strict);
+
+                if (const auto scale_raw = parse_string_scalar(
+                        sweep["scale"] ? sweep["scale"] : sweep["type"],
+                        "simulation.frequency_analysis.sweep.scale",
+                        errors_)) {
+                    const std::string scale = normalize_key(*scale_raw);
+                    if (scale == "log" || scale == "logarithmic") {
+                        options.frequency_analysis.sweep_scale = FrequencySweepScale::Logarithmic;
+                    } else if (scale == "linear" || scale == "lin") {
+                        options.frequency_analysis.sweep_scale = FrequencySweepScale::Linear;
+                    } else {
+                        push_error(
+                            errors_,
+                            kDiagFrequencyInvalid,
+                            "Invalid simulation.frequency_analysis.sweep.scale: '" + *scale_raw + "'");
+                    }
+                }
+
+                if (sweep["f_start_hz"]) {
+                    options.frequency_analysis.f_start_hz = parse_real(
+                        sweep["f_start_hz"], "simulation.frequency_analysis.sweep.f_start_hz", errors_);
+                }
+                if (sweep["f_stop_hz"]) {
+                    options.frequency_analysis.f_stop_hz = parse_real(
+                        sweep["f_stop_hz"], "simulation.frequency_analysis.sweep.f_stop_hz", errors_);
+                }
+                if (const auto points = parse_int_scalar(
+                        sweep["points"], "simulation.frequency_analysis.sweep.points", errors_)) {
+                    options.frequency_analysis.points = *points;
+                }
+            }
+
+            if (frequency["injection_current_amplitude"]) {
+                options.frequency_analysis.injection_current_amplitude =
+                    parse_real(
+                        frequency["injection_current_amplitude"],
+                        "simulation.frequency_analysis.injection_current_amplitude",
+                        errors_);
+            } else if (frequency["injection_current"]) {
+                options.frequency_analysis.injection_current_amplitude =
+                    parse_real(
+                        frequency["injection_current"],
+                        "simulation.frequency_analysis.injection_current",
+                        errors_);
+            }
+
+            auto parse_port = [&](const YAML::Node& node,
+                                  const std::string& path,
+                                  FrequencyAnalysisPort& port) {
+                if (!node) {
+                    return;
+                }
+                validate_keys(node, {"positive", "negative"}, path, errors_, options_.strict);
+                if (const auto pos = parse_string_scalar(node["positive"], path + ".positive", errors_)) {
+                    port.positive_node = *pos;
+                }
+                if (const auto neg = parse_string_scalar(node["negative"], path + ".negative", errors_)) {
+                    port.negative_node = *neg;
+                }
+            };
+
+            parse_port(
+                frequency["perturbation"] ? frequency["perturbation"] : frequency["input"],
+                "simulation.frequency_analysis.perturbation",
+                options.frequency_analysis.perturbation_port);
+            parse_port(
+                frequency["output"],
+                "simulation.frequency_analysis.output",
+                options.frequency_analysis.output_port);
+
+            if (!(std::isfinite(options.frequency_analysis.f_start_hz) &&
+                  std::isfinite(options.frequency_analysis.f_stop_hz)) ||
+                options.frequency_analysis.f_start_hz <= 0.0 ||
+                options.frequency_analysis.f_stop_hz < options.frequency_analysis.f_start_hz) {
+                push_error(
+                    errors_,
+                    kDiagFrequencyInvalid,
+                    "simulation.frequency_analysis sweep range must satisfy finite "
+                    "f_start_hz > 0 and f_stop_hz >= f_start_hz");
+            }
+            if (options.frequency_analysis.points < 2) {
+                push_error(
+                    errors_,
+                    kDiagFrequencyInvalid,
+                    "simulation.frequency_analysis.sweep.points must be >= 2");
+            }
+            if (!(std::isfinite(options.frequency_analysis.injection_current_amplitude) &&
+                  std::abs(options.frequency_analysis.injection_current_amplitude) > 0.0)) {
+                push_error(
+                    errors_,
+                    kDiagFrequencyInvalid,
+                    "simulation.frequency_analysis.injection_current_amplitude must be finite and non-zero");
+            }
+        }
+
+        YAML::Node averaged = sim["averaged_converter"];
+        if (averaged) {
+            validate_keys(
+                averaged,
+                {"enabled", "topology", "operating_mode", "envelope_policy", "vin_source", "inductor",
+                 "capacitor", "load_resistor", "output_node", "duty", "duty_min", "duty_max",
+                 "switching_frequency_hz", "initial_inductor_current", "initial_output_voltage",
+                 "ccm_current_threshold"},
+                "simulation.averaged_converter",
+                errors_,
+                options_.strict);
+
+            options.averaged_converter.enabled = true;
+            if (const auto enabled = parse_bool_scalar(
+                    averaged["enabled"], "simulation.averaged_converter.enabled", errors_)) {
+                options.averaged_converter.enabled = *enabled;
+            }
+
+            if (const auto topology_raw = parse_string_scalar(
+                    averaged["topology"], "simulation.averaged_converter.topology", errors_)) {
+                const std::string topology = normalize_key(*topology_raw);
+                if (topology == "buck") {
+                    options.averaged_converter.topology = AveragedConverterTopology::Buck;
+                } else if (topology == "boost") {
+                    options.averaged_converter.topology = AveragedConverterTopology::Boost;
+                } else if (topology == "buckboost" || topology == "buckboostinverting" ||
+                           topology == "invertingbuckboost") {
+                    options.averaged_converter.topology = AveragedConverterTopology::BuckBoost;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "Invalid simulation.averaged_converter.topology: '" + *topology_raw + "'");
+                }
+            }
+
+            if (const auto mode_raw = parse_string_scalar(
+                    averaged["operating_mode"],
+                    "simulation.averaged_converter.operating_mode",
+                    errors_)) {
+                const std::string mode = normalize_key(*mode_raw);
+                if (mode == "ccm") {
+                    options.averaged_converter.operating_mode = AveragedOperatingMode::CCM;
+                } else if (mode == "dcm") {
+                    options.averaged_converter.operating_mode = AveragedOperatingMode::DCM;
+                } else if (mode == "auto") {
+                    options.averaged_converter.operating_mode = AveragedOperatingMode::Auto;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "Invalid simulation.averaged_converter.operating_mode: '" + *mode_raw +
+                            "' (expected 'ccm', 'dcm', or 'auto')");
+                }
+            }
+
+            if (const auto policy_raw = parse_string_scalar(
+                    averaged["envelope_policy"],
+                    "simulation.averaged_converter.envelope_policy",
+                    errors_)) {
+                const std::string policy = normalize_key(*policy_raw);
+                if (policy == "strict") {
+                    options.averaged_converter.envelope_policy = AveragedEnvelopePolicy::Strict;
+                } else if (policy == "warn" || policy == "warning") {
+                    options.averaged_converter.envelope_policy = AveragedEnvelopePolicy::Warn;
+                } else {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "Invalid simulation.averaged_converter.envelope_policy: '" + *policy_raw +
+                            "' (expected 'strict' or 'warn')");
+                }
+            }
+
+            if (const auto vin = parse_string_scalar(
+                    averaged["vin_source"], "simulation.averaged_converter.vin_source", errors_)) {
+                options.averaged_converter.vin_source = *vin;
+            }
+            if (const auto ind = parse_string_scalar(
+                    averaged["inductor"], "simulation.averaged_converter.inductor", errors_)) {
+                options.averaged_converter.inductor = *ind;
+            }
+            if (const auto cap = parse_string_scalar(
+                    averaged["capacitor"], "simulation.averaged_converter.capacitor", errors_)) {
+                options.averaged_converter.capacitor = *cap;
+            }
+            if (const auto load = parse_string_scalar(
+                    averaged["load_resistor"], "simulation.averaged_converter.load_resistor", errors_)) {
+                options.averaged_converter.load_resistor = *load;
+            }
+            if (const auto out = parse_string_scalar(
+                    averaged["output_node"], "simulation.averaged_converter.output_node", errors_)) {
+                options.averaged_converter.output_node = *out;
+            }
+
+            if (averaged["duty"]) {
+                options.averaged_converter.duty = parse_real(
+                    averaged["duty"], "simulation.averaged_converter.duty", errors_);
+            }
+            if (averaged["duty_min"]) {
+                options.averaged_converter.duty_min = parse_real(
+                    averaged["duty_min"], "simulation.averaged_converter.duty_min", errors_);
+            }
+            if (averaged["duty_max"]) {
+                options.averaged_converter.duty_max = parse_real(
+                    averaged["duty_max"], "simulation.averaged_converter.duty_max", errors_);
+            }
+            if (averaged["switching_frequency_hz"]) {
+                options.averaged_converter.switching_frequency_hz = parse_real(
+                    averaged["switching_frequency_hz"],
+                    "simulation.averaged_converter.switching_frequency_hz",
+                    errors_);
+            }
+            if (averaged["initial_inductor_current"]) {
+                options.averaged_converter.initial_inductor_current = parse_real(
+                    averaged["initial_inductor_current"],
+                    "simulation.averaged_converter.initial_inductor_current",
+                    errors_);
+            }
+            if (averaged["initial_output_voltage"]) {
+                options.averaged_converter.initial_output_voltage = parse_real(
+                    averaged["initial_output_voltage"],
+                    "simulation.averaged_converter.initial_output_voltage",
+                    errors_);
+            }
+            if (averaged["ccm_current_threshold"]) {
+                options.averaged_converter.ccm_current_threshold = parse_real(
+                    averaged["ccm_current_threshold"],
+                    "simulation.averaged_converter.ccm_current_threshold",
+                    errors_);
+            }
+
+            if (options.averaged_converter.enabled) {
+                auto require_non_empty = [&](const std::string& value, const std::string& field) {
+                    if (value.empty()) {
+                        push_error(
+                            errors_,
+                            kDiagAveragedInvalid,
+                            "simulation.averaged_converter." + field + " is required when enabled=true");
+                    }
+                };
+
+                require_non_empty(options.averaged_converter.vin_source, "vin_source");
+                require_non_empty(options.averaged_converter.inductor, "inductor");
+                require_non_empty(options.averaged_converter.capacitor, "capacitor");
+                require_non_empty(options.averaged_converter.load_resistor, "load_resistor");
+                require_non_empty(options.averaged_converter.output_node, "output_node");
+
+                if (!(std::isfinite(options.averaged_converter.duty_min) &&
+                      std::isfinite(options.averaged_converter.duty_max) &&
+                      std::isfinite(options.averaged_converter.duty) &&
+                      options.averaged_converter.duty_min >= 0.0 &&
+                      options.averaged_converter.duty_max <= 1.0 &&
+                      options.averaged_converter.duty_min <= options.averaged_converter.duty_max &&
+                      options.averaged_converter.duty >= options.averaged_converter.duty_min &&
+                      options.averaged_converter.duty <= options.averaged_converter.duty_max)) {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "simulation.averaged_converter requires finite duty bounds "
+                        "0 <= duty_min <= duty <= duty_max <= 1");
+                }
+                if (!(std::isfinite(options.averaged_converter.ccm_current_threshold) &&
+                      options.averaged_converter.ccm_current_threshold >= 0.0)) {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "simulation.averaged_converter.ccm_current_threshold must be finite and >= 0");
+                }
+                if (!(std::isfinite(options.averaged_converter.switching_frequency_hz) &&
+                      options.averaged_converter.switching_frequency_hz > 0.0)) {
+                    push_error(
+                        errors_,
+                        kDiagAveragedInvalid,
+                        "simulation.averaged_converter.switching_frequency_hz must be finite and > 0");
+                }
             }
         }
     }

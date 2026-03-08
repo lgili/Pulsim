@@ -38,6 +38,19 @@ sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
 ```
 
+For frequency-domain workflows, configure `options.frequency_analysis` and call:
+
+```python
+ac_result = sim.run_frequency_analysis(options.frequency_analysis)
+```
+
+For averaged plant workflows, configure `options.averaged_converter.enabled = True`
+and run the same transient entrypoint:
+
+```python
+avg_result = sim.run_transient(circuit.initial_state())
+```
+
 ## Core Concepts
 
 ### 1. Circuit and Topology
@@ -50,6 +63,7 @@ result = sim.run_transient(circuit.initial_state())
 Use `SimulationOptions` to control:
 
 - time window and timestep strategy (`Fixed` vs `Variable`)
+- averaged-converter mode (`simulation.averaged_converter`)
 - nonlinear convergence (`NewtonOptions`)
 - linear solver stack and fallback behavior
 - event handling, periodic methods, and thermal coupling
@@ -96,6 +110,13 @@ For switched converters in production-like runs:
 - monitor rejection ratio and fallback causes
 - add KPI regression thresholds before merging solver changes
 
+For fast control-loop plant iteration in supported envelope:
+
+- use averaged mode (`simulation.averaged_converter.enabled: true`)
+- keep explicit duty bounds and envelope policy
+- validate parity against a paired switching case before broad usage
+- keep switched/electrothermal as final sign-off runs
+
 ## Integration Tips
 
 - Always set `num_nodes` and `num_branches` when manually composing options.
@@ -106,6 +127,8 @@ For switched converters in production-like runs:
 
 - [Netlist YAML Format](netlist-format.md)
 - [Frontend Control and Signals Contract](frontend-control-signals.md)
+- [Frequency Analysis (AC Sweep)](frequency-analysis-ac-sweep.md)
+- [Averaged Converter Modeling](averaged-converter-modeling.md)
 - [Electrothermal Workflow](electrothermal-workflow.md)
 - [Electrothermal Migration (Scalar to Datasheet)](electrothermal-migration-scalar-to-datasheet.md)
 - [Configuration](configuration.md)

@@ -1,0 +1,63 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: buck_averaged_mvp
+  category: averaged
+  averaged_pair:
+    id: buck_mvp_pair
+    role: averaged
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 10.0
+  validation:
+    type: paired_reference
+    observable: V(out)
+    pair_benchmark_id: buck_switching_paired
+    pair_scenario: direct_trap
+    start_time: 300e-6
+simulation:
+  tstart: 0.0
+  tstop: 350e-6
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  averaged_converter:
+    enabled: true
+    topology: buck
+    envelope_policy: warn
+    vin_source: Vdc
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 0.4
+    duty_min: 0.0
+    duty_max: 0.95
+    initial_inductor_current: 0.0
+    initial_output_voltage: 0.0
+    ccm_current_threshold: 0.0
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  - type: inductor
+    name: L1
+    nodes: [sw, out]
+    value: 47u
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100u
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10

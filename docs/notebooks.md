@@ -17,6 +17,7 @@ Recommended sequence:
 - `examples/notebooks/28_electrothermal_component_telemetry.ipynb`
 - `examples/notebooks/29_electrothermal_yaml_validation_modes.ipynb`
 - `examples/notebooks/30_electrothermal_kpi_gate_consistency.ipynb`
+- `examples/notebooks/31_frequency_analysis_ac_sweep_spec_walkthrough.ipynb`
 - `examples/notebooks/10_benchmarks.ipynb`
 
 Advanced catalog/coverage notebooks:
@@ -31,6 +32,10 @@ Electrothermal-focused additions:
 - `28_electrothermal_component_telemetry.ipynb`
 - `29_electrothermal_yaml_validation_modes.ipynb`
 - `30_electrothermal_kpi_gate_consistency.ipynb`
+
+Frequency-analysis addition:
+
+- `31_frequency_analysis_ac_sweep_spec_walkthrough.ipynb`
 
 ## Execute Headless (CI/local automation)
 

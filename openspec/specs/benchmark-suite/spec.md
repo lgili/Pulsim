@@ -316,3 +316,79 @@ The benchmark and validation suite SHALL assert component-level electrothermal o
 - **WHEN** strict-mode benchmark/parser validation runs include invalid thermal-port configurations
 - **THEN** deterministic parser diagnostics are emitted and the run fails as expected
 
+### Requirement: AC Sweep Benchmark Corpus Coverage
+The benchmark suite SHALL include AC sweep scenarios covering at least one analytical linear circuit and one converter/control-use-case workflow.
+
+#### Scenario: Analytical reference AC sweep case
+- **WHEN** AC benchmark suite runs the analytical reference case
+- **THEN** magnitude and phase responses are compared against analytical/reference values
+- **AND** errors are reported in machine-readable KPI artifacts
+
+#### Scenario: Converter/control AC sweep case
+- **WHEN** AC benchmark suite runs a converter/control frequency-response case
+- **THEN** benchmark verifies deterministic response generation and structured metric emission
+- **AND** unsupported configurations fail with typed diagnostics
+
+### Requirement: AC Sweep KPI Regression Gates
+Benchmark gating SHALL enforce non-regression thresholds for AC sweep accuracy and runtime metrics.
+
+#### Scenario: AC sweep regression threshold violation
+- **WHEN** required AC sweep KPI thresholds are exceeded versus approved baseline
+- **THEN** CI fails the gate deterministically
+- **AND** artifacts include baseline/current values and delta metrics
+
+#### Scenario: AC sweep gate pass
+- **WHEN** required AC sweep KPIs remain within thresholds
+- **THEN** CI reports gate pass
+- **AND** machine-readable KPI report is published
+
+### Requirement: AC Sweep Determinism Regression Gate
+Benchmark validation SHALL include repeat-run determinism checks for AC sweep outputs on the same machine class.
+
+#### Scenario: Repeat-run deterministic comparison
+- **WHEN** the same AC sweep benchmark case executes multiple times with identical configuration
+- **THEN** frequency grids are identical and response drift stays within configured tolerance
+- **AND** determinism regressions fail the gate
+
+### Requirement: Post-Processing Benchmark Fixture Coverage
+The benchmark suite SHALL include deterministic fixture scenarios that validate waveform post-processing correctness across metric families.
+
+#### Scenario: Spectral fixture with known harmonics
+- **WHEN** FFT/THD fixtures with known harmonic content are executed
+- **THEN** benchmark artifacts include spectral/THD errors against analytical or frozen-reference expectations
+- **AND** errors remain within configured thresholds.
+
+#### Scenario: Power-efficiency fixture
+- **WHEN** efficiency/power-factor fixtures are executed
+- **THEN** benchmark artifacts include derived metric errors against declared references
+- **AND** deterministic pass/fail status is emitted.
+
+### Requirement: Deterministic Expected-Failure Fixtures
+Benchmark coverage SHALL include expected-failure fixtures for invalid post-processing contracts.
+
+#### Scenario: Invalid window/sampling expected failure
+- **WHEN** a fixture intentionally violates post-processing window/sampling prerequisites
+- **THEN** benchmark run validates typed expected-failure diagnostics
+- **AND** the case is marked passed only if expected diagnostics match deterministically.
+
+### Requirement: Post-Processing KPI Non-Regression Gates
+Benchmark KPI gating SHALL enforce post-processing metric correctness, determinism, and runtime-overhead constraints.
+
+#### Scenario: Correctness gate
+- **WHEN** post-processing KPI reports are evaluated
+- **THEN** required metrics (for example FFT bin error, THD error, scalar metric error) stay within approved thresholds
+- **AND** threshold violations fail the required gate.
+
+#### Scenario: Determinism and overhead gate
+- **WHEN** repeat-run and runtime-overhead KPIs are evaluated
+- **THEN** determinism drift and overhead regressions stay within approved thresholds
+- **AND** regressions beyond thresholds fail CI.
+
+### Requirement: Machine-Readable Post-Processing KPI Reporting
+Benchmark artifacts SHALL emit machine-readable post-processing KPI deltas and gate status.
+
+#### Scenario: KPI report publication
+- **WHEN** post-processing benchmark gate completes
+- **THEN** artifacts include baseline/current values, deltas, and pass/fail status per KPI
+- **AND** schema remains stable for automated tooling.
+

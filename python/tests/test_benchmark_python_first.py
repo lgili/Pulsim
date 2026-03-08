@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 import benchmark_runner as br
+import kpi_gate
 import pulsim_python_backend as backend
 
 
@@ -83,6 +84,100 @@ def _write_periodic_netlist(tmp_path: Path) -> Path:
         ],
     }
     netlist_path = tmp_path / "periodic.yaml"
+    netlist_path.write_text(yaml.safe_dump(netlist, sort_keys=False), encoding="utf-8")
+    return netlist_path
+
+
+def _write_ac_rc_netlist(tmp_path: Path, benchmark_block: dict, filename: str = "ac_rc.yaml") -> Path:
+    netlist = {
+        "schema": "pulsim-v1",
+        "version": 1,
+        "benchmark": benchmark_block,
+        "simulation": {
+            "tstart": 0.0,
+            "tstop": 1e-3,
+            "dt": 1e-6,
+            "frequency_analysis": {
+                "enabled": True,
+                "mode": "open_loop_transfer",
+                "anchor": "dc",
+                "sweep": {
+                    "scale": "log",
+                    "f_start_hz": 10.0,
+                    "f_stop_hz": 100000.0,
+                    "points": 80,
+                },
+                "injection_current_amplitude": 1.0,
+                "perturbation": {"positive": "in", "negative": "0"},
+                "output": {"positive": "out", "negative": "0"},
+            },
+        },
+        "components": [
+            {"type": "resistor", "name": "R1", "nodes": ["in", "out"], "value": "1k"},
+            {"type": "capacitor", "name": "C1", "nodes": ["out", "0"], "value": "1u", "ic": 0.0},
+        ],
+    }
+    netlist_path = tmp_path / filename
+    netlist_path.write_text(yaml.safe_dump(netlist, sort_keys=False), encoding="utf-8")
+    return netlist_path
+
+
+def _write_ac_control_expected_failure_netlist(
+    tmp_path: Path,
+    benchmark_block: dict,
+    filename: str = "ac_control_fail.yaml",
+) -> Path:
+    netlist = {
+        "schema": "pulsim-v1",
+        "version": 1,
+        "benchmark": benchmark_block,
+        "simulation": {
+            "tstart": 0.0,
+            "tstop": 1e-3,
+            "dt": 1e-6,
+            "frequency_analysis": {
+                "enabled": True,
+                "mode": "open_loop_transfer",
+                "anchor": "dc",
+                "sweep": {
+                    "scale": "log",
+                    "f_start_hz": 10.0,
+                    "f_stop_hz": 10000.0,
+                    "points": 40,
+                },
+                "injection_current_amplitude": 1.0,
+                "perturbation": {"positive": "in", "negative": "0"},
+                "output": {"positive": "out", "negative": "0"},
+            },
+        },
+        "components": [
+            {
+                "type": "voltage_source",
+                "name": "Vin",
+                "nodes": ["in", "0"],
+                "waveform": {"type": "dc", "value": 12.0},
+            },
+            {"type": "resistor", "name": "R1", "nodes": ["in", "out"], "value": "1k"},
+            {"type": "capacitor", "name": "C1", "nodes": ["out", "0"], "value": "1u", "ic": 0.0},
+            {
+                "type": "voltage_source",
+                "name": "Vref",
+                "nodes": ["vref", "0"],
+                "waveform": {"type": "dc", "value": 5.0},
+            },
+            {
+                "type": "pi_controller",
+                "name": "PI1",
+                "nodes": ["vref", "out", "ctrl"],
+                "kp": 0.08,
+                "ki": 100.0,
+                "output_min": 0.0,
+                "output_max": 0.95,
+                "anti_windup": 1.0,
+            },
+        ],
+    }
+    netlist_path = tmp_path / filename
     netlist_path.write_text(yaml.safe_dump(netlist, sort_keys=False), encoding="utf-8")
     return netlist_path
 
@@ -306,3 +401,208 @@ def test_periodic_benchmark_shooting_default_keeps_reference_error_bounded(
     assert result.status == "passed"
     assert result.max_error is not None
     assert result.max_error <= 0.11
+
+
+def test_averaged_benchmark_pair_case_emits_pair_telemetry(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        tmp_path / "out",
+        selected=["buck_switching_paired", "buck_averaged_mvp"],
+        scenario_filter=["direct_trap"],
+    )
+
+    assert len(results) == 2
+    result = next(item for item in results if item.benchmark_id == "buck_averaged_mvp")
+    assert result.status == "passed"
+    assert result.mode == "transient"
+    assert result.max_error is not None
+    assert result.max_error <= 10.0
+    assert result.telemetry.get("averaged_pair_case") == 1.0
+    assert result.telemetry.get("averaged_pair_role_averaged") == 1.0
+    assert result.telemetry.get("averaged_pair_role_switching") == 0.0
+    assert result.telemetry.get("averaged_pair_group_crc32") is not None
+    assert result.telemetry.get("paired_reference_case") == 1.0
+
+
+def test_averaged_benchmark_repeat_runs_are_deterministic(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+
+    out_a = tmp_path / "out_a"
+    out_b = tmp_path / "out_b"
+    br.run_benchmarks(
+        manifest_path,
+        out_a,
+        selected=["buck_switching_paired", "buck_averaged_mvp"],
+        scenario_filter=["direct_trap"],
+    )
+    br.run_benchmarks(
+        manifest_path,
+        out_b,
+        selected=["buck_switching_paired", "buck_averaged_mvp"],
+        scenario_filter=["direct_trap"],
+    )
+
+    csv_a = out_a / "outputs" / "buck_averaged_mvp" / "direct_trap" / "pulsim.csv"
+    csv_b = out_b / "outputs" / "buck_averaged_mvp" / "direct_trap" / "pulsim.csv"
+    assert csv_a.read_text(encoding="utf-8") == csv_b.read_text(encoding="utf-8")
+
+
+def test_run_benchmarks_accepts_expected_failure_for_averaged_invalid_mapping(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        tmp_path / "out",
+        selected=["buck_averaged_expected_failure"],
+        scenario_filter=["direct_trap"],
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.status == "passed"
+    assert result.mode == "transient"
+    assert "Expected failure matched" in result.message
+    assert result.telemetry.get("expected_failure_matched") == 1.0
+
+
+def test_averaged_benchmark_kpi_gate_passes_with_frozen_baseline(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "benchmarks.yaml"
+    out_dir = tmp_path / "averaged_gate_out"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        out_dir,
+        selected=["buck_switching_paired", "buck_averaged_mvp", "buck_averaged_expected_failure"],
+        scenario_filter=["direct_trap"],
+    )
+    br.write_results(out_dir, results)
+    assert len(results) == 3
+    assert all(item.status == "passed" for item in results)
+
+    baseline_path = (
+        repo_root
+        / "benchmarks"
+        / "kpi_baselines"
+        / "averaged_converter_phase14_2026-03-07"
+        / "kpi_baseline.json"
+    )
+    thresholds_path = repo_root / "benchmarks" / "kpi_thresholds_averaged.yaml"
+    bench_results_path = out_dir / "results.json"
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_results_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+
+    assert report["overall_status"] == "passed"
+    assert report["failed_required_metrics"] == 0
+    assert report["comparisons"]["averaged_pair_case_count"]["status"] == "passed"
+    assert report["comparisons"]["averaged_pair_fidelity_error"]["status"] == "passed"
+    assert report["comparisons"]["averaged_pair_runtime_speedup_min"]["status"] == "passed"
+
+
+def test_python_backend_runs_frequency_analysis_mode_and_writes_frequency_csv(tmp_path: Path) -> None:
+    netlist_path = _write_ac_rc_netlist(
+        tmp_path,
+        benchmark_block={
+            "id": "ac_backend_mode",
+            "validation": {"type": "none"},
+        },
+    )
+    output_path = tmp_path / "ac_frequency.csv"
+    run = backend.run_from_yaml(netlist_path, output_path, preferred_mode="frequency_analysis")
+
+    assert run.mode == "frequency_analysis"
+    assert run.steps > 0
+    assert run.telemetry.get("ac_sweep_case") == 1.0
+    header = output_path.read_text(encoding="utf-8").splitlines()[0]
+    assert header == "frequency_hz,response_real,response_imag,magnitude,magnitude_db,phase_deg"
+
+
+def test_frequency_analysis_repeat_runs_are_deterministic(tmp_path: Path) -> None:
+    netlist_path = _write_ac_rc_netlist(
+        tmp_path,
+        benchmark_block={
+            "id": "ac_repeatability",
+            "validation": {"type": "none"},
+        },
+    )
+    out_a = tmp_path / "ac_run_a.csv"
+    out_b = tmp_path / "ac_run_b.csv"
+    backend.run_from_yaml(netlist_path, out_a, preferred_mode="frequency_analysis")
+    backend.run_from_yaml(netlist_path, out_b, preferred_mode="frequency_analysis")
+
+    assert out_a.read_text(encoding="utf-8") == out_b.read_text(encoding="utf-8")
+
+
+def test_run_benchmarks_validates_ac_analytical_case(tmp_path: Path) -> None:
+    _write_ac_rc_netlist(
+        tmp_path,
+        benchmark_block={
+            "id": "ac_analytical_smoke",
+            "validation": {
+                "type": "ac_analytical",
+                "model": "rc_lowpass",
+                "params": {"r": "1k", "c": "1u"},
+            },
+            "expectations": {
+                "metrics": {
+                    "max_error": 1e-4,
+                    "phase_error_deg": 1e-3,
+                }
+            },
+        },
+    )
+    manifest_path = _write_manifest(tmp_path, "ac_rc.yaml")
+
+    results = br.run_benchmarks(manifest_path, tmp_path / "out")
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.status == "passed"
+    assert result.mode == "frequency_analysis"
+    assert result.max_error is not None
+    assert result.phase_error_deg is not None
+    assert result.telemetry.get("ac_sweep_mag_error") is not None
+    assert result.telemetry.get("ac_sweep_phase_error") is not None
+
+
+def test_run_benchmarks_accepts_expected_frequency_failure_for_control_workflow(
+    tmp_path: Path,
+) -> None:
+    _write_ac_control_expected_failure_netlist(
+        tmp_path,
+        benchmark_block={
+            "id": "ac_control_expected_failure",
+            "validation": {"type": "none"},
+            "expectations": {
+                "expected_failure": {
+                    "mode": "frequency_analysis",
+                    "diagnostic": "FrequencyUnsupportedConfiguration",
+                    "message_contains": "probe/scope virtual components only",
+                }
+            },
+        },
+    )
+    manifest_path = _write_manifest(tmp_path, "ac_control_fail.yaml")
+
+    results = br.run_benchmarks(manifest_path, tmp_path / "out")
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.status == "passed"
+    assert result.mode == "frequency_analysis"
+    assert "Expected failure matched" in result.message
+    assert result.telemetry.get("expected_failure_matched") == 1.0

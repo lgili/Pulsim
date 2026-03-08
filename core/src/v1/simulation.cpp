@@ -399,6 +399,20 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
             return "harmonic_diff_matrix_failure";
         case SimulationDiagnosticCode::HarmonicSolverFailure:
             return "harmonic_solver_failure";
+        case SimulationDiagnosticCode::FrequencyInvalidConfiguration:
+            return "frequency_invalid_configuration";
+        case SimulationDiagnosticCode::FrequencyUnsupportedConfiguration:
+            return "frequency_unsupported_configuration";
+        case SimulationDiagnosticCode::FrequencySolverFailure:
+            return "frequency_solver_failure";
+        case SimulationDiagnosticCode::AveragedInvalidConfiguration:
+            return "averaged_invalid_configuration";
+        case SimulationDiagnosticCode::AveragedUnsupportedConfiguration:
+            return "averaged_unsupported_configuration";
+        case SimulationDiagnosticCode::AveragedOutOfEnvelope:
+            return "averaged_out_of_envelope";
+        case SimulationDiagnosticCode::AveragedSolverFailure:
+            return "averaged_solver_failure";
     }
     return "";
 }
@@ -981,6 +995,15 @@ DCAnalysisResult Simulator::dc_operating_point() {
 SimulationResult Simulator::run_transient(SimulationCallback callback,
                                           EventCallback event_callback,
                                           SimulationControl* control) {
+    if (options_.averaged_converter.enabled) {
+        Vector startup_state = circuit_.initial_state();
+        const Index expected_size = static_cast<Index>(circuit_.system_size());
+        if (startup_state.size() != expected_size || !startup_state.allFinite()) {
+            startup_state = Vector::Zero(expected_size);
+        }
+        return run_transient(startup_state, std::move(callback), std::move(event_callback), control);
+    }
+
     auto dc = dc_operating_point();
     if (dc.success) {
         return run_transient(dc.newton_result.solution, callback, event_callback, control);
@@ -1068,11 +1091,20 @@ SimulationResult Simulator::run_transient(const Vector& x0,
         return result;
     }
 
-    SimulationResult native_result = run_transient_native_impl(
-        x0,
-        std::move(callback),
-        std::move(event_callback),
-        control);
+    SimulationResult native_result;
+    if (options_.averaged_converter.enabled) {
+        native_result = run_transient_averaged_impl(
+            x0,
+            std::move(callback),
+            std::move(event_callback),
+            control);
+    } else {
+        native_result = run_transient_native_impl(
+            x0,
+            std::move(callback),
+            std::move(event_callback),
+            control);
+    }
 
     native_result.backend_telemetry.requested_backend = "native";
     if (native_result.backend_telemetry.selected_backend.empty()) {

@@ -1,0 +1,99 @@
+# Buck converter with post-processing analysis
+#
+# Demonstrates:
+#   - simulation.post_processing YAML block
+#   - time-domain metrics (steady-state window, last 3 ms)
+#   - spectral analysis (THD of output voltage)
+#   - efficiency measurement
+
+schema: pulsim-v1
+version: 1
+
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 1e-7
+  step_mode: variable
+  post_processing:
+    jobs:
+      - id: vout_metrics
+        kind: time_domain
+        signals: [V(out)]
+        window:
+          mode: time
+          t_start: 2e-3
+          t_end: 5e-3
+        metrics: [rms, mean, min, max, p2p, ripple]
+
+      - id: vout_spectrum
+        kind: spectral
+        signals: [V(out)]
+        window:
+          mode: time
+          t_start: 2e-3
+          t_end: 5e-3
+        fundamental_hz: 20000.0
+        n_harmonics: 5
+        window_function: hann
+
+      - id: converter_efficiency
+        kind: power_efficiency
+        input_voltage: V(Vin)
+        input_current: I(Vin)
+        output_voltage: V(out)
+        output_current: I(Rload)
+        window:
+          mode: time
+          t_start: 2e-3
+          t_end: 5e-3
+
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [Vin, 0]
+    waveform:
+      type: dc
+      value: 24.0
+
+  - type: switch
+    name: S1
+    nodes: [Vin, sw]
+    control: ctrl
+    g_on: 1000.0
+    g_off: 1e-6
+    initial_state: open
+
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    g_on: 1000.0
+    g_off: 1e-6
+
+  - type: inductor
+    name: L1
+    nodes: [sw, out]
+    value: 50e-6
+    ic: 0.0
+
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 12.0
+
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 24.0
+
+  - type: voltage_source
+    name: Vpwm
+    nodes: [ctrl, 0]
+    waveform:
+      type: pulse
+      v_low: 0.0
+      v_high: 1.0
+      period: 50e-6
+      duty_cycle: 0.5
+      rise_time: 1e-9
+      fall_time: 1e-9

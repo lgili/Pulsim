@@ -1223,6 +1223,56 @@ void init_v2_module(py::module_& v2) {
         .value("Direct", FormulationMode::Direct)
         .export_values();
 
+    py::enum_<FrequencyAnalysisMode>(v2, "FrequencyAnalysisMode",
+        "Frequency-domain analysis mode")
+        .value("OpenLoopTransfer", FrequencyAnalysisMode::OpenLoopTransfer)
+        .value("ClosedLoopTransfer", FrequencyAnalysisMode::ClosedLoopTransfer)
+        .value("InputImpedance", FrequencyAnalysisMode::InputImpedance)
+        .value("OutputImpedance", FrequencyAnalysisMode::OutputImpedance)
+        .export_values();
+
+    py::enum_<FrequencyAnchorMode>(v2, "FrequencyAnchorMode",
+        "Operating-point anchoring mode for frequency analysis")
+        .value("DC", FrequencyAnchorMode::DC)
+        .value("Periodic", FrequencyAnchorMode::Periodic)
+        .value("Averaged", FrequencyAnchorMode::Averaged)
+        .value("Auto", FrequencyAnchorMode::Auto)
+        .export_values();
+
+    py::enum_<FrequencySweepScale>(v2, "FrequencySweepScale",
+        "Frequency sweep spacing mode")
+        .value("Logarithmic", FrequencySweepScale::Logarithmic)
+        .value("Linear", FrequencySweepScale::Linear)
+        .export_values();
+
+    py::enum_<FrequencyMetricUndefinedReason>(v2, "FrequencyMetricUndefinedReason",
+        "Reason code for undefined AC sweep derived metrics")
+        .value("None", FrequencyMetricUndefinedReason::None)
+        .value("NotTransferMode", FrequencyMetricUndefinedReason::NotTransferMode)
+        .value("NoGainCrossover", FrequencyMetricUndefinedReason::NoGainCrossover)
+        .value("NoPhaseCrossover", FrequencyMetricUndefinedReason::NoPhaseCrossover)
+        .export_values();
+
+    py::enum_<AveragedConverterTopology>(v2, "AveragedConverterTopology",
+        "Supported topology for averaged-converter transient mode")
+        .value("Buck", AveragedConverterTopology::Buck)
+        .value("Boost", AveragedConverterTopology::Boost)
+        .value("BuckBoost", AveragedConverterTopology::BuckBoost)
+        .export_values();
+
+    py::enum_<AveragedOperatingMode>(v2, "AveragedOperatingMode",
+        "Operating mode policy for averaged-converter transient mode")
+        .value("CCM", AveragedOperatingMode::CCM)
+        .value("DCM", AveragedOperatingMode::DCM)
+        .value("Auto", AveragedOperatingMode::Auto)
+        .export_values();
+
+    py::enum_<AveragedEnvelopePolicy>(v2, "AveragedEnvelopePolicy",
+        "Operating-envelope policy for averaged-converter mode")
+        .value("Strict", AveragedEnvelopePolicy::Strict)
+        .value("Warn", AveragedEnvelopePolicy::Warn)
+        .export_values();
+
     py::enum_<SimulationDiagnosticCode>(v2, "SimulationDiagnosticCode",
         "Typed simulation diagnostic code")
         .value("None", SimulationDiagnosticCode::None)
@@ -1241,6 +1291,13 @@ void init_v2_module(py::module_& v2) {
         .value("HarmonicInvalidInitialState", SimulationDiagnosticCode::HarmonicInvalidInitialState)
         .value("HarmonicDifferentiationFailure", SimulationDiagnosticCode::HarmonicDifferentiationFailure)
         .value("HarmonicSolverFailure", SimulationDiagnosticCode::HarmonicSolverFailure)
+        .value("FrequencyInvalidConfiguration", SimulationDiagnosticCode::FrequencyInvalidConfiguration)
+        .value("FrequencyUnsupportedConfiguration", SimulationDiagnosticCode::FrequencyUnsupportedConfiguration)
+        .value("FrequencySolverFailure", SimulationDiagnosticCode::FrequencySolverFailure)
+        .value("AveragedInvalidConfiguration", SimulationDiagnosticCode::AveragedInvalidConfiguration)
+        .value("AveragedUnsupportedConfiguration", SimulationDiagnosticCode::AveragedUnsupportedConfiguration)
+        .value("AveragedOutOfEnvelope", SimulationDiagnosticCode::AveragedOutOfEnvelope)
+        .value("AveragedSolverFailure", SimulationDiagnosticCode::AveragedSolverFailure)
         .export_values();
 
     py::class_<SimulationEvent>(v2, "SimulationEvent", "Simulation event record")
@@ -1392,6 +1449,72 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("peak_temperature", &ComponentElectrothermalTelemetry::peak_temperature)
         .def_readwrite("average_temperature", &ComponentElectrothermalTelemetry::average_temperature);
 
+    py::class_<FrequencyAnalysisPort>(v2, "FrequencyAnalysisPort",
+        "Node pair used as perturbation/output port in frequency analysis")
+        .def(py::init<>())
+        .def_readwrite("positive_node", &FrequencyAnalysisPort::positive_node)
+        .def_readwrite("negative_node", &FrequencyAnalysisPort::negative_node);
+
+    py::class_<FrequencyAnalysisOptions>(v2, "FrequencyAnalysisOptions",
+        "Frequency-domain AC sweep configuration")
+        .def(py::init<>())
+        .def_readwrite("enabled", &FrequencyAnalysisOptions::enabled)
+        .def_readwrite("mode", &FrequencyAnalysisOptions::mode)
+        .def_readwrite("anchor_mode", &FrequencyAnalysisOptions::anchor_mode)
+        .def_readwrite("sweep_scale", &FrequencyAnalysisOptions::sweep_scale)
+        .def_readwrite("f_start_hz", &FrequencyAnalysisOptions::f_start_hz)
+        .def_readwrite("f_stop_hz", &FrequencyAnalysisOptions::f_stop_hz)
+        .def_readwrite("points", &FrequencyAnalysisOptions::points)
+        .def_readwrite("injection_current_amplitude", &FrequencyAnalysisOptions::injection_current_amplitude)
+        .def_readwrite("perturbation_port", &FrequencyAnalysisOptions::perturbation_port)
+        .def_readwrite("output_port", &FrequencyAnalysisOptions::output_port);
+
+    py::class_<FrequencyAnalysisResult>(v2, "FrequencyAnalysisResult",
+        "Frequency-domain AC sweep result")
+        .def(py::init<>())
+        .def_readwrite("success", &FrequencyAnalysisResult::success)
+        .def_readwrite("diagnostic", &FrequencyAnalysisResult::diagnostic)
+        .def_readwrite("message", &FrequencyAnalysisResult::message)
+        .def_readwrite("mode", &FrequencyAnalysisResult::mode)
+        .def_readwrite("anchor_mode_selected", &FrequencyAnalysisResult::anchor_mode_selected)
+        .def_readwrite("failed_point_index", &FrequencyAnalysisResult::failed_point_index)
+        .def_readwrite("failed_frequency_hz", &FrequencyAnalysisResult::failed_frequency_hz)
+        .def_readwrite("frequency_hz", &FrequencyAnalysisResult::frequency_hz)
+        .def_readwrite("response_real", &FrequencyAnalysisResult::response_real)
+        .def_readwrite("response_imag", &FrequencyAnalysisResult::response_imag)
+        .def_readwrite("magnitude", &FrequencyAnalysisResult::magnitude)
+        .def_readwrite("magnitude_db", &FrequencyAnalysisResult::magnitude_db)
+        .def_readwrite("phase_deg", &FrequencyAnalysisResult::phase_deg)
+        .def_readwrite("channel_metadata", &FrequencyAnalysisResult::channel_metadata)
+        .def_readwrite("gain_crossover_hz", &FrequencyAnalysisResult::gain_crossover_hz)
+        .def_readwrite("phase_crossover_hz", &FrequencyAnalysisResult::phase_crossover_hz)
+        .def_readwrite("phase_margin_deg", &FrequencyAnalysisResult::phase_margin_deg)
+        .def_readwrite("gain_margin_db", &FrequencyAnalysisResult::gain_margin_db)
+        .def_readwrite("gain_crossover_reason", &FrequencyAnalysisResult::gain_crossover_reason)
+        .def_readwrite("phase_crossover_reason", &FrequencyAnalysisResult::phase_crossover_reason)
+        .def_readwrite("phase_margin_reason", &FrequencyAnalysisResult::phase_margin_reason)
+        .def_readwrite("gain_margin_reason", &FrequencyAnalysisResult::gain_margin_reason);
+
+    py::class_<AveragedConverterOptions>(v2, "AveragedConverterOptions",
+        "Averaged-converter runtime configuration")
+        .def(py::init<>())
+        .def_readwrite("enabled", &AveragedConverterOptions::enabled)
+        .def_readwrite("topology", &AveragedConverterOptions::topology)
+        .def_readwrite("operating_mode", &AveragedConverterOptions::operating_mode)
+        .def_readwrite("envelope_policy", &AveragedConverterOptions::envelope_policy)
+        .def_readwrite("vin_source", &AveragedConverterOptions::vin_source)
+        .def_readwrite("inductor", &AveragedConverterOptions::inductor)
+        .def_readwrite("capacitor", &AveragedConverterOptions::capacitor)
+        .def_readwrite("load_resistor", &AveragedConverterOptions::load_resistor)
+        .def_readwrite("output_node", &AveragedConverterOptions::output_node)
+        .def_readwrite("duty", &AveragedConverterOptions::duty)
+        .def_readwrite("duty_min", &AveragedConverterOptions::duty_min)
+        .def_readwrite("duty_max", &AveragedConverterOptions::duty_max)
+        .def_readwrite("switching_frequency_hz", &AveragedConverterOptions::switching_frequency_hz)
+        .def_readwrite("initial_inductor_current", &AveragedConverterOptions::initial_inductor_current)
+        .def_readwrite("initial_output_voltage", &AveragedConverterOptions::initial_output_voltage)
+        .def_readwrite("ccm_current_threshold", &AveragedConverterOptions::ccm_current_threshold);
+
     py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
         .def(py::init<>())
         .def_readwrite("tstart", &SimulationOptions::tstart)
@@ -1436,6 +1559,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("periodic_options", &SimulationOptions::periodic_options)
         .def_readwrite("enable_harmonic_balance", &SimulationOptions::enable_harmonic_balance)
         .def_readwrite("harmonic_balance", &SimulationOptions::harmonic_balance)
+        .def_readwrite("frequency_analysis", &SimulationOptions::frequency_analysis)
+        .def_readwrite("averaged_converter", &SimulationOptions::averaged_converter)
         .def_readwrite("enable_events", &SimulationOptions::enable_events)
         .def_readwrite("enable_losses", &SimulationOptions::enable_losses)
         .def_readwrite("switching_energy", &SimulationOptions::switching_energy)
@@ -1526,6 +1651,12 @@ void init_v2_module(py::module_& v2) {
             return sim.run_harmonic_balance(x0, options);
         }, py::arg("x0"), py::arg("options") = HarmonicBalanceOptions(),
            "Run harmonic balance with explicit initial state")
+        .def("run_frequency_analysis", [](Simulator& sim) {
+            return sim.run_frequency_analysis();
+        }, "Run frequency-domain analysis using options.frequency_analysis")
+        .def("run_frequency_analysis", [](Simulator& sim, const FrequencyAnalysisOptions& options) {
+            return sim.run_frequency_analysis(options);
+        }, py::arg("options"), "Run frequency-domain analysis with explicit options")
         .def("set_switching_energy", &Simulator::set_switching_energy,
              py::arg("device_name"), py::arg("energy"))
         .def("set_switching_energy_surface", &Simulator::set_switching_energy_surface,
@@ -1649,6 +1780,24 @@ void init_v2_module(py::module_& v2) {
          py::arg("newton_options") = NewtonOptions(),
          py::arg("linear_solver") = LinearSolverStackConfig::defaults(),
     "Run transient with zero initial state");
+
+    v2.def("run_frequency_analysis", [&](Circuit& circuit, const FrequencyAnalysisOptions& options) {
+        SimulationOptions sim_options;
+        sim_options.frequency_analysis = options;
+        Simulator sim(circuit, sim_options);
+        return sim.run_frequency_analysis(options);
+    }, py::arg("circuit"), py::arg("options"),
+    R"doc(
+    Run frequency-domain AC sweep analysis (procedural API).
+
+    Args:
+        circuit: Circuit object with devices
+        options: Frequency-domain analysis options (mode, ports, sweep settings)
+
+    Returns:
+        FrequencyAnalysisResult with complex response arrays, derived metrics,
+        metadata and deterministic diagnostics.
+    )doc");
 
     // =========================================================================
     // Streaming transient simulation (for real-time GUI updates)

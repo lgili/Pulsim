@@ -1,0 +1,43 @@
+{
+  "baseline_id": "averaged_converter_phase14_2026-03-07",
+  "captured_at_utc": "2026-03-07T21:53:12.820367+00:00",
+  "environment": {
+    "cc": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
+    "cmake": "cmake version 4.2.3",
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
+    "cxx_flags": "unset",
+    "machine_class": "arm64",
+    "os": "Darwin-25.4.0-arm64",
+    "python": "Python 3.13.5"
+  },
+  "metrics": {
+    "ac_runtime_p95": null,
+    "ac_sweep_mag_error": null,
+    "ac_sweep_phase_error": null,
+    "averaged_pair_case_count": 2.0,
+    "averaged_pair_fidelity_error": 8.311013464000002,
+    "averaged_pair_runtime_speedup_mean": 94.526637263754,
+    "averaged_pair_runtime_speedup_min": 94.526637263754,
+    "component_coverage_gap": 2.0,
+    "component_coverage_rate": 0.5,
+    "component_loss_summary_consistency_error": 0.0,
+    "component_thermal_summary_consistency_error": 0.0,
+    "convergence_success_rate": 1.0,
+    "dae_fallback_ratio": 0.0,
+    "loss_energy_balance_error": 0.0,
+    "module_order_count_match_rate": 1.0,
+    "module_order_mismatch_rate": 0.0,
+    "module_output_reallocation_free_rate": 1.0,
+    "module_output_reallocation_p95": 0.0,
+    "parity_rms_error_ltspice": null,
+    "parity_rms_error_ngspice": null,
+    "runtime_p50": 0.00037266699655447155,
+    "runtime_p95": 0.031741528902784914,
+    "state_space_primary_ratio": 1.0,
+    "stress_tier_failure_count": null,
+    "thermal_peak_temperature_delta": 0.0
+  },
+  "schema_version": "pulsim-kpi-baseline-v1",
+  "source_artifacts_root": "benchmarks/phase14_averaged_artifacts",
+  "source_bench_results": "benchmarks/phase14_averaged_artifacts/benchmarks/results.json"
+}

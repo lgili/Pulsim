@@ -1,0 +1,12 @@
+{
+  "baseline_id": "averaged_converter_phase14_2026-03-07",
+  "captured_at_utc": "2026-03-07T21:53:12.820367+00:00",
+  "files": [
+    {
+      "path": "benchmarks/phase14_averaged_artifacts/benchmarks/results.json",
+      "sha256": "af1f65f590335e6d2e7e79f62d9a6d554ac5f4eab6314b6a530af8ff8780f2fd",
+      "size_bytes": 6708
+    }
+  ],
+  "schema_version": "pulsim-kpi-baseline-manifest-v1"
+}

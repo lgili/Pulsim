@@ -96,6 +96,42 @@ class FormulationMode(Enum):
     ProjectedWrapper = ...
     Direct = ...
 
+class FrequencyAnalysisMode(Enum):
+    OpenLoopTransfer = ...
+    ClosedLoopTransfer = ...
+    InputImpedance = ...
+    OutputImpedance = ...
+
+class FrequencyAnchorMode(Enum):
+    DC = ...
+    Periodic = ...
+    Averaged = ...
+    Auto = ...
+
+class FrequencySweepScale(Enum):
+    Logarithmic = ...
+    Linear = ...
+
+class FrequencyMetricUndefinedReason(Enum):
+    None_ = ...
+    NotTransferMode = ...
+    NoGainCrossover = ...
+    NoPhaseCrossover = ...
+
+class AveragedConverterTopology(Enum):
+    Buck = ...
+    Boost = ...
+    BuckBoost = ...
+
+class AveragedOperatingMode(Enum):
+    CCM = ...
+    DCM = ...
+    Auto = ...
+
+class AveragedEnvelopePolicy(Enum):
+    Strict = ...
+    Warn = ...
+
 # =============================================================================
 # Device Classes
 # =============================================================================
@@ -424,6 +460,43 @@ class HarmonicBalanceOptions:
     initialize_from_transient: bool
     def __init__(self) -> None: ...
 
+class FrequencyAnalysisPort:
+    positive_node: str
+    negative_node: str
+    def __init__(self) -> None: ...
+
+class FrequencyAnalysisOptions:
+    enabled: bool
+    mode: FrequencyAnalysisMode
+    anchor_mode: FrequencyAnchorMode
+    sweep_scale: FrequencySweepScale
+    f_start_hz: float
+    f_stop_hz: float
+    points: int
+    injection_current_amplitude: float
+    perturbation_port: FrequencyAnalysisPort
+    output_port: FrequencyAnalysisPort
+    def __init__(self) -> None: ...
+
+class AveragedConverterOptions:
+    enabled: bool
+    topology: AveragedConverterTopology
+    operating_mode: AveragedOperatingMode
+    envelope_policy: AveragedEnvelopePolicy
+    vin_source: str
+    inductor: str
+    capacitor: str
+    load_resistor: str
+    output_node: str
+    duty: float
+    duty_min: float
+    duty_max: float
+    switching_frequency_hz: float
+    initial_inductor_current: float
+    initial_output_voltage: float
+    ccm_current_threshold: float
+    def __init__(self) -> None: ...
+
 class SwitchingEnergy:
     eon: float
     eoff: float
@@ -675,6 +748,8 @@ class SimulationOptions:
     periodic_options: PeriodicSteadyStateOptions
     enable_harmonic_balance: bool
     harmonic_balance: HarmonicBalanceOptions
+    frequency_analysis: FrequencyAnalysisOptions
+    averaged_converter: AveragedConverterOptions
     enable_events: bool
     enable_losses: bool
     switching_energy: Dict[str, SwitchingEnergy]
@@ -727,6 +802,31 @@ class HarmonicBalanceResult:
     message: str
     def __init__(self) -> None: ...
 
+class FrequencyAnalysisResult:
+    success: bool
+    diagnostic: object
+    message: str
+    mode: FrequencyAnalysisMode
+    anchor_mode_selected: FrequencyAnchorMode
+    failed_point_index: int
+    failed_frequency_hz: float
+    frequency_hz: List[float]
+    response_real: List[float]
+    response_imag: List[float]
+    magnitude: List[float]
+    magnitude_db: List[float]
+    phase_deg: List[float]
+    channel_metadata: Dict[str, VirtualChannelMetadata]
+    gain_crossover_hz: float
+    phase_crossover_hz: float
+    phase_margin_deg: float
+    gain_margin_db: float
+    gain_crossover_reason: FrequencyMetricUndefinedReason
+    phase_crossover_reason: FrequencyMetricUndefinedReason
+    phase_margin_reason: FrequencyMetricUndefinedReason
+    gain_margin_reason: FrequencyMetricUndefinedReason
+    def __init__(self) -> None: ...
+
 class Simulator:
     options: SimulationOptions
     def __init__(self, circuit: Circuit, options: SimulationOptions = ...) -> None: ...
@@ -742,6 +842,7 @@ class Simulator:
         x0_or_options: Optional[object] = ...,
         options: Optional[HarmonicBalanceOptions] = ...,
     ) -> HarmonicBalanceResult: ...
+    def run_frequency_analysis(self, options: Optional[FrequencyAnalysisOptions] = ...) -> FrequencyAnalysisResult: ...
     def set_switching_energy(self, device_name: str, energy: SwitchingEnergy) -> None: ...
     def set_switching_energy_surface(self, device_name: str, surface: SwitchingEnergySurface3D) -> None: ...
 
@@ -929,6 +1030,10 @@ def run_transient_streaming(
     newton_options: Optional[NewtonOptions] = None,
     linear_solver: Optional[LinearSolverStackConfig] = None,
 ) -> object: ...
+def run_frequency_analysis(
+    circuit: Circuit,
+    options: FrequencyAnalysisOptions,
+) -> FrequencyAnalysisResult: ...
 
 # =============================================================================
 # Thermal & Loss Models

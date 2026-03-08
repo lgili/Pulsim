@@ -180,6 +180,86 @@ Supported values for mode:
 
 In strict parsing, `discrete` requires `sample_time > 0`.
 
+### Frequency Analysis (AC Sweep)
+
+Use `simulation.frequency_analysis` for backend AC sweep workflows:
+
+```yaml
+simulation:
+  frequency_analysis:
+    enabled: true
+    mode: open_loop_transfer
+    anchor: auto
+    sweep:
+      scale: log
+      f_start_hz: 10.0
+      f_stop_hz: 100000.0
+      points: 80
+    injection_current_amplitude: 1.0
+    perturbation: {positive: in, negative: 0}
+    output: {positive: out, negative: 0}
+```
+
+Supported `mode` values:
+
+- `open_loop_transfer`
+- `closed_loop_transfer`
+- `input_impedance`
+- `output_impedance`
+
+Supported `anchor` values:
+
+- `dc`
+- `periodic`
+- `averaged`
+- `auto`
+
+The parser enforces deterministic validation for sweep ranges, point count, and port bindings.
+For full backend contract and Python result usage, see
+[Frequency Analysis (AC Sweep)](frequency-analysis-ac-sweep.md).
+
+### Averaged Converter Mode
+
+Use `simulation.averaged_converter` for backend averaged plant runs:
+
+```yaml
+simulation:
+  averaged_converter:
+    enabled: true
+    topology: buck
+    operating_mode: auto
+    envelope_policy: warn
+    vin_source: Vin
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 0.4
+    duty_min: 0.0
+    duty_max: 0.95
+    switching_frequency_hz: 100000.0
+    initial_inductor_current: 0.0
+    initial_output_voltage: 0.0
+    ccm_current_threshold: 0.0
+```
+
+Supported values:
+
+- `topology`: `buck` | `boost` | `buck_boost`
+- `operating_mode`: `ccm` | `dcm` | `auto`
+- `envelope_policy`: `strict` | `warn`
+
+Deterministic checks:
+
+- required mapping fields when `enabled=true`
+- valid duty bounds (`0 <= duty_min <= duty <= duty_max <= 1`)
+- finite `ccm_current_threshold >= 0`
+- finite `switching_frequency_hz > 0`
+- mapped component types (`vin_source` voltage source, `inductor` inductor, `capacitor` capacitor, `load_resistor` resistor)
+
+For full runtime/result/frontend contract and migration guidance, see
+[Averaged Converter Modeling](averaged-converter-modeling.md).
+
 ### Control Blocks for Closed-Loop Converters
 
 Common blocks for converter control loops:

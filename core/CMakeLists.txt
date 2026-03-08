@@ -28,7 +28,9 @@ add_library(pulsim::core ALIAS pulsim_core)
 # =============================================================================
 add_library(pulsim STATIC
     src/v1/runtime_module_adapters.cpp
+    src/v1/simulation_averaged.cpp
     src/v1/simulation.cpp
+    src/v1/simulation_frequency.cpp
     src/v1/simulation_periodic.cpp
     src/v1/simulation_step.cpp
     src/v1/transient_services.cpp

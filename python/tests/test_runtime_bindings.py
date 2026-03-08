@@ -22,6 +22,80 @@ def _build_rc_circuit() -> ps.Circuit:
     return circuit
 
 
+def _build_rc_frequency_circuit() -> ps.Circuit:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+    return circuit
+
+
+def _build_sine_resistive_frequency_circuit() -> ps.Circuit:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_sine_voltage_source("Vs", n_in, gnd, 1.0, 1_000.0, 0.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_resistor("R2", n_out, gnd, 500.0)
+    return circuit
+
+
+def _build_sine_rc_frequency_circuit() -> ps.Circuit:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_sine_voltage_source("Vs", n_in, gnd, 1.0, 1_000.0, 0.0)
+    circuit.add_resistor("R1", n_in, n_out, 1_000.0)
+    circuit.add_capacitor("C1", n_out, gnd, 1e-6, 0.0)
+    return circuit
+
+
+def _build_buck_averaged_circuit() -> ps.Circuit:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0)
+    circuit.add_inductor("L1", n_in, n_out, 100e-6, 0.0)
+    circuit.add_capacitor("C1", n_out, gnd, 220e-6, 0.0)
+    circuit.add_resistor("Rload", n_out, gnd, 10.0)
+    return circuit
+
+
+def _build_boost_averaged_circuit(load_ohm: float = 20.0) -> ps.Circuit:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0)
+    circuit.add_inductor("L1", n_in, n_out, 100e-6, 0.0)
+    circuit.add_capacitor("C1", n_out, gnd, 220e-6, 0.0)
+    circuit.add_resistor("Rload", n_out, gnd, load_ohm)
+    return circuit
+
+
+def _build_buck_boost_averaged_circuit(load_ohm: float = 10.0) -> ps.Circuit:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 12.0)
+    circuit.add_inductor("L1", n_in, n_out, 100e-6, 0.0)
+    circuit.add_capacitor("C1", n_out, gnd, 220e-6, 0.0)
+    circuit.add_resistor("Rload", n_out, gnd, load_ohm)
+    return circuit
+
+
 def test_simulator_with_simulation_options_runs_transient() -> None:
     circuit = _build_rc_circuit()
 
@@ -182,6 +256,650 @@ components:
     assert any("PULSIM_YAML_W_DEPRECATED_FIELD" in msg for msg in parser.warnings)
     assert any("simulation.adaptive_timestep" in msg for msg in parser.warnings)
     assert any("simulation.step_mode" in msg for msg in parser.warnings)
+
+
+def test_yaml_parser_maps_frequency_analysis_block() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-3
+  dt: 1e-6
+  frequency_analysis:
+    enabled: true
+    mode: open_loop_transfer
+    anchor: dc
+    sweep:
+      scale: log
+      f_start_hz: 1.0
+      f_stop_hz: 100000.0
+      points: 40
+    injection_current_amplitude: 1.0
+    perturbation:
+      positive: in
+      negative: 0
+    output:
+      positive: out
+      negative: 0
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 1k
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1u
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+
+    assert parser.errors == []
+    assert options.frequency_analysis.enabled is True
+    assert options.frequency_analysis.mode == ps.FrequencyAnalysisMode.OpenLoopTransfer
+    assert options.frequency_analysis.anchor_mode == ps.FrequencyAnchorMode.DC
+    assert options.frequency_analysis.sweep_scale == ps.FrequencySweepScale.Logarithmic
+    assert options.frequency_analysis.points == 40
+    assert abs(options.frequency_analysis.f_start_hz - 1.0) < 1e-12
+    assert abs(options.frequency_analysis.f_stop_hz - 100000.0) < 1e-12
+    assert options.frequency_analysis.perturbation_port.positive_node == "in"
+    assert options.frequency_analysis.output_port.positive_node == "out"
+
+
+def test_yaml_parser_rejects_invalid_frequency_sweep_points() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  frequency_analysis:
+    enabled: true
+    sweep:
+      f_start_hz: 10.0
+      f_stop_hz: 1000.0
+      points: 1
+    injection_current_amplitude: 1.0
+    perturbation:
+      positive: in
+      negative: 0
+components:
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 1k
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+    assert any("PULSIM_YAML_E_FREQ_CONFIG_INVALID" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_maps_averaged_converter_block() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0
+  tstop: 1e-4
+  dt: 1e-6
+  averaged_converter:
+    enabled: true
+    topology: boost
+    operating_mode: dcm
+    envelope_policy: warn
+    vin_source: Vin
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 0.42
+    duty_min: 0.1
+    duty_max: 0.9
+    switching_frequency_hz: 120000.0
+    initial_inductor_current: 0.2
+    initial_output_voltage: 4.5
+    ccm_current_threshold: 0.0
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: inductor
+    name: L1
+    nodes: [in, out]
+    value: 100u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 220u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    _, options = parser.load_string(content)
+
+    assert parser.errors == []
+    assert options.averaged_converter.enabled is True
+    assert options.averaged_converter.topology == ps.AveragedConverterTopology.Boost
+    assert options.averaged_converter.operating_mode == ps.AveragedOperatingMode.DCM
+    assert options.averaged_converter.envelope_policy == ps.AveragedEnvelopePolicy.Warn
+    assert options.averaged_converter.vin_source == "Vin"
+    assert options.averaged_converter.inductor == "L1"
+    assert options.averaged_converter.capacitor == "C1"
+    assert options.averaged_converter.load_resistor == "Rload"
+    assert options.averaged_converter.output_node == "out"
+    assert abs(options.averaged_converter.duty - 0.42) < 1e-12
+    assert abs(options.averaged_converter.switching_frequency_hz - 120000.0) < 1e-12
+
+
+def test_yaml_parser_rejects_invalid_averaged_duty_bounds() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  averaged_converter:
+    enabled: true
+    topology: buck
+    vin_source: Vin
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 1.1
+    duty_min: 0.0
+    duty_max: 0.9
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: inductor
+    name: L1
+    nodes: [in, out]
+    value: 100u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 220u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+
+    assert any("PULSIM_YAML_E_AVERAGED_CONFIG_INVALID" in msg for msg in parser.errors)
+
+
+def test_yaml_parser_rejects_invalid_averaged_switching_frequency() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  averaged_converter:
+    enabled: true
+    topology: buck_boost
+    operating_mode: dcm
+    vin_source: Vin
+    inductor: L1
+    capacitor: C1
+    load_resistor: Rload
+    output_node: out
+    duty: 0.4
+    duty_min: 0.0
+    duty_max: 0.9
+    switching_frequency_hz: 0.0
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [in, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: inductor
+    name: L1
+    nodes: [in, out]
+    value: 100u
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 220u
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10
+"""
+    parser = ps.YamlParser()
+    parser.load_string(content)
+    assert any("PULSIM_YAML_E_AVERAGED_CONFIG_INVALID" in msg for msg in parser.errors)
+    assert any("switching_frequency_hz" in msg for msg in parser.errors)
+
+
+def test_frequency_analysis_rc_lowpass_behaves_physically() -> None:
+    circuit = _build_rc_frequency_circuit()
+    options = ps.SimulationOptions()
+    options.frequency_analysis.enabled = True
+    options.frequency_analysis.mode = ps.FrequencyAnalysisMode.OpenLoopTransfer
+    options.frequency_analysis.anchor_mode = ps.FrequencyAnchorMode.DC
+    options.frequency_analysis.sweep_scale = ps.FrequencySweepScale.Logarithmic
+    options.frequency_analysis.f_start_hz = 1.0
+    options.frequency_analysis.f_stop_hz = 100000.0
+    options.frequency_analysis.points = 80
+    options.frequency_analysis.injection_current_amplitude = 1.0
+    options.frequency_analysis.perturbation_port.positive_node = "in"
+    options.frequency_analysis.perturbation_port.negative_node = "0"
+    options.frequency_analysis.output_port.positive_node = "out"
+    options.frequency_analysis.output_port.negative_node = "0"
+
+    result = ps.Simulator(circuit, options).run_frequency_analysis()
+
+    assert result.success is True
+    assert len(result.frequency_hz) == 80
+    assert len(result.magnitude_db) == 80
+    assert len(result.phase_deg) == 80
+
+    # RC low-pass: near 0 dB at very low frequency, strong attenuation at high frequency.
+    assert result.magnitude_db[0] > -0.5
+    assert result.magnitude_db[-1] < -40.0
+    assert result.phase_deg[-1] < -70.0
+
+    f_cutoff = 1.0 / (2.0 * math.pi * 1_000.0 * 1e-6)
+    idx = min(range(len(result.frequency_hz)), key=lambda i: abs(result.frequency_hz[i] - f_cutoff))
+    assert abs(result.magnitude_db[idx] + 3.0) < 1.5
+
+
+def test_averaged_buck_transient_runs_with_expected_channels() -> None:
+    circuit = _build_buck_averaged_circuit()
+    options = ps.SimulationOptions()
+    options.tstart = 0.0
+    options.tstop = 2e-4
+    options.dt = 1e-6
+
+    options.averaged_converter.enabled = True
+    options.averaged_converter.topology = ps.AveragedConverterTopology.Buck
+    options.averaged_converter.operating_mode = ps.AveragedOperatingMode.CCM
+    options.averaged_converter.envelope_policy = ps.AveragedEnvelopePolicy.Warn
+    options.averaged_converter.vin_source = "Vin"
+    options.averaged_converter.inductor = "L1"
+    options.averaged_converter.capacitor = "C1"
+    options.averaged_converter.load_resistor = "Rload"
+    options.averaged_converter.output_node = "out"
+    options.averaged_converter.duty = 0.42
+    options.averaged_converter.duty_min = 0.0
+    options.averaged_converter.duty_max = 0.95
+    options.averaged_converter.switching_frequency_hz = 100_000.0
+    options.averaged_converter.initial_inductor_current = 0.0
+    options.averaged_converter.initial_output_voltage = 0.0
+    options.averaged_converter.ccm_current_threshold = 0.0
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is True
+    assert result.diagnostic.name == "None"
+    assert result.backend_telemetry.solver_family == "averaged_converter"
+    assert len(result.time) > 10
+    assert "Iavg(L1)" in result.virtual_channels
+    assert "Vavg(out)" in result.virtual_channels
+    assert "Davg" in result.virtual_channels
+    assert len(result.virtual_channels["Iavg(L1)"]) == len(result.time)
+    assert len(result.virtual_channels["Vavg(out)"]) == len(result.time)
+    assert len(result.virtual_channels["Davg"]) == len(result.time)
+    assert result.virtual_channels["Vavg(out)"][-1] > 0.0
+
+
+def test_averaged_buck_strict_envelope_reports_typed_diagnostic() -> None:
+    circuit = _build_buck_averaged_circuit()
+    options = ps.SimulationOptions()
+    options.tstart = 0.0
+    options.tstop = 5e-5
+    options.dt = 1e-6
+
+    options.averaged_converter.enabled = True
+    options.averaged_converter.topology = ps.AveragedConverterTopology.Buck
+    options.averaged_converter.operating_mode = ps.AveragedOperatingMode.CCM
+    options.averaged_converter.envelope_policy = ps.AveragedEnvelopePolicy.Strict
+    options.averaged_converter.vin_source = "Vin"
+    options.averaged_converter.inductor = "L1"
+    options.averaged_converter.capacitor = "C1"
+    options.averaged_converter.load_resistor = "Rload"
+    options.averaged_converter.output_node = "out"
+    options.averaged_converter.duty = 0.2
+    options.averaged_converter.duty_min = 0.0
+    options.averaged_converter.duty_max = 0.95
+    options.averaged_converter.switching_frequency_hz = 100_000.0
+    options.averaged_converter.initial_inductor_current = 0.0
+    options.averaged_converter.initial_output_voltage = 0.0
+    options.averaged_converter.ccm_current_threshold = 5.0
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is False
+    assert result.diagnostic.name == "AveragedOutOfEnvelope"
+
+
+def test_averaged_boost_ccm_produces_step_up_output() -> None:
+    circuit = _build_boost_averaged_circuit(load_ohm=20.0)
+    options = ps.SimulationOptions()
+    options.tstart = 0.0
+    options.tstop = 8e-4
+    options.dt = 1e-6
+
+    options.averaged_converter.enabled = True
+    options.averaged_converter.topology = ps.AveragedConverterTopology.Boost
+    options.averaged_converter.operating_mode = ps.AveragedOperatingMode.CCM
+    options.averaged_converter.envelope_policy = ps.AveragedEnvelopePolicy.Warn
+    options.averaged_converter.vin_source = "Vin"
+    options.averaged_converter.inductor = "L1"
+    options.averaged_converter.capacitor = "C1"
+    options.averaged_converter.load_resistor = "Rload"
+    options.averaged_converter.output_node = "out"
+    options.averaged_converter.duty = 0.5
+    options.averaged_converter.duty_min = 0.0
+    options.averaged_converter.duty_max = 0.95
+    options.averaged_converter.switching_frequency_hz = 100_000.0
+    options.averaged_converter.initial_inductor_current = 0.0
+    options.averaged_converter.initial_output_voltage = 0.0
+    options.averaged_converter.ccm_current_threshold = 0.0
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is True
+    v_final = float(result.virtual_channels["Vavg(out)"][-1])
+    assert v_final > 12.0
+    assert v_final < 60.0
+
+
+def test_averaged_buck_boost_dcm_produces_negative_output() -> None:
+    circuit = _build_buck_boost_averaged_circuit(load_ohm=10.0)
+    options = ps.SimulationOptions()
+    options.tstart = 0.0
+    options.tstop = 1.5e-3
+    options.dt = 1e-6
+
+    options.averaged_converter.enabled = True
+    options.averaged_converter.topology = ps.AveragedConverterTopology.BuckBoost
+    options.averaged_converter.operating_mode = ps.AveragedOperatingMode.DCM
+    options.averaged_converter.envelope_policy = ps.AveragedEnvelopePolicy.Strict
+    options.averaged_converter.vin_source = "Vin"
+    options.averaged_converter.inductor = "L1"
+    options.averaged_converter.capacitor = "C1"
+    options.averaged_converter.load_resistor = "Rload"
+    options.averaged_converter.output_node = "out"
+    options.averaged_converter.duty = 0.35
+    options.averaged_converter.duty_min = 0.0
+    options.averaged_converter.duty_max = 0.95
+    options.averaged_converter.switching_frequency_hz = 100_000.0
+    options.averaged_converter.initial_inductor_current = 0.0
+    options.averaged_converter.initial_output_voltage = 0.0
+    options.averaged_converter.ccm_current_threshold = 5.0
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is True
+    v_final = float(result.virtual_channels["Vavg(out)"][-1])
+    assert v_final < -0.5
+    assert v_final > -8.0
+
+
+def test_averaged_auto_mode_uses_dcm_without_envelope_failure() -> None:
+    circuit = _build_boost_averaged_circuit(load_ohm=80.0)
+    options = ps.SimulationOptions()
+    options.tstart = 0.0
+    options.tstop = 8e-4
+    options.dt = 1e-6
+
+    options.averaged_converter.enabled = True
+    options.averaged_converter.topology = ps.AveragedConverterTopology.Boost
+    options.averaged_converter.operating_mode = ps.AveragedOperatingMode.Auto
+    options.averaged_converter.envelope_policy = ps.AveragedEnvelopePolicy.Strict
+    options.averaged_converter.vin_source = "Vin"
+    options.averaged_converter.inductor = "L1"
+    options.averaged_converter.capacitor = "C1"
+    options.averaged_converter.load_resistor = "Rload"
+    options.averaged_converter.output_node = "out"
+    options.averaged_converter.duty = 0.45
+    options.averaged_converter.duty_min = 0.0
+    options.averaged_converter.duty_max = 0.95
+    options.averaged_converter.switching_frequency_hz = 100_000.0
+    options.averaged_converter.initial_inductor_current = 0.0
+    options.averaged_converter.initial_output_voltage = 0.0
+    options.averaged_converter.ccm_current_threshold = 3.0
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is True
+    assert result.diagnostic.name == "None"
+    assert float(result.virtual_channels["Vavg(out)"][-1]) > 0.0
+
+
+def test_frequency_analysis_exposes_metadata_and_undefined_metric_reasons() -> None:
+    circuit = _build_rc_frequency_circuit()
+    options = ps.FrequencyAnalysisOptions()
+    options.enabled = True
+    options.mode = ps.FrequencyAnalysisMode.OpenLoopTransfer
+    options.anchor_mode = ps.FrequencyAnchorMode.DC
+    options.sweep_scale = ps.FrequencySweepScale.Logarithmic
+    options.f_start_hz = 10.0
+    options.f_stop_hz = 100000.0
+    options.points = 40
+    options.injection_current_amplitude = 1.0
+    options.perturbation_port.positive_node = "in"
+    options.output_port.positive_node = "out"
+
+    result = ps.Simulator(circuit).run_frequency_analysis(options)
+
+    assert result.success is True
+    assert "frequency_hz" in result.channel_metadata
+    assert "magnitude_db" in result.channel_metadata
+    assert result.channel_metadata["frequency_hz"].unit == "Hz"
+    assert result.channel_metadata["magnitude_db"].unit == "dB"
+    assert result.channel_metadata["magnitude_db"].domain == "frequency"
+
+    # Passive RC low-pass does not cross 0 dB or -180 deg in this range.
+    assert math.isnan(result.gain_crossover_hz)
+    assert math.isnan(result.phase_margin_deg)
+    assert result.gain_crossover_reason == ps.FrequencyMetricUndefinedReason.NoGainCrossover
+    assert result.phase_margin_reason == ps.FrequencyMetricUndefinedReason.NoGainCrossover
+    assert result.phase_crossover_reason == ps.FrequencyMetricUndefinedReason.NoPhaseCrossover
+    assert result.gain_margin_reason == ps.FrequencyMetricUndefinedReason.NoPhaseCrossover
+
+
+def test_frequency_analysis_auto_anchor_selects_dc_without_periodic_excitation() -> None:
+    circuit = _build_rc_frequency_circuit()
+    options = ps.FrequencyAnalysisOptions()
+    options.enabled = True
+    options.mode = ps.FrequencyAnalysisMode.OpenLoopTransfer
+    options.anchor_mode = ps.FrequencyAnchorMode.Auto
+    options.f_start_hz = 10.0
+    options.f_stop_hz = 1_000.0
+    options.points = 10
+    options.injection_current_amplitude = 1.0
+    options.perturbation_port.positive_node = "in"
+    options.output_port.positive_node = "out"
+
+    result = ps.Simulator(circuit).run_frequency_analysis(options)
+
+    assert result.success is True
+    assert result.anchor_mode_selected == ps.FrequencyAnchorMode.DC
+
+
+def test_frequency_analysis_auto_anchor_selects_periodic_with_sine_source() -> None:
+    circuit = _build_sine_resistive_frequency_circuit()
+    sim_options = ps.SimulationOptions()
+    sim_options.dt = 1e-4
+    sim_options.frequency_analysis.enabled = True
+    sim_options.frequency_analysis.mode = ps.FrequencyAnalysisMode.InputImpedance
+    sim_options.frequency_analysis.anchor_mode = ps.FrequencyAnchorMode.Auto
+    sim_options.frequency_analysis.f_start_hz = 10.0
+    sim_options.frequency_analysis.f_stop_hz = 1_000.0
+    sim_options.frequency_analysis.points = 6
+    sim_options.frequency_analysis.injection_current_amplitude = 1.0
+    sim_options.frequency_analysis.perturbation_port.positive_node = "out"
+    sim_options.periodic_options.max_iterations = 4
+    sim_options.periodic_options.tolerance = 1e-6
+    sim_options.periodic_options.relaxation = 1.0
+
+    result = ps.Simulator(circuit, sim_options).run_frequency_analysis()
+
+    assert result.success is True
+    assert result.anchor_mode_selected == ps.FrequencyAnchorMode.Periodic
+
+
+def test_frequency_analysis_periodic_anchor_requires_period_configuration() -> None:
+    circuit = _build_rc_frequency_circuit()
+    sim_options = ps.SimulationOptions()
+    sim_options.frequency_analysis.enabled = True
+    sim_options.frequency_analysis.mode = ps.FrequencyAnalysisMode.OpenLoopTransfer
+    sim_options.frequency_analysis.anchor_mode = ps.FrequencyAnchorMode.Periodic
+    sim_options.frequency_analysis.f_start_hz = 10.0
+    sim_options.frequency_analysis.f_stop_hz = 1_000.0
+    sim_options.frequency_analysis.points = 10
+    sim_options.frequency_analysis.injection_current_amplitude = 1.0
+    sim_options.frequency_analysis.perturbation_port.positive_node = "in"
+    sim_options.frequency_analysis.output_port.positive_node = "out"
+    sim_options.periodic_options.period = 0.0
+
+    result = ps.Simulator(circuit, sim_options).run_frequency_analysis()
+
+    assert result.success is False
+    assert result.diagnostic.name == "FrequencyUnsupportedConfiguration"
+    assert "periodic anchor period" in result.message.lower()
+
+
+def test_frequency_analysis_explicit_averaged_anchor_runs() -> None:
+    circuit = _build_sine_rc_frequency_circuit()
+    sim_options = ps.SimulationOptions()
+    sim_options.dt = 1e-3
+    sim_options.frequency_analysis.enabled = True
+    sim_options.frequency_analysis.mode = ps.FrequencyAnalysisMode.InputImpedance
+    sim_options.frequency_analysis.anchor_mode = ps.FrequencyAnchorMode.Averaged
+    sim_options.frequency_analysis.f_start_hz = 10.0
+    sim_options.frequency_analysis.f_stop_hz = 1_000.0
+    sim_options.frequency_analysis.points = 6
+    sim_options.frequency_analysis.injection_current_amplitude = 1.0
+    sim_options.frequency_analysis.perturbation_port.positive_node = "out"
+    sim_options.periodic_options.max_iterations = 1
+    sim_options.periodic_options.tolerance = 1e-12
+
+    result = ps.Simulator(circuit, sim_options).run_frequency_analysis()
+
+    assert result.success is True
+    assert result.anchor_mode_selected == ps.FrequencyAnchorMode.Averaged
+    assert "anchor=averaged" in result.message.lower()
+
+
+def test_frequency_analysis_auto_falls_back_from_periodic_to_averaged() -> None:
+    circuit = _build_sine_rc_frequency_circuit()
+    sim_options = ps.SimulationOptions()
+    sim_options.dt = 1e-3
+    # Force periodic pre-anchor to fail deterministically in one iteration.
+    sim_options.periodic_options.period = 7e-4
+    sim_options.periodic_options.max_iterations = 1
+    sim_options.periodic_options.tolerance = 1e-12
+    sim_options.periodic_options.relaxation = 1.0
+
+    sim_options.frequency_analysis.enabled = True
+    sim_options.frequency_analysis.mode = ps.FrequencyAnalysisMode.InputImpedance
+    sim_options.frequency_analysis.anchor_mode = ps.FrequencyAnchorMode.Auto
+    sim_options.frequency_analysis.sweep_scale = ps.FrequencySweepScale.Linear
+    sim_options.frequency_analysis.f_start_hz = 100.0
+    sim_options.frequency_analysis.f_stop_hz = 1_000.0
+    sim_options.frequency_analysis.points = 4
+    sim_options.frequency_analysis.injection_current_amplitude = 1.0
+    sim_options.frequency_analysis.perturbation_port.positive_node = "out"
+
+    result = ps.Simulator(circuit, sim_options).run_frequency_analysis()
+
+    assert result.success is True
+    assert result.anchor_mode_selected == ps.FrequencyAnchorMode.Averaged
+    assert "auto fallback applied" in result.message.lower()
+
+
+def test_procedural_frequency_analysis_matches_simulator_entrypoint() -> None:
+    circuit = _build_rc_frequency_circuit()
+    options = ps.FrequencyAnalysisOptions()
+    options.enabled = True
+    options.mode = ps.FrequencyAnalysisMode.InputImpedance
+    options.anchor_mode = ps.FrequencyAnchorMode.DC
+    options.sweep_scale = ps.FrequencySweepScale.Linear
+    options.f_start_hz = 100.0
+    options.f_stop_hz = 10000.0
+    options.points = 25
+    options.injection_current_amplitude = 0.5
+    options.perturbation_port.positive_node = "in"
+    options.perturbation_port.negative_node = "0"
+
+    class_result = ps.Simulator(circuit).run_frequency_analysis(options)
+    proc_result = ps.run_frequency_analysis(circuit, options)
+
+    assert class_result.success is True
+    assert proc_result.success is True
+    assert class_result.frequency_hz == proc_result.frequency_hz
+    assert class_result.magnitude_db == proc_result.magnitude_db
+    assert class_result.phase_deg == proc_result.phase_deg
+
+
+def test_frequency_analysis_failure_context_is_structured() -> None:
+    circuit = _build_rc_frequency_circuit()
+    options = ps.FrequencyAnalysisOptions()
+    options.enabled = True
+    options.mode = ps.FrequencyAnalysisMode.OpenLoopTransfer
+    options.anchor_mode = ps.FrequencyAnchorMode.DC
+    options.f_start_hz = 0.0
+    options.f_stop_hz = 1000.0
+    options.points = 10
+    options.injection_current_amplitude = 1.0
+    options.perturbation_port.positive_node = "in"
+    options.output_port.positive_node = "out"
+
+    result = ps.Simulator(circuit).run_frequency_analysis(options)
+
+    assert result.success is False
+    assert result.diagnostic.name == "FrequencyInvalidConfiguration"
+    assert result.failed_point_index == -1
+    assert math.isnan(result.failed_frequency_hz)
+
+
+def test_procedural_frequency_analysis_raise_on_failure_exposes_diagnostics() -> None:
+    circuit = _build_rc_frequency_circuit()
+    options = ps.FrequencyAnalysisOptions()
+    options.enabled = True
+    options.mode = ps.FrequencyAnalysisMode.OpenLoopTransfer
+    options.anchor_mode = ps.FrequencyAnchorMode.DC
+    options.f_start_hz = 0.0
+    options.f_stop_hz = 1000.0
+    options.points = 10
+    options.injection_current_amplitude = 1.0
+    options.perturbation_port.positive_node = "in"
+    options.output_port.positive_node = "out"
+
+    with pytest.raises(ps.FrequencyAnalysisError) as excinfo:
+        ps.run_frequency_analysis(circuit, options, raise_on_failure=True)
+
+    err = excinfo.value
+    assert err.diagnostic.name == "FrequencyInvalidConfiguration"
+    assert err.reason_code == "frequency_invalid_configuration"
+    assert err.failed_point_index == -1
+    assert math.isnan(err.failed_frequency_hz)
+    assert "frequency_invalid_configuration" in str(err)
+
+
+def test_procedural_frequency_analysis_default_does_not_raise() -> None:
+    circuit = _build_rc_frequency_circuit()
+    options = ps.FrequencyAnalysisOptions()
+    options.enabled = True
+    options.mode = ps.FrequencyAnalysisMode.OpenLoopTransfer
+    options.anchor_mode = ps.FrequencyAnchorMode.DC
+    options.f_start_hz = 0.0
+    options.f_stop_hz = 1000.0
+    options.points = 10
+    options.injection_current_amplitude = 1.0
+    options.perturbation_port.positive_node = "in"
+    options.output_port.positive_node = "out"
+
+    result = ps.run_frequency_analysis(circuit, options)
+    assert result.success is False
+    assert result.diagnostic.name == "FrequencyInvalidConfiguration"
 
 
 def test_yaml_parser_supports_legacy_si_suffix_words() -> None:

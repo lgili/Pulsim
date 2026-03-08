@@ -112,6 +112,9 @@ nav:
       - Backend C++ Contributor Guide: backend-cpp-contributor-guide.md
       - Netlist YAML Format: netlist-format.md
       - Frontend Control and Signals Contract: frontend-control-signals.md
+      - Frequency Analysis (AC Sweep): frequency-analysis-ac-sweep.md
+      - Waveform Post-Processing: post-processing.md
+      - Averaged Converter Modeling: averaged-converter-modeling.md
       - Electrothermal Workflow: electrothermal-workflow.md
       - Electrothermal Migration (Scalar to Datasheet): electrothermal-migration-scalar-to-datasheet.md
       - Examples and Results: examples-and-results.md

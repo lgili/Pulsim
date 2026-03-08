@@ -1,0 +1,27 @@
+schema: pulsim-kpi-gates-v1
+version: 1
+metrics:
+  convergence_success_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.0
+    required: true
+  averaged_pair_case_count:
+    direction: higher_is_better
+    max_regression_abs: 0.0
+    required: true
+  averaged_pair_fidelity_error:
+    direction: lower_is_better
+    max_regression_abs: 2.0
+    required: true
+  averaged_pair_runtime_speedup_min:
+    direction: higher_is_better
+    max_regression_abs: 90.0
+    required: true
+  module_order_mismatch_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
+  module_output_reallocation_p95:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true

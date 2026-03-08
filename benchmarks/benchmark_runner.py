@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import tempfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -46,6 +47,8 @@ class ScenarioResult:
     rms_error: Optional[float]
     message: str
     telemetry: Dict[str, Optional[float]]
+    mode: str = "transient"
+    phase_error_deg: Optional[float] = None
 
 
 def can_use_pulsim_python_backend() -> bool:
@@ -111,12 +114,23 @@ def infer_preferred_mode(scenario_name: str, scenario_override: Dict[str, Any]) 
     if isinstance(sim, dict):
         has_shooting = "shooting" in sim
         has_hb = "harmonic_balance" in sim or "hb" in sim
+        has_frequency = False
+        frequency_cfg = sim.get("frequency_analysis")
+        if isinstance(frequency_cfg, dict):
+            has_frequency = bool(frequency_cfg.get("enabled", False))
+        elif frequency_cfg is True:
+            has_frequency = True
+
+        if has_frequency and not has_shooting and not has_hb:
+            return "frequency_analysis"
         if has_shooting and not has_hb:
             return "shooting"
         if has_hb and not has_shooting:
             return "harmonic_balance"
 
     lowered = scenario_name.lower()
+    if "frequency" in lowered or "ac" in lowered:
+        return "frequency_analysis"
     if "shooting" in lowered:
         return "shooting"
     if "harmonic" in lowered or lowered == "hb":
@@ -147,6 +161,33 @@ def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
     # Benchmark suite targets deterministic comparisons by default.
     if "adaptive_timestep" not in simulation:
         simulation["adaptive_timestep"] = False
+
+
+def extract_averaged_pair_telemetry(benchmark_meta: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    """Extract deterministic averaged-pair telemetry tags from benchmark metadata."""
+    if not isinstance(benchmark_meta, dict):
+        return {}
+
+    averaged_pair = benchmark_meta.get("averaged_pair")
+    if not isinstance(averaged_pair, dict):
+        return {}
+
+    pair_id = averaged_pair.get("id")
+    if not isinstance(pair_id, str) or not pair_id.strip():
+        return {}
+
+    role_raw = averaged_pair.get("role")
+    role = str(role_raw).strip().lower() if role_raw is not None else ""
+    if role not in {"switching", "averaged"}:
+        return {}
+
+    pair_crc32 = float(zlib.crc32(pair_id.strip().encode("utf-8")) & 0xFFFFFFFF)
+    return {
+        "averaged_pair_case": 1.0,
+        "averaged_pair_group_crc32": pair_crc32,
+        "averaged_pair_role_switching": 1.0 if role == "switching" else 0.0,
+        "averaged_pair_role_averaged": 1.0 if role == "averaged" else 0.0,
+    }
 
 
 def run_pulsim(
@@ -202,6 +243,20 @@ def load_csv_series(path: Path) -> Tuple[List[float], Dict[str, List[float]]]:
     return times, series
 
 
+def load_frequency_csv_series(path: Path) -> Tuple[List[float], Dict[str, List[float]]]:
+    with open(path, "r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        frequencies: List[float] = []
+        series: Dict[str, List[float]] = {}
+        for row in reader:
+            frequencies.append(float(row["frequency_hz"]))
+            for key, value in row.items():
+                if key == "frequency_hz":
+                    continue
+                series.setdefault(key, []).append(float(value))
+    return frequencies, series
+
+
 def analytical_rc_step(times: List[float], v0: float, r: float, c: float) -> List[float]:
     tau = r * c
     return [v0 * (1.0 - math.exp(-t / tau)) for t in times]
@@ -233,6 +288,24 @@ def analytical_rlc_step(times: List[float], v0: float, r: float, l: float, c: fl
     return result
 
 
+def analytical_rc_lowpass_frequency(
+    frequencies_hz: List[float],
+    r: float,
+    c: float,
+) -> Tuple[List[float], List[float], List[float]]:
+    magnitude: List[float] = []
+    magnitude_db: List[float] = []
+    phase_deg: List[float] = []
+    for f_hz in frequencies_hz:
+        omega_rc = 2.0 * math.pi * f_hz * r * c
+        mag = 1.0 / math.sqrt(1.0 + omega_rc * omega_rc)
+        phase = -math.degrees(math.atan(omega_rc))
+        magnitude.append(mag)
+        magnitude_db.append(20.0 * math.log10(mag))
+        phase_deg.append(phase)
+    return magnitude, magnitude_db, phase_deg
+
+
 def compute_errors(values: List[float], reference: List[float]) -> Tuple[float, float]:
     if len(values) != len(reference):
         raise ValueError("Length mismatch between values and reference")
@@ -240,6 +313,29 @@ def compute_errors(values: List[float], reference: List[float]) -> Tuple[float, 
     max_error = max(errors) if errors else 0.0
     rms_error = math.sqrt(sum(err * err for err in errors) / len(errors)) if errors else 0.0
     return max_error, rms_error
+
+
+def validate_ac_analytical(
+    frequencies_hz: List[float],
+    series: Dict[str, List[float]],
+    model: str,
+    params: Dict[str, Any],
+) -> Tuple[float, float, float, float]:
+    if model != "rc_lowpass":
+        raise ValueError(f"Unknown AC analytical model: {model}")
+
+    if "magnitude_db" not in series:
+        raise ValueError("AC result is missing 'magnitude_db' column")
+    if "phase_deg" not in series:
+        raise ValueError("AC result is missing 'phase_deg' column")
+
+    r = parse_value(params["r"])
+    c = parse_value(params["c"])
+    _, ref_mag_db, ref_phase_deg = analytical_rc_lowpass_frequency(frequencies_hz, r, c)
+
+    mag_max, mag_rms = compute_errors(series["magnitude_db"], ref_mag_db)
+    phase_max, phase_rms = compute_errors(series["phase_deg"], ref_phase_deg)
+    return mag_max, mag_rms, phase_max, phase_rms
 
 
 def validate_analytical(times: List[float], values: List[float], model: str, params: Dict[str, Any]) -> Tuple[float, float]:
@@ -334,6 +430,63 @@ def apply_validation_window(
     return filtered_times, filtered_values
 
 
+def _error_diagnostic_name(exc: Exception) -> Optional[str]:
+    diagnostic = getattr(exc, "diagnostic", None)
+    if diagnostic is None:
+        return None
+    if isinstance(diagnostic, str):
+        value = diagnostic.strip()
+        return value or None
+    name = getattr(diagnostic, "name", None)
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    value = str(diagnostic).strip()
+    return value or None
+
+
+def _error_mode_name(exc: Exception) -> Optional[str]:
+    mode = getattr(exc, "mode", None)
+    if mode is None:
+        return None
+    if isinstance(mode, str):
+        value = mode.strip()
+        return value or None
+    name = getattr(mode, "name", None)
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    value = str(mode).strip()
+    return value or None
+
+
+def _matches_expected_failure(
+    expected_failure: Any,
+    *,
+    diagnostic: Optional[str],
+    mode: Optional[str],
+    message: str,
+) -> bool:
+    if not isinstance(expected_failure, dict):
+        return False
+
+    expected_diagnostic = expected_failure.get("diagnostic")
+    if expected_diagnostic:
+        if not diagnostic or str(expected_diagnostic).strip() != diagnostic:
+            return False
+
+    expected_mode = expected_failure.get("mode")
+    if expected_mode:
+        if not mode or str(expected_mode).strip() != mode:
+            return False
+
+    contains = expected_failure.get("message_contains")
+    if contains:
+        text = str(message).lower()
+        if str(contains).lower() not in text:
+            return False
+
+    return True
+
+
 def run_benchmarks(
     benchmarks_path: Path,
     output_dir: Path,
@@ -347,12 +500,15 @@ def run_benchmarks(
     manifest = load_yaml(benchmarks_path)
     scenarios = manifest.get("scenarios", {})
     results: List[ScenarioResult] = []
+    output_index: Dict[Tuple[str, str], Path] = {}
 
     for entry in manifest.get("benchmarks", []):
         circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
         netlist = load_yaml(circuit_path)
-        bench_meta = netlist.get("benchmark", {})
-        benchmark_id = bench_meta.get("id", circuit_path.stem)
+        base_bench_meta = netlist.get("benchmark", {})
+        if not isinstance(base_bench_meta, dict):
+            base_bench_meta = {}
+        benchmark_id = base_bench_meta.get("id", circuit_path.stem)
         if selected and benchmark_id not in selected:
             continue
 
@@ -368,6 +524,9 @@ def run_benchmarks(
         for scenario_name in scenario_names:
             scenario_override = scenarios.get(scenario_name, {})
             scenario_netlist = deep_merge(netlist, scenario_override)
+            scenario_bench_meta = scenario_netlist.get("benchmark", base_bench_meta)
+            if not isinstance(scenario_bench_meta, dict):
+                scenario_bench_meta = base_bench_meta
             preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
             normalize_periodic_mode(scenario_netlist, preferred_mode)
             apply_runtime_defaults(scenario_netlist)
@@ -410,6 +569,12 @@ def run_benchmarks(
                 with open(scenario_file, "w", encoding="utf-8") as handle:
                     yaml.safe_dump(scenario_netlist, handle, sort_keys=False)
 
+                expectations = scenario_bench_meta.get("expectations", {})
+                if not isinstance(expectations, dict):
+                    expectations = {}
+                expected_failure = expectations.get("expected_failure")
+                averaged_pair_telemetry = extract_averaged_pair_telemetry(scenario_bench_meta)
+
                 try:
                     run_result = run_pulsim(
                         scenario_file,
@@ -418,15 +583,48 @@ def run_benchmarks(
                         use_initial_conditions=use_initial_conditions,
                     )
                 except Exception as exc:
+                    diagnostic = _error_diagnostic_name(exc)
+                    mode = _error_mode_name(exc) or preferred_mode or "unknown"
+                    if _matches_expected_failure(
+                        expected_failure,
+                        diagnostic=diagnostic,
+                        mode=mode,
+                        message=str(exc),
+                    ):
+                        telemetry: Dict[str, Optional[float]] = {
+                            "python_backend": 1.0,
+                            "expected_failure_matched": 1.0,
+                            "expected_failure_case": 1.0,
+                        }
+                        telemetry.update(averaged_pair_telemetry)
+                        results.append(
+                            ScenarioResult(
+                                benchmark_id=benchmark_id,
+                                scenario=scenario_name,
+                                mode=mode,
+                                status="passed",
+                                runtime_s=0.0,
+                                steps=0,
+                                max_error=None,
+                                rms_error=None,
+                                phase_error_deg=None,
+                                message=f"Expected failure matched: {exc}",
+                                telemetry=telemetry,
+                            )
+                        )
+                        continue
+
                     results.append(
                         ScenarioResult(
                             benchmark_id=benchmark_id,
                             scenario=scenario_name,
+                            mode=_error_mode_name(exc) or preferred_mode or "unknown",
                             status="failed",
                             runtime_s=0.0,
                             steps=0,
                             max_error=None,
                             rms_error=None,
+                            phase_error_deg=None,
                             message=str(exc),
                             telemetry={},
                         )
@@ -436,13 +634,17 @@ def run_benchmarks(
                 status = "passed"
                 max_error = None
                 rms_error = None
+                phase_error_deg = None
                 message = ""
+                mode = run_result.mode
                 runtime_s = run_result.runtime_s
                 steps = run_result.steps
                 telemetry = dict(run_result.telemetry)
                 telemetry["steps"] = float(steps)
                 telemetry["runtime_s"] = float(runtime_s)
                 telemetry["python_backend"] = 1.0
+                telemetry.update(averaged_pair_telemetry)
+                output_index[(benchmark_id, scenario_name)] = output_path
                 for key in ("newton_iterations", "timestep_rejections", "linear_fallbacks"):
                     if telemetry.get(key) is None:
                         telemetry[key] = 0.0
@@ -467,13 +669,49 @@ def run_benchmarks(
                         except (TypeError, ValueError):
                             pass
 
-                validation = bench_meta.get("validation", {})
+                validation = scenario_bench_meta.get("validation", {})
+                if not isinstance(validation, dict):
+                    validation = {}
                 validation_type = validation.get("type", "none")
                 observable = validation.get("observable")
-                expectations = bench_meta.get("expectations", {})
                 max_threshold = coerce_optional_float(expectations.get("metrics", {}).get("max_error"))
+                phase_threshold = coerce_optional_float(
+                    expectations.get("metrics", {}).get("phase_error_deg")
+                )
 
-                if validation_type != "none" and not observable:
+                if validation_type == "ac_analytical":
+                    try:
+                        frequencies, freq_series = load_frequency_csv_series(output_path)
+                        max_error, rms_error, phase_error_deg, phase_rms_error = validate_ac_analytical(
+                            frequencies,
+                            freq_series,
+                            validation.get("model", ""),
+                            validation.get("params", {}),
+                        )
+                        telemetry["ac_sweep_case"] = 1.0
+                        telemetry["ac_sweep_mag_error"] = float(max_error)
+                        telemetry["ac_sweep_mag_rms_error"] = float(rms_error)
+                        telemetry["ac_sweep_phase_error"] = float(phase_error_deg)
+                        telemetry["ac_sweep_phase_rms_error"] = float(phase_rms_error)
+
+                        if max_threshold is not None and max_error is not None and max_error > max_threshold:
+                            status = "failed"
+                            message = f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                        if (
+                            status == "passed"
+                            and phase_threshold is not None
+                            and phase_error_deg is not None
+                            and phase_error_deg > phase_threshold
+                        ):
+                            status = "failed"
+                            message = (
+                                f"phase_error_deg {phase_error_deg:.6e} > "
+                                f"threshold {phase_threshold:.6e}"
+                            )
+                    except Exception as exc:
+                        status = "failed"
+                        message = str(exc)
+                elif validation_type != "none" and not observable:
                     status = "failed"
                     message = "Missing validation observable"
                 elif validation_type != "none":
@@ -537,19 +775,77 @@ def run_benchmarks(
                                                 message = (
                                                     f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
                                                 )
+                            elif validation_type == "paired_reference":
+                                pair_benchmark_id = validation.get("pair_benchmark_id")
+                                pair_scenario = validation.get("pair_scenario", scenario_name)
+                                pair_observable = validation.get("pair_observable", observable)
+                                if (
+                                    not isinstance(pair_benchmark_id, str)
+                                    or not pair_benchmark_id.strip()
+                                ):
+                                    status = "failed"
+                                    message = "Missing validation pair_benchmark_id"
+                                elif not isinstance(pair_scenario, str) or not pair_scenario.strip():
+                                    status = "failed"
+                                    message = "Invalid validation pair_scenario"
+                                elif not isinstance(pair_observable, str) or not pair_observable.strip():
+                                    status = "failed"
+                                    message = "Invalid validation pair_observable"
+                                else:
+                                    pair_key = (pair_benchmark_id.strip(), pair_scenario.strip())
+                                    pair_output_path = output_index.get(pair_key)
+                                    if pair_output_path is None or not pair_output_path.exists():
+                                        status = "failed"
+                                        message = (
+                                            "Missing paired reference output for "
+                                            f"{pair_key[0]}/{pair_key[1]}"
+                                        )
+                                    else:
+                                        max_error, rms_error, message = validate_reference(
+                                            times_eval,
+                                            values_eval,
+                                            pair_output_path,
+                                            pair_observable.strip(),
+                                        )
+                                        telemetry["paired_reference_case"] = 1.0
+                                        telemetry["paired_reference_group_crc32"] = float(
+                                            zlib.crc32(
+                                                f"{pair_key[0]}::{pair_key[1]}".encode("utf-8")
+                                            )
+                                            & 0xFFFFFFFF
+                                        )
+                                        if max_error is None:
+                                            status = "failed"
+                                        elif max_threshold is not None:
+                                            if max_error <= max_threshold:
+                                                status = "passed"
+                                            else:
+                                                status = "failed"
+                                                message = (
+                                                    f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                                                )
                             else:
                                 status = "failed"
                                 message = f"Unsupported validation type: {validation_type}"
+
+                if max_error is not None:
+                    telemetry["validation_max_error"] = float(max_error)
+                if rms_error is not None:
+                    telemetry["validation_rms_error"] = float(rms_error)
+                if phase_error_deg is not None:
+                    telemetry["validation_phase_error_deg"] = float(phase_error_deg)
 
                 results.append(
                     ScenarioResult(
                         benchmark_id=benchmark_id,
                         scenario=scenario_name,
+                        mode=mode,
                         status=status,
                         runtime_s=runtime_s,
                         steps=steps,
                         max_error=max_error,
                         rms_error=rms_error,
+                        phase_error_deg=phase_error_deg,
                         message=message,
                         telemetry=telemetry,
                     )
@@ -569,22 +865,26 @@ def write_results(output_dir: Path, results: List[ScenarioResult]) -> None:
         writer.writerow([
             "benchmark_id",
             "scenario",
+            "mode",
             "status",
             "runtime_s",
             "steps",
             "max_error",
             "rms_error",
+            "phase_error_deg",
             "message",
         ])
         for item in results:
             writer.writerow([
                 item.benchmark_id,
                 item.scenario,
+                item.mode,
                 item.status,
                 f"{item.runtime_s:.6f}",
                 item.steps,
                 "" if item.max_error is None else f"{item.max_error:.6e}",
                 "" if item.rms_error is None else f"{item.rms_error:.6e}",
+                "" if item.phase_error_deg is None else f"{item.phase_error_deg:.6e}",
                 item.message,
             ])
 
