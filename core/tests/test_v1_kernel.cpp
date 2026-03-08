@@ -740,6 +740,217 @@ TEST_CASE("v1 auto control scheduler samples PI at PWM period",
     CHECK(pi[20] > pi[15]);                         // 200 us: update
 }
 
+namespace {
+
+Circuit build_closed_loop_buck_for_control_regression(bool use_cblock_controller,
+                                                      bool add_disconnected_cblock,
+                                                      bool ghost_node_first = false) {
+    Circuit circuit;
+    const auto n_ghost = ghost_node_first ? circuit.add_node("ghost") : Index{-1};
+    const auto n_vin = circuit.add_node("vin");
+    const auto n_ref = circuit.add_node("vref");
+    const auto n_sw = circuit.add_node("sw");
+    const auto n_out = circuit.add_node("vout");
+    const auto n_ghost_late = ghost_node_first ? n_ghost : circuit.add_node("ghost");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_vin, gnd, 12.0);
+    circuit.add_voltage_source("Vref", n_ref, gnd, 6.0);
+    MOSFET::Params m1_params{};
+    m1_params.vth = 3.0;
+    m1_params.kp = 0.35;
+    m1_params.lambda = 0.01;
+    m1_params.g_off = 1e-8;
+    circuit.add_mosfet("M1", gnd, n_vin, n_sw, m1_params);
+    circuit.add_diode("D1", gnd, n_sw, 350.0, 1e-9);
+    circuit.add_inductor("L1", n_sw, n_out, 220e-6, 0.0);
+    circuit.add_capacitor("Cout", n_out, gnd, 220e-6, 0.0);
+    circuit.add_resistor("Rload", n_out, gnd, 8.0);
+    circuit.add_virtual_component("voltage_probe", "Xout", {n_out, gnd}, {}, {});
+
+    if (use_cblock_controller) {
+        circuit.add_virtual_component(
+            "c_block", "CB1", {n_ref, n_out},
+            {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
+            {{"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH}});
+    } else {
+        // PI configured as constant duty reference (equivalent to dummy C-Block output=0.5).
+        circuit.add_virtual_component(
+            "pi_controller", "PI1", {n_ref, n_out, gnd},
+            {{"kp", 0.0}, {"ki", 0.0}, {"output_min", 0.5}, {"output_max", 0.5}, {"anti_windup", 1.0}},
+            {});
+    }
+
+    if (add_disconnected_cblock) {
+        // This block is intentionally disconnected from duty routing.
+        // It must not perturb electrical convergence.
+        circuit.add_virtual_component(
+            "c_block", "CB_GHOST", {n_ghost_late},
+            {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
+            {{"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH}});
+    }
+
+    circuit.add_virtual_component(
+        "pwm_generator", "PWM1", {gnd},
+        {{"frequency", 10e3}, {"duty", 0.5}, {"duty_min", 0.0}, {"duty_max", 0.95}},
+        {{"duty_from_channel", use_cblock_controller ? "CB1" : "PI1"}, {"target_component", "M1"}});
+
+    return circuit;
+}
+
+Circuit build_closed_loop_buck_with_dynamic_pi(bool add_disconnected_cblock,
+                                               bool ghost_node_first = false) {
+    Circuit circuit;
+    const auto n_ghost = ghost_node_first ? circuit.add_node("ghost") : Index{-1};
+    const auto n_vin = circuit.add_node("vin");
+    const auto n_ref = circuit.add_node("vref");
+    const auto n_sw = circuit.add_node("sw");
+    const auto n_out = circuit.add_node("vout");
+    const auto n_ghost_late = ghost_node_first ? n_ghost : circuit.add_node("ghost");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_vin, gnd, 12.0);
+    circuit.add_voltage_source("Vref", n_ref, gnd, 6.0);
+
+    MOSFET::Params m1_params{};
+    m1_params.vth = 3.0;
+    m1_params.kp = 0.35;
+    m1_params.lambda = 0.01;
+    m1_params.g_off = 1e-8;
+    circuit.add_mosfet("M1", gnd, n_vin, n_sw, m1_params);
+
+    circuit.add_diode("D1", gnd, n_sw, 350.0, 1e-9);
+    circuit.add_inductor("L1", n_sw, n_out, 220e-6, 0.0);
+    circuit.add_capacitor("Cout", n_out, gnd, 220e-6, 0.0);
+    circuit.add_resistor("Rload", n_out, gnd, 8.0);
+    circuit.add_virtual_component("voltage_probe", "Xout", {n_out, gnd}, {}, {});
+
+    if (add_disconnected_cblock) {
+        circuit.add_virtual_component(
+            "c_block", "CB_GHOST", {n_ghost_late},
+            {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
+            {{"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH}});
+    }
+
+    circuit.add_virtual_component(
+        "pi_controller", "PI1", {n_ref, n_out, gnd},
+        {{"kp", 0.08}, {"ki", 100.0}, {"output_min", 0.0}, {"output_max", 0.95}, {"anti_windup", 1.0}},
+        {});
+    circuit.add_virtual_component(
+        "pwm_generator", "PWM1", {gnd},
+        {{"frequency", 10e3}, {"duty", 0.5}, {"duty_min", 0.0}, {"duty_max", 0.95}},
+        {{"duty_from_channel", "PI1"}, {"target_component", "M1"}});
+
+    return circuit;
+}
+
+SimulationOptions closed_loop_buck_regression_options(const Circuit& circuit) {
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 0.4e-3;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 5e-6;
+    opts.step_mode = TransientStepMode::Variable;
+    opts.step_mode_explicit = true;
+    opts.enable_events = true;
+    opts.enable_losses = false;
+    opts.control_mode = ControlUpdateMode::Auto;
+    opts.control_sample_time = 0.0;
+    opts.max_step_retries = 8;
+    opts.formulation_mode = FormulationMode::ProjectedWrapper;
+    opts.direct_formulation_fallback = true;
+    opts.newton_options.max_iterations = 99;
+    opts.newton_options.enable_limiting = true;
+    opts.newton_options.max_voltage_step = 2.0;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+    return opts;
+}
+
+}  // namespace
+
+TEST_CASE("v1 buck PI and equivalent C_BLOCK controller both converge",
+          "[v1][mixed-domain][control][c_block][converter][regression]") {
+    Circuit pi_circuit = build_closed_loop_buck_for_control_regression(false, false);
+    const SimulationOptions pi_opts = closed_loop_buck_regression_options(pi_circuit);
+    const auto pi_result =
+        Simulator(pi_circuit, pi_opts).run_transient(pi_circuit.initial_state());
+
+    REQUIRE(pi_result.success);
+    REQUIRE(pi_result.virtual_channels.contains("Xout"));
+    const auto& vout_pi = pi_result.virtual_channels.at("Xout");
+    REQUIRE_FALSE(vout_pi.empty());
+
+    Circuit cblock_circuit = build_closed_loop_buck_for_control_regression(true, false);
+    const SimulationOptions cblock_opts = closed_loop_buck_regression_options(cblock_circuit);
+    const auto cblock_result =
+        Simulator(cblock_circuit, cblock_opts).run_transient(cblock_circuit.initial_state());
+
+    REQUIRE(cblock_result.success);
+    REQUIRE(cblock_result.virtual_channels.contains("Xout"));
+    REQUIRE(cblock_result.virtual_channels.contains("CB1"));
+    const auto& vout_cb = cblock_result.virtual_channels.at("Xout");
+    const auto& duty_cb = cblock_result.virtual_channels.at("CB1");
+    REQUIRE_FALSE(vout_cb.empty());
+    REQUIRE_FALSE(duty_cb.empty());
+
+    CHECK(duty_cb.back() == Approx(0.5).margin(1e-12));
+    CHECK(std::abs(vout_cb.back() - vout_pi.back()) < 0.5);
+}
+
+TEST_CASE("v1 disconnected C_BLOCK does not perturb switched buck convergence",
+          "[v1][mixed-domain][control][c_block][converter][regression]") {
+    Circuit baseline_circuit = build_closed_loop_buck_for_control_regression(false, false, true);
+    const SimulationOptions baseline_opts = closed_loop_buck_regression_options(baseline_circuit);
+    const auto baseline_result =
+        Simulator(baseline_circuit, baseline_opts).run_transient(baseline_circuit.initial_state());
+    REQUIRE(baseline_result.success);
+    REQUIRE(baseline_result.virtual_channels.contains("Xout"));
+    const auto& vout_baseline = baseline_result.virtual_channels.at("Xout");
+    REQUIRE_FALSE(vout_baseline.empty());
+
+    Circuit with_disconnected = build_closed_loop_buck_for_control_regression(false, true, true);
+    const SimulationOptions disconnected_opts = closed_loop_buck_regression_options(with_disconnected);
+    const auto disconnected_result =
+        Simulator(with_disconnected, disconnected_opts).run_transient(with_disconnected.initial_state());
+
+    REQUIRE(disconnected_result.success);
+    REQUIRE(disconnected_result.virtual_channels.contains("Xout"));
+    REQUIRE(disconnected_result.virtual_channels.contains("CB_GHOST"));
+    const auto& vout_with_ghost = disconnected_result.virtual_channels.at("Xout");
+    REQUIRE_FALSE(vout_with_ghost.empty());
+
+    CHECK(std::abs(vout_with_ghost.back() - vout_baseline.back()) < 0.5);
+}
+
+TEST_CASE("v1 disconnected C_BLOCK does not perturb dynamic PI buck convergence",
+          "[v1][mixed-domain][control][c_block][converter][regression]") {
+    Circuit baseline_circuit = build_closed_loop_buck_with_dynamic_pi(false, true);
+    SimulationOptions baseline_opts = closed_loop_buck_regression_options(baseline_circuit);
+    baseline_opts.tstop = 0.5e-3;
+    const auto baseline_result =
+        Simulator(baseline_circuit, baseline_opts).run_transient(baseline_circuit.initial_state());
+    REQUIRE(baseline_result.success);
+    REQUIRE(baseline_result.virtual_channels.contains("Xout"));
+    const auto& vout_baseline = baseline_result.virtual_channels.at("Xout");
+    REQUIRE_FALSE(vout_baseline.empty());
+
+    Circuit with_disconnected = build_closed_loop_buck_with_dynamic_pi(true, true);
+    SimulationOptions disconnected_opts = closed_loop_buck_regression_options(with_disconnected);
+    disconnected_opts.tstop = 0.5e-3;
+    const auto disconnected_result =
+        Simulator(with_disconnected, disconnected_opts).run_transient(with_disconnected.initial_state());
+
+    REQUIRE(disconnected_result.success);
+    REQUIRE(disconnected_result.virtual_channels.contains("Xout"));
+    REQUIRE(disconnected_result.virtual_channels.contains("CB_GHOST"));
+    const auto& vout_with_ghost = disconnected_result.virtual_channels.at("Xout");
+    REQUIRE_FALSE(vout_with_ghost.empty());
+
+    CHECK(std::abs(vout_with_ghost.back() - vout_baseline.back()) < 0.5);
+}
+
 TEST_CASE("v1 control scheduler updates c_block channels",
           "[v1][mixed-domain][control][c_block][regression]") {
     Circuit circuit;

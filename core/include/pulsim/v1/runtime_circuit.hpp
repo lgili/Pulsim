@@ -1856,6 +1856,15 @@ public:
             }, devices_[i]);
         }
 
+        // Nodes introduced only by virtual/control wiring (no electrical stamps)
+        // are anchored to ground to keep the Jacobian non-singular.
+        for (Index node = 0; node < num_nodes(); ++node) {
+            if (!is_unstamped_node(node)) {
+                continue;
+            }
+            triplets.emplace_back(node, node, unstamped_node_leak_g_);
+        }
+
         G.setFromTriplets(triplets.begin(), triplets.end());
     }
 
@@ -1899,6 +1908,14 @@ public:
 
         stamp_coupled_inductor_terms(triplets, f, x);
 
+        for (Index node = 0; node < num_nodes(); ++node) {
+            if (!is_unstamped_node(node)) {
+                continue;
+            }
+            triplets.emplace_back(node, node, unstamped_node_leak_g_);
+            f[node] += unstamped_node_leak_g_ * x[node];
+        }
+
         J.setFromTriplets(triplets.begin(), triplets.end());
     }
 
@@ -1934,6 +1951,13 @@ public:
         }
 
         stamp_coupled_inductor_terms(null_triplets, f, x);
+
+        for (Index node = 0; node < num_nodes(); ++node) {
+            if (!is_unstamped_node(node)) {
+                continue;
+            }
+            f[node] += unstamped_node_leak_g_ * x[node];
+        }
     }
 
     /// Assemble residual for harmonic balance using direct time-derivatives
@@ -2027,6 +2051,13 @@ public:
         }
 
         stamp_coupled_inductor_hb_terms(f, x, di_dt_branches);
+
+        for (Index node = 0; node < num_nodes(); ++node) {
+            if (!is_unstamped_node(node)) {
+                continue;
+            }
+            f[node] += unstamped_node_leak_g_ * x[node];
+        }
     }
 
     /// Check if circuit has nonlinear devices
@@ -2203,6 +2234,15 @@ private:
         const auto node_u = static_cast<std::size_t>(node);
         return node_u < stamped_node_ref_count_.size() &&
                stamped_node_ref_count_[node_u] <= 1;
+    }
+
+    [[nodiscard]] bool is_unstamped_node(Index node) const {
+        if (node < 0) {
+            return false;
+        }
+        const auto node_u = static_cast<std::size_t>(node);
+        return node_u >= stamped_node_ref_count_.size() ||
+               stamped_node_ref_count_[node_u] == 0;
     }
 
     [[nodiscard]] const DeviceConnection* find_connection(std::string_view name) const {
@@ -2840,6 +2880,8 @@ private:
     std::vector<ResistorStamp> resistor_cache_;
     std::unordered_map<std::string, Index, TransparentStringHash, TransparentStringEqual> node_map_;
     std::vector<std::string> node_names_;
+    // Stabilization conductance used only for nodes that have zero electrical stamps.
+    static constexpr Real unstamped_node_leak_g_ = 1.0;
     Index num_branches_ = 0;
     Real timestep_ = 1e-6;
     Integrator integration_method_ = Integrator::Trapezoidal;

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import statistics
+import tempfile
 from pathlib import Path
 
 import pulsim as ps
@@ -189,6 +190,91 @@ components:
     sim = ps.Simulator(circuit, options)
     result = sim.run_transient()
     assert result.success
+
+
+def test_yaml_virtual_component_first_does_not_break_switched_convergence() -> None:
+    content = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 4e-4
+  dt: 1e-6
+  step_mode: variable
+  enable_events: true
+  enable_losses: false
+  max_step_retries: 8
+  formulation: projected_wrapper
+  direct_formulation_fallback: true
+  newton:
+    max_iterations: 99
+    enable_limiting: true
+    max_voltage_step: 2.0
+components:
+  - type: voltage_probe
+    name: Vghost
+    nodes: [ghost_control_node, 0]
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: voltage_source
+    name: Vref
+    nodes: [vref, 0]
+    waveform: {type: dc, value: 6.0}
+  - type: mosfet
+    name: M1
+    nodes: [0, vin, sw]
+    vth: 3.0
+    kp: 0.35
+    lambda: 0.01
+    g_off: 1e-8
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    g_on: 350.0
+    g_off: 1e-9
+  - type: inductor
+    name: L1
+    nodes: [sw, vout]
+    value: 220u
+    ic: 0.0
+  - type: capacitor
+    name: Cout
+    nodes: [vout, 0]
+    value: 220u
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [vout, 0]
+    value: 8.0
+  - type: pi_controller
+    name: PI1
+    nodes: [vref, vout, 0]
+    kp: 0.08
+    ki: 100.0
+    output_min: 0.0
+    output_max: 0.95
+    anti_windup: 1.0
+  - type: pwm_generator
+    name: PWM1
+    nodes: [0]
+    frequency: 10000.0
+    duty: 0.5
+    duty_min: 0.0
+    duty_max: 0.95
+    duty_from_channel: PI1
+    target_component: M1
+"""
+    parser = ps.YamlParser()
+    circuit, options = parser.load_string(content)
+    assert parser.errors == []
+
+    result = ps.Simulator(circuit, options).run_transient(circuit.initial_state())
+
+    assert result.success is True
+    assert result.backend_telemetry.failure_reason == ""
+    assert abs(float(result.time[-1]) - float(options.tstop)) <= 1e-12
 
 
 def test_yaml_parser_strict_mode_reports_unknown_field() -> None:
@@ -1809,6 +1895,142 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     component_total_loss = sum(float(item.total_loss) for item in component_rows.values())
     component_loss_denom = max(abs(component_total_loss), abs(float(loss_summary.total_loss)), 1e-12)
     assert abs(component_total_loss - float(loss_summary.total_loss)) / component_loss_denom < 1e-9
+
+
+def test_closed_loop_buck_gui_example_cblock_pi_matches_native_pi() -> None:
+    example_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "09_buck_closed_loop_loss_thermal_validation_backend.yaml"
+    )
+
+    parser = ps.YamlParser()
+    circuit_pi, options_pi = parser.load(str(example_path))
+    assert parser.errors == []
+    options_pi.newton_options.num_nodes = int(circuit_pi.num_nodes())
+    options_pi.newton_options.num_branches = int(circuit_pi.num_branches())
+    result_pi = ps.Simulator(circuit_pi, options_pi).run_transient(circuit_pi.initial_state())
+    assert result_pi.success
+
+    compiler = ps.detect_compiler()
+    if compiler is None:
+        pytest.skip("No C compiler available for C_BLOCK PI equivalence check")
+
+    c_source = r"""
+#include "pulsim/v1/cblock_abi.h"
+#include <stdlib.h>
+
+#define KP 0.08
+#define KI 100.0
+#define OUTPUT_MIN 0.0
+#define OUTPUT_MAX 0.95
+#define ANTI_WINDUP 1
+
+struct PulsimCBlockCtx {
+    double integral;
+    double t_prev;
+};
+
+static double clamp(double v, double lo, double hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+PULSIM_CBLOCK_EXPORT int pulsim_cblock_abi_version = PULSIM_CBLOCK_ABI_VERSION;
+
+PULSIM_CBLOCK_EXPORT int pulsim_cblock_init(PulsimCBlockCtx** ctx_out, const PulsimCBlockInfo* info) {
+    (void)info;
+    struct PulsimCBlockCtx* s = (struct PulsimCBlockCtx*)malloc(sizeof(struct PulsimCBlockCtx));
+    if (!s) return -1;
+    s->integral = 0.0;
+    s->t_prev = -1.0;
+    *ctx_out = (PulsimCBlockCtx*)s;
+    return 0;
+}
+
+PULSIM_CBLOCK_EXPORT int pulsim_cblock_step(
+    PulsimCBlockCtx* ctx, double t, double dt, const double* in, double* out) {
+    struct PulsimCBlockCtx* s = (struct PulsimCBlockCtx*)ctx;
+    const double error = in[0];
+    const double effective_dt = (s->t_prev < 0.0) ? 0.0 : ((dt > 0.0) ? dt : 0.0);
+
+    double integral = s->integral + error * effective_dt;
+    double u = KP * error + KI * integral;
+    const double limited = clamp(u, OUTPUT_MIN, OUTPUT_MAX);
+
+    if (ANTI_WINDUP && KI != 0.0 && effective_dt > 0.0 && limited != u) {
+        integral = (limited - KP * error) / KI;
+        u = limited;
+    } else {
+        u = limited;
+    }
+
+    s->integral = integral;
+    s->t_prev = t;
+    out[0] = u;
+    return 0;
+}
+
+PULSIM_CBLOCK_EXPORT void pulsim_cblock_destroy(PulsimCBlockCtx* ctx) {
+    free(ctx);
+}
+"""
+
+    with tempfile.TemporaryDirectory(prefix="pulsim_pi_cblock_test_") as temp_dir:
+        lib_path = ps.compile_cblock(
+            c_source,
+            output_dir=Path(temp_dir),
+            name="pi_backend_equiv",
+            compiler=compiler,
+        )
+
+        text = example_path.read_text(encoding="utf-8")
+        pi_start = text.find("  - type: pi_controller\n")
+        assert pi_start >= 0
+        pwm_start = text.find("  - type: pwm_generator\n", pi_start)
+        assert pwm_start >= 0
+
+        cblock_block = (
+            "  - type: c_block\n"
+            "    name: CB1\n"
+            "    nodes: [vref, vout]\n"
+            "    n_inputs: 1\n"
+            "    n_outputs: 1\n"
+            f"    lib_path: {Path(lib_path).as_posix()}\n\n"
+        )
+        cblock_yaml = text[:pi_start] + cblock_block + text[pwm_start:]
+        cblock_yaml = cblock_yaml.replace("duty_from_channel: PI1", "duty_from_channel: CB1", 1)
+
+        parser_cb = ps.YamlParser()
+        circuit_cb, options_cb = parser_cb.load_string(cblock_yaml)
+        assert parser_cb.errors == []
+        options_cb.newton_options.num_nodes = int(circuit_cb.num_nodes())
+        options_cb.newton_options.num_branches = int(circuit_cb.num_branches())
+        result_cb = ps.Simulator(circuit_cb, options_cb).run_transient(circuit_cb.initial_state())
+        assert result_cb.success
+
+    assert len(result_pi.time) == len(result_cb.time)
+    assert len(result_pi.virtual_channels["Xout"]) == len(result_cb.virtual_channels["Xout"])
+    assert len(result_pi.virtual_channels["PI1"]) == len(result_cb.virtual_channels["CB1"])
+    assert len(result_pi.virtual_channels["PWM1.duty"]) == len(result_cb.virtual_channels["PWM1.duty"])
+
+    vout_diff = max(
+        abs(float(a) - float(b))
+        for a, b in zip(result_pi.virtual_channels["Xout"], result_cb.virtual_channels["Xout"])
+    )
+    ctrl_diff = max(
+        abs(float(a) - float(b))
+        for a, b in zip(result_pi.virtual_channels["PI1"], result_cb.virtual_channels["CB1"])
+    )
+    duty_diff = max(
+        abs(float(a) - float(b))
+        for a, b in zip(result_pi.virtual_channels["PWM1.duty"], result_cb.virtual_channels["PWM1.duty"])
+    )
+
+    assert vout_diff < 1e-9
+    assert ctrl_diff < 1e-12
+    assert duty_diff < 1e-12
 
 
 def test_closed_loop_buck_electrothermal_avoids_output_reallocations() -> None:
