@@ -2634,6 +2634,94 @@ def test_simulation_result_includes_virtual_channels() -> None:
     assert result.virtual_channel_metadata["VP"].domain == "instrumentation"
 
 
+def test_collect_result_channels_merges_electrical_and_control_channels() -> None:
+    circuit = ps.Circuit()
+    n_ref = circuit.add_node("ref")
+    n_fb = circuit.add_node("fb")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vref", n_ref, gnd, 5.0)
+    circuit.add_voltage_source("Vfb", n_fb, gnd, 3.0)
+    circuit.add_resistor("Rout", n_out, gnd, 1_000.0)
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI1",
+        [n_ref, n_fb, n_out],
+        {"kp": 0.4, "ki": 5_000.0, "anti_windup": 1.0, "output_min": 0.0, "output_max": 1.0},
+        {},
+    )
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 10e-6
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "PI1" in result.virtual_channels
+
+    channels, metadata = ps.collect_result_channels(circuit, result)
+    assert "V(ref)" in channels
+    assert "I(Vref)" in channels
+    assert "PI1" in channels
+    assert len(channels["V(ref)"]) == len(result.time)
+    assert len(channels["I(Vref)"]) == len(result.time)
+    assert len(channels["PI1"]) == len(result.time)
+    assert metadata["V(ref)"].domain == "electrical"
+    assert metadata["V(ref)"].unit == "V"
+    assert metadata["I(Vref)"].unit == "A"
+    assert metadata["PI1"].domain == "control"
+
+
+def test_run_transient_streaming_emits_full_electrical_names_and_final_virtual_channels() -> None:
+    circuit = ps.Circuit()
+    n_ref = circuit.add_node("ref")
+    n_fb = circuit.add_node("fb")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vref", n_ref, gnd, 5.0)
+    circuit.add_voltage_source("Vfb", n_fb, gnd, 3.0)
+    circuit.add_resistor("Rout", n_out, gnd, 1_000.0)
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI1",
+        [n_ref, n_fb, n_out],
+        {"kp": 0.4, "ki": 5_000.0, "anti_windup": 1.0, "output_min": 0.0, "output_max": 1.0},
+        {},
+    )
+
+    streamed_samples: list[dict[str, float]] = []
+
+    def on_data(_time: float, sample: dict[str, float]) -> None:
+        streamed_samples.append(dict(sample))
+
+    _, _, ok, _ = ps.run_transient_streaming(
+        circuit,
+        0.0,
+        10e-6,
+        1e-6,
+        circuit.initial_state(),
+        ps.NewtonOptions(),
+        ps.LinearSolverStackConfig.defaults(),
+        on_data,
+        None,
+        None,
+        1,
+    )
+
+    assert ok
+    assert streamed_samples
+    assert "V(ref)" in streamed_samples[0]
+    assert "I(Vref)" in streamed_samples[0]
+    assert "PI1" in streamed_samples[-1]
+
+
 def test_virtual_channel_metadata_includes_relay_state_channel() -> None:
     circuit = ps.Circuit()
     n_coil_p = circuit.add_node("coil_p")

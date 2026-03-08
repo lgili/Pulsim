@@ -496,6 +496,51 @@ def run_transient(
     return last_result
 
 
+def collect_result_channels(circuit, result, *, include_states=True, include_virtual=True):
+    """Build a unified waveform map for GUI/Python consumers.
+
+    Returns:
+        (channels, metadata)
+        channels: Dict[str, List[float]]
+        metadata: Dict[str, VirtualChannelMetadata]
+    """
+
+    channels = {}
+    metadata = {}
+
+    if include_states:
+        signal_names = list(circuit.signal_names())
+        states = list(result.states)
+        for index, signal_name in enumerate(signal_names):
+            series = [float(state[index]) for state in states] if states else []
+            channels[signal_name] = series
+
+            meta = VirtualChannelMetadata()
+            meta.component_name = signal_name
+            meta.source_component = signal_name
+            meta.domain = "electrical"
+            meta.nodes = [int(index)]
+
+            if signal_name.startswith("V("):
+                meta.component_type = "node_voltage"
+                meta.unit = "V"
+            elif signal_name.startswith("I("):
+                meta.component_type = "branch_current"
+                meta.unit = "A"
+            else:
+                meta.component_type = "state_signal"
+                meta.unit = ""
+            metadata[signal_name] = meta
+
+    if include_virtual:
+        for name, series in result.virtual_channels.items():
+            channels[name] = [float(value) for value in series]
+        for name, meta in result.virtual_channel_metadata.items():
+            metadata[name] = meta
+
+    return channels, metadata
+
+
 run_transient_streaming = _run_transient_streaming_native
 
 
@@ -634,6 +679,7 @@ __all__ = [
     "dc_operating_point",
     # Transient Simulation
     "run_transient",
+    "collect_result_channels",
     "run_frequency_analysis",
     "run_transient_streaming",
     "FrequencyAnalysisError",
