@@ -16,23 +16,18 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import numpy as np
 import pytest
 
 from pulsim.post_processing import (
-    HarmonicEntry,
     PostProcessingDiagnosticCode,
     PostProcessingJob,
     PostProcessingJobKind,
     PostProcessingOptions,
-    PostProcessingResult,
     PostProcessingWindowMode,
     PostProcessingWindowSpec,
-    ScalarMetric,
-    SpectralBin,
-    UndefinedMetricEntry,
     WindowFunction,
     parse_post_processing_yaml,
     run_post_processing,
@@ -43,9 +38,11 @@ from pulsim.post_processing import (
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FakeSimResult:
     """Minimal stand-in for SimulationResult with .time and .virtual_channels."""
+
     time: List[float]
     virtual_channels: Dict[str, List[float]] = field(default_factory=dict)
 
@@ -90,8 +87,8 @@ def _dc_result(
 # Section 1: Time-domain metrics
 # ---------------------------------------------------------------------------
 
-class TestTimeDomainMetrics:
 
+class TestTimeDomainMetrics:
     def test_rms_pure_sine_theoretical(self):
         result = _sine_result(amplitude=math.sqrt(2.0), freq_hz=1000.0, n=10000)
         job = PostProcessingJob(
@@ -154,7 +151,9 @@ class TestTimeDomainMetrics:
         ac_amp = 0.5
         t = np.linspace(0.0, 1e-3, 1000, endpoint=False)
         sig = dc + ac_amp * np.sin(2.0 * np.pi * 1e4 * t)
-        result = FakeSimResult(time=t.tolist(), virtual_channels={"V(out)": sig.tolist()})
+        result = FakeSimResult(
+            time=t.tolist(), virtual_channels={"V(out)": sig.tolist()}
+        )
         job = PostProcessingJob(
             job_id="ripple",
             kind=PostProcessingJobKind.TimeDomain,
@@ -195,7 +194,10 @@ class TestTimeDomainMetrics:
         assert jr.success  # job succeeds but metric is undefined
         assert len(jr.undefined_metrics) == 1
         assert jr.undefined_metrics[0].name == "crest"
-        assert jr.undefined_metrics[0].reason == PostProcessingDiagnosticCode.UndefinedMetric
+        assert (
+            jr.undefined_metrics[0].reason
+            == PostProcessingDiagnosticCode.UndefinedMetric
+        )
 
     def test_undefined_ripple_zero_mean(self):
         result = _sine_result(amplitude=1.0, dc_offset=0.0, n=5000)
@@ -208,9 +210,7 @@ class TestTimeDomainMetrics:
         out = run_post_processing(result, PostProcessingOptions(jobs=[job]))
         jr = out.jobs[0]
         assert jr.success
-        assert any(
-            u.name == "ripple" for u in jr.undefined_metrics
-        )
+        assert any(u.name == "ripple" for u in jr.undefined_metrics)
 
     def test_unknown_metric_gives_undefined_reason(self):
         result = _dc_result()
@@ -273,8 +273,8 @@ class TestTimeDomainMetrics:
 # Section 2: Spectral metrics
 # ---------------------------------------------------------------------------
 
-class TestSpectralMetrics:
 
+class TestSpectralMetrics:
     def _pure_sine_result(
         self,
         amplitude: float = 1.0,
@@ -330,7 +330,9 @@ class TestSpectralMetrics:
         t_stop = 8.0 / f0
         t = np.linspace(0.0, t_stop, n, endpoint=False)
         sig = A1 * np.sin(2.0 * np.pi * f0 * t) + A3 * np.sin(2.0 * np.pi * 3 * f0 * t)
-        result = FakeSimResult(time=t.tolist(), virtual_channels={"V(out)": sig.tolist()})
+        result = FakeSimResult(
+            time=t.tolist(), virtual_channels={"V(out)": sig.tolist()}
+        )
 
         job = PostProcessingJob(
             job_id="thd_known",
@@ -440,8 +442,8 @@ class TestSpectralMetrics:
 # Section 3: Power and efficiency metrics
 # ---------------------------------------------------------------------------
 
-class TestPowerEfficiencyMetrics:
 
+class TestPowerEfficiencyMetrics:
     def test_resistive_load_efficiency_100pct(self):
         # Ideal case: P_in = P_out = V*I (same voltage/current)
         n = 500
@@ -469,14 +471,16 @@ class TestPowerEfficiencyMetrics:
         n = 500
         t = np.linspace(0.0, 1e-3, n, endpoint=False).tolist()
         v_in = [10.0] * n
-        i_in = [1.0] * n        # P_in = 10 W
+        i_in = [1.0] * n  # P_in = 10 W
         v_out = [9.0] * n
-        i_out = [1.0] * n       # P_out = 9 W → η = 90%
+        i_out = [1.0] * n  # P_out = 9 W → η = 90%
         result = FakeSimResult(
             time=t,
             virtual_channels={
-                "V(in)": v_in, "I(in)": i_in,
-                "V(out)": v_out, "I(out)": i_out,
+                "V(in)": v_in,
+                "I(in)": i_in,
+                "V(out)": v_out,
+                "I(out)": i_out,
             },
         )
         job = PostProcessingJob(
@@ -557,8 +561,10 @@ class TestPowerEfficiencyMetrics:
         result = FakeSimResult(
             time=t,
             virtual_channels={
-                "V(in)": [0.0] * n, "I(in)": [0.0] * n,
-                "V(out)": [0.0] * n, "I(out)": [0.0] * n,
+                "V(in)": [0.0] * n,
+                "I(in)": [0.0] * n,
+                "V(out)": [0.0] * n,
+                "I(out)": [0.0] * n,
             },
         )
         job = PostProcessingJob(
@@ -579,8 +585,8 @@ class TestPowerEfficiencyMetrics:
 # Section 4: Window planning
 # ---------------------------------------------------------------------------
 
-class TestWindowPlanning:
 
+class TestWindowPlanning:
     def _result_with_long_time(self, n: int = 1000) -> FakeSimResult:
         t = np.linspace(0.0, 10e-3, n, endpoint=False).tolist()
         return FakeSimResult(
@@ -635,7 +641,9 @@ class TestWindowPlanning:
         n = 5000
         t = np.linspace(0.0, 5e-3, n, endpoint=False)
         sig = np.sin(2.0 * np.pi * f * t)
-        result = FakeSimResult(time=t.tolist(), virtual_channels={"V(out)": sig.tolist()})
+        result = FakeSimResult(
+            time=t.tolist(), virtual_channels={"V(out)": sig.tolist()}
+        )
 
         job = PostProcessingJob(
             job_id="cw",
@@ -729,8 +737,8 @@ class TestWindowPlanning:
 # Section 5: Signal resolution diagnostics
 # ---------------------------------------------------------------------------
 
-class TestSignalResolution:
 
+class TestSignalResolution:
     def test_signal_not_found_fails(self):
         result = _dc_result(n=100)
         job = PostProcessingJob(
@@ -778,18 +786,20 @@ class TestSignalResolution:
 # Section 6: Determinism
 # ---------------------------------------------------------------------------
 
-class TestDeterminism:
 
+class TestDeterminism:
     def test_time_domain_repeated_identical(self):
         result = _sine_result(amplitude=3.0, dc_offset=2.0, n=2000)
-        opts = PostProcessingOptions(jobs=[
-            PostProcessingJob(
-                job_id="det",
-                kind=PostProcessingJobKind.TimeDomain,
-                signals=["V(out)"],
-                metrics=["rms", "mean", "min", "max", "p2p"],
-            )
-        ])
+        opts = PostProcessingOptions(
+            jobs=[
+                PostProcessingJob(
+                    job_id="det",
+                    kind=PostProcessingJobKind.TimeDomain,
+                    signals=["V(out)"],
+                    metrics=["rms", "mean", "min", "max", "p2p"],
+                )
+            ]
+        )
         r1 = run_post_processing(result, opts)
         r2 = run_post_processing(result, opts)
         assert r1.success == r2.success
@@ -800,14 +810,16 @@ class TestDeterminism:
 
     def test_spectral_repeated_identical(self):
         result = _sine_result(amplitude=1.0, freq_hz=1000.0, n=8192)
-        opts = PostProcessingOptions(jobs=[
-            PostProcessingJob(
-                job_id="spec_det",
-                kind=PostProcessingJobKind.Spectral,
-                signals=["V(out)"],
-                n_harmonics=5,
-            )
-        ])
+        opts = PostProcessingOptions(
+            jobs=[
+                PostProcessingJob(
+                    job_id="spec_det",
+                    kind=PostProcessingJobKind.Spectral,
+                    signals=["V(out)"],
+                    n_harmonics=5,
+                )
+            ]
+        )
         r1 = run_post_processing(result, opts)
         r2 = run_post_processing(result, opts)
         assert r1.success == r2.success
@@ -820,20 +832,24 @@ class TestDeterminism:
         result = FakeSimResult(
             time=t,
             virtual_channels={
-                "V(in)": [10.0] * n, "I(in)": [1.5] * n,
-                "V(out)": [9.0] * n, "I(out)": [1.5] * n,
+                "V(in)": [10.0] * n,
+                "I(in)": [1.5] * n,
+                "V(out)": [9.0] * n,
+                "I(out)": [1.5] * n,
             },
         )
-        opts = PostProcessingOptions(jobs=[
-            PostProcessingJob(
-                job_id="eff_det",
-                kind=PostProcessingJobKind.PowerEfficiency,
-                input_voltage_signal="V(in)",
-                input_current_signal="I(in)",
-                output_voltage_signal="V(out)",
-                output_current_signal="I(out)",
-            )
-        ])
+        opts = PostProcessingOptions(
+            jobs=[
+                PostProcessingJob(
+                    job_id="eff_det",
+                    kind=PostProcessingJobKind.PowerEfficiency,
+                    input_voltage_signal="V(in)",
+                    input_current_signal="I(in)",
+                    output_voltage_signal="V(out)",
+                    output_current_signal="I(out)",
+                )
+            ]
+        )
         r1 = run_post_processing(result, opts)
         r2 = run_post_processing(result, opts)
         assert r1.jobs[0].efficiency == r2.jobs[0].efficiency
@@ -844,8 +860,8 @@ class TestDeterminism:
 # Section 7: Multiple jobs in one call
 # ---------------------------------------------------------------------------
 
-class TestMultipleJobs:
 
+class TestMultipleJobs:
     def test_mixed_jobs_all_succeed(self):
         f0 = 1000.0
         n = 8192
@@ -860,26 +876,28 @@ class TestMultipleJobs:
                 "I(L1)": i.tolist(),
             },
         )
-        opts = PostProcessingOptions(jobs=[
-            PostProcessingJob(
-                job_id="td",
-                kind=PostProcessingJobKind.TimeDomain,
-                signals=["V(out)"],
-                metrics=["rms", "mean"],
-            ),
-            PostProcessingJob(
-                job_id="spec",
-                kind=PostProcessingJobKind.Spectral,
-                signals=["V(out)"],
-                n_harmonics=3,
-            ),
-            PostProcessingJob(
-                job_id="eff",
-                kind=PostProcessingJobKind.PowerEfficiency,
-                input_voltage_signal="V(out)",
-                input_current_signal="I(L1)",
-            ),
-        ])
+        opts = PostProcessingOptions(
+            jobs=[
+                PostProcessingJob(
+                    job_id="td",
+                    kind=PostProcessingJobKind.TimeDomain,
+                    signals=["V(out)"],
+                    metrics=["rms", "mean"],
+                ),
+                PostProcessingJob(
+                    job_id="spec",
+                    kind=PostProcessingJobKind.Spectral,
+                    signals=["V(out)"],
+                    n_harmonics=3,
+                ),
+                PostProcessingJob(
+                    job_id="eff",
+                    kind=PostProcessingJobKind.PowerEfficiency,
+                    input_voltage_signal="V(out)",
+                    input_current_signal="I(L1)",
+                ),
+            ]
+        )
         out = run_post_processing(result, opts)
         assert len(out.jobs) == 3
         assert out.jobs[0].job_id == "td"
@@ -888,19 +906,21 @@ class TestMultipleJobs:
 
     def test_partial_failure_does_not_affect_other_jobs(self):
         result = _dc_result(n=200)
-        opts = PostProcessingOptions(jobs=[
-            PostProcessingJob(
-                job_id="good",
-                kind=PostProcessingJobKind.TimeDomain,
-                signals=["V(out)"],
-                metrics=["mean"],
-            ),
-            PostProcessingJob(
-                job_id="bad",
-                kind=PostProcessingJobKind.TimeDomain,
-                signals=["V(missing)"],
-            ),
-        ])
+        opts = PostProcessingOptions(
+            jobs=[
+                PostProcessingJob(
+                    job_id="good",
+                    kind=PostProcessingJobKind.TimeDomain,
+                    signals=["V(out)"],
+                    metrics=["mean"],
+                ),
+                PostProcessingJob(
+                    job_id="bad",
+                    kind=PostProcessingJobKind.TimeDomain,
+                    signals=["V(missing)"],
+                ),
+            ]
+        )
         out = run_post_processing(result, opts)
         assert out.jobs[0].success
         assert not out.jobs[1].success
@@ -915,15 +935,17 @@ class TestMultipleJobs:
     def test_job_ordering_is_stable(self):
         result = _dc_result(n=100)
         ids = [f"job_{i}" for i in range(5)]
-        opts = PostProcessingOptions(jobs=[
-            PostProcessingJob(
-                job_id=jid,
-                kind=PostProcessingJobKind.TimeDomain,
-                signals=["V(out)"],
-                metrics=["mean"],
-            )
-            for jid in ids
-        ])
+        opts = PostProcessingOptions(
+            jobs=[
+                PostProcessingJob(
+                    job_id=jid,
+                    kind=PostProcessingJobKind.TimeDomain,
+                    signals=["V(out)"],
+                    metrics=["mean"],
+                )
+                for jid in ids
+            ]
+        )
         out = run_post_processing(result, opts)
         assert [jr.job_id for jr in out.jobs] == ids
 
@@ -932,8 +954,8 @@ class TestMultipleJobs:
 # Section 8: Backward compatibility
 # ---------------------------------------------------------------------------
 
-class TestBackwardCompatibility:
 
+class TestBackwardCompatibility:
     def test_no_post_processing_config_does_not_break(self):
         # run_post_processing with an empty options is a no-op
         result = _dc_result(n=100)
@@ -952,8 +974,8 @@ class TestBackwardCompatibility:
 # Section 9: YAML parser
 # ---------------------------------------------------------------------------
 
-class TestParsePostProcessingYaml:
 
+class TestParsePostProcessingYaml:
     def test_none_node_returns_empty(self):
         opts = parse_post_processing_yaml(None)
         assert len(opts.jobs) == 0
@@ -1064,7 +1086,7 @@ class TestParsePostProcessingYaml:
             ]
         }
         errors: list[str] = []
-        opts = parse_post_processing_yaml(node, errors)
+        parse_post_processing_yaml(node, errors)
         # Job is still created (with default window) but error is reported
         assert any("PULSIM_PP_E_WINDOW_MODE" in e for e in errors)
 
@@ -1080,7 +1102,7 @@ class TestParsePostProcessingYaml:
             ]
         }
         errors: list[str] = []
-        opts = parse_post_processing_yaml(node, errors)
+        parse_post_processing_yaml(node, errors)
         assert any("PULSIM_PP_E_WINDOW_FUNC" in e for e in errors)
 
     def test_non_mapping_block_reports_error(self):
