@@ -60,3 +60,16 @@ def test_publish_workflow_smoke_test_exercises_cblock_api() -> None:
     assert "PythonCBlock" in test_command
     assert "compile_cblock" in test_command
     assert "CBlockLibrary" in test_command
+
+
+def test_publish_workflow_has_windows_specific_stable_smoke_test() -> None:
+    workflow = _load_yaml(ROOT / ".github/workflows/publish.yml")
+    build_steps = workflow["jobs"]["build-wheels"]["steps"]
+    build_wheels_step = next(
+        (step for step in build_steps if step.get("name") == "Build wheels"),
+        None,
+    )
+    assert build_wheels_step is not None
+    test_command_windows = build_wheels_step["env"]["CIBW_TEST_COMMAND_WINDOWS"]
+    assert "PythonCBlock" in test_command_windows
+    assert "detect_compiler" in test_command_windows
