@@ -501,6 +501,7 @@ public:
         virtual_time_history_.erase(name);
         virtual_components_.push_back(
             VirtualComponent{type, name, std::move(nodes), std::move(numeric_params), std::move(metadata)});
+        control_graph_dirty_ = true;
     }
 
     /// Number of virtual components
@@ -653,6 +654,10 @@ public:
     /// Execute one deterministic mixed-domain scheduler pass for a timestep.
     /// Phase order: electrical -> control -> events -> instrumentation.
     [[nodiscard]] MixedDomainStepResult execute_mixed_domain_step(const Vector& x, Real time) {
+        if (!std::isfinite(last_control_time_) || time + 1e-18 < last_control_time_) {
+            control_node_values_.clear();
+        }
+        last_control_time_ = time;
         set_current_time(time);
         MixedDomainStepResult result;
         result.phase_order = mixed_domain_phase_order();
@@ -663,6 +668,16 @@ public:
                 return 0.0;
             }
             return x[node];
+        };
+        auto control_node_value = [&](Index node) -> Real {
+            if (node < 0) {
+                return 0.0;
+            }
+            if (const auto it = control_node_values_.find(node);
+                it != control_node_values_.end() && std::isfinite(it->second)) {
+                return it->second;
+            }
+            return node_voltage(node);
         };
 
         auto get_numeric = [&](const VirtualComponent& component, const std::string& key, Real fallback) {
@@ -704,8 +719,15 @@ public:
             "state_machine", "signal_mux", "signal_demux",
             "c_block"
         };
+        const std::unordered_set<std::string> combinational_types = {
+            "op_amp", "gain", "sum", "subtraction", "math_block",
+            "limiter", "lookup_table", "signal_mux", "signal_demux"
+        };
         const auto is_legacy_global_discrete_component = [](std::string_view type) {
             return type == "pi_controller" || type == "pid_controller" || type == "c_block";
+        };
+        const auto is_combinational = [&](std::string_view type) {
+            return combinational_types.find(std::string(type)) != combinational_types.end();
         };
         auto component_sample_time = [&](const VirtualComponent& component) -> Real {
             auto get_local_sample_time = [&](std::string_view key) -> std::optional<Real> {
@@ -736,14 +758,301 @@ public:
             return 0.0;
         };
 
+        const auto control_node_io = [&](const VirtualComponent& component) {
+            struct ControlNodeIo {
+                std::vector<Index> inputs;
+                std::vector<Index> outputs;
+            };
+            ControlNodeIo io{};
+            const auto& nodes = component.nodes;
+            const std::size_t n = nodes.size();
+
+            auto push_if_valid = [&](std::vector<Index>& dst, Index node) {
+                if (node >= 0) {
+                    dst.push_back(node);
+                }
+            };
+
+            if (component.type == "op_amp" ||
+                component.type == "comparator" ||
+                component.type == "pi_controller" ||
+                component.type == "pid_controller") {
+                if (n >= 2) {
+                    push_if_valid(io.inputs, nodes[0]);
+                    push_if_valid(io.inputs, nodes[1]);
+                }
+                if (n >= 3) {
+                    push_if_valid(io.outputs, nodes[2]);
+                }
+                return io;
+            }
+
+            if (component.type == "sum" ||
+                component.type == "subtraction") {
+                if (n >= 2) {
+                    push_if_valid(io.inputs, nodes[0]);
+                    push_if_valid(io.inputs, nodes[1]);
+                }
+                if (n >= 3) {
+                    push_if_valid(io.outputs, nodes[2]);
+                }
+                return io;
+            }
+
+            if (component.type == "math_block") {
+                if (n >= 2) {
+                    for (std::size_t i = 0; i + 1 < n; ++i) {
+                        push_if_valid(io.inputs, nodes[i]);
+                    }
+                    push_if_valid(io.outputs, nodes.back());
+                } else if (n == 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                return io;
+            }
+
+            if (component.type == "signal_demux") {
+                if (n >= 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                for (std::size_t i = 1; i < n; ++i) {
+                    push_if_valid(io.outputs, nodes[i]);
+                }
+                return io;
+            }
+
+            if (component.type == "signal_mux") {
+                if (n >= 3) {
+                    for (std::size_t i = 0; i + 1 < n; ++i) {
+                        push_if_valid(io.inputs, nodes[i]);
+                    }
+                    push_if_valid(io.outputs, nodes.back());
+                } else if (n >= 2) {
+                    push_if_valid(io.inputs, nodes[0]);
+                    push_if_valid(io.inputs, nodes[1]);
+                } else if (n == 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                return io;
+            }
+
+            if (component.type == "c_block") {
+                int n_inputs = 0;
+                int n_outputs = 0;
+                if (const auto it = component.numeric_params.find("n_inputs");
+                    it != component.numeric_params.end() && std::isfinite(it->second) && it->second >= 0.0) {
+                    n_inputs = std::max(0, static_cast<int>(std::llround(it->second)));
+                }
+                if (const auto it = component.numeric_params.find("n_outputs");
+                    it != component.numeric_params.end() && std::isfinite(it->second) && it->second >= 0.0) {
+                    n_outputs = std::max(0, static_cast<int>(std::llround(it->second)));
+                }
+                const std::size_t required = static_cast<std::size_t>(n_inputs + n_outputs);
+                if (required > 0 && n >= required) {
+                    for (int i = 0; i < n_inputs; ++i) {
+                        push_if_valid(io.inputs, nodes[static_cast<std::size_t>(i)]);
+                    }
+                    for (int i = 0; i < n_outputs; ++i) {
+                        push_if_valid(io.outputs, nodes[static_cast<std::size_t>(n_inputs + i)]);
+                    }
+                }
+                return io;
+            }
+
+            if (component.type == "pwm_generator") {
+                if (n >= 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                return io;
+            }
+
+            if (n >= 2) {
+                push_if_valid(io.inputs, nodes[0]);
+                if (component.type == "state_machine" && n >= 2) {
+                    push_if_valid(io.inputs, nodes[1]);
+                }
+                push_if_valid(io.outputs, nodes[1]);
+            } else if (n == 1) {
+                push_if_valid(io.inputs, nodes[0]);
+            }
+            return io;
+        };
+
+        auto build_control_eval_order = [&]() {
+            if (!control_graph_dirty_ && !control_eval_order_.empty()) {
+                return;
+            }
+            control_eval_order_.clear();
+            control_eval_cycle_.clear();
+
+            std::vector<std::size_t> control_indices;
+            control_indices.reserve(virtual_components_.size());
+            for (std::size_t i = 0; i < virtual_components_.size(); ++i) {
+                if (has_type(control_types, virtual_components_[i].type)) {
+                    control_indices.push_back(i);
+                }
+            }
+            if (control_indices.empty()) {
+                control_graph_dirty_ = false;
+                return;
+            }
+
+            std::unordered_map<Index, std::size_t> node_producer;
+            node_producer.reserve(control_indices.size() * 2);
+            for (std::size_t idx : control_indices) {
+                const auto io = control_node_io(virtual_components_[idx]);
+                for (Index out_node : io.outputs) {
+                    if (out_node >= 0 && !node_producer.contains(out_node)) {
+                        node_producer[out_node] = idx;
+                    }
+                }
+            }
+
+            std::unordered_map<std::size_t, std::vector<std::size_t>> adjacency;
+            std::unordered_map<std::size_t, std::size_t> indegree;
+            adjacency.reserve(control_indices.size());
+            indegree.reserve(control_indices.size());
+            for (std::size_t idx : control_indices) {
+                indegree[idx] = 0;
+            }
+
+            for (std::size_t idx : control_indices) {
+                const auto io = control_node_io(virtual_components_[idx]);
+                for (Index in_node : io.inputs) {
+                    if (const auto it = node_producer.find(in_node);
+                        it != node_producer.end()) {
+                        const std::size_t producer = it->second;
+                        if (producer == idx) {
+                            continue;
+                        }
+                        adjacency[producer].push_back(idx);
+                        indegree[idx] += 1;
+                    }
+                }
+            }
+
+            std::vector<std::size_t> ready;
+            ready.reserve(control_indices.size());
+            for (std::size_t idx : control_indices) {
+                if (indegree[idx] == 0) {
+                    ready.push_back(idx);
+                }
+            }
+            std::sort(ready.begin(), ready.end());
+            while (!ready.empty()) {
+                const std::size_t idx = ready.front();
+                ready.erase(ready.begin());
+                control_eval_order_.push_back(idx);
+                auto adj_it = adjacency.find(idx);
+                if (adj_it == adjacency.end()) {
+                    continue;
+                }
+                auto& out_edges = adj_it->second;
+                std::sort(out_edges.begin(), out_edges.end());
+                for (std::size_t target : out_edges) {
+                    if (indegree[target] > 0) {
+                        indegree[target] -= 1;
+                        if (indegree[target] == 0) {
+                            ready.push_back(target);
+                            std::sort(ready.begin(), ready.end());
+                        }
+                    }
+                }
+            }
+
+            // Detect combinational algebraic loops among remaining nodes.
+            if (control_eval_order_.size() != control_indices.size()) {
+                std::unordered_set<std::size_t> remaining;
+                for (std::size_t idx : control_indices) {
+                    if (std::find(control_eval_order_.begin(), control_eval_order_.end(), idx) ==
+                        control_eval_order_.end()) {
+                        remaining.insert(idx);
+                    }
+                }
+
+                std::unordered_map<std::size_t, int> visit;
+                std::vector<std::size_t> stack;
+                auto dfs = [&](auto&& self, std::size_t node) -> bool {
+                    visit[node] = 1;
+                    stack.push_back(node);
+                    const auto adj_it = adjacency.find(node);
+                    if (adj_it != adjacency.end()) {
+                        for (std::size_t next : adj_it->second) {
+                            if (!remaining.contains(next)) {
+                                continue;
+                            }
+                            if (!is_combinational(virtual_components_[node].type) ||
+                                !is_combinational(virtual_components_[next].type)) {
+                                continue;
+                            }
+                            if (visit[next] == 0) {
+                                if (self(self, next)) {
+                                    return true;
+                                }
+                            } else if (visit[next] == 1) {
+                                auto it = std::find(stack.begin(), stack.end(), next);
+                                if (it != stack.end()) {
+                                    control_eval_cycle_.assign(it, stack.end());
+                                    control_eval_cycle_.push_back(next);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    stack.pop_back();
+                    visit[node] = 2;
+                    return false;
+                };
+
+                for (std::size_t idx : remaining) {
+                    if (!is_combinational(virtual_components_[idx].type)) {
+                        continue;
+                    }
+                    if (visit[idx] == 0) {
+                        if (dfs(dfs, idx)) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Ensure PWM generators run after other control blocks for duty_from_channel reads.
+            if (!control_eval_order_.empty()) {
+                std::stable_partition(
+                    control_eval_order_.begin(),
+                    control_eval_order_.end(),
+                    [&](std::size_t idx) {
+                        return virtual_components_[idx].type != "pwm_generator";
+                    });
+            }
+
+            control_graph_dirty_ = false;
+        };
+
         // Phase 2: control update
-        for (const auto& component : virtual_components_) {
+        build_control_eval_order();
+        if (!control_eval_cycle_.empty()) {
+            std::ostringstream oss;
+            oss << "Virtual control algebraic loop: ";
+            for (std::size_t i = 0; i < control_eval_cycle_.size(); ++i) {
+                const auto& name = virtual_components_[control_eval_cycle_[i]].name;
+                if (i > 0) {
+                    oss << " -> ";
+                }
+                oss << name;
+            }
+            throw std::runtime_error(oss.str());
+        }
+
+        for (std::size_t component_index : control_eval_order_) {
+            const auto& component = virtual_components_[component_index];
             if (!has_type(control_types, component.type)) {
                 continue;
             }
 
-            const Real in0 = (component.nodes.size() > 0) ? node_voltage(component.nodes[0]) : 0.0;
-            const Real in1 = (component.nodes.size() > 1) ? node_voltage(component.nodes[1]) : 0.0;
+            const auto io = control_node_io(component);
+            const Real in0 = !io.inputs.empty() ? control_node_value(io.inputs[0]) : 0.0;
+            const Real in1 = (io.inputs.size() > 1) ? control_node_value(io.inputs[1]) : 0.0;
             const Real signal = in0 - in1;
             Real output = signal * get_numeric(component, "gain", 1.0);
             const auto last_time_it = virtual_last_time_.find(component.name);
@@ -757,6 +1066,9 @@ public:
                 if (dt + tol < block_sample_time) {
                     output = virtual_signal_state_[component.name];
                     result.channel_values[component.name] = output;
+                    for (Index out_node : io.outputs) {
+                        control_node_values_[out_node] = output;
+                    }
                     if (component.type == "c_block") {
                         int n_outputs = 1;
                         if (const auto it = component.numeric_params.find("n_outputs");
@@ -772,6 +1084,10 @@ public:
                                 : ((output_index == 0) ? output : Real{0.0});
                             virtual_signal_state_[channel_name] = channel_value;
                             result.channel_values[channel_name] = channel_value;
+                            if (static_cast<std::size_t>(output_index) < io.outputs.size()) {
+                                control_node_values_[io.outputs[static_cast<std::size_t>(output_index)]] =
+                                    channel_value;
+                            }
                         }
                     } else if (component.type == "pwm_generator") {
                         const std::string duty_channel = component.name + ".duty";
@@ -1097,8 +1413,8 @@ public:
                 const Real trigger = get_numeric(component, "threshold", 0.5);
                 if (mode == "set_reset" || mode == "sr") {
                     const Real set_signal = in0;
-                    const Real reset_signal = (component.nodes.size() > 1)
-                        ? node_voltage(component.nodes[1])
+                    const Real reset_signal = (io.inputs.size() > 1)
+                        ? control_node_value(io.inputs[1])
                         : 0.0;
                     const bool set_active = set_signal > trigger;
                     const bool reset_active = reset_signal > trigger;
@@ -1121,7 +1437,7 @@ public:
             } else if (component.type == "signal_mux") {
                 const int select = static_cast<int>(std::llround(get_numeric(component, "select_index", 0.0)));
                 const std::size_t selected = static_cast<std::size_t>(std::max(select, 0));
-                output = selected < component.nodes.size() ? node_voltage(component.nodes[selected]) : in0;
+                output = selected < io.inputs.size() ? control_node_value(io.inputs[selected]) : in0;
             } else if (component.type == "signal_demux") {
                 output = in0;
             }
@@ -1130,6 +1446,9 @@ public:
             virtual_last_input_[component.name] = signal;
             virtual_last_time_[component.name] = time;
             result.channel_values[component.name] = output;
+            for (Index out_node : io.outputs) {
+                control_node_values_[out_node] = output;
+            }
         }
 
         for (const auto& binding : switch_driver_bindings_) {
@@ -3379,6 +3698,11 @@ private:
     std::unordered_map<std::string, Real> virtual_last_input_;
     std::unordered_map<std::string, Real> virtual_last_time_;
     std::unordered_map<std::string, bool> virtual_binary_state_;
+    std::unordered_map<Index, Real> control_node_values_;
+    bool control_graph_dirty_ = true;
+    std::vector<std::size_t> control_eval_order_;
+    std::vector<std::size_t> control_eval_cycle_;
+    Real last_control_time_ = std::numeric_limits<Real>::quiet_NaN();
     std::unordered_map<std::string, std::deque<std::pair<Real, Real>>> virtual_time_history_;
     mutable std::unordered_map<std::string, std::vector<std::pair<Real, Real>>> lookup_table_cache_;
     mutable std::unordered_map<std::string, std::vector<Real>> transfer_coeff_cache_;

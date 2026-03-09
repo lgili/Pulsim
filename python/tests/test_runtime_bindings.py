@@ -2894,6 +2894,53 @@ def test_pi_controller_anti_windup_recovers_faster_than_unclamped_integrator() -
     assert recovery.channel_values["PI_NO_AW"] > 0.0
 
 
+def test_control_node_cascade_pi_pwm_updates_duty() -> None:
+    circuit = ps.Circuit()
+    n_ref_src = circuit.add_node("ref_src")
+    n_sense = circuit.add_node("sense")
+    n_ref = circuit.add_node("ref")
+    n_err = circuit.add_node("err")
+    n_pi = circuit.add_node("pi_out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vref", n_ref_src, gnd, 1.0)
+    circuit.add_sine_voltage_source("Vsense", n_sense, gnd, 0.5, 500.0, 0.0)
+
+    circuit.add_virtual_component("gain", "REF", [n_ref_src, n_ref], {"gain": 1.0}, {})
+    circuit.add_virtual_component("subtraction", "SUB", [n_sense, n_ref, n_err], {}, {})
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI",
+        [n_err, gnd, n_pi],
+        {"kp": 0.2, "ki": 50.0, "output_min": 0.0, "output_max": 1.0},
+        {},
+    )
+    circuit.add_virtual_component(
+        "pwm_generator",
+        "PWM",
+        [n_pi],
+        {"frequency": 5_000.0, "duty_from_input": 1.0, "duty_min": 0.0, "duty_max": 1.0},
+        {},
+    )
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-3
+    opts.dt = 2e-6
+    opts.step_mode = ps.StepMode.Fixed
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success, result.message
+    assert "PWM.duty" in result.virtual_channels
+    duty = [float(v) for v in result.virtual_channels["PWM.duty"]]
+    assert len(duty) == len(result.time)
+    assert max(duty) <= 1.0 + 1e-12
+    assert min(duty) >= -1e-12
+    assert max(duty) - min(duty) > 1e-3
+
+
 def test_pid_controller_uses_error_derivative() -> None:
     circuit = ps.Circuit()
     n_err = circuit.add_node("err")

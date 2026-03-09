@@ -1,0 +1,226 @@
+{
+  "version": "1.0",
+  "name": "Boost Cascaded PI Control Demo",
+  "created": "2026-03-09T00:00:00",
+  "modified": "2026-03-09T00:00:00",
+  "active_circuit": "main",
+  "simulation_settings": {
+    "tstop": 0.003,
+    "dt": 1e-06,
+    "max_step": 1e-06,
+    "tstart": 0.0,
+    "abstol": 1e-06,
+    "reltol": 0.0001,
+    "solver": "auto",
+    "step_mode": "variable",
+    "output_points": 12000,
+    "enable_events": true,
+    "max_step_retries": 8,
+    "enable_losses": false,
+    "max_iterations": 99,
+    "enable_voltage_limiting": true,
+    "max_voltage_step": 2.0,
+    "dc_strategy": "gmin",
+    "gmin_initial": 0.01,
+    "gmin_final": 1e-12,
+    "dc_source_steps": 20,
+    "transient_robust_mode": true,
+    "transient_auto_regularize": true,
+    "thermal_ambient": 25.0,
+    "thermal_network": "foster",
+    "formulation_mode": "projected_wrapper",
+    "direct_formulation_fallback": true
+  },
+  "circuits": {
+    "main": {
+      "name": "Boost Cascaded PI Control Demo",
+      "components": [
+        {
+          "id": "00000000-0001-0000-0000-000000000100",
+          "type": "VOLTAGE_SOURCE",
+          "name": "Vin",
+          "x": 120.0,
+          "y": 140.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"waveform": {"type": "dc", "value": 12.0}},
+          "pins": [
+            {"index": 0, "name": "+", "x": 0.0, "y": -20.0},
+            {"index": 1, "name": "-", "x": 0.0, "y": 20.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000101",
+          "type": "INDUCTOR",
+          "name": "L1",
+          "x": 240.0,
+          "y": 160.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"inductance": 0.00022, "initial_current": 0.0},
+          "pins": [
+            {"index": 0, "name": "1", "x": -40.0, "y": 0.0},
+            {"index": 1, "name": "2", "x": 40.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000102",
+          "type": "MOSFET_N",
+          "name": "M1",
+          "x": 300.0,
+          "y": 240.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"vth": 3.0, "kp": 0.35, "lambda_": 0.01, "g_off": 1e-08},
+          "pins": [
+            {"index": 0, "name": "D", "x": 20.0, "y": -20.0},
+            {"index": 1, "name": "G", "x": -20.0, "y": 0.0},
+            {"index": 2, "name": "S", "x": 20.0, "y": 20.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000103",
+          "type": "DIODE",
+          "name": "D1",
+          "x": 360.0,
+          "y": 140.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"g_on": 350.0, "g_off": 1e-09},
+          "pins": [
+            {"index": 0, "name": "A", "x": -20.0, "y": 0.0},
+            {"index": 1, "name": "K", "x": 20.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000104",
+          "type": "CAPACITOR",
+          "name": "Cout",
+          "x": 520.0,
+          "y": 160.0,
+          "rotation": 90,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"capacitance": 0.00022, "initial_voltage": 0.0},
+          "pins": [
+            {"index": 0, "name": "+", "x": -20.0, "y": 0.0},
+            {"index": 1, "name": "-", "x": 20.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000105",
+          "type": "RESISTOR",
+          "name": "Rload",
+          "x": 620.0,
+          "y": 160.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"resistance": 20.0},
+          "pins": [
+            {"index": 0, "name": "1", "x": -40.0, "y": 0.0},
+            {"index": 1, "name": "2", "x": 40.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000106",
+          "type": "CONSTANT",
+          "name": "VREF",
+          "x": 760.0,
+          "y": 240.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"value": 24.0},
+          "pins": [
+            {"index": 0, "name": "OUT", "x": 40.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000107",
+          "type": "SUBTRACTOR",
+          "name": "SUB_V",
+          "x": 900.0,
+          "y": 240.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"input_count": 2, "signs": ["+", "-"]},
+          "pins": [
+            {"index": 0, "name": "IN1", "x": -40.0, "y": -20.0},
+            {"index": 1, "name": "IN2", "x": -40.0, "y": 20.0},
+            {"index": 2, "name": "OUT", "x": 40.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000108",
+          "type": "PI_CONTROLLER",
+          "name": "PI_V",
+          "x": 1020.0,
+          "y": 240.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"kp": 0.06, "ki": 60.0, "output_min": 0.0, "output_max": 1.0},
+          "pins": [
+            {"index": 0, "name": "IN", "x": -40.0, "y": 0.0},
+            {"index": 1, "name": "OUT", "x": 40.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000109",
+          "type": "SUBTRACTOR",
+          "name": "SUB_I",
+          "x": 1140.0,
+          "y": 240.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"input_count": 2, "signs": ["+", "-"]},
+          "pins": [
+            {"index": 0, "name": "IN1", "x": -40.0, "y": -20.0},
+            {"index": 1, "name": "IN2", "x": -40.0, "y": 20.0},
+            {"index": 2, "name": "OUT", "x": 40.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000110",
+          "type": "PI_CONTROLLER",
+          "name": "PI_I",
+          "x": 1260.0,
+          "y": 240.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"kp": 0.2, "ki": 200.0, "output_min": 0.0, "output_max": 1.0},
+          "pins": [
+            {"index": 0, "name": "IN", "x": -40.0, "y": 0.0},
+            {"index": 1, "name": "OUT", "x": 40.0, "y": 0.0}
+          ]
+        },
+        {
+          "id": "00000000-0001-0000-0000-000000000111",
+          "type": "PWM_GENERATOR",
+          "name": "PWM2",
+          "x": 1380.0,
+          "y": 240.0,
+          "rotation": 0,
+          "mirrored_h": false,
+          "mirrored_v": false,
+          "parameters": {"frequency": 20000.0, "duty_cycle": 0.5, "carrier": "sawtooth", "amplitude": 1.0},
+          "pins": [
+            {"index": 0, "name": "OUT", "x": 40.0, "y": 0.0},
+            {"index": 1, "name": "DUTY_IN", "x": -40.0, "y": 20.0}
+          ]
+        }
+      ],
+      "wires": []
+    }
+  },
+  "subcircuits": [],
+  "scope_windows": {}
+}

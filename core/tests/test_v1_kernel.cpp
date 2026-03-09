@@ -3154,6 +3154,42 @@ TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
 
 TEST_CASE("v1 control primitives keep bounded deterministic outputs",
           "[v1][mixed-domain][control][regression]") {
+    SECTION("control-node writeback enables gain cascades") {
+        Circuit circuit;
+        const auto n_in = circuit.add_node("in");
+        const auto n_mid = circuit.add_node("mid");
+        const auto n_out = circuit.add_node("out");
+
+        circuit.add_virtual_component("gain", "G1", {n_in, n_mid}, {{"gain", 2.0}}, {});
+        circuit.add_virtual_component("gain", "G2", {n_mid, n_out}, {{"gain", 3.0}}, {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_in] = 1.0;
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step.channel_values.contains("G1"));
+        REQUIRE(step.channel_values.contains("G2"));
+        CHECK(step.channel_values.at("G1") == Approx(2.0).margin(1e-12));
+        CHECK(step.channel_values.at("G2") == Approx(6.0).margin(1e-12));
+    }
+
+    SECTION("algebraic control loops without state fail deterministically") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+
+        circuit.add_virtual_component("gain", "GA", {n_a, n_b}, {{"gain", 1.0}}, {});
+        circuit.add_virtual_component("gain", "GB", {n_b, n_a}, {{"gain", 1.0}}, {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        try {
+            circuit.execute_mixed_domain_step(x, 1e-6);
+            FAIL("Expected algebraic loop failure");
+        } catch (const std::runtime_error& err) {
+            const std::string message = err.what() ? err.what() : "";
+            REQUIRE(message.find("Virtual control algebraic loop") != std::string::npos);
+        }
+    }
+
     SECTION("op amp output saturates at configured rails") {
         Circuit circuit;
         const auto n_pos = circuit.add_node("v_plus");
