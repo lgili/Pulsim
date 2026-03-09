@@ -3007,6 +3007,63 @@ TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
         CHECK(step.channel_values.at("K1.k") == Approx(0.9).margin(1e-12));
         CHECK(step.channel_values.at("K1.mutual") == Approx(1.8e-3).margin(1e-12));
     }
+
+    SECTION("coupled inductor core loss channel uses configured power law") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+        const auto n_c = circuit.add_node("c");
+        const auto n_d = circuit.add_node("d");
+        circuit.add_inductor("K2__L1", n_a, n_b, 1e-3);
+        circuit.add_inductor("K2__L2", n_c, n_d, 1e-3);
+        circuit.add_virtual_component("coupled_inductor", "K2", {n_a, n_b, n_c, n_d},
+                                      {{"l1", 1e-3},
+                                       {"l2", 1e-3},
+                                       {"coupling", 0.95},
+                                       {"magnetic_core_enabled", 1.0},
+                                       {"core_loss_k", 0.1},
+                                       {"core_loss_alpha", 2.0}},
+                                      {{"target_component_1", "K2__L1"},
+                                       {"target_component_2", "K2__L2"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        const auto& conns = circuit.connections();
+        REQUIRE(conns.size() >= 2);
+        x[conns[0].branch_index] = 2.0;
+        x[conns[1].branch_index] = -2.0;
+
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step.channel_values.contains("K2.core_loss"));
+        CHECK(step.channel_values.at("K2.core_loss") == Approx(0.4).margin(1e-12));
+    }
+
+    SECTION("transformer core loss channel uses configured power law") {
+        Circuit circuit;
+        const auto p1 = circuit.add_node("p1");
+        const auto p2 = circuit.add_node("p2");
+        const auto s1 = circuit.add_node("s1");
+        const auto s2 = circuit.add_node("s2");
+        circuit.add_transformer("T1", p1, p2, s1, s2, 2.0);
+        circuit.add_virtual_component("transformer", "T1", {p1, p2, s1, s2},
+                                      {{"turns_ratio", 2.0},
+                                       {"magnetic_core_enabled", 1.0},
+                                       {"core_loss_k", 0.1},
+                                       {"core_loss_alpha", 2.0}},
+                                      {{"target_component", "T1"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        const auto& conns = circuit.connections();
+        REQUIRE_FALSE(conns.empty());
+        const auto& xfmr = conns.front();
+        REQUIRE(xfmr.branch_index >= 0);
+        REQUIRE(xfmr.branch_index_2 >= 0);
+        x[xfmr.branch_index] = 2.0;      // primary current
+        x[xfmr.branch_index_2] = -4.0;   // secondary current = -n * i_p
+
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step.channel_values.contains("T1.core_loss"));
+        CHECK(step.channel_values.at("T1.core_loss") == Approx(0.4).margin(1e-12));
+    }
 }
 
 TEST_CASE("v1 control primitives keep bounded deterministic outputs",

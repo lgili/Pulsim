@@ -71,6 +71,45 @@ parity status, see [GUI Backend Parity](gui-component-parity.md).
 
 - **Transformer**: `type: transformer` (or `T`), `turns_ratio`
 
+### Magnetic Core (MVP)
+
+Supported components for `magnetic_core` block:
+
+- `saturable_inductor`
+- `coupled_inductor`
+- `transformer`
+
+Canonical fields (current MVP):
+
+- `enabled` (bool)
+- `model` (`saturation`)
+- `saturation_current` (optional, component-dependent)
+- `saturation_inductance` (optional, component-dependent)
+- `saturation_exponent` (optional, component-dependent)
+- `core_loss_k` (optional, default `0.0`)
+- `core_loss_alpha` (optional, default `2.0`)
+
+Example:
+
+```yaml
+- type: transformer
+  name: Tmag
+  nodes: [p1, 0, s1, 0]
+  turns_ratio: 2.0
+  magnetic_core:
+    enabled: true
+    model: saturation
+    core_loss_k: 0.08
+    core_loss_alpha: 2.0
+```
+
+When enabled with `core_loss_k > 0`, backend exports `"<component>.core_loss"` in
+`result.virtual_channels` with metadata:
+
+- `domain: loss`
+- `unit: W`
+- `source_component: <component_name>`
+
 ## Waveforms
 
 ```yaml

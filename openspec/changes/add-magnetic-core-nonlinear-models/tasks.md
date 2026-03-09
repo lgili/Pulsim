@@ -34,7 +34,7 @@
 - [ ] 6.4 Add migration guidance from legacy/simple magnetic approximations to canonical nonlinear core models.
 
 ## 7. Quality Gates (Mandatory Before Merge)
-- [ ] 7.1 `openspec validate add-magnetic-core-nonlinear-models --strict` passes.
-- [ ] 7.2 Targeted parser/kernel/python tests for nonlinear magnetic-core flows pass locally and in CI.
+- [x] 7.1 `openspec validate add-magnetic-core-nonlinear-models --strict` passes.
+- [x] 7.2 Targeted parser/kernel/python tests for nonlinear magnetic-core flows pass locally and in CI.
 - [ ] 7.3 Benchmark KPI gate for magnetic-core fidelity/determinism/performance passes in CI.
 - [ ] 7.4 Acceptance evidence (artifacts, thresholds, known limitations) is recorded in change notes.

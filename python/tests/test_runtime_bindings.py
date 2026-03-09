@@ -3566,6 +3566,120 @@ components:
     assert metadata.source_component == "Lsat"
 
 
+def test_coupled_inductor_magnetic_core_exports_core_loss_channel() -> None:
+    parser = ps.YamlParser()
+    circuit, opts = parser.load_string(
+        """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 5e-4
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vp
+    nodes: [vp, 0]
+    waveform: {type: dc, value: 8}
+  - type: voltage_source
+    name: Vs
+    nodes: [vs, 0]
+    waveform: {type: dc, value: 4}
+  - type: resistor
+    name: Rp
+    nodes: [vp, p1]
+    value: 2
+  - type: resistor
+    name: Rs
+    nodes: [vs, s1]
+    value: 2
+  - type: coupled_inductor
+    name: Kmag
+    nodes: [p1, 0, s1, 0]
+    l1: 1m
+    l2: 1m
+    coupling: 0.95
+    magnetic_core:
+      enabled: true
+      model: saturation
+      core_loss_k: 0.1
+      core_loss_alpha: 2.0
+"""
+    )
+    assert parser.errors == [], parser.errors
+
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+
+    assert "Kmag.core_loss" in result.virtual_channels
+    core_loss = [float(v) for v in result.virtual_channels["Kmag.core_loss"]]
+    assert len(core_loss) == len(result.time)
+    assert max(core_loss) > 0.0
+    assert min(core_loss) >= 0.0
+
+    metadata = result.virtual_channel_metadata["Kmag.core_loss"]
+    assert metadata.domain == "loss"
+    assert metadata.unit == "W"
+    assert metadata.source_component == "Kmag"
+
+
+def test_transformer_magnetic_core_exports_core_loss_channel() -> None:
+    parser = ps.YamlParser()
+    circuit, opts = parser.load_string(
+        """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 5e-4
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 12}
+  - type: resistor
+    name: Rsrc
+    nodes: [vin, p1]
+    value: 2
+  - type: transformer
+    name: Tmag
+    nodes: [p1, 0, s1, 0]
+    turns_ratio: 2.0
+    magnetic_core:
+      enabled: true
+      model: saturation
+      core_loss_k: 0.08
+      core_loss_alpha: 2.0
+  - type: resistor
+    name: Rload
+    nodes: [s1, 0]
+    value: 4
+"""
+    )
+    assert parser.errors == [], parser.errors
+
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+
+    assert "Tmag.core_loss" in result.virtual_channels
+    core_loss = [float(v) for v in result.virtual_channels["Tmag.core_loss"]]
+    assert len(core_loss) == len(result.time)
+    assert max(core_loss) > 0.0
+    assert min(core_loss) >= 0.0
+
+    metadata = result.virtual_channel_metadata["Tmag.core_loss"]
+    assert metadata.domain == "loss"
+    assert metadata.unit == "W"
+    assert metadata.source_component == "Tmag"
+
+
 def test_coupled_inductor_adds_mutual_terms_to_jacobian() -> None:
     circuit = ps.Circuit()
     n_p = circuit.add_node("p")

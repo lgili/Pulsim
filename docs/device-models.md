@@ -428,6 +428,31 @@ o----------------------o    o---------------------o
 
 ---
 
+### Magnetic Core Runtime Contract (MVP)
+
+For `saturable_inductor`, `coupled_inductor`, and `transformer`, the backend
+accepts `component.magnetic_core` with `model: saturation` and optional
+`core_loss_k` / `core_loss_alpha`.
+
+Current MVP runtime behavior:
+
+- Computes per-sample magnetic loss estimate:
+  - `P_core = core_loss_k * |i_equiv|^core_loss_alpha`
+- Exports canonical virtual channel:
+  - `"<component>.core_loss"` (`W`)
+- Exports channel metadata:
+  - `domain="loss"`
+  - `unit="W"`
+  - `source_component="<component_name>"`
+
+Current limitations:
+
+- Hysteresis model families are not implemented yet.
+- `core_loss` is currently exposed as virtual telemetry and is not yet coupled
+  into global electrothermal/loss summaries.
+
+---
+
 ## Thermal Models
 
 ### Runtime Thermal RC Model

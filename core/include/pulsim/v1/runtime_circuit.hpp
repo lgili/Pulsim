@@ -537,7 +537,7 @@ public:
                 type == "thyristor" || type == "triac") {
                 return "events";
             }
-            if (type == "saturable_inductor" || type == "coupled_inductor") {
+            if (type == "saturable_inductor" || type == "coupled_inductor" || type == "transformer") {
                 return "electrical";
             }
             if (type == "voltage_probe" || type == "current_probe" || type == "power_probe" ||
@@ -612,6 +612,23 @@ public:
                 electrical.domain = "electrical";
                 metadata.emplace(component.name + ".mutual", electrical);
                 metadata.emplace(component.name + ".k", std::move(electrical));
+                const Real mag_enabled = numeric_param("magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(numeric_param("core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
+                    auto magnetic_loss = base;
+                    magnetic_loss.domain = "loss";
+                    magnetic_loss.unit = "W";
+                    metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
+                }
+            } else if (component.type == "transformer") {
+                const Real mag_enabled = numeric_param("magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(numeric_param("core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
+                    auto magnetic_loss = base;
+                    magnetic_loss.domain = "loss";
+                    magnetic_loss.unit = "W";
+                    metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
+                }
             }
         }
 
@@ -1324,18 +1341,22 @@ public:
             if (component.type == "coupled_inductor") {
                 Real l1 = std::max<Real>(get_numeric(component, "l1", 0.0), 0.0);
                 Real l2 = std::max<Real>(get_numeric(component, "l2", 0.0), 0.0);
+                const auto l1_target_it = component.metadata.find("target_component_1");
+                const auto l2_target_it = component.metadata.find("target_component_2");
+                const DeviceConnection* conn1 = (l1_target_it == component.metadata.end())
+                    ? nullptr : find_connection(l1_target_it->second);
+                const DeviceConnection* conn2 = (l2_target_it == component.metadata.end())
+                    ? nullptr : find_connection(l2_target_it->second);
                 if (l1 <= 0.0 || l2 <= 0.0) {
-                    const auto l1_it = component.metadata.find("target_component_1");
-                    const auto l2_it = component.metadata.find("target_component_2");
-                    if (l1_it != component.metadata.end()) {
-                        if (const auto index = find_connection_index(l1_it->second); index.has_value()) {
+                    if (l1_target_it != component.metadata.end()) {
+                        if (const auto index = find_connection_index(l1_target_it->second); index.has_value()) {
                             if (const auto* inductor = std::get_if<Inductor>(&devices_[*index])) {
                                 l1 = inductor->inductance();
                             }
                         }
                     }
-                    if (l2_it != component.metadata.end()) {
-                        if (const auto index = find_connection_index(l2_it->second); index.has_value()) {
+                    if (l2_target_it != component.metadata.end()) {
+                        if (const auto index = find_connection_index(l2_target_it->second); index.has_value()) {
                             if (const auto* inductor = std::get_if<Inductor>(&devices_[*index])) {
                                 l2 = inductor->inductance();
                             }
@@ -1347,6 +1368,47 @@ public:
                 const Real mutual = k * std::sqrt(std::max<Real>(l1 * l2, 0.0));
                 result.channel_values[component.name + ".k"] = k;
                 result.channel_values[component.name + ".mutual"] = mutual;
+                const Real mag_enabled = get_numeric(component, "magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(get_numeric(component, "core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0 && conn1 && conn2 &&
+                    conn1->branch_index >= 0 && conn2->branch_index >= 0 &&
+                    conn1->branch_index < system_size() && conn2->branch_index < system_size()) {
+                    const Real i1 = x[conn1->branch_index];
+                    const Real i2 = x[conn2->branch_index];
+                    const Real i_equiv = Real{0.5} * (std::abs(i1) + std::abs(i2));
+                    const Real core_loss_alpha =
+                        std::clamp(get_numeric(component, "core_loss_alpha", 2.0), 0.0, 8.0);
+                    const Real core_loss = core_loss_k * std::pow(i_equiv, core_loss_alpha);
+                    result.channel_values[component.name + ".core_loss"] =
+                        std::max<Real>(core_loss, 0.0);
+                }
+                continue;
+            }
+            if (component.type == "transformer") {
+                const auto target_it = component.metadata.find("target_component");
+                const std::string target =
+                    (target_it == component.metadata.end()) ? component.name : target_it->second;
+                const DeviceConnection* conn = find_connection(target);
+                const Real mag_enabled = get_numeric(component, "magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(get_numeric(component, "core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0 &&
+                    conn && conn->branch_index >= 0 && conn->branch_index < system_size()) {
+                    const Real i_p = x[conn->branch_index];
+                    Real i_s = 0.0;
+                    if (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size()) {
+                        i_s = x[conn->branch_index_2];
+                    }
+                    const Real turns_ratio = std::max<Real>(
+                        std::abs(get_numeric(component, "turns_ratio", 1.0)), 1e-12);
+                    const Real i_equiv = (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size())
+                        ? Real{0.5} * (std::abs(i_p) + std::abs(i_s) / turns_ratio)
+                        : std::abs(i_p);
+                    const Real core_loss_alpha =
+                        std::clamp(get_numeric(component, "core_loss_alpha", 2.0), 0.0, 8.0);
+                    const Real core_loss = core_loss_k * std::pow(i_equiv, core_loss_alpha);
+                    result.channel_values[component.name + ".core_loss"] =
+                        std::max<Real>(core_loss, 0.0);
+                }
                 continue;
             }
             if (component.type == "electrical_scope" || component.type == "thermal_scope") {

@@ -89,7 +89,9 @@ bool is_known_key(const std::string& key, const std::unordered_set<std::string>&
 
 /// Returns whether canonical component type supports nonlinear magnetic_core block.
 [[nodiscard]] bool component_type_supports_magnetic_core(const std::string& canonical_type) {
-    return canonical_type == "saturable_inductor";
+    return canonical_type == "saturable_inductor" ||
+           canonical_type == "coupled_inductor" ||
+           canonical_type == "transformer";
 }
 
 /// Prefixes diagnostics with stable machine-readable error code.
@@ -2716,6 +2718,19 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (!ratio_node) ratio_node = get_param("ratio");
             Real turns_ratio = parse_real(ratio_node, name + ".turns_ratio", errors_);
             circuit.add_transformer(name, node_at(0), node_at(1), node_at(2), node_at(3), turns_ratio);
+            if (magnetic_core_defined) {
+                std::unordered_map<std::string, Real> numeric_params;
+                numeric_params["turns_ratio"] = turns_ratio;
+                numeric_params["magnetic_core_enabled"] = magnetic_core_enabled ? 1.0 : 0.0;
+                numeric_params["core_loss_k"] = magnetic_core_enabled ? magnetic_core_loss_k : 0.0;
+                numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
+
+                std::unordered_map<std::string, std::string> metadata;
+                metadata["target_component"] = name;
+                metadata["magnetic_core_model"] = magnetic_core_model;
+                circuit.add_virtual_component(
+                    type, name, node_indices, std::move(numeric_params), std::move(metadata));
+            }
         }
         else if (type == "snubber_rc") {
             YAML::Node r_node = get_param("resistance");
@@ -2991,9 +3006,17 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             numeric_params["l2"] = l2;
             numeric_params["coupling"] = k;
             numeric_params["k"] = k;
+            if (magnetic_core_defined) {
+                numeric_params["magnetic_core_enabled"] = magnetic_core_enabled ? 1.0 : 0.0;
+                numeric_params["core_loss_k"] = magnetic_core_enabled ? magnetic_core_loss_k : 0.0;
+                numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
+            }
             std::unordered_map<std::string, std::string> metadata;
             metadata["target_component_1"] = l1_name;
             metadata["target_component_2"] = l2_name;
+            if (magnetic_core_defined) {
+                metadata["magnetic_core_model"] = magnetic_core_model;
+            }
             circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
 
             push_warning(warnings_, kDiagVirtualComponent,

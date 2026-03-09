@@ -456,7 +456,7 @@ class TestYamlCBlockParser:
         assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
 
     def test_yaml_rejects_magnetic_core_on_unsupported_component(self) -> None:
-        """magnetic_core is currently accepted only for saturable_inductor."""
+        """magnetic_core is rejected for components outside supported magnetic families."""
         p = self._parse(
             "  - name: Rmag\n"
             "    type: resistor\n"
@@ -467,6 +467,21 @@ class TestYamlCBlockParser:
             "      model: saturation\n"
         )
         assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_transformer_accepts_magnetic_core_loss_block(self) -> None:
+        """transformer accepts magnetic_core loss parameters in MVP."""
+        p = self._parse(
+            "  - name: Tmag\n"
+            "    type: transformer\n"
+            "    nodes: [p1, p2, s1, s2]\n"
+            "    turns_ratio: 2.0\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      core_loss_k: 0.03\n"
+            "      core_loss_alpha: 1.9\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
 
     def test_yaml_rejects_unsupported_magnetic_core_model(self) -> None:
         """Only saturation model is supported in the initial magnetic_core release."""
@@ -480,6 +495,23 @@ class TestYamlCBlockParser:
             "      model: hysteresis\n"
         )
         assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_coupled_inductor_accepts_magnetic_core_loss_block(self) -> None:
+        """coupled_inductor accepts magnetic_core loss parameters in MVP."""
+        p = self._parse(
+            "  - name: Kmag\n"
+            "    type: coupled_inductor\n"
+            "    nodes: [p1, p2, s1, s2]\n"
+            "    l1: 1m\n"
+            "    l2: 1m\n"
+            "    coupling: 0.9\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      core_loss_k: 0.05\n"
+            "      core_loss_alpha: 2.0\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
 
     # 6.3.3 — both lib_path and source → error
     def test_yaml_cblock_both_specified_error(self, tmp_path) -> None:
