@@ -746,12 +746,16 @@ Circuit build_closed_loop_buck_for_control_regression(bool use_cblock_controller
                                                       bool add_disconnected_cblock,
                                                       bool ghost_node_first = false) {
     Circuit circuit;
-    const auto n_ghost = ghost_node_first ? circuit.add_node("ghost") : Index{-1};
+    if (ghost_node_first) {
+        (void)circuit.add_node("ghost");
+    }
     const auto n_vin = circuit.add_node("vin");
     const auto n_ref = circuit.add_node("vref");
     const auto n_sw = circuit.add_node("sw");
     const auto n_out = circuit.add_node("vout");
-    const auto n_ghost_late = ghost_node_first ? n_ghost : circuit.add_node("ghost");
+    if (!ghost_node_first) {
+        (void)circuit.add_node("ghost");
+    }
     const auto gnd = Circuit::ground();
 
     circuit.add_voltage_source("Vin", n_vin, gnd, 12.0);
@@ -766,13 +770,17 @@ Circuit build_closed_loop_buck_for_control_regression(bool use_cblock_controller
     circuit.add_inductor("L1", n_sw, n_out, 220e-6, 0.0);
     circuit.add_capacitor("Cout", n_out, gnd, 220e-6, 0.0);
     circuit.add_resistor("Rload", n_out, gnd, 8.0);
+    circuit.add_virtual_component("voltage_probe", "VrefProbe", {n_ref, gnd}, {}, {});
     circuit.add_virtual_component("voltage_probe", "Xout", {n_out, gnd}, {}, {});
 
     if (use_cblock_controller) {
         circuit.add_virtual_component(
-            "c_block", "CB1", {n_ref, n_out},
+            "c_block", "CB1", {},
             {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
-            {{"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH}});
+            {
+                {"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH},
+                {"inputs", "[Xout]"}
+            });
     } else {
         // PI configured as constant duty reference (equivalent to dummy C-Block output=0.5).
         circuit.add_virtual_component(
@@ -785,9 +793,12 @@ Circuit build_closed_loop_buck_for_control_regression(bool use_cblock_controller
         // This block is intentionally disconnected from duty routing.
         // It must not perturb electrical convergence.
         circuit.add_virtual_component(
-            "c_block", "CB_GHOST", {n_ghost_late},
+            "c_block", "CB_GHOST", {},
             {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
-            {{"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH}});
+            {
+                {"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH},
+                {"inputs", "[Xout]"}
+            });
     }
 
     circuit.add_virtual_component(
@@ -801,12 +812,16 @@ Circuit build_closed_loop_buck_for_control_regression(bool use_cblock_controller
 Circuit build_closed_loop_buck_with_dynamic_pi(bool add_disconnected_cblock,
                                                bool ghost_node_first = false) {
     Circuit circuit;
-    const auto n_ghost = ghost_node_first ? circuit.add_node("ghost") : Index{-1};
+    if (ghost_node_first) {
+        (void)circuit.add_node("ghost");
+    }
     const auto n_vin = circuit.add_node("vin");
     const auto n_ref = circuit.add_node("vref");
     const auto n_sw = circuit.add_node("sw");
     const auto n_out = circuit.add_node("vout");
-    const auto n_ghost_late = ghost_node_first ? n_ghost : circuit.add_node("ghost");
+    if (!ghost_node_first) {
+        (void)circuit.add_node("ghost");
+    }
     const auto gnd = Circuit::ground();
 
     circuit.add_voltage_source("Vin", n_vin, gnd, 12.0);
@@ -827,9 +842,12 @@ Circuit build_closed_loop_buck_with_dynamic_pi(bool add_disconnected_cblock,
 
     if (add_disconnected_cblock) {
         circuit.add_virtual_component(
-            "c_block", "CB_GHOST", {n_ghost_late},
+            "c_block", "CB_GHOST", {},
             {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
-            {{"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH}});
+            {
+                {"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH},
+                {"inputs", "[Xout]"}
+            });
     }
 
     circuit.add_virtual_component(
@@ -959,11 +977,15 @@ TEST_CASE("v1 control scheduler updates c_block channels",
 
     circuit.add_voltage_source("Vin", n_in, gnd, 0.0);
     circuit.add_resistor("Rin", n_in, gnd, 1e3);
+    circuit.add_virtual_component("voltage_probe", "Xin", {n_in, gnd}, {}, {});
 
     circuit.add_virtual_component(
-        "c_block", "CB1", {n_in},
+        "c_block", "CB1", {},
         {{"n_inputs", 1.0}, {"n_outputs", 2.0}},
-        {{"lib_path", PULSIM_TEST_CBLOCK_LIB_PATH}});
+        {
+            {"lib_path", PULSIM_TEST_CBLOCK_LIB_PATH},
+            {"inputs", "[Xin]"}
+        });
 
     SimulationOptions opts;
     opts.tstart = 0.0;
@@ -1010,7 +1032,7 @@ TEST_CASE("v1 control scheduler updates c_block channels",
     CHECK(saw_low);
 }
 
-TEST_CASE("v1 c_block without runtime library fails fast",
+TEST_CASE("v1 c_block requires explicit control input mapping",
           "[v1][mixed-domain][control][c_block][regression]") {
     Circuit circuit;
     const auto n_in = circuit.add_node("in");
@@ -1019,9 +1041,38 @@ TEST_CASE("v1 c_block without runtime library fails fast",
     circuit.add_voltage_source("Vin", n_in, gnd, 1.0);
     circuit.add_resistor("Rin", n_in, gnd, 1e3);
     circuit.add_virtual_component(
-        "c_block", "CB_MISSING_LIB", {n_in},
+        "c_block", "CB_NO_INPUTS", {},
         {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
-        {});
+        {{"lib_path", PULSIM_TEST_CBLOCK_CONST_LIB_PATH}});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 40e-6;
+    opts.dt = 10e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    REQUIRE_THROWS_AS(sim.run_transient(circuit.initial_state()), std::runtime_error);
+}
+
+TEST_CASE("v1 c_block without runtime library fails fast",
+          "[v1][mixed-domain][control][c_block][regression]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 1.0);
+    circuit.add_resistor("Rin", n_in, gnd, 1e3);
+    circuit.add_virtual_component("voltage_probe", "Xin", {n_in, gnd}, {}, {});
+    circuit.add_virtual_component(
+        "c_block", "CB_MISSING_LIB", {},
+        {{"n_inputs", 1.0}, {"n_outputs", 1.0}},
+        {{"inputs", "[Xin]"}});
 
     SimulationOptions opts;
     opts.tstart = 0.0;

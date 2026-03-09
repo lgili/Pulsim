@@ -186,21 +186,39 @@ schema: pulsim-v1
 version: 1
 
 components:
+  - type: voltage_probe
+    name: IN_V
+    nodes: [in_wire, 0]
+
   - type: c_block
     name: GAIN
-    nodes: [in_wire, out_wire]
+    nodes: []
     n_inputs: 1
     n_outputs: 1
+    inputs: [IN_V]
     source: gain3x.c          # compile at simulation start
+
+  - type: voltage_probe
+    name: VDS
+    nodes: [vds, 0]
+
+  - type: voltage_probe
+    name: ID
+    nodes: [id, 0]
 
   - type: c_block
     name: LUT
-    nodes: [vds, id, loss]
+    nodes: []
     n_inputs: 2
     n_outputs: 2
+    inputs: [VDS, ID]
     lib_path: prebuilt/efficiency_map.so   # use pre-compiled library
     extra_cflags: ["-lm"]
 ```
+
+`c_block` inputs are resolved only from control channels declared in `inputs`.
+The `nodes` field remains accepted by YAML schema but is not used to feed C-Block
+inputs in mixed-domain execution.
 
 Exactly one of `source` or `lib_path` must be present. Omitting both is valid
 only when the block is instantiated programmatically with a `python_fn`.

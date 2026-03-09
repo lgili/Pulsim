@@ -1967,7 +1967,10 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         }
 
         std::vector<std::string> nodes = parse_nodes(comp["nodes"], name, errors_);
-        if (nodes.empty()) continue;
+        const auto arity_it = component_node_arity().find(type);
+        const bool accepts_zero_nodes =
+            arity_it != component_node_arity().end() && arity_it->second.first == 0;
+        if (nodes.empty() && !accepts_zero_nodes) continue;
         if (!validate_node_count(type, nodes, errors_, name)) continue;
 
         const YAML::Node comp_view = comp;

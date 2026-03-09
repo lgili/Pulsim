@@ -1952,7 +1952,7 @@ PULSIM_CBLOCK_EXPORT int pulsim_cblock_init(PulsimCBlockCtx** ctx_out, const Pul
 PULSIM_CBLOCK_EXPORT int pulsim_cblock_step(
     PulsimCBlockCtx* ctx, double t, double dt, const double* in, double* out) {
     struct PulsimCBlockCtx* s = (struct PulsimCBlockCtx*)ctx;
-    const double error = in[0];
+    const double error = in[0] - in[1];
     const double effective_dt = (s->t_prev < 0.0) ? 0.0 : ((dt > 0.0) ? dt : 0.0);
 
     double integral = s->integral + error * effective_dt;
@@ -1992,11 +1992,15 @@ PULSIM_CBLOCK_EXPORT void pulsim_cblock_destroy(PulsimCBlockCtx* ctx) {
         assert pwm_start >= 0
 
         cblock_block = (
+            "  - type: voltage_probe\n"
+            "    name: VrefProbe\n"
+            "    nodes: [vref, 0]\n\n"
             "  - type: c_block\n"
             "    name: CB1\n"
-            "    nodes: [vref, vout]\n"
-            "    n_inputs: 1\n"
+            "    nodes: []\n"
+            "    n_inputs: 2\n"
             "    n_outputs: 1\n"
+            "    inputs: [VrefProbe, Xout]\n"
             f"    lib_path: {Path(lib_path).as_posix()}\n\n"
         )
         cblock_yaml = text[:pi_start] + cblock_block + text[pwm_start:]

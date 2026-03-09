@@ -396,6 +396,23 @@ class TestYamlCBlockParser:
         )
         assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
 
+    def test_yaml_cblock_control_only_allows_empty_nodes(self, tmp_path) -> None:
+        """Control-domain C_BLOCK supports nodes: [] without being dropped by parser."""
+        lib = tmp_path / "gain.so"
+        lib.write_bytes(b"")
+        component_yaml = (
+            f"  - {{name: CB0, type: c_block, n_inputs: 1, n_outputs: 1,"
+            f" lib_path: {lib}, nodes: [], inputs: [ERR]}}\n"
+        )
+
+        p = self._parse(component_yaml)
+        assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
+
+        p_roundtrip = ps.YamlParser()
+        circuit, _ = p_roundtrip.load_string(self._HEADER + component_yaml)
+        assert p_roundtrip.errors == [], p_roundtrip.errors
+        assert any(v.name == "CB0" for v in circuit.virtual_components())
+
     # 6.3.3 — both lib_path and source → error
     def test_yaml_cblock_both_specified_error(self, tmp_path) -> None:
         """Specifying both lib_path and source yields a PARAM_INVALID error."""
