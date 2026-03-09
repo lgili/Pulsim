@@ -12,20 +12,20 @@
 
 ## 3. Result Surface and Telemetry
 - [x] 3.1 Expose canonical magnetic channels and metadata (state/loss quantities, units, source component).
-- [ ] 3.2 Expose deterministic summary reductions consistent with time-series channels.
-- [ ] 3.3 Keep deterministic channel ordering and allocation-bounded behavior in repeated runs.
+- [x] 3.2 Expose deterministic summary reductions consistent with time-series channels.
+- [x] 3.3 Keep deterministic channel ordering and allocation-bounded behavior in repeated runs.
 
 ## 4. Python Bindings and API
-- [ ] 4.1 Expose typed Python configuration surfaces for nonlinear magnetic-core models.
-- [ ] 4.2 Expose magnetic-core channels/metadata and summary fields through existing result APIs.
+- [x] 4.1 Expose typed Python configuration surfaces for nonlinear magnetic-core models.
+- [x] 4.2 Expose magnetic-core channels/metadata and summary fields through existing result APIs.
 - [x] 4.3 Propagate structured parser/runtime diagnostics with stable reason codes and field context.
 
 ## 5. Benchmark and Regression Coverage
-- [ ] 5.1 Add canonical fixture circuits for saturation validation against analytical/reference expectations.
-- [ ] 5.2 Add canonical fixture circuits for hysteresis-loop behavior and cycle-energy consistency checks.
+- [x] 5.1 Add canonical fixture circuits for saturation validation against analytical/reference expectations.
+- [x] 5.2 Add canonical fixture circuits for hysteresis-loop behavior and cycle-energy consistency checks.
 - [x] 5.3 Add canonical fixture circuits for frequency-dependent core-loss trend validation.
 - [x] 5.4 Add repeat-run determinism tests for magnetic-core channels and summaries.
-- [ ] 5.5 Add KPI gates for fidelity, determinism, runtime, and allocation stability.
+- [x] 5.5 Add KPI gates for fidelity, determinism, runtime, and allocation stability.
 
 ## 6. Documentation and UX Boundary
 - [x] 6.1 Document backend nonlinear magnetic-core contract (model families, parameters, outputs, diagnostics, limits).
@@ -36,5 +36,5 @@
 ## 7. Quality Gates (Mandatory Before Merge)
 - [x] 7.1 `openspec validate add-magnetic-core-nonlinear-models --strict` passes.
 - [x] 7.2 Targeted parser/kernel/python tests for nonlinear magnetic-core flows pass locally and in CI.
-- [ ] 7.3 Benchmark KPI gate for magnetic-core fidelity/determinism/performance passes in CI.
+- [x] 7.3 Benchmark KPI gate for magnetic-core fidelity/determinism/performance passes in CI.
 - [x] 7.4 Acceptance evidence (artifacts, thresholds, known limitations) is recorded in change notes.

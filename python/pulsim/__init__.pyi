@@ -863,6 +863,56 @@ class PythonCBlock:
     def step(self, t: float, dt: float, inputs: Sequence[float]) -> List[float]: ...
     def reset(self) -> None: ...
 
+class MagneticCoreConfigError(ValueError):
+    code: str
+    field: str
+
+class MagneticCoreConfig:
+    enabled: bool
+    model: str
+    loss_policy: str
+    saturation_current: float | None
+    saturation_inductance: float | None
+    saturation_exponent: float | None
+    core_loss_k: float
+    core_loss_alpha: float
+    core_loss_freq_coeff: float
+    i_equiv_init: float
+    hysteresis_band: float | None
+    hysteresis_strength: float
+    hysteresis_loss_coeff: float
+    hysteresis_state_init: float
+
+    def __init__(
+        self,
+        *,
+        enabled: bool = ...,
+        model: str = ...,
+        loss_policy: str = ...,
+        saturation_current: float | None = ...,
+        saturation_inductance: float | None = ...,
+        saturation_exponent: float | None = ...,
+        core_loss_k: float = ...,
+        core_loss_alpha: float = ...,
+        core_loss_freq_coeff: float = ...,
+        i_equiv_init: float = ...,
+        hysteresis_band: float | None = ...,
+        hysteresis_strength: float = ...,
+        hysteresis_loss_coeff: float = ...,
+        hysteresis_state_init: float = ...,
+    ) -> None: ...
+    def normalized_model(self) -> str: ...
+    def normalized_loss_policy(self) -> str: ...
+    def validate(self) -> None: ...
+    def to_numeric_params(self) -> Dict[str, float]: ...
+    def to_metadata(self) -> Dict[str, str]: ...
+
+def apply_magnetic_core_config(
+    numeric_params: Dict[str, float],
+    metadata: Dict[str, str],
+    config: MagneticCoreConfig,
+) -> Tuple[Dict[str, float], Dict[str, str]]: ...
+
 capabilities: Dict[str, bool]
 
 # =============================================================================

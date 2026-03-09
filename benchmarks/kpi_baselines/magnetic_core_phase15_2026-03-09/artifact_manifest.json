@@ -1,0 +1,12 @@
+{
+  "baseline_id": "magnetic_core_phase15_2026-03-09",
+  "captured_at_utc": "2026-03-09T19:45:18.864118+00:00",
+  "files": [
+    {
+      "path": "benchmarks/phase15_magnetic_core_artifacts/benchmarks/results.json",
+      "sha256": "f60f5a5ba91e790bd3fd2a55da092cd2483570ee78f09a3bebfce05ce8552b4f",
+      "size_bytes": 18930
+    }
+  ],
+  "schema_version": "pulsim-kpi-baseline-manifest-v1"
+}

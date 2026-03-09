@@ -1,0 +1,177 @@
+{
+  "baseline_id": "magnetic_core_phase15_2026-03-09",
+  "blocked_by_provenance": false,
+  "comparisons": {
+    "magnetic_allocation_regression": {
+      "baseline": 0.0,
+      "current": 0.0,
+      "direction": "lower_is_better",
+      "max_regression_abs": 0.0,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    },
+    "magnetic_core_loss_trend_error": {
+      "baseline": 0.0,
+      "current": 0.0,
+      "direction": "lower_is_better",
+      "max_regression_abs": 0.0,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    },
+    "magnetic_determinism_drift": {
+      "baseline": 1.0658141036401503e-14,
+      "current": 1.0658141036401503e-14,
+      "direction": "lower_is_better",
+      "max_regression_abs": 1e-10,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    },
+    "magnetic_hysteresis_cycle_energy_error": {
+      "baseline": 1.3400688141083665e-11,
+      "current": 1.3400688141083665e-11,
+      "direction": "lower_is_better",
+      "max_regression_abs": 5e-07,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    },
+    "magnetic_runtime_p95": {
+      "baseline": 0.09985821824921004,
+      "current": 0.09985821824921004,
+      "direction": "lower_is_better",
+      "max_regression_abs": null,
+      "max_regression_rel": 0.1,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": false,
+      "status": "passed"
+    },
+    "magnetic_sat_error": {
+      "baseline": 2.3789087019721045e-13,
+      "current": 2.3789087019721045e-13,
+      "direction": "lower_is_better",
+      "max_regression_abs": 5e-07,
+      "max_regression_rel": null,
+      "message": "within threshold",
+      "regression_abs": 0.0,
+      "regression_rel": 0.0,
+      "required": true,
+      "status": "passed"
+    }
+  },
+  "current_metrics": {
+    "ac_runtime_p95": null,
+    "ac_sweep_mag_error": null,
+    "ac_sweep_phase_error": null,
+    "averaged_pair_case_count": null,
+    "averaged_pair_fidelity_error": null,
+    "averaged_pair_runtime_speedup_mean": null,
+    "averaged_pair_runtime_speedup_min": null,
+    "component_coverage_gap": 0.0,
+    "component_coverage_rate": 1.0,
+    "component_loss_summary_consistency_error": 0.0,
+    "component_thermal_summary_consistency_error": 0.0,
+    "convergence_success_rate": 1.0,
+    "dae_fallback_ratio": 0.0,
+    "loss_energy_balance_error": 0.0,
+    "magnetic_allocation_regression": 0.0,
+    "magnetic_core_loss_trend_error": 0.0,
+    "magnetic_determinism_drift": 1.0658141036401503e-14,
+    "magnetic_hysteresis_cycle_energy_error": 1.3400688141083665e-11,
+    "magnetic_runtime_p95": 0.09985821824921004,
+    "magnetic_sat_error": 2.3789087019721045e-13,
+    "module_order_count_match_rate": 1.0,
+    "module_order_mismatch_rate": 0.0,
+    "module_output_reallocation_free_rate": 1.0,
+    "module_output_reallocation_p95": 0.0,
+    "parity_rms_error_ltspice": null,
+    "parity_rms_error_ngspice": null,
+    "runtime_p50": 0.06933214599848725,
+    "runtime_p95": 0.09985821824921004,
+    "state_space_primary_ratio": 1.0,
+    "stress_tier_failure_count": null,
+    "thermal_peak_temperature_delta": 0.0
+  },
+  "evaluated_at_utc": "2026-03-09T19:46:51.712843+00:00",
+  "failed_required_metrics": 0,
+  "overall_status": "passed",
+  "provenance": {
+    "baseline": {
+      "checks": {
+        "baseline_id": "magnetic_core_phase15_2026-03-09",
+        "baseline_path": "benchmarks/kpi_baselines/magnetic_core_phase15_2026-03-09/kpi_baseline.json",
+        "bench_results_declared": 1,
+        "captured_at_utc": "2026-03-09T19:45:18.864118+00:00",
+        "digest_mismatches": 0,
+        "environment_keys": [
+          "cc",
+          "cmake",
+          "compiler",
+          "cxx_flags",
+          "machine_class",
+          "os",
+          "python"
+        ],
+        "eol_normalization_matches": 0,
+        "manifest_baseline_id": "magnetic_core_phase15_2026-03-09",
+        "manifest_captured_at_utc": "2026-03-09T19:45:18.864118+00:00",
+        "manifest_file_count": 1,
+        "manifest_path": "benchmarks/kpi_baselines/magnetic_core_phase15_2026-03-09/artifact_manifest.json",
+        "manifest_schema_version": "pulsim-kpi-baseline-manifest-v1",
+        "metrics_count": 31,
+        "missing_files": 0,
+        "schema_version": "pulsim-kpi-baseline-v1",
+        "size_mismatches": 0,
+        "source_bench_results": "benchmarks/phase15_magnetic_core_artifacts/benchmarks/results.json",
+        "source_bench_results_resolved": "/Users/lgili/Documents/01 - Codes/01 - Github/PulsimCore/benchmarks/phase15_magnetic_core_artifacts/benchmarks/results.json",
+        "verified_files": 1
+      },
+      "errors": [],
+      "status": "passed",
+      "warnings": []
+    },
+    "environment_compatibility": {
+      "baseline_machine_class": "arm64",
+      "current_machine_class": "arm64",
+      "machine_class_match": true
+    },
+    "strict_mode": true,
+    "thresholds": {
+      "checks": {
+        "metrics_count": 6,
+        "schema": "pulsim-kpi-gates-v1",
+        "version": 1
+      },
+      "errors": [],
+      "status": "passed",
+      "warnings": []
+    }
+  },
+  "runtime_scope": {
+    "baseline_results_path": "/Users/lgili/Documents/01 - Codes/01 - Github/PulsimCore/benchmarks/phase15_magnetic_core_artifacts/benchmarks/results.json",
+    "baseline_scope_total": 6,
+    "comparable_total": 6,
+    "executed_total": 6,
+    "executed_with_ids": 6,
+    "mode": "baseline_intersection",
+    "reason": "using_baseline_case_intersection"
+  },
+  "schema_version": "pulsim-kpi-gate-report-v1",
+  "skipped_optional_metrics": 0
+}

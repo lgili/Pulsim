@@ -198,6 +198,11 @@ from .cblock import (
     CBlockLibrary,
     PythonCBlock,
 )
+from .magnetic_core import (
+    MagneticCoreConfig,
+    MagneticCoreConfigError,
+    apply_magnetic_core_config,
+)
 
 # Waveform Post-Processing (Pure Python, backend-owned metric pipeline)
 from .post_processing import (
@@ -799,6 +804,9 @@ __all__ = [
     "compile_cblock",
     "CBlockLibrary",
     "PythonCBlock",
+    "MagneticCoreConfig",
+    "MagneticCoreConfigError",
+    "apply_magnetic_core_config",
     # Waveform Post-Processing
     "PostProcessingWindowMode",
     "PostProcessingJobKind",

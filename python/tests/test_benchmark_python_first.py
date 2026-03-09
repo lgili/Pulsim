@@ -678,3 +678,70 @@ def test_run_benchmarks_accepts_expected_frequency_failure_for_control_workflow(
     assert result.mode == "frequency_analysis"
     assert "Expected failure matched" in result.message
     assert result.telemetry.get("expected_failure_matched") == 1.0
+
+
+def test_run_benchmarks_validates_magnetic_core_saturation_and_hysteresis(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "magnetic_core_benchmarks.yaml"
+
+    results = br.run_benchmarks(
+        manifest_path,
+        tmp_path / "out",
+        selected=["magnetic_core_saturation", "magnetic_core_hysteresis"],
+    )
+
+    assert len(results) == 2
+    rows = {row.benchmark_id: row for row in results}
+
+    sat = rows["magnetic_core_saturation"]
+    assert sat.status == "passed"
+    assert sat.max_error is not None
+    assert sat.telemetry.get("magnetic_fixture_saturation") == 1.0
+    assert sat.telemetry.get("magnetic_sat_error") is not None
+
+    hyst = rows["magnetic_core_hysteresis"]
+    assert hyst.status == "passed"
+    assert hyst.max_error is not None
+    assert hyst.telemetry.get("magnetic_fixture_hysteresis") == 1.0
+    assert hyst.telemetry.get("magnetic_hysteresis_cycle_energy_error") is not None
+
+
+def test_run_benchmarks_emits_magnetic_trend_and_determinism_telemetry(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = repo_root / "benchmarks" / "magnetic_core_benchmarks.yaml"
+
+    selected_ids = [
+        "magnetic_core_frequency_trend_low",
+        "magnetic_core_frequency_trend_high",
+        "magnetic_core_determinism_ref",
+        "magnetic_core_determinism_cmp",
+    ]
+    results = br.run_benchmarks(
+        manifest_path,
+        tmp_path / "out",
+        selected=selected_ids,
+    )
+
+    assert len(results) == len(selected_ids)
+    rows = {row.benchmark_id: row for row in results}
+    for bench_id in selected_ids:
+        assert rows[bench_id].status == "passed"
+
+    low = rows["magnetic_core_frequency_trend_low"]
+    high = rows["magnetic_core_frequency_trend_high"]
+    assert low.telemetry.get("magnetic_fixture_frequency_trend") == 1.0
+    assert high.telemetry.get("magnetic_fixture_frequency_trend") == 1.0
+    assert low.telemetry.get("magnetic_trend_role_low") == 1.0
+    assert high.telemetry.get("magnetic_trend_role_high") == 1.0
+    assert low.telemetry.get("magnetic_avg_core_loss") is not None
+    assert high.telemetry.get("magnetic_avg_core_loss") is not None
+    assert float(high.telemetry["magnetic_avg_core_loss"]) > float(low.telemetry["magnetic_avg_core_loss"])
+
+    det = rows["magnetic_core_determinism_cmp"]
+    assert det.telemetry.get("magnetic_determinism_case") == 1.0
+    assert det.max_error is not None
+    assert det.max_error <= 1e-12

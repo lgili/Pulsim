@@ -1,0 +1,57 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: magnetic_core_hysteresis
+  category: magnetic
+  magnetic_kpi:
+    category: hysteresis
+  validation:
+    type: magnetic_hysteresis
+    params:
+      i_observable: Lsat.i_est
+      h_state_observable: Lsat.h_state
+      core_loss_observable: Lsat.core_loss
+      core_loss_k: 0.15
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 0.0
+      hysteresis_band: 0.05
+      hysteresis_loss_coeff: 0.4
+      magnetic_i_equiv_init: 0.0
+  expectations:
+    metrics:
+      max_error: 1e-9
+      cycle_energy_error: 1e-9
+simulation:
+  tstart: 0.0
+  tstop: 2.5e-3
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: sine
+      amplitude: 8
+      frequency: 900
+      offset: 0
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 1.5
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: hysteresis
+      hysteresis_band: 0.05
+      hysteresis_strength: 0.2
+      hysteresis_loss_coeff: 0.4
+      hysteresis_state_init: 1.0
+      core_loss_k: 0.15
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 0.0

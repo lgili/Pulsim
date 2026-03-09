@@ -1,0 +1,27 @@
+schema: pulsim-kpi-gates-v1
+version: 1
+metrics:
+  magnetic_sat_error:
+    direction: lower_is_better
+    max_regression_abs: 5e-7
+    required: true
+  magnetic_hysteresis_cycle_energy_error:
+    direction: lower_is_better
+    max_regression_abs: 5e-7
+    required: true
+  magnetic_core_loss_trend_error:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true
+  magnetic_determinism_drift:
+    direction: lower_is_better
+    max_regression_abs: 1e-10
+    required: true
+  magnetic_runtime_p95:
+    direction: lower_is_better
+    max_regression_rel: 0.10
+    required: false
+  magnetic_allocation_regression:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: true

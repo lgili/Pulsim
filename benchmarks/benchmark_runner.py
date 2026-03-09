@@ -190,6 +190,194 @@ def extract_averaged_pair_telemetry(benchmark_meta: Dict[str, Any]) -> Dict[str,
     }
 
 
+def extract_magnetic_kpi_telemetry(benchmark_meta: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    """Extract optional magnetic KPI tags from benchmark metadata."""
+    if not isinstance(benchmark_meta, dict):
+        return {}
+
+    magnetic_kpi = benchmark_meta.get("magnetic_kpi")
+    if not isinstance(magnetic_kpi, dict):
+        return {}
+
+    telemetry: Dict[str, Optional[float]] = {"magnetic_fixture_case": 1.0}
+
+    category_raw = magnetic_kpi.get("category", "")
+    category = str(category_raw).strip().lower()
+    category_flags = {
+        "saturation": "magnetic_fixture_saturation",
+        "hysteresis": "magnetic_fixture_hysteresis",
+        "frequency_trend": "magnetic_fixture_frequency_trend",
+        "determinism": "magnetic_determinism_case",
+    }
+    if category in category_flags:
+        telemetry[category_flags[category]] = 1.0
+
+    trend_group = magnetic_kpi.get("trend_group")
+    if isinstance(trend_group, str) and trend_group.strip():
+        telemetry["magnetic_trend_group_crc32"] = float(
+            zlib.crc32(trend_group.strip().encode("utf-8")) & 0xFFFFFFFF
+        )
+
+    trend_role_raw = magnetic_kpi.get("trend_role")
+    trend_role = str(trend_role_raw).strip().lower() if trend_role_raw is not None else ""
+    if trend_role in {"low", "high"}:
+        telemetry["magnetic_trend_role_low"] = 1.0 if trend_role == "low" else 0.0
+        telemetry["magnetic_trend_role_high"] = 1.0 if trend_role == "high" else 0.0
+
+    return telemetry
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _load_series_values(series: Dict[str, List[float]], observable: str) -> List[float]:
+    values = series.get(observable)
+    if values is None:
+        raise ValueError(f"Missing observable column: {observable}")
+    if len(values) < 2:
+        raise ValueError(f"Observable '{observable}' has fewer than 2 samples")
+    return values
+
+
+def validate_magnetic_saturation(
+    series: Dict[str, List[float]],
+    params: Dict[str, Any],
+) -> Tuple[float, float]:
+    i_observable = str(params.get("i_observable", "Lsat.i_est"))
+    l_eff_observable = str(params.get("l_eff_observable", "Lsat.l_eff"))
+    i_values = _load_series_values(series, i_observable)
+    l_eff_values = _load_series_values(series, l_eff_observable)
+
+    if len(i_values) != len(l_eff_values):
+        raise ValueError("Magnetic saturation observables must have matching lengths")
+
+    l_unsat = max(abs(parse_value(params["inductance"])), 1e-12)
+    i_sat = max(abs(parse_value(params["saturation_current"])), 1e-12)
+    l_sat_raw = abs(parse_value(params.get("saturation_inductance", l_unsat * 0.2)))
+    l_sat = _clamp(l_sat_raw, 1e-12, l_unsat)
+    exponent = _clamp(parse_value(params.get("saturation_exponent", 2.0)), 1.0, 8.0)
+
+    reference: List[float] = []
+    for i_value in i_values:
+        ratio = math.pow(abs(float(i_value)) / i_sat, exponent)
+        l_eff_ref = l_sat + (l_unsat - l_sat) / (1.0 + ratio)
+        reference.append(max(l_eff_ref, 1e-12))
+
+    return compute_errors(l_eff_values, reference)
+
+
+def _expected_magnetic_core_loss_series(
+    times: List[float],
+    i_signed: List[float],
+    h_state: List[float],
+    params: Dict[str, Any],
+) -> List[float]:
+    core_loss_k = max(parse_value(params.get("core_loss_k", 0.0)), 0.0)
+    if core_loss_k <= 0.0:
+        return [0.0 for _ in times]
+
+    core_loss_alpha = _clamp(parse_value(params.get("core_loss_alpha", 2.0)), 0.0, 8.0)
+    core_loss_freq_coeff = max(parse_value(params.get("core_loss_freq_coeff", 0.0)), 0.0)
+    hysteresis_loss_coeff = _clamp(
+        abs(parse_value(params.get("hysteresis_loss_coeff", 0.2))),
+        0.0,
+        50.0,
+    )
+    band = max(parse_value(params.get("hysteresis_band", 0.0)), 0.0)
+    magnetic_i_equiv_init = max(parse_value(params.get("magnetic_i_equiv_init", 0.0)), 0.0)
+
+    if not (len(times) == len(i_signed) == len(h_state)):
+        raise ValueError("Magnetic hysteresis observables must have matching lengths")
+
+    out: List[float] = []
+    prev_i: Optional[float] = None
+    prev_t: Optional[float] = None
+    for t, i_val, state in zip(times, i_signed, h_state):
+        i_equiv = abs(float(i_val))
+        freq_multiplier = 1.0
+        if core_loss_freq_coeff > 0.0:
+            if prev_i is None or prev_t is None:
+                prev_i = magnetic_i_equiv_init if magnetic_i_equiv_init > 0.0 else i_equiv
+                prev_t = float(t)
+            else:
+                dt = float(t) - prev_t
+                if dt > 0.0 and math.isfinite(dt):
+                    di_dt = (i_equiv - prev_i) / dt
+                    additive = core_loss_freq_coeff * abs(di_dt)
+                    if math.isfinite(additive) and additive > 0.0:
+                        freq_multiplier += additive
+                prev_i = i_equiv
+                prev_t = float(t)
+
+        direction = 1.0 if i_val > band else -1.0 if i_val < -band else 0.0
+        mismatch = 0.5 if direction == 0.0 else 0.5 * (1.0 - float(state) * direction)
+        hysteresis_multiplier = 1.0 + hysteresis_loss_coeff * mismatch
+
+        core_loss = (
+            core_loss_k
+            * math.pow(i_equiv, core_loss_alpha)
+            * freq_multiplier
+            * hysteresis_multiplier
+        )
+        out.append(max(core_loss, 0.0))
+
+    return out
+
+
+def validate_magnetic_hysteresis(
+    times: List[float],
+    series: Dict[str, List[float]],
+    params: Dict[str, Any],
+) -> Tuple[float, float, float]:
+    i_observable = str(params.get("i_observable", "Lsat.i_est"))
+    h_state_observable = str(params.get("h_state_observable", "Lsat.h_state"))
+    core_loss_observable = str(params.get("core_loss_observable", "Lsat.core_loss"))
+
+    i_values = _load_series_values(series, i_observable)
+    h_state_values = _load_series_values(series, h_state_observable)
+    core_loss_values = _load_series_values(series, core_loss_observable)
+
+    reference = _expected_magnetic_core_loss_series(
+        times=times,
+        i_signed=i_values,
+        h_state=h_state_values,
+        params=params,
+    )
+    max_error, rms_error = compute_errors(core_loss_values, reference)
+
+    energy_actual = 0.0
+    energy_reference = 0.0
+    for idx in range(1, len(times)):
+        dt = float(times[idx] - times[idx - 1])
+        if dt <= 0.0 or not math.isfinite(dt):
+            continue
+        energy_actual += float(core_loss_values[idx]) * dt
+        energy_reference += float(reference[idx]) * dt
+
+    denom = max(abs(energy_actual), abs(energy_reference), 1e-12)
+    cycle_energy_error = abs(energy_actual - energy_reference) / denom
+    return max_error, rms_error, cycle_energy_error
+
+
+def compute_magnetic_core_loss_tail_mean(
+    output_path: Path,
+    observable: str,
+) -> Optional[float]:
+    try:
+        _, series = load_csv_series(output_path)
+    except Exception:
+        return None
+
+    values = series.get(observable)
+    if not values:
+        return None
+    tail = values[len(values) // 2 :]
+    if not tail:
+        return None
+    return float(sum(tail) / len(tail))
+
+
 def run_pulsim(
     netlist_path: Path,
     output_path: Path,
@@ -566,14 +754,17 @@ def run_benchmarks(
 
                 if yaml is None:
                     raise RuntimeError("PyYAML is required. Install with: pip install pyyaml")
+                runtime_netlist = dict(scenario_netlist)
+                runtime_netlist.pop("benchmark", None)
                 with open(scenario_file, "w", encoding="utf-8") as handle:
-                    yaml.safe_dump(scenario_netlist, handle, sort_keys=False)
+                    yaml.safe_dump(runtime_netlist, handle, sort_keys=False)
 
                 expectations = scenario_bench_meta.get("expectations", {})
                 if not isinstance(expectations, dict):
                     expectations = {}
                 expected_failure = expectations.get("expected_failure")
                 averaged_pair_telemetry = extract_averaged_pair_telemetry(scenario_bench_meta)
+                magnetic_kpi_telemetry = extract_magnetic_kpi_telemetry(scenario_bench_meta)
 
                 try:
                     run_result = run_pulsim(
@@ -597,6 +788,7 @@ def run_benchmarks(
                             "expected_failure_case": 1.0,
                         }
                         telemetry.update(averaged_pair_telemetry)
+                        telemetry.update(magnetic_kpi_telemetry)
                         results.append(
                             ScenarioResult(
                                 benchmark_id=benchmark_id,
@@ -644,6 +836,7 @@ def run_benchmarks(
                 telemetry["runtime_s"] = float(runtime_s)
                 telemetry["python_backend"] = 1.0
                 telemetry.update(averaged_pair_telemetry)
+                telemetry.update(magnetic_kpi_telemetry)
                 output_index[(benchmark_id, scenario_name)] = output_path
                 for key in ("newton_iterations", "timestep_rejections", "linear_fallbacks"):
                     if telemetry.get(key) is None:
@@ -678,6 +871,9 @@ def run_benchmarks(
                 phase_threshold = coerce_optional_float(
                     expectations.get("metrics", {}).get("phase_error_deg")
                 )
+                cycle_energy_threshold = coerce_optional_float(
+                    expectations.get("metrics", {}).get("cycle_energy_error")
+                )
 
                 if validation_type == "ac_analytical":
                     try:
@@ -707,6 +903,46 @@ def run_benchmarks(
                             message = (
                                 f"phase_error_deg {phase_error_deg:.6e} > "
                                 f"threshold {phase_threshold:.6e}"
+                            )
+                    except Exception as exc:
+                        status = "failed"
+                        message = str(exc)
+                elif validation_type == "magnetic_saturation":
+                    try:
+                        _, series = load_csv_series(output_path)
+                        max_error, rms_error = validate_magnetic_saturation(
+                            series,
+                            validation.get("params", {}),
+                        )
+                        telemetry["magnetic_sat_error"] = float(max_error)
+                        if max_threshold is not None and max_error is not None and max_error > max_threshold:
+                            status = "failed"
+                            message = f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                    except Exception as exc:
+                        status = "failed"
+                        message = str(exc)
+                elif validation_type == "magnetic_hysteresis":
+                    try:
+                        times, series = load_csv_series(output_path)
+                        max_error, rms_error, cycle_energy_error = validate_magnetic_hysteresis(
+                            times,
+                            series,
+                            validation.get("params", {}),
+                        )
+                        telemetry["magnetic_hysteresis_waveform_error"] = float(max_error)
+                        telemetry["magnetic_hysteresis_cycle_energy_error"] = float(cycle_energy_error)
+                        if max_threshold is not None and max_error is not None and max_error > max_threshold:
+                            status = "failed"
+                            message = f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
+                        if (
+                            status == "passed"
+                            and cycle_energy_threshold is not None
+                            and cycle_energy_error > cycle_energy_threshold
+                        ):
+                            status = "failed"
+                            message = (
+                                "cycle_energy_error "
+                                f"{cycle_energy_error:.6e} > threshold {cycle_energy_threshold:.6e}"
                             )
                     except Exception as exc:
                         status = "failed"
@@ -827,6 +1063,22 @@ def run_benchmarks(
                             else:
                                 status = "failed"
                                 message = f"Unsupported validation type: {validation_type}"
+
+                magnetic_core_loss_observable = scenario_bench_meta.get(
+                    "magnetic_core_loss_observable",
+                    "Lsat.core_loss",
+                )
+                if (
+                    isinstance(magnetic_core_loss_observable, str)
+                    and magnetic_core_loss_observable.strip()
+                    and telemetry.get("magnetic_fixture_frequency_trend", 0.0) > 0.0
+                ):
+                    core_loss_mean = compute_magnetic_core_loss_tail_mean(
+                        output_path=output_path,
+                        observable=magnetic_core_loss_observable.strip(),
+                    )
+                    if core_loss_mean is not None:
+                        telemetry["magnetic_avg_core_loss"] = float(core_loss_mean)
 
                 if max_error is not None:
                     telemetry["validation_max_error"] = float(max_error)

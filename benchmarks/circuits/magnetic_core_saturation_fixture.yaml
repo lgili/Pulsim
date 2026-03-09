@@ -1,0 +1,48 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: magnetic_core_saturation
+  category: magnetic
+  magnetic_kpi:
+    category: saturation
+  validation:
+    type: magnetic_saturation
+    params:
+      i_observable: Lsat.i_est
+      l_eff_observable: Lsat.l_eff
+      inductance: 1m
+      saturation_current: 1.2
+      saturation_inductance: 150u
+      saturation_exponent: 2.2
+  expectations:
+    metrics:
+      max_error: 1e-9
+simulation:
+  tstart: 0.0
+  tstop: 1.5e-3
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: sine
+      amplitude: 6
+      frequency: 1200
+      offset: 0
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 2
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.2
+    saturation_inductance: 150u
+    saturation_exponent: 2.2
+    magnetic_core:
+      enabled: true
+      model: saturation
+      core_loss_k: 0.0
