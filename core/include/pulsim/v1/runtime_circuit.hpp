@@ -777,8 +777,10 @@ public:
                 component.type == "comparator" ||
                 component.type == "pi_controller" ||
                 component.type == "pid_controller") {
-                if (n >= 2) {
+                if (n >= 1) {
                     push_if_valid(io.inputs, nodes[0]);
+                }
+                if (n >= 2) {
                     push_if_valid(io.inputs, nodes[1]);
                 }
                 if (n >= 3) {
