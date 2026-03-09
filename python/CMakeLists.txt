@@ -111,6 +111,11 @@ configure_file(
     ${CMAKE_BINARY_DIR}/python/pulsim/cblock.py
     COPYONLY
 )
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/magnetic_core.py
+    ${CMAKE_BINARY_DIR}/python/pulsim/magnetic_core.py
+    COPYONLY
+)
 
 # Package CBlock ABI header with the Python module so compile_cblock() works
 # from installed wheels, not only from source checkouts.
@@ -133,6 +138,7 @@ install(FILES
     pulsim/signal_evaluator.py
     pulsim/post_processing.py
     pulsim/cblock.py
+    pulsim/magnetic_core.py
     DESTINATION pulsim
 )
 

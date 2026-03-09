@@ -27,6 +27,10 @@ Advanced catalog/coverage notebooks:
 - `17_protection_magnetics_probes.ipynb`
 - `18_buck_mosfet_pwm_block.ipynb`
 
+Magnetic-core addition:
+
+- `35_magnetic_core_mvp_tutorial.ipynb`
+
 Electrothermal-focused additions:
 
 - `28_electrothermal_component_telemetry.ipynb`
@@ -37,6 +41,11 @@ Frequency-analysis addition:
 
 - `31_frequency_analysis_ac_sweep_spec_walkthrough.ipynb`
 
+Post-processing and C-Block additions:
+
+- `33_post_processing_tutorial.ipynb`
+- `34_cblock_runtime_validation.ipynb`
+
 ## Execute Headless (CI/local automation)
 
 ```bash
@@ -46,6 +55,17 @@ PYTHONPATH=build/python MPLBACKEND=Agg python3 -m nbconvert \
   --inplace \
   --ExecutePreprocessor.timeout=600 \
   examples/pulsim_tutorial.ipynb
+```
+
+Magnetic-core tutorial headless run:
+
+```bash
+PYTHONPATH=build/python MPLBACKEND=Agg python3 -m nbconvert \
+  --to notebook \
+  --execute \
+  --inplace \
+  --ExecutePreprocessor.timeout=600 \
+  examples/notebooks/35_magnetic_core_mvp_tutorial.ipynb
 ```
 
 ## Notebook Environment Tips

@@ -418,6 +418,15 @@ jobs:
             --report-out benchmarks/out_ci/kpi_gate_report.json \
             --print-report
 
+      - name: Enforce magnetic-core KPI regression gate
+        run: |
+          python3 benchmarks/kpi_gate.py \
+            --baseline benchmarks/kpi_baselines/magnetic_core_phase15_2026-03-09/kpi_baseline.json \
+            --thresholds benchmarks/kpi_thresholds_magnetic_core.yaml \
+            --bench-results benchmarks/out_ci/results.json \
+            --report-out benchmarks/out_ci/kpi_gate_magnetic_core_report.json \
+            --print-report
+
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4

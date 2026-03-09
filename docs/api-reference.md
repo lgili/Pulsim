@@ -269,6 +269,14 @@ This page is generated from the `pulsim` package surface (stubs + public exports
 
 ::: pulsim.AlgebraicLoopError
 
+## Magnetic-Core Helpers
+
+::: pulsim.MagneticCoreConfig
+
+::: pulsim.MagneticCoreConfigError
+
+::: pulsim.apply_magnetic_core_config
+
 ## Performance Utilities and Enums
 
 ::: pulsim.SIMDLevel

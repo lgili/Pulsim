@@ -1,0 +1,35 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: magnetic_core_determinism_ref
+  category: magnetic
+  magnetic_kpi:
+    category: determinism
+  validation:
+    type: none
+simulation:
+  tstart: 0.0
+  tstop: 8e-4
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10}
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 2
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: saturation
+      core_loss_k: 0.2
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 1e-4

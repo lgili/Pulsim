@@ -708,6 +708,79 @@ def compute_metrics(
         float(sum(speedup_values) / len(speedup_values)) if speedup_values else None
     )
 
+    metrics["magnetic_sat_error"] = telemetry_mean("magnetic_sat_error")
+    metrics["magnetic_hysteresis_cycle_energy_error"] = telemetry_mean(
+        "magnetic_hysteresis_cycle_energy_error"
+    )
+
+    magnetic_rows = [row for row in executed if telemetry_flag(row, "magnetic_fixture_case")]
+    magnetic_runtimes = [
+        float(row["runtime_s"])
+        for row in magnetic_rows
+        if row.get("runtime_s") is not None
+    ]
+    metrics["magnetic_runtime_p95"] = _quantile(magnetic_runtimes, 0.95)
+
+    magnetic_realloc_values = telemetry_values("output_reallocation_total", rows=magnetic_rows)
+    metrics["magnetic_allocation_regression"] = _quantile(magnetic_realloc_values, 0.95)
+
+    trend_rows = [row for row in executed if telemetry_flag(row, "magnetic_fixture_frequency_trend")]
+    trend_groups: Dict[int, Dict[str, list[float]]] = {}
+    for row in trend_rows:
+        group_crc = telemetry_float(row, "magnetic_trend_group_crc32")
+        avg_core_loss = telemetry_float(row, "magnetic_avg_core_loss")
+        if group_crc is None or avg_core_loss is None:
+            continue
+        if avg_core_loss < 0.0:
+            continue
+        group_key = int(round(group_crc))
+        group = trend_groups.setdefault(group_key, {"low": [], "high": []})
+        if telemetry_flag(row, "magnetic_trend_role_low"):
+            group["low"].append(avg_core_loss)
+        if telemetry_flag(row, "magnetic_trend_role_high"):
+            group["high"].append(avg_core_loss)
+
+    trend_error_values: list[float] = []
+    for group in trend_groups.values():
+        lows = group["low"]
+        highs = group["high"]
+        if not lows or not highs:
+            continue
+        low_mean = float(sum(lows) / len(lows))
+        high_mean = float(sum(highs) / len(highs))
+        if low_mean <= 0.0:
+            continue
+        ratio = high_mean / low_mean
+        trend_error_values.append(0.0 if ratio > 1.0 else (1.0 - ratio))
+
+    metrics["magnetic_core_loss_trend_error"] = (
+        float(sum(trend_error_values) / len(trend_error_values))
+        if trend_error_values
+        else None
+    )
+
+    determinism_rows = [row for row in executed if telemetry_flag(row, "magnetic_determinism_case")]
+    determinism_values: list[float] = []
+    for row in determinism_rows:
+        value: Optional[float]
+        raw = row.get("max_error")
+        if raw is not None:
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                value = telemetry_float(row, "validation_max_error")
+        else:
+            value = telemetry_float(row, "validation_max_error")
+        if value is None or not math.isfinite(value):
+            continue
+        determinism_values.append(value)
+
+    metrics["magnetic_determinism_drift"] = (
+        float(sum(determinism_values) / len(determinism_values))
+        if determinism_values
+        else None
+    )
+
     def parity_mean_rms(path: Optional[Path]) -> Optional[float]:
         if path is None:
             return None

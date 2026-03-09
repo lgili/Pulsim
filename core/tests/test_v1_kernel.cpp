@@ -2990,6 +2990,42 @@ TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
         CHECK(l_high < l_low);
     }
 
+    SECTION("hysteresis model updates memory state only when time advances") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+        circuit.add_inductor("Lh", n_a, n_b, 1e-3);
+        circuit.add_virtual_component("saturable_inductor", "Lh", {n_a, n_b},
+                                      {{"inductance", 1e-3},
+                                       {"saturation_current", 1.0},
+                                       {"saturation_inductance", 2e-4},
+                                       {"saturation_exponent", 2.0},
+                                       {"magnetic_core_enabled", 1.0},
+                                       {"hysteresis_band", 0.05},
+                                       {"hysteresis_strength", 0.2},
+                                       {"hysteresis_state_init", 1.0}},
+                                      {{"target_component", "Lh"},
+                                       {"magnetic_core_model", "hysteresis"}});
+
+        const Index branch = circuit.num_nodes();
+        Vector x = Vector::Zero(circuit.system_size());
+        x[branch] = 0.2;
+        const auto s1 = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(s1.channel_values.contains("Lh.h_state"));
+        CHECK(s1.channel_values.at("Lh.h_state") == Approx(1.0).margin(1e-12));
+
+        // Same timestamp should not commit a hysteresis state transition.
+        x[branch] = -0.2;
+        const auto s_same_time = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(s_same_time.channel_values.contains("Lh.h_state"));
+        CHECK(s_same_time.channel_values.at("Lh.h_state") == Approx(1.0).margin(1e-12));
+
+        // Advancing accepted time allows deterministic state transition.
+        const auto s2 = circuit.execute_mixed_domain_step(x, 2e-6);
+        REQUIRE(s2.channel_values.contains("Lh.h_state"));
+        CHECK(s2.channel_values.at("Lh.h_state") == Approx(-1.0).margin(1e-12));
+    }
+
     SECTION("coupled inductor emits expected mutual inductance") {
         Circuit circuit;
         const auto n_a = circuit.add_node("a");
@@ -3007,10 +3043,153 @@ TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
         CHECK(step.channel_values.at("K1.k") == Approx(0.9).margin(1e-12));
         CHECK(step.channel_values.at("K1.mutual") == Approx(1.8e-3).margin(1e-12));
     }
+
+    SECTION("coupled inductor core loss channel uses configured power law") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+        const auto n_c = circuit.add_node("c");
+        const auto n_d = circuit.add_node("d");
+        circuit.add_inductor("K2__L1", n_a, n_b, 1e-3);
+        circuit.add_inductor("K2__L2", n_c, n_d, 1e-3);
+        circuit.add_virtual_component("coupled_inductor", "K2", {n_a, n_b, n_c, n_d},
+                                      {{"l1", 1e-3},
+                                       {"l2", 1e-3},
+                                       {"coupling", 0.95},
+                                       {"magnetic_core_enabled", 1.0},
+                                       {"core_loss_k", 0.1},
+                                       {"core_loss_alpha", 2.0}},
+                                      {{"target_component_1", "K2__L1"},
+                                       {"target_component_2", "K2__L2"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        const auto& conns = circuit.connections();
+        REQUIRE(conns.size() >= 2);
+        x[conns[0].branch_index] = 2.0;
+        x[conns[1].branch_index] = -2.0;
+
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step.channel_values.contains("K2.core_loss"));
+        CHECK(step.channel_values.at("K2.core_loss") == Approx(0.4).margin(1e-12));
+    }
+
+    SECTION("transformer core loss channel uses configured power law") {
+        Circuit circuit;
+        const auto p1 = circuit.add_node("p1");
+        const auto p2 = circuit.add_node("p2");
+        const auto s1 = circuit.add_node("s1");
+        const auto s2 = circuit.add_node("s2");
+        circuit.add_transformer("T1", p1, p2, s1, s2, 2.0);
+        circuit.add_virtual_component("transformer", "T1", {p1, p2, s1, s2},
+                                      {{"turns_ratio", 2.0},
+                                       {"magnetic_core_enabled", 1.0},
+                                       {"core_loss_k", 0.1},
+                                       {"core_loss_alpha", 2.0}},
+                                      {{"target_component", "T1"}});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        const auto& conns = circuit.connections();
+        REQUIRE_FALSE(conns.empty());
+        const auto& xfmr = conns.front();
+        REQUIRE(xfmr.branch_index >= 0);
+        REQUIRE(xfmr.branch_index_2 >= 0);
+        x[xfmr.branch_index] = 2.0;      // primary current
+        x[xfmr.branch_index_2] = -4.0;   // secondary current = -n * i_p
+
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step.channel_values.contains("T1.core_loss"));
+        CHECK(step.channel_values.at("T1.core_loss") == Approx(0.4).margin(1e-12));
+    }
+
+    SECTION("frequency coefficient increases average magnetic core loss") {
+        auto average_core_loss_for_frequency = [](Real frequency_hz) {
+            Circuit circuit;
+            const auto n_a = circuit.add_node("a");
+            const auto n_b = circuit.add_node("b");
+            circuit.add_inductor("Lfreq", n_a, n_b, 1e-3);
+            circuit.add_virtual_component("saturable_inductor", "Lfreq", {n_a, n_b},
+                                          {{"inductance", 1e-3},
+                                           {"saturation_current", 2.0},
+                                           {"saturation_inductance", 2e-4},
+                                           {"saturation_exponent", 2.0},
+                                           {"magnetic_core_enabled", 1.0},
+                                           {"core_loss_k", 0.1},
+                                           {"core_loss_alpha", 2.0},
+                                           {"core_loss_freq_coeff", 1e-4}},
+                                          {{"target_component", "Lfreq"}});
+
+            const auto& conns = circuit.connections();
+            REQUIRE_FALSE(conns.empty());
+            const Index branch = conns.front().branch_index;
+            REQUIRE(branch >= 0);
+
+            const Real duration = 2e-3;
+            const Real dt = 2e-6;
+            const Real current_amplitude = 2.0;
+            Vector x = Vector::Zero(circuit.system_size());
+            Real sum = 0.0;
+            std::size_t count = 0;
+
+            constexpr Real kTwoPi = Real{6.28318530717958647692};
+            for (Real t = 0.0; t <= duration; t += dt) {
+                x[branch] = current_amplitude * std::sin(kTwoPi * frequency_hz * t);
+                const auto step = circuit.execute_mixed_domain_step(x, t);
+                if (const auto it = step.channel_values.find("Lfreq.core_loss");
+                    it != step.channel_values.end()) {
+                    sum += it->second;
+                    count += 1;
+                }
+            }
+
+            REQUIRE(count > 0);
+            return sum / static_cast<Real>(count);
+        };
+
+        const Real low_freq_avg = average_core_loss_for_frequency(1e3);
+        const Real high_freq_avg = average_core_loss_for_frequency(20e3);
+
+        CHECK(high_freq_avg > low_freq_avg);
+    }
 }
 
 TEST_CASE("v1 control primitives keep bounded deterministic outputs",
           "[v1][mixed-domain][control][regression]") {
+    SECTION("control-node writeback enables gain cascades") {
+        Circuit circuit;
+        const auto n_in = circuit.add_node("in");
+        const auto n_mid = circuit.add_node("mid");
+        const auto n_out = circuit.add_node("out");
+
+        circuit.add_virtual_component("gain", "G1", {n_in, n_mid}, {{"gain", 2.0}}, {});
+        circuit.add_virtual_component("gain", "G2", {n_mid, n_out}, {{"gain", 3.0}}, {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        x[n_in] = 1.0;
+        const auto step = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(step.channel_values.contains("G1"));
+        REQUIRE(step.channel_values.contains("G2"));
+        CHECK(step.channel_values.at("G1") == Approx(2.0).margin(1e-12));
+        CHECK(step.channel_values.at("G2") == Approx(6.0).margin(1e-12));
+    }
+
+    SECTION("algebraic control loops without state fail deterministically") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+
+        circuit.add_virtual_component("gain", "GA", {n_a, n_b}, {{"gain", 1.0}}, {});
+        circuit.add_virtual_component("gain", "GB", {n_b, n_a}, {{"gain", 1.0}}, {});
+
+        Vector x = Vector::Zero(circuit.system_size());
+        try {
+            circuit.execute_mixed_domain_step(x, 1e-6);
+            FAIL("Expected algebraic loop failure");
+        } catch (const std::runtime_error& err) {
+            const std::string message = err.what() ? err.what() : "";
+            REQUIRE(message.find("Virtual control algebraic loop") != std::string::npos);
+        }
+    }
+
     SECTION("op amp output saturates at configured rails") {
         Circuit circuit;
         const auto n_pos = circuit.add_node("v_plus");

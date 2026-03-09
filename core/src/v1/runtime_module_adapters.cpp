@@ -6,6 +6,7 @@
 #include "runtime_module_adapters.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -35,6 +36,16 @@ constexpr Real kLossConsistencyAbsTol = 1e-8;
     }
     const Real scale = std::max<Real>({Real{1.0}, std::abs(a), std::abs(b)});
     return diff <= rel_tol * scale;
+}
+
+[[nodiscard]] std::string normalize_ascii_token(std::string_view token) {
+    std::string normalized(token);
+    std::transform(
+        normalized.begin(),
+        normalized.end(),
+        normalized.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return normalized;
 }
 }  // namespace
 
@@ -406,6 +417,7 @@ ElectrothermalTelemetryModule::ElectrothermalTelemetryModule(
       thermal_module_(thermal_module),
       result_(result),
       sample_reserve_(sample_reserve),
+      thermal_options_(options.thermal),
       losses_enabled_(options.enable_losses),
       has_loss_trace_(loss_module.has_trace_enabled()),
       has_thermal_trace_(thermal_module.has_trace_enabled()),
@@ -416,6 +428,15 @@ Real ElectrothermalTelemetryModule::sanitize_power(Real value) {
         return 0.0;
     }
     return value;
+}
+
+bool ElectrothermalTelemetryModule::loss_policy_includes_summary(std::string_view token) {
+    const std::string normalized = normalize_ascii_token(token);
+    return normalized == "loss_summary" ||
+           normalized == "losssummary" ||
+           normalized == "summary" ||
+           normalized == "includeinlosssummary" ||
+           normalized == "include_in_loss_summary";
 }
 
 void ElectrothermalTelemetryModule::push_series_value(std::vector<Real>& series, Real value) {
@@ -540,6 +561,36 @@ void ElectrothermalTelemetryModule::initialize_thermal_channels() {
     thermal_channels_initialized_ = true;
 }
 
+void ElectrothermalTelemetryModule::initialize_magnetic_loss_summary_bindings() {
+    if (magnetic_loss_bindings_initialized_) {
+        return;
+    }
+
+    magnetic_loss_summary_bindings_.clear();
+    magnetic_loss_summary_bindings_.reserve(circuit_.virtual_components().size());
+
+    for (const auto& component : circuit_.virtual_components()) {
+        if (component.type != "saturable_inductor" &&
+            component.type != "coupled_inductor" &&
+            component.type != "transformer") {
+            continue;
+        }
+        const auto policy_it = component.metadata.find("magnetic_core_loss_policy");
+        const std::string policy = (policy_it == component.metadata.end())
+            ? "telemetry_only" : policy_it->second;
+        if (!loss_policy_includes_summary(policy)) {
+            continue;
+        }
+        MagneticLossSummaryBinding binding;
+        binding.component_name = component.name;
+        binding.channel_name = component.name + ".core_loss";
+        binding.summary_name = component.name + ".core";
+        magnetic_loss_summary_bindings_.push_back(std::move(binding));
+    }
+
+    magnetic_loss_bindings_initialized_ = true;
+}
+
 void ElectrothermalTelemetryModule::on_step_accepted(Real dt_segment) {
     if (!has_loss_trace_ || dt_segment <= 0.0) {
         return;
@@ -658,7 +709,7 @@ void ElectrothermalTelemetryModule::sample_thermal_channels(std::size_t sample_c
 void ElectrothermalTelemetryModule::finalize_component_electrothermal() {
     const auto& conns = circuit_.connections();
     result_.component_electrothermal.clear();
-    result_.component_electrothermal.reserve(conns.size());
+    result_.component_electrothermal.reserve(conns.size() + result_.loss_summary.device_losses.size());
 
     std::unordered_map<std::string, const LossResult*> loss_by_name;
     loss_by_name.reserve(result_.loss_summary.device_losses.size());
@@ -701,6 +752,261 @@ void ElectrothermalTelemetryModule::finalize_component_electrothermal() {
         }
 
         result_.component_electrothermal.push_back(std::move(entry));
+    }
+
+    std::unordered_map<std::string, bool> emitted;
+    emitted.reserve(result_.component_electrothermal.size());
+    for (const auto& entry : result_.component_electrothermal) {
+        emitted[entry.component_name] = true;
+    }
+    for (const auto& loss : result_.loss_summary.device_losses) {
+        if (emitted.contains(loss.device_name)) {
+            continue;
+        }
+        ComponentElectrothermalTelemetry extra;
+        extra.component_name = loss.device_name;
+        extra.final_temperature = ambient;
+        extra.peak_temperature = ambient;
+        extra.average_temperature = ambient;
+        extra.conduction = loss.breakdown.conduction;
+        extra.turn_on = loss.breakdown.turn_on;
+        extra.turn_off = loss.breakdown.turn_off;
+        extra.reverse_recovery = loss.breakdown.reverse_recovery;
+        extra.total_loss = loss.breakdown.total();
+        extra.total_energy = loss.total_energy;
+        extra.average_power = loss.average_power;
+        extra.peak_power = loss.peak_power;
+        if (const auto thermal_it = thermal_by_name.find(loss.device_name);
+            thermal_it != thermal_by_name.end()) {
+            const DeviceThermalTelemetry& thermal = *thermal_it->second;
+            extra.thermal_enabled = thermal.enabled;
+            extra.final_temperature = thermal.final_temperature;
+            extra.peak_temperature = thermal.peak_temperature;
+            extra.average_temperature = thermal.average_temperature;
+        }
+        result_.component_electrothermal.push_back(std::move(extra));
+    }
+}
+
+void ElectrothermalTelemetryModule::merge_magnetic_core_loss_into_loss_summary() {
+    if (!losses_enabled_) {
+        return;
+    }
+    if (result_.time.size() < 2) {
+        return;
+    }
+
+    initialize_magnetic_loss_summary_bindings();
+    if (magnetic_loss_summary_bindings_.empty()) {
+        return;
+    }
+
+    auto fail = [&](const std::string& detail) {
+        result_.success = false;
+        result_.final_status = SolverStatus::NumericalError;
+        result_.diagnostic = SimulationDiagnosticCode::TransientStepFailure;
+        result_.message = "Magnetic-core summary coupling failure: " + detail;
+        result_.backend_telemetry.failure_reason = "magnetic_core_runtime_invalid";
+    };
+
+    for (const auto& component : circuit_.virtual_components()) {
+        if (component.type != "saturable_inductor" &&
+            component.type != "coupled_inductor" &&
+            component.type != "transformer") {
+            continue;
+        }
+        const auto policy_it = component.metadata.find("magnetic_core_loss_policy");
+        const std::string normalized_policy = normalize_ascii_token(
+            (policy_it == component.metadata.end()) ? "telemetry_only" : policy_it->second);
+        if (normalized_policy != "telemetry_only" &&
+            normalized_policy != "telemetryonly" &&
+            !loss_policy_includes_summary(normalized_policy)) {
+            fail("unsupported magnetic_core_loss_policy '" + normalized_policy +
+                 "' for component '" + component.name + "'");
+            return;
+        }
+    }
+
+    const Real duration = result_.time.back() - result_.time.front();
+    if (!std::isfinite(duration) || duration <= 0.0) {
+        fail("invalid time base while coupling magnetic core losses");
+        return;
+    }
+
+    std::unordered_map<std::string, std::size_t> loss_row_index;
+    loss_row_index.reserve(result_.loss_summary.device_losses.size());
+    for (std::size_t i = 0; i < result_.loss_summary.device_losses.size(); ++i) {
+        loss_row_index[result_.loss_summary.device_losses[i].device_name] = i;
+    }
+
+    for (const auto& binding : magnetic_loss_summary_bindings_) {
+        const auto channel_it = result_.virtual_channels.find(binding.channel_name);
+        if (channel_it == result_.virtual_channels.end()) {
+            fail("missing channel '" + binding.channel_name + "'");
+            return;
+        }
+        const auto& series = channel_it->second;
+        if (series.size() != result_.time.size()) {
+            fail("channel '" + binding.channel_name + "' length mismatch");
+            return;
+        }
+
+        Real total_energy = 0.0;
+        Real peak_power = 0.0;
+        for (std::size_t i = 1; i < series.size(); ++i) {
+            const Real dt = result_.time[i] - result_.time[i - 1];
+            const Real p = series[i];
+            if (!std::isfinite(dt) || dt < 0.0 || !std::isfinite(p) || p < -1e-12) {
+                fail("non-finite sample while integrating '" + binding.channel_name + "'");
+                return;
+            }
+            total_energy += p * dt;
+            peak_power = std::max(peak_power, std::abs(p));
+        }
+        const Real average_power = total_energy / duration;
+
+        if (const auto it = loss_row_index.find(binding.summary_name);
+            it != loss_row_index.end()) {
+            auto& row = result_.loss_summary.device_losses[it->second];
+            row.breakdown.conduction = average_power;
+            row.breakdown.turn_on = 0.0;
+            row.breakdown.turn_off = 0.0;
+            row.breakdown.reverse_recovery = 0.0;
+            row.total_energy = total_energy;
+            row.average_power = average_power;
+            row.peak_power = peak_power;
+            continue;
+        }
+
+        LossResult row;
+        row.device_name = binding.summary_name;
+        row.breakdown.conduction = average_power;
+        row.total_energy = total_energy;
+        row.average_power = average_power;
+        row.peak_power = peak_power;
+        result_.loss_summary.device_losses.push_back(std::move(row));
+    }
+
+    result_.loss_summary.compute_totals();
+}
+
+void ElectrothermalTelemetryModule::merge_magnetic_core_loss_into_thermal_summary() {
+    if (!losses_enabled_ || !thermal_options_.enable) {
+        return;
+    }
+    if (result_.time.empty()) {
+        return;
+    }
+
+    initialize_magnetic_loss_summary_bindings();
+    if (magnetic_loss_summary_bindings_.empty()) {
+        return;
+    }
+
+    auto fail = [&](const std::string& detail) {
+        result_.success = false;
+        result_.final_status = SolverStatus::NumericalError;
+        result_.diagnostic = SimulationDiagnosticCode::TransientStepFailure;
+        result_.message = "Magnetic-core thermal coupling failure: " + detail;
+        result_.backend_telemetry.failure_reason = "magnetic_core_runtime_invalid";
+    };
+
+    const Real ambient = std::isfinite(result_.thermal_summary.ambient)
+        ? result_.thermal_summary.ambient
+        : thermal_options_.ambient;
+    if (!result_.thermal_summary.enabled) {
+        result_.thermal_summary.enabled = true;
+        result_.thermal_summary.ambient = ambient;
+        result_.thermal_summary.max_temperature = ambient;
+    } else if (!std::isfinite(result_.thermal_summary.max_temperature)) {
+        result_.thermal_summary.max_temperature = ambient;
+    }
+
+    std::unordered_map<std::string, std::size_t> thermal_row_index;
+    thermal_row_index.reserve(result_.thermal_summary.device_temperatures.size());
+    for (std::size_t i = 0; i < result_.thermal_summary.device_temperatures.size(); ++i) {
+        thermal_row_index[result_.thermal_summary.device_temperatures[i].device_name] = i;
+    }
+
+    const Real rth = std::max<Real>(thermal_options_.default_rth, 1e-12);
+    const Real cth = std::max<Real>(thermal_options_.default_cth, 0.0);
+    const Real tau = std::max<Real>(rth * cth, 1e-18);
+
+    for (const auto& binding : magnetic_loss_summary_bindings_) {
+        const auto channel_it = result_.virtual_channels.find(binding.channel_name);
+        if (channel_it == result_.virtual_channels.end()) {
+            fail("missing channel '" + binding.channel_name + "'");
+            return;
+        }
+        const auto& power_series = channel_it->second;
+        if (power_series.size() != result_.time.size()) {
+            fail("channel '" + binding.channel_name + "' length mismatch");
+            return;
+        }
+
+        std::vector<Real> thermal_series(result_.time.size(), ambient);
+        Real theta = 0.0;
+        for (std::size_t i = 1; i < result_.time.size(); ++i) {
+            const Real dt = result_.time[i] - result_.time[i - 1];
+            const Real power = sanitize_power(power_series[i]);
+            if (!std::isfinite(dt) || dt < 0.0) {
+                fail("non-monotonic time base while coupling '" + binding.channel_name + "'");
+                return;
+            }
+
+            if (cth <= 0.0) {
+                theta = power * rth;
+            } else {
+                const Real a = std::exp(-dt / tau);
+                theta = theta * a + (power * rth) * (1.0 - a);
+            }
+            if (!std::isfinite(theta)) {
+                fail("non-finite thermal state while coupling '" + binding.channel_name + "'");
+                return;
+            }
+            thermal_series[i] = ambient + theta;
+        }
+
+        const Real final_temperature = thermal_series.back();
+        const Real peak_temperature = *std::max_element(thermal_series.begin(), thermal_series.end());
+        const Real sum_temperature = std::accumulate(
+            thermal_series.begin(),
+            thermal_series.end(),
+            Real{0.0});
+        const Real average_temperature =
+            sum_temperature / static_cast<Real>(thermal_series.size());
+
+        const std::string thermal_channel_name = "T(" + binding.summary_name + ")";
+        result_.virtual_channels[thermal_channel_name] = thermal_series;
+        result_.virtual_channel_metadata[thermal_channel_name] = VirtualChannelMetadata{
+            "thermal_trace",
+            thermal_channel_name,
+            binding.summary_name,
+            "thermal",
+            "degC",
+            {}
+        };
+
+        if (const auto row_it = thermal_row_index.find(binding.summary_name);
+            row_it != thermal_row_index.end()) {
+            auto& row = result_.thermal_summary.device_temperatures[row_it->second];
+            row.enabled = true;
+            row.final_temperature = final_temperature;
+            row.peak_temperature = peak_temperature;
+            row.average_temperature = average_temperature;
+        } else {
+            DeviceThermalTelemetry row;
+            row.device_name = binding.summary_name;
+            row.enabled = true;
+            row.final_temperature = final_temperature;
+            row.peak_temperature = peak_temperature;
+            row.average_temperature = average_temperature;
+            result_.thermal_summary.device_temperatures.push_back(std::move(row));
+            thermal_row_index[binding.summary_name] = result_.thermal_summary.device_temperatures.size() - 1;
+        }
+
+        result_.thermal_summary.max_temperature =
+            std::max(result_.thermal_summary.max_temperature, peak_temperature);
     }
 }
 
@@ -944,6 +1250,34 @@ void ElectrothermalTelemetryModule::validate_electrothermal_consistency() {
         }
     }
 
+    initialize_magnetic_loss_summary_bindings();
+    for (const auto& binding : magnetic_loss_summary_bindings_) {
+        const std::vector<Real>* p_core = find_channel(binding.channel_name);
+        if (p_core == nullptr) return;
+
+        const std::optional<Real> e_core_opt = integrate_channel_energy(binding.channel_name, *p_core);
+        if (!e_core_opt.has_value()) return;
+        const Real e_core = *e_core_opt;
+        const Real e_core_tol = channel_energy_quantization_tol(*p_core);
+        aggregated_channel_energy += e_core;
+        aggregated_channel_energy_tol += e_core_tol;
+
+        const auto loss_it = loss_summary_by_name.find(binding.summary_name);
+        if (loss_it == loss_summary_by_name.end()) {
+            fail("loss_summary missing magnetic row '" + binding.summary_name + "'");
+            return;
+        }
+        const auto* loss = loss_it->second;
+        const Real avg_core = duration > 0.0 ? e_core / duration : 0.0;
+        const Real avg_core_tol = channel_average_power_quantization_tol(*p_core);
+        if (!nearly_equal(loss->breakdown.conduction, avg_core, kLossConsistencyRelTol, avg_core_tol) ||
+            !nearly_equal(loss->average_power, avg_core, kLossConsistencyRelTol, avg_core_tol) ||
+            !nearly_equal(loss->total_energy, e_core, kLossConsistencyRelTol, e_core_tol)) {
+            fail("loss_summary mismatch for magnetic row '" + binding.summary_name + "'");
+            return;
+        }
+    }
+
     if (duration > 0.0 &&
         !nearly_equal(result_.loss_summary.total_loss * duration,
                       aggregated_channel_energy,
@@ -954,6 +1288,11 @@ void ElectrothermalTelemetryModule::validate_electrothermal_consistency() {
 }
 
 void ElectrothermalTelemetryModule::on_finalize() {
+    merge_magnetic_core_loss_into_loss_summary();
+    merge_magnetic_core_loss_into_thermal_summary();
+    if (!result_.success) {
+        return;
+    }
     finalize_component_electrothermal();
     validate_electrothermal_consistency();
 }

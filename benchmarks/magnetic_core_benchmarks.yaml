@@ -1,0 +1,19 @@
+benchmarks:
+  - path: circuits/magnetic_core_saturation_fixture.yaml
+    scenarios: [direct_trap]
+  - path: circuits/magnetic_core_hysteresis_fixture.yaml
+    scenarios: [direct_trap]
+  - path: circuits/magnetic_core_frequency_trend_low.yaml
+    scenarios: [direct_trap]
+  - path: circuits/magnetic_core_frequency_trend_high.yaml
+    scenarios: [direct_trap]
+  - path: circuits/magnetic_core_determinism_ref.yaml
+    scenarios: [direct_trap]
+  - path: circuits/magnetic_core_determinism_cmp.yaml
+    scenarios: [direct_trap]
+scenarios:
+  direct_trap:
+    simulation:
+      integrator: trapezoidal
+      solver:
+        order: [klu]

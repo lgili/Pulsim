@@ -436,6 +436,165 @@ class TestYamlCBlockParser:
         )
         assert self._has_error_code(p.errors, "PARAM_INVALID"), p.errors
 
+    def test_yaml_saturable_inductor_accepts_magnetic_core_block(self) -> None:
+        """saturable_inductor accepts canonical magnetic_core settings."""
+        p = self._parse(
+            "  - name: Lsat\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      saturation_current: 2\n"
+            "      saturation_inductance: 200u\n"
+            "      saturation_exponent: 2.5\n"
+            "      core_loss_k: 0.01\n"
+            "      core_loss_alpha: 1.8\n"
+            "      core_loss_freq_coeff: 1e-4\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
+        assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
+
+    def test_yaml_rejects_magnetic_core_on_unsupported_component(self) -> None:
+        """magnetic_core is rejected for components outside supported magnetic families."""
+        p = self._parse(
+            "  - name: Rmag\n"
+            "    type: resistor\n"
+            "    nodes: [a, 0]\n"
+            "    value: 1\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+        )
+        assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_transformer_accepts_magnetic_core_loss_block(self) -> None:
+        """transformer accepts magnetic_core loss parameters in MVP."""
+        p = self._parse(
+            "  - name: Tmag\n"
+            "    type: transformer\n"
+            "    nodes: [p1, p2, s1, s2]\n"
+            "    turns_ratio: 2.0\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      core_loss_k: 0.03\n"
+            "      core_loss_alpha: 1.9\n"
+            "      core_loss_freq_coeff: 5e-5\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
+
+    def test_yaml_accepts_hysteresis_magnetic_core_model(self) -> None:
+        """hysteresis model is accepted with deterministic optional parameters."""
+        p = self._parse(
+            "  - name: Lsat_hyst\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: hysteresis\n"
+            "      hysteresis_band: 0.05\n"
+            "      hysteresis_strength: 0.2\n"
+            "      hysteresis_loss_coeff: 0.3\n"
+            "      hysteresis_state_init: -1\n"
+            "      core_loss_k: 0.02\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
+
+    def test_yaml_rejects_unsupported_magnetic_core_model(self) -> None:
+        """Only known magnetic_core model families are supported."""
+        p = self._parse(
+            "  - name: Lsat_bad_model\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: preisach\n"
+        )
+        assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_rejects_negative_magnetic_core_freq_coeff(self) -> None:
+        """core_loss_freq_coeff must be finite and >= 0."""
+        p = self._parse(
+            "  - name: Lsat_bad_freq\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      core_loss_k: 0.02\n"
+            "      core_loss_freq_coeff: -1e-4\n"
+        )
+        assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_accepts_magnetic_core_loss_policy_and_init(self) -> None:
+        """magnetic_core accepts loss_policy and i_equiv_init fields."""
+        p = self._parse(
+            "  - name: Lsat_policy\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      loss_policy: loss_summary\n"
+            "      i_equiv_init: 0.1\n"
+            "      core_loss_k: 0.02\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
+
+    def test_yaml_rejects_invalid_magnetic_core_loss_policy(self) -> None:
+        """loss_policy is restricted to canonical values."""
+        p = self._parse(
+            "  - name: Lsat_bad_policy\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      loss_policy: unknown_mode\n"
+            "      core_loss_k: 0.02\n"
+        )
+        assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_rejects_negative_magnetic_i_equiv_init(self) -> None:
+        """i_equiv_init must be finite and >= 0."""
+        p = self._parse(
+            "  - name: Lsat_bad_init\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      i_equiv_init: -0.1\n"
+            "      core_loss_k: 0.02\n"
+        )
+        assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_coupled_inductor_accepts_magnetic_core_loss_block(self) -> None:
+        """coupled_inductor accepts magnetic_core loss parameters in MVP."""
+        p = self._parse(
+            "  - name: Kmag\n"
+            "    type: coupled_inductor\n"
+            "    nodes: [p1, p2, s1, s2]\n"
+            "    l1: 1m\n"
+            "    l2: 1m\n"
+            "    coupling: 0.9\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      core_loss_k: 0.05\n"
+            "      core_loss_alpha: 2.0\n"
+            "      core_loss_freq_coeff: 2e-4\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
+
     # 6.3.3 — both lib_path and source → error
     def test_yaml_cblock_both_specified_error(self, tmp_path) -> None:
         """Specifying both lib_path and source yields a PARAM_INVALID error."""

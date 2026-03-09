@@ -530,6 +530,98 @@ def test_compute_metrics_includes_averaged_pair_metrics(tmp_path: Path) -> None:
     )
 
 
+def test_compute_metrics_includes_magnetic_core_metrics(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "magnetic_core_saturation",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.04,
+                "telemetry": {
+                    "magnetic_fixture_case": 1.0,
+                    "magnetic_fixture_saturation": 1.0,
+                    "magnetic_sat_error": 2.0e-7,
+                    "output_reallocation_total": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "magnetic_core_hysteresis",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.06,
+                "telemetry": {
+                    "magnetic_fixture_case": 1.0,
+                    "magnetic_fixture_hysteresis": 1.0,
+                    "magnetic_hysteresis_cycle_energy_error": 4.0e-7,
+                    "output_reallocation_total": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "magnetic_core_frequency_trend_low",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.05,
+                "telemetry": {
+                    "magnetic_fixture_case": 1.0,
+                    "magnetic_fixture_frequency_trend": 1.0,
+                    "magnetic_trend_group_crc32": 101.0,
+                    "magnetic_trend_role_low": 1.0,
+                    "magnetic_avg_core_loss": 0.5,
+                    "output_reallocation_total": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "magnetic_core_frequency_trend_high",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.05,
+                "telemetry": {
+                    "magnetic_fixture_case": 1.0,
+                    "magnetic_fixture_frequency_trend": 1.0,
+                    "magnetic_trend_group_crc32": 101.0,
+                    "magnetic_trend_role_high": 1.0,
+                    "magnetic_avg_core_loss": 1.2,
+                    "output_reallocation_total": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "magnetic_core_determinism_cmp",
+                "scenario": "direct_trap",
+                "mode": "transient",
+                "status": "passed",
+                "runtime_s": 0.05,
+                "max_error": 1.0e-12,
+                "telemetry": {
+                    "magnetic_fixture_case": 1.0,
+                    "magnetic_determinism_case": 1.0,
+                    "validation_max_error": 1.0e-12,
+                    "output_reallocation_total": 0.0,
+                },
+            },
+        ]
+    }
+    bench_path = tmp_path / "bench.json"
+    _write_json(bench_path, bench_results)
+
+    metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
+    assert metrics["magnetic_sat_error"] == 2.0e-7
+    assert metrics["magnetic_hysteresis_cycle_energy_error"] == 4.0e-7
+    assert metrics["magnetic_core_loss_trend_error"] == 0.0
+    assert metrics["magnetic_determinism_drift"] == 1.0e-12
+    assert math.isclose(
+        float(metrics["magnetic_runtime_p95"]),
+        0.058,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["magnetic_allocation_regression"] == 0.0
+
+
 def test_compute_metrics_runtime_quantiles_can_use_case_filter(tmp_path: Path) -> None:
     bench_results = {
         "results": [

@@ -501,6 +501,7 @@ public:
         virtual_time_history_.erase(name);
         virtual_components_.push_back(
             VirtualComponent{type, name, std::move(nodes), std::move(numeric_params), std::move(metadata)});
+        control_graph_dirty_ = true;
     }
 
     /// Number of virtual components
@@ -537,7 +538,7 @@ public:
                 type == "thyristor" || type == "triac") {
                 return "events";
             }
-            if (type == "saturable_inductor" || type == "coupled_inductor") {
+            if (type == "saturable_inductor" || type == "coupled_inductor" || type == "transformer") {
                 return "electrical";
             }
             if (type == "voltage_probe" || type == "current_probe" || type == "power_probe" ||
@@ -548,6 +549,10 @@ public:
         };
 
         for (const auto& component : virtual_components_) {
+            auto numeric_param = [&](std::string_view key, Real fallback) {
+                const auto it = component.numeric_params.find(std::string(key));
+                return (it == component.numeric_params.end()) ? fallback : it->second;
+            };
             VirtualChannelMetadata base{
                 component.type,
                 component.name,
@@ -595,11 +600,51 @@ public:
                 electrical.domain = "electrical";
                 metadata.emplace(component.name + ".l_eff", electrical);
                 metadata.emplace(component.name + ".i_est", std::move(electrical));
+                const Real mag_enabled = numeric_param("magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(numeric_param("core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
+                    auto magnetic_loss = base;
+                    magnetic_loss.domain = "loss";
+                    magnetic_loss.unit = "W";
+                    metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
+                }
+                if (mag_enabled > 0.5 && magnetic_model_is_hysteresis(component)) {
+                    auto magnetic_state = base;
+                    magnetic_state.domain = "electrical";
+                    metadata.emplace(component.name + ".h_state", std::move(magnetic_state));
+                }
             } else if (component.type == "coupled_inductor") {
                 auto electrical = base;
                 electrical.domain = "electrical";
                 metadata.emplace(component.name + ".mutual", electrical);
                 metadata.emplace(component.name + ".k", std::move(electrical));
+                const Real mag_enabled = numeric_param("magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(numeric_param("core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
+                    auto magnetic_loss = base;
+                    magnetic_loss.domain = "loss";
+                    magnetic_loss.unit = "W";
+                    metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
+                }
+                if (mag_enabled > 0.5 && magnetic_model_is_hysteresis(component)) {
+                    auto magnetic_state = base;
+                    magnetic_state.domain = "electrical";
+                    metadata.emplace(component.name + ".h_state", std::move(magnetic_state));
+                }
+            } else if (component.type == "transformer") {
+                const Real mag_enabled = numeric_param("magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(numeric_param("core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
+                    auto magnetic_loss = base;
+                    magnetic_loss.domain = "loss";
+                    magnetic_loss.unit = "W";
+                    metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
+                }
+                if (mag_enabled > 0.5 && magnetic_model_is_hysteresis(component)) {
+                    auto magnetic_state = base;
+                    magnetic_state.domain = "electrical";
+                    metadata.emplace(component.name + ".h_state", std::move(magnetic_state));
+                }
             }
         }
 
@@ -609,6 +654,10 @@ public:
     /// Execute one deterministic mixed-domain scheduler pass for a timestep.
     /// Phase order: electrical -> control -> events -> instrumentation.
     [[nodiscard]] MixedDomainStepResult execute_mixed_domain_step(const Vector& x, Real time) {
+        if (!std::isfinite(last_control_time_) || time + 1e-18 < last_control_time_) {
+            control_node_values_.clear();
+        }
+        last_control_time_ = time;
         set_current_time(time);
         MixedDomainStepResult result;
         result.phase_order = mixed_domain_phase_order();
@@ -619,6 +668,16 @@ public:
                 return 0.0;
             }
             return x[node];
+        };
+        auto control_node_value = [&](Index node) -> Real {
+            if (node < 0) {
+                return 0.0;
+            }
+            if (const auto it = control_node_values_.find(node);
+                it != control_node_values_.end() && std::isfinite(it->second)) {
+                return it->second;
+            }
+            return node_voltage(node);
         };
 
         auto get_numeric = [&](const VirtualComponent& component, const std::string& key, Real fallback) {
@@ -660,8 +719,15 @@ public:
             "state_machine", "signal_mux", "signal_demux",
             "c_block"
         };
+        const std::unordered_set<std::string> combinational_types = {
+            "op_amp", "gain", "sum", "subtraction", "math_block",
+            "limiter", "lookup_table", "signal_mux", "signal_demux"
+        };
         const auto is_legacy_global_discrete_component = [](std::string_view type) {
             return type == "pi_controller" || type == "pid_controller" || type == "c_block";
+        };
+        const auto is_combinational = [&](std::string_view type) {
+            return combinational_types.find(std::string(type)) != combinational_types.end();
         };
         auto component_sample_time = [&](const VirtualComponent& component) -> Real {
             auto get_local_sample_time = [&](std::string_view key) -> std::optional<Real> {
@@ -692,14 +758,293 @@ public:
             return 0.0;
         };
 
+        const auto control_node_io = [&](const VirtualComponent& component) {
+            struct ControlNodeIo {
+                std::vector<Index> inputs;
+                std::vector<Index> outputs;
+            };
+            ControlNodeIo io{};
+            const auto& nodes = component.nodes;
+            const std::size_t n = nodes.size();
+
+            auto push_if_valid = [&](std::vector<Index>& dst, Index node) {
+                if (node >= 0) {
+                    dst.push_back(node);
+                }
+            };
+
+            if (component.type == "op_amp" ||
+                component.type == "comparator" ||
+                component.type == "pi_controller" ||
+                component.type == "pid_controller") {
+                if (n >= 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                if (n >= 2) {
+                    push_if_valid(io.inputs, nodes[1]);
+                }
+                if (n >= 3) {
+                    push_if_valid(io.outputs, nodes[2]);
+                }
+                return io;
+            }
+
+            if (component.type == "sum" ||
+                component.type == "subtraction") {
+                if (n >= 2) {
+                    push_if_valid(io.inputs, nodes[0]);
+                    push_if_valid(io.inputs, nodes[1]);
+                }
+                if (n >= 3) {
+                    push_if_valid(io.outputs, nodes[2]);
+                }
+                return io;
+            }
+
+            if (component.type == "math_block") {
+                if (n >= 2) {
+                    push_if_valid(io.inputs, nodes[0]);
+                    push_if_valid(io.inputs, nodes[1]);
+                    if (n >= 3) {
+                        push_if_valid(io.outputs, nodes[2]);
+                    }
+                } else if (n == 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                return io;
+            }
+
+            if (component.type == "signal_demux") {
+                if (n >= 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                return io;
+            }
+
+            if (component.type == "signal_mux") {
+                for (std::size_t i = 0; i < n; ++i) {
+                    push_if_valid(io.inputs, nodes[i]);
+                }
+                return io;
+            }
+
+            if (component.type == "c_block") {
+                int n_inputs = 0;
+                int n_outputs = 0;
+                if (const auto it = component.numeric_params.find("n_inputs");
+                    it != component.numeric_params.end() && std::isfinite(it->second) && it->second >= 0.0) {
+                    n_inputs = std::max(0, static_cast<int>(std::llround(it->second)));
+                }
+                if (const auto it = component.numeric_params.find("n_outputs");
+                    it != component.numeric_params.end() && std::isfinite(it->second) && it->second >= 0.0) {
+                    n_outputs = std::max(0, static_cast<int>(std::llround(it->second)));
+                }
+                const std::size_t required = static_cast<std::size_t>(n_inputs + n_outputs);
+                if (required > 0 && n >= required) {
+                    for (int i = 0; i < n_inputs; ++i) {
+                        push_if_valid(io.inputs, nodes[static_cast<std::size_t>(i)]);
+                    }
+                    for (int i = 0; i < n_outputs; ++i) {
+                        push_if_valid(io.outputs, nodes[static_cast<std::size_t>(n_inputs + i)]);
+                    }
+                }
+                return io;
+            }
+
+            if (component.type == "pwm_generator") {
+                if (n >= 1) {
+                    push_if_valid(io.inputs, nodes[0]);
+                }
+                return io;
+            }
+
+            if (n >= 2) {
+                push_if_valid(io.inputs, nodes[0]);
+                if (component.type == "state_machine" && n >= 2) {
+                    push_if_valid(io.inputs, nodes[1]);
+                }
+                push_if_valid(io.outputs, nodes[1]);
+            } else if (n == 1) {
+                push_if_valid(io.inputs, nodes[0]);
+            }
+            return io;
+        };
+
+        auto build_control_eval_order = [&]() {
+            if (!control_graph_dirty_ && !control_eval_order_.empty()) {
+                return;
+            }
+            control_eval_order_.clear();
+            control_eval_cycle_.clear();
+
+            std::vector<std::size_t> control_indices;
+            control_indices.reserve(virtual_components_.size());
+            for (std::size_t i = 0; i < virtual_components_.size(); ++i) {
+                if (has_type(control_types, virtual_components_[i].type)) {
+                    control_indices.push_back(i);
+                }
+            }
+            if (control_indices.empty()) {
+                control_graph_dirty_ = false;
+                return;
+            }
+
+            std::unordered_map<Index, std::size_t> node_producer;
+            node_producer.reserve(control_indices.size() * 2);
+            for (std::size_t idx : control_indices) {
+                const auto io = control_node_io(virtual_components_[idx]);
+                for (Index out_node : io.outputs) {
+                    if (out_node >= 0 && !node_producer.contains(out_node)) {
+                        node_producer[out_node] = idx;
+                    }
+                }
+            }
+
+            std::unordered_map<std::size_t, std::vector<std::size_t>> adjacency;
+            std::unordered_map<std::size_t, std::size_t> indegree;
+            adjacency.reserve(control_indices.size());
+            indegree.reserve(control_indices.size());
+            for (std::size_t idx : control_indices) {
+                indegree[idx] = 0;
+            }
+
+            for (std::size_t idx : control_indices) {
+                const auto io = control_node_io(virtual_components_[idx]);
+                for (Index in_node : io.inputs) {
+                    if (const auto it = node_producer.find(in_node);
+                        it != node_producer.end()) {
+                        const std::size_t producer = it->second;
+                        if (producer == idx) {
+                            continue;
+                        }
+                        adjacency[producer].push_back(idx);
+                        indegree[idx] += 1;
+                    }
+                }
+            }
+
+            std::vector<std::size_t> ready;
+            ready.reserve(control_indices.size());
+            for (std::size_t idx : control_indices) {
+                if (indegree[idx] == 0) {
+                    ready.push_back(idx);
+                }
+            }
+            std::sort(ready.begin(), ready.end());
+            while (!ready.empty()) {
+                const std::size_t idx = ready.front();
+                ready.erase(ready.begin());
+                control_eval_order_.push_back(idx);
+                auto adj_it = adjacency.find(idx);
+                if (adj_it == adjacency.end()) {
+                    continue;
+                }
+                auto& out_edges = adj_it->second;
+                std::sort(out_edges.begin(), out_edges.end());
+                for (std::size_t target : out_edges) {
+                    if (indegree[target] > 0) {
+                        indegree[target] -= 1;
+                        if (indegree[target] == 0) {
+                            ready.push_back(target);
+                            std::sort(ready.begin(), ready.end());
+                        }
+                    }
+                }
+            }
+
+            // Detect combinational algebraic loops among remaining nodes.
+            if (control_eval_order_.size() != control_indices.size()) {
+                std::unordered_set<std::size_t> remaining;
+                for (std::size_t idx : control_indices) {
+                    if (std::find(control_eval_order_.begin(), control_eval_order_.end(), idx) ==
+                        control_eval_order_.end()) {
+                        remaining.insert(idx);
+                    }
+                }
+
+                std::unordered_map<std::size_t, int> visit;
+                std::vector<std::size_t> stack;
+                auto dfs = [&](auto&& self, std::size_t node) -> bool {
+                    visit[node] = 1;
+                    stack.push_back(node);
+                    const auto adj_it = adjacency.find(node);
+                    if (adj_it != adjacency.end()) {
+                        for (std::size_t next : adj_it->second) {
+                            if (!remaining.contains(next)) {
+                                continue;
+                            }
+                            if (!is_combinational(virtual_components_[node].type) ||
+                                !is_combinational(virtual_components_[next].type)) {
+                                continue;
+                            }
+                            if (visit[next] == 0) {
+                                if (self(self, next)) {
+                                    return true;
+                                }
+                            } else if (visit[next] == 1) {
+                                auto it = std::find(stack.begin(), stack.end(), next);
+                                if (it != stack.end()) {
+                                    control_eval_cycle_.assign(it, stack.end());
+                                    control_eval_cycle_.push_back(next);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    stack.pop_back();
+                    visit[node] = 2;
+                    return false;
+                };
+
+                for (std::size_t idx : remaining) {
+                    if (!is_combinational(virtual_components_[idx].type)) {
+                        continue;
+                    }
+                    if (visit[idx] == 0) {
+                        if (dfs(dfs, idx)) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Ensure PWM generators run after other control blocks for duty_from_channel reads.
+            if (!control_eval_order_.empty()) {
+                std::stable_partition(
+                    control_eval_order_.begin(),
+                    control_eval_order_.end(),
+                    [&](std::size_t idx) {
+                        return virtual_components_[idx].type != "pwm_generator";
+                    });
+            }
+
+            control_graph_dirty_ = false;
+        };
+
         // Phase 2: control update
-        for (const auto& component : virtual_components_) {
+        build_control_eval_order();
+        if (!control_eval_cycle_.empty()) {
+            std::ostringstream oss;
+            oss << "Virtual control algebraic loop: ";
+            for (std::size_t i = 0; i < control_eval_cycle_.size(); ++i) {
+                const auto& name = virtual_components_[control_eval_cycle_[i]].name;
+                if (i > 0) {
+                    oss << " -> ";
+                }
+                oss << name;
+            }
+            throw std::runtime_error(oss.str());
+        }
+
+        for (std::size_t component_index : control_eval_order_) {
+            const auto& component = virtual_components_[component_index];
             if (!has_type(control_types, component.type)) {
                 continue;
             }
 
-            const Real in0 = (component.nodes.size() > 0) ? node_voltage(component.nodes[0]) : 0.0;
-            const Real in1 = (component.nodes.size() > 1) ? node_voltage(component.nodes[1]) : 0.0;
+            const auto io = control_node_io(component);
+            const Real in0 = !io.inputs.empty() ? control_node_value(io.inputs[0]) : 0.0;
+            const Real in1 = (io.inputs.size() > 1) ? control_node_value(io.inputs[1]) : 0.0;
             const Real signal = in0 - in1;
             Real output = signal * get_numeric(component, "gain", 1.0);
             const auto last_time_it = virtual_last_time_.find(component.name);
@@ -713,6 +1058,9 @@ public:
                 if (dt + tol < block_sample_time) {
                     output = virtual_signal_state_[component.name];
                     result.channel_values[component.name] = output;
+                    for (Index out_node : io.outputs) {
+                        control_node_values_[out_node] = output;
+                    }
                     if (component.type == "c_block") {
                         int n_outputs = 1;
                         if (const auto it = component.numeric_params.find("n_outputs");
@@ -728,6 +1076,10 @@ public:
                                 : ((output_index == 0) ? output : Real{0.0});
                             virtual_signal_state_[channel_name] = channel_value;
                             result.channel_values[channel_name] = channel_value;
+                            if (static_cast<std::size_t>(output_index) < io.outputs.size()) {
+                                control_node_values_[io.outputs[static_cast<std::size_t>(output_index)]] =
+                                    channel_value;
+                            }
                         }
                     } else if (component.type == "pwm_generator") {
                         const std::string duty_channel = component.name + ".duty";
@@ -1035,7 +1387,14 @@ public:
                 }
                 const Real phase = std::fmod(std::max<Real>(0.0, time * frequency), 1.0);
                 const Real carrier = (phase <= 0.5) ? (2.0 * phase) : (2.0 * (1.0 - phase));
-                output = (duty > carrier) ? 1.0 : 0.0;
+                constexpr Real duty_edge_eps = Real{1e-12};
+                if (duty >= Real{1.0} - duty_edge_eps) {
+                    output = 1.0;
+                } else if (duty <= duty_edge_eps) {
+                    output = 0.0;
+                } else {
+                    output = (duty > carrier) ? 1.0 : 0.0;
+                }
                 if (const auto it = component.metadata.find("target_component");
                     it != component.metadata.end()) {
                     set_switch_state(it->second, output > 0.5);
@@ -1053,8 +1412,8 @@ public:
                 const Real trigger = get_numeric(component, "threshold", 0.5);
                 if (mode == "set_reset" || mode == "sr") {
                     const Real set_signal = in0;
-                    const Real reset_signal = (component.nodes.size() > 1)
-                        ? node_voltage(component.nodes[1])
+                    const Real reset_signal = (io.inputs.size() > 1)
+                        ? control_node_value(io.inputs[1])
                         : 0.0;
                     const bool set_active = set_signal > trigger;
                     const bool reset_active = reset_signal > trigger;
@@ -1077,7 +1436,7 @@ public:
             } else if (component.type == "signal_mux") {
                 const int select = static_cast<int>(std::llround(get_numeric(component, "select_index", 0.0)));
                 const std::size_t selected = static_cast<std::size_t>(std::max(select, 0));
-                output = selected < component.nodes.size() ? node_voltage(component.nodes[selected]) : in0;
+                output = selected < io.inputs.size() ? control_node_value(io.inputs[selected]) : in0;
             } else if (component.type == "signal_demux") {
                 output = in0;
             }
@@ -1086,6 +1445,9 @@ public:
             virtual_last_input_[component.name] = signal;
             virtual_last_time_[component.name] = time;
             result.channel_values[component.name] = output;
+            for (Index out_node : io.outputs) {
+                control_node_values_[out_node] = output;
+            }
         }
 
         for (const auto& binding : switch_driver_bindings_) {
@@ -1295,27 +1657,40 @@ public:
                     continue;
                 }
                 const Real i_est = x[conn->branch_index];
+                update_magnetic_hysteresis_state_if_due(component, i_est, time);
                 const Real l_nom = get_numeric(component, "inductance", 1e-3);
                 const Real l_eff = saturable_effective_inductance(component, i_est, l_nom);
                 result.channel_values[component.name + ".l_eff"] = l_eff;
                 result.channel_values[component.name + ".i_est"] = i_est;
+                if (magnetic_model_is_hysteresis(component)) {
+                    result.channel_values[component.name + ".h_state"] =
+                        magnetic_hysteresis_state(component);
+                }
+                if (const auto core_loss = magnetic_core_loss_from_current(component, i_est, time);
+                    core_loss.has_value()) {
+                    result.channel_values[component.name + ".core_loss"] = *core_loss;
+                }
                 continue;
             }
             if (component.type == "coupled_inductor") {
                 Real l1 = std::max<Real>(get_numeric(component, "l1", 0.0), 0.0);
                 Real l2 = std::max<Real>(get_numeric(component, "l2", 0.0), 0.0);
+                const auto l1_target_it = component.metadata.find("target_component_1");
+                const auto l2_target_it = component.metadata.find("target_component_2");
+                const DeviceConnection* conn1 = (l1_target_it == component.metadata.end())
+                    ? nullptr : find_connection(l1_target_it->second);
+                const DeviceConnection* conn2 = (l2_target_it == component.metadata.end())
+                    ? nullptr : find_connection(l2_target_it->second);
                 if (l1 <= 0.0 || l2 <= 0.0) {
-                    const auto l1_it = component.metadata.find("target_component_1");
-                    const auto l2_it = component.metadata.find("target_component_2");
-                    if (l1_it != component.metadata.end()) {
-                        if (const auto index = find_connection_index(l1_it->second); index.has_value()) {
+                    if (l1_target_it != component.metadata.end()) {
+                        if (const auto index = find_connection_index(l1_target_it->second); index.has_value()) {
                             if (const auto* inductor = std::get_if<Inductor>(&devices_[*index])) {
                                 l1 = inductor->inductance();
                             }
                         }
                     }
-                    if (l2_it != component.metadata.end()) {
-                        if (const auto index = find_connection_index(l2_it->second); index.has_value()) {
+                    if (l2_target_it != component.metadata.end()) {
+                        if (const auto index = find_connection_index(l2_target_it->second); index.has_value()) {
                             if (const auto* inductor = std::get_if<Inductor>(&devices_[*index])) {
                                 l2 = inductor->inductance();
                             }
@@ -1327,6 +1702,61 @@ public:
                 const Real mutual = k * std::sqrt(std::max<Real>(l1 * l2, 0.0));
                 result.channel_values[component.name + ".k"] = k;
                 result.channel_values[component.name + ".mutual"] = mutual;
+                if (conn1 && conn2 &&
+                    conn1->branch_index >= 0 && conn2->branch_index >= 0 &&
+                    conn1->branch_index < system_size() && conn2->branch_index < system_size()) {
+                    const Real i1 = x[conn1->branch_index];
+                    const Real i2 = x[conn2->branch_index];
+                    const Real i_equiv_signed = Real{0.5} * (i1 + i2);
+                    const Real i_equiv_abs =
+                        Real{0.5} * (std::abs(i1) + std::abs(i2));
+                    update_magnetic_hysteresis_state_if_due(component, i_equiv_signed, time);
+                    if (magnetic_model_is_hysteresis(component)) {
+                        result.channel_values[component.name + ".h_state"] =
+                            magnetic_hysteresis_state(component);
+                    }
+                    const Real i_equiv_for_loss = magnetic_model_is_hysteresis(component)
+                        ? i_equiv_signed
+                        : i_equiv_abs;
+                    if (const auto core_loss =
+                            magnetic_core_loss_from_current(component, i_equiv_for_loss, time);
+                        core_loss.has_value()) {
+                        result.channel_values[component.name + ".core_loss"] = *core_loss;
+                    }
+                }
+                continue;
+            }
+            if (component.type == "transformer") {
+                const auto target_it = component.metadata.find("target_component");
+                const std::string target =
+                    (target_it == component.metadata.end()) ? component.name : target_it->second;
+                const DeviceConnection* conn = find_connection(target);
+                if (conn && conn->branch_index >= 0 && conn->branch_index < system_size()) {
+                    const Real i_p = x[conn->branch_index];
+                    Real i_s = 0.0;
+                    if (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size()) {
+                        i_s = x[conn->branch_index_2];
+                    }
+                    const Real turns_ratio = std::max<Real>(
+                        std::abs(get_numeric(component, "turns_ratio", 1.0)), 1e-12);
+                    const Real i_equiv_signed = i_p;
+                    const Real i_equiv_abs = (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size())
+                        ? Real{0.5} * (std::abs(i_p) + std::abs(i_s) / turns_ratio)
+                        : std::abs(i_p);
+                    update_magnetic_hysteresis_state_if_due(component, i_equiv_signed, time);
+                    if (magnetic_model_is_hysteresis(component)) {
+                        result.channel_values[component.name + ".h_state"] =
+                            magnetic_hysteresis_state(component);
+                    }
+                    const Real i_equiv_for_loss = magnetic_model_is_hysteresis(component)
+                        ? i_equiv_signed
+                        : i_equiv_abs;
+                    if (const auto core_loss =
+                            magnetic_core_loss_from_current(component, i_equiv_for_loss, time);
+                        core_loss.has_value()) {
+                        result.channel_values[component.name + ".core_loss"] = *core_loss;
+                    }
+                }
                 continue;
             }
             if (component.type == "electrical_scope" || component.type == "thermal_scope") {
@@ -2701,6 +3131,158 @@ private:
         return transfer_coeff_cache_.emplace(cache_key, std::move(coeffs)).first->second;
     }
 
+    [[nodiscard]] std::string magnetic_core_model(const VirtualComponent& component) const {
+        const auto it = component.metadata.find("magnetic_core_model");
+        if (it == component.metadata.end()) {
+            return "saturation";
+        }
+        const std::string model = normalize_mode_token(trim_ascii_whitespace(it->second));
+        return model.empty() ? "saturation" : model;
+    }
+
+    [[nodiscard]] bool magnetic_model_is_hysteresis(const VirtualComponent& component) const {
+        return magnetic_core_model(component) == "hysteresis";
+    }
+
+    [[nodiscard]] Real magnetic_hysteresis_band(const VirtualComponent& component) const {
+        const Real configured_band = std::abs(
+            get_param_value(component.numeric_params, "hysteresis_band", 0.0));
+        if (configured_band > 0.0 && std::isfinite(configured_band)) {
+            return configured_band;
+        }
+        const Real i_sat = std::max<Real>(
+            std::abs(get_param_value(component.numeric_params, "saturation_current", 1.0)),
+            1e-12);
+        return std::max<Real>(i_sat * 0.05, 1e-6);
+    }
+
+    [[nodiscard]] Real magnetic_hysteresis_state(const VirtualComponent& component) const {
+        const std::string state_key = component.name + ".__mag_h_state";
+        if (const auto it = virtual_signal_state_.find(state_key);
+            it != virtual_signal_state_.end() && std::isfinite(it->second)) {
+            return std::clamp(it->second, Real{-1.0}, Real{1.0});
+        }
+
+        const Real configured_init = get_param_value(
+            component.numeric_params,
+            "hysteresis_state_init",
+            1.0);
+        if (!std::isfinite(configured_init) || std::abs(configured_init) < 1e-15) {
+            return 1.0;
+        }
+        return configured_init >= 0.0 ? 1.0 : -1.0;
+    }
+
+    void update_magnetic_hysteresis_state_if_due(
+        const VirtualComponent& component,
+        Real i_equiv_signed,
+        Real time) {
+        if (!magnetic_model_is_hysteresis(component) || !std::isfinite(time)) {
+            return;
+        }
+
+        const std::string state_key = component.name + ".__mag_h_state";
+        const std::string time_key = component.name + ".__mag_h_time_prev";
+
+        Real state = magnetic_hysteresis_state(component);
+        if (const auto time_it = virtual_last_time_.find(time_key);
+            time_it != virtual_last_time_.end() && std::isfinite(time_it->second)) {
+            const Real dt = time - time_it->second;
+            if (!(dt > 1e-15)) {
+                virtual_signal_state_[state_key] = state;
+                return;
+            }
+        }
+
+        const Real band = magnetic_hysteresis_band(component);
+        if (i_equiv_signed > band) {
+            state = 1.0;
+        } else if (i_equiv_signed < -band) {
+            state = -1.0;
+        }
+
+        virtual_signal_state_[state_key] = state;
+        virtual_last_time_[time_key] = time;
+    }
+
+    [[nodiscard]] std::optional<Real> magnetic_core_loss_from_current(
+        const VirtualComponent& component,
+        Real i_equiv_signed,
+        Real time) {
+        const Real mag_enabled = get_param_value(component.numeric_params, "magnetic_core_enabled", 0.0);
+        const Real core_loss_k =
+            std::max<Real>(get_param_value(component.numeric_params, "core_loss_k", 0.0), 0.0);
+        if (mag_enabled <= 0.5 || core_loss_k <= 0.0) {
+            return std::nullopt;
+        }
+
+        const Real i_equiv = std::abs(i_equiv_signed);
+        const Real core_loss_alpha = std::clamp(
+            get_param_value(component.numeric_params, "core_loss_alpha", 2.0), 0.0, 8.0);
+        const Real core_loss_freq_coeff = std::max<Real>(
+            get_param_value(component.numeric_params, "core_loss_freq_coeff", 0.0), 0.0);
+
+        Real frequency_multiplier = 1.0;
+        if (core_loss_freq_coeff > 0.0) {
+            const std::string i_key = component.name + ".__mag_i_equiv_prev";
+            const std::string t_key = component.name + ".__mag_time_prev";
+            const auto i_it = virtual_last_input_.find(i_key);
+            const auto t_it = virtual_last_time_.find(t_key);
+            if (i_it != virtual_last_input_.end() &&
+                t_it != virtual_last_time_.end() &&
+                std::isfinite(i_it->second) &&
+                std::isfinite(t_it->second)) {
+                const Real dt = time - t_it->second;
+                if (dt > 0.0 && std::isfinite(dt)) {
+                    const Real di_dt = (i_equiv - i_it->second) / dt;
+                    const Real additive = core_loss_freq_coeff * std::abs(di_dt);
+                    if (std::isfinite(additive) && additive > 0.0) {
+                        frequency_multiplier += additive;
+                    }
+                }
+            } else {
+                const Real i_init = std::max<Real>(
+                    get_param_value(component.numeric_params, "magnetic_i_equiv_init", i_equiv),
+                    0.0);
+                virtual_last_input_[i_key] = i_init;
+                virtual_last_time_[t_key] = time;
+            }
+            if (i_it != virtual_last_input_.end() && t_it != virtual_last_time_.end()) {
+                virtual_last_input_[i_key] = i_equiv;
+                virtual_last_time_[t_key] = time;
+            }
+        }
+
+        Real hysteresis_multiplier = 1.0;
+        if (magnetic_model_is_hysteresis(component)) {
+            const Real state = magnetic_hysteresis_state(component);
+            const Real band = magnetic_hysteresis_band(component);
+            Real direction = 0.0;
+            if (i_equiv_signed > band) {
+                direction = 1.0;
+            } else if (i_equiv_signed < -band) {
+                direction = -1.0;
+            }
+
+            const Real mismatch = (direction == 0.0)
+                ? 0.5
+                : 0.5 * (1.0 - state * direction);
+            const Real hysteresis_loss_coeff = std::clamp(
+                std::abs(get_param_value(component.numeric_params, "hysteresis_loss_coeff", 0.2)),
+                0.0,
+                50.0);
+            hysteresis_multiplier += hysteresis_loss_coeff * mismatch;
+        }
+
+        const Real core_loss =
+            core_loss_k * std::pow(i_equiv, core_loss_alpha) *
+            frequency_multiplier * hysteresis_multiplier;
+        if (!std::isfinite(core_loss)) {
+            return std::nullopt;
+        }
+        return std::max<Real>(core_loss, 0.0);
+    }
+
     [[nodiscard]] Real saturable_effective_inductance(
         const VirtualComponent& component,
         Real i_est,
@@ -2716,7 +3298,27 @@ private:
             get_param_value(component.numeric_params, "saturation_exponent", 2.0), 1.0, 8.0);
         const Real ratio = std::pow(std::abs(i_est) / i_sat, exponent);
         const Real l_eff = l_sat + (l_unsat - l_sat) / (1.0 + ratio);
-        return std::max<Real>(l_eff, 1e-12);
+
+        if (!magnetic_model_is_hysteresis(component)) {
+            return std::max<Real>(l_eff, 1e-12);
+        }
+
+        const Real state = magnetic_hysteresis_state(component);
+        const Real band = magnetic_hysteresis_band(component);
+        Real direction = 0.0;
+        if (i_est > band) {
+            direction = 1.0;
+        } else if (i_est < -band) {
+            direction = -1.0;
+        }
+
+        const Real strength = std::clamp(
+            std::abs(get_param_value(component.numeric_params, "hysteresis_strength", 0.15)),
+            0.0,
+            0.95);
+        const Real multiplier = 1.0 - strength * state * direction;
+        const Real l_hysteretic = std::clamp(l_eff * multiplier, l_sat, l_unsat);
+        return std::max<Real>(l_hysteretic, 1e-12);
     }
 
     [[nodiscard]] Real effective_inductance_for(
@@ -3095,6 +3697,11 @@ private:
     std::unordered_map<std::string, Real> virtual_last_input_;
     std::unordered_map<std::string, Real> virtual_last_time_;
     std::unordered_map<std::string, bool> virtual_binary_state_;
+    std::unordered_map<Index, Real> control_node_values_;
+    bool control_graph_dirty_ = true;
+    std::vector<std::size_t> control_eval_order_;
+    std::vector<std::size_t> control_eval_cycle_;
+    Real last_control_time_ = std::numeric_limits<Real>::quiet_NaN();
     std::unordered_map<std::string, std::deque<std::pair<Real, Real>>> virtual_time_history_;
     mutable std::unordered_map<std::string, std::vector<std::pair<Real, Real>>> lookup_table_cache_;
     mutable std::unordered_map<std::string, std::vector<Real>> transfer_coeff_cache_;

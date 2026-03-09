@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
+try:
+    import yaml
+except Exception:  # pragma: no cover - optional dependency
+    yaml = None
+
 
 @dataclass
 class BackendRunResult:
@@ -132,20 +137,37 @@ def _write_state_csv(
     times: Sequence[float],
     states: Sequence[Sequence[float]],
     signal_names: Sequence[str],
+    virtual_channels: Optional[Dict[str, Sequence[float]]] = None,
 ) -> int:
     if len(times) != len(states):
         raise RuntimeError("Simulation result time/state length mismatch")
+
+    virtual_names: List[str] = []
+    virtual_series: Dict[str, Sequence[float]] = {}
+    if virtual_channels:
+        for name in sorted(str(key) for key in virtual_channels.keys()):
+            values = virtual_channels.get(name)
+            if values is None:
+                continue
+            if len(values) != len(times):
+                raise RuntimeError(
+                    f"Virtual channel '{name}' length mismatch with time vector"
+                )
+            virtual_names.append(name)
+            virtual_series[name] = values
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["time", *signal_names])
-        for t, state in zip(times, states):
+        writer.writerow(["time", *signal_names, *virtual_names])
+        for idx, (t, state) in enumerate(zip(times, states)):
             if len(state) != len(signal_names):
                 raise RuntimeError("Simulation state size mismatch with circuit signals")
             row = [f"{float(t):.9e}"]
             row.extend(f"{float(value):.9e}" for value in state)
+            for channel in virtual_names:
+                row.append(f"{float(virtual_series[channel][idx]):.9e}")
             writer.writerow(row)
 
     return max(0, len(times) - 1)
@@ -637,9 +659,27 @@ def run_from_yaml(
         raise RuntimeError("Installed pulsim package does not expose required runtime APIs")
 
     parser_options = ps.YamlParserOptions()
-    parser_options.strict = False
+    parser_options.strict = True
     parser = ps.YamlParser(parser_options)
-    circuit, options = parser.load(str(netlist_path))
+
+    netlist_text = netlist_path.read_text(encoding="utf-8")
+    if yaml is not None:
+        try:
+            payload = yaml.safe_load(netlist_text)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            payload.pop("benchmark", None)
+            simulation = payload.get("simulation")
+            if isinstance(simulation, dict):
+                simulation = dict(simulation)
+                # Benchmark driver handles UIC behavior directly via x0 injection.
+                simulation.pop("uic", None)
+                payload["simulation"] = simulation
+            netlist_text = yaml.safe_dump(payload, sort_keys=False)
+
+    circuit, options = parser.load_string(netlist_text)
     _raise_if_parser_errors(parser)
 
     # Some solver internals require dimensions to be set before Simulator construction.
@@ -702,7 +742,13 @@ def run_from_yaml(
             _raise_result_failure(shooting_result, "Periodic shooting failed", mode="shooting")
 
         cycle = shooting_result.last_cycle
-        steps = _write_state_csv(output_path, cycle.time, cycle.states, signal_names)
+        steps = _write_state_csv(
+            output_path,
+            cycle.time,
+            cycle.states,
+            signal_names,
+            getattr(cycle, "virtual_channels", None),
+        )
         telemetry = _transient_telemetry(cycle, elapsed)
         telemetry["periodic_iterations"] = float(shooting_result.iterations)
         telemetry["periodic_residual_norm"] = float(shooting_result.residual_norm)
@@ -787,7 +833,13 @@ def run_from_yaml(
     if not transient_result.success:
         _raise_result_failure(transient_result, "Transient simulation failed", mode="transient")
 
-    steps = _write_state_csv(output_path, transient_result.time, transient_result.states, signal_names)
+    steps = _write_state_csv(
+        output_path,
+        transient_result.time,
+        transient_result.states,
+        signal_names,
+        getattr(transient_result, "virtual_channels", None),
+    )
     telemetry = _transient_telemetry(transient_result, elapsed)
     telemetry["steps"] = float(steps)
     telemetry["integrator_fallback_to_rosenbrockw"] = 1.0 if used_integrator_fallback else 0.0
