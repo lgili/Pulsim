@@ -121,6 +121,23 @@ Checkpoints:
 - thermal-enabled devices report non-empty telemetry in `component_electrothermal`.
 - run remains stable for longer windows (10 ms, 20 ms, ...).
 
+## Example 6: Magnetic Core MVP (saturation + frequency-sensitive loss)
+
+```bash
+PYTHONPATH=build/python python3 examples/run_magnetic_core_saturation_freq_loss.py
+```
+
+Checkpoints:
+
+- `Lsat.core_loss` exists in `result.virtual_channels` and stays non-negative.
+- metadata for `Lsat.core_loss` is coherent (`domain=loss`, `unit=W`, `source_component=Lsat`).
+- when `loss_policy: loss_summary`, summary row `Lsat.core` is present in `loss_summary.device_losses`.
+- average/peak trends are deterministic for repeated runs with the same setup.
+
+Notebook walkthrough:
+
+- `examples/notebooks/35_magnetic_core_mvp_tutorial.ipynb`
+
 ## Output Artifacts for Automation
 
 Main files used in CI/regression tooling:

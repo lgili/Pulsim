@@ -28,6 +28,36 @@ As APIs de transiente em Python (`Simulator.run_transient`, `run_transient_strea
 - Em casos de migração YAML, prefira `simulation.step_mode` em vez de
   `simulation.adaptive_timestep`/`simulation.backend`.
 
+## Configuração tipada de núcleo magnético
+
+Para fluxos Python-first com componentes virtuais, a API expõe:
+
+- `MagneticCoreConfig`
+- `MagneticCoreConfigError`
+- `apply_magnetic_core_config(...)`
+
+Exemplo (merge determinístico em `numeric_params` + `metadata`):
+
+```python
+import pulsim as ps
+
+cfg = ps.MagneticCoreConfig(
+    model="hysteresis",
+    loss_policy="loss_summary",
+    core_loss_k=0.2,
+    core_loss_alpha=2.0,
+    core_loss_freq_coeff=1e-4,
+    hysteresis_strength=0.25,
+)
+
+numeric_params, metadata = ps.apply_magnetic_core_config({}, {}, cfg)
+print(numeric_params["core_loss_k"])
+print(metadata["magnetic_core_model"])
+```
+
+Quando inválido, `cfg.validate()` (ou o merge) lança `MagneticCoreConfigError`
+com `code` e `field` estáveis para automação.
+
 ## Exemplo completo
 
 ```python
