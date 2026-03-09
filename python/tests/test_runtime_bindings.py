@@ -1860,7 +1860,12 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     for item in thermal_by_name.values():
         assert item.final_temperature >= thermal_summary.ambient
         assert item.peak_temperature >= item.final_temperature
-    assert thermal_by_name["Rload"].final_temperature > thermal_by_name["M1"].final_temperature
+    assert thermal_by_name["M1"].final_temperature > thermal_summary.ambient
+    assert thermal_by_name["Rload"].final_temperature > thermal_summary.ambient
+    assert abs(
+        thermal_summary.max_temperature
+        - max(item.peak_temperature for item in thermal_by_name.values())
+    ) < 1e-12
     assert abs(thermal_by_name["M1"].final_temperature - m1_temp[-1]) < 1e-12
     assert abs(thermal_by_name["M1"].peak_temperature - max(m1_temp)) < 1e-12
     assert abs(thermal_by_name["M1"].average_temperature - statistics.fmean(m1_temp)) < 1e-12
@@ -1952,7 +1957,7 @@ PULSIM_CBLOCK_EXPORT int pulsim_cblock_init(PulsimCBlockCtx** ctx_out, const Pul
 PULSIM_CBLOCK_EXPORT int pulsim_cblock_step(
     PulsimCBlockCtx* ctx, double t, double dt, const double* in, double* out) {
     struct PulsimCBlockCtx* s = (struct PulsimCBlockCtx*)ctx;
-    const double error = in[0];
+    const double error = in[0] - in[1];
     const double effective_dt = (s->t_prev < 0.0) ? 0.0 : ((dt > 0.0) ? dt : 0.0);
 
     double integral = s->integral + error * effective_dt;
@@ -1992,11 +1997,15 @@ PULSIM_CBLOCK_EXPORT void pulsim_cblock_destroy(PulsimCBlockCtx* ctx) {
         assert pwm_start >= 0
 
         cblock_block = (
+            "  - type: voltage_probe\n"
+            "    name: VrefProbe\n"
+            "    nodes: [vref, 0]\n\n"
             "  - type: c_block\n"
             "    name: CB1\n"
-            "    nodes: [vref, vout]\n"
-            "    n_inputs: 1\n"
+            "    nodes: []\n"
+            "    n_inputs: 2\n"
             "    n_outputs: 1\n"
+            "    inputs: [VrefProbe, Xout]\n"
             f"    lib_path: {Path(lib_path).as_posix()}\n\n"
         )
         cblock_yaml = text[:pi_start] + cblock_block + text[pwm_start:]
@@ -2606,6 +2615,48 @@ def test_mixed_domain_scheduler_is_deterministic() -> None:
     assert "PI1" in step.channel_values
 
 
+def test_component_sample_time_overrides_legacy_global_control_sampling() -> None:
+    circuit = ps.Circuit()
+    n_err = circuit.add_node("err")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Verr", n_err, gnd, 1.0)
+    circuit.add_resistor("Rerr", n_err, gnd, 1e3)
+    circuit.add_resistor("Rout", n_out, gnd, 1e3)
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI1",
+        [n_err, gnd, n_out],
+        {"kp": 0.0, "ki": 10_000.0, "sample_time": 50e-6},
+        {},
+    )
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 120e-6
+    opts.dt = 10e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.control_mode = ps.ControlUpdateMode.Discrete
+    opts.control_sample_time = 100e-6  # legacy global fallback; local Ts must win
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    pi = result.virtual_channels["PI1"]
+    assert len(pi) >= 11
+
+    assert abs(float(pi[0])) < 1e-12
+    assert abs(float(pi[4]) - float(pi[0])) < 1e-12
+    assert float(pi[5]) > float(pi[4])  # update at 50 us
+    assert abs(float(pi[9]) - float(pi[5])) < 1e-12
+    assert float(pi[10]) > float(pi[9])  # update at 100 us (50 us cadence)
+
+
 def test_simulation_result_includes_virtual_channels() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
@@ -2632,6 +2683,94 @@ def test_simulation_result_includes_virtual_channels() -> None:
     assert "VP" in result.virtual_channel_metadata
     assert result.virtual_channel_metadata["VP"].component_type == "voltage_probe"
     assert result.virtual_channel_metadata["VP"].domain == "instrumentation"
+
+
+def test_collect_result_channels_merges_electrical_and_control_channels() -> None:
+    circuit = ps.Circuit()
+    n_ref = circuit.add_node("ref")
+    n_fb = circuit.add_node("fb")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vref", n_ref, gnd, 5.0)
+    circuit.add_voltage_source("Vfb", n_fb, gnd, 3.0)
+    circuit.add_resistor("Rout", n_out, gnd, 1_000.0)
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI1",
+        [n_ref, n_fb, n_out],
+        {"kp": 0.4, "ki": 5_000.0, "anti_windup": 1.0, "output_min": 0.0, "output_max": 1.0},
+        {},
+    )
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 10e-6
+    opts.dt = 1e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    assert "PI1" in result.virtual_channels
+
+    channels, metadata = ps.collect_result_channels(circuit, result)
+    assert "V(ref)" in channels
+    assert "I(Vref)" in channels
+    assert "PI1" in channels
+    assert len(channels["V(ref)"]) == len(result.time)
+    assert len(channels["I(Vref)"]) == len(result.time)
+    assert len(channels["PI1"]) == len(result.time)
+    assert metadata["V(ref)"].domain == "electrical"
+    assert metadata["V(ref)"].unit == "V"
+    assert metadata["I(Vref)"].unit == "A"
+    assert metadata["PI1"].domain == "control"
+
+
+def test_run_transient_streaming_emits_full_electrical_names_and_final_virtual_channels() -> None:
+    circuit = ps.Circuit()
+    n_ref = circuit.add_node("ref")
+    n_fb = circuit.add_node("fb")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vref", n_ref, gnd, 5.0)
+    circuit.add_voltage_source("Vfb", n_fb, gnd, 3.0)
+    circuit.add_resistor("Rout", n_out, gnd, 1_000.0)
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI1",
+        [n_ref, n_fb, n_out],
+        {"kp": 0.4, "ki": 5_000.0, "anti_windup": 1.0, "output_min": 0.0, "output_max": 1.0},
+        {},
+    )
+
+    streamed_samples: list[dict[str, float]] = []
+
+    def on_data(_time: float, sample: dict[str, float]) -> None:
+        streamed_samples.append(dict(sample))
+
+    _, _, ok, _ = ps.run_transient_streaming(
+        circuit,
+        0.0,
+        10e-6,
+        1e-6,
+        circuit.initial_state(),
+        ps.NewtonOptions(),
+        ps.LinearSolverStackConfig.defaults(),
+        on_data,
+        None,
+        None,
+        1,
+    )
+
+    assert ok
+    assert streamed_samples
+    assert "V(ref)" in streamed_samples[0]
+    assert "I(Vref)" in streamed_samples[0]
+    assert "PI1" in streamed_samples[-1]
 
 
 def test_virtual_channel_metadata_includes_relay_state_channel() -> None:

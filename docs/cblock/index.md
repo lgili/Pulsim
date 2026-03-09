@@ -63,13 +63,22 @@ schema: pulsim-v1
 version: 1
 
 components:
+  - type: voltage_probe
+    name: ERR
+    nodes: [sig_in, 0]
+
   - type: c_block
     name: MY_GAIN
-    nodes: [sig_in, sig_out]
+    nodes: []
     n_inputs: 1
     n_outputs: 1
+    inputs: [ERR]
     source: path/to/gain3x.c
 ```
+
+`c_block` is control-domain only in the mixed-domain runtime:
+inputs must come from control channels (for example probes, controllers, or
+other virtual channels), and outputs are emitted as control channels.
 
 ## Next steps
 

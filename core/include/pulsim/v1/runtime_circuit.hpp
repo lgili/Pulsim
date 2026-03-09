@@ -495,6 +495,7 @@ public:
         lookup_table_cache_.erase(name);
         transfer_coeff_cache_.erase(name + ":num");
         transfer_coeff_cache_.erase(name + ":den");
+        cblock_input_channels_cache_.erase(name);
         transfer_input_history_.erase(name);
         transfer_output_history_.erase(name);
         virtual_time_history_.erase(name);
@@ -611,6 +612,7 @@ public:
         set_current_time(time);
         MixedDomainStepResult result;
         result.phase_order = mixed_domain_phase_order();
+        const auto probe_snapshot = evaluate_virtual_signals(x);
 
         auto node_voltage = [&](Index node) -> Real {
             if (node < 0 || node >= system_size()) {
@@ -626,6 +628,24 @@ public:
         auto has_numeric = [&](const VirtualComponent& component, const std::string& key) {
             return component.numeric_params.find(key) != component.numeric_params.end();
         };
+        auto resolve_control_signal = [&](std::string_view channel_name) -> std::optional<Real> {
+            if (channel_name.empty()) {
+                return std::nullopt;
+            }
+            if (const auto it = result.channel_values.find(std::string(channel_name));
+                it != result.channel_values.end()) {
+                return it->second;
+            }
+            if (const auto probe_it = probe_snapshot.find(std::string(channel_name));
+                probe_it != probe_snapshot.end()) {
+                return probe_it->second;
+            }
+            if (const auto state_it = virtual_signal_state_.find(std::string(channel_name));
+                state_it != virtual_signal_state_.end()) {
+                return state_it->second;
+            }
+            return std::nullopt;
+        };
 
         auto has_type = [](const std::unordered_set<std::string>& set, const std::string& value) {
             return set.find(value) != set.end();
@@ -640,8 +660,36 @@ public:
             "state_machine", "signal_mux", "signal_demux",
             "c_block"
         };
-        const auto is_discrete_control_component = [](std::string_view type) {
+        const auto is_legacy_global_discrete_component = [](std::string_view type) {
             return type == "pi_controller" || type == "pid_controller" || type == "c_block";
+        };
+        auto component_sample_time = [&](const VirtualComponent& component) -> Real {
+            auto get_local_sample_time = [&](std::string_view key) -> std::optional<Real> {
+                const auto it = component.numeric_params.find(std::string(key));
+                if (it == component.numeric_params.end()) {
+                    return std::nullopt;
+                }
+                const Real value = it->second;
+                if (!std::isfinite(value) || value <= 0.0) {
+                    return Real{0.0};
+                }
+                return value;
+            };
+
+            if (const auto local = get_local_sample_time("sample_time"); local.has_value()) {
+                return *local;
+            }
+            if (const auto local = get_local_sample_time("ts"); local.has_value()) {
+                return *local;
+            }
+            if (const auto local = get_local_sample_time("Ts"); local.has_value()) {
+                return *local;
+            }
+
+            if (control_sample_time_ > 0.0 && is_legacy_global_discrete_component(component.type)) {
+                return control_sample_time_;
+            }
+            return 0.0;
         };
 
         // Phase 2: control update
@@ -658,13 +706,45 @@ public:
             const bool first_update = (last_time_it == virtual_last_time_.end());
             const Real dt = first_update ? Real{0.0}
                                          : std::max<Real>(0.0, time - last_time_it->second);
-            const bool discrete_control =
-                control_sample_time_ > 0.0 && is_discrete_control_component(component.type);
+            const Real block_sample_time = component_sample_time(component);
+            const bool discrete_control = block_sample_time > 0.0;
             if (discrete_control && !first_update) {
-                const Real tol = std::max<Real>(control_sample_time_ * Real{1e-9}, Real{1e-15});
-                if (dt + tol < control_sample_time_) {
+                const Real tol = std::max<Real>(block_sample_time * Real{1e-9}, Real{1e-15});
+                if (dt + tol < block_sample_time) {
                     output = virtual_signal_state_[component.name];
                     result.channel_values[component.name] = output;
+                    if (component.type == "c_block") {
+                        int n_outputs = 1;
+                        if (const auto it = component.numeric_params.find("n_outputs");
+                            it != component.numeric_params.end() && std::isfinite(it->second) && it->second >= 1.0) {
+                            n_outputs = std::max(1, static_cast<int>(std::llround(it->second)));
+                        }
+                        for (int output_index = 0; output_index < n_outputs; ++output_index) {
+                            const std::string channel_name =
+                                component.name + ".out" + std::to_string(output_index);
+                            const auto out_it = virtual_signal_state_.find(channel_name);
+                            const Real channel_value = (out_it != virtual_signal_state_.end())
+                                ? out_it->second
+                                : ((output_index == 0) ? output : Real{0.0});
+                            virtual_signal_state_[channel_name] = channel_value;
+                            result.channel_values[channel_name] = channel_value;
+                        }
+                    } else if (component.type == "pwm_generator") {
+                        const std::string duty_channel = component.name + ".duty";
+                        if (const auto it = virtual_signal_state_.find(duty_channel);
+                            it != virtual_signal_state_.end()) {
+                            result.channel_values[duty_channel] = it->second;
+                        }
+                        const std::string carrier_channel = component.name + ".carrier";
+                        if (const auto it = virtual_signal_state_.find(carrier_channel);
+                            it != virtual_signal_state_.end()) {
+                            result.channel_values[carrier_channel] = it->second;
+                        }
+                        if (const auto it = component.metadata.find("target_component");
+                            it != component.metadata.end()) {
+                            set_switch_state(it->second, output > 0.5);
+                        }
+                    }
                     continue;
                 }
             }
@@ -752,26 +832,33 @@ public:
                         "C_BLOCK '" + component.name + "' failed to initialize runtime step function");
                 }
 
+                const auto& input_channels = cblock_input_channels(component);
+                if (input_channels.empty()) {
+                    throw std::runtime_error(
+                        "C_BLOCK '" + component.name +
+                        "' requires control input channel mapping via metadata field 'inputs'");
+                }
+                if (input_channels.size() != static_cast<std::size_t>(runtime->n_inputs)) {
+                    std::ostringstream oss;
+                    oss << "C_BLOCK '" << component.name << "' input mapping size mismatch: "
+                        << "n_inputs=" << runtime->n_inputs
+                        << ", mapped_channels=" << input_channels.size();
+                    throw std::runtime_error(oss.str());
+                }
+
                 std::vector<Real> inputs(
                     static_cast<std::size_t>(runtime->n_inputs), Real{0.0});
-                if (runtime->n_inputs == 1) {
-                    if (component.nodes.size() >= 2) {
-                        inputs[0] = in0 - in1;
-                    } else if (component.nodes.size() == 1) {
-                        inputs[0] = in0;
-                    }
-                } else {
-                    if (component.nodes.size() < static_cast<std::size_t>(runtime->n_inputs)) {
+                for (int input_index = 0; input_index < runtime->n_inputs; ++input_index) {
+                    const std::string& channel_name =
+                        input_channels[static_cast<std::size_t>(input_index)];
+                    const auto value = resolve_control_signal(channel_name);
+                    if (!value.has_value()) {
                         std::ostringstream oss;
-                        oss << "C_BLOCK '" << component.name << "' expects at least "
-                            << runtime->n_inputs << " input nodes, got "
-                            << component.nodes.size();
+                        oss << "C_BLOCK '" << component.name << "' unresolved control input channel '"
+                            << channel_name << "'";
                         throw std::runtime_error(oss.str());
                     }
-                    for (int input_index = 0; input_index < runtime->n_inputs; ++input_index) {
-                        inputs[static_cast<std::size_t>(input_index)] =
-                            node_voltage(component.nodes[static_cast<std::size_t>(input_index)]);
-                    }
+                    inputs[static_cast<std::size_t>(input_index)] = *value;
                 }
 
                 std::vector<Real> outputs(
@@ -953,6 +1040,8 @@ public:
                     it != component.metadata.end()) {
                     set_switch_state(it->second, output > 0.5);
                 }
+                virtual_signal_state_[component.name + ".duty"] = duty;
+                virtual_signal_state_[component.name + ".carrier"] = carrier;
                 result.channel_values[component.name + ".duty"] = duty;
                 result.channel_values[component.name + ".carrier"] = carrier;
             } else if (component.type == "state_machine") {
@@ -1194,8 +1283,7 @@ public:
         }
 
         // Phase 4: instrumentation extraction
-        const auto probes = evaluate_virtual_signals(x);
-        for (const auto& probe : probes) {
+        for (const auto& probe : probe_snapshot) {
             result.channel_values.emplace(probe.first, probe.second);
         }
         for (const auto& component : virtual_components_) {
@@ -1558,8 +1646,10 @@ public:
     /// Get current simulation time
     [[nodiscard]] Real current_time() const { return current_time_; }
 
-    /// Configure global discrete-control sample interval (seconds).
-    /// Non-finite or non-positive values disable discrete control sampling.
+    /// Configure legacy global discrete-control sample interval (seconds).
+    /// This is used as a fallback only when a control block does not declare
+    /// its own per-block sample_time/Ts.
+    /// Non-finite or non-positive values disable global fallback sampling.
     void set_control_sample_time(Real sample_time) {
         if (!(std::isfinite(sample_time) && sample_time > 0.0)) {
             control_sample_time_ = 0.0;
@@ -1568,8 +1658,8 @@ public:
         control_sample_time_ = sample_time;
     }
 
-    /// Returns the active global control sample interval in seconds.
-    /// A value of 0 means continuous control updates.
+    /// Returns the active legacy global control sample interval in seconds.
+    /// A value of 0 means no global fallback scheduling.
     [[nodiscard]] Real control_sample_time() const { return control_sample_time_; }
 
     /// Check if circuit has time-varying sources
@@ -2292,6 +2382,18 @@ private:
         return token;
     }
 
+    [[nodiscard]] static std::string trim_ascii_whitespace(std::string_view raw) {
+        std::size_t begin = 0;
+        while (begin < raw.size() && std::isspace(static_cast<unsigned char>(raw[begin])) != 0) {
+            ++begin;
+        }
+        std::size_t end = raw.size();
+        while (end > begin && std::isspace(static_cast<unsigned char>(raw[end - 1])) != 0) {
+            --end;
+        }
+        return std::string(raw.substr(begin, end - begin));
+    }
+
     [[nodiscard]] static std::optional<Real> parse_yaml_real(const YAML::Node& node) {
         if (!node || node.IsNull()) return std::nullopt;
         try {
@@ -2319,6 +2421,136 @@ private:
             values.push_back(*value);
         }
         return values;
+    }
+
+    [[nodiscard]] std::vector<std::string> parse_cblock_input_channels(
+        const VirtualComponent& component) const {
+        std::vector<std::string> channels;
+
+        const auto append_channel_name = [&](std::string_view key,
+                                             std::optional<std::size_t> index,
+                                             std::string raw_name) {
+            std::string channel_name = trim_ascii_whitespace(raw_name);
+            if (channel_name.empty()) {
+                std::ostringstream oss;
+                oss << "C_BLOCK '" << component.name << "' has empty channel name in metadata key '"
+                    << key << "'";
+                if (index.has_value()) {
+                    oss << "[" << *index << "]";
+                }
+                throw std::runtime_error(oss.str());
+            }
+            channels.push_back(std::move(channel_name));
+        };
+
+        const auto parse_scalar_or_sequence_key = [&](std::string_view key) -> bool {
+            const auto key_it = component.metadata.find(std::string(key));
+            if (key_it == component.metadata.end() || key_it->second.empty()) {
+                return false;
+            }
+            YAML::Node node;
+            try {
+                node = YAML::Load(key_it->second);
+            } catch (...) {
+                std::ostringstream oss;
+                oss << "C_BLOCK '" << component.name << "' has invalid YAML in metadata key '"
+                    << key << "'";
+                throw std::runtime_error(oss.str());
+            }
+
+            if (node.IsSequence()) {
+                for (std::size_t i = 0; i < node.size(); ++i) {
+                    const YAML::Node item = node[i];
+                    if (!item || item.IsNull() || !item.IsScalar()) {
+                        std::ostringstream oss;
+                        oss << "C_BLOCK '" << component.name << "' metadata key '" << key
+                            << "' must contain only string channels";
+                        throw std::runtime_error(oss.str());
+                    }
+                    try {
+                        append_channel_name(key, i, item.as<std::string>());
+                    } catch (const std::runtime_error&) {
+                        throw;
+                    } catch (...) {
+                        std::ostringstream oss;
+                        oss << "C_BLOCK '" << component.name << "' metadata key '" << key
+                            << "' must contain only string channels";
+                        throw std::runtime_error(oss.str());
+                    }
+                }
+                return true;
+            }
+
+            if (!node.IsScalar()) {
+                std::ostringstream oss;
+                oss << "C_BLOCK '" << component.name << "' metadata key '" << key
+                    << "' must be a string or sequence of strings";
+                throw std::runtime_error(oss.str());
+            }
+
+            try {
+                append_channel_name(key, std::nullopt, node.as<std::string>());
+            } catch (const std::runtime_error&) {
+                throw;
+            } catch (...) {
+                std::ostringstream oss;
+                oss << "C_BLOCK '" << component.name << "' metadata key '" << key
+                    << "' must be a string or sequence of strings";
+                throw std::runtime_error(oss.str());
+            }
+            return true;
+        };
+
+        const bool has_inputs = parse_scalar_or_sequence_key("inputs");
+        if (!has_inputs) {
+            (void)parse_scalar_or_sequence_key("input_channels");
+        }
+
+        for (int input_index = 0;; ++input_index) {
+            const std::string key = "input_channel_" + std::to_string(input_index);
+            const auto key_it = component.metadata.find(key);
+            if (key_it == component.metadata.end() || key_it->second.empty()) {
+                break;
+            }
+
+            YAML::Node node;
+            try {
+                node = YAML::Load(key_it->second);
+            } catch (...) {
+                append_channel_name(key, std::nullopt, key_it->second);
+                continue;
+            }
+
+            if (!node.IsScalar()) {
+                std::ostringstream oss;
+                oss << "C_BLOCK '" << component.name << "' metadata key '" << key
+                    << "' must be a string channel name";
+                throw std::runtime_error(oss.str());
+            }
+            try {
+                append_channel_name(key, std::nullopt, node.as<std::string>());
+            } catch (const std::runtime_error&) {
+                throw;
+            } catch (...) {
+                std::ostringstream oss;
+                oss << "C_BLOCK '" << component.name << "' metadata key '" << key
+                    << "' must be a string channel name";
+                throw std::runtime_error(oss.str());
+            }
+        }
+
+        return channels;
+    }
+
+    [[nodiscard]] const std::vector<std::string>& cblock_input_channels(
+        const VirtualComponent& component) const {
+        if (const auto it = cblock_input_channels_cache_.find(component.name);
+            it != cblock_input_channels_cache_.end()) {
+            return it->second;
+        }
+        return cblock_input_channels_cache_
+            .emplace(component.name, parse_cblock_input_channels(component))
+            .first->second;
     }
 
     [[nodiscard]] static std::vector<std::pair<Real, Real>> normalize_lookup_samples(
@@ -2866,6 +3098,7 @@ private:
     std::unordered_map<std::string, std::deque<std::pair<Real, Real>>> virtual_time_history_;
     mutable std::unordered_map<std::string, std::vector<std::pair<Real, Real>>> lookup_table_cache_;
     mutable std::unordered_map<std::string, std::vector<Real>> transfer_coeff_cache_;
+    mutable std::unordered_map<std::string, std::vector<std::string>> cblock_input_channels_cache_;
     std::unordered_map<std::string, std::deque<Real>> transfer_input_history_;
     std::unordered_map<std::string, std::deque<Real>> transfer_output_history_;
     std::vector<DeviceConnection> connections_;

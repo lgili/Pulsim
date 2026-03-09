@@ -26,18 +26,25 @@ Isso importa para interpretação:
 - PI/PID são atualizados antes dos blocos de evento daquele mesmo instante.
 - `pwm_generator.target_component` já afeta estado do switch no passo mixed-domain.
 
-## 3) Modos de atualização de controle
+## 3) Agendamento de controle (Ts por bloco + fallback legado)
 
-Configuração: `simulation.control.mode` (`auto|continuous|discrete`) e `sample_time`.
+O contrato atual é **por bloco de controle**:
 
-- `continuous`:
-  - blocos de controle (PI/PID) atualizam em todo passo aceito.
-- `discrete`:
-  - PI/PID atualizam apenas quando `dt_acumulado >= sample_time`;
-  - entre amostras, o canal mantém o último valor (hold).
+- use `component.sample_time` (ou aliases `ts`/`Ts`) em cada bloco de controle;
+- `Ts = 0` (ou ausente): execução contínua (a cada passo aceito);
+- `Ts > 0`: execução discreta com hold entre atualizações (`dt_acumulado >= Ts`).
+
+Blocos suportados para `sample_time`: PI/PID, PWM, C-block e demais blocos de controle virtuais.
+Scopes/probes não aceitam `sample_time`.
+
+Compatibilidade legada (`simulation.control.mode/sample_time`) continua ativa como fallback:
+
+- `continuous`: força contínuo global.
+- `discrete`: `sample_time` global é usado apenas quando o bloco não declara `sample_time` local.
 - `auto`:
-  - usa `sample_time` se definido;
-  - senão tenta inferir por frequência PWM.
+  - se `sample_time` global > 0, usa fallback global;
+  - se existir qualquer `sample_time` local, desabilita inferência global por PWM;
+  - sem `sample_time` local/global, ainda pode inferir `Ts = 1/f_pwm_max` para fallback legado.
 
 ## 4) Canais canônicos por tipo
 
@@ -177,7 +184,7 @@ Essas relações são o contrato canônico do backend.
 
 - Usar `THERMAL_SCOPE` para temperatura de junção.
 - Plotar `PWM1` como se fosse duty (o correto é `PWM1.duty`).
-- Ignorar `control.mode=discrete` e esperar atualização contínua de PI/PID.
+- Ignorar `sample_time` por bloco e assumir uma taxa global única.
 - Ignorar `virtual_channel_metadata` e inferir domínio por regex de nome.
 - Sintetizar `Iavg/Vavg/Davg` localmente quando backend não exportou o canal.
 

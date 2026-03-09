@@ -162,27 +162,43 @@ Shared sink rules:
 
 ## 4) Closed-Loop Control Sampling (Important for Stability)
 
-Control update policy is configured with `simulation.control`:
+Control scheduling is primarily configured per control block via `sample_time` (`Ts`):
+
+```yaml
+components:
+  - type: pi_controller
+    name: PI1
+    nodes: [vref, vout, 0]
+    kp: 0.08
+    ki: 100.0
+    sample_time: 100e-6 # Ts local (0 ou ausente => contínuo)
+```
+
+Legacy global fallback is still available via `simulation.control`:
 
 ```yaml
 simulation:
   control:
     mode: auto        # auto | continuous | discrete
-    sample_time: 1e-4 # required when mode=discrete
+    sample_time: 1e-4 # fallback global (legacy)
 ```
 
 Behavior:
 
+- per-block (`component.sample_time|ts|Ts`):
+  - `Ts = 0` or missing: continuous execution for that block;
+  - `Ts > 0`: discrete execution with output hold between updates.
 - `auto`:
-  - uses `sample_time` if provided;
-  - otherwise infers `Ts = 1 / f_pwm_max` from the highest PWM frequency found in `pwm_generator`/PWM sources;
-  - if no PWM is present, runs as continuous.
+  - if global `sample_time` is provided, uses global fallback;
+  - if any control block already declares local `Ts`, global PWM inference is disabled;
+  - otherwise infers legacy fallback `Ts = 1 / f_pwm_max` from `pwm_generator`/PWM sources.
 - `continuous`: updates control blocks at every accepted solver step.
-- `discrete`: updates PI/PID blocks only when `dt_accum >= sample_time`.
+- `discrete`: applies global fallback sampling when local `Ts` is not set.
 
 Notes:
 
-- In YAML strict validation, `mode: discrete` requires `sample_time > 0`.
+- `sample_time/ts/Ts` is accepted only for control virtual blocks (not probes/scopes).
+- In YAML strict validation, legacy `mode: discrete` still requires global `sample_time > 0`.
 - `sample_hold` has independent `sample_period` behavior.
 
 ## 5) Strict vs Non-Strict Thermal Validation

@@ -405,6 +405,34 @@ const std::unordered_set<std::string>& virtual_component_types() {
     return types;
 }
 
+bool virtual_component_supports_sample_time(const std::string& type) {
+    static const std::unordered_set<std::string> sampled_types = {
+        "op_amp",
+        "comparator",
+        "pi_controller",
+        "pid_controller",
+        "gain",
+        "sum",
+        "subtraction",
+        "math_block",
+        "pwm_generator",
+        "integrator",
+        "differentiator",
+        "limiter",
+        "rate_limiter",
+        "hysteresis",
+        "lookup_table",
+        "transfer_function",
+        "delay_block",
+        "sample_hold",
+        "state_machine",
+        "signal_mux",
+        "signal_demux",
+        "c_block"
+    };
+    return sampled_types.contains(type);
+}
+
 std::string canonical_component_type(const std::string& raw_type) {
     const auto key = normalize_key(raw_type);
     const auto& aliases = component_alias_map();
@@ -1943,6 +1971,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "alpha", "anti_windup", "min", "max", "output_min", "output_max",
              "rising_rate", "falling_rate",
              "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping",
+             "sample_time", "ts", "Ts",
              "n_inputs", "n_outputs", "lib_path", "source", "extra_cflags"},
             "component", errors_, options_.strict);
 
@@ -1967,7 +1996,10 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         }
 
         std::vector<std::string> nodes = parse_nodes(comp["nodes"], name, errors_);
-        if (nodes.empty()) continue;
+        const auto arity_it = component_node_arity().find(type);
+        const bool accepts_zero_nodes =
+            arity_it != component_node_arity().end() && arity_it->second.first == 0;
+        if (nodes.empty() && !accepts_zero_nodes) continue;
         if (!validate_node_count(type, nodes, errors_, name)) continue;
 
         const YAML::Node comp_view = comp;
@@ -2011,6 +2043,20 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         auto is_set = [](const YAML::Node& node) {
             return node.IsDefined() && !node.IsNull();
         };
+
+        const bool has_component_sample_time =
+            is_set(get_param("sample_time")) ||
+            is_set(get_param("ts")) ||
+            is_set(get_param("Ts"));
+        if (has_component_sample_time &&
+            !virtual_component_supports_sample_time(type)) {
+            push_error(
+                errors_,
+                kDiagInvalidParameter,
+                "sample_time/ts is only supported for control virtual blocks; got '" +
+                    type + "' on component '" + name + "'");
+            continue;
+        }
 
         // Loss model (switching energy)
         if (comp["loss"]) {
@@ -3148,6 +3194,45 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                                      "c_block '" + name + "' source '" + *source_path + "' does not exist at parse time");
                     }
                 }
+            }
+
+            const YAML::Node sample_time_node = [&]() -> YAML::Node {
+                if (const YAML::Node node = get_param("sample_time");
+                    node && !node.IsNull()) {
+                    return node;
+                }
+                if (const YAML::Node node = get_param("ts");
+                    node && !node.IsNull()) {
+                    return node;
+                }
+                if (const YAML::Node node = get_param("Ts");
+                    node && !node.IsNull()) {
+                    return node;
+                }
+                return YAML::Node();
+            }();
+
+            if (sample_time_node && !sample_time_node.IsNull()) {
+                if (!virtual_component_supports_sample_time(type)) {
+                    push_error(
+                        errors_,
+                        kDiagInvalidParameter,
+                        "sample_time/ts is only supported for control virtual blocks; got '" +
+                            type + "' on component '" + name + "'");
+                    continue;
+                }
+                const Real sample_time =
+                    parse_real(sample_time_node, name + ".sample_time", errors_);
+                if (!std::isfinite(sample_time) || sample_time < 0.0) {
+                    push_error(
+                        errors_,
+                        kDiagInvalidParameter,
+                        name + ".sample_time must be finite and >= 0");
+                    continue;
+                }
+                numeric_params["sample_time"] = sample_time;
+                numeric_params.erase("ts");
+                numeric_params.erase("Ts");
             }
 
             circuit.add_virtual_component(type, name, node_indices,

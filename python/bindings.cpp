@@ -1821,10 +1821,7 @@ void init_v2_module(py::module_& v2) {
 
         Simulator sim(circuit, opts);
 
-        std::vector<std::string> node_names;
-        for (Index i = 0; i < circuit.num_nodes(); ++i) {
-            node_names.push_back(circuit.node_name(i));
-        }
+        const std::vector<std::string> signal_names = circuit.signal_names();
 
         struct PyControl final : SimulationControl {
             std::atomic<bool>* stop = nullptr;
@@ -1837,6 +1834,16 @@ void init_v2_module(py::module_& v2) {
         PyControl control;
         control.stop = &stop_requested;
 
+        bool has_data_callback = false;
+        bool has_progress_callback = false;
+        bool has_cancel_check = false;
+        {
+            py::gil_scoped_acquire acquire;
+            has_data_callback = !data_callback.is_none();
+            has_progress_callback = !progress_callback.is_none();
+            has_cancel_check = !cancel_check.is_none();
+        }
+
         int step = 0;
         int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
         const Real total_duration = t_stop - t_start;
@@ -1845,14 +1852,21 @@ void init_v2_module(py::module_& v2) {
             step++;
             bool emit = (step % actual_emit_interval == 0);
 
-            if (emit || !cancel_check.is_none()) {
+            if (emit || has_cancel_check) {
                 py::gil_scoped_acquire acquire;
 
-                if (emit && !data_callback.is_none()) {
+                if (emit && has_data_callback) {
                     try {
                         py::dict state_dict;
-                        for (size_t i = 0; i < node_names.size(); ++i) {
-                            state_dict[py::str("V(" + node_names[i] + ")")] = state[static_cast<Index>(i)];
+                        const std::size_t signal_count = std::min<std::size_t>(
+                            signal_names.size(),
+                            static_cast<std::size_t>(state.size()));
+                        for (std::size_t i = 0; i < signal_count; ++i) {
+                            state_dict[py::str(signal_names[i])] = state[static_cast<Index>(i)];
+                        }
+                        const auto probes = circuit.evaluate_virtual_signals(state);
+                        for (const auto& [name, value] : probes) {
+                            state_dict[py::str(name)] = value;
                         }
                         data_callback(time, state_dict);
                     } catch (...) {
@@ -1860,7 +1874,7 @@ void init_v2_module(py::module_& v2) {
                     }
                 }
 
-                if (emit && !progress_callback.is_none()) {
+                if (emit && has_progress_callback) {
                     try {
                         Real progress = total_duration > 0
                             ? (time - t_start) / total_duration * 100.0
@@ -1872,7 +1886,7 @@ void init_v2_module(py::module_& v2) {
                     }
                 }
 
-                if (!cancel_check.is_none()) {
+                if (has_cancel_check) {
                     try {
                         if (py::cast<bool>(cancel_check())) {
                             stop_requested.store(true);
@@ -1900,21 +1914,40 @@ void init_v2_module(py::module_& v2) {
 
         {
             py::gil_scoped_acquire acquire;
-            if (!data_callback.is_none() && !result.time.empty()) {
+            if (has_data_callback && !result.time.empty()) {
                 try {
                     const Vector& state = result.states.back();
                     py::dict state_dict;
-                    for (size_t i = 0; i < node_names.size(); ++i) {
-                        state_dict[py::str("V(" + node_names[i] + ")")] = state[static_cast<Index>(i)];
+                    const std::size_t signal_count = std::min<std::size_t>(
+                        signal_names.size(),
+                        static_cast<std::size_t>(state.size()));
+                    for (std::size_t i = 0; i < signal_count; ++i) {
+                        state_dict[py::str(signal_names[i])] = state[static_cast<Index>(i)];
+                    }
+                    const auto probes = circuit.evaluate_virtual_signals(state);
+                    for (const auto& [name, value] : probes) {
+                        state_dict[py::str(name)] = value;
+                    }
+                    for (const auto& [channel, series] : result.virtual_channels) {
+                        if (!series.empty()) {
+                            state_dict[py::str(channel)] = series.back();
+                        }
                     }
                     data_callback(result.time.back(), state_dict);
                 } catch (...) {}
             }
-            if (!progress_callback.is_none()) {
+            if (has_progress_callback) {
                 try {
                     progress_callback(100.0, message);
                 } catch (...) {}
             }
+        }
+
+        {
+            py::gil_scoped_acquire acquire;
+            data_callback = py::none();
+            progress_callback = py::none();
+            cancel_check = py::none();
         }
 
         return std::make_tuple(result.time, result.states, success, message);
@@ -1937,7 +1970,6 @@ void init_v2_module(py::module_& v2) {
             circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
             data_callback, progress_callback, cancel_check, emit_interval);
     },
-    py::call_guard<py::gil_scoped_release>(),
     py::arg("circuit"),
     py::arg("t_start"),
     py::arg("t_stop"),
@@ -1991,7 +2023,6 @@ void init_v2_module(py::module_& v2) {
             circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
             data_callback, progress_callback, cancel_check, emit_interval);
     },
-    py::call_guard<py::gil_scoped_release>(),
     py::arg("circuit"),
     py::arg("t_start"),
     py::arg("t_stop"),
