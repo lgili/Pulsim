@@ -591,6 +591,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../magnetic-core-backend-frontend-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Core Backend/Frontend Contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../frontend-control-signals/" class="md-nav__link">
         
   
@@ -1441,6 +1462,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#magnetic-core-runtime-contract-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic Core Runtime Contract (MVP)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1991,6 +2021,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#magnetic-core-runtime-contract-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic Core Runtime Contract (MVP)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2466,6 +2505,39 @@ o----------------------o    o---------------------o
 | llk_sec | L_lk,s | H | Secondary leakage inductance |
 | rp | R_p | Ω | Primary winding resistance |
 | rs | R_s | Ω | Secondary winding resistance |</p>
+<hr />
+<h3 id="magnetic-core-runtime-contract-mvp">Magnetic Core Runtime Contract (MVP)<a class="headerlink" href="#magnetic-core-runtime-contract-mvp" title="Permanent link">&para;</a></h3>
+<p>For <code>saturable_inductor</code>, <code>coupled_inductor</code>, and <code>transformer</code>, the backend
+accepts <code>component.magnetic_core</code> with <code>model: saturation|hysteresis</code> and optional
+<code>core_loss_k</code> / <code>core_loss_alpha</code> / <code>core_loss_freq_coeff</code>.</p>
+<p>Current MVP runtime behavior:</p>
+<ul>
+<li>Computes per-sample magnetic loss estimate:</li>
+<li><code>P_core = core_loss_k * |i_equiv|^core_loss_alpha * (1 + core_loss_freq_coeff * |di_equiv/dt|)</code></li>
+<li>Exports canonical virtual channel:</li>
+<li><code>"&lt;component&gt;.core_loss"</code> (<code>W</code>)</li>
+<li>For <code>model: hysteresis</code>, exports deterministic memory-state channel:</li>
+<li><code>"&lt;component&gt;.h_state"</code> (bounded <code>[-1, 1]</code>)</li>
+<li>Exports channel metadata:</li>
+<li><code>domain="loss"</code></li>
+<li><code>unit="W"</code></li>
+<li><code>source_component="&lt;component_name&gt;"</code></li>
+<li>Optional policy:</li>
+<li><code>loss_policy: loss_summary</code> appends deterministic loss-summary row
+    <code>"&lt;component&gt;.core"</code> when global loss pipeline is enabled.</li>
+<li>When thermal is enabled together with losses, magnetic core-loss rows are
+  coupled into thermal telemetry:</li>
+<li>thermal channel <code>T(&lt;component&gt;.core)</code></li>
+<li>thermal summary row <code>&lt;component&gt;.core</code></li>
+<li><code>component_electrothermal</code> row consistency against the thermal channel.</li>
+</ul>
+<p>Current limitations:</p>
+<ul>
+<li>Magnetic thermal coupling currently uses simulation defaults
+  (<code>simulation.thermal.default_rth/default_cth</code>) for magnetic virtual rows.</li>
+<li>Advanced hysteresis family parameter sets (beyond current bounded state model)
+  are not implemented yet.</li>
+</ul>
 <hr />
 <h2 id="thermal-models">Thermal Models<a class="headerlink" href="#thermal-models" title="Permanent link">&para;</a></h2>
 <h3 id="runtime-thermal-rc-model">Runtime Thermal RC Model<a class="headerlink" href="#runtime-thermal-rc-model" title="Permanent link">&para;</a></h3>

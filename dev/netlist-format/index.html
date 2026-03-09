@@ -16,7 +16,7 @@
         <link rel="prev" href="../backend-cpp-contributor-guide/">
       
       
-        <link rel="next" href="../frontend-control-signals/">
+        <link rel="next" href="../magnetic-core-backend-frontend-contract/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -706,6 +706,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#magnetic-core-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic Core (MVP)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -820,6 +829,27 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-core-backend-frontend-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Core Backend/Frontend Contract
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -1709,6 +1739,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#magnetic-core-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic Core (MVP)
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1950,6 +1989,58 @@ parity status, see <a href="../gui-component-parity/">GUI Backend Parity</a>.</p
 <ul>
 <li><strong>Transformer</strong>: <code>type: transformer</code> (or <code>T</code>), <code>turns_ratio</code></li>
 </ul>
+<h3 id="magnetic-core-mvp">Magnetic Core (MVP)<a class="headerlink" href="#magnetic-core-mvp" title="Permanent link">&para;</a></h3>
+<p>Supported components for <code>magnetic_core</code> block:</p>
+<ul>
+<li><code>saturable_inductor</code></li>
+<li><code>coupled_inductor</code></li>
+<li><code>transformer</code></li>
+</ul>
+<p>Canonical fields (current MVP):</p>
+<ul>
+<li><code>enabled</code> (bool)</li>
+<li><code>model</code> (<code>saturation</code> or <code>hysteresis</code>)</li>
+<li><code>saturation_current</code> (optional, component-dependent)</li>
+<li><code>saturation_inductance</code> (optional, component-dependent)</li>
+<li><code>saturation_exponent</code> (optional, component-dependent)</li>
+<li><code>core_loss_k</code> (optional, default <code>0.0</code>)</li>
+<li><code>core_loss_alpha</code> (optional, default <code>2.0</code>)</li>
+<li><code>core_loss_freq_coeff</code> (optional, default <code>0.0</code>, multiplies loss by a <code>|di/dt|</code> proxy term)</li>
+<li><code>hysteresis_band</code> (optional, default derived from <code>saturation_current</code>)</li>
+<li><code>hysteresis_strength</code> (optional, default <code>0.15</code>)</li>
+<li><code>hysteresis_loss_coeff</code> (optional, default <code>0.2</code>)</li>
+<li><code>hysteresis_state_init</code> (optional, default <code>1</code>)</li>
+<li><code>loss_policy</code> (optional: <code>telemetry_only</code> or <code>loss_summary</code>, default <code>telemetry_only</code>)</li>
+<li><code>i_equiv_init</code> (optional, default <code>0.0</code>, initialization for magnetic current proxy)</li>
+</ul>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transformer</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tmag</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">p1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">s1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">turns_ratio</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+<span class="w">  </span><span class="nt">magnetic_core</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">saturation</span>
+<span class="w">    </span><span class="nt">loss_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loss_summary</span>
+<span class="w">    </span><span class="nt">i_equiv_init</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">core_loss_k</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.08</span>
+<span class="w">    </span><span class="nt">core_loss_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+<span class="w">    </span><span class="nt">core_loss_freq_coeff</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
+</code></pre></div>
+<p>When enabled with <code>core_loss_k &gt; 0</code>, backend exports <code>"&lt;component&gt;.core_loss"</code> in
+<code>result.virtual_channels</code> with metadata:</p>
+<ul>
+<li><code>domain: loss</code></li>
+<li><code>unit: W</code></li>
+<li><code>source_component: &lt;component_name&gt;</code></li>
+</ul>
+<p>When <code>model: hysteresis</code>, backend also exports <code>"&lt;component&gt;.h_state"</code> as the
+deterministic magnetic memory-state channel (bounded in <code>[-1, 1]</code>).</p>
+<p>When <code>simulation.enable_losses: true</code>, <code>simulation.thermal.enabled: true</code>, and
+<code>loss_policy: loss_summary</code>, backend additionally exports <code>T(&lt;component&gt;.core)</code>
+with deterministic thermal evolution for magnetic core-loss coupling.</p>
+<p>For GUI/backend ownership boundaries, see
+<a href="../magnetic-core-backend-frontend-contract/">Magnetic Core Backend/Frontend Contract</a>.</p>
 <h2 id="waveforms">Waveforms<a class="headerlink" href="#waveforms" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">waveform</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dc</span>
@@ -2286,13 +2377,13 @@ For full backend contract and Python result usage, see
         
         
           
-          <a href="../frontend-control-signals/" class="md-footer__link md-footer__link--next" aria-label="Next: Frontend Control and Signals Contract">
+          <a href="../magnetic-core-backend-frontend-contract/" class="md-footer__link md-footer__link--next" aria-label="Next: Magnetic Core Backend/Frontend Contract">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Frontend Control and Signals Contract
+                Magnetic Core Backend/Frontend Contract
               </div>
             </div>
             <div class="md-footer__button md-icon">

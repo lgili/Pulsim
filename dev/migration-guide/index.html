@@ -591,6 +591,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../magnetic-core-backend-frontend-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Core Backend/Frontend Contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../frontend-control-signals/" class="md-nav__link">
         
   
@@ -1373,6 +1394,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#migracao-para-componentmagnetic_core-canonico" class="md-nav__link">
+    <span class="md-ellipsis">
+      Migração para component.magnetic_core canônico
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#pinagem-e-validacao" class="md-nav__link">
     <span class="md-ellipsis">
       Pinagem e validação
@@ -1788,6 +1818,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#migracao-para-componentmagnetic_core-canonico" class="md-nav__link">
+    <span class="md-ellipsis">
+      Migração para component.magnetic_core canônico
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#pinagem-e-validacao" class="md-nav__link">
     <span class="md-ellipsis">
       Pinagem e validação
@@ -2051,8 +2090,30 @@ ambiguidade no pipeline GUI -&gt; YAML -&gt; backend.</p>
 <li><code>relay</code>: composição com dois <code>switch</code> (<code>NO</code>/<code>NC</code>) + controlador virtual da bobina.</li>
 <li><code>saturable_inductor</code>: <code>inductor</code> elétrico + controlador virtual de indutância efetiva.</li>
 <li><code>coupled_inductor</code>: dois ramos <code>inductor</code> + controlador virtual de acoplamento.</li>
+<li><code>transformer</code> com <code>magnetic_core</code>: mantém ramo elétrico ideal + telemetria
+  canônica de perdas magnéticas (<code>&lt;name&gt;.core_loss</code>).</li>
 <li><code>voltage_probe/current_probe/power_probe/scope/mux/demux</code>: componentes
   virtuais (não estampam MNA).</li>
+</ul>
+<h3 id="migracao-para-componentmagnetic_core-canonico">Migração para <code>component.magnetic_core</code> canônico<a class="headerlink" href="#migracao-para-componentmagnetic_core-canonico" title="Permanent link">&para;</a></h3>
+<p>Para novos modelos magnéticos, prefira o bloco canônico:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">magnetic_core</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">saturation</span>
+<span class="w">  </span><span class="nt">core_loss_k</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
+<span class="w">  </span><span class="nt">core_loss_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+<span class="w">  </span><span class="nt">core_loss_freq_coeff</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
+</code></pre></div>
+<p>Regras práticas de migração:</p>
+<ul>
+<li>Evite parâmetros soltos fora de <code>magnetic_core</code> para perdas magnéticas.</li>
+<li>Use <code>model: saturation</code> para curva de saturação simples, ou <code>model: hysteresis</code>
+  quando precisar memória de ciclo (<code>&lt;component&gt;.h_state</code>).</li>
+<li>Para <code>saturable_inductor</code>, mantenha também os parâmetros elétricos
+  (<code>inductance</code>, <code>saturation_current</code>, <code>saturation_inductance</code>) no componente.</li>
+<li>No frontend, não reconstrua curvas térmicas/magnéticas; use os canais
+  exportados pelo backend (<code>&lt;component&gt;.core_loss</code>, <code>&lt;component&gt;.h_state</code>,
+  <code>T(&lt;component&gt;.core)</code> quando perdas+térmico estiverem ativos).</li>
 </ul>
 <h3 id="pinagem-e-validacao">Pinagem e validação<a class="headerlink" href="#pinagem-e-validacao" title="Permanent link">&para;</a></h3>
 <p>Ative strict mode no parser durante integração:</p>

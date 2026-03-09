@@ -594,6 +594,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../magnetic-core-backend-frontend-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Core Backend/Frontend Contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../frontend-control-signals/" class="md-nav__link">
         
   
@@ -823,6 +844,15 @@
   <a href="#example-5-closed-loop-buck-thermal-port-validation" class="md-nav__link">
     <span class="md-ellipsis">
       Example 5: Closed-Loop Buck + Thermal Port Validation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 6: Magnetic Core MVP (saturation + frequency-sensitive loss)
     </span>
   </a>
   
@@ -1583,6 +1613,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example 6: Magnetic Core MVP (saturation + frequency-sensitive loss)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#output-artifacts-for-automation" class="md-nav__link">
     <span class="md-ellipsis">
       Output Artifacts for Automation
@@ -1742,6 +1781,20 @@
 <li>closed-loop control remains bounded (<code>PI</code> output and PWM duty).</li>
 <li>thermal-enabled devices report non-empty telemetry in <code>component_electrothermal</code>.</li>
 <li>run remains stable for longer windows (10 ms, 20 ms, ...).</li>
+</ul>
+<h2 id="example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss">Example 6: Magnetic Core MVP (saturation + frequency-sensitive loss)<a class="headerlink" href="#example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>examples/run_magnetic_core_saturation_freq_loss.py
+</code></pre></div>
+<p>Checkpoints:</p>
+<ul>
+<li><code>Lsat.core_loss</code> exists in <code>result.virtual_channels</code> and stays non-negative.</li>
+<li>metadata for <code>Lsat.core_loss</code> is coherent (<code>domain=loss</code>, <code>unit=W</code>, <code>source_component=Lsat</code>).</li>
+<li>when <code>loss_policy: loss_summary</code>, summary row <code>Lsat.core</code> is present in <code>loss_summary.device_losses</code>.</li>
+<li>average/peak trends are deterministic for repeated runs with the same setup.</li>
+</ul>
+<p>Notebook walkthrough:</p>
+<ul>
+<li><code>examples/notebooks/35_magnetic_core_mvp_tutorial.ipynb</code></li>
 </ul>
 <h2 id="output-artifacts-for-automation">Output Artifacts for Automation<a class="headerlink" href="#output-artifacts-for-automation" title="Permanent link">&para;</a></h2>
 <p>Main files used in CI/regression tooling:</p>
