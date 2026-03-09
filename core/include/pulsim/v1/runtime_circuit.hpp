@@ -801,10 +801,11 @@ public:
 
             if (component.type == "math_block") {
                 if (n >= 2) {
-                    for (std::size_t i = 0; i + 1 < n; ++i) {
-                        push_if_valid(io.inputs, nodes[i]);
+                    push_if_valid(io.inputs, nodes[0]);
+                    push_if_valid(io.inputs, nodes[1]);
+                    if (n >= 3) {
+                        push_if_valid(io.outputs, nodes[2]);
                     }
-                    push_if_valid(io.outputs, nodes.back());
                 } else if (n == 1) {
                     push_if_valid(io.inputs, nodes[0]);
                 }
@@ -815,23 +816,12 @@ public:
                 if (n >= 1) {
                     push_if_valid(io.inputs, nodes[0]);
                 }
-                for (std::size_t i = 1; i < n; ++i) {
-                    push_if_valid(io.outputs, nodes[i]);
-                }
                 return io;
             }
 
             if (component.type == "signal_mux") {
-                if (n >= 3) {
-                    for (std::size_t i = 0; i + 1 < n; ++i) {
-                        push_if_valid(io.inputs, nodes[i]);
-                    }
-                    push_if_valid(io.outputs, nodes.back());
-                } else if (n >= 2) {
-                    push_if_valid(io.inputs, nodes[0]);
-                    push_if_valid(io.inputs, nodes[1]);
-                } else if (n == 1) {
-                    push_if_valid(io.inputs, nodes[0]);
+                for (std::size_t i = 0; i < n; ++i) {
+                    push_if_valid(io.inputs, nodes[i]);
                 }
                 return io;
             }
@@ -1395,7 +1385,14 @@ public:
                 }
                 const Real phase = std::fmod(std::max<Real>(0.0, time * frequency), 1.0);
                 const Real carrier = (phase <= 0.5) ? (2.0 * phase) : (2.0 * (1.0 - phase));
-                output = (duty > carrier) ? 1.0 : 0.0;
+                constexpr Real duty_edge_eps = Real{1e-12};
+                if (duty >= Real{1.0} - duty_edge_eps) {
+                    output = 1.0;
+                } else if (duty <= duty_edge_eps) {
+                    output = 0.0;
+                } else {
+                    output = (duty > carrier) ? 1.0 : 0.0;
+                }
                 if (const auto it = component.metadata.find("target_component");
                     it != component.metadata.end()) {
                     set_switch_state(it->second, output > 0.5);
