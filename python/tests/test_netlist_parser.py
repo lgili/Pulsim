@@ -436,6 +436,51 @@ class TestYamlCBlockParser:
         )
         assert self._has_error_code(p.errors, "PARAM_INVALID"), p.errors
 
+    def test_yaml_saturable_inductor_accepts_magnetic_core_block(self) -> None:
+        """saturable_inductor accepts canonical magnetic_core settings."""
+        p = self._parse(
+            "  - name: Lsat\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+            "      saturation_current: 2\n"
+            "      saturation_inductance: 200u\n"
+            "      saturation_exponent: 2.5\n"
+            "      core_loss_k: 0.01\n"
+            "      core_loss_alpha: 1.8\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
+        assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
+
+    def test_yaml_rejects_magnetic_core_on_unsupported_component(self) -> None:
+        """magnetic_core is currently accepted only for saturable_inductor."""
+        p = self._parse(
+            "  - name: Rmag\n"
+            "    type: resistor\n"
+            "    nodes: [a, 0]\n"
+            "    value: 1\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: saturation\n"
+        )
+        assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
+    def test_yaml_rejects_unsupported_magnetic_core_model(self) -> None:
+        """Only saturation model is supported in the initial magnetic_core release."""
+        p = self._parse(
+            "  - name: Lsat_bad_model\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: hysteresis\n"
+        )
+        assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
+
     # 6.3.3 — both lib_path and source → error
     def test_yaml_cblock_both_specified_error(self, tmp_path) -> None:
         """Specifying both lib_path and source yields a PARAM_INVALID error."""

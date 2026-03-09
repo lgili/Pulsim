@@ -3514,6 +3514,58 @@ def test_saturable_inductor_effective_inductance_decreases_with_current() -> Non
     assert abs(j_high[br][br]) < abs(j_low[br][br])
 
 
+def test_saturable_inductor_magnetic_core_exports_core_loss_channel() -> None:
+    parser = ps.YamlParser()
+    circuit, opts = parser.load_string(
+        """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10}
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 2
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: saturation
+      core_loss_k: 0.2
+      core_loss_alpha: 2.0
+"""
+    )
+    assert parser.errors == [], parser.errors
+
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+
+    assert "Lsat.core_loss" in result.virtual_channels
+    core_loss = [float(v) for v in result.virtual_channels["Lsat.core_loss"]]
+    assert len(core_loss) == len(result.time)
+    assert max(core_loss) > 0.0
+    assert min(core_loss) >= 0.0
+
+    metadata = result.virtual_channel_metadata["Lsat.core_loss"]
+    assert metadata.domain == "loss"
+    assert metadata.unit == "W"
+    assert metadata.source_component == "Lsat"
+
+
 def test_coupled_inductor_adds_mutual_terms_to_jacobian() -> None:
     circuit = ps.Circuit()
     n_p = circuit.add_node("p")

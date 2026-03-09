@@ -48,6 +48,7 @@ constexpr const char* kDiagLossAxisInvalid = "PULSIM_YAML_E_LOSS_AXIS_INVALID";
 constexpr const char* kDiagLossDimensionInvalid = "PULSIM_YAML_E_LOSS_DIMENSION_INVALID";
 constexpr const char* kDiagFrequencyInvalid = "PULSIM_YAML_E_FREQ_CONFIG_INVALID";
 constexpr const char* kDiagAveragedInvalid = "PULSIM_YAML_E_AVERAGED_CONFIG_INVALID";
+constexpr const char* kDiagMagneticInvalid = "PULSIM_YAML_E_MAGNETIC_CONFIG_INVALID";
 
 /// Parses scalar real strings with engineering suffix support.
 Real parse_real_string(const std::string& raw);
@@ -84,6 +85,11 @@ bool is_known_key(const std::string& key, const std::unordered_set<std::string>&
            canonical_type == "igbt" ||
            canonical_type == "bjt_npn" ||
            canonical_type == "bjt_pnp";
+}
+
+/// Returns whether canonical component type supports nonlinear magnetic_core block.
+[[nodiscard]] bool component_type_supports_magnetic_core(const std::string& canonical_type) {
+    return canonical_type == "saturable_inductor";
 }
 
 /// Prefixes diagnostics with stable machine-readable error code.
@@ -1951,7 +1957,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
 
         validate_keys(comp,
             {"type", "name", "nodes", "value", "params", "waveform", "use", "loss",
-             "thermal",
+             "thermal", "magnetic_core",
              "resistance", "capacitance", "inductance", "ic",
              "g_on", "g_off", "ron", "roff", "v_threshold", "initial_state",
              "vth", "kp", "lambda", "lambda_", "is_nmos", "v_ce_sat",
@@ -2056,6 +2062,130 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 "sample_time/ts is only supported for control virtual blocks; got '" +
                     type + "' on component '" + name + "'");
             continue;
+        }
+
+        bool magnetic_core_defined = false;
+        bool magnetic_core_enabled = false;
+        std::string magnetic_core_model = "saturation";
+        std::optional<Real> magnetic_saturation_current;
+        std::optional<Real> magnetic_saturation_inductance;
+        std::optional<Real> magnetic_saturation_exponent;
+        Real magnetic_core_loss_k = 0.0;
+        Real magnetic_core_loss_alpha = 2.0;
+
+        if (comp["magnetic_core"]) {
+            magnetic_core_defined = true;
+            magnetic_core_enabled = true;
+            YAML::Node magnetic_core = comp["magnetic_core"];
+            validate_keys(
+                magnetic_core,
+                {"enabled", "model", "saturation_current", "saturation_inductance",
+                 "saturation_exponent", "core_loss_k", "core_loss_alpha"},
+                name + ".magnetic_core",
+                errors_,
+                options_.strict);
+
+            if (!component_type_supports_magnetic_core(type)) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    "Component '" + name + "' (" + type +
+                        ") does not support magnetic_core in this release");
+                continue;
+            }
+
+            if (const auto enabled = parse_bool_scalar(
+                    magnetic_core["enabled"], name + ".magnetic_core.enabled", errors_);
+                enabled.has_value()) {
+                magnetic_core_enabled = *enabled;
+            }
+
+            if (const auto model = parse_string_scalar(
+                    magnetic_core["model"], name + ".magnetic_core.model", errors_);
+                model.has_value()) {
+                magnetic_core_model = normalize_key(*model);
+            }
+            if (!magnetic_core_model.empty() && magnetic_core_model != "saturation") {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    "Unsupported " + name + ".magnetic_core.model '" + magnetic_core_model +
+                        "' (expected 'saturation' in this release)");
+                continue;
+            }
+
+            if (magnetic_core["saturation_current"]) {
+                const Real value = parse_real(
+                    magnetic_core["saturation_current"],
+                    name + ".magnetic_core.saturation_current",
+                    errors_);
+                if (!std::isfinite(value) || value <= 0.0) {
+                    push_error(
+                        errors_,
+                        kDiagMagneticInvalid,
+                        name + ".magnetic_core.saturation_current must be finite and > 0");
+                    continue;
+                }
+                magnetic_saturation_current = value;
+            }
+
+            if (magnetic_core["saturation_inductance"]) {
+                const Real value = parse_real(
+                    magnetic_core["saturation_inductance"],
+                    name + ".magnetic_core.saturation_inductance",
+                    errors_);
+                if (!std::isfinite(value) || value <= 0.0) {
+                    push_error(
+                        errors_,
+                        kDiagMagneticInvalid,
+                        name + ".magnetic_core.saturation_inductance must be finite and > 0");
+                    continue;
+                }
+                magnetic_saturation_inductance = value;
+            }
+
+            if (magnetic_core["saturation_exponent"]) {
+                const Real value = parse_real(
+                    magnetic_core["saturation_exponent"],
+                    name + ".magnetic_core.saturation_exponent",
+                    errors_);
+                if (!std::isfinite(value) || value < 1.0) {
+                    push_error(
+                        errors_,
+                        kDiagMagneticInvalid,
+                        name + ".magnetic_core.saturation_exponent must be finite and >= 1");
+                    continue;
+                }
+                magnetic_saturation_exponent = value;
+            }
+
+            if (magnetic_core["core_loss_k"]) {
+                magnetic_core_loss_k = parse_real(
+                    magnetic_core["core_loss_k"],
+                    name + ".magnetic_core.core_loss_k",
+                    errors_);
+            }
+            if (!std::isfinite(magnetic_core_loss_k) || magnetic_core_loss_k < 0.0) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    name + ".magnetic_core.core_loss_k must be finite and >= 0");
+                continue;
+            }
+
+            if (magnetic_core["core_loss_alpha"]) {
+                magnetic_core_loss_alpha = parse_real(
+                    magnetic_core["core_loss_alpha"],
+                    name + ".magnetic_core.core_loss_alpha",
+                    errors_);
+            }
+            if (!std::isfinite(magnetic_core_loss_alpha) || magnetic_core_loss_alpha < 0.0) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    name + ".magnetic_core.core_loss_alpha must be finite and >= 0");
+                continue;
+            }
         }
 
         // Loss model (switching energy)
@@ -2769,6 +2899,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             Real sat_current = get_param("saturation_current")
                 ? parse_real(get_param("saturation_current"), name + ".saturation_current", errors_)
                 : 1.0;
+            if (magnetic_saturation_current.has_value()) {
+                sat_current = *magnetic_saturation_current;
+            }
             if (sat_current <= 0.0) {
                 push_error(errors_, kDiagInvalidParameter,
                            "saturation_current must be > 0 for " + name);
@@ -2777,6 +2910,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             Real sat_inductance = get_param("saturation_inductance")
                 ? parse_real(get_param("saturation_inductance"), name + ".saturation_inductance", errors_)
                 : (0.2 * inductance);
+            if (magnetic_saturation_inductance.has_value()) {
+                sat_inductance = *magnetic_saturation_inductance;
+            }
             if (sat_inductance <= 0.0 || sat_inductance > inductance) {
                 push_error(errors_, kDiagInvalidParameter,
                            "saturation_inductance must be in (0, inductance] for " + name);
@@ -2789,12 +2925,22 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             numeric_params["inductance"] = inductance;
             numeric_params["saturation_current"] = sat_current;
             numeric_params["saturation_inductance"] = sat_inductance;
-            if (get_param("saturation_exponent")) {
+            if (magnetic_saturation_exponent.has_value()) {
+                numeric_params["saturation_exponent"] = *magnetic_saturation_exponent;
+            } else if (get_param("saturation_exponent")) {
                 numeric_params["saturation_exponent"] =
                     parse_real(get_param("saturation_exponent"), name + ".saturation_exponent", errors_);
             }
+            if (magnetic_core_defined) {
+                numeric_params["magnetic_core_enabled"] = magnetic_core_enabled ? 1.0 : 0.0;
+                numeric_params["core_loss_k"] = magnetic_core_enabled ? magnetic_core_loss_k : 0.0;
+                numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
+            }
             std::unordered_map<std::string, std::string> metadata;
             metadata["target_component"] = name;
+            if (magnetic_core_defined) {
+                metadata["magnetic_core_model"] = magnetic_core_model;
+            }
             circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
             push_warning(warnings_, kDiagVirtualComponent,
                          "Component '" + name + "' (saturable_inductor) registered with nonlinear inductance controller");

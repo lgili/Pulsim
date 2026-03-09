@@ -548,6 +548,10 @@ public:
         };
 
         for (const auto& component : virtual_components_) {
+            auto numeric_param = [&](std::string_view key, Real fallback) {
+                const auto it = component.numeric_params.find(std::string(key));
+                return (it == component.numeric_params.end()) ? fallback : it->second;
+            };
             VirtualChannelMetadata base{
                 component.type,
                 component.name,
@@ -595,6 +599,14 @@ public:
                 electrical.domain = "electrical";
                 metadata.emplace(component.name + ".l_eff", electrical);
                 metadata.emplace(component.name + ".i_est", std::move(electrical));
+                const Real mag_enabled = numeric_param("magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(numeric_param("core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
+                    auto magnetic_loss = base;
+                    magnetic_loss.domain = "loss";
+                    magnetic_loss.unit = "W";
+                    metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
+                }
             } else if (component.type == "coupled_inductor") {
                 auto electrical = base;
                 electrical.domain = "electrical";
@@ -1299,6 +1311,14 @@ public:
                 const Real l_eff = saturable_effective_inductance(component, i_est, l_nom);
                 result.channel_values[component.name + ".l_eff"] = l_eff;
                 result.channel_values[component.name + ".i_est"] = i_est;
+                const Real mag_enabled = get_numeric(component, "magnetic_core_enabled", 0.0);
+                const Real core_loss_k = std::max<Real>(get_numeric(component, "core_loss_k", 0.0), 0.0);
+                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
+                    const Real core_loss_alpha =
+                        std::clamp(get_numeric(component, "core_loss_alpha", 2.0), 0.0, 8.0);
+                    const Real core_loss = core_loss_k * std::pow(std::abs(i_est), core_loss_alpha);
+                    result.channel_values[component.name + ".core_loss"] = std::max<Real>(core_loss, 0.0);
+                }
                 continue;
             }
             if (component.type == "coupled_inductor") {
