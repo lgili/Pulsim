@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import math
 import statistics
 import tempfile
@@ -2019,22 +2020,34 @@ PULSIM_CBLOCK_EXPORT void pulsim_cblock_destroy(PulsimCBlockCtx* ctx) {
         result_cb = ps.Simulator(circuit_cb, options_cb).run_transient(circuit_cb.initial_state())
         assert result_cb.success
 
-    assert len(result_pi.time) == len(result_cb.time)
-    assert len(result_pi.virtual_channels["Xout"]) == len(result_cb.virtual_channels["Xout"])
-    assert len(result_pi.virtual_channels["PI1"]) == len(result_cb.virtual_channels["CB1"])
-    assert len(result_pi.virtual_channels["PWM1.duty"]) == len(result_cb.virtual_channels["PWM1.duty"])
+        # Copy data out and release C_BLOCK owning objects before temp-dir cleanup.
+        # On Windows, loaded DLL files cannot be removed while any handle remains open.
+        time_cb = [float(v) for v in result_cb.time]
+        xout_cb = [float(v) for v in result_cb.virtual_channels["Xout"]]
+        ctrl_cb = [float(v) for v in result_cb.virtual_channels["CB1"]]
+        duty_cb = [float(v) for v in result_cb.virtual_channels["PWM1.duty"]]
+        del result_cb
+        del circuit_cb
+        del options_cb
+        del parser_cb
+        gc.collect()
+
+    assert len(result_pi.time) == len(time_cb)
+    assert len(result_pi.virtual_channels["Xout"]) == len(xout_cb)
+    assert len(result_pi.virtual_channels["PI1"]) == len(ctrl_cb)
+    assert len(result_pi.virtual_channels["PWM1.duty"]) == len(duty_cb)
 
     vout_diff = max(
-        abs(float(a) - float(b))
-        for a, b in zip(result_pi.virtual_channels["Xout"], result_cb.virtual_channels["Xout"])
+        abs(float(a) - b)
+        for a, b in zip(result_pi.virtual_channels["Xout"], xout_cb)
     )
     ctrl_diff = max(
-        abs(float(a) - float(b))
-        for a, b in zip(result_pi.virtual_channels["PI1"], result_cb.virtual_channels["CB1"])
+        abs(float(a) - b)
+        for a, b in zip(result_pi.virtual_channels["PI1"], ctrl_cb)
     )
     duty_diff = max(
-        abs(float(a) - float(b))
-        for a, b in zip(result_pi.virtual_channels["PWM1.duty"], result_cb.virtual_channels["PWM1.duty"])
+        abs(float(a) - b)
+        for a, b in zip(result_pi.virtual_channels["PWM1.duty"], duty_cb)
     )
 
     assert vout_diff < 1e-9
