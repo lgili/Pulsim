@@ -3064,6 +3064,56 @@ TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
         REQUIRE(step.channel_values.contains("T1.core_loss"));
         CHECK(step.channel_values.at("T1.core_loss") == Approx(0.4).margin(1e-12));
     }
+
+    SECTION("frequency coefficient increases average magnetic core loss") {
+        auto average_core_loss_for_frequency = [](Real frequency_hz) {
+            Circuit circuit;
+            const auto n_a = circuit.add_node("a");
+            const auto n_b = circuit.add_node("b");
+            circuit.add_inductor("Lfreq", n_a, n_b, 1e-3);
+            circuit.add_virtual_component("saturable_inductor", "Lfreq", {n_a, n_b},
+                                          {{"inductance", 1e-3},
+                                           {"saturation_current", 2.0},
+                                           {"saturation_inductance", 2e-4},
+                                           {"saturation_exponent", 2.0},
+                                           {"magnetic_core_enabled", 1.0},
+                                           {"core_loss_k", 0.1},
+                                           {"core_loss_alpha", 2.0},
+                                           {"core_loss_freq_coeff", 1e-4}},
+                                          {{"target_component", "Lfreq"}});
+
+            const auto& conns = circuit.connections();
+            REQUIRE_FALSE(conns.empty());
+            const Index branch = conns.front().branch_index;
+            REQUIRE(branch >= 0);
+
+            const Real duration = 2e-3;
+            const Real dt = 2e-6;
+            const Real current_amplitude = 2.0;
+            Vector x = Vector::Zero(circuit.system_size());
+            Real sum = 0.0;
+            std::size_t count = 0;
+
+            constexpr Real kTwoPi = Real{6.28318530717958647692};
+            for (Real t = 0.0; t <= duration; t += dt) {
+                x[branch] = current_amplitude * std::sin(kTwoPi * frequency_hz * t);
+                const auto step = circuit.execute_mixed_domain_step(x, t);
+                if (const auto it = step.channel_values.find("Lfreq.core_loss");
+                    it != step.channel_values.end()) {
+                    sum += it->second;
+                    count += 1;
+                }
+            }
+
+            REQUIRE(count > 0);
+            return sum / static_cast<Real>(count);
+        };
+
+        const Real low_freq_avg = average_core_loss_for_frequency(1e3);
+        const Real high_freq_avg = average_core_loss_for_frequency(20e3);
+
+        CHECK(high_freq_avg > low_freq_avg);
+    }
 }
 
 TEST_CASE("v1 control primitives keep bounded deterministic outputs",

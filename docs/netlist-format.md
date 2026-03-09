@@ -88,6 +88,9 @@ Canonical fields (current MVP):
 - `saturation_exponent` (optional, component-dependent)
 - `core_loss_k` (optional, default `0.0`)
 - `core_loss_alpha` (optional, default `2.0`)
+- `core_loss_freq_coeff` (optional, default `0.0`, multiplies loss by a `|di/dt|` proxy term)
+- `loss_policy` (optional: `telemetry_only` or `loss_summary`, default `telemetry_only`)
+- `i_equiv_init` (optional, default `0.0`, initialization for magnetic current proxy)
 
 Example:
 
@@ -99,8 +102,11 @@ Example:
   magnetic_core:
     enabled: true
     model: saturation
+    loss_policy: loss_summary
+    i_equiv_init: 0.0
     core_loss_k: 0.08
     core_loss_alpha: 2.0
+    core_loss_freq_coeff: 1e-4
 ```
 
 When enabled with `core_loss_k > 0`, backend exports `"<component>.core_loss"` in
@@ -109,6 +115,9 @@ When enabled with `core_loss_k > 0`, backend exports `"<component>.core_loss"` i
 - `domain: loss`
 - `unit: W`
 - `source_component: <component_name>`
+
+For GUI/backend ownership boundaries, see
+[Magnetic Core Backend/Frontend Contract](magnetic-core-backend-frontend-contract.md).
 
 ## Waveforms
 

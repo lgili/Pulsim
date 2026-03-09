@@ -432,18 +432,21 @@ o----------------------o    o---------------------o
 
 For `saturable_inductor`, `coupled_inductor`, and `transformer`, the backend
 accepts `component.magnetic_core` with `model: saturation` and optional
-`core_loss_k` / `core_loss_alpha`.
+`core_loss_k` / `core_loss_alpha` / `core_loss_freq_coeff`.
 
 Current MVP runtime behavior:
 
 - Computes per-sample magnetic loss estimate:
-  - `P_core = core_loss_k * |i_equiv|^core_loss_alpha`
+  - `P_core = core_loss_k * |i_equiv|^core_loss_alpha * (1 + core_loss_freq_coeff * |di_equiv/dt|)`
 - Exports canonical virtual channel:
   - `"<component>.core_loss"` (`W`)
 - Exports channel metadata:
   - `domain="loss"`
   - `unit="W"`
   - `source_component="<component_name>"`
+- Optional policy:
+  - `loss_policy: loss_summary` appends deterministic loss-summary row
+    `"<component>.core"` when global loss pipeline is enabled.
 
 Current limitations:
 

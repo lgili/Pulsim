@@ -1328,13 +1328,9 @@ public:
                 const Real l_eff = saturable_effective_inductance(component, i_est, l_nom);
                 result.channel_values[component.name + ".l_eff"] = l_eff;
                 result.channel_values[component.name + ".i_est"] = i_est;
-                const Real mag_enabled = get_numeric(component, "magnetic_core_enabled", 0.0);
-                const Real core_loss_k = std::max<Real>(get_numeric(component, "core_loss_k", 0.0), 0.0);
-                if (mag_enabled > 0.5 && core_loss_k > 0.0) {
-                    const Real core_loss_alpha =
-                        std::clamp(get_numeric(component, "core_loss_alpha", 2.0), 0.0, 8.0);
-                    const Real core_loss = core_loss_k * std::pow(std::abs(i_est), core_loss_alpha);
-                    result.channel_values[component.name + ".core_loss"] = std::max<Real>(core_loss, 0.0);
+                if (const auto core_loss = magnetic_core_loss_from_current(component, std::abs(i_est), time);
+                    core_loss.has_value()) {
+                    result.channel_values[component.name + ".core_loss"] = *core_loss;
                 }
                 continue;
             }
@@ -1368,19 +1364,17 @@ public:
                 const Real mutual = k * std::sqrt(std::max<Real>(l1 * l2, 0.0));
                 result.channel_values[component.name + ".k"] = k;
                 result.channel_values[component.name + ".mutual"] = mutual;
-                const Real mag_enabled = get_numeric(component, "magnetic_core_enabled", 0.0);
-                const Real core_loss_k = std::max<Real>(get_numeric(component, "core_loss_k", 0.0), 0.0);
-                if (mag_enabled > 0.5 && core_loss_k > 0.0 && conn1 && conn2 &&
+                if (conn1 && conn2 &&
                     conn1->branch_index >= 0 && conn2->branch_index >= 0 &&
                     conn1->branch_index < system_size() && conn2->branch_index < system_size()) {
                     const Real i1 = x[conn1->branch_index];
                     const Real i2 = x[conn2->branch_index];
                     const Real i_equiv = Real{0.5} * (std::abs(i1) + std::abs(i2));
-                    const Real core_loss_alpha =
-                        std::clamp(get_numeric(component, "core_loss_alpha", 2.0), 0.0, 8.0);
-                    const Real core_loss = core_loss_k * std::pow(i_equiv, core_loss_alpha);
-                    result.channel_values[component.name + ".core_loss"] =
-                        std::max<Real>(core_loss, 0.0);
+                    if (const auto core_loss =
+                            magnetic_core_loss_from_current(component, i_equiv, time);
+                        core_loss.has_value()) {
+                        result.channel_values[component.name + ".core_loss"] = *core_loss;
+                    }
                 }
                 continue;
             }
@@ -1389,10 +1383,7 @@ public:
                 const std::string target =
                     (target_it == component.metadata.end()) ? component.name : target_it->second;
                 const DeviceConnection* conn = find_connection(target);
-                const Real mag_enabled = get_numeric(component, "magnetic_core_enabled", 0.0);
-                const Real core_loss_k = std::max<Real>(get_numeric(component, "core_loss_k", 0.0), 0.0);
-                if (mag_enabled > 0.5 && core_loss_k > 0.0 &&
-                    conn && conn->branch_index >= 0 && conn->branch_index < system_size()) {
+                if (conn && conn->branch_index >= 0 && conn->branch_index < system_size()) {
                     const Real i_p = x[conn->branch_index];
                     Real i_s = 0.0;
                     if (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size()) {
@@ -1403,11 +1394,11 @@ public:
                     const Real i_equiv = (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size())
                         ? Real{0.5} * (std::abs(i_p) + std::abs(i_s) / turns_ratio)
                         : std::abs(i_p);
-                    const Real core_loss_alpha =
-                        std::clamp(get_numeric(component, "core_loss_alpha", 2.0), 0.0, 8.0);
-                    const Real core_loss = core_loss_k * std::pow(i_equiv, core_loss_alpha);
-                    result.channel_values[component.name + ".core_loss"] =
-                        std::max<Real>(core_loss, 0.0);
+                    if (const auto core_loss =
+                            magnetic_core_loss_from_current(component, i_equiv, time);
+                        core_loss.has_value()) {
+                        result.channel_values[component.name + ".core_loss"] = *core_loss;
+                    }
                 }
                 continue;
             }
@@ -2781,6 +2772,61 @@ private:
         }
 
         return transfer_coeff_cache_.emplace(cache_key, std::move(coeffs)).first->second;
+    }
+
+    [[nodiscard]] std::optional<Real> magnetic_core_loss_from_current(
+        const VirtualComponent& component,
+        Real i_equiv,
+        Real time) {
+        const Real mag_enabled = get_param_value(component.numeric_params, "magnetic_core_enabled", 0.0);
+        const Real core_loss_k =
+            std::max<Real>(get_param_value(component.numeric_params, "core_loss_k", 0.0), 0.0);
+        if (mag_enabled <= 0.5 || core_loss_k <= 0.0) {
+            return std::nullopt;
+        }
+
+        const Real core_loss_alpha = std::clamp(
+            get_param_value(component.numeric_params, "core_loss_alpha", 2.0), 0.0, 8.0);
+        const Real core_loss_freq_coeff = std::max<Real>(
+            get_param_value(component.numeric_params, "core_loss_freq_coeff", 0.0), 0.0);
+
+        Real frequency_multiplier = 1.0;
+        if (core_loss_freq_coeff > 0.0) {
+            const std::string i_key = component.name + ".__mag_i_equiv_prev";
+            const std::string t_key = component.name + ".__mag_time_prev";
+            const auto i_it = virtual_last_input_.find(i_key);
+            const auto t_it = virtual_last_time_.find(t_key);
+            if (i_it != virtual_last_input_.end() &&
+                t_it != virtual_last_time_.end() &&
+                std::isfinite(i_it->second) &&
+                std::isfinite(t_it->second)) {
+                const Real dt = time - t_it->second;
+                if (dt > 0.0 && std::isfinite(dt)) {
+                    const Real di_dt = (i_equiv - i_it->second) / dt;
+                    const Real additive = core_loss_freq_coeff * std::abs(di_dt);
+                    if (std::isfinite(additive) && additive > 0.0) {
+                        frequency_multiplier += additive;
+                    }
+                }
+            } else {
+                const Real i_init = std::max<Real>(
+                    get_param_value(component.numeric_params, "magnetic_i_equiv_init", i_equiv),
+                    0.0);
+                virtual_last_input_[i_key] = i_init;
+                virtual_last_time_[t_key] = time;
+            }
+            if (i_it != virtual_last_input_.end() && t_it != virtual_last_time_.end()) {
+                virtual_last_input_[i_key] = i_equiv;
+                virtual_last_time_[t_key] = time;
+            }
+        }
+
+        const Real core_loss =
+            core_loss_k * std::pow(std::abs(i_equiv), core_loss_alpha) * frequency_multiplier;
+        if (!std::isfinite(core_loss)) {
+            return std::nullopt;
+        }
+        return std::max<Real>(core_loss, 0.0);
     }
 
     [[nodiscard]] Real saturable_effective_inductance(

@@ -12,6 +12,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -251,14 +252,23 @@ private:
         std::string total_channel;
     };
 
+    struct MagneticLossSummaryBinding {
+        std::string component_name;
+        std::string channel_name;
+        std::string summary_name;
+    };
+
     [[nodiscard]] static Real sanitize_power(Real value);
+    [[nodiscard]] static bool loss_policy_includes_summary(std::string_view token);
     void push_series_value(std::vector<Real>& series, Real value);
     void ensure_prefix(std::vector<Real>& series, std::size_t sample_count, Real fill_value);
     void initialize_loss_interval();
     void initialize_loss_channels();
     void initialize_thermal_channels();
+    void initialize_magnetic_loss_summary_bindings();
     void sample_loss_channels(Real sample_time, std::size_t sample_count);
     void sample_thermal_channels(std::size_t sample_count);
+    void merge_magnetic_core_loss_into_loss_summary();
     void finalize_component_electrothermal();
     void validate_electrothermal_consistency();
 
@@ -274,10 +284,12 @@ private:
     bool loss_interval_initialized_ = false;
     bool loss_channels_initialized_ = false;
     bool thermal_channels_initialized_ = false;
+    bool magnetic_loss_bindings_initialized_ = false;
     Real loss_interval_start_time_ = 0.0;
 
     std::vector<ThermalTraceBinding> thermal_bindings_;
     std::vector<LossTraceBinding> loss_bindings_;
+    std::vector<MagneticLossSummaryBinding> magnetic_loss_summary_bindings_;
     std::vector<Real> loss_interval_cond_energy_;
     std::vector<Real> loss_interval_turn_on_energy_;
     std::vector<Real> loss_interval_turn_off_energy_;

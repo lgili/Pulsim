@@ -206,8 +206,32 @@ ambiguidade no pipeline GUI -> YAML -> backend.
 - `relay`: composição com dois `switch` (`NO`/`NC`) + controlador virtual da bobina.
 - `saturable_inductor`: `inductor` elétrico + controlador virtual de indutância efetiva.
 - `coupled_inductor`: dois ramos `inductor` + controlador virtual de acoplamento.
+- `transformer` com `magnetic_core`: mantém ramo elétrico ideal + telemetria
+  canônica de perdas magnéticas (`<name>.core_loss`).
 - `voltage_probe/current_probe/power_probe/scope/mux/demux`: componentes
   virtuais (não estampam MNA).
+
+### Migração para `component.magnetic_core` canônico
+
+Para novos modelos magnéticos, prefira o bloco canônico:
+
+```yaml
+magnetic_core:
+  enabled: true
+  model: saturation
+  core_loss_k: 0.1
+  core_loss_alpha: 2.0
+  core_loss_freq_coeff: 1e-4
+```
+
+Regras práticas de migração:
+
+- Evite parâmetros soltos fora de `magnetic_core` para perdas magnéticas.
+- Use `model: saturation` no MVP atual.
+- Para `saturable_inductor`, mantenha também os parâmetros elétricos
+  (`inductance`, `saturation_current`, `saturation_inductance`) no componente.
+- No frontend, não reconstrua curvas térmicas/magnéticas; use os canais
+  exportados pelo backend (`<component>.core_loss`).
 
 ### Pinagem e validação
 

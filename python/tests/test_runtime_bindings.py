@@ -3680,6 +3680,232 @@ components:
     assert metadata.source_component == "Tmag"
 
 
+def test_saturable_inductor_core_loss_freq_coefficient_increases_loss_with_frequency() -> None:
+    def _average_core_loss(frequency_hz: float) -> float:
+        parser = ps.YamlParser()
+        circuit, opts = parser.load_string(
+            f"""
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 3e-3
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: sine
+      amplitude: 5
+      frequency: {frequency_hz}
+      offset: 0
+      phase: 0
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 10
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 100n
+    saturation_current: 5.0
+    saturation_inductance: 80n
+    magnetic_core:
+      enabled: true
+      model: saturation
+      core_loss_k: 0.1
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 1e-4
+"""
+        )
+        assert parser.errors == [], parser.errors
+        opts.newton_options.num_nodes = int(circuit.num_nodes())
+        opts.newton_options.num_branches = int(circuit.num_branches())
+        result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+        assert result.success
+
+        series = [float(v) for v in result.virtual_channels["Lsat.core_loss"]]
+        assert series
+        tail = series[len(series) // 2 :]
+        return float(sum(tail) / len(tail))
+
+    avg_low = _average_core_loss(1e3)
+    avg_high = _average_core_loss(20e3)
+    assert avg_high > avg_low
+
+
+def test_magnetic_core_loss_channel_is_deterministic_across_repeated_runs() -> None:
+    netlist = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 8e-4
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10}
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 2
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: saturation
+      core_loss_k: 0.2
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 1e-4
+"""
+
+    parser_a = ps.YamlParser()
+    circuit_a, opts_a = parser_a.load_string(netlist)
+    assert parser_a.errors == [], parser_a.errors
+    opts_a.newton_options.num_nodes = int(circuit_a.num_nodes())
+    opts_a.newton_options.num_branches = int(circuit_a.num_branches())
+    result_a = ps.Simulator(circuit_a, opts_a).run_transient(circuit_a.initial_state())
+    assert result_a.success
+
+    parser_b = ps.YamlParser()
+    circuit_b, opts_b = parser_b.load_string(netlist)
+    assert parser_b.errors == [], parser_b.errors
+    opts_b.newton_options.num_nodes = int(circuit_b.num_nodes())
+    opts_b.newton_options.num_branches = int(circuit_b.num_branches())
+    result_b = ps.Simulator(circuit_b, opts_b).run_transient(circuit_b.initial_state())
+    assert result_b.success
+
+    series_a = [float(v) for v in result_a.virtual_channels["Lsat.core_loss"]]
+    series_b = [float(v) for v in result_b.virtual_channels["Lsat.core_loss"]]
+    assert len(series_a) == len(series_b)
+    assert len(series_a) == len(result_a.time)
+    assert len(series_b) == len(result_b.time)
+
+    for a, b in zip(series_a, series_b):
+        assert abs(a - b) <= 1e-12
+
+
+def test_magnetic_core_loss_policy_loss_summary_exports_summary_row() -> None:
+    parser = ps.YamlParser()
+    circuit, opts = parser.load_string(
+        """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 2e-6
+  step_mode: fixed
+  enable_losses: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10}
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 2
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: saturation
+      loss_policy: loss_summary
+      core_loss_k: 0.2
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 1e-4
+      i_equiv_init: 0.0
+"""
+    )
+    assert parser.errors == [], parser.errors
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success, result.message
+    assert "Lsat.core_loss" in result.virtual_channels
+
+    loss_rows = {row.device_name: row for row in result.loss_summary.device_losses}
+    assert "Lsat.core" in loss_rows
+    core_row = loss_rows["Lsat.core"]
+    assert core_row.total_energy > 0.0
+    assert core_row.average_power > 0.0
+    assert core_row.breakdown.conduction > 0.0
+    assert result.loss_summary.total_loss >= core_row.average_power
+
+    component_rows = {row.component_name: row for row in result.component_electrothermal}
+    assert "Lsat.core" in component_rows
+    assert component_rows["Lsat.core"].total_energy > 0.0
+    assert component_rows["Lsat.core"].total_loss > 0.0
+
+
+def test_magnetic_core_loss_summary_row_is_deterministic_across_repeated_runs() -> None:
+    netlist = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 2e-6
+  step_mode: fixed
+  enable_losses: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10}
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 2
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: saturation
+      loss_policy: loss_summary
+      core_loss_k: 0.2
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 1e-4
+"""
+
+    def _run() -> tuple[float, float]:
+        parser = ps.YamlParser()
+        circuit, opts = parser.load_string(netlist)
+        assert parser.errors == [], parser.errors
+        opts.newton_options.num_nodes = int(circuit.num_nodes())
+        opts.newton_options.num_branches = int(circuit.num_branches())
+        result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+        assert result.success
+        rows = {row.device_name: row for row in result.loss_summary.device_losses}
+        assert "Lsat.core" in rows
+        row = rows["Lsat.core"]
+        return float(row.average_power), float(row.total_energy)
+
+    avg_a, energy_a = _run()
+    avg_b, energy_b = _run()
+    assert abs(avg_a - avg_b) <= 1e-12
+    assert abs(energy_a - energy_b) <= 1e-12
+
+
 def test_coupled_inductor_adds_mutual_terms_to_jacobian() -> None:
     circuit = ps.Circuit()
     n_p = circuit.add_node("p")

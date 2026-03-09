@@ -2069,11 +2069,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         bool magnetic_core_defined = false;
         bool magnetic_core_enabled = false;
         std::string magnetic_core_model = "saturation";
+        std::string magnetic_core_loss_policy = "telemetry_only";
         std::optional<Real> magnetic_saturation_current;
         std::optional<Real> magnetic_saturation_inductance;
         std::optional<Real> magnetic_saturation_exponent;
         Real magnetic_core_loss_k = 0.0;
         Real magnetic_core_loss_alpha = 2.0;
+        Real magnetic_core_loss_freq_coeff = 0.0;
+        Real magnetic_i_equiv_init = 0.0;
 
         if (comp["magnetic_core"]) {
             magnetic_core_defined = true;
@@ -2082,7 +2085,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             validate_keys(
                 magnetic_core,
                 {"enabled", "model", "saturation_current", "saturation_inductance",
-                 "saturation_exponent", "core_loss_k", "core_loss_alpha"},
+                 "saturation_exponent", "core_loss_k", "core_loss_alpha", "core_loss_freq_coeff",
+                 "loss_policy", "i_equiv_init"},
                 name + ".magnetic_core",
                 errors_,
                 options_.strict);
@@ -2113,6 +2117,33 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     kDiagMagneticInvalid,
                     "Unsupported " + name + ".magnetic_core.model '" + magnetic_core_model +
                         "' (expected 'saturation' in this release)");
+                continue;
+            }
+
+            if (const auto loss_policy = parse_string_scalar(
+                    magnetic_core["loss_policy"], name + ".magnetic_core.loss_policy", errors_);
+                loss_policy.has_value()) {
+                magnetic_core_loss_policy = normalize_key(*loss_policy);
+            }
+            if (magnetic_core_loss_policy.empty()) {
+                magnetic_core_loss_policy = "telemetry_only";
+            }
+            if (magnetic_core_loss_policy == "telemetry_only" ||
+                magnetic_core_loss_policy == "telemetryonly") {
+                magnetic_core_loss_policy = "telemetry_only";
+            } else if (magnetic_core_loss_policy == "loss_summary" ||
+                       magnetic_core_loss_policy == "losssummary" ||
+                       magnetic_core_loss_policy == "summary" ||
+                       magnetic_core_loss_policy == "include_in_loss_summary" ||
+                       magnetic_core_loss_policy == "includeinlosssummary") {
+                magnetic_core_loss_policy = "loss_summary";
+            } else {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    "Unsupported " + name + ".magnetic_core.loss_policy '" +
+                        magnetic_core_loss_policy +
+                        "' (expected 'telemetry_only' or 'loss_summary')");
                 continue;
             }
 
@@ -2186,6 +2217,34 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     errors_,
                     kDiagMagneticInvalid,
                     name + ".magnetic_core.core_loss_alpha must be finite and >= 0");
+                continue;
+            }
+
+            if (magnetic_core["core_loss_freq_coeff"]) {
+                magnetic_core_loss_freq_coeff = parse_real(
+                    magnetic_core["core_loss_freq_coeff"],
+                    name + ".magnetic_core.core_loss_freq_coeff",
+                    errors_);
+            }
+            if (!std::isfinite(magnetic_core_loss_freq_coeff) || magnetic_core_loss_freq_coeff < 0.0) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    name + ".magnetic_core.core_loss_freq_coeff must be finite and >= 0");
+                continue;
+            }
+
+            if (magnetic_core["i_equiv_init"]) {
+                magnetic_i_equiv_init = parse_real(
+                    magnetic_core["i_equiv_init"],
+                    name + ".magnetic_core.i_equiv_init",
+                    errors_);
+            }
+            if (!std::isfinite(magnetic_i_equiv_init) || magnetic_i_equiv_init < 0.0) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    name + ".magnetic_core.i_equiv_init must be finite and >= 0");
                 continue;
             }
         }
@@ -2724,10 +2783,13 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 numeric_params["magnetic_core_enabled"] = magnetic_core_enabled ? 1.0 : 0.0;
                 numeric_params["core_loss_k"] = magnetic_core_enabled ? magnetic_core_loss_k : 0.0;
                 numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
+                numeric_params["core_loss_freq_coeff"] = magnetic_core_loss_freq_coeff;
+                numeric_params["magnetic_i_equiv_init"] = magnetic_i_equiv_init;
 
                 std::unordered_map<std::string, std::string> metadata;
                 metadata["target_component"] = name;
                 metadata["magnetic_core_model"] = magnetic_core_model;
+                metadata["magnetic_core_loss_policy"] = magnetic_core_loss_policy;
                 circuit.add_virtual_component(
                     type, name, node_indices, std::move(numeric_params), std::move(metadata));
             }
@@ -2950,11 +3012,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 numeric_params["magnetic_core_enabled"] = magnetic_core_enabled ? 1.0 : 0.0;
                 numeric_params["core_loss_k"] = magnetic_core_enabled ? magnetic_core_loss_k : 0.0;
                 numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
+                numeric_params["core_loss_freq_coeff"] = magnetic_core_loss_freq_coeff;
+                numeric_params["magnetic_i_equiv_init"] = magnetic_i_equiv_init;
             }
             std::unordered_map<std::string, std::string> metadata;
             metadata["target_component"] = name;
             if (magnetic_core_defined) {
                 metadata["magnetic_core_model"] = magnetic_core_model;
+                metadata["magnetic_core_loss_policy"] = magnetic_core_loss_policy;
             }
             circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
             push_warning(warnings_, kDiagVirtualComponent,
@@ -3010,12 +3075,15 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 numeric_params["magnetic_core_enabled"] = magnetic_core_enabled ? 1.0 : 0.0;
                 numeric_params["core_loss_k"] = magnetic_core_enabled ? magnetic_core_loss_k : 0.0;
                 numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
+                numeric_params["core_loss_freq_coeff"] = magnetic_core_loss_freq_coeff;
+                numeric_params["magnetic_i_equiv_init"] = magnetic_i_equiv_init;
             }
             std::unordered_map<std::string, std::string> metadata;
             metadata["target_component_1"] = l1_name;
             metadata["target_component_2"] = l2_name;
             if (magnetic_core_defined) {
                 metadata["magnetic_core_model"] = magnetic_core_model;
+                metadata["magnetic_core_loss_policy"] = magnetic_core_loss_policy;
             }
             circuit.add_virtual_component(type, name, node_indices, std::move(numeric_params), std::move(metadata));
 
