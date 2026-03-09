@@ -658,9 +658,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-modos-de-atualizacao-de-controle" class="md-nav__link">
+  <a href="#3-agendamento-de-controle-ts-por-bloco-fallback-legado" class="md-nav__link">
     <span class="md-ellipsis">
-      3) Modos de atualização de controle
+      3) Agendamento de controle (Ts por bloco + fallback legado)
     </span>
   </a>
   
@@ -1592,9 +1592,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-modos-de-atualizacao-de-controle" class="md-nav__link">
+  <a href="#3-agendamento-de-controle-ts-por-bloco-fallback-legado" class="md-nav__link">
     <span class="md-ellipsis">
-      3) Modos de atualização de controle
+      3) Agendamento de controle (Ts por bloco + fallback legado)
     </span>
   </a>
   
@@ -1778,17 +1778,23 @@
 <li>PI/PID são atualizados antes dos blocos de evento daquele mesmo instante.</li>
 <li><code>pwm_generator.target_component</code> já afeta estado do switch no passo mixed-domain.</li>
 </ul>
-<h2 id="3-modos-de-atualizacao-de-controle">3) Modos de atualização de controle<a class="headerlink" href="#3-modos-de-atualizacao-de-controle" title="Permanent link">&para;</a></h2>
-<p>Configuração: <code>simulation.control.mode</code> (<code>auto|continuous|discrete</code>) e <code>sample_time</code>.</p>
+<h2 id="3-agendamento-de-controle-ts-por-bloco-fallback-legado">3) Agendamento de controle (Ts por bloco + fallback legado)<a class="headerlink" href="#3-agendamento-de-controle-ts-por-bloco-fallback-legado" title="Permanent link">&para;</a></h2>
+<p>O contrato atual é <strong>por bloco de controle</strong>:</p>
 <ul>
-<li><code>continuous</code>:</li>
-<li>blocos de controle (PI/PID) atualizam em todo passo aceito.</li>
-<li><code>discrete</code>:</li>
-<li>PI/PID atualizam apenas quando <code>dt_acumulado &gt;= sample_time</code>;</li>
-<li>entre amostras, o canal mantém o último valor (hold).</li>
+<li>use <code>component.sample_time</code> (ou aliases <code>ts</code>/<code>Ts</code>) em cada bloco de controle;</li>
+<li><code>Ts = 0</code> (ou ausente): execução contínua (a cada passo aceito);</li>
+<li><code>Ts &gt; 0</code>: execução discreta com hold entre atualizações (<code>dt_acumulado &gt;= Ts</code>).</li>
+</ul>
+<p>Blocos suportados para <code>sample_time</code>: PI/PID, PWM, C-block e demais blocos de controle virtuais.
+Scopes/probes não aceitam <code>sample_time</code>.</p>
+<p>Compatibilidade legada (<code>simulation.control.mode/sample_time</code>) continua ativa como fallback:</p>
+<ul>
+<li><code>continuous</code>: força contínuo global.</li>
+<li><code>discrete</code>: <code>sample_time</code> global é usado apenas quando o bloco não declara <code>sample_time</code> local.</li>
 <li><code>auto</code>:</li>
-<li>usa <code>sample_time</code> se definido;</li>
-<li>senão tenta inferir por frequência PWM.</li>
+<li>se <code>sample_time</code> global &gt; 0, usa fallback global;</li>
+<li>se existir qualquer <code>sample_time</code> local, desabilita inferência global por PWM;</li>
+<li>sem <code>sample_time</code> local/global, ainda pode inferir <code>Ts = 1/f_pwm_max</code> para fallback legado.</li>
 </ul>
 <h2 id="4-canais-canonicos-por-tipo">4) Canais canônicos por tipo<a class="headerlink" href="#4-canais-canonicos-por-tipo" title="Permanent link">&para;</a></h2>
 <h3 id="controle">Controle<a class="headerlink" href="#controle" title="Permanent link">&para;</a></h3>
@@ -1922,7 +1928,7 @@
 <ul>
 <li>Usar <code>THERMAL_SCOPE</code> para temperatura de junção.</li>
 <li>Plotar <code>PWM1</code> como se fosse duty (o correto é <code>PWM1.duty</code>).</li>
-<li>Ignorar <code>control.mode=discrete</code> e esperar atualização contínua de PI/PID.</li>
+<li>Ignorar <code>sample_time</code> por bloco e assumir uma taxa global única.</li>
 <li>Ignorar <code>virtual_channel_metadata</code> e inferir domínio por regex de nome.</li>
 <li>Sintetizar <code>Iavg/Vavg/Davg</code> localmente quando backend não exportou o canal.</li>
 </ul>

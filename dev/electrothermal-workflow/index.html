@@ -1795,24 +1795,37 @@
 <li><code>shared_sink_rth/shared_sink_cth</code> without <code>shared_sink_id</code> is invalid.</li>
 </ul>
 <h2 id="4-closed-loop-control-sampling-important-for-stability">4) Closed-Loop Control Sampling (Important for Stability)<a class="headerlink" href="#4-closed-loop-control-sampling-important-for-stability" title="Permanent link">&para;</a></h2>
-<p>Control update policy is configured with <code>simulation.control</code>:</p>
+<p>Control scheduling is primarily configured per control block via <code>sample_time</code> (<code>Ts</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pi_controller</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
+<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vref</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.08</span>
+<span class="w">    </span><span class="nt">ki</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span>
+<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100e-6</span><span class="w"> </span><span class="c1"># Ts local (0 ou ausente =&gt; contínuo)</span>
+</code></pre></div>
+<p>Legacy global fallback is still available via <code>simulation.control</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">control</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">        </span><span class="c1"># auto | continuous | discrete</span>
-<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span><span class="w"> </span><span class="c1"># required when mode=discrete</span>
+<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span><span class="w"> </span><span class="c1"># fallback global (legacy)</span>
 </code></pre></div>
 <p>Behavior:</p>
 <ul>
+<li>per-block (<code>component.sample_time|ts|Ts</code>):</li>
+<li><code>Ts = 0</code> or missing: continuous execution for that block;</li>
+<li><code>Ts &gt; 0</code>: discrete execution with output hold between updates.</li>
 <li><code>auto</code>:</li>
-<li>uses <code>sample_time</code> if provided;</li>
-<li>otherwise infers <code>Ts = 1 / f_pwm_max</code> from the highest PWM frequency found in <code>pwm_generator</code>/PWM sources;</li>
-<li>if no PWM is present, runs as continuous.</li>
+<li>if global <code>sample_time</code> is provided, uses global fallback;</li>
+<li>if any control block already declares local <code>Ts</code>, global PWM inference is disabled;</li>
+<li>otherwise infers legacy fallback <code>Ts = 1 / f_pwm_max</code> from <code>pwm_generator</code>/PWM sources.</li>
 <li><code>continuous</code>: updates control blocks at every accepted solver step.</li>
-<li><code>discrete</code>: updates PI/PID blocks only when <code>dt_accum &gt;= sample_time</code>.</li>
+<li><code>discrete</code>: applies global fallback sampling when local <code>Ts</code> is not set.</li>
 </ul>
 <p>Notes:</p>
 <ul>
-<li>In YAML strict validation, <code>mode: discrete</code> requires <code>sample_time &gt; 0</code>.</li>
+<li><code>sample_time/ts/Ts</code> is accepted only for control virtual blocks (not probes/scopes).</li>
+<li>In YAML strict validation, legacy <code>mode: discrete</code> still requires global <code>sample_time &gt; 0</code>.</li>
 <li><code>sample_hold</code> has independent <code>sample_period</code> behavior.</li>
 </ul>
 <h2 id="5-strict-vs-non-strict-thermal-validation">5) Strict vs Non-Strict Thermal Validation<a class="headerlink" href="#5-strict-vs-non-strict-thermal-validation" title="Permanent link">&para;</a></h2>
