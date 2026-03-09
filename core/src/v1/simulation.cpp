@@ -225,12 +225,46 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
     return Real{1.0} / max_pwm_frequency;
 }
 
+/// Returns true when at least one control block declares an explicit per-block sample time.
+[[nodiscard]] bool has_per_block_control_sample_time(const Circuit& circuit) {
+    auto supports_per_block_sample_time = [](std::string_view type) {
+        return type == "op_amp" || type == "comparator" ||
+               type == "pi_controller" || type == "pid_controller" ||
+               type == "math_block" || type == "gain" || type == "sum" ||
+               type == "subtraction" || type == "pwm_generator" ||
+               type == "integrator" || type == "differentiator" ||
+               type == "limiter" || type == "rate_limiter" ||
+               type == "hysteresis" || type == "lookup_table" ||
+               type == "transfer_function" || type == "delay_block" ||
+               type == "sample_hold" || type == "state_machine" ||
+               type == "signal_mux" || type == "signal_demux" ||
+               type == "c_block";
+    };
+    auto has_numeric_key = [](const std::unordered_map<std::string, Real>& params,
+                              std::string_view key) {
+        return params.find(std::string(key)) != params.end();
+    };
+
+    for (const auto& component : circuit.virtual_components()) {
+        if (!supports_per_block_sample_time(component.type)) {
+            continue;
+        }
+        if (has_numeric_key(component.numeric_params, "sample_time") ||
+            has_numeric_key(component.numeric_params, "ts") ||
+            has_numeric_key(component.numeric_params, "Ts")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Resolves effective control sampling period from explicit mode and circuit hints.
 [[nodiscard]] Real resolve_control_sample_time(const SimulationOptions& options, const Circuit& circuit) {
     auto sanitize = [](Real value) -> Real {
         return (std::isfinite(value) && value > 0.0) ? value : Real{0.0};
     };
     const Real explicit_sample_time = sanitize(options.control_sample_time);
+    const bool uses_per_block_sample_time = has_per_block_control_sample_time(circuit);
 
     switch (options.control_mode) {
         case ControlUpdateMode::Continuous:
@@ -244,6 +278,9 @@ void apply_robust_newton_defaults(NewtonOptions& opts, bool force = true) {
         default:
             if (explicit_sample_time > 0.0) {
                 return explicit_sample_time;
+            }
+            if (uses_per_block_sample_time) {
+                return 0.0;
             }
             if (const auto inferred = infer_control_sample_time_from_pwm(circuit); inferred.has_value()) {
                 return sanitize(*inferred);

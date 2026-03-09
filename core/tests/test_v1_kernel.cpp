@@ -740,6 +740,99 @@ TEST_CASE("v1 auto control scheduler samples PI at PWM period",
     CHECK(pi[20] > pi[15]);                         // 200 us: update
 }
 
+TEST_CASE("v1 per-block sample_time overrides legacy global control sample time",
+          "[v1][mixed-domain][control][scheduler][regression]") {
+    Circuit circuit;
+    const auto n_err = circuit.add_node("err");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Verr", n_err, gnd, 1.0);
+    circuit.add_resistor("Rerr", n_err, gnd, 1e3);
+
+    circuit.add_virtual_component(
+        "pi_controller", "PI1", {n_err, gnd},
+        {{"kp", 0.0}, {"ki", 10000.0}, {"sample_time", 50e-6}},
+        {});
+    circuit.add_virtual_component(
+        "pwm_generator", "PWM1", {gnd},
+        {{"frequency", 10e3}, {"duty", 0.5}, {"duty_from_input", 0.0}, {"duty_min", 0.0}, {"duty_max", 1.0}},
+        {{"duty_from_channel", "PI1"}});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 120e-6;
+    opts.dt = 10e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.control_mode = ControlUpdateMode::Discrete;
+    opts.control_sample_time = 100e-6;  // legacy global fallback (must be ignored for PI1)
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE(result.virtual_channels.contains("PI1"));
+    const auto& pi = result.virtual_channels.at("PI1");
+    REQUIRE(pi.size() >= 11);
+
+    // PI1 local Ts=50 us must override global 100 us.
+    CHECK(pi[0] == Approx(0.0).margin(1e-12));
+    CHECK(pi[4] == Approx(pi[0]).margin(1e-12));  // 40 us: hold
+    CHECK(pi[5] > pi[4]);                         // 50 us: update
+    CHECK(pi[9] == Approx(pi[5]).margin(1e-12)); // 90 us: hold
+    CHECK(pi[10] > pi[9]);                        // 100 us: second update (at 100 us via 50 us cadence)
+}
+
+TEST_CASE("v1 per-block sample_time zero keeps control block continuous",
+          "[v1][mixed-domain][control][scheduler][regression]") {
+    Circuit circuit;
+    const auto n_err = circuit.add_node("err");
+    const auto gnd = Circuit::ground();
+
+    circuit.add_voltage_source("Verr", n_err, gnd, 1.0);
+    circuit.add_resistor("Rerr", n_err, gnd, 1e3);
+
+    circuit.add_virtual_component(
+        "pi_controller", "PI1", {n_err, gnd},
+        {{"kp", 0.0}, {"ki", 10000.0}, {"sample_time", 0.0}},
+        {});
+    circuit.add_virtual_component(
+        "pwm_generator", "PWM1", {gnd},
+        {{"frequency", 10e3}, {"duty", 0.5}, {"duty_from_input", 0.0}, {"duty_min", 0.0}, {"duty_max", 1.0}},
+        {{"duty_from_channel", "PI1"}});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 40e-6;
+    opts.dt = 10e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.dt_min = opts.dt;
+    opts.dt_max = opts.dt;
+    opts.control_mode = ControlUpdateMode::Discrete;
+    opts.control_sample_time = 100e-6;  // legacy global fallback must be disabled by local Ts=0
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const auto result = sim.run_transient(circuit.initial_state());
+
+    REQUIRE(result.success);
+    REQUIRE(result.virtual_channels.contains("PI1"));
+    const auto& pi = result.virtual_channels.at("PI1");
+    REQUIRE(pi.size() >= 5);
+
+    // Continuous updates: integral grows every accepted step.
+    CHECK(pi[1] > pi[0]);
+    CHECK(pi[2] > pi[1]);
+    CHECK(pi[3] > pi[2]);
+    CHECK(pi[4] > pi[3]);
+}
+
 namespace {
 
 Circuit build_closed_loop_buck_for_control_regression(bool use_cblock_controller,

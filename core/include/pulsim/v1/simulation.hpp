@@ -558,10 +558,11 @@ struct SimulationOptions {
     // surfaces, this field defines fixed vs variable semantics.
     TransientStepMode step_mode = TransientStepMode::Variable;
     bool step_mode_explicit = false;
-    // Global control update policy for mixed-domain blocks (PI/PID and related loops).
+    // Legacy global control update policy for mixed-domain blocks.
+    // Prefer per-component sample_time/Ts for new projects.
     ControlUpdateMode control_mode = ControlUpdateMode::Auto;
-    // Explicit control sample interval in seconds when mode is Discrete.
-    // Non-positive values disable discrete sampling.
+    // Legacy explicit global control sample interval in seconds when mode is Discrete.
+    // Non-positive values disable global fallback scheduling.
     Real control_sample_time = 0.0;
     AdvancedTimestepConfig timestep_config = AdvancedTimestepConfig::for_power_electronics();
     RichardsonLTEConfig lte_config = RichardsonLTEConfig::defaults();

@@ -413,6 +413,29 @@ class TestYamlCBlockParser:
         assert p_roundtrip.errors == [], p_roundtrip.errors
         assert any(v.name == "CB0" for v in circuit.virtual_components())
 
+    def test_yaml_pi_controller_accepts_component_sample_time(self) -> None:
+        """Control blocks accept per-component sample_time >= 0."""
+        p = self._parse(
+            "  - {name: PI_TS, type: pi_controller, nodes: [e, fb, out],"
+            " kp: 0.1, ki: 10.0, sample_time: 5e-6}\n"
+        )
+        assert all("PARAM_INVALID" not in e for e in p.errors), p.errors
+
+    def test_yaml_pi_controller_negative_sample_time_rejected(self) -> None:
+        """Control block sample_time must be finite and >= 0."""
+        p = self._parse(
+            "  - {name: PI_BAD_TS, type: pi_controller, nodes: [e, fb, out],"
+            " kp: 0.1, ki: 10.0, sample_time: -1e-6}\n"
+        )
+        assert self._has_error_code(p.errors, "PARAM_INVALID"), p.errors
+
+    def test_yaml_probe_rejects_component_sample_time(self) -> None:
+        """Scopes/probes are not schedulable control blocks and must reject sample_time."""
+        p = self._parse(
+            "  - {name: VP_TS, type: voltage_probe, nodes: [a, b], sample_time: 1e-6}\n"
+        )
+        assert self._has_error_code(p.errors, "PARAM_INVALID"), p.errors
+
     # 6.3.3 — both lib_path and source → error
     def test_yaml_cblock_both_specified_error(self, tmp_path) -> None:
         """Specifying both lib_path and source yields a PARAM_INVALID error."""

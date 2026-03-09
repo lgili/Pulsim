@@ -1860,7 +1860,12 @@ def test_closed_loop_buck_thermal_example_validates_control_losses_and_thermal()
     for item in thermal_by_name.values():
         assert item.final_temperature >= thermal_summary.ambient
         assert item.peak_temperature >= item.final_temperature
-    assert thermal_by_name["Rload"].final_temperature > thermal_by_name["M1"].final_temperature
+    assert thermal_by_name["M1"].final_temperature > thermal_summary.ambient
+    assert thermal_by_name["Rload"].final_temperature > thermal_summary.ambient
+    assert abs(
+        thermal_summary.max_temperature
+        - max(item.peak_temperature for item in thermal_by_name.values())
+    ) < 1e-12
     assert abs(thermal_by_name["M1"].final_temperature - m1_temp[-1]) < 1e-12
     assert abs(thermal_by_name["M1"].peak_temperature - max(m1_temp)) < 1e-12
     assert abs(thermal_by_name["M1"].average_temperature - statistics.fmean(m1_temp)) < 1e-12
@@ -2608,6 +2613,48 @@ def test_mixed_domain_scheduler_is_deterministic() -> None:
 
     assert step.phase_order == ["electrical", "control", "events", "instrumentation"]
     assert "PI1" in step.channel_values
+
+
+def test_component_sample_time_overrides_legacy_global_control_sampling() -> None:
+    circuit = ps.Circuit()
+    n_err = circuit.add_node("err")
+    n_out = circuit.add_node("out")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Verr", n_err, gnd, 1.0)
+    circuit.add_resistor("Rerr", n_err, gnd, 1e3)
+    circuit.add_resistor("Rout", n_out, gnd, 1e3)
+    circuit.add_virtual_component(
+        "pi_controller",
+        "PI1",
+        [n_err, gnd, n_out],
+        {"kp": 0.0, "ki": 10_000.0, "sample_time": 50e-6},
+        {},
+    )
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 120e-6
+    opts.dt = 10e-6
+    opts.dt_min = opts.dt
+    opts.dt_max = opts.dt
+    opts.adaptive_timestep = False
+    opts.enable_bdf_order_control = False
+    opts.control_mode = ps.ControlUpdateMode.Discrete
+    opts.control_sample_time = 100e-6  # legacy global fallback; local Ts must win
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success
+    pi = result.virtual_channels["PI1"]
+    assert len(pi) >= 11
+
+    assert abs(float(pi[0])) < 1e-12
+    assert abs(float(pi[4]) - float(pi[0])) < 1e-12
+    assert float(pi[5]) > float(pi[4])  # update at 50 us
+    assert abs(float(pi[9]) - float(pi[5])) < 1e-12
+    assert float(pi[10]) > float(pi[9])  # update at 100 us (50 us cadence)
 
 
 def test_simulation_result_includes_virtual_channels() -> None:

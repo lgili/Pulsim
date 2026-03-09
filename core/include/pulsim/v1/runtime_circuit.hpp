@@ -660,8 +660,36 @@ public:
             "state_machine", "signal_mux", "signal_demux",
             "c_block"
         };
-        const auto is_discrete_control_component = [](std::string_view type) {
+        const auto is_legacy_global_discrete_component = [](std::string_view type) {
             return type == "pi_controller" || type == "pid_controller" || type == "c_block";
+        };
+        auto component_sample_time = [&](const VirtualComponent& component) -> Real {
+            auto get_local_sample_time = [&](std::string_view key) -> std::optional<Real> {
+                const auto it = component.numeric_params.find(std::string(key));
+                if (it == component.numeric_params.end()) {
+                    return std::nullopt;
+                }
+                const Real value = it->second;
+                if (!std::isfinite(value) || value <= 0.0) {
+                    return Real{0.0};
+                }
+                return value;
+            };
+
+            if (const auto local = get_local_sample_time("sample_time"); local.has_value()) {
+                return *local;
+            }
+            if (const auto local = get_local_sample_time("ts"); local.has_value()) {
+                return *local;
+            }
+            if (const auto local = get_local_sample_time("Ts"); local.has_value()) {
+                return *local;
+            }
+
+            if (control_sample_time_ > 0.0 && is_legacy_global_discrete_component(component.type)) {
+                return control_sample_time_;
+            }
+            return 0.0;
         };
 
         // Phase 2: control update
@@ -678,11 +706,11 @@ public:
             const bool first_update = (last_time_it == virtual_last_time_.end());
             const Real dt = first_update ? Real{0.0}
                                          : std::max<Real>(0.0, time - last_time_it->second);
-            const bool discrete_control =
-                control_sample_time_ > 0.0 && is_discrete_control_component(component.type);
+            const Real block_sample_time = component_sample_time(component);
+            const bool discrete_control = block_sample_time > 0.0;
             if (discrete_control && !first_update) {
-                const Real tol = std::max<Real>(control_sample_time_ * Real{1e-9}, Real{1e-15});
-                if (dt + tol < control_sample_time_) {
+                const Real tol = std::max<Real>(block_sample_time * Real{1e-9}, Real{1e-15});
+                if (dt + tol < block_sample_time) {
                     output = virtual_signal_state_[component.name];
                     result.channel_values[component.name] = output;
                     if (component.type == "c_block") {
@@ -700,6 +728,21 @@ public:
                                 : ((output_index == 0) ? output : Real{0.0});
                             virtual_signal_state_[channel_name] = channel_value;
                             result.channel_values[channel_name] = channel_value;
+                        }
+                    } else if (component.type == "pwm_generator") {
+                        const std::string duty_channel = component.name + ".duty";
+                        if (const auto it = virtual_signal_state_.find(duty_channel);
+                            it != virtual_signal_state_.end()) {
+                            result.channel_values[duty_channel] = it->second;
+                        }
+                        const std::string carrier_channel = component.name + ".carrier";
+                        if (const auto it = virtual_signal_state_.find(carrier_channel);
+                            it != virtual_signal_state_.end()) {
+                            result.channel_values[carrier_channel] = it->second;
+                        }
+                        if (const auto it = component.metadata.find("target_component");
+                            it != component.metadata.end()) {
+                            set_switch_state(it->second, output > 0.5);
                         }
                     }
                     continue;
@@ -997,6 +1040,8 @@ public:
                     it != component.metadata.end()) {
                     set_switch_state(it->second, output > 0.5);
                 }
+                virtual_signal_state_[component.name + ".duty"] = duty;
+                virtual_signal_state_[component.name + ".carrier"] = carrier;
                 result.channel_values[component.name + ".duty"] = duty;
                 result.channel_values[component.name + ".carrier"] = carrier;
             } else if (component.type == "state_machine") {
@@ -1601,8 +1646,10 @@ public:
     /// Get current simulation time
     [[nodiscard]] Real current_time() const { return current_time_; }
 
-    /// Configure global discrete-control sample interval (seconds).
-    /// Non-finite or non-positive values disable discrete control sampling.
+    /// Configure legacy global discrete-control sample interval (seconds).
+    /// This is used as a fallback only when a control block does not declare
+    /// its own per-block sample_time/Ts.
+    /// Non-finite or non-positive values disable global fallback sampling.
     void set_control_sample_time(Real sample_time) {
         if (!(std::isfinite(sample_time) && sample_time > 0.0)) {
             control_sample_time_ = 0.0;
@@ -1611,8 +1658,8 @@ public:
         control_sample_time_ = sample_time;
     }
 
-    /// Returns the active global control sample interval in seconds.
-    /// A value of 0 means continuous control updates.
+    /// Returns the active legacy global control sample interval in seconds.
+    /// A value of 0 means no global fallback scheduling.
     [[nodiscard]] Real control_sample_time() const { return control_sample_time_; }
 
     /// Check if circuit has time-varying sources
