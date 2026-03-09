@@ -2073,9 +2073,13 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         std::optional<Real> magnetic_saturation_current;
         std::optional<Real> magnetic_saturation_inductance;
         std::optional<Real> magnetic_saturation_exponent;
+        std::optional<Real> magnetic_hysteresis_band;
         Real magnetic_core_loss_k = 0.0;
         Real magnetic_core_loss_alpha = 2.0;
         Real magnetic_core_loss_freq_coeff = 0.0;
+        Real magnetic_hysteresis_strength = 0.15;
+        Real magnetic_hysteresis_loss_coeff = 0.2;
+        Real magnetic_hysteresis_state_init = 1.0;
         Real magnetic_i_equiv_init = 0.0;
 
         if (comp["magnetic_core"]) {
@@ -2086,7 +2090,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 magnetic_core,
                 {"enabled", "model", "saturation_current", "saturation_inductance",
                  "saturation_exponent", "core_loss_k", "core_loss_alpha", "core_loss_freq_coeff",
-                 "loss_policy", "i_equiv_init"},
+                 "loss_policy", "i_equiv_init", "hysteresis_band", "hysteresis_strength",
+                 "hysteresis_loss_coeff", "hysteresis_state_init"},
                 name + ".magnetic_core",
                 errors_,
                 options_.strict);
@@ -2111,12 +2116,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 model.has_value()) {
                 magnetic_core_model = normalize_key(*model);
             }
-            if (!magnetic_core_model.empty() && magnetic_core_model != "saturation") {
+            if (!magnetic_core_model.empty() &&
+                magnetic_core_model != "saturation" &&
+                magnetic_core_model != "hysteresis") {
                 push_error(
                     errors_,
                     kDiagMagneticInvalid,
                     "Unsupported " + name + ".magnetic_core.model '" + magnetic_core_model +
-                        "' (expected 'saturation' in this release)");
+                        "' (expected 'saturation' or 'hysteresis')");
                 continue;
             }
 
@@ -2231,6 +2238,65 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     errors_,
                     kDiagMagneticInvalid,
                     name + ".magnetic_core.core_loss_freq_coeff must be finite and >= 0");
+                continue;
+            }
+
+            if (magnetic_core["hysteresis_band"]) {
+                const Real value = parse_real(
+                    magnetic_core["hysteresis_band"],
+                    name + ".magnetic_core.hysteresis_band",
+                    errors_);
+                if (!std::isfinite(value) || value < 0.0) {
+                    push_error(
+                        errors_,
+                        kDiagMagneticInvalid,
+                        name + ".magnetic_core.hysteresis_band must be finite and >= 0");
+                    continue;
+                }
+                magnetic_hysteresis_band = value;
+            }
+
+            if (magnetic_core["hysteresis_strength"]) {
+                magnetic_hysteresis_strength = parse_real(
+                    magnetic_core["hysteresis_strength"],
+                    name + ".magnetic_core.hysteresis_strength",
+                    errors_);
+            }
+            if (!std::isfinite(magnetic_hysteresis_strength) ||
+                magnetic_hysteresis_strength < 0.0 ||
+                magnetic_hysteresis_strength > 1.0) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    name + ".magnetic_core.hysteresis_strength must be finite and in [0, 1]");
+                continue;
+            }
+
+            if (magnetic_core["hysteresis_loss_coeff"]) {
+                magnetic_hysteresis_loss_coeff = parse_real(
+                    magnetic_core["hysteresis_loss_coeff"],
+                    name + ".magnetic_core.hysteresis_loss_coeff",
+                    errors_);
+            }
+            if (!std::isfinite(magnetic_hysteresis_loss_coeff) || magnetic_hysteresis_loss_coeff < 0.0) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    name + ".magnetic_core.hysteresis_loss_coeff must be finite and >= 0");
+                continue;
+            }
+
+            if (magnetic_core["hysteresis_state_init"]) {
+                magnetic_hysteresis_state_init = parse_real(
+                    magnetic_core["hysteresis_state_init"],
+                    name + ".magnetic_core.hysteresis_state_init",
+                    errors_);
+            }
+            if (!std::isfinite(magnetic_hysteresis_state_init)) {
+                push_error(
+                    errors_,
+                    kDiagMagneticInvalid,
+                    name + ".magnetic_core.hysteresis_state_init must be finite");
                 continue;
             }
 
@@ -2785,6 +2851,12 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
                 numeric_params["core_loss_freq_coeff"] = magnetic_core_loss_freq_coeff;
                 numeric_params["magnetic_i_equiv_init"] = magnetic_i_equiv_init;
+                if (magnetic_hysteresis_band.has_value()) {
+                    numeric_params["hysteresis_band"] = *magnetic_hysteresis_band;
+                }
+                numeric_params["hysteresis_strength"] = magnetic_hysteresis_strength;
+                numeric_params["hysteresis_loss_coeff"] = magnetic_hysteresis_loss_coeff;
+                numeric_params["hysteresis_state_init"] = magnetic_hysteresis_state_init;
 
                 std::unordered_map<std::string, std::string> metadata;
                 metadata["target_component"] = name;
@@ -3014,6 +3086,12 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
                 numeric_params["core_loss_freq_coeff"] = magnetic_core_loss_freq_coeff;
                 numeric_params["magnetic_i_equiv_init"] = magnetic_i_equiv_init;
+                if (magnetic_hysteresis_band.has_value()) {
+                    numeric_params["hysteresis_band"] = *magnetic_hysteresis_band;
+                }
+                numeric_params["hysteresis_strength"] = magnetic_hysteresis_strength;
+                numeric_params["hysteresis_loss_coeff"] = magnetic_hysteresis_loss_coeff;
+                numeric_params["hysteresis_state_init"] = magnetic_hysteresis_state_init;
             }
             std::unordered_map<std::string, std::string> metadata;
             metadata["target_component"] = name;
@@ -3077,6 +3155,12 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 numeric_params["core_loss_alpha"] = magnetic_core_loss_alpha;
                 numeric_params["core_loss_freq_coeff"] = magnetic_core_loss_freq_coeff;
                 numeric_params["magnetic_i_equiv_init"] = magnetic_i_equiv_init;
+                if (magnetic_hysteresis_band.has_value()) {
+                    numeric_params["hysteresis_band"] = *magnetic_hysteresis_band;
+                }
+                numeric_params["hysteresis_strength"] = magnetic_hysteresis_strength;
+                numeric_params["hysteresis_loss_coeff"] = magnetic_hysteresis_loss_coeff;
+                numeric_params["hysteresis_state_init"] = magnetic_hysteresis_state_init;
             }
             std::unordered_map<std::string, std::string> metadata;
             metadata["target_component_1"] = l1_name;

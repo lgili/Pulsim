@@ -1,7 +1,7 @@
 # Change Notes: add-magnetic-core-nonlinear-models
 
 ## Status
-In progress (MVP slice implemented for saturation + core-loss telemetry).
+In progress (stage-2 runtime slice completed: saturation + hysteresis + loss/thermal coupling).
 
 ## Evidence Checklist
 - [x] Contract validation (`openspec validate --strict`)
@@ -32,9 +32,17 @@ In progress (MVP slice implemented for saturation + core-loss telemetry).
 - Added canonical policy/initialization fields:
   - `magnetic_core.loss_policy` (`telemetry_only` | `loss_summary`)
   - `magnetic_core.i_equiv_init` (`>= 0`) for deterministic initialization of frequency-sensitive loss dynamics.
+- Added hysteresis model family support (`magnetic_core.model: hysteresis`) with deterministic state semantics:
+  - explicit init parameter `magnetic_core.hysteresis_state_init`
+  - optional parameters `hysteresis_band`, `hysteresis_strength`, and `hysteresis_loss_coeff`
+  - state updates commit only when accepted-time advances (no same-timestamp re-commit).
 - Implemented loss-summary coupling path:
   - when `simulation.enable_losses: true` and `loss_policy: loss_summary`,
     backend appends deterministic summary row `<component>.core` sourced from `<component>.core_loss` integration.
+- Implemented thermal coupling path for magnetic core-loss rows:
+  - when losses + thermal are enabled, backend exports `T(<component>.core)` channels
+  - updates `thermal_summary.device_temperatures` and `component_electrothermal` for `<component>.core`
+  - enforces deterministic consistency against thermal channels.
 - Implemented runtime fail-fast guard for invalid magnetic loss policy in runtime metadata path:
   - marks run as failed with machine-readable reason `magnetic_core_runtime_invalid`.
 - Added/updated regression tests:
@@ -72,6 +80,6 @@ Populate after implementation:
 - `magnetic_allocation_regression`
 
 ## Known Limitations (Initial)
-- Only `model: saturation` is implemented in MVP. Hysteresis model families are not implemented yet.
-- Core-loss currently exports as canonical virtual channels/metadata; it is not yet coupled into global `loss_summary` and electrothermal accumulation.
-- Magnetic-core state telemetry beyond scalar `core_loss` (e.g., loop state/flux memory channels) is not yet implemented.
+- Core thermal coupling currently uses simulation-level default thermal RC (`default_rth/default_cth`) for magnetic virtual rows.
+- Magnetic-core state telemetry is currently limited to scalar memory-state channel (`<component>.h_state`) and loss channel (`<component>.core_loss`).
+- Advanced hysteresis families (e.g., Preisach/Jiles-Atherton parameter sets) remain out of scope for this slice.

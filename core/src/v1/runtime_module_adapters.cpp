@@ -417,6 +417,7 @@ ElectrothermalTelemetryModule::ElectrothermalTelemetryModule(
       thermal_module_(thermal_module),
       result_(result),
       sample_reserve_(sample_reserve),
+      thermal_options_(options.thermal),
       losses_enabled_(options.enable_losses),
       has_loss_trace_(loss_module.has_trace_enabled()),
       has_thermal_trace_(thermal_module.has_trace_enabled()),
@@ -775,6 +776,14 @@ void ElectrothermalTelemetryModule::finalize_component_electrothermal() {
         extra.total_energy = loss.total_energy;
         extra.average_power = loss.average_power;
         extra.peak_power = loss.peak_power;
+        if (const auto thermal_it = thermal_by_name.find(loss.device_name);
+            thermal_it != thermal_by_name.end()) {
+            const DeviceThermalTelemetry& thermal = *thermal_it->second;
+            extra.thermal_enabled = thermal.enabled;
+            extra.final_temperature = thermal.final_temperature;
+            extra.peak_temperature = thermal.peak_temperature;
+            extra.average_temperature = thermal.average_temperature;
+        }
         result_.component_electrothermal.push_back(std::move(extra));
     }
 }
@@ -879,6 +888,126 @@ void ElectrothermalTelemetryModule::merge_magnetic_core_loss_into_loss_summary()
     }
 
     result_.loss_summary.compute_totals();
+}
+
+void ElectrothermalTelemetryModule::merge_magnetic_core_loss_into_thermal_summary() {
+    if (!losses_enabled_ || !thermal_options_.enable) {
+        return;
+    }
+    if (result_.time.empty()) {
+        return;
+    }
+
+    initialize_magnetic_loss_summary_bindings();
+    if (magnetic_loss_summary_bindings_.empty()) {
+        return;
+    }
+
+    auto fail = [&](const std::string& detail) {
+        result_.success = false;
+        result_.final_status = SolverStatus::NumericalError;
+        result_.diagnostic = SimulationDiagnosticCode::TransientStepFailure;
+        result_.message = "Magnetic-core thermal coupling failure: " + detail;
+        result_.backend_telemetry.failure_reason = "magnetic_core_runtime_invalid";
+    };
+
+    const Real ambient = std::isfinite(result_.thermal_summary.ambient)
+        ? result_.thermal_summary.ambient
+        : thermal_options_.ambient;
+    if (!result_.thermal_summary.enabled) {
+        result_.thermal_summary.enabled = true;
+        result_.thermal_summary.ambient = ambient;
+        result_.thermal_summary.max_temperature = ambient;
+    } else if (!std::isfinite(result_.thermal_summary.max_temperature)) {
+        result_.thermal_summary.max_temperature = ambient;
+    }
+
+    std::unordered_map<std::string, std::size_t> thermal_row_index;
+    thermal_row_index.reserve(result_.thermal_summary.device_temperatures.size());
+    for (std::size_t i = 0; i < result_.thermal_summary.device_temperatures.size(); ++i) {
+        thermal_row_index[result_.thermal_summary.device_temperatures[i].device_name] = i;
+    }
+
+    const Real rth = std::max<Real>(thermal_options_.default_rth, 1e-12);
+    const Real cth = std::max<Real>(thermal_options_.default_cth, 0.0);
+    const Real tau = std::max<Real>(rth * cth, 1e-18);
+
+    for (const auto& binding : magnetic_loss_summary_bindings_) {
+        const auto channel_it = result_.virtual_channels.find(binding.channel_name);
+        if (channel_it == result_.virtual_channels.end()) {
+            fail("missing channel '" + binding.channel_name + "'");
+            return;
+        }
+        const auto& power_series = channel_it->second;
+        if (power_series.size() != result_.time.size()) {
+            fail("channel '" + binding.channel_name + "' length mismatch");
+            return;
+        }
+
+        std::vector<Real> thermal_series(result_.time.size(), ambient);
+        Real theta = 0.0;
+        for (std::size_t i = 1; i < result_.time.size(); ++i) {
+            const Real dt = result_.time[i] - result_.time[i - 1];
+            const Real power = sanitize_power(power_series[i]);
+            if (!std::isfinite(dt) || dt < 0.0) {
+                fail("non-monotonic time base while coupling '" + binding.channel_name + "'");
+                return;
+            }
+
+            if (cth <= 0.0) {
+                theta = power * rth;
+            } else {
+                const Real a = std::exp(-dt / tau);
+                theta = theta * a + (power * rth) * (1.0 - a);
+            }
+            if (!std::isfinite(theta)) {
+                fail("non-finite thermal state while coupling '" + binding.channel_name + "'");
+                return;
+            }
+            thermal_series[i] = ambient + theta;
+        }
+
+        const Real final_temperature = thermal_series.back();
+        const Real peak_temperature = *std::max_element(thermal_series.begin(), thermal_series.end());
+        const Real sum_temperature = std::accumulate(
+            thermal_series.begin(),
+            thermal_series.end(),
+            Real{0.0});
+        const Real average_temperature =
+            sum_temperature / static_cast<Real>(thermal_series.size());
+
+        const std::string thermal_channel_name = "T(" + binding.summary_name + ")";
+        result_.virtual_channels[thermal_channel_name] = thermal_series;
+        result_.virtual_channel_metadata[thermal_channel_name] = VirtualChannelMetadata{
+            "thermal_trace",
+            thermal_channel_name,
+            binding.summary_name,
+            "thermal",
+            "degC",
+            {}
+        };
+
+        if (const auto row_it = thermal_row_index.find(binding.summary_name);
+            row_it != thermal_row_index.end()) {
+            auto& row = result_.thermal_summary.device_temperatures[row_it->second];
+            row.enabled = true;
+            row.final_temperature = final_temperature;
+            row.peak_temperature = peak_temperature;
+            row.average_temperature = average_temperature;
+        } else {
+            DeviceThermalTelemetry row;
+            row.device_name = binding.summary_name;
+            row.enabled = true;
+            row.final_temperature = final_temperature;
+            row.peak_temperature = peak_temperature;
+            row.average_temperature = average_temperature;
+            result_.thermal_summary.device_temperatures.push_back(std::move(row));
+            thermal_row_index[binding.summary_name] = result_.thermal_summary.device_temperatures.size() - 1;
+        }
+
+        result_.thermal_summary.max_temperature =
+            std::max(result_.thermal_summary.max_temperature, peak_temperature);
+    }
 }
 
 void ElectrothermalTelemetryModule::validate_electrothermal_consistency() {
@@ -1160,6 +1289,7 @@ void ElectrothermalTelemetryModule::validate_electrothermal_consistency() {
 
 void ElectrothermalTelemetryModule::on_finalize() {
     merge_magnetic_core_loss_into_loss_summary();
+    merge_magnetic_core_loss_into_thermal_summary();
     if (!result_.success) {
         return;
     }

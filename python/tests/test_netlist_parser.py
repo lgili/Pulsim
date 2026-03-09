@@ -485,8 +485,26 @@ class TestYamlCBlockParser:
         )
         assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
 
+    def test_yaml_accepts_hysteresis_magnetic_core_model(self) -> None:
+        """hysteresis model is accepted with deterministic optional parameters."""
+        p = self._parse(
+            "  - name: Lsat_hyst\n"
+            "    type: saturable_inductor\n"
+            "    nodes: [a, 0]\n"
+            "    inductance: 1m\n"
+            "    magnetic_core:\n"
+            "      enabled: true\n"
+            "      model: hysteresis\n"
+            "      hysteresis_band: 0.05\n"
+            "      hysteresis_strength: 0.2\n"
+            "      hysteresis_loss_coeff: 0.3\n"
+            "      hysteresis_state_init: -1\n"
+            "      core_loss_k: 0.02\n"
+        )
+        assert all("MAGNETIC_CONFIG_INVALID" not in e for e in p.errors), p.errors
+
     def test_yaml_rejects_unsupported_magnetic_core_model(self) -> None:
-        """Only saturation model is supported in the initial magnetic_core release."""
+        """Only known magnetic_core model families are supported."""
         p = self._parse(
             "  - name: Lsat_bad_model\n"
             "    type: saturable_inductor\n"
@@ -494,7 +512,7 @@ class TestYamlCBlockParser:
             "    inductance: 1m\n"
             "    magnetic_core:\n"
             "      enabled: true\n"
-            "      model: hysteresis\n"
+            "      model: preisach\n"
         )
         assert self._has_error_code(p.errors, "MAGNETIC_CONFIG_INVALID"), p.errors
 

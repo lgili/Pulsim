@@ -431,7 +431,7 @@ o----------------------o    o---------------------o
 ### Magnetic Core Runtime Contract (MVP)
 
 For `saturable_inductor`, `coupled_inductor`, and `transformer`, the backend
-accepts `component.magnetic_core` with `model: saturation` and optional
+accepts `component.magnetic_core` with `model: saturation|hysteresis` and optional
 `core_loss_k` / `core_loss_alpha` / `core_loss_freq_coeff`.
 
 Current MVP runtime behavior:
@@ -440,6 +440,8 @@ Current MVP runtime behavior:
   - `P_core = core_loss_k * |i_equiv|^core_loss_alpha * (1 + core_loss_freq_coeff * |di_equiv/dt|)`
 - Exports canonical virtual channel:
   - `"<component>.core_loss"` (`W`)
+- For `model: hysteresis`, exports deterministic memory-state channel:
+  - `"<component>.h_state"` (bounded `[-1, 1]`)
 - Exports channel metadata:
   - `domain="loss"`
   - `unit="W"`
@@ -447,12 +449,18 @@ Current MVP runtime behavior:
 - Optional policy:
   - `loss_policy: loss_summary` appends deterministic loss-summary row
     `"<component>.core"` when global loss pipeline is enabled.
+- When thermal is enabled together with losses, magnetic core-loss rows are
+  coupled into thermal telemetry:
+  - thermal channel `T(<component>.core)`
+  - thermal summary row `<component>.core`
+  - `component_electrothermal` row consistency against the thermal channel.
 
 Current limitations:
 
-- Hysteresis model families are not implemented yet.
-- `core_loss` is currently exposed as virtual telemetry and is not yet coupled
-  into global electrothermal/loss summaries.
+- Magnetic thermal coupling currently uses simulation defaults
+  (`simulation.thermal.default_rth/default_cth`) for magnetic virtual rows.
+- Advanced hysteresis family parameter sets (beyond current bounded state model)
+  are not implemented yet.
 
 ---
 

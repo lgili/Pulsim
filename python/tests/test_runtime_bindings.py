@@ -3906,6 +3906,155 @@ components:
     assert abs(energy_a - energy_b) <= 1e-12
 
 
+def test_magnetic_core_hysteresis_exports_deterministic_memory_state() -> None:
+    netlist = """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 2e-3
+  dt: 2e-6
+  step_mode: fixed
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: sine
+      amplitude: 8
+      frequency: 1000
+      offset: 0
+      phase: 0
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 1
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: hysteresis
+      hysteresis_band: 0.05
+      hysteresis_strength: 0.25
+      hysteresis_loss_coeff: 0.2
+      hysteresis_state_init: 1
+      core_loss_k: 0.15
+      core_loss_alpha: 2.0
+"""
+
+    def _run_once() -> tuple[list[float], list[float]]:
+        parser = ps.YamlParser()
+        circuit, opts = parser.load_string(netlist)
+        assert parser.errors == [], parser.errors
+        opts.newton_options.num_nodes = int(circuit.num_nodes())
+        opts.newton_options.num_branches = int(circuit.num_branches())
+        result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+        assert result.success
+        assert "Lsat.h_state" in result.virtual_channels
+        assert "Lsat.l_eff" in result.virtual_channels
+        h_state = [float(v) for v in result.virtual_channels["Lsat.h_state"]]
+        l_eff = [float(v) for v in result.virtual_channels["Lsat.l_eff"]]
+        assert len(h_state) == len(result.time)
+        assert len(l_eff) == len(result.time)
+        return h_state, l_eff
+
+    h_a, l_a = _run_once()
+    h_b, l_b = _run_once()
+    assert len(h_a) == len(h_b)
+    assert len(l_a) == len(l_b)
+
+    # Hysteresis state must be deterministic and bounded.
+    for va, vb in zip(h_a, h_b):
+        assert abs(va - vb) <= 1e-12
+        assert abs(va) <= 1.0 + 1e-12
+    assert max(h_a) > 0.5
+    assert min(h_a) < -0.5
+
+    # Effective inductance trace should also be deterministic.
+    for va, vb in zip(l_a, l_b):
+        assert abs(va - vb) <= 1e-12
+
+
+def test_magnetic_core_loss_couples_into_thermal_summary_when_enabled() -> None:
+    parser = ps.YamlParser()
+    circuit, opts = parser.load_string(
+        """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 2e-6
+  step_mode: fixed
+  enable_losses: true
+  thermal:
+    enabled: true
+    ambient: 25
+    default_rth: 0.9
+    default_cth: 0.05
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10}
+  - type: resistor
+    name: R1
+    nodes: [vin, n1]
+    value: 2
+  - type: saturable_inductor
+    name: Lsat
+    nodes: [n1, 0]
+    inductance: 1m
+    saturation_current: 1.0
+    saturation_inductance: 200u
+    magnetic_core:
+      enabled: true
+      model: saturation
+      loss_policy: loss_summary
+      core_loss_k: 0.2
+      core_loss_alpha: 2.0
+      core_loss_freq_coeff: 1e-4
+"""
+    )
+    assert parser.errors == [], parser.errors
+    opts.newton_options.num_nodes = int(circuit.num_nodes())
+    opts.newton_options.num_branches = int(circuit.num_branches())
+
+    result = ps.Simulator(circuit, opts).run_transient(circuit.initial_state())
+    assert result.success, result.message
+
+    thermal_channel = "T(Lsat.core)"
+    assert thermal_channel in result.virtual_channels
+    assert thermal_channel in result.virtual_channel_metadata
+    trace = [float(v) for v in result.virtual_channels[thermal_channel]]
+    assert len(trace) == len(result.time)
+    assert trace[-1] > 25.0
+
+    metadata = result.virtual_channel_metadata[thermal_channel]
+    assert metadata.domain == "thermal"
+    assert metadata.unit == "degC"
+    assert metadata.source_component == "Lsat.core"
+
+    thermal_rows = {
+        row.device_name: row for row in list(result.thermal_summary.device_temperatures)
+    }
+    assert "Lsat.core" in thermal_rows
+    core_row = thermal_rows["Lsat.core"]
+    assert core_row.final_temperature > result.thermal_summary.ambient
+    assert abs(core_row.final_temperature - trace[-1]) <= 1e-12
+    assert abs(core_row.peak_temperature - max(trace)) <= 1e-12
+    assert abs(core_row.average_temperature - statistics.fmean(trace)) <= 1e-12
+
+    component_rows = {row.component_name: row for row in result.component_electrothermal}
+    assert "Lsat.core" in component_rows
+    assert component_rows["Lsat.core"].thermal_enabled
+    assert abs(component_rows["Lsat.core"].final_temperature - trace[-1]) <= 1e-12
+
+
 def test_coupled_inductor_adds_mutual_terms_to_jacobian() -> None:
     circuit = ps.Circuit()
     n_p = circuit.add_node("p")

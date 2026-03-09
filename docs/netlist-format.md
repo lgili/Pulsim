@@ -82,13 +82,17 @@ Supported components for `magnetic_core` block:
 Canonical fields (current MVP):
 
 - `enabled` (bool)
-- `model` (`saturation`)
+- `model` (`saturation` or `hysteresis`)
 - `saturation_current` (optional, component-dependent)
 - `saturation_inductance` (optional, component-dependent)
 - `saturation_exponent` (optional, component-dependent)
 - `core_loss_k` (optional, default `0.0`)
 - `core_loss_alpha` (optional, default `2.0`)
 - `core_loss_freq_coeff` (optional, default `0.0`, multiplies loss by a `|di/dt|` proxy term)
+- `hysteresis_band` (optional, default derived from `saturation_current`)
+- `hysteresis_strength` (optional, default `0.15`)
+- `hysteresis_loss_coeff` (optional, default `0.2`)
+- `hysteresis_state_init` (optional, default `1`)
 - `loss_policy` (optional: `telemetry_only` or `loss_summary`, default `telemetry_only`)
 - `i_equiv_init` (optional, default `0.0`, initialization for magnetic current proxy)
 
@@ -115,6 +119,13 @@ When enabled with `core_loss_k > 0`, backend exports `"<component>.core_loss"` i
 - `domain: loss`
 - `unit: W`
 - `source_component: <component_name>`
+
+When `model: hysteresis`, backend also exports `"<component>.h_state"` as the
+deterministic magnetic memory-state channel (bounded in `[-1, 1]`).
+
+When `simulation.enable_losses: true`, `simulation.thermal.enabled: true`, and
+`loss_policy: loss_summary`, backend additionally exports `T(<component>.core)`
+with deterministic thermal evolution for magnetic core-loss coupling.
 
 For GUI/backend ownership boundaries, see
 [Magnetic Core Backend/Frontend Contract](magnetic-core-backend-frontend-contract.md).

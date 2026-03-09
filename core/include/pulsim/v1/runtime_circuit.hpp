@@ -607,6 +607,11 @@ public:
                     magnetic_loss.unit = "W";
                     metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
                 }
+                if (mag_enabled > 0.5 && magnetic_model_is_hysteresis(component)) {
+                    auto magnetic_state = base;
+                    magnetic_state.domain = "electrical";
+                    metadata.emplace(component.name + ".h_state", std::move(magnetic_state));
+                }
             } else if (component.type == "coupled_inductor") {
                 auto electrical = base;
                 electrical.domain = "electrical";
@@ -620,6 +625,11 @@ public:
                     magnetic_loss.unit = "W";
                     metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
                 }
+                if (mag_enabled > 0.5 && magnetic_model_is_hysteresis(component)) {
+                    auto magnetic_state = base;
+                    magnetic_state.domain = "electrical";
+                    metadata.emplace(component.name + ".h_state", std::move(magnetic_state));
+                }
             } else if (component.type == "transformer") {
                 const Real mag_enabled = numeric_param("magnetic_core_enabled", 0.0);
                 const Real core_loss_k = std::max<Real>(numeric_param("core_loss_k", 0.0), 0.0);
@@ -628,6 +638,11 @@ public:
                     magnetic_loss.domain = "loss";
                     magnetic_loss.unit = "W";
                     metadata.emplace(component.name + ".core_loss", std::move(magnetic_loss));
+                }
+                if (mag_enabled > 0.5 && magnetic_model_is_hysteresis(component)) {
+                    auto magnetic_state = base;
+                    magnetic_state.domain = "electrical";
+                    metadata.emplace(component.name + ".h_state", std::move(magnetic_state));
                 }
             }
         }
@@ -1324,11 +1339,16 @@ public:
                     continue;
                 }
                 const Real i_est = x[conn->branch_index];
+                update_magnetic_hysteresis_state_if_due(component, i_est, time);
                 const Real l_nom = get_numeric(component, "inductance", 1e-3);
                 const Real l_eff = saturable_effective_inductance(component, i_est, l_nom);
                 result.channel_values[component.name + ".l_eff"] = l_eff;
                 result.channel_values[component.name + ".i_est"] = i_est;
-                if (const auto core_loss = magnetic_core_loss_from_current(component, std::abs(i_est), time);
+                if (magnetic_model_is_hysteresis(component)) {
+                    result.channel_values[component.name + ".h_state"] =
+                        magnetic_hysteresis_state(component);
+                }
+                if (const auto core_loss = magnetic_core_loss_from_current(component, i_est, time);
                     core_loss.has_value()) {
                     result.channel_values[component.name + ".core_loss"] = *core_loss;
                 }
@@ -1369,9 +1389,19 @@ public:
                     conn1->branch_index < system_size() && conn2->branch_index < system_size()) {
                     const Real i1 = x[conn1->branch_index];
                     const Real i2 = x[conn2->branch_index];
-                    const Real i_equiv = Real{0.5} * (std::abs(i1) + std::abs(i2));
+                    const Real i_equiv_signed = Real{0.5} * (i1 + i2);
+                    const Real i_equiv_abs =
+                        Real{0.5} * (std::abs(i1) + std::abs(i2));
+                    update_magnetic_hysteresis_state_if_due(component, i_equiv_signed, time);
+                    if (magnetic_model_is_hysteresis(component)) {
+                        result.channel_values[component.name + ".h_state"] =
+                            magnetic_hysteresis_state(component);
+                    }
+                    const Real i_equiv_for_loss = magnetic_model_is_hysteresis(component)
+                        ? i_equiv_signed
+                        : i_equiv_abs;
                     if (const auto core_loss =
-                            magnetic_core_loss_from_current(component, i_equiv, time);
+                            magnetic_core_loss_from_current(component, i_equiv_for_loss, time);
                         core_loss.has_value()) {
                         result.channel_values[component.name + ".core_loss"] = *core_loss;
                     }
@@ -1391,11 +1421,20 @@ public:
                     }
                     const Real turns_ratio = std::max<Real>(
                         std::abs(get_numeric(component, "turns_ratio", 1.0)), 1e-12);
-                    const Real i_equiv = (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size())
+                    const Real i_equiv_signed = i_p;
+                    const Real i_equiv_abs = (conn->branch_index_2 >= 0 && conn->branch_index_2 < system_size())
                         ? Real{0.5} * (std::abs(i_p) + std::abs(i_s) / turns_ratio)
                         : std::abs(i_p);
+                    update_magnetic_hysteresis_state_if_due(component, i_equiv_signed, time);
+                    if (magnetic_model_is_hysteresis(component)) {
+                        result.channel_values[component.name + ".h_state"] =
+                            magnetic_hysteresis_state(component);
+                    }
+                    const Real i_equiv_for_loss = magnetic_model_is_hysteresis(component)
+                        ? i_equiv_signed
+                        : i_equiv_abs;
                     if (const auto core_loss =
-                            magnetic_core_loss_from_current(component, i_equiv, time);
+                            magnetic_core_loss_from_current(component, i_equiv_for_loss, time);
                         core_loss.has_value()) {
                         result.channel_values[component.name + ".core_loss"] = *core_loss;
                     }
@@ -2774,9 +2813,83 @@ private:
         return transfer_coeff_cache_.emplace(cache_key, std::move(coeffs)).first->second;
     }
 
+    [[nodiscard]] std::string magnetic_core_model(const VirtualComponent& component) const {
+        const auto it = component.metadata.find("magnetic_core_model");
+        if (it == component.metadata.end()) {
+            return "saturation";
+        }
+        const std::string model = normalize_mode_token(trim_ascii_whitespace(it->second));
+        return model.empty() ? "saturation" : model;
+    }
+
+    [[nodiscard]] bool magnetic_model_is_hysteresis(const VirtualComponent& component) const {
+        return magnetic_core_model(component) == "hysteresis";
+    }
+
+    [[nodiscard]] Real magnetic_hysteresis_band(const VirtualComponent& component) const {
+        const Real configured_band = std::abs(
+            get_param_value(component.numeric_params, "hysteresis_band", 0.0));
+        if (configured_band > 0.0 && std::isfinite(configured_band)) {
+            return configured_band;
+        }
+        const Real i_sat = std::max<Real>(
+            std::abs(get_param_value(component.numeric_params, "saturation_current", 1.0)),
+            1e-12);
+        return std::max<Real>(i_sat * 0.05, 1e-6);
+    }
+
+    [[nodiscard]] Real magnetic_hysteresis_state(const VirtualComponent& component) const {
+        const std::string state_key = component.name + ".__mag_h_state";
+        if (const auto it = virtual_signal_state_.find(state_key);
+            it != virtual_signal_state_.end() && std::isfinite(it->second)) {
+            return std::clamp(it->second, Real{-1.0}, Real{1.0});
+        }
+
+        const Real configured_init = get_param_value(
+            component.numeric_params,
+            "hysteresis_state_init",
+            1.0);
+        if (!std::isfinite(configured_init) || std::abs(configured_init) < 1e-15) {
+            return 1.0;
+        }
+        return configured_init >= 0.0 ? 1.0 : -1.0;
+    }
+
+    void update_magnetic_hysteresis_state_if_due(
+        const VirtualComponent& component,
+        Real i_equiv_signed,
+        Real time) {
+        if (!magnetic_model_is_hysteresis(component) || !std::isfinite(time)) {
+            return;
+        }
+
+        const std::string state_key = component.name + ".__mag_h_state";
+        const std::string time_key = component.name + ".__mag_h_time_prev";
+
+        Real state = magnetic_hysteresis_state(component);
+        if (const auto time_it = virtual_last_time_.find(time_key);
+            time_it != virtual_last_time_.end() && std::isfinite(time_it->second)) {
+            const Real dt = time - time_it->second;
+            if (!(dt > 1e-15)) {
+                virtual_signal_state_[state_key] = state;
+                return;
+            }
+        }
+
+        const Real band = magnetic_hysteresis_band(component);
+        if (i_equiv_signed > band) {
+            state = 1.0;
+        } else if (i_equiv_signed < -band) {
+            state = -1.0;
+        }
+
+        virtual_signal_state_[state_key] = state;
+        virtual_last_time_[time_key] = time;
+    }
+
     [[nodiscard]] std::optional<Real> magnetic_core_loss_from_current(
         const VirtualComponent& component,
-        Real i_equiv,
+        Real i_equiv_signed,
         Real time) {
         const Real mag_enabled = get_param_value(component.numeric_params, "magnetic_core_enabled", 0.0);
         const Real core_loss_k =
@@ -2785,6 +2898,7 @@ private:
             return std::nullopt;
         }
 
+        const Real i_equiv = std::abs(i_equiv_signed);
         const Real core_loss_alpha = std::clamp(
             get_param_value(component.numeric_params, "core_loss_alpha", 2.0), 0.0, 8.0);
         const Real core_loss_freq_coeff = std::max<Real>(
@@ -2821,8 +2935,30 @@ private:
             }
         }
 
+        Real hysteresis_multiplier = 1.0;
+        if (magnetic_model_is_hysteresis(component)) {
+            const Real state = magnetic_hysteresis_state(component);
+            const Real band = magnetic_hysteresis_band(component);
+            Real direction = 0.0;
+            if (i_equiv_signed > band) {
+                direction = 1.0;
+            } else if (i_equiv_signed < -band) {
+                direction = -1.0;
+            }
+
+            const Real mismatch = (direction == 0.0)
+                ? 0.5
+                : 0.5 * (1.0 - state * direction);
+            const Real hysteresis_loss_coeff = std::clamp(
+                std::abs(get_param_value(component.numeric_params, "hysteresis_loss_coeff", 0.2)),
+                0.0,
+                50.0);
+            hysteresis_multiplier += hysteresis_loss_coeff * mismatch;
+        }
+
         const Real core_loss =
-            core_loss_k * std::pow(std::abs(i_equiv), core_loss_alpha) * frequency_multiplier;
+            core_loss_k * std::pow(i_equiv, core_loss_alpha) *
+            frequency_multiplier * hysteresis_multiplier;
         if (!std::isfinite(core_loss)) {
             return std::nullopt;
         }
@@ -2844,7 +2980,27 @@ private:
             get_param_value(component.numeric_params, "saturation_exponent", 2.0), 1.0, 8.0);
         const Real ratio = std::pow(std::abs(i_est) / i_sat, exponent);
         const Real l_eff = l_sat + (l_unsat - l_sat) / (1.0 + ratio);
-        return std::max<Real>(l_eff, 1e-12);
+
+        if (!magnetic_model_is_hysteresis(component)) {
+            return std::max<Real>(l_eff, 1e-12);
+        }
+
+        const Real state = magnetic_hysteresis_state(component);
+        const Real band = magnetic_hysteresis_band(component);
+        Real direction = 0.0;
+        if (i_est > band) {
+            direction = 1.0;
+        } else if (i_est < -band) {
+            direction = -1.0;
+        }
+
+        const Real strength = std::clamp(
+            std::abs(get_param_value(component.numeric_params, "hysteresis_strength", 0.15)),
+            0.0,
+            0.95);
+        const Real multiplier = 1.0 - strength * state * direction;
+        const Real l_hysteretic = std::clamp(l_eff * multiplier, l_sat, l_unsat);
+        return std::max<Real>(l_hysteretic, 1e-12);
     }
 
     [[nodiscard]] Real effective_inductance_for(

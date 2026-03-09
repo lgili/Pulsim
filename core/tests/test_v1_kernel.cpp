@@ -2990,6 +2990,42 @@ TEST_CASE("v1 magnetic telemetry channels remain physically bounded",
         CHECK(l_high < l_low);
     }
 
+    SECTION("hysteresis model updates memory state only when time advances") {
+        Circuit circuit;
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+        circuit.add_inductor("Lh", n_a, n_b, 1e-3);
+        circuit.add_virtual_component("saturable_inductor", "Lh", {n_a, n_b},
+                                      {{"inductance", 1e-3},
+                                       {"saturation_current", 1.0},
+                                       {"saturation_inductance", 2e-4},
+                                       {"saturation_exponent", 2.0},
+                                       {"magnetic_core_enabled", 1.0},
+                                       {"hysteresis_band", 0.05},
+                                       {"hysteresis_strength", 0.2},
+                                       {"hysteresis_state_init", 1.0}},
+                                      {{"target_component", "Lh"},
+                                       {"magnetic_core_model", "hysteresis"}});
+
+        const Index branch = circuit.num_nodes();
+        Vector x = Vector::Zero(circuit.system_size());
+        x[branch] = 0.2;
+        const auto s1 = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(s1.channel_values.contains("Lh.h_state"));
+        CHECK(s1.channel_values.at("Lh.h_state") == Approx(1.0).margin(1e-12));
+
+        // Same timestamp should not commit a hysteresis state transition.
+        x[branch] = -0.2;
+        const auto s_same_time = circuit.execute_mixed_domain_step(x, 1e-6);
+        REQUIRE(s_same_time.channel_values.contains("Lh.h_state"));
+        CHECK(s_same_time.channel_values.at("Lh.h_state") == Approx(1.0).margin(1e-12));
+
+        // Advancing accepted time allows deterministic state transition.
+        const auto s2 = circuit.execute_mixed_domain_step(x, 2e-6);
+        REQUIRE(s2.channel_values.contains("Lh.h_state"));
+        CHECK(s2.channel_values.at("Lh.h_state") == Approx(-1.0).margin(1e-12));
+    }
+
     SECTION("coupled inductor emits expected mutual inductance") {
         Circuit circuit;
         const auto n_a = circuit.add_node("a");

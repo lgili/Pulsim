@@ -227,11 +227,13 @@ magnetic_core:
 Regras práticas de migração:
 
 - Evite parâmetros soltos fora de `magnetic_core` para perdas magnéticas.
-- Use `model: saturation` no MVP atual.
+- Use `model: saturation` para curva de saturação simples, ou `model: hysteresis`
+  quando precisar memória de ciclo (`<component>.h_state`).
 - Para `saturable_inductor`, mantenha também os parâmetros elétricos
   (`inductance`, `saturation_current`, `saturation_inductance`) no componente.
 - No frontend, não reconstrua curvas térmicas/magnéticas; use os canais
-  exportados pelo backend (`<component>.core_loss`).
+  exportados pelo backend (`<component>.core_loss`, `<component>.h_state`,
+  `T(<component>.core)` quando perdas+térmico estiverem ativos).
 
 ### Pinagem e validação
 

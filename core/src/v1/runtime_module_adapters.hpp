@@ -269,6 +269,7 @@ private:
     void sample_loss_channels(Real sample_time, std::size_t sample_count);
     void sample_thermal_channels(std::size_t sample_count);
     void merge_magnetic_core_loss_into_loss_summary();
+    void merge_magnetic_core_loss_into_thermal_summary();
     void finalize_component_electrothermal();
     void validate_electrothermal_consistency();
 
@@ -277,6 +278,7 @@ private:
     const ThermalCouplingModule& thermal_module_;
     SimulationResult& result_;
     std::size_t sample_reserve_ = 0;
+    ThermalCouplingOptions thermal_options_{};
 
     bool losses_enabled_ = false;
     bool has_loss_trace_ = false;

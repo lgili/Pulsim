@@ -5,9 +5,9 @@
 
 ## 2. Kernel Runtime Implementation
 - [x] 2.1 Implement nonlinear saturation behavior for supported magnetic components with deterministic state semantics.
-- [ ] 2.2 Implement hysteresis behavior with explicit memory-state initialization and update ordering.
+- [x] 2.2 Implement hysteresis behavior with explicit memory-state initialization and update ordering.
 - [x] 2.3 Implement frequency-dependent core-loss evaluation and coupling into loss summaries.
-- [ ] 2.4 Integrate magnetic-core losses with electrothermal pipeline when enabled, without silent fallback.
+- [x] 2.4 Integrate magnetic-core losses with electrothermal pipeline when enabled, without silent fallback.
 - [x] 2.5 Ensure fail-fast typed diagnostics for unsupported magnetic models or invalid runtime conditions.
 
 ## 3. Result Surface and Telemetry
