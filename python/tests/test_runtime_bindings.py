@@ -3634,37 +3634,33 @@ schema: pulsim-v1
 version: 1
 simulation:
   tstart: 0.0
-  tstop: 5e-4
-  dt: 2e-6
+  tstop: 5e-5
+  dt: 1e-6
   step_mode: fixed
 components:
   - type: voltage_source
-    name: Vp
-    nodes: [vp, 0]
-    waveform: {type: dc, value: 8}
-  - type: voltage_source
-    name: Vs
-    nodes: [vs, 0]
-    waveform: {type: dc, value: 4}
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 2}
   - type: resistor
     name: Rp
-    nodes: [vp, p1]
-    value: 2
-  - type: resistor
-    name: Rs
-    nodes: [vs, s1]
-    value: 2
+    nodes: [vin, p1]
+    value: 100
   - type: coupled_inductor
     name: Kmag
     nodes: [p1, 0, s1, 0]
-    l1: 1m
-    l2: 1m
-    coupling: 0.95
+    l1: 50m
+    l2: 50m
+    coupling: 0.2
     magnetic_core:
       enabled: true
       model: saturation
-      core_loss_k: 0.1
+      core_loss_k: 0.02
       core_loss_alpha: 2.0
+  - type: resistor
+    name: Rload
+    nodes: [s1, 0]
+    value: 100
 """
     )
     assert parser.errors == [], parser.errors
