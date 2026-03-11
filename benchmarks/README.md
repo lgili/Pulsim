@@ -26,6 +26,8 @@ This folder contains the YAML benchmark suite and validation runners.
 - `kpi_thresholds_convergence_platform.yaml` — optional policy-gate thresholds for convergence dry-run KPIs.
 - `convergence_phase_budgets.yaml` — versioned per-phase (Gate A..F/ADV) functional/performance budget contract.
 - `advanced_solver_decision_matrix.yaml` — objective adoption contract for advanced solver backends (SUNDIALS/PETSc families).
+- `advanced_solver_decision_matrix_heavy.yaml` — heavy stress matrix to evaluate trend retention under tougher runs.
+- `benchmarks_advanced_heavy.yaml` — dedicated benchmark manifest for heavy advanced-solver comparisons.
 - `validate_advanced_solver_decision_matrix.py` — schema+policy validator for `advanced_solver_decision_matrix.yaml`.
 - `advanced_solver_prototype_runner.py` — isolated baseline-vs-prototype runner for advanced backend candidate evaluation.
 - `gate_adv_decision.py` — formal Gate ADV decision artifact generator with reproducibility hashes.
@@ -54,6 +56,11 @@ python3 benchmarks/advanced_solver_prototype_runner.py \
   --candidate sundials_ida_direct \
   --output-dir benchmarks/out_advanced_solver \
   --enforce-hard-constraints
+python3 benchmarks/advanced_solver_prototype_runner.py \
+  --matrix benchmarks/advanced_solver_decision_matrix_heavy.yaml \
+  --manifest benchmarks/benchmarks_advanced_heavy.yaml \
+  --candidate sundials_ida_direct \
+  --output-dir benchmarks/out_advanced_solver_heavy
 python3 benchmarks/gate_adv_decision.py \
   --report benchmarks/out_advanced_solver/advanced_solver_prototype_report.json \
   --adr docs/advanced-solver-adr.md \

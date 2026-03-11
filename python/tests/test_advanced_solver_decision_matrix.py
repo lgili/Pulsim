@@ -109,3 +109,10 @@ def test_validate_advanced_solver_decision_matrix_reports_candidate_validation_e
     errors = validator.validate_decision_matrix(matrix_path)
     assert any("duplicated" in error for error in errors)
     assert any("unsupported solver_family" in error for error in errors)
+
+
+def test_repository_heavy_advanced_solver_decision_matrix_is_valid() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    matrix_path = repo_root / "benchmarks" / "advanced_solver_decision_matrix_heavy.yaml"
+    errors = validator.validate_decision_matrix(matrix_path)
+    assert errors == []
