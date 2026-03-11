@@ -504,6 +504,8 @@ simulation:
   max_step_retries: 4
   fallback:
     trace_retries: true
+    convergence_profile: robust
+    policy_dry_run: true
     enable_transient_gmin: true
     gmin_retry_threshold: 2
     gmin_initial: 1e-8
@@ -521,6 +523,8 @@ components:
     REQUIRE(parser.errors().empty());
     CHECK(options.max_step_retries == 4);
     CHECK(options.fallback_policy.trace_retries);
+    CHECK(options.fallback_policy.convergence_profile == ConvergenceProfile::Robust);
+    CHECK(options.fallback_policy.policy_dry_run);
     CHECK(options.fallback_policy.enable_transient_gmin);
     CHECK(options.fallback_policy.gmin_retry_threshold == 2);
     CHECK(options.fallback_policy.gmin_initial == Approx(1e-8));

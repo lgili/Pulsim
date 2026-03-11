@@ -1137,11 +1137,34 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             validate_keys(fallback, {"trace_retries", "enable_transient_gmin",
                                      "gmin_retry_threshold", "gmin_initial",
                                      "gmin_max", "gmin_growth",
+                                     "convergence_profile", "policy_dry_run",
                                      "enable_backend_escalation", "backend_escalation_threshold",
                                      "enable_native_reentry", "sundials_recovery_window"},
                           "simulation.advanced.fallback", errors_, options_.strict);
             if (fallback["trace_retries"]) {
                 options.fallback_policy.trace_retries = fallback["trace_retries"].as<bool>();
+            }
+            if (const auto profile_value = parse_string_scalar(
+                    fallback["convergence_profile"],
+                    "simulation.fallback.convergence_profile",
+                    errors_)) {
+                const std::string profile = normalize_key(*profile_value);
+                if (profile == "strict") {
+                    options.fallback_policy.convergence_profile = ConvergenceProfile::Strict;
+                } else if (profile == "balanced") {
+                    options.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
+                } else if (profile == "robust") {
+                    options.fallback_policy.convergence_profile = ConvergenceProfile::Robust;
+                } else {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "simulation.fallback.convergence_profile must be one of: strict, balanced, robust");
+                }
+            }
+            if (const auto value = parse_bool_scalar(
+                    fallback["policy_dry_run"],
+                    "simulation.fallback.policy_dry_run",
+                    errors_)) {
+                options.fallback_policy.policy_dry_run = *value;
             }
             if (fallback["enable_transient_gmin"]) {
                 options.fallback_policy.enable_transient_gmin = fallback["enable_transient_gmin"].as<bool>();

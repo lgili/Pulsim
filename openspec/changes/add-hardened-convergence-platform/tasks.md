@@ -5,15 +5,15 @@
 - [ ] 1.4 Montar catalogo de circuitos de estresse reprodutiveis com parametros fixos e fingerprint de ambiente.
 
 ## 2. M0 - Observation-Only Instrumentation (Sem mudar decisoes)
-- [ ] 2.1 Implementar schema tipado de convergencia no runtime (`failure_class`, `recovery_stage`, `policy_action`, contexto numerico minimo).
-- [ ] 2.2 Instrumentar classificador em modo observacao (somente recomendacao, sem atuar no solver).
-- [ ] 2.3 Expor telemetria no `SimulationResult` e preservar compatibilidade com campos legados.
+- [x] 2.1 Implementar schema tipado de convergencia no runtime (`failure_class`, `recovery_stage`, `policy_action`, contexto numerico minimo).
+- [x] 2.2 Instrumentar classificador em modo observacao (somente recomendacao, sem atuar no solver).
+- [x] 2.3 Expor telemetria no `SimulationResult` e preservar compatibilidade com campos legados.
 - [ ] 2.4 Gate A: cobertura de schema obrigatorio >= 99% nos casos da matriz minima e 0 regressao funcional.
 
 ## 3. M1 - Policy Passive Validation
-- [ ] 3.1 Implementar `PolicySelector` em dry-run comparando acao recomendada vs acao aplicada.
+- [x] 3.1 Implementar `PolicySelector` em dry-run comparando acao recomendada vs acao aplicada.
 - [ ] 3.2 Adicionar verificador de anti-overfitting (ganho local nao pode violar budget em classes estaveis).
-- [ ] 3.3 Definir e validar contrato de perfis `strict`, `balanced`, `robust` (sem ativar mudancas agressivas ainda).
+- [x] 3.3 Definir e validar contrato de perfis `strict`, `balanced`, `robust` (sem ativar mudancas agressivas ainda).
 - [ ] 3.4 Gate B: recomendacoes de politica melhoram KPI de robustez em classes-alvo sem degradar classes estaveis alem do budget.
 
 ## 4. M2 - Policy Active (Balanced)
@@ -35,8 +35,8 @@
 - [ ] 6.4 Gate E: closed-loop suite completa verde + determinismo confirmado em repeticoes equivalentes.
 
 ## 7. API / Tooling / Benchmarks
-- [ ] 7.1 Expor configuracao de politica de convergencia nas bindings Python com validacao de ranges.
-- [ ] 7.2 Expor telemetria tipada de convergencia/fallback sem parsing textual.
+- [x] 7.1 Expor configuracao de politica de convergencia nas bindings Python com validacao de ranges.
+- [x] 7.2 Expor telemetria tipada de convergencia/fallback sem parsing textual.
 - [ ] 7.3 Atualizar benchmark runner, artefatos e CI para gates por fase e budgets versionados.
 - [ ] 7.4 Gate F: tooling/GUI consomem schema novo sem quebrar compatibilidade.
 

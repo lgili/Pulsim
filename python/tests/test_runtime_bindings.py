@@ -4292,6 +4292,8 @@ def test_fallback_trace_records_retry_reasons() -> None:
     opts.linear_solver.allow_fallback = False
     opts.linear_solver.auto_select = False
     opts.fallback_policy.trace_retries = True
+    opts.fallback_policy.convergence_profile = ps.ConvergenceProfile.Balanced
+    opts.fallback_policy.policy_dry_run = True
     opts.fallback_policy.enable_transient_gmin = True
     opts.fallback_policy.gmin_retry_threshold = 1
     opts.fallback_policy.gmin_initial = 1e-8
@@ -4310,6 +4312,12 @@ def test_fallback_trace_records_retry_reasons() -> None:
     )
     assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons
     assert result.backend_telemetry.classified_fallback_events == len(result.fallback_trace)
+    assert result.backend_telemetry.policy_dry_run_events == len(result.fallback_trace)
+    assert (
+        result.backend_telemetry.policy_recommendation_matches
+        + result.backend_telemetry.policy_recommendation_mismatches
+        == len(result.fallback_trace)
+    )
     assert result.backend_telemetry.last_failure_class in (
         ps.ConvergenceFailureClass.RetryBudgetExhausted,
         ps.ConvergenceFailureClass.LinearBreakdown,
@@ -4327,6 +4335,10 @@ def test_fallback_trace_records_retry_reasons() -> None:
     )
     assert any(
         entry.recovery_stage != ps.RecoveryStage.None_
+        for entry in result.fallback_trace
+    )
+    assert any(
+        entry.recommended_policy_action != ps.ConvergencePolicyAction.None_
         for entry in result.fallback_trace
     )
 

@@ -537,6 +537,11 @@ class ConvergencePolicyAction(Enum):
     GlobalRecovery = ...
     AbortStep = ...
 
+class ConvergenceProfile(Enum):
+    Strict = ...
+    Balanced = ...
+    Robust = ...
+
 class ThermalCouplingPolicy(Enum):
     LossOnly = ...
     LossWithTemperatureScaling = ...
@@ -558,6 +563,8 @@ class SimulationEvent:
 
 class FallbackPolicyOptions:
     trace_retries: bool
+    convergence_profile: ConvergenceProfile
+    policy_dry_run: bool
     enable_transient_gmin: bool
     gmin_retry_threshold: int
     gmin_initial: float
@@ -594,6 +601,10 @@ class BackendTelemetry:
     last_failure_class: ConvergenceFailureClass
     last_recovery_stage: RecoveryStage
     last_policy_action: ConvergencePolicyAction
+    policy_dry_run_events: int
+    policy_recommendation_matches: int
+    policy_recommendation_mismatches: int
+    last_recommended_policy_action: ConvergencePolicyAction
     failure_reason: str
 
     def __init__(self) -> None: ...
@@ -608,6 +619,8 @@ class FallbackTraceEntry:
     recovery_stage: RecoveryStage
     failure_class: ConvergenceFailureClass
     policy_action: ConvergencePolicyAction
+    recommended_policy_action: ConvergencePolicyAction
+    policy_action_matches_recommendation: bool
     action: str
 
     def __init__(self) -> None: ...

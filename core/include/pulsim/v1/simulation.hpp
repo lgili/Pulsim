@@ -246,6 +246,12 @@ enum class ConvergencePolicyAction {
     AbortStep
 };
 
+enum class ConvergenceProfile {
+    Strict,
+    Balanced,
+    Robust
+};
+
 struct FallbackTraceEntry {
     int step_index = 0;
     int retry_index = 0;
@@ -256,11 +262,15 @@ struct FallbackTraceEntry {
     RecoveryStage recovery_stage = RecoveryStage::None;
     ConvergenceFailureClass failure_class = ConvergenceFailureClass::Unknown;
     ConvergencePolicyAction policy_action = ConvergencePolicyAction::ObserveOnly;
+    ConvergencePolicyAction recommended_policy_action = ConvergencePolicyAction::None;
+    bool policy_action_matches_recommendation = true;
     std::string action;
 };
 
 struct FallbackPolicyOptions {
     bool trace_retries = true;
+    ConvergenceProfile convergence_profile = ConvergenceProfile::Balanced;
+    bool policy_dry_run = false;
     bool enable_transient_gmin = true;
     int gmin_retry_threshold = 2;
     Real gmin_initial = 1e-9;
@@ -326,6 +336,10 @@ struct BackendTelemetry {
     ConvergenceFailureClass last_failure_class = ConvergenceFailureClass::None;
     RecoveryStage last_recovery_stage = RecoveryStage::None;
     ConvergencePolicyAction last_policy_action = ConvergencePolicyAction::None;
+    int policy_dry_run_events = 0;
+    int policy_recommendation_matches = 0;
+    int policy_recommendation_mismatches = 0;
+    ConvergencePolicyAction last_recommended_policy_action = ConvergencePolicyAction::None;
     std::string failure_reason;
 };
 

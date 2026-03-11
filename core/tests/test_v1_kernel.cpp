@@ -2106,6 +2106,60 @@ TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fall
                       }));
 }
 
+TEST_CASE("v1 strict convergence profile blocks implicit switching global recovery",
+          "[v1][fallback][strict]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    PulseParams pulse;
+    pulse.v_initial = 0.0;
+    pulse.v_pulse = 5.0;
+    pulse.t_delay = 1e-6;
+    pulse.t_rise = 2e-7;
+    pulse.t_fall = 2e-7;
+    pulse.t_width = 2e-6;
+    pulse.period = 4e-6;
+    circuit.add_pulse_voltage_source("Vin", n_in, Circuit::ground(), pulse);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 4e-5;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-3;
+    opts.adaptive_timestep = true;
+    opts.enable_bdf_order_control = false;
+    opts.max_step_retries = 2;
+    opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.convergence_profile = ConvergenceProfile::Strict;
+    opts.fallback_policy.enable_transient_gmin = true;
+    opts.fallback_policy.gmin_retry_threshold = 1;
+    opts.fallback_policy.gmin_initial = 1e-8;
+    opts.fallback_policy.gmin_max = 1e-4;
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.fallback_order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = false;
+    opts.linear_solver.auto_select = false;
+    opts.linear_solver.iterative_config.max_iterations = 2;
+    opts.linear_solver.iterative_config.tolerance = 1e-16;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    auto result = sim.run_transient(x0);
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.backend_recovery_count == 0);
+    CHECK(std::none_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.action.find("global_recovery_") != std::string::npos;
+                       }));
+}
+
 TEST_CASE("v1 startup fallback recovers when DC operating point fails",
           "[v1][fallback][startup]") {
     auto build_circuit = []() {
@@ -2184,6 +2238,8 @@ TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback
     opts.enable_bdf_order_control = false;
     opts.max_step_retries = 3;
     opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
+    opts.fallback_policy.policy_dry_run = true;
     opts.fallback_policy.enable_transient_gmin = true;
     opts.fallback_policy.gmin_retry_threshold = 1;
     opts.fallback_policy.gmin_initial = 1e-8;
@@ -2210,6 +2266,16 @@ TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback
     CHECK((has_reason(FallbackReasonCode::TransientGminEscalation) ||
            has_reason(FallbackReasonCode::StiffnessBackoff)));
     CHECK(has_reason(FallbackReasonCode::MaxRetriesExceeded));
+    CHECK(result.backend_telemetry.policy_dry_run_events ==
+          static_cast<int>(result.fallback_trace.size()));
+    CHECK(result.backend_telemetry.policy_recommendation_matches +
+              result.backend_telemetry.policy_recommendation_mismatches ==
+          result.backend_telemetry.policy_dry_run_events);
+    CHECK(std::any_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                      [](const FallbackTraceEntry& entry) {
+                          return entry.recommended_policy_action !=
+                                 ConvergencePolicyAction::None;
+                      }));
 }
 
 TEST_CASE("v1 linear solver order honored", "[v1][solver][regression]") {

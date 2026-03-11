@@ -1085,6 +1085,55 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
     return ConvergenceFailureClass::Unknown;
 }
 
+[[nodiscard]] ConvergencePolicyAction recommend_policy_action(ConvergenceProfile profile,
+                                                              ConvergenceFailureClass failure_class,
+                                                              FallbackReasonCode reason) {
+    if (reason == FallbackReasonCode::MaxRetriesExceeded) {
+        return profile == ConvergenceProfile::Robust
+            ? ConvergencePolicyAction::HoldAdvance
+            : ConvergencePolicyAction::AbortStep;
+    }
+    if (reason == FallbackReasonCode::TransientGminEscalation) {
+        return ConvergencePolicyAction::TransientGminEscalation;
+    }
+    if (reason == FallbackReasonCode::EventSplit) {
+        return ConvergencePolicyAction::EventSplit;
+    }
+    if (reason == FallbackReasonCode::LTERejection) {
+        return ConvergencePolicyAction::DtBackoff;
+    }
+
+    switch (failure_class) {
+        case ConvergenceFailureClass::EventBurstZeroCross:
+            return profile == ConvergenceProfile::Strict
+                ? ConvergencePolicyAction::DtBackoff
+                : ConvergencePolicyAction::EventSplit;
+        case ConvergenceFailureClass::SwitchChattering:
+            return ConvergencePolicyAction::DtBackoff;
+        case ConvergenceFailureClass::NonlinearMagneticStiffness:
+            return ConvergencePolicyAction::Regularization;
+        case ConvergenceFailureClass::ControlDiscreteStiffness:
+            return ConvergencePolicyAction::StiffnessBackoff;
+        case ConvergenceFailureClass::LinearBreakdown:
+            return profile == ConvergenceProfile::Strict
+                ? ConvergencePolicyAction::AbortStep
+                : ConvergencePolicyAction::GlobalRecovery;
+        case ConvergenceFailureClass::NewtonGlobalizationFailure:
+            return profile == ConvergenceProfile::Strict
+                ? ConvergencePolicyAction::Regularization
+                : ConvergencePolicyAction::GlobalRecovery;
+        case ConvergenceFailureClass::RetryBudgetExhausted:
+            return profile == ConvergenceProfile::Robust
+                ? ConvergencePolicyAction::HoldAdvance
+                : ConvergencePolicyAction::AbortStep;
+        case ConvergenceFailureClass::None:
+            return ConvergencePolicyAction::ObserveOnly;
+        case ConvergenceFailureClass::Unknown:
+        default:
+            return ConvergencePolicyAction::ObserveOnly;
+    }
+}
+
 /**
  * @brief Appends one fallback/recovery trace entry for diagnostics.
  * @param result Simulation result accumulator.
@@ -1119,12 +1168,30 @@ void Simulator::record_fallback_event(SimulationResult& result,
     entry.recovery_stage = infer_recovery_stage(reason, action, recovery_stage);
     entry.policy_action = infer_policy_action(reason, action, entry.recovery_stage);
     entry.failure_class = infer_failure_class(reason, solver_status, action, entry.recovery_stage);
+    if (options_.fallback_policy.policy_dry_run) {
+        entry.recommended_policy_action =
+            recommend_policy_action(options_.fallback_policy.convergence_profile,
+                                    entry.failure_class,
+                                    reason);
+        entry.policy_action_matches_recommendation =
+            (entry.recommended_policy_action == entry.policy_action);
+    }
     entry.action = action;
     result.fallback_trace.push_back(std::move(entry));
     result.backend_telemetry.classified_fallback_events += 1;
     result.backend_telemetry.last_failure_class = result.fallback_trace.back().failure_class;
     result.backend_telemetry.last_recovery_stage = result.fallback_trace.back().recovery_stage;
     result.backend_telemetry.last_policy_action = result.fallback_trace.back().policy_action;
+    result.backend_telemetry.last_recommended_policy_action =
+        result.fallback_trace.back().recommended_policy_action;
+    if (options_.fallback_policy.policy_dry_run) {
+        result.backend_telemetry.policy_dry_run_events += 1;
+        if (result.fallback_trace.back().policy_action_matches_recommendation) {
+            result.backend_telemetry.policy_recommendation_matches += 1;
+        } else {
+            result.backend_telemetry.policy_recommendation_mismatches += 1;
+        }
+    }
 }
 
 /**
@@ -1415,8 +1482,11 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 },
                 device_variant);
         });
+    const bool strict_convergence_profile =
+        options_.fallback_policy.convergence_profile == ConvergenceProfile::Strict;
     const bool can_auto_recover =
-        options_.linear_solver.allow_fallback || switching_recovery_profile;
+        options_.linear_solver.allow_fallback ||
+        (!strict_convergence_profile && switching_recovery_profile);
     const int max_global_recovery_attempts =
         switching_recovery_profile ? (kMaxGlobalRecoveryAttempts + 1) : kMaxGlobalRecoveryAttempts;
 

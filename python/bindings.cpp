@@ -1228,6 +1228,13 @@ void init_v2_module(py::module_& v2) {
         .value("AbortStep", ConvergencePolicyAction::AbortStep)
         .export_values();
 
+    py::enum_<ConvergenceProfile>(v2, "ConvergenceProfile",
+        "Convergence policy profile contract")
+        .value("Strict", ConvergenceProfile::Strict)
+        .value("Balanced", ConvergenceProfile::Balanced)
+        .value("Robust", ConvergenceProfile::Robust)
+        .export_values();
+
     py::enum_<ThermalCouplingPolicy>(v2, "ThermalCouplingPolicy",
         "Electro-thermal coupling policy")
         .value("LossOnly", ThermalCouplingPolicy::LossOnly)
@@ -1350,6 +1357,8 @@ void init_v2_module(py::module_& v2) {
         "Convergence fallback policy options for stiff transients")
         .def(py::init<>())
         .def_readwrite("trace_retries", &FallbackPolicyOptions::trace_retries)
+        .def_readwrite("convergence_profile", &FallbackPolicyOptions::convergence_profile)
+        .def_readwrite("policy_dry_run", &FallbackPolicyOptions::policy_dry_run)
         .def_readwrite("enable_transient_gmin", &FallbackPolicyOptions::enable_transient_gmin)
         .def_readwrite("gmin_retry_threshold", &FallbackPolicyOptions::gmin_retry_threshold)
         .def_readwrite("gmin_initial", &FallbackPolicyOptions::gmin_initial)
@@ -1418,6 +1427,10 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("last_failure_class", &BackendTelemetry::last_failure_class)
         .def_readwrite("last_recovery_stage", &BackendTelemetry::last_recovery_stage)
         .def_readwrite("last_policy_action", &BackendTelemetry::last_policy_action)
+        .def_readwrite("policy_dry_run_events", &BackendTelemetry::policy_dry_run_events)
+        .def_readwrite("policy_recommendation_matches", &BackendTelemetry::policy_recommendation_matches)
+        .def_readwrite("policy_recommendation_mismatches", &BackendTelemetry::policy_recommendation_mismatches)
+        .def_readwrite("last_recommended_policy_action", &BackendTelemetry::last_recommended_policy_action)
         .def_readwrite("failure_reason", &BackendTelemetry::failure_reason);
 
     py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
@@ -1432,6 +1445,9 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("recovery_stage", &FallbackTraceEntry::recovery_stage)
         .def_readwrite("failure_class", &FallbackTraceEntry::failure_class)
         .def_readwrite("policy_action", &FallbackTraceEntry::policy_action)
+        .def_readwrite("recommended_policy_action", &FallbackTraceEntry::recommended_policy_action)
+        .def_readwrite("policy_action_matches_recommendation",
+                       &FallbackTraceEntry::policy_action_matches_recommendation)
         .def_readwrite("action", &FallbackTraceEntry::action);
 
     py::class_<ThermalCouplingOptions>(v2, "ThermalCouplingOptions",
