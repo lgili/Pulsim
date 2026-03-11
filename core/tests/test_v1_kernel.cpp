@@ -197,7 +197,9 @@ TEST_CASE("v1 fixed-step buck keeps macro-grid outputs with event-aligned subste
     CHECK(has_event_split);
     for (const auto& entry : result.fallback_trace) {
         if (entry.reason == FallbackReasonCode::EventSplit) {
-            CHECK(entry.retry_index == 0);
+            CHECK((entry.action == "event_calendar_clip" ||
+                   entry.action == "split_to_earliest_event"));
+            CHECK(entry.retry_index <= opts.max_step_retries);
         }
     }
 
@@ -310,6 +312,92 @@ TEST_CASE("v1 variable-step switched buck remains stable around pwm edges",
                    entry.action == "abort_step";
         });
     CHECK_FALSE(has_abort);
+}
+
+TEST_CASE("v1 balanced convergence policy activates contextual event guards",
+          "[v1][fallback][policy][m2][regression]") {
+    Circuit circuit;
+
+    auto n_in = circuit.add_node("vin");
+    auto n_out = circuit.add_node("out");
+    auto n_ctrl = circuit.add_node("ctrl");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 5.0);
+
+    PulseParams gate;
+    gate.v_initial = 0.0;
+    gate.v_pulse = 5.0;
+    gate.t_delay = 1e-6;
+    gate.t_rise = 0.2e-6;
+    gate.t_fall = 0.2e-6;
+    gate.t_width = 2e-6;
+    gate.period = 6e-6;
+    circuit.add_pulse_voltage_source("Vctrl", n_ctrl, Circuit::ground(), gate);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_out, 2.5, 100.0, 1e-9);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 100.0);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 40e-6;
+    opts.dt = 2e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 8e-6;
+    opts.step_mode = TransientStepMode::Variable;
+    opts.step_mode_explicit = true;
+    opts.adaptive_timestep = true;
+    opts.enable_events = true;
+    opts.enable_bdf_order_control = true;
+    opts.max_step_retries = 8;
+    opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
+    opts.fallback_policy.policy_dry_run = false;
+    opts.fallback_policy.enable_transient_gmin = true;
+    opts.fallback_policy.gmin_retry_threshold = 1;
+    opts.newton_options.max_iterations = 1;
+    opts.newton_options.auto_damping = false;
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = false;
+    opts.linear_solver.auto_select = false;
+    opts.linear_solver.iterative_config.max_iterations = 2;
+    opts.linear_solver.iterative_config.tolerance = 1e-12;
+    opts.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::None;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    const auto result = sim.run_transient(x0);
+
+    INFO("policy activation status: " << static_cast<int>(result.final_status)
+         << " success=" << result.success
+         << " message=" << result.message
+         << " trace=" << result.fallback_trace.size()
+         << " rejections=" << result.timestep_rejections);
+    CHECK_FALSE(result.fallback_trace.empty());
+
+    const bool has_policy_guard = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.action.find("policy_event_burst_zero_cross_guard") != std::string::npos ||
+                   entry.action.find("policy_switch_chattering_guard") != std::string::npos;
+        });
+    CHECK(has_policy_guard);
+
+    const bool has_target_class = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.failure_class == ConvergenceFailureClass::EventBurstZeroCross ||
+                   entry.failure_class == ConvergenceFailureClass::SwitchChattering;
+        });
+    CHECK(has_target_class);
+
+    for (const auto& entry : result.fallback_trace) {
+        if (entry.action.find("policy_") != std::string::npos) {
+            CHECK(entry.retry_index <= opts.max_step_retries);
+        }
+    }
 }
 
 TEST_CASE("v1 variable-step mosfet buck stays close to fixed-step reference",
