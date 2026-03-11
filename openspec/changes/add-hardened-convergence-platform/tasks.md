@@ -14,7 +14,7 @@
 - [x] 3.1 Implementar `PolicySelector` em dry-run comparando acao recomendada vs acao aplicada.
 - [x] 3.2 Adicionar verificador de anti-overfitting (ganho local nao pode violar budget em classes estaveis).
 - [x] 3.3 Definir e validar contrato de perfis `strict`, `balanced`, `robust` (sem ativar mudancas agressivas ainda).
-- [ ] 3.4 Gate B: recomendacoes de politica melhoram KPI de robustez em classes-alvo sem degradar classes estaveis alem do budget.
+- [x] 3.4 Gate B: recomendacoes de politica melhoram KPI de robustez em classes-alvo sem degradar classes estaveis alem do budget.
 
 ## 4. M2 - Policy Active (Balanced)
 - [ ] 4.1 Ativar politicas contextuais para `event_burst_zero_cross` e `switch_chattering` com guardas bounded.

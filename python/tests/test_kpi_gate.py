@@ -593,6 +593,75 @@ def test_compute_metrics_includes_convergence_class_matrix_kpis(tmp_path: Path) 
     assert metrics["policy_stable_anti_overfit_violation_rate"] == 0.0
 
 
+def test_compute_policy_guard_rates_default_to_zero_without_policy_events(
+    tmp_path: Path,
+) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.20,
+                "telemetry": {
+                    "policy_dry_run_events": 0.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                    "classified_fallback_events": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "diode_rectifier",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "policy_dry_run_events": 0.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                    "classified_fallback_events": 0.0,
+                },
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {
+                "cases": [
+                    {"benchmark_id": "buck_switching", "scenarios": ["direct_trap"]},
+                ]
+            },
+            "diode_heavy": {
+                "cases": [
+                    {"benchmark_id": "diode_rectifier", "scenarios": ["direct_trap"]},
+                ]
+            },
+        },
+    }
+    bench_path = tmp_path / "bench.json"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    _write_json(bench_path, bench_results)
+    _write_yaml(class_matrix_path, class_matrix)
+
+    metrics = kpi_gate.compute_metrics(
+        bench_results_path=bench_path,
+        class_matrix_path=class_matrix_path,
+    )
+
+    assert metrics["policy_target_pass_rate"] == 1.0
+    assert metrics["policy_target_match_rate"] is None
+    assert metrics["policy_target_mismatch_rate"] == 0.0
+    assert metrics["policy_stable_pass_rate"] == 1.0
+    assert metrics["policy_stable_mismatch_rate"] == 0.0
+    assert metrics["policy_stable_anti_overfit_violation_rate"] == 0.0
+
+
 def test_compute_metrics_includes_ac_sweep_accuracy_and_runtime_metrics(tmp_path: Path) -> None:
     bench_results = {
         "results": [
@@ -1193,6 +1262,139 @@ def test_run_gate_phase_budget_requires_path_and_key(tmp_path: Path) -> None:
             phase_budget_path=tmp_path / "missing.yaml",
             phase_budget_key=None,
         )
+
+
+def test_gate_b_phase_budget_blocks_cross_class_regression(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.20,
+                "telemetry": {
+                    "policy_dry_run_events": 4.0,
+                    "policy_recommendation_matches": 1.0,
+                    "policy_recommendation_mismatches": 3.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                    "classified_fallback_events": 2.0,
+                },
+            },
+            {
+                "benchmark_id": "diode_rectifier",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "policy_dry_run_events": 2.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 2.0,
+                    "anti_overfit_violations": 1.0,
+                    "anti_overfit_budget_exceeded": 1.0,
+                    "classified_fallback_events": 1.0,
+                },
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {
+                "cases": [
+                    {"benchmark_id": "buck_switching", "scenarios": ["direct_trap"]},
+                ]
+            },
+            "diode_heavy": {
+                "cases": [
+                    {"benchmark_id": "diode_rectifier", "scenarios": ["direct_trap"]},
+                ]
+            },
+        },
+    }
+    baseline_metrics = {
+        "policy_target_pass_rate": 1.0,
+        "policy_target_match_rate": 0.9,
+        "policy_target_mismatch_rate": 0.1,
+        "policy_stable_pass_rate": 1.0,
+        "policy_stable_mismatch_rate": 0.0,
+        "policy_stable_anti_overfit_violation_rate": 0.0,
+    }
+    thresholds = {"metrics": {}}
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {
+            "gate_b": {
+                "metrics": {
+                    "policy_target_pass_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_target_match_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_target_mismatch_rate": {
+                        "direction": "lower_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_stable_pass_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_stable_mismatch_rate": {
+                        "direction": "lower_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_stable_anti_overfit_violation_rate": {
+                        "direction": "lower_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                }
+            }
+        },
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_b_regression",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_b",
+    )
+
+    assert report["overall_status"] == "failed"
+    assert report["failed_required_metrics"] >= 1
+    assert report["comparisons"]["policy_stable_mismatch_rate"]["status"] == "failed"
+    assert report["comparisons"]["policy_stable_anti_overfit_violation_rate"]["status"] == "failed"
 
 
 def test_compare_metric_uses_epsilon_guard_for_near_zero_baseline() -> None:

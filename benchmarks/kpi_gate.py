@@ -896,7 +896,7 @@ def compute_metrics(
                 metrics["policy_target_mismatch_rate"] = target_mismatches / target_events
             else:
                 metrics["policy_target_match_rate"] = None
-                metrics["policy_target_mismatch_rate"] = None
+                metrics["policy_target_mismatch_rate"] = 0.0
         else:
             metrics["policy_target_pass_rate"] = None
             metrics["policy_target_match_rate"] = None
@@ -918,8 +918,8 @@ def compute_metrics(
                     stable_violations / stable_events
                 )
             else:
-                metrics["policy_stable_mismatch_rate"] = None
-                metrics["policy_stable_anti_overfit_violation_rate"] = None
+                metrics["policy_stable_mismatch_rate"] = 0.0
+                metrics["policy_stable_anti_overfit_violation_rate"] = 0.0
         else:
             metrics["policy_stable_pass_rate"] = None
             metrics["policy_stable_mismatch_rate"] = None

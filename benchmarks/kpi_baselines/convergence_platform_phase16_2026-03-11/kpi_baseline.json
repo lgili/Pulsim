@@ -1,6 +1,6 @@
 {
   "baseline_id": "convergence_platform_phase16_2026-03-11",
-  "captured_at_utc": "2026-03-11T12:49:01.599743+00:00",
+  "captured_at_utc": "2026-03-11T12:53:16.047629+00:00",
   "environment": {
     "cc": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
     "cmake": "cmake version 4.2.3",
@@ -77,11 +77,11 @@
     "module_output_reallocation_p95": 0.0,
     "parity_rms_error_ltspice": null,
     "parity_rms_error_ngspice": null,
-    "policy_stable_anti_overfit_violation_rate": null,
-    "policy_stable_mismatch_rate": null,
+    "policy_stable_anti_overfit_violation_rate": 0.0,
+    "policy_stable_mismatch_rate": 0.0,
     "policy_stable_pass_rate": 1.0,
     "policy_target_match_rate": null,
-    "policy_target_mismatch_rate": null,
+    "policy_target_mismatch_rate": 0.0,
     "policy_target_pass_rate": 1.0,
     "runtime_p50": 0.007933457993203774,
     "runtime_p95": 0.23596052051289007,

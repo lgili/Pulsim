@@ -142,6 +142,8 @@ coverage, pass rate, runtime p95, timestep rejections p95, Newton iterations p95
 and typed convergence schema coverage per class.
 When `--phase-budget` and `--phase-key` are provided, the gate merges
 the selected phase budget with the threshold policy before evaluating regressions.
+Current `gate_b` phase budget enforces required non-regression for
+target-class policy quality and stable-class anti-overfit guards.
 
 `local_limit_suite.py` is intended for PC-local stress discovery and reports
 exact failure reasons per circuit/scenario. It always supports:

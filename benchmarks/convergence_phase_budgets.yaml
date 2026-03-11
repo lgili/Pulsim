@@ -82,28 +82,28 @@ phases:
         required: false
       policy_target_pass_rate:
         direction: higher_is_better
-        max_regression_abs: 0.02
-        required: false
+        max_regression_abs: 0.0
+        required: true
       policy_target_match_rate:
         direction: higher_is_better
-        max_regression_abs: 0.02
+        max_regression_abs: 0.0
         required: false
       policy_target_mismatch_rate:
         direction: lower_is_better
-        max_regression_abs: 0.02
-        required: false
+        max_regression_abs: 0.0
+        required: true
       policy_stable_pass_rate:
         direction: higher_is_better
-        max_regression_abs: 0.01
-        required: false
+        max_regression_abs: 0.0
+        required: true
       policy_stable_mismatch_rate:
         direction: lower_is_better
-        max_regression_abs: 0.01
-        required: false
+        max_regression_abs: 0.0
+        required: true
       policy_stable_anti_overfit_violation_rate:
         direction: lower_is_better
-        max_regression_abs: 0.01
-        required: false
+        max_regression_abs: 0.0
+        required: true
 
   gate_c:
     description: Active balanced policy budget (robustness gains with bounded p95 impact).
