@@ -158,6 +158,11 @@ drop significance check (or strict non-regression when baseline failures are zer
 Current `gate_d` phase budget enforces closed-loop no-regression for control suites:
 `class_closed_loop_control_coverage_rate` and `class_closed_loop_control_pass_rate`
 are both required with zero regression tolerance.
+Current `gate_e` extends the closed-loop contract with typed-schema repeatability
+requirements: `class_closed_loop_control_coverage_rate`,
+`class_closed_loop_control_pass_rate`, and
+`class_closed_loop_control_typed_schema_coverage_rate`
+are required with zero regression tolerance.
 
 `local_limit_suite.py` is intended for PC-local stress discovery and reports
 exact failure reasons per circuit/scenario. It always supports:

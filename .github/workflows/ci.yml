@@ -472,6 +472,18 @@ jobs:
             --report-out benchmarks/out_ci/kpi_gate_convergence_platform_gate_d_report.json \
             --print-report
 
+      - name: Enforce convergence-platform closed-loop Gate E
+        run: |
+          python3 benchmarks/kpi_gate.py \
+            --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
+            --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
+            --bench-results benchmarks/out_ci/results.json \
+            --class-matrix benchmarks/convergence_class_matrix.yaml \
+            --phase-budget benchmarks/convergence_phase_budgets.yaml \
+            --phase-key gate_e \
+            --report-out benchmarks/out_ci/kpi_gate_convergence_platform_gate_e_report.json \
+            --print-report
+
       - name: Enforce magnetic-core KPI regression gate
         run: |
           python3 benchmarks/kpi_gate.py \

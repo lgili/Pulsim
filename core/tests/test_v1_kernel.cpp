@@ -1150,6 +1150,94 @@ TEST_CASE("v1 disconnected C_BLOCK does not perturb dynamic PI buck convergence"
     CHECK(std::abs(vout_with_ghost.back() - vout_baseline.back()) < 0.5);
 }
 
+TEST_CASE("v1 closed-loop PI and C_BLOCK suites remain stable and repeatable",
+          "[v1][mixed-domain][control][closed-loop][stability][repeatability]") {
+    const auto assert_stable = [](const SimulationResult& result,
+                                  const std::string& output_channel,
+                                  Real vout_abs_max,
+                                  Real tail_ripple_max) {
+        REQUIRE(result.success);
+        REQUIRE(result.virtual_channels.contains(output_channel));
+        const auto& vout = result.virtual_channels.at(output_channel);
+        REQUIRE(vout.size() >= 20);
+        REQUIRE(std::all_of(vout.begin(), vout.end(), [](Real value) { return std::isfinite(value); }));
+        const Real max_abs = std::accumulate(
+            vout.begin(),
+            vout.end(),
+            Real{0.0},
+            [](Real current_max, Real value) {
+                return std::max(current_max, std::abs(value));
+            });
+        CHECK(max_abs < vout_abs_max);
+
+        const std::size_t tail_count = std::max<std::size_t>(5, vout.size() / 5);
+        const auto tail_begin = vout.end() - static_cast<std::ptrdiff_t>(tail_count);
+        const auto [tail_min_it, tail_max_it] = std::minmax_element(tail_begin, vout.end());
+        const Real tail_ripple = *tail_max_it - *tail_min_it;
+        CHECK(tail_ripple < tail_ripple_max);
+    };
+
+    const auto assert_repeatable = [](const SimulationResult& run_a,
+                                      const SimulationResult& run_b,
+                                      const std::string& output_channel) {
+        REQUIRE(run_a.success);
+        REQUIRE(run_b.success);
+        REQUIRE(run_a.total_steps == run_b.total_steps);
+        REQUIRE(run_a.timestep_rejections == run_b.timestep_rejections);
+        REQUIRE(run_a.time.size() == run_b.time.size());
+        REQUIRE(run_a.virtual_channels.contains(output_channel));
+        REQUIRE(run_b.virtual_channels.contains(output_channel));
+
+        const auto& vout_a = run_a.virtual_channels.at(output_channel);
+        const auto& vout_b = run_b.virtual_channels.at(output_channel);
+        REQUIRE(vout_a.size() == vout_b.size());
+        REQUIRE_FALSE(vout_a.empty());
+        CHECK(vout_a.back() == Approx(vout_b.back()).margin(1e-12));
+
+        const std::size_t compare_tail = std::min<std::size_t>(10, vout_a.size());
+        for (std::size_t i = 0; i < compare_tail; ++i) {
+            const std::size_t idx = vout_a.size() - 1 - i;
+            CHECK(vout_a[idx] == Approx(vout_b[idx]).margin(1e-12));
+            CHECK(run_a.time[idx] == Approx(run_b.time[idx]).margin(1e-15));
+        }
+    };
+
+    auto run_dynamic_pi = []() {
+        Circuit circuit = build_closed_loop_buck_with_dynamic_pi(false, true);
+        SimulationOptions opts = closed_loop_buck_regression_options(circuit);
+        opts.tstop = 0.7e-3;
+        return Simulator(circuit, opts).run_transient(circuit.initial_state());
+    };
+
+    auto run_cblock_closed_loop = []() {
+        Circuit circuit = build_closed_loop_buck_for_control_regression(true, false, true);
+        SimulationOptions opts = closed_loop_buck_regression_options(circuit);
+        opts.tstop = 0.7e-3;
+        return Simulator(circuit, opts).run_transient(circuit.initial_state());
+    };
+
+    const auto pi_run_a = run_dynamic_pi();
+    const auto pi_run_b = run_dynamic_pi();
+    assert_stable(pi_run_a, "Xout", 50.0, 5.0);
+    assert_stable(pi_run_b, "Xout", 50.0, 5.0);
+    assert_repeatable(pi_run_a, pi_run_b, "Xout");
+
+    const auto cb_run_a = run_cblock_closed_loop();
+    const auto cb_run_b = run_cblock_closed_loop();
+    assert_stable(cb_run_a, "Xout", 50.0, 5.0);
+    assert_stable(cb_run_b, "Xout", 50.0, 5.0);
+    assert_repeatable(cb_run_a, cb_run_b, "Xout");
+
+    REQUIRE(cb_run_a.virtual_channels.contains("CB1"));
+    REQUIRE(cb_run_b.virtual_channels.contains("CB1"));
+    const auto& duty_a = cb_run_a.virtual_channels.at("CB1");
+    const auto& duty_b = cb_run_b.virtual_channels.at("CB1");
+    REQUIRE_FALSE(duty_a.empty());
+    REQUIRE(duty_a.size() == duty_b.size());
+    CHECK(duty_a.back() == Approx(0.5).margin(1e-12));
+    CHECK(duty_b.back() == Approx(0.5).margin(1e-12));
+}
+
 TEST_CASE("v1 control scheduler updates c_block channels",
           "[v1][mixed-domain][control][c_block][regression]") {
     Circuit circuit;

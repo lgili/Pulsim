@@ -31,8 +31,8 @@
 ## 6. M4 - Control Robustness and Multirate Contract
 - [x] 6.1 Definir semantica multirate explicita entre controle discreto e solver eletrico (global/per-block sample time).
 - [x] 6.2 Adicionar diagnostico tipado para eventos de rigidez de controle e risco de loop algebraico.
-- [ ] 6.3 Validar suite fechada PI/C-Block com criterios de estabilidade e repetibilidade.
-- [ ] 6.4 Gate E: closed-loop suite completa verde + determinismo confirmado em repeticoes equivalentes.
+- [x] 6.3 Validar suite fechada PI/C-Block com criterios de estabilidade e repetibilidade.
+- [x] 6.4 Gate E: closed-loop suite completa verde + determinismo confirmado em repeticoes equivalentes.
 
 ## 7. API / Tooling / Benchmarks
 - [x] 7.1 Expor configuracao de politica de convergencia nas bindings Python com validacao de ranges.
