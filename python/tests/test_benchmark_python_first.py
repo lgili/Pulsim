@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -235,6 +236,79 @@ def test_run_benchmarks_uses_python_backend_without_cli(tmp_path: Path) -> None:
     assert result.telemetry.get("runtime_module_count", 0.0) >= 5.0
     assert result.telemetry.get("runtime_module_count_match") == 1.0
     assert result.telemetry.get("output_reallocation_total", 0.0) >= 0.0
+
+
+def test_transient_telemetry_exports_convergence_policy_schema_fields() -> None:
+    result = SimpleNamespace(
+        newton_iterations_total=9,
+        timestep_rejections=1,
+        total_time_seconds=2.5e-4,
+        total_steps=12,
+        time=[0.0, 1.0e-6],
+        backend_telemetry=SimpleNamespace(
+            classified_fallback_events=7,
+            policy_dry_run_events=5,
+            policy_recommendation_matches=4,
+            policy_recommendation_mismatches=1,
+            anti_overfit_violations=2,
+            anti_overfit_budget_exceeded=True,
+        ),
+    )
+
+    telemetry = backend._transient_telemetry(result, runtime_s=3.0e-4)
+
+    assert telemetry["classified_fallback_events"] == 7.0
+    assert telemetry["policy_dry_run_events"] == 5.0
+    assert telemetry["policy_recommendation_matches"] == 4.0
+    assert telemetry["policy_recommendation_mismatches"] == 1.0
+    assert telemetry["anti_overfit_violations"] == 2.0
+    assert telemetry["anti_overfit_budget_exceeded"] == 1.0
+
+
+def test_run_benchmarks_backfills_convergence_policy_fields_for_legacy_backend(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _write_rc_netlist(
+        tmp_path,
+        benchmark_block={
+            "id": "legacy_telemetry_backfill",
+            "validation": {"type": "none"},
+        },
+    )
+    manifest_path = _write_manifest(tmp_path, "circuit.yaml")
+
+    def fake_run_pulsim(
+        netlist_path: Path,
+        output_path: Path,
+        preferred_mode: str | None = None,
+        use_initial_conditions: bool = False,
+    ) -> br.PulsimRunResult:
+        del netlist_path, preferred_mode, use_initial_conditions
+        output_path.write_text("time,V(in),V(out)\n0.0,5.0,0.0\n1.0e-6,5.0,0.1\n", encoding="utf-8")
+        return br.PulsimRunResult(
+            runtime_s=2.0e-4,
+            steps=2,
+            mode="transient",
+            telemetry={"newton_iterations": 3.0},
+        )
+
+    monkeypatch.setattr(br, "run_pulsim", fake_run_pulsim)
+
+    results = br.run_benchmarks(manifest_path, tmp_path / "out")
+
+    assert len(results) == 1
+    row = results[0]
+    assert row.status == "passed"
+    for key in (
+        "classified_fallback_events",
+        "policy_dry_run_events",
+        "policy_recommendation_matches",
+        "policy_recommendation_mismatches",
+        "anti_overfit_violations",
+        "anti_overfit_budget_exceeded",
+    ):
+        assert row.telemetry.get(key) == 0.0
 
 
 def test_reference_validation_missing_baseline_is_failed_not_skipped(

@@ -38,7 +38,7 @@
 - [x] 7.1 Expor configuracao de politica de convergencia nas bindings Python com validacao de ranges.
 - [x] 7.2 Expor telemetria tipada de convergencia/fallback sem parsing textual.
 - [x] 7.3 Atualizar benchmark runner, artefatos e CI para gates por fase e budgets versionados.
-- [ ] 7.4 Gate F: tooling/GUI consomem schema novo sem quebrar compatibilidade.
+- [x] 7.4 Gate F: tooling/GUI consomem schema novo sem quebrar compatibilidade.
 
 ## 8. Documentation and Reference Corpus
 - [ ] 8.1 Publicar `Convergence Playbook` com matriz de triagem por classe de falha.
