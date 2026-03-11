@@ -20,6 +20,7 @@ This folder contains the YAML benchmark suite and validation runners.
   with environment fingerprint and artifact hashes for provenance-safe gating.
 - `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
 - `kpi_thresholds_convergence_platform.yaml` — optional policy-gate thresholds for convergence dry-run KPIs.
+- `convergence_phase_budgets.yaml` — versioned per-phase (Gate A..F/ADV) functional/performance budget contract.
 - `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
 - `kpi_thresholds_averaged.yaml` — required KPI thresholds for averaged-mode paired gate.
 - `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
@@ -50,19 +51,22 @@ python3 benchmarks/kpi_gate.py \
 
 # Convergence-platform KPI gate (M1 policy dry-run)
 python3 benchmarks/kpi_gate.py \
-  --baseline benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json \
+  --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
   --bench-results benchmarks/out/results.json \
   --class-matrix benchmarks/convergence_class_matrix.yaml \
+  --phase-budget benchmarks/convergence_phase_budgets.yaml \
+  --phase-key gate_b \
   --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
   --report-out benchmarks/out/kpi_gate_convergence_platform_report.json \
   --print-report
 
 # Freeze a new baseline snapshot from a validated run
 python3 benchmarks/freeze_kpi_baseline.py \
-  --baseline-id modular_runtime_phase13_2026-03-07 \
-  --bench-results benchmarks/out/results.json \
-  --stress-summary benchmarks/stress_out/stress_summary.json \
-  --source-artifacts-root benchmarks/out
+  --baseline-id convergence_platform_phase16_2026-03-11 \
+  --bench-results benchmarks/phase16_artifacts/benchmarks/results.json \
+  --stress-summary benchmarks/phase16_artifacts/stress/stress_summary.json \
+  --class-matrix benchmarks/convergence_class_matrix.yaml \
+  --source-artifacts-root benchmarks/phase16_artifacts
 
 # Electrothermal focused matrix + stress
 python3 benchmarks/benchmark_runner.py \
@@ -133,6 +137,8 @@ Runtime latency KPIs (`runtime_p50`, `runtime_p95`) are auto-skipped when
 When `--class-matrix` is provided, `kpi_gate.py` also emits per-class KPIs:
 coverage, pass rate, runtime p95, timestep rejections p95, Newton iterations p95,
 and typed convergence schema coverage per class.
+When `--phase-budget` and `--phase-key` are provided, the gate merges
+the selected phase budget with the threshold policy before evaluating regressions.
 
 `local_limit_suite.py` is intended for PC-local stress discovery and reports
 exact failure reasons per circuit/scenario. It always supports:

@@ -47,6 +47,45 @@ def _load_thresholds(path: Path) -> Dict[str, Any]:
         return yaml.safe_load(handle)
 
 
+def _load_phase_budget_metrics(
+    phase_budget_path: Optional[Path],
+    phase_budget_key: Optional[str],
+) -> Dict[str, Dict[str, Any]]:
+    if phase_budget_path is None and phase_budget_key is None:
+        return {}
+    if phase_budget_path is None or phase_budget_key is None:
+        raise RuntimeError("phase budget requires both --phase-budget and --phase-key")
+    if not phase_budget_path.is_file():
+        raise FileNotFoundError(f"phase budget file not found: {phase_budget_path}")
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to load phase budget YAML files")
+
+    with open(phase_budget_path, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle) or {}
+    phases = payload.get("phases")
+    if not isinstance(phases, dict):
+        raise RuntimeError("phase budget file must define a 'phases' object")
+
+    phase_entry = phases.get(phase_budget_key)
+    if not isinstance(phase_entry, dict):
+        raise RuntimeError(f"phase budget key not found: {phase_budget_key}")
+
+    metrics = phase_entry.get("metrics")
+    if not isinstance(metrics, dict):
+        raise RuntimeError(
+            f"phase budget '{phase_budget_key}' must define a 'metrics' mapping"
+        )
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for metric_name, rules in metrics.items():
+        if not isinstance(metric_name, str) or not metric_name.strip():
+            continue
+        if not isinstance(rules, dict):
+            continue
+        out[metric_name.strip()] = dict(rules)
+    return out
+
+
 def _sanitize_metric_slug(label: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
     return slug or "unknown"
@@ -1113,9 +1152,24 @@ def run_gate(
     stress_summary_path: Optional[Path],
     strict_provenance: bool = True,
     class_matrix_path: Optional[Path] = None,
+    phase_budget_path: Optional[Path] = None,
+    phase_budget_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     baseline_payload = _load_json(baseline_path)
     threshold_payload = _load_thresholds(thresholds_path)
+    phase_budget_metrics = _load_phase_budget_metrics(
+        phase_budget_path=phase_budget_path,
+        phase_budget_key=phase_budget_key,
+    )
+    if phase_budget_metrics:
+        merged_threshold_payload = dict(threshold_payload)
+        current_metrics = threshold_payload.get("metrics", {})
+        if not isinstance(current_metrics, dict):
+            current_metrics = {}
+        merged_metrics = dict(current_metrics)
+        merged_metrics.update(phase_budget_metrics)
+        merged_threshold_payload["metrics"] = merged_metrics
+        threshold_payload = merged_threshold_payload
     baseline_provenance = validate_baseline_provenance(
         baseline_payload=baseline_payload,
         baseline_path=baseline_path,
@@ -1239,6 +1293,8 @@ def run_gate(
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
         "baseline_id": baseline_payload.get("baseline_id"),
         "class_matrix_path": str(class_matrix_path) if class_matrix_path is not None else None,
+        "phase_budget_path": str(phase_budget_path) if phase_budget_path is not None else None,
+        "phase_budget_key": phase_budget_key,
         "overall_status": overall_status,
         "failed_required_metrics": failed_required,
         "skipped_optional_metrics": skipped_optional,
@@ -1281,6 +1337,15 @@ def main() -> int:
         type=Path,
         help="Optional convergence class matrix YAML for per-class KPI derivation",
     )
+    parser.add_argument(
+        "--phase-budget",
+        type=Path,
+        help="Optional phase budget YAML with additional KPI threshold rules",
+    )
+    parser.add_argument(
+        "--phase-key",
+        help="Phase key in --phase-budget (for example: gate_a, gate_b, gate_c)",
+    )
     parser.add_argument("--report-out", type=Path)
     parser.add_argument("--print-report", action="store_true")
     parser.add_argument(
@@ -1299,6 +1364,8 @@ def main() -> int:
         stress_summary_path=args.stress_summary,
         strict_provenance=not args.no_strict_provenance,
         class_matrix_path=args.class_matrix,
+        phase_budget_path=args.phase_budget,
+        phase_budget_key=args.phase_key,
     )
 
     if args.report_out is not None:

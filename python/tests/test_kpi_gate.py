@@ -8,6 +8,7 @@ import math
 import platform
 from pathlib import Path
 
+import pytest
 import yaml
 
 import kpi_gate
@@ -1088,6 +1089,104 @@ def test_kpi_gate_skips_runtime_metrics_on_machine_class_mismatch(tmp_path: Path
     assert report["overall_status"] == "passed"
     assert report["comparisons"]["runtime_p95"]["status"] == "skipped"
     assert "machine_class mismatch" in report["comparisons"]["runtime_p95"]["message"]
+
+
+def test_run_gate_merges_phase_budget_metrics(tmp_path: Path) -> None:
+    bench_results = {"results": [{"status": "passed", "runtime_s": 0.30}]}
+    baseline_metrics = {"runtime_p95": 0.20}
+    thresholds = {
+        "metrics": {
+            "runtime_p95": {
+                "direction": "lower_is_better",
+                "max_regression_rel": 1.0,
+                "required": False,
+            },
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {
+            "gate_b": {
+                "metrics": {
+                    "runtime_p95": {
+                        "direction": "lower_is_better",
+                        "max_regression_rel": 0.05,
+                        "required": True,
+                    },
+                }
+            }
+        },
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_budget_test",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report_without_budget = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+    assert report_without_budget["overall_status"] == "passed"
+
+    report_with_budget = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_b",
+    )
+    assert report_with_budget["overall_status"] == "failed"
+    assert report_with_budget["phase_budget_key"] == "gate_b"
+    assert report_with_budget["phase_budget_path"] == str(phase_budget_path)
+    assert report_with_budget["comparisons"]["runtime_p95"]["required"] is True
+
+
+def test_run_gate_phase_budget_requires_path_and_key(tmp_path: Path) -> None:
+    bench_results = {"results": [{"status": "passed", "runtime_s": 0.10}]}
+    baseline_metrics = {"runtime_p95": 0.20}
+    thresholds = {"metrics": {}}
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_budget_missing_key",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    with pytest.raises(RuntimeError, match="phase budget requires both"):
+        kpi_gate.run_gate(
+            baseline_path=baseline_path,
+            thresholds_path=thresholds_path,
+            bench_results_path=bench_path,
+            parity_ltspice_results_path=None,
+            parity_ngspice_results_path=None,
+            stress_summary_path=None,
+            phase_budget_path=tmp_path / "missing.yaml",
+            phase_budget_key=None,
+        )
 
 
 def test_compare_metric_uses_epsilon_guard_for_near_zero_baseline() -> None:

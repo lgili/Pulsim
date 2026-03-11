@@ -421,10 +421,12 @@ jobs:
       - name: Enforce convergence-platform KPI regression gate
         run: |
           python3 benchmarks/kpi_gate.py \
-            --baseline benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json \
+            --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
             --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
             --bench-results benchmarks/out_ci/results.json \
             --class-matrix benchmarks/convergence_class_matrix.yaml \
+            --phase-budget benchmarks/convergence_phase_budgets.yaml \
+            --phase-key gate_b \
             --report-out benchmarks/out_ci/kpi_gate_convergence_platform_report.json \
             --print-report
 

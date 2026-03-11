@@ -105,6 +105,7 @@ def freeze_baseline(
     stress_summary_path: Optional[Path],
     parity_ltspice_results_path: Optional[Path],
     parity_ngspice_results_path: Optional[Path],
+    class_matrix_path: Optional[Path],
     source_artifacts_root: Optional[Path],
     machine_class_override: Optional[str],
     cxx_flags_override: Optional[str],
@@ -123,6 +124,9 @@ def freeze_baseline(
         if parity_ngspice_results_path is not None
         else None
     )
+    class_matrix = (
+        class_matrix_path.resolve() if class_matrix_path is not None else None
+    )
 
     if not bench_results.is_file():
         raise FileNotFoundError(f"bench results not found: {bench_results}")
@@ -132,6 +136,8 @@ def freeze_baseline(
         raise FileNotFoundError(f"LTspice parity results not found: {parity_ltspice}")
     if parity_ngspice is not None and not parity_ngspice.is_file():
         raise FileNotFoundError(f"ngspice parity results not found: {parity_ngspice}")
+    if class_matrix is not None and not class_matrix.is_file():
+        raise FileNotFoundError(f"class matrix not found: {class_matrix}")
 
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -147,6 +153,7 @@ def freeze_baseline(
         parity_ltspice_results_path=parity_ltspice,
         parity_ngspice_results_path=parity_ngspice,
         stress_summary_path=stress_summary,
+        class_matrix_path=class_matrix,
     )
 
     captured_at = datetime.now(timezone.utc).isoformat()
@@ -161,6 +168,11 @@ def freeze_baseline(
             cxx_flags_override=cxx_flags_override,
         ),
     }
+    if class_matrix is not None:
+        baseline_payload["source_class_matrix"] = _as_repo_relative(
+            class_matrix,
+            repo_root,
+        )
     if source_artifacts_root is not None:
         baseline_payload["source_artifacts_root"] = _as_repo_relative(
             source_artifacts_root.resolve(),
@@ -173,6 +185,7 @@ def freeze_baseline(
             stress_summary,
             parity_ltspice,
             parity_ngspice,
+            class_matrix,
         )
     )
     manifest_payload = {
@@ -211,6 +224,11 @@ def main() -> int:
     parser.add_argument("--parity-ltspice-results", type=Path)
     parser.add_argument("--parity-ngspice-results", type=Path)
     parser.add_argument(
+        "--class-matrix",
+        type=Path,
+        help="Optional convergence class matrix YAML used to derive per-class baseline metrics",
+    )
+    parser.add_argument(
         "--source-artifacts-root",
         type=Path,
         help="Optional root directory containing benchmark artifacts",
@@ -239,6 +257,7 @@ def main() -> int:
         stress_summary_path=args.stress_summary,
         parity_ltspice_results_path=args.parity_ltspice_results,
         parity_ngspice_results_path=args.parity_ngspice_results,
+        class_matrix_path=args.class_matrix,
         source_artifacts_root=args.source_artifacts_root,
         machine_class_override=args.machine_class,
         cxx_flags_override=args.cxx_flags,
