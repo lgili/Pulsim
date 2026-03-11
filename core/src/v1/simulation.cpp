@@ -438,6 +438,8 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
             return "user_stop_requested";
         case SimulationDiagnosticCode::TransientStepFailure:
             return "transient_step_failure";
+        case SimulationDiagnosticCode::ControlAlgebraicLoopRisk:
+            return "control_algebraic_loop_risk";
         case SimulationDiagnosticCode::PeriodicInvalidPeriod:
             return "periodic_invalid_period";
         case SimulationDiagnosticCode::PeriodicInvalidInitialState:
@@ -1073,6 +1075,9 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
                                                           SolverStatus solver_status,
                                                           std::string_view action,
                                                           RecoveryStage stage) {
+    if (action_contains(action, "algebraic_loop")) {
+        return ConvergenceFailureClass::ControlAlgebraicLoopRisk;
+    }
     if (action_contains(action, "magnetic")) {
         return ConvergenceFailureClass::NonlinearMagneticStiffness;
     }
@@ -1131,6 +1136,8 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
             return ConvergencePolicyAction::Regularization;
         case ConvergenceFailureClass::ControlDiscreteStiffness:
             return ConvergencePolicyAction::StiffnessBackoff;
+        case ConvergenceFailureClass::ControlAlgebraicLoopRisk:
+            return ConvergencePolicyAction::AbortStep;
         case ConvergenceFailureClass::LinearBreakdown:
             return profile == ConvergenceProfile::Strict
                 ? ConvergencePolicyAction::AbortStep
@@ -1157,6 +1164,7 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
         case ConvergenceFailureClass::SwitchChattering:
         case ConvergenceFailureClass::NonlinearMagneticStiffness:
         case ConvergenceFailureClass::ControlDiscreteStiffness:
+        case ConvergenceFailureClass::ControlAlgebraicLoopRisk:
             return true;
         case ConvergenceFailureClass::None:
         case ConvergenceFailureClass::LinearBreakdown:
@@ -1536,6 +1544,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     const bool contextual_policy_active =
         is_contextual_policy_active(options_) && variable_step_policy.enabled();
     const bool robust_convergence_profile = is_robust_convergence_profile(options_);
+    const CircuitRobustnessHints runtime_hints = analyze_circuit_robustness(circuit_);
+    const bool control_discrete_profile =
+        runtime_hints.control_blocks > 0 &&
+        (options_.control_mode == ControlUpdateMode::Discrete ||
+         options_.control_sample_time > 0.0 ||
+         has_per_block_control_sample_time(circuit_));
     // Strict contract: disable global recovery transitions whenever explicit
     // fallback is off, independent of convergence profile.
     const bool can_auto_recover = options_.linear_solver.allow_fallback;
@@ -1650,14 +1664,40 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         append_virtual_sample(state, sample_time);
     };
 
-    append_sample(t, x);
+    auto fail_control_algebraic_loop = [&](const ControlAlgebraicLoopError& error,
+                                           Real failure_time,
+                                           int retry_index) {
+        record_fallback_event(result,
+                              result.total_steps,
+                              std::max(0, retry_index),
+                              failure_time,
+                              std::max(std::abs(dt), options_.dt_min),
+                              FallbackReasonCode::MaxRetriesExceeded,
+                              SolverStatus::NumericalError,
+                              "control_algebraic_loop_abort",
+                              RecoveryStage::Abort);
+        result.success = false;
+        result.final_status = SolverStatus::NumericalError;
+        result.diagnostic = SimulationDiagnosticCode::ControlAlgebraicLoopRisk;
+        result.message = "Transient failed at t=" + std::to_string(failure_time) + ": " + error.what();
+        result.backend_telemetry.failure_reason =
+            std::string(diagnostic_code_to_reason(result.diagnostic));
+    };
 
-    if (callback) {
+    bool terminal_control_loop_failure = false;
+    try {
+        append_sample(t, x);
+    } catch (const ControlAlgebraicLoopError& error) {
+        fail_control_algebraic_loop(error, t, 0);
+        terminal_control_loop_failure = true;
+    }
+
+    if (!terminal_control_loop_failure && callback) {
         callback(t, x);
     }
     int lte_discontinuity_grace_steps = 0;
 
-    while (t < options_.tstop) {
+    while (t < options_.tstop && !terminal_control_loop_failure) {
         if (control) {
             if (control->should_stop()) {
                 result.message = "Simulation stopped by user";
@@ -2112,6 +2152,16 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                     }
                 } else if (recovery.stage == RecoveryStage::Abort) {
                     recovery_reason_code = FallbackReasonCode::MaxRetriesExceeded;
+                }
+
+                const bool control_stiffness_event =
+                    control_discrete_profile &&
+                    (recovery.stage == RecoveryStage::StiffProfile ||
+                     (recovery.stage == RecoveryStage::DtBackoff &&
+                      step_result.iterations >= options_.stiffness_config.newton_iter_threshold));
+                if (control_stiffness_event &&
+                    recovery_action.find("control_discrete_stiffness") == std::string::npos) {
+                    recovery_action += " control_discrete_stiffness";
                 }
 
                 const bool event_burst_stage =
@@ -2603,13 +2653,19 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        runtime_modules.on_step_accepted(
-            t,
-            dt_used,
-            x,
-            step_result.solution,
-            refine_threshold_event,
-            emit_threshold_event);
+        try {
+            runtime_modules.on_step_accepted(
+                t,
+                dt_used,
+                x,
+                step_result.solution,
+                refine_threshold_event,
+                emit_threshold_event);
+        } catch (const ControlAlgebraicLoopError& error) {
+            fail_control_algebraic_loop(error, t + dt_used, retries);
+            terminal_control_loop_failure = true;
+            break;
+        }
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);
@@ -2633,7 +2689,13 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         if (emit_sample || nearly_same_time(t, options_.tstop)) {
-            append_sample(t, x);
+            try {
+                append_sample(t, x);
+            } catch (const ControlAlgebraicLoopError& error) {
+                fail_control_algebraic_loop(error, t, retries);
+                terminal_control_loop_failure = true;
+                break;
+            }
 
             if (callback) {
                 callback(t, x);

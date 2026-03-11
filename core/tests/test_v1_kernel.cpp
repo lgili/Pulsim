@@ -2392,6 +2392,45 @@ TEST_CASE("v1 startup fallback recovers when DC operating point fails",
     }
 }
 
+TEST_CASE("v1 transient emits typed diagnostic for control algebraic loop risk",
+          "[v1][fallback][control][diagnostics]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto n_mid = circuit.add_node("mid");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 1.0);
+    circuit.add_resistor("Rin", n_in, Circuit::ground(), 1e3);
+    circuit.add_virtual_component("gain", "GA", {n_in, n_mid}, {{"gain", 1.0}}, {});
+    circuit.add_virtual_component("gain", "GB", {n_mid, n_in}, {{"gain", 1.0}}, {});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 2e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.adaptive_timestep = false;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const Vector x0 = circuit.initial_state();
+    const auto result = sim.run_transient(x0);
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.diagnostic == SimulationDiagnosticCode::ControlAlgebraicLoopRisk);
+    CHECK(result.final_status == SolverStatus::NumericalError);
+    CHECK(result.backend_telemetry.failure_reason == "control_algebraic_loop_risk");
+    REQUIRE_FALSE(result.fallback_trace.empty());
+    CHECK(result.fallback_trace.back().failure_class ==
+          ConvergenceFailureClass::ControlAlgebraicLoopRisk);
+    CHECK(result.fallback_trace.back().policy_action == ConvergencePolicyAction::AbortStep);
+    CHECK(result.message.find("Virtual control algebraic loop") != std::string::npos);
+}
+
 TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
     Circuit circuit;
 
@@ -3429,9 +3468,15 @@ TEST_CASE("v1 control primitives keep bounded deterministic outputs",
         try {
             circuit.execute_mixed_domain_step(x, 1e-6);
             FAIL("Expected algebraic loop failure");
-        } catch (const std::runtime_error& err) {
+        } catch (const ControlAlgebraicLoopError& err) {
             const std::string message = err.what() ? err.what() : "";
             REQUIRE(message.find("Virtual control algebraic loop") != std::string::npos);
+            REQUIRE(err.component_cycle().size() >= 3);
+            CHECK(err.component_cycle().front() == err.component_cycle().back());
+            CHECK(std::find(err.component_cycle().begin(), err.component_cycle().end(), "GA") !=
+                  err.component_cycle().end());
+            CHECK(std::find(err.component_cycle().begin(), err.component_cycle().end(), "GB") !=
+                  err.component_cycle().end());
         }
     }
 

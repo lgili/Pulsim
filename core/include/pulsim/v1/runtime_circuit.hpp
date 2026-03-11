@@ -124,6 +124,33 @@ struct VirtualChannelMetadata {
     std::vector<Index> nodes;
 };
 
+/// Typed control-graph failure for combinational algebraic loops.
+class ControlAlgebraicLoopError : public std::runtime_error {
+public:
+    explicit ControlAlgebraicLoopError(std::vector<std::string> component_cycle)
+        : std::runtime_error(build_message(component_cycle))
+        , component_cycle_(std::move(component_cycle)) {}
+
+    [[nodiscard]] const std::vector<std::string>& component_cycle() const noexcept {
+        return component_cycle_;
+    }
+
+private:
+    [[nodiscard]] static std::string build_message(const std::vector<std::string>& component_cycle) {
+        std::ostringstream oss;
+        oss << "Virtual control algebraic loop: ";
+        for (std::size_t i = 0; i < component_cycle.size(); ++i) {
+            if (i > 0) {
+                oss << " -> ";
+            }
+            oss << component_cycle[i];
+        }
+        return oss.str();
+    }
+
+    std::vector<std::string> component_cycle_;
+};
+
 // =============================================================================
 // Runtime Circuit Class
 // =============================================================================
@@ -1024,16 +1051,12 @@ public:
         // Phase 2: control update
         build_control_eval_order();
         if (!control_eval_cycle_.empty()) {
-            std::ostringstream oss;
-            oss << "Virtual control algebraic loop: ";
-            for (std::size_t i = 0; i < control_eval_cycle_.size(); ++i) {
-                const auto& name = virtual_components_[control_eval_cycle_[i]].name;
-                if (i > 0) {
-                    oss << " -> ";
-                }
-                oss << name;
+            std::vector<std::string> component_cycle;
+            component_cycle.reserve(control_eval_cycle_.size());
+            for (std::size_t idx : control_eval_cycle_) {
+                component_cycle.push_back(virtual_components_[idx].name);
             }
-            throw std::runtime_error(oss.str());
+            throw ControlAlgebraicLoopError(std::move(component_cycle));
         }
 
         for (std::size_t component_index : control_eval_order_) {

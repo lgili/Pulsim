@@ -4353,6 +4353,42 @@ def test_fallback_trace_records_retry_reasons() -> None:
     )
 
 
+def test_control_algebraic_loop_emits_typed_diagnostic() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_mid = circuit.add_node("mid")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 1.0)
+    circuit.add_resistor("Rin", n_in, gnd, 1_000.0)
+    circuit.add_virtual_component("gain", "GA", [n_in, n_mid], {"gain": 1.0}, {})
+    circuit.add_virtual_component("gain", "GB", [n_mid, n_in], {"gain": 1.0}, {})
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-6
+    opts.dt = 1e-6
+    opts.dt_min = 1e-9
+    opts.dt_max = 1e-6
+    opts.step_mode = ps.StepMode.Fixed
+    opts.adaptive_timestep = False
+    opts.fallback_policy.trace_retries = True
+
+    sim = ps.Simulator(circuit, opts)
+    result = sim.run_transient(circuit.initial_state())
+
+    assert not result.success
+    assert result.diagnostic == ps.SimulationDiagnosticCode.ControlAlgebraicLoopRisk
+    assert result.final_status == ps.SolverStatus.NumericalError
+    assert result.backend_telemetry.failure_reason == "control_algebraic_loop_risk"
+    assert result.fallback_trace
+    assert result.fallback_trace[-1].failure_class == (
+        ps.ConvergenceFailureClass.ControlAlgebraicLoopRisk
+    )
+    assert result.fallback_trace[-1].policy_action == ps.ConvergencePolicyAction.AbortStep
+    assert "Virtual control algebraic loop" in result.message
+
+
 def test_recovery_ladder_stages_are_deterministic() -> None:
     circuit = ps.Circuit()
     n_in = circuit.add_node("in")
