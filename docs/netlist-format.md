@@ -216,7 +216,7 @@ simulation:
     default_cth: 0.1
 ```
 
-`simulation.backend` e `simulation.sundials` são chaves legadas e não fazem parte
+`simulation.backend`, `simulation.sundials` e `simulation.advanced` foram removidos
 da superfície suportada de transiente. Use `step_mode` + `formulation`.
 
 ### Control Update Mode

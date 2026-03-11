@@ -26,7 +26,8 @@ As APIs de transiente em Python (`Simulator.run_transient`, `run_transient_strea
 - `ps.run_transient(...)` permanece disponível para compatibilidade procedural.
 - A superfície canônica para novas integrações é `YamlParser` + `SimulationOptions` + `Simulator`.
 - Em casos de migração YAML, prefira `simulation.step_mode` em vez de
-  `simulation.adaptive_timestep`/`simulation.backend`.
+  `simulation.adaptive_timestep` (legado) e evite campos removidos como
+  `simulation.backend`/`simulation.sundials`/`simulation.advanced`.
 
 ## Configuração tipada de núcleo magnético
 
@@ -135,9 +136,7 @@ times, states, ok, msg = ps.run_transient(
 - `SimulationOptions.timestep_config`
 - `SimulationOptions.lte_config`
 
-`SimulationOptions.transient_backend` e `SimulationOptions.sundials` permanecem
-apenas para migração/diagnóstico de legado; o caminho suportado usa core nativo
-com `step_mode` + `formulation_mode`.
+O caminho suportado usa o core nativo com `step_mode` + `formulation_mode`.
 
 ### Controle em malha fechada
 

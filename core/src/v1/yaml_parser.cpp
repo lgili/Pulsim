@@ -31,7 +31,6 @@ constexpr const char* kDiagInvalidPinCount = "PULSIM_YAML_E_PIN_COUNT";
 constexpr const char* kDiagInvalidParameter = "PULSIM_YAML_E_PARAM_INVALID";
 constexpr const char* kDiagVirtualComponent = "PULSIM_YAML_W_COMPONENT_VIRTUAL";
 constexpr const char* kDiagSurrogateComponent = "PULSIM_YAML_W_COMPONENT_SURROGATE";
-constexpr const char* kDiagLegacyTransientBackend = "PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND";
 constexpr const char* kDiagInvalidStepMode = "PULSIM_YAML_E_STEP_MODE_INVALID";
 constexpr const char* kDiagUnknownField = "PULSIM_YAML_E_UNKNOWN_FIELD";
 constexpr const char* kDiagTypeMismatch = "PULSIM_YAML_E_TYPE_MISMATCH";
@@ -248,15 +247,6 @@ void enforce_mode_semantics(SimulationOptions& options) {
         return;
     }
     options.adaptive_timestep = (options.step_mode == TransientStepMode::Variable);
-}
-
-void push_legacy_backend_migration_error(std::vector<std::string>& errors, const std::string& key_path) {
-    push_error(
-        errors,
-        kDiagLegacyTransientBackend,
-        "Removed transient backend key '" + key_path +
-            "' is unsupported in strict mode. Migrate to 'simulation.step_mode: fixed|variable' "
-            "with the native core.");
 }
 
 const std::unordered_map<std::string, std::string>& component_alias_map() {
@@ -790,17 +780,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
                             "direct_formulation_fallback", "control", "control_mode", "control_sample_time",
-                            "frequency_analysis", "ac_sweep", "averaged_converter", "post_processing",
-                            "backend", "sundials", "advanced"},
+                            "frequency_analysis", "ac_sweep", "averaged_converter", "post_processing"},
                       "simulation", errors_, options_.strict);
-
-        YAML::Node advanced = sim["advanced"];
-        if (advanced) {
-            validate_keys(advanced, {"adaptive_timestep", "integrator", "integration", "newton", "timestep",
-                                     "lte", "bdf", "solver", "fallback", "formulation",
-                                     "direct_formulation_fallback", "backend", "sundials"},
-                          "simulation.advanced", errors_, options_.strict);
-        }
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);
         if (sim["tstop"]) options.tstop = parse_real(sim["tstop"], "simulation.tstop", errors_);
@@ -897,19 +878,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 "simulation.control_sample_time must be > 0 when simulation.control_mode is 'discrete'");
         }
 
-        auto expert_node = [&](const char* key) -> YAML::Node {
-            if (advanced && advanced[key]) {
-                return advanced[key];
-            }
-            return sim[key];
-        };
-
-        YAML::Node formulation = expert_node("formulation");
+        YAML::Node formulation = sim["formulation"];
         if (formulation) {
-            const std::string formulation_path =
-                (advanced && advanced["formulation"])
-                    ? "simulation.advanced.formulation"
-                    : "simulation.formulation";
+            const std::string formulation_path = "simulation.formulation";
             const auto formulation_raw = parse_string_scalar(formulation, formulation_path, errors_);
             if (formulation_raw) {
                 const std::string mode = normalize_key(*formulation_raw);
@@ -927,23 +898,17 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        YAML::Node direct_formulation_fallback = expert_node("direct_formulation_fallback");
+        YAML::Node direct_formulation_fallback = sim["direct_formulation_fallback"];
         if (direct_formulation_fallback) {
-            const std::string fallback_path =
-                (advanced && advanced["direct_formulation_fallback"])
-                    ? "simulation.advanced.direct_formulation_fallback"
-                    : "simulation.direct_formulation_fallback";
+            const std::string fallback_path = "simulation.direct_formulation_fallback";
             if (const auto value = parse_bool_scalar(direct_formulation_fallback, fallback_path, errors_)) {
                 options.direct_formulation_fallback = *value;
             }
         }
 
-        YAML::Node adaptive_timestep = expert_node("adaptive_timestep");
+        YAML::Node adaptive_timestep = sim["adaptive_timestep"];
         if (adaptive_timestep) {
-            const std::string adaptive_path =
-                (advanced && advanced["adaptive_timestep"])
-                    ? "simulation.advanced.adaptive_timestep"
-                    : "simulation.adaptive_timestep";
+            const std::string adaptive_path = "simulation.adaptive_timestep";
             if (!sim["step_mode"]) {
                 push_deprecated_field_migration_warning(
                     warnings_,
@@ -967,130 +932,6 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         if (sim["max_step_retries"]) {
             if (const auto value = parse_int_scalar(sim["max_step_retries"], "simulation.max_step_retries", errors_)) {
                 options.max_step_retries = *value;
-            }
-        }
-
-        if (options_.strict) {
-            if (sim["backend"]) {
-                push_legacy_backend_migration_error(errors_, "simulation.backend");
-            }
-            if (sim["sundials"]) {
-                push_legacy_backend_migration_error(errors_, "simulation.sundials");
-            }
-            if (advanced && advanced["backend"]) {
-                push_legacy_backend_migration_error(errors_, "simulation.advanced.backend");
-            }
-            if (advanced && advanced["sundials"]) {
-                push_legacy_backend_migration_error(errors_, "simulation.advanced.sundials");
-            }
-            if (sim["fallback"]) {
-                const YAML::Node fallback = sim["fallback"];
-                if (fallback["enable_backend_escalation"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.fallback.enable_backend_escalation");
-                }
-                if (fallback["backend_escalation_threshold"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.fallback.backend_escalation_threshold");
-                }
-                if (fallback["enable_native_reentry"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.fallback.enable_native_reentry");
-                }
-                if (fallback["sundials_recovery_window"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.fallback.sundials_recovery_window");
-                }
-            }
-            if (advanced && advanced["fallback"]) {
-                const YAML::Node fallback = advanced["fallback"];
-                if (fallback["enable_backend_escalation"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.enable_backend_escalation");
-                }
-                if (fallback["backend_escalation_threshold"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.backend_escalation_threshold");
-                }
-                if (fallback["enable_native_reentry"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.enable_native_reentry");
-                }
-                if (fallback["sundials_recovery_window"]) {
-                    push_legacy_backend_migration_error(errors_, "simulation.advanced.fallback.sundials_recovery_window");
-                }
-            }
-        } else {
-            if (sim["backend"]) {
-                push_deprecated_field_migration_warning(
-                    warnings_,
-                    "simulation.backend",
-                    "simulation.step_mode: fixed|variable");
-            }
-            if (sim["sundials"]) {
-                push_deprecated_field_migration_warning(
-                    warnings_,
-                    "simulation.sundials",
-                    "simulation.step_mode: fixed|variable");
-            }
-            if (advanced && advanced["backend"]) {
-                push_deprecated_field_migration_warning(
-                    warnings_,
-                    "simulation.advanced.backend",
-                    "simulation.step_mode: fixed|variable");
-            }
-            if (advanced && advanced["sundials"]) {
-                push_deprecated_field_migration_warning(
-                    warnings_,
-                    "simulation.advanced.sundials",
-                    "simulation.step_mode: fixed|variable");
-            }
-            if (sim["fallback"]) {
-                const YAML::Node fallback = sim["fallback"];
-                if (fallback["enable_backend_escalation"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.fallback.enable_backend_escalation",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
-                if (fallback["backend_escalation_threshold"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.fallback.backend_escalation_threshold",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
-                if (fallback["enable_native_reentry"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.fallback.enable_native_reentry",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
-                if (fallback["sundials_recovery_window"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.fallback.sundials_recovery_window",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
-            }
-            if (advanced && advanced["fallback"]) {
-                const YAML::Node fallback = advanced["fallback"];
-                if (fallback["enable_backend_escalation"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.advanced.fallback.enable_backend_escalation",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
-                if (fallback["backend_escalation_threshold"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.advanced.fallback.backend_escalation_threshold",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
-                if (fallback["enable_native_reentry"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.advanced.fallback.enable_native_reentry",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
-                if (fallback["sundials_recovery_window"]) {
-                    push_deprecated_field_migration_warning(
-                        warnings_,
-                        "simulation.advanced.fallback.sundials_recovery_window",
-                        "simulation.fallback trace_retries/gmin_*");
-                }
             }
         }
 
@@ -1131,17 +972,15 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        YAML::Node fallback_root = expert_node("fallback");
+        YAML::Node fallback_root = sim["fallback"];
         if (fallback_root) {
             YAML::Node fallback = fallback_root;
             validate_keys(fallback, {"trace_retries", "enable_transient_gmin",
                                      "gmin_retry_threshold", "gmin_initial",
                                      "gmin_max", "gmin_growth",
                                      "convergence_profile", "policy_dry_run",
-                                     "anti_overfit_check", "anti_overfit_stable_budget",
-                                     "enable_backend_escalation", "backend_escalation_threshold",
-                                     "enable_native_reentry", "sundials_recovery_window"},
-                          "simulation.advanced.fallback", errors_, options_.strict);
+                                     "anti_overfit_check", "anti_overfit_stable_budget"},
+                          "simulation.fallback", errors_, options_.strict);
             if (fallback["trace_retries"]) {
                 options.fallback_policy.trace_retries = fallback["trace_retries"].as<bool>();
             }
@@ -1273,9 +1112,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             parse_positive_real("vcswitch_g_off_min", options.model_regularization.vcswitch_g_off_min, true);
         }
 
-        YAML::Node integrator_node = expert_node("integrator");
+        YAML::Node integrator_node = sim["integrator"];
         if (!integrator_node) {
-            integrator_node = expert_node("integration");
+            integrator_node = sim["integration"];
         }
         if (integrator_node) {
             std::string method = normalize_key(integrator_node.as<std::string>());
@@ -1304,7 +1143,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        YAML::Node newton = expert_node("newton");
+        YAML::Node newton = sim["newton"];
         if (newton) {
             YAML::Node n = newton;
             validate_keys(n, {"max_iterations", "initial_damping", "min_damping", "auto_damping",
@@ -1337,7 +1176,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
-        YAML::Node timestep = expert_node("timestep");
+        YAML::Node timestep = sim["timestep"];
         if (timestep) {
             YAML::Node t = timestep;
             validate_keys(t, {"preset", "dt_min", "dt_max", "error_tolerance", "target_newton_iterations"},
@@ -1370,7 +1209,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (t["target_newton_iterations"]) options.timestep_config.target_newton_iterations = t["target_newton_iterations"].as<int>();
         }
 
-        YAML::Node lte = expert_node("lte");
+        YAML::Node lte = sim["lte"];
         if (lte) {
             YAML::Node l = lte;
             validate_keys(l, {"method", "voltage_tolerance", "current_tolerance"},
@@ -1384,7 +1223,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (l["current_tolerance"]) options.lte_config.current_tolerance = parse_real(l["current_tolerance"], "lte.current_tolerance", errors_);
         }
 
-        YAML::Node bdf = expert_node("bdf");
+        YAML::Node bdf = sim["bdf"];
         if (bdf) {
             YAML::Node b = bdf;
             validate_keys(b, {"enable", "min_order", "max_order", "initial_order"},
@@ -1395,7 +1234,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (b["initial_order"]) options.bdf_config.initial_order = b["initial_order"].as<int>();
         }
 
-        YAML::Node solver = expert_node("solver");
+        YAML::Node solver = sim["solver"];
         if (solver) {
             YAML::Node s = solver;
             validate_keys(s, {"linear", "iterative", "nonlinear", "order", "fallback_order",

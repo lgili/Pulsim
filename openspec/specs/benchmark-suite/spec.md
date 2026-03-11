@@ -401,7 +401,7 @@ Benchmark and validation tooling SHALL provide a stress matrix indexed by conver
 - **AND** reports pass/fail and KPI outputs by class and runtime mode
 
 ### Requirement: Phase-Gated Progression for Robustness Program
-CI SHALL enforce phase gates (A..F, ADV) for convergence-platform rollout.
+CI SHALL enforce phase gates (A..F) for convergence-platform rollout.
 
 #### Scenario: Phase gate regression
 - **WHEN** required KPI thresholds fail for active phase
@@ -428,4 +428,3 @@ Benchmark gates SHALL enforce explicit cross-class non-regression budgets to pre
 - **WHEN** a change improves one challenge class but exceeds regression budget in another stable class
 - **THEN** the gate fails deterministically
 - **AND** the report identifies improved and regressed classes side-by-side
-

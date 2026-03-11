@@ -24,12 +24,11 @@ No Python:
 ```python
 import pulsim as ps
 print(ps.backend_capabilities())
-# {'klu': True, 'hypre_amg': True/False, 'sundials': True/False}
+# Exemplo: {'c_block': True} (chaves podem variar conforme build)
 ```
 
-Observação: `sundials=True` indica apenas suporte compilado opcional. No caminho
-suportado de transiente, use o core nativo com `simulation.step_mode`
-(`fixed|variable`), sem seleção de backend legado.
+Observação: no caminho suportado de transiente, use o core nativo com
+`simulation.step_mode` (`fixed|variable`), sem seleção de backend legado.
 
 ## Exemplo de configuração robusta
 

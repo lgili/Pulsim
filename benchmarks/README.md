@@ -24,13 +24,7 @@ This folder contains the YAML benchmark suite and validation runners.
   with environment fingerprint and artifact hashes for provenance-safe gating.
 - `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
 - `kpi_thresholds_convergence_platform.yaml` — optional policy-gate thresholds for convergence dry-run KPIs.
-- `convergence_phase_budgets.yaml` — versioned per-phase (Gate A..F/ADV) functional/performance budget contract.
-- `advanced_solver_decision_matrix.yaml` — objective adoption contract for advanced solver backends (SUNDIALS/PETSc families).
-- `advanced_solver_decision_matrix_heavy.yaml` — heavy stress matrix to evaluate trend retention under tougher runs.
-- `benchmarks_advanced_heavy.yaml` — dedicated benchmark manifest for heavy advanced-solver comparisons.
-- `validate_advanced_solver_decision_matrix.py` — schema+policy validator for `advanced_solver_decision_matrix.yaml`.
-- `advanced_solver_prototype_runner.py` — isolated baseline-vs-prototype runner for advanced backend candidate evaluation.
-- `gate_adv_decision.py` — formal Gate ADV decision artifact generator with reproducibility hashes.
+- `convergence_phase_budgets.yaml` — versioned per-phase (Gate A..F) functional/performance budget contract.
 - `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
 - `kpi_thresholds_averaged.yaml` — required KPI thresholds for averaged-mode paired gate.
 - `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
@@ -50,21 +44,6 @@ python3 benchmarks/stress_suite.py \
 python3 benchmarks/validate_reference_examples.py \
   --manifest benchmarks/benchmarks.yaml \
   --examples benchmarks/convergence_reference_examples.yaml
-python3 benchmarks/validate_advanced_solver_decision_matrix.py \
-  --matrix benchmarks/advanced_solver_decision_matrix.yaml
-python3 benchmarks/advanced_solver_prototype_runner.py \
-  --candidate sundials_ida_direct \
-  --output-dir benchmarks/out_advanced_solver \
-  --enforce-hard-constraints
-python3 benchmarks/advanced_solver_prototype_runner.py \
-  --matrix benchmarks/advanced_solver_decision_matrix_heavy.yaml \
-  --manifest benchmarks/benchmarks_advanced_heavy.yaml \
-  --candidate sundials_ida_direct \
-  --output-dir benchmarks/out_advanced_solver_heavy
-python3 benchmarks/gate_adv_decision.py \
-  --report benchmarks/out_advanced_solver/advanced_solver_prototype_report.json \
-  --adr docs/advanced-solver-adr.md \
-  --decision-out benchmarks/out_advanced_solver/gate_adv_decision.json
 python3 benchmarks/run_reference_examples.py \
   --class event_burst_zero_cross \
   --output-dir benchmarks/out_reference_examples

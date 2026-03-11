@@ -54,15 +54,15 @@ sim = ps.Simulator(circuit, options)
 result = sim.run_transient(circuit.initial_state())
 ```
 
-### Legacy transient backend keys
+### Canonical transient mode keys
 
 No runtime suportado, a escolha de caminho transiente é canônica por modo:
 
 - `simulation.step_mode: fixed`
 - `simulation.step_mode: variable`
 
-As chaves legadas `simulation.backend` / `simulation.sundials` (e equivalentes em
-`simulation.advanced`) são tratadas apenas para diagnóstico de migração.
+As chaves legadas `simulation.backend`, `simulation.sundials` e os campos antigos
+de `simulation.fallback` não fazem mais parte do schema ativo.
 
 ### Before/After: legacy backend -> canonical mode
 
@@ -100,8 +100,9 @@ simulation:
     preset: power_electronics
 ```
 
-If `strict = True`, legacy backend keys produce parser diagnostic
-`PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND`.
+Com `strict = True`, esses campos geram erro de campo desconhecido
+(`PULSIM_YAML_E_UNKNOWN_FIELD`). Em `strict = False`, geram warning com o mesmo
+código.
 
 ### Schema Evolution Policy (v1)
 
@@ -109,11 +110,14 @@ If `strict = True`, legacy backend keys produce parser diagnostic
   - Accepted in schema `pulsim-v1`, but emits warning
     `PULSIM_YAML_W_DEPRECATED_FIELD` with replacement guidance to
     `simulation.step_mode: fixed|variable`.
-- Removed (strict migration path): `simulation.backend`,
-  `simulation.sundials`, `simulation.advanced.backend`,
-  `simulation.advanced.sundials`
-  - In strict mode, parser fails deterministically with
-    `PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND` and migration guidance.
+- Removed: `simulation.backend`, `simulation.sundials`,
+  `simulation.fallback.enable_backend_escalation`,
+  `simulation.fallback.backend_escalation_threshold`,
+  `simulation.fallback.enable_native_reentry`,
+  `simulation.fallback.sundials_recovery_window`,
+  and `simulation.advanced` block.
+  - Parser emits deterministic unknown-field diagnostics
+    (`PULSIM_YAML_E_UNKNOWN_FIELD`) for these keys.
 
 ### Before/After: procedural compatibility and canonical runtime
 
@@ -143,9 +147,9 @@ result = sim.run_transient(circuit.initial_state())
 
 Both paths share the same v1 kernel semantics; prefer `Simulator` for new code.
 
-### Before/After: expert override location
+### Canonical expert knobs
 
-Before (mixed top-level knobs):
+Use the top-level `simulation` fields for expert tuning:
 
 ```yaml
 simulation:
@@ -153,21 +157,10 @@ simulation:
   integrator: trbdf2
   solver:
     order: [gmres]
-```
-
-After (canonical mode + explicit expert section):
-
-```yaml
-simulation:
-  step_mode: variable
-  advanced:
-    integrator: trbdf2
-    solver:
-      order: [gmres]
-      iterative:
-        preconditioner: ilut
-        max_iterations: 300
-        tolerance: 1e-8
+    iterative:
+      preconditioner: ilut
+      max_iterations: 300
+      tolerance: 1e-8
 ```
 
 ## 4. Removed API/Workflow Mapping

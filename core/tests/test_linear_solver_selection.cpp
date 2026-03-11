@@ -779,8 +779,8 @@ components:
     CHECK(joined.find("simulation.model_regularization.escalation_factor") != std::string::npos);
 }
 
-TEST_CASE("YAML parser emits migration warnings for legacy backend controls in non-strict mode",
-          "[v1][yaml][backend]") {
+TEST_CASE("YAML parser ignores removed legacy backend keys in non-strict mode",
+          "[v1][yaml][legacy]") {
     const std::string yaml = R"(schema: pulsim-v1
 version: 1
 simulation:
@@ -806,24 +806,12 @@ components:
     parser::YamlParser parser(parser_options);
     auto [circuit, options] = parser.load_string(yaml);
     REQUIRE(parser.errors().empty());
+    CHECK(parser.warnings().empty());
     CHECK(options.step_mode == TransientStepMode::Variable);
-    CHECK(options.fallback_policy.trace_retries);
-    REQUIRE_FALSE(parser.warnings().empty());
-    std::string joined;
-    for (const auto& warning : parser.warnings()) {
-        joined += warning;
-        joined.push_back('\n');
-    }
-    CHECK(joined.find("simulation.backend") != std::string::npos);
-    CHECK(joined.find("simulation.sundials") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.enable_backend_escalation") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.backend_escalation_threshold") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.enable_native_reentry") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.sundials_recovery_window") != std::string::npos);
     CHECK(circuit.num_devices() == 1);
 }
 
-TEST_CASE("YAML parser applies canonical step_mode and advanced overrides",
+TEST_CASE("YAML parser applies canonical step_mode and solver overrides",
           "[v1][yaml][step-mode]") {
     const std::string yaml_fixed = R"(schema: pulsim-v1
 version: 1
@@ -831,9 +819,8 @@ simulation:
   tstop: 2e-5
   dt: 1e-6
   step_mode: fixed
-  advanced:
-    solver:
-      order: [klu]
+  solver:
+    order: [klu]
 components:
   - type: resistor
     name: R1
@@ -963,14 +950,12 @@ components:
     CHECK_FALSE(options_direct.direct_formulation_fallback);
     CHECK(circuit_direct.num_devices() == 1);
 
-    const std::string yaml_advanced_override = R"(schema: pulsim-v1
+    const std::string yaml_projected = R"(schema: pulsim-v1
 version: 1
 simulation:
   tstop: 2e-5
   dt: 1e-6
-  formulation: direct
-  advanced:
-    formulation: projected_wrapper
+  formulation: projected_wrapper
 components:
   - type: resistor
     name: R1
@@ -978,7 +963,7 @@ components:
     value: 1k
 )";
 
-    auto [circuit_projected, options_projected] = parser.load_string(yaml_advanced_override);
+    auto [circuit_projected, options_projected] = parser.load_string(yaml_projected);
     REQUIRE(parser.errors().empty());
     CHECK(options_projected.formulation_mode == FormulationMode::ProjectedWrapper);
     CHECK(circuit_projected.num_devices() == 1);
@@ -1004,18 +989,18 @@ components:
                       }));
 }
 
-TEST_CASE("YAML parser emits strict migration diagnostics for legacy backend keys",
-          "[v1][yaml][migration]") {
+TEST_CASE("YAML parser emits strict unknown-field diagnostics for removed legacy backend keys",
+          "[v1][yaml][legacy]") {
     const std::string yaml = R"(schema: pulsim-v1
 version: 1
 simulation:
   tstop: 1e-4
   dt: 1e-6
   backend: auto
-  advanced:
-    backend: sundials
-    sundials:
-      enabled: true
+  sundials:
+    enabled: true
+  fallback:
+    enable_backend_escalation: true
 components:
   - type: resistor
     name: R1
@@ -1032,9 +1017,9 @@ components:
         joined.push_back('\n');
     }
     CHECK(joined.find("simulation.backend") != std::string::npos);
-    CHECK(joined.find("simulation.advanced.backend") != std::string::npos);
-    CHECK(joined.find("simulation.advanced.sundials") != std::string::npos);
-    CHECK(joined.find("simulation.step_mode") != std::string::npos);
+    CHECK(joined.find("simulation.sundials") != std::string::npos);
+    CHECK(joined.find("simulation.fallback.enable_backend_escalation") != std::string::npos);
+    CHECK(joined.find("PULSIM_YAML_E_UNKNOWN_FIELD") != std::string::npos);
 }
 
 TEST_CASE("YAML parser emits coded unknown-field diagnostics with field paths",

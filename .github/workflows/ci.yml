@@ -131,45 +131,6 @@ jobs:
           fi
 
   # =============================================================================
-  # SUNDIALS Backend Validation (optional dependency enabled)
-  # =============================================================================
-  sundials-backend:
-    name: Linux SUNDIALS backend
-    runs-on: ubuntu-24.04
-    if: false  # Temporarily disabled: SUNDIALS backend is not in active use
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
-
-      - name: Configure CMake (SUNDIALS ON)
-        env:
-          CC: clang-17
-          CXX: clang++-17
-        run: |
-          cmake -B build-sundials \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang-17 \
-            -DCMAKE_CXX_COMPILER=clang++-17 \
-            -DPULSIM_BUILD_TESTS=ON \
-            -DPULSIM_BUILD_PYTHON=OFF \
-            -DPULSIM_USE_HYPRE=OFF \
-            -DPULSIM_USE_SUNDIALS=ON \
-            -DPULSIM_ENABLE_LTO=OFF
-
-      - name: Build SUNDIALS backend tests
-        run: cmake --build build-sundials --target pulsim_simulation_tests --config Release
-
-      - name: Run backend tests
-        run: |
-          build-sundials/core/pulsim_simulation_tests "[v1][backend]" --reporter console
-
-  # =============================================================================
   # Python Tests
   # =============================================================================
   python-tests:
@@ -347,11 +308,6 @@ jobs:
             --manifest benchmarks/benchmarks.yaml \
             --examples benchmarks/convergence_reference_examples.yaml
 
-      - name: Validate advanced solver decision matrix
-        run: |
-          python3 benchmarks/validate_advanced_solver_decision_matrix.py \
-            --matrix benchmarks/advanced_solver_decision_matrix.yaml
-
       - name: Build docs (strict)
         run: |
           mkdocs build --strict
@@ -488,19 +444,6 @@ jobs:
             --phase-key gate_e \
             --report-out benchmarks/out_ci/kpi_gate_convergence_platform_gate_e_report.json \
             --print-report
-
-      - name: Run advanced solver isolated prototype (Gate ADV evidence)
-        run: |
-          python3 benchmarks/advanced_solver_prototype_runner.py \
-            --candidate sundials_ida_direct \
-            --output-dir benchmarks/out_ci/advanced_solver
-
-      - name: Finalize Gate ADV decision artifact
-        run: |
-          python3 benchmarks/gate_adv_decision.py \
-            --report benchmarks/out_ci/advanced_solver/advanced_solver_prototype_report.json \
-            --adr docs/advanced-solver-adr.md \
-            --decision-out benchmarks/out_ci/advanced_solver/gate_adv_decision.json
 
       - name: Enforce magnetic-core KPI regression gate
         run: |

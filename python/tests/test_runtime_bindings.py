@@ -2267,7 +2267,7 @@ components:
     assert abs(options.fallback_policy.gmin_growth - 5.0) < 1e-12
 
 
-def test_yaml_parser_emits_migration_warnings_for_legacy_backend_controls() -> None:
+def test_yaml_parser_ignores_removed_legacy_backend_keys_in_non_strict_mode() -> None:
     content = """
 schema: pulsim-v1
 version: 1
@@ -2291,20 +2291,12 @@ components:
     parser_opts = ps.YamlParserOptions()
     parser_opts.strict = False
     parser = ps.YamlParser(parser_opts)
-    _, options = parser.load_string(content)
+    parser.load_string(content)
     assert parser.errors == []
-    assert options.step_mode == ps.StepMode.Variable
-    assert parser.warnings
-    joined = "\n".join(parser.warnings)
-    assert "simulation.backend" in joined
-    assert "simulation.sundials" in joined
-    assert "simulation.fallback.enable_backend_escalation" in joined
-    assert "simulation.fallback.backend_escalation_threshold" in joined
-    assert "simulation.fallback.enable_native_reentry" in joined
-    assert "simulation.fallback.sundials_recovery_window" in joined
+    assert parser.warnings == []
 
 
-def test_yaml_parser_maps_canonical_step_mode_and_advanced_overrides() -> None:
+def test_yaml_parser_maps_canonical_step_mode_and_solver_overrides() -> None:
     content = """
 schema: pulsim-v1
 version: 1
@@ -2312,9 +2304,8 @@ simulation:
   tstop: 2e-5
   dt: 1e-6
   step_mode: fixed
-  advanced:
-    solver:
-      order: [klu]
+  solver:
+    order: [klu]
 components:
   - type: resistor
     name: R1
@@ -2345,10 +2336,8 @@ version: 1
 simulation:
   tstop: 2e-5
   dt: 1e-6
-  formulation: direct
+  formulation: projected_wrapper
   direct_formulation_fallback: false
-  advanced:
-    formulation: projected_wrapper
 components:
   - type: resistor
     name: R1
@@ -2380,7 +2369,7 @@ components:
     assert any("simulation.formulation" in msg for msg in parser_invalid.errors)
 
 
-def test_yaml_parser_reports_migration_error_for_legacy_backend_keys_in_strict_mode() -> None:
+def test_yaml_parser_reports_unknown_field_errors_for_removed_legacy_backend_keys_in_strict_mode() -> None:
     content = """
 schema: pulsim-v1
 version: 1
@@ -2388,12 +2377,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
   backend: auto
-  advanced:
-    backend: sundials
-    sundials:
-      enabled: true
-    fallback:
-      enable_backend_escalation: true
+  sundials:
+    enabled: true
+  fallback:
+    enable_backend_escalation: true
 components:
   - type: resistor
     name: R1
@@ -2404,10 +2391,9 @@ components:
     parser.load_string(content)
     assert parser.errors
     assert any("simulation.backend" in msg for msg in parser.errors)
-    assert any("simulation.advanced.backend" in msg for msg in parser.errors)
-    assert any("simulation.advanced.sundials" in msg for msg in parser.errors)
-    assert any("simulation.advanced.fallback.enable_backend_escalation" in msg for msg in parser.errors)
-    assert any("simulation.step_mode" in msg for msg in parser.errors)
+    assert any("simulation.sundials" in msg for msg in parser.errors)
+    assert any("simulation.fallback.enable_backend_escalation" in msg for msg in parser.errors)
+    assert any("PULSIM_YAML_E_UNKNOWN_FIELD" in msg for msg in parser.errors)
 
 
 def test_backend_telemetry_binding_fields() -> None:

@@ -8,7 +8,7 @@
 #
 # This script installs:
 #   Required: LLVM/Clang 17+, CMake, Ninja, Python 3, SuiteSparse/KLU
-#   Optional (-Full): SUNDIALS, gRPC
+#   Optional (-Full): gRPC
 #
 # Run as Administrator for best results.
 # =============================================================================
@@ -68,7 +68,7 @@ PulsimCore Windows Dependency Installer
 Usage: .\setup-windows.ps1 [OPTIONS]
 
 Options:
-    -Full       Install optional dependencies (SUNDIALS, gRPC)
+    -Full       Install optional dependencies (gRPC)
     -Help       Show this help message
 
 Required dependencies (always installed):
@@ -80,7 +80,6 @@ Required dependencies (always installed):
     - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with -Full):
-    - SUNDIALS (advanced ODE/DAE solvers)
     - gRPC and protobuf (remote API)
 
 After installation, restart your terminal or run:
@@ -359,11 +358,6 @@ function Install-OptionalDeps {
 
     $vcpkg = "$VCPKG_PATH\vcpkg.exe"
 
-    # SUNDIALS
-    Write-Info "Installing SUNDIALS..."
-    & $vcpkg install sundials:x64-windows
-    Write-Success "SUNDIALS installed"
-
     # gRPC
     Write-Info "Installing gRPC (this may take a while)..."
     & $vcpkg install grpc:x64-windows
@@ -449,11 +443,6 @@ function Test-Installation {
     if ($Full) {
         Write-Host ""
         Write-Host "Optional dependencies:"
-        if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\sundials*") {
-            Write-Host "  SUNDIALS:    installed"
-        } else {
-            Write-Host "  SUNDIALS:    not installed"
-        }
         if (Test-Path "$VCPKG_PATH\installed\x64-windows\lib\grpc*") {
             Write-Host "  gRPC:        installed"
         } else {
