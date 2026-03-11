@@ -1191,6 +1191,43 @@ void init_v2_module(py::module_& v2) {
         .value("MaxRetriesExceeded", FallbackReasonCode::MaxRetriesExceeded)
         .export_values();
 
+    py::enum_<RecoveryStage>(v2, "RecoveryStage",
+        "Typed recovery ladder stage")
+        .value("None_", RecoveryStage::None)
+        .value("DtBackoff", RecoveryStage::DtBackoff)
+        .value("GlobalizationEscalation", RecoveryStage::GlobalizationEscalation)
+        .value("StiffProfile", RecoveryStage::StiffProfile)
+        .value("Regularization", RecoveryStage::Regularization)
+        .value("Abort", RecoveryStage::Abort)
+        .export_values();
+
+    py::enum_<ConvergenceFailureClass>(v2, "ConvergenceFailureClass",
+        "Typed convergence failure classification (observation/policy telemetry)")
+        .value("None_", ConvergenceFailureClass::None)
+        .value("EventBurstZeroCross", ConvergenceFailureClass::EventBurstZeroCross)
+        .value("SwitchChattering", ConvergenceFailureClass::SwitchChattering)
+        .value("NonlinearMagneticStiffness", ConvergenceFailureClass::NonlinearMagneticStiffness)
+        .value("ControlDiscreteStiffness", ConvergenceFailureClass::ControlDiscreteStiffness)
+        .value("LinearBreakdown", ConvergenceFailureClass::LinearBreakdown)
+        .value("NewtonGlobalizationFailure", ConvergenceFailureClass::NewtonGlobalizationFailure)
+        .value("RetryBudgetExhausted", ConvergenceFailureClass::RetryBudgetExhausted)
+        .value("Unknown", ConvergenceFailureClass::Unknown)
+        .export_values();
+
+    py::enum_<ConvergencePolicyAction>(v2, "ConvergencePolicyAction",
+        "Typed policy/recovery action identifier")
+        .value("None_", ConvergencePolicyAction::None)
+        .value("ObserveOnly", ConvergencePolicyAction::ObserveOnly)
+        .value("DtBackoff", ConvergencePolicyAction::DtBackoff)
+        .value("EventSplit", ConvergencePolicyAction::EventSplit)
+        .value("StiffnessBackoff", ConvergencePolicyAction::StiffnessBackoff)
+        .value("Regularization", ConvergencePolicyAction::Regularization)
+        .value("TransientGminEscalation", ConvergencePolicyAction::TransientGminEscalation)
+        .value("HoldAdvance", ConvergencePolicyAction::HoldAdvance)
+        .value("GlobalRecovery", ConvergencePolicyAction::GlobalRecovery)
+        .value("AbortStep", ConvergencePolicyAction::AbortStep)
+        .export_values();
+
     py::enum_<ThermalCouplingPolicy>(v2, "ThermalCouplingPolicy",
         "Electro-thermal coupling policy")
         .value("LossOnly", ThermalCouplingPolicy::LossOnly)
@@ -1377,6 +1414,10 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("model_regularization_events", &BackendTelemetry::model_regularization_events)
         .def_readwrite("model_regularization_last_changed", &BackendTelemetry::model_regularization_last_changed)
         .def_readwrite("model_regularization_last_intensity", &BackendTelemetry::model_regularization_last_intensity)
+        .def_readwrite("classified_fallback_events", &BackendTelemetry::classified_fallback_events)
+        .def_readwrite("last_failure_class", &BackendTelemetry::last_failure_class)
+        .def_readwrite("last_recovery_stage", &BackendTelemetry::last_recovery_stage)
+        .def_readwrite("last_policy_action", &BackendTelemetry::last_policy_action)
         .def_readwrite("failure_reason", &BackendTelemetry::failure_reason);
 
     py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
@@ -1388,6 +1429,9 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("dt", &FallbackTraceEntry::dt)
         .def_readwrite("reason", &FallbackTraceEntry::reason)
         .def_readwrite("solver_status", &FallbackTraceEntry::solver_status)
+        .def_readwrite("recovery_stage", &FallbackTraceEntry::recovery_stage)
+        .def_readwrite("failure_class", &FallbackTraceEntry::failure_class)
+        .def_readwrite("policy_action", &FallbackTraceEntry::policy_action)
         .def_readwrite("action", &FallbackTraceEntry::action);
 
     py::class_<ThermalCouplingOptions>(v2, "ThermalCouplingOptions",

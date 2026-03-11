@@ -970,6 +970,121 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
     }
 }
 
+[[nodiscard]] bool action_contains(std::string_view action, std::string_view token) {
+    return action.find(token) != std::string_view::npos;
+}
+
+[[nodiscard]] RecoveryStage infer_recovery_stage(FallbackReasonCode reason,
+                                                 std::string_view action,
+                                                 RecoveryStage explicit_stage) {
+    if (explicit_stage != RecoveryStage::None) {
+        return explicit_stage;
+    }
+    switch (reason) {
+        case FallbackReasonCode::EventSplit:
+        case FallbackReasonCode::LTERejection:
+            return RecoveryStage::DtBackoff;
+        case FallbackReasonCode::StiffnessBackoff:
+            return RecoveryStage::StiffProfile;
+        case FallbackReasonCode::TransientGminEscalation:
+            return RecoveryStage::Regularization;
+        case FallbackReasonCode::MaxRetriesExceeded:
+            if (action_contains(action, "global_recovery")) {
+                return RecoveryStage::GlobalizationEscalation;
+            }
+            if (action_contains(action, "hold_advance")) {
+                return RecoveryStage::DtBackoff;
+            }
+            if (action_contains(action, "abort")) {
+                return RecoveryStage::Abort;
+            }
+            return RecoveryStage::Abort;
+        case FallbackReasonCode::NewtonFailure:
+        default:
+            if (action_contains(action, "regularization")) {
+                return RecoveryStage::Regularization;
+            }
+            if (action_contains(action, "globalization")) {
+                return RecoveryStage::GlobalizationEscalation;
+            }
+            return RecoveryStage::None;
+    }
+}
+
+[[nodiscard]] ConvergencePolicyAction infer_policy_action(FallbackReasonCode reason,
+                                                          std::string_view action,
+                                                          RecoveryStage stage) {
+    if (action_contains(action, "global_recovery")) {
+        return ConvergencePolicyAction::GlobalRecovery;
+    }
+    if (action_contains(action, "hold_advance")) {
+        return ConvergencePolicyAction::HoldAdvance;
+    }
+    if (action_contains(action, "abort")) {
+        return ConvergencePolicyAction::AbortStep;
+    }
+
+    switch (reason) {
+        case FallbackReasonCode::EventSplit:
+            return ConvergencePolicyAction::EventSplit;
+        case FallbackReasonCode::StiffnessBackoff:
+            return ConvergencePolicyAction::StiffnessBackoff;
+        case FallbackReasonCode::TransientGminEscalation:
+            return ConvergencePolicyAction::TransientGminEscalation;
+        case FallbackReasonCode::NewtonFailure:
+        case FallbackReasonCode::LTERejection:
+        case FallbackReasonCode::MaxRetriesExceeded:
+            if (stage == RecoveryStage::Regularization) {
+                return ConvergencePolicyAction::Regularization;
+            }
+            if (stage == RecoveryStage::DtBackoff) {
+                return ConvergencePolicyAction::DtBackoff;
+            }
+            if (stage == RecoveryStage::StiffProfile) {
+                return ConvergencePolicyAction::StiffnessBackoff;
+            }
+            if (stage == RecoveryStage::Abort) {
+                return ConvergencePolicyAction::AbortStep;
+            }
+            return ConvergencePolicyAction::ObserveOnly;
+        default:
+            return ConvergencePolicyAction::ObserveOnly;
+    }
+}
+
+[[nodiscard]] ConvergenceFailureClass infer_failure_class(FallbackReasonCode reason,
+                                                          SolverStatus solver_status,
+                                                          std::string_view action,
+                                                          RecoveryStage stage) {
+    if (solver_status == SolverStatus::SingularMatrix ||
+        solver_status == SolverStatus::NumericalError) {
+        return ConvergenceFailureClass::LinearBreakdown;
+    }
+    if (action_contains(action, "magnetic")) {
+        return ConvergenceFailureClass::NonlinearMagneticStiffness;
+    }
+    if (action_contains(action, "control")) {
+        return ConvergenceFailureClass::ControlDiscreteStiffness;
+    }
+    if (action_contains(action, "chatter")) {
+        return ConvergenceFailureClass::SwitchChattering;
+    }
+    if (reason == FallbackReasonCode::EventSplit ||
+        action_contains(action, "event") ||
+        action_contains(action, "hold_advance")) {
+        return ConvergenceFailureClass::EventBurstZeroCross;
+    }
+    if (reason == FallbackReasonCode::NewtonFailure ||
+        stage == RecoveryStage::GlobalizationEscalation) {
+        return ConvergenceFailureClass::NewtonGlobalizationFailure;
+    }
+    if (reason == FallbackReasonCode::MaxRetriesExceeded ||
+        stage == RecoveryStage::Abort) {
+        return ConvergenceFailureClass::RetryBudgetExhausted;
+    }
+    return ConvergenceFailureClass::Unknown;
+}
+
 /**
  * @brief Appends one fallback/recovery trace entry for diagnostics.
  * @param result Simulation result accumulator.
@@ -980,6 +1095,7 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
  * @param reason Typed fallback reason code.
  * @param solver_status Solver status at logging instant.
  * @param action Human-readable action tag.
+ * @param recovery_stage Optional typed recovery stage (inferred when None).
  */
 void Simulator::record_fallback_event(SimulationResult& result,
                                       int step_index,
@@ -988,7 +1104,8 @@ void Simulator::record_fallback_event(SimulationResult& result,
                                       Real dt,
                                       FallbackReasonCode reason,
                                       SolverStatus solver_status,
-                                      const std::string& action) {
+                                      const std::string& action,
+                                      RecoveryStage recovery_stage) {
     if (!options_.fallback_policy.trace_retries) {
         return;
     }
@@ -999,8 +1116,15 @@ void Simulator::record_fallback_event(SimulationResult& result,
     entry.dt = dt;
     entry.reason = reason;
     entry.solver_status = solver_status;
+    entry.recovery_stage = infer_recovery_stage(reason, action, recovery_stage);
+    entry.policy_action = infer_policy_action(reason, action, entry.recovery_stage);
+    entry.failure_class = infer_failure_class(reason, solver_status, action, entry.recovery_stage);
     entry.action = action;
     result.fallback_trace.push_back(std::move(entry));
+    result.backend_telemetry.classified_fallback_events += 1;
+    result.backend_telemetry.last_failure_class = result.fallback_trace.back().failure_class;
+    result.backend_telemetry.last_recovery_stage = result.fallback_trace.back().recovery_stage;
+    result.backend_telemetry.last_policy_action = result.fallback_trace.back().policy_action;
 }
 
 /**

@@ -4309,6 +4309,26 @@ def test_fallback_trace_records_retry_reasons() -> None:
         or ps.FallbackReasonCode.StiffnessBackoff in reasons
     )
     assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons
+    assert result.backend_telemetry.classified_fallback_events == len(result.fallback_trace)
+    assert result.backend_telemetry.last_failure_class in (
+        ps.ConvergenceFailureClass.RetryBudgetExhausted,
+        ps.ConvergenceFailureClass.LinearBreakdown,
+        ps.ConvergenceFailureClass.NewtonGlobalizationFailure,
+        ps.ConvergenceFailureClass.EventBurstZeroCross,
+        ps.ConvergenceFailureClass.Unknown,
+    )
+    assert result.backend_telemetry.last_policy_action in (
+        ps.ConvergencePolicyAction.AbortStep,
+        ps.ConvergencePolicyAction.DtBackoff,
+        ps.ConvergencePolicyAction.Regularization,
+        ps.ConvergencePolicyAction.StiffnessBackoff,
+        ps.ConvergencePolicyAction.TransientGminEscalation,
+        ps.ConvergencePolicyAction.ObserveOnly,
+    )
+    assert any(
+        entry.recovery_stage != ps.RecoveryStage.None_
+        for entry in result.fallback_trace
+    )
 
 
 def test_recovery_ladder_stages_are_deterministic() -> None:

@@ -221,6 +221,31 @@ enum class FallbackReasonCode {
     MaxRetriesExceeded
 };
 
+enum class ConvergenceFailureClass {
+    None,
+    EventBurstZeroCross,
+    SwitchChattering,
+    NonlinearMagneticStiffness,
+    ControlDiscreteStiffness,
+    LinearBreakdown,
+    NewtonGlobalizationFailure,
+    RetryBudgetExhausted,
+    Unknown
+};
+
+enum class ConvergencePolicyAction {
+    None,
+    ObserveOnly,
+    DtBackoff,
+    EventSplit,
+    StiffnessBackoff,
+    Regularization,
+    TransientGminEscalation,
+    HoldAdvance,
+    GlobalRecovery,
+    AbortStep
+};
+
 struct FallbackTraceEntry {
     int step_index = 0;
     int retry_index = 0;
@@ -228,6 +253,9 @@ struct FallbackTraceEntry {
     Real dt = 0.0;
     FallbackReasonCode reason = FallbackReasonCode::NewtonFailure;
     SolverStatus solver_status = SolverStatus::Success;
+    RecoveryStage recovery_stage = RecoveryStage::None;
+    ConvergenceFailureClass failure_class = ConvergenceFailureClass::Unknown;
+    ConvergencePolicyAction policy_action = ConvergencePolicyAction::ObserveOnly;
     std::string action;
 };
 
@@ -294,6 +322,10 @@ struct BackendTelemetry {
     int model_regularization_events = 0;
     int model_regularization_last_changed = 0;
     double model_regularization_last_intensity = 0.0;
+    int classified_fallback_events = 0;
+    ConvergenceFailureClass last_failure_class = ConvergenceFailureClass::None;
+    RecoveryStage last_recovery_stage = RecoveryStage::None;
+    ConvergencePolicyAction last_policy_action = ConvergencePolicyAction::None;
     std::string failure_reason;
 };
 
@@ -773,7 +805,8 @@ private:
                                Real dt,
                                FallbackReasonCode reason,
                                SolverStatus solver_status,
-                               const std::string& action);
+                               const std::string& action,
+                               RecoveryStage recovery_stage = RecoveryStage::None);
 
     Circuit& circuit_;
     SimulationOptions options_;
