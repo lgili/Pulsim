@@ -61,13 +61,13 @@ python3 benchmarks/kpi_gate.py \
   --report-out benchmarks/out_ac/kpi_gate_report.json \
   --print-report
 
-# Convergence-platform KPI gate (M1 policy dry-run)
+# Convergence-platform KPI gate (M2 active balanced policy)
 python3 benchmarks/kpi_gate.py \
   --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
   --bench-results benchmarks/out/results.json \
   --class-matrix benchmarks/convergence_class_matrix.yaml \
   --phase-budget benchmarks/convergence_phase_budgets.yaml \
-  --phase-key gate_b \
+  --phase-key gate_c \
   --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
   --report-out benchmarks/out/kpi_gate_convergence_platform_report.json \
   --print-report
@@ -151,8 +151,10 @@ coverage, pass rate, runtime p95, timestep rejections p95, Newton iterations p95
 and typed convergence schema coverage per class.
 When `--phase-budget` and `--phase-key` are provided, the gate merges
 the selected phase budget with the threshold policy before evaluating regressions.
-Current `gate_b` phase budget enforces required non-regression for
-target-class policy quality and stable-class anti-overfit guards.
+Current `gate_c` phase budget enforces required non-regression for
+convergence success, runtime p95 budget, and switch/zero-cross class pass rates.
+In `gate_c`, the KPI gate also enforces a required target-class terminal-failure
+drop significance check (or strict non-regression when baseline failures are zero).
 
 `local_limit_suite.py` is intended for PC-local stress discovery and reports
 exact failure reasons per circuit/scenario. It always supports:

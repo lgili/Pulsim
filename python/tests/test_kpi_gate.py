@@ -585,9 +585,15 @@ def test_compute_metrics_includes_convergence_class_matrix_kpis(tmp_path: Path) 
     assert metrics["class_closed_loop_control_case_count"] == 1.0
     assert metrics["class_closed_loop_control_coverage_rate"] == 0.0
     assert metrics["class_closed_loop_control_pass_rate"] is None
+    assert metrics["policy_target_case_count"] == 2.0
+    assert metrics["policy_target_terminal_failure_count"] == 1.0
+    assert metrics["policy_target_terminal_failure_rate"] == 0.5
     assert metrics["policy_target_pass_rate"] == 0.5
     assert metrics["policy_target_match_rate"] == 0.5
     assert metrics["policy_target_mismatch_rate"] == 0.5
+    assert metrics["policy_stable_case_count"] == 1.0
+    assert metrics["policy_stable_terminal_failure_count"] == 0.0
+    assert metrics["policy_stable_terminal_failure_rate"] == 0.0
     assert metrics["policy_stable_pass_rate"] == 1.0
     assert metrics["policy_stable_mismatch_rate"] == 0.0
     assert metrics["policy_stable_anti_overfit_violation_rate"] == 0.0
@@ -654,9 +660,15 @@ def test_compute_policy_guard_rates_default_to_zero_without_policy_events(
         class_matrix_path=class_matrix_path,
     )
 
+    assert metrics["policy_target_case_count"] == 1.0
+    assert metrics["policy_target_terminal_failure_count"] == 0.0
+    assert metrics["policy_target_terminal_failure_rate"] == 0.0
     assert metrics["policy_target_pass_rate"] == 1.0
     assert metrics["policy_target_match_rate"] is None
     assert metrics["policy_target_mismatch_rate"] == 0.0
+    assert metrics["policy_stable_case_count"] == 1.0
+    assert metrics["policy_stable_terminal_failure_count"] == 0.0
+    assert metrics["policy_stable_terminal_failure_rate"] == 0.0
     assert metrics["policy_stable_pass_rate"] == 1.0
     assert metrics["policy_stable_mismatch_rate"] == 0.0
     assert metrics["policy_stable_anti_overfit_violation_rate"] == 0.0
@@ -1237,7 +1249,15 @@ def test_run_gate_merges_phase_budget_metrics(tmp_path: Path) -> None:
 def test_run_gate_phase_budget_requires_path_and_key(tmp_path: Path) -> None:
     bench_results = {"results": [{"status": "passed", "runtime_s": 0.10}]}
     baseline_metrics = {"runtime_p95": 0.20}
-    thresholds = {"metrics": {}}
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "max_regression_abs": 1.0,
+                "required": False,
+            }
+        }
+    }
 
     bench_path = tmp_path / "bench.json"
     baseline_path = tmp_path / "kpi_baseline.json"
@@ -1321,7 +1341,15 @@ def test_gate_b_phase_budget_blocks_cross_class_regression(tmp_path: Path) -> No
         "policy_stable_mismatch_rate": 0.0,
         "policy_stable_anti_overfit_violation_rate": 0.0,
     }
-    thresholds = {"metrics": {}}
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "max_regression_abs": 1.0,
+                "required": False,
+            }
+        }
+    }
     phase_budget = {
         "schema": "pulsim-convergence-phase-budgets-v1",
         "version": 1,
@@ -1395,6 +1423,170 @@ def test_gate_b_phase_budget_blocks_cross_class_regression(tmp_path: Path) -> No
     assert report["failed_required_metrics"] >= 1
     assert report["comparisons"]["policy_stable_mismatch_rate"]["status"] == "failed"
     assert report["comparisons"]["policy_stable_anti_overfit_violation_rate"]["status"] == "failed"
+
+
+def test_gate_c_target_failure_drop_significance_passes_with_strong_improvement(
+    tmp_path: Path,
+) -> None:
+    cases = []
+    class_cases = []
+    for idx in range(10):
+        benchmark_id = f"switch_case_{idx}"
+        class_cases.append({"benchmark_id": benchmark_id, "scenarios": ["direct_trap"]})
+        cases.append(
+            {
+                "benchmark_id": benchmark_id,
+                "scenario": "direct_trap",
+                "status": "failed" if idx == 0 else "passed",
+                "runtime_s": 0.05 + idx * 1e-3,
+                "telemetry": {},
+            }
+        )
+
+    bench_results = {"results": cases}
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {"cases": class_cases},
+        },
+    }
+    baseline_metrics = {
+        "policy_target_pass_rate": 0.5,  # baseline terminal failure rate = 0.5
+        "class_switch_heavy_case_count": 10.0,
+        "convergence_success_rate": 0.5,
+    }
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "required": False,
+                "max_regression_rel": 1.0,
+            }
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {"gate_c": {"metrics": {}}},
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_c_significant_drop_pass",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_c",
+    )
+
+    cmp = report["comparisons"]["gate_c_target_failure_drop_significance"]
+    assert report["overall_status"] == "passed"
+    assert cmp["status"] == "passed"
+    assert cmp["required"] is True
+    assert cmp["baseline_target_failure_rate"] == pytest.approx(0.5)
+    assert cmp["current_target_failure_rate"] == pytest.approx(0.1)
+
+
+def test_gate_c_target_failure_drop_significance_fails_without_statistical_signal(
+    tmp_path: Path,
+) -> None:
+    cases = []
+    class_cases = []
+    for idx in range(10):
+        benchmark_id = f"switch_case_{idx}"
+        class_cases.append({"benchmark_id": benchmark_id, "scenarios": ["direct_trap"]})
+        cases.append(
+            {
+                "benchmark_id": benchmark_id,
+                "scenario": "direct_trap",
+                "status": "failed" if idx < 3 else "passed",  # failure rate = 0.3
+                "runtime_s": 0.05 + idx * 1e-3,
+                "telemetry": {},
+            }
+        )
+
+    bench_results = {"results": cases}
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {"cases": class_cases},
+        },
+    }
+    baseline_metrics = {
+        "policy_target_pass_rate": 0.5,  # baseline terminal failure rate = 0.5
+        "class_switch_heavy_case_count": 10.0,
+        "convergence_success_rate": 0.5,
+    }
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "required": False,
+                "max_regression_rel": 1.0,
+            }
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {"gate_c": {"metrics": {}}},
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_c_significant_drop_fail",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_c",
+    )
+
+    cmp = report["comparisons"]["gate_c_target_failure_drop_significance"]
+    assert report["overall_status"] == "failed"
+    assert report["failed_required_metrics"] >= 1
+    assert cmp["status"] == "failed"
+    assert cmp["required"] is True
+    assert "not significant" in cmp["message"]
 
 
 def test_compare_metric_uses_epsilon_guard_for_near_zero_baseline() -> None:

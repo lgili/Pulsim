@@ -456,7 +456,7 @@ jobs:
             --bench-results benchmarks/out_ci/results.json \
             --class-matrix benchmarks/convergence_class_matrix.yaml \
             --phase-budget benchmarks/convergence_phase_budgets.yaml \
-            --phase-key gate_b \
+            --phase-key gate_c \
             --report-out benchmarks/out_ci/kpi_gate_convergence_platform_report.json \
             --print-report
 

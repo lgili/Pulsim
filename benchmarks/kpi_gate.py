@@ -19,6 +19,13 @@ try:
 except Exception:  # pragma: no cover - optional dependency for CLI usage
     yaml = None
 
+TARGET_POLICY_CLASS_SLUGS = (
+    "switch_heavy",
+    "zero_cross",
+    "magnetic_nonlinear",
+    "closed_loop_control",
+)
+
 
 def _quantile(values: list[float], q: float) -> Optional[float]:
     if not values:
@@ -31,6 +38,153 @@ def _quantile(values: list[float], q: float) -> Optional[float]:
     hi = min(lo + 1, len(ordered) - 1)
     frac = index - lo
     return ordered[lo] * (1.0 - frac) + ordered[hi] * frac
+
+
+def _coerce_finite_float(value: Any) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _normal_cdf(z_value: float) -> float:
+    return 0.5 * (1.0 + math.erf(z_value / math.sqrt(2.0)))
+
+
+def _policy_target_failure_stats(metrics: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    case_count = _coerce_finite_float(metrics.get("policy_target_case_count"))
+    if case_count is None or case_count <= 0.0:
+        case_total = 0.0
+        has_any_class_count = False
+        for slug in TARGET_POLICY_CLASS_SLUGS:
+            class_count = _coerce_finite_float(metrics.get(f"class_{slug}_case_count"))
+            if class_count is None or class_count <= 0.0:
+                continue
+            has_any_class_count = True
+            case_total += class_count
+        if has_any_class_count and case_total > 0.0:
+            case_count = case_total
+
+    failure_rate = _coerce_finite_float(metrics.get("policy_target_terminal_failure_rate"))
+    if failure_rate is None:
+        pass_rate = _coerce_finite_float(metrics.get("policy_target_pass_rate"))
+        if pass_rate is not None:
+            failure_rate = max(0.0, min(1.0, 1.0 - pass_rate))
+    if case_count is None or case_count <= 0.0 or failure_rate is None:
+        return None
+
+    failure_count = _coerce_finite_float(metrics.get("policy_target_terminal_failure_count"))
+    if failure_count is None:
+        failure_count = max(0.0, min(case_count, failure_rate * case_count))
+    else:
+        failure_count = max(0.0, min(case_count, failure_count))
+
+    return {
+        "case_count": case_count,
+        "failure_count": failure_count,
+        "failure_rate": max(0.0, min(1.0, failure_rate)),
+    }
+
+
+def evaluate_gate_c_target_failure_drop_significance(
+    baseline_metrics: Dict[str, Any],
+    current_metrics: Dict[str, Any],
+    alpha: float = 0.05,
+) -> Dict[str, Any]:
+    baseline = _policy_target_failure_stats(baseline_metrics)
+    current = _policy_target_failure_stats(current_metrics)
+    required = True
+    metric_name = "gate_c_target_failure_drop_significance"
+
+    if baseline is None or current is None:
+        return {
+            "status": "failed",
+            "message": (
+                "target failure statistics unavailable "
+                "(requires policy_target_* and class matrix coverage)"
+            ),
+            "current": None,
+            "baseline": None,
+            "direction": "higher_is_better",
+            "regression_abs": None,
+            "regression_rel": None,
+            "max_regression_abs": 0.0,
+            "max_regression_rel": None,
+            "required": required,
+            "metric": metric_name,
+            "significance_alpha": alpha,
+            "significance_p_value": None,
+            "z_score": None,
+        }
+
+    baseline_rate = baseline["failure_rate"]
+    current_rate = current["failure_rate"]
+    baseline_count = baseline["case_count"]
+    current_count = current["case_count"]
+
+    significant_drop = False
+    message = ""
+    p_value: Optional[float] = None
+    z_score: Optional[float] = None
+
+    if baseline_rate <= 1e-12:
+        significant_drop = current_rate <= baseline_rate + 1e-12
+        if significant_drop:
+            message = "baseline has zero target failures; non-regression preserved"
+        else:
+            message = "baseline has zero target failures but current run regressed"
+    else:
+        if current_rate >= baseline_rate:
+            significant_drop = False
+            message = "current target failure rate did not improve"
+        else:
+            pooled_rate = (
+                baseline["failure_count"] + current["failure_count"]
+            ) / max(baseline_count + current_count, 1.0)
+            variance = pooled_rate * (1.0 - pooled_rate) * (
+                (1.0 / baseline_count) + (1.0 / current_count)
+            )
+            if variance <= 0.0:
+                significant_drop = current_rate < baseline_rate
+                message = (
+                    "degenerate variance; accepted strict improvement" if significant_drop
+                    else "degenerate variance without strict improvement"
+                )
+            else:
+                z_score = (baseline_rate - current_rate) / math.sqrt(variance)
+                p_value = 1.0 - _normal_cdf(z_score)
+                significant_drop = p_value <= alpha
+                if significant_drop:
+                    message = "target failure drop is statistically significant"
+                else:
+                    message = (
+                        f"target failure drop not significant (p={p_value:.3g} > alpha={alpha:.3g})"
+                    )
+
+    current_flag = 1.0 if significant_drop else 0.0
+    return {
+        "status": "passed" if significant_drop else "failed",
+        "message": message,
+        "current": current_flag,
+        "baseline": 1.0,
+        "direction": "higher_is_better",
+        "regression_abs": 1.0 - current_flag,
+        "regression_rel": 1.0 - current_flag,
+        "max_regression_abs": 0.0,
+        "max_regression_rel": None,
+        "required": required,
+        "metric": metric_name,
+        "significance_alpha": alpha,
+        "significance_p_value": p_value,
+        "z_score": z_score,
+        "baseline_target_failure_rate": baseline_rate,
+        "current_target_failure_rate": current_rate,
+        "baseline_target_case_count": baseline_count,
+        "current_target_case_count": current_count,
+    }
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -873,19 +1027,19 @@ def compute_metrics(
                     selected[key] = row
             return list(selected.values())
 
-        target_classes = {
-            "switch_heavy",
-            "zero_cross",
-            "magnetic_nonlinear",
-            "closed_loop_control",
-        }
+        target_classes = set(TARGET_POLICY_CLASS_SLUGS)
         stable_classes = {"diode_heavy"}
         target_rows = unique_rows_for_classes(target_classes)
         stable_rows = unique_rows_for_classes(stable_classes)
 
         if target_rows:
             target_passed = sum(1 for row in target_rows if row.get("status") == "passed")
-            metrics["policy_target_pass_rate"] = float(target_passed) / float(len(target_rows))
+            target_count = float(len(target_rows))
+            target_failed = float(len(target_rows) - target_passed)
+            metrics["policy_target_case_count"] = target_count
+            metrics["policy_target_terminal_failure_count"] = target_failed
+            metrics["policy_target_pass_rate"] = float(target_passed) / target_count
+            metrics["policy_target_terminal_failure_rate"] = target_failed / target_count
             target_events = float(sum(telemetry_values("policy_dry_run_events", rows=target_rows)))
             target_matches = float(sum(telemetry_values("policy_recommendation_matches", rows=target_rows)))
             target_mismatches = float(
@@ -898,13 +1052,21 @@ def compute_metrics(
                 metrics["policy_target_match_rate"] = None
                 metrics["policy_target_mismatch_rate"] = 0.0
         else:
+            metrics["policy_target_case_count"] = None
+            metrics["policy_target_terminal_failure_count"] = None
+            metrics["policy_target_terminal_failure_rate"] = None
             metrics["policy_target_pass_rate"] = None
             metrics["policy_target_match_rate"] = None
             metrics["policy_target_mismatch_rate"] = None
 
         if stable_rows:
             stable_passed = sum(1 for row in stable_rows if row.get("status") == "passed")
-            metrics["policy_stable_pass_rate"] = float(stable_passed) / float(len(stable_rows))
+            stable_count = float(len(stable_rows))
+            stable_failed = float(len(stable_rows) - stable_passed)
+            metrics["policy_stable_case_count"] = stable_count
+            metrics["policy_stable_terminal_failure_count"] = stable_failed
+            metrics["policy_stable_pass_rate"] = float(stable_passed) / stable_count
+            metrics["policy_stable_terminal_failure_rate"] = stable_failed / stable_count
             stable_events = float(sum(telemetry_values("policy_dry_run_events", rows=stable_rows)))
             stable_mismatches = float(
                 sum(telemetry_values("policy_recommendation_mismatches", rows=stable_rows))
@@ -921,6 +1083,9 @@ def compute_metrics(
                 metrics["policy_stable_mismatch_rate"] = 0.0
                 metrics["policy_stable_anti_overfit_violation_rate"] = 0.0
         else:
+            metrics["policy_stable_case_count"] = None
+            metrics["policy_stable_terminal_failure_count"] = None
+            metrics["policy_stable_terminal_failure_rate"] = None
             metrics["policy_stable_pass_rate"] = None
             metrics["policy_stable_mismatch_rate"] = None
             metrics["policy_stable_anti_overfit_violation_rate"] = None
@@ -1347,6 +1512,15 @@ def run_gate(
                 failed_required += 1
             if cmp.status == "skipped" and not cmp.required:
                 skipped_optional += 1
+
+        if phase_budget_key == "gate_c":
+            gate_c_cmp = evaluate_gate_c_target_failure_drop_significance(
+                baseline_metrics=baseline_metrics,
+                current_metrics=current_metrics,
+            )
+            comparisons[gate_c_cmp["metric"]] = gate_c_cmp
+            if gate_c_cmp["status"] == "failed" and gate_c_cmp["required"]:
+                failed_required += 1
 
     overall_status = "failed" if failed_required > 0 else "passed"
     if blocked_by_provenance and strict_provenance:

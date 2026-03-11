@@ -115,15 +115,15 @@ phases:
       runtime_p95:
         direction: lower_is_better
         max_regression_rel: 0.12
-        required: false
+        required: true
       class_switch_heavy_pass_rate:
         direction: higher_is_better
         max_regression_abs: 0.02
-        required: false
+        required: true
       class_zero_cross_pass_rate:
         direction: higher_is_better
         max_regression_abs: 0.02
-        required: false
+        required: true
 
   gate_d:
     description: Solver/model hardening budget with closed-loop no-regression focus.
