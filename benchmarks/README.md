@@ -13,6 +13,9 @@ This folder contains the YAML benchmark suite and validation runners.
 - `stress_catalog.yaml` — stress tier definitions, mapped cases, and acceptance criteria.
 - `convergence_stress_catalog.yaml` — reproducible stress catalog with fixed simulation contract and fingerprint contract.
 - `convergence_class_matrix.yaml` — canonical convergence-class case matrix (`diode_heavy`, `switch_heavy`, `zero_cross`, `magnetic_nonlinear`, `closed_loop_control`).
+- `convergence_reference_examples.yaml` — executable reference corpus by failure class with expected KPI targets.
+- `validate_reference_examples.py` — schema+consistency validator for `convergence_reference_examples.yaml`.
+- `run_reference_examples.py` — runner wrapper to execute reference examples by class.
 - `electrothermal_benchmarks.yaml` — focused matrix for electrothermal converter validation.
 - `electrothermal_stress_catalog.yaml` — stress criteria for electrothermal KPI coverage.
 - `kpi_gate.py` — regression gate that compares current KPIs against frozen baseline
@@ -38,6 +41,12 @@ python3 benchmarks/variable_mode_matrix.py --output-dir benchmarks/out_variable_
 python3 benchmarks/stress_suite.py \
   --catalog benchmarks/convergence_stress_catalog.yaml \
   --output-dir benchmarks/stress_out
+python3 benchmarks/validate_reference_examples.py \
+  --manifest benchmarks/benchmarks.yaml \
+  --examples benchmarks/convergence_reference_examples.yaml
+python3 benchmarks/run_reference_examples.py \
+  --class event_burst_zero_cross \
+  --output-dir benchmarks/out_reference_examples
 python3 benchmarks/kpi_gate.py \
   --bench-results benchmarks/out/results.json \
   --stress-summary benchmarks/stress_out/stress_summary.json \
@@ -200,6 +209,8 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
 - `stress_summary.json` — overall pass/fail and per-tier status.
   - Includes reproducibility metadata with catalog hash, manifest path,
     runtime environment fingerprint, and declared reproducibility contract.
+- `run_reference_examples.py` emits standard benchmark artifacts (`results.json`, `results.csv`, `summary.json`)
+  for the selected class subset.
 
 `local_limit_suite.py` emits:
 

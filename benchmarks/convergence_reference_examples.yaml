@@ -1,0 +1,66 @@
+schema: pulsim-convergence-reference-examples-v1
+version: 1
+baseline: benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json
+classes:
+  - failure_class: event_burst_zero_cross
+    objective: Validate robust handling around event bursts and zero-crossing windows.
+    examples:
+      - benchmark_id: diode_rectifier
+        scenarios: [direct_trap]
+        expected_kpi:
+          status: passed
+          typed_convergence_schema: true
+          timestep_rejections_p95_max: 0.0
+      - benchmark_id: periodic_rc_pwm
+        scenarios: [shooting_default]
+        expected_kpi:
+          status: passed
+          typed_convergence_schema: true
+          runtime_p95_max_s: 0.25
+
+  - failure_class: switch_chattering
+    objective: Check switching-heavy transients remain stable without policy regressions.
+    examples:
+      - benchmark_id: buck_switching
+        scenarios: [direct_trap, trbdf2]
+        expected_kpi:
+          status: passed
+          typed_convergence_schema: true
+          class_switch_heavy_pass_rate_min: 1.0
+      - benchmark_id: boost_switching_complex
+        scenarios: [direct_trap]
+        expected_kpi:
+          status: passed
+          typed_convergence_schema: true
+          class_switch_heavy_pass_rate_min: 1.0
+
+  - failure_class: nonlinear_magnetic_stiffness
+    objective: Validate nonlinear magnetic model stability with policy telemetry active.
+    examples:
+      - benchmark_id: magnetic_core_saturation
+        scenarios: [direct_trap]
+        expected_kpi:
+          status: passed
+          typed_convergence_schema: true
+          magnetic_sat_error_max: 1e-9
+      - benchmark_id: magnetic_core_hysteresis
+        scenarios: [direct_trap]
+        expected_kpi:
+          status: passed
+          typed_convergence_schema: true
+          magnetic_hysteresis_cycle_energy_error_max: 1e-8
+
+  - failure_class: control_discrete_stiffness
+    objective: Validate control-domain coupling behavior for PI/C-Block workflows.
+    examples:
+      - benchmark_id: periodic_rc_pwm
+        scenarios: [harmonic_balance]
+        expected_kpi:
+          status: passed
+          typed_convergence_schema: true
+          class_closed_loop_control_pass_rate_min: 1.0
+      - benchmark_id: ac_control_workflow_expected_failure
+        scenarios: [direct_trap]
+        expected_kpi:
+          status: passed
+          expected_failure_matched: true

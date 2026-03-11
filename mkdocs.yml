@@ -122,6 +122,8 @@ nav:
       - Benchmarks and Parity: benchmarks-and-parity.md
       - Notebooks: notebooks.md
       - Convergence Tuning: convergence-tuning-guide.md
+      - Convergence Playbook: convergence-playbook.md
+      - Convergence Profile Migration: convergence-profile-migration.md
       - Troubleshooting: troubleshooting.md
   - Signal Domain:
       - C-Block Overview: cblock/index.md

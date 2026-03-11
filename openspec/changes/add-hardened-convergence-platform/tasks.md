@@ -41,10 +41,10 @@
 - [x] 7.4 Gate F: tooling/GUI consomem schema novo sem quebrar compatibilidade.
 
 ## 8. Documentation and Reference Corpus
-- [ ] 8.1 Publicar `Convergence Playbook` com matriz de triagem por classe de falha.
-- [ ] 8.2 Publicar exemplos referenciais executaveis por classe com KPI esperado.
-- [ ] 8.3 Publicar guia de migracao/tuning entre perfis `strict`, `balanced`, `robust`.
-- [ ] 8.4 Validar docs e exemplos em pipeline automatizado.
+- [x] 8.1 Publicar `Convergence Playbook` com matriz de triagem por classe de falha.
+- [x] 8.2 Publicar exemplos referenciais executaveis por classe com KPI esperado.
+- [x] 8.3 Publicar guia de migracao/tuning entre perfis `strict`, `balanced`, `robust`.
+- [x] 8.4 Validar docs e exemplos em pipeline automatizado.
 
 ## 9. Advanced Solver Evaluation Track (Isolado)
 - [ ] 9.1 Definir benchmark de decisao para SUNDIALS/PETSc/KINSOL/IDA com criterios objetivos.
