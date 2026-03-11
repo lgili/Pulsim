@@ -142,6 +142,7 @@ nav:
   - Operations:
       - Configuration: configuration.md
       - PSIM/PLECS Gap and Modular Roadmap: psim-plecs-gap-and-modular-architecture-roadmap.md
+      - Advanced Solver ADR (Gate ADV): advanced-solver-adr.md
       - Docs Versioning and Release: versioning-and-release.md
       - Release Notes (Electrothermal Parity): release-notes-electrothermal-parity.md
       - PR Package (Electrothermal): pr-electrothermal-datasheet-parity-package.md
