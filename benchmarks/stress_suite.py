@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import platform
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -275,7 +277,43 @@ def run_stress_suite(
     return tier_results
 
 
-def write_stress_artifacts(output_dir: Path, tier_runs: Sequence[TierRunResult]) -> None:
+def collect_reproducibility_metadata(
+    benchmarks_manifest_path: Path,
+    stress_catalog_path: Path,
+) -> Dict[str, Any]:
+    catalog_payload = load_yaml(stress_catalog_path)
+    reproducibility_contract = (
+        catalog_payload.get("reproducibility")
+        if isinstance(catalog_payload, dict)
+        else None
+    )
+    if not isinstance(reproducibility_contract, dict):
+        reproducibility_contract = {}
+
+    catalog_resolved = stress_catalog_path.resolve()
+    digest = hashlib.sha256()
+    with open(catalog_resolved, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+
+    return {
+        "catalog_path": str(catalog_resolved),
+        "benchmarks_manifest_path": str(benchmarks_manifest_path.resolve()),
+        "catalog_sha256": digest.hexdigest(),
+        "environment": {
+            "os": f"{platform.system()}-{platform.release()}-{platform.machine()}",
+            "python": platform.python_version(),
+            "machine_class": platform.machine() or "unknown",
+        },
+        "contract": reproducibility_contract,
+    }
+
+
+def write_stress_artifacts(
+    output_dir: Path,
+    tier_runs: Sequence[TierRunResult],
+    reproducibility_metadata: Optional[Dict[str, Any]] = None,
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "stress_results.csv"
     json_path = output_dir / "stress_results.json"
@@ -325,6 +363,8 @@ def write_stress_artifacts(output_dir: Path, tier_runs: Sequence[TierRunResult])
         "schema_version": STRESS_SCHEMA_VERSION,
         "tiers": [],
     }
+    if reproducibility_metadata:
+        payload["reproducibility"] = reproducibility_metadata
     for tier_run in tier_runs:
         payload["tiers"].append(
             {
@@ -349,6 +389,8 @@ def write_stress_artifacts(output_dir: Path, tier_runs: Sequence[TierRunResult])
         else "failed",
         "tier_evaluations": {item.tier: asdict(item.evaluation) for item in tier_runs},
     }
+    if reproducibility_metadata:
+        summary["reproducibility"] = reproducibility_metadata
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2, sort_keys=True)
 
@@ -367,7 +409,15 @@ def main() -> int:
         output_dir=args.output_dir,
         selected_tiers=args.tier,
     )
-    write_stress_artifacts(args.output_dir, tier_runs)
+    reproducibility_metadata = collect_reproducibility_metadata(
+        benchmarks_manifest_path=args.benchmarks.resolve(),
+        stress_catalog_path=args.catalog.resolve(),
+    )
+    write_stress_artifacts(
+        args.output_dir,
+        tier_runs,
+        reproducibility_metadata=reproducibility_metadata,
+    )
 
     summary = {
         "schema_version": STRESS_SCHEMA_VERSION,

@@ -406,6 +406,7 @@ jobs:
       - name: Run stress suite
         run: |
           python3 benchmarks/stress_suite.py \
+            --catalog benchmarks/convergence_stress_catalog.yaml \
             --output-dir benchmarks/stress_out_ci
 
       - name: Enforce KPI regression gate

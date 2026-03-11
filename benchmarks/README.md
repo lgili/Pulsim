@@ -11,6 +11,7 @@ This folder contains the YAML benchmark suite and validation runners.
 - `benchmark_ngspice.py` — Pulsim vs external SPICE parity runner (`ngspice` or `ltspice` backends).
 - `stress_suite.py` — tiered stress validation runner (tiers A/B/C + pass criteria).
 - `stress_catalog.yaml` — stress tier definitions, mapped cases, and acceptance criteria.
+- `convergence_stress_catalog.yaml` — reproducible stress catalog with fixed simulation contract and fingerprint contract.
 - `convergence_class_matrix.yaml` — canonical convergence-class case matrix (`diode_heavy`, `switch_heavy`, `zero_cross`, `magnetic_nonlinear`, `closed_loop_control`).
 - `electrothermal_benchmarks.yaml` — focused matrix for electrothermal converter validation.
 - `electrothermal_stress_catalog.yaml` — stress criteria for electrothermal KPI coverage.
@@ -34,7 +35,9 @@ export PYTHONPATH=build/python
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 python3 benchmarks/variable_mode_matrix.py --output-dir benchmarks/out_variable_matrix
-python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
+python3 benchmarks/stress_suite.py \
+  --catalog benchmarks/convergence_stress_catalog.yaml \
+  --output-dir benchmarks/stress_out
 python3 benchmarks/kpi_gate.py \
   --bench-results benchmarks/out/results.json \
   --stress-summary benchmarks/stress_out/stress_summary.json \
@@ -190,6 +193,8 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
 - `stress_results.csv` — per scenario stress execution rows with telemetry columns.
 - `stress_results.json` — tier criteria + per-tier evaluation + scenario records.
 - `stress_summary.json` — overall pass/fail and per-tier status.
+  - Includes reproducibility metadata with catalog hash, manifest path,
+    runtime environment fingerprint, and declared reproducibility contract.
 
 `local_limit_suite.py` emits:
 
