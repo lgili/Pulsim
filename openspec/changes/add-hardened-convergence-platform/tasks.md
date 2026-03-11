@@ -18,7 +18,7 @@
 
 ## 4. M2 - Policy Active (Balanced)
 - [x] 4.1 Ativar politicas contextuais para `event_burst_zero_cross` e `switch_chattering` com guardas bounded.
-- [ ] 4.2 Refinar arbitragem LTE/Newton/evento para reduzir loops de rejeicao sem progresso fisico.
+- [x] 4.2 Refinar arbitragem LTE/Newton/evento para reduzir loops de rejeicao sem progresso fisico.
 - [ ] 4.3 Garantir contrato de strict mode (`allow_fallback=false`) com estabilizacao interna bounded e diagnostico terminal deterministico.
 - [ ] 4.4 Gate C: queda estatisticamente significativa de falhas terminais nas classes-alvo e performance p95 dentro do budget.
 

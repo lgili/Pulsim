@@ -385,6 +385,14 @@ TEST_CASE("v1 balanced convergence policy activates contextual event guards",
         });
     CHECK(has_policy_guard);
 
+    const bool has_lte_newton_event_arbitration = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.action.find("lte_newton_event_arbitration_accept") != std::string::npos ||
+                   entry.action.find("arbitration_lte_newton_event") != std::string::npos;
+        });
+    CHECK(has_lte_newton_event_arbitration);
+
     const bool has_target_class = std::any_of(
         result.fallback_trace.begin(), result.fallback_trace.end(),
         [](const FallbackTraceEntry& entry) {

@@ -26,6 +26,7 @@ constexpr std::size_t kMaxSampleReserve = 1'000'000;
 constexpr std::size_t kMaxFallbackReserve = 2'000'000;
 constexpr int kPolicyGuardActivationBudget = 64;
 constexpr int kSwitchChatteringRetryThreshold = 2;
+constexpr int kArbitrationRetryThreshold = 2;
 constexpr Real kBalancedEventBurstBackoff = 0.35;
 constexpr Real kRobustEventBurstBackoff = 0.25;
 constexpr Real kBalancedChatteringSplitScale = 6.0;
@@ -1733,6 +1734,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         bool accepted_step_lte_guarded = false;
         bool split_encountered_this_step = false;
         int split_retry_count_this_step = 0;
+        int lte_rejections_this_step = 0;
+        int newton_failures_this_step = 0;
 
         while (!accepted && retries <= options_.max_step_retries) {
             auto consume_fixed_recovery_budget = [&](const std::string& action_tag) {
@@ -1915,7 +1918,21 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
             if (step_result.status != SolverStatus::Success) {
                 circuit_.clear_stage_context();
+                newton_failures_this_step++;
                 RecoveryDecision recovery = transient_services_.recovery_manager->on_step_failure(step_request);
+                const bool lte_newton_event_loop =
+                    contextual_policy_active &&
+                    step_request.event_adjacent &&
+                    split_retry_count_this_step > 0 &&
+                    lte_rejections_this_step > 0 &&
+                    newton_failures_this_step >= kArbitrationRetryThreshold;
+                if (lte_newton_event_loop &&
+                    recovery.stage == RecoveryStage::DtBackoff) {
+                    recovery.stage = RecoveryStage::StiffProfile;
+                    recovery.next_dt = std::max(step_request.dt_min, step_request.dt_candidate * Real{0.5});
+                    recovery.abort = false;
+                    recovery.reason = "arbitration_lte_newton_event";
+                }
                 transient_services_.telemetry_collector->on_step_reject(recovery);
                 const Real recovered_dt =
                     recovery.next_dt > 0.0 ? recovery.next_dt : (step_request.dt_candidate * 0.5);
@@ -2162,6 +2179,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             // Avoid deadlock loops when LTE remains high at dt_min.
                             // Accept the step and let event/stiffness policies move
                             // the trajectory forward instead of exhausting retries.
+                            lte_rejections_this_step++;
                             accepted_step_lte_guarded = true;
                             const Real recovered_dt =
                                 std::max(options_.dt_min, dt_used * Real{1.25});
@@ -2175,36 +2193,61 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                                   step_result.status,
                                                   "lte_min_floor_accept");
                         } else {
-                        circuit_.clear_stage_context();
-                        dt = clamp_dt_for_mode(decision.dt_new);
-                        RecoveryDecision lte_recovery;
-                        lte_recovery.stage = RecoveryStage::DtBackoff;
-                        lte_recovery.next_dt = decision.dt_new;
-                        lte_recovery.abort = false;
-                        lte_recovery.reason = "lte_rejection";
-                        transient_services_.telemetry_collector->on_step_reject(lte_recovery);
-                        result.timestep_rejections++;
-                        retries++;
-                        if (!consume_fixed_recovery_budget("fixed_recovery_budget_lte")) {
-                            continue;
-                        }
-                        std::ostringstream action;
-                        action << "lte_dt=" << decision.dt_new;
-                        record_fallback_event(result,
-                                              result.total_steps,
-                                              retries,
-                                              t,
-                                              dt_used,
-                                              FallbackReasonCode::LTERejection,
-                                              step_result.status,
-                                              action.str());
-                        rejection_streak++;
-                        high_iter_streak = 0;
-                        if (options_.stiffness_config.enable &&
-                            rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
-                            stiffness_cooldown = options_.stiffness_config.cooldown_steps;
-                        }
-                        continue;
+                            const bool lte_newton_event_loop =
+                                contextual_policy_active &&
+                                step_request.event_adjacent &&
+                                split_retry_count_this_step > 0 &&
+                                newton_failures_this_step > 0 &&
+                                retries >= kArbitrationRetryThreshold;
+                            if (lte_newton_event_loop) {
+                                lte_rejections_this_step++;
+                                accepted_step_lte_guarded = true;
+                                const Real recovered_dt =
+                                    std::max(options_.dt_min, dt_used * Real{1.5});
+                                dt = clamp_dt_for_mode(std::min(recovered_dt, options_.dt_max));
+                                lte_discontinuity_grace_steps =
+                                    std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps + 1);
+                                record_fallback_event(result,
+                                                      result.total_steps,
+                                                      retries,
+                                                      t,
+                                                      dt_used,
+                                                      FallbackReasonCode::LTERejection,
+                                                      step_result.status,
+                                                      "lte_newton_event_arbitration_accept");
+                            } else {
+                                lte_rejections_this_step++;
+                                circuit_.clear_stage_context();
+                                dt = clamp_dt_for_mode(decision.dt_new);
+                                RecoveryDecision lte_recovery;
+                                lte_recovery.stage = RecoveryStage::DtBackoff;
+                                lte_recovery.next_dt = decision.dt_new;
+                                lte_recovery.abort = false;
+                                lte_recovery.reason = "lte_rejection";
+                                transient_services_.telemetry_collector->on_step_reject(lte_recovery);
+                                result.timestep_rejections++;
+                                retries++;
+                                if (!consume_fixed_recovery_budget("fixed_recovery_budget_lte")) {
+                                    continue;
+                                }
+                                std::ostringstream action;
+                                action << "lte_dt=" << decision.dt_new;
+                                record_fallback_event(result,
+                                                      result.total_steps,
+                                                      retries,
+                                                      t,
+                                                      dt_used,
+                                                      FallbackReasonCode::LTERejection,
+                                                      step_result.status,
+                                                      action.str());
+                                rejection_streak++;
+                                high_iter_streak = 0;
+                                if (options_.stiffness_config.enable &&
+                                    rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
+                                    stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+                                }
+                                continue;
+                            }
                         }
                     }
 
