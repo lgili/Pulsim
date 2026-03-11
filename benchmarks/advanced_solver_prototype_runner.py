@@ -139,9 +139,6 @@ def _build_prototype_simulation_override(candidate: Dict[str, Any], mode: str) -
             "integrator": integrator,
             "formulation": "direct",
             "direct_formulation_fallback": True,
-            "fallback_policy": {
-                "convergence_profile": "robust",
-            },
         }
     }
 
@@ -314,10 +311,15 @@ def summarize_case_results(
         )
     )
     memory_regression_rel = 0.0
+    min_success_gain_required = float(criteria.get("min_success_rate_gain_abs", 0.0))
+    baseline_saturated = baseline_success_rate >= (1.0 - 1e-12)
+    if baseline_saturated:
+        success_constraint_passed = prototype_success_rate >= (baseline_success_rate - 1e-12)
+    else:
+        success_constraint_passed = success_gain >= min_success_gain_required
 
     hard_constraints = {
-        "min_success_rate_gain_abs": success_gain
-        >= float(criteria.get("min_success_rate_gain_abs", 0.0)),
+        "min_success_rate_gain_abs": success_constraint_passed,
         "max_runtime_regression_rel": runtime_regression_rel
         <= float(criteria.get("max_runtime_regression_rel", 1e9)),
         "max_memory_regression_rel": memory_regression_rel
@@ -355,6 +357,10 @@ def summarize_case_results(
         "memory_regression_rel": memory_regression_rel,
         "portability_score": portability_score,
         "maintenance_cost_score": maintenance_cost_score,
+        "min_success_rate_gain_required": min_success_gain_required,
+        "min_success_rate_gain_constraint_mode": (
+            "non_regression_when_baseline_saturated" if baseline_saturated else "absolute_gain"
+        ),
         "hard_constraints": hard_constraints,
         "hard_constraints_passed": hard_pass,
         "weighted_total_score": weighted_total_score,

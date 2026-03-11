@@ -105,6 +105,8 @@ def test_prototype_runner_applies_transient_override_and_generates_report(
     _write_yaml(manifest_path, _manifest_payload())
     _write_yaml(circuit_path, _circuit_payload())
 
+    seen_payloads: List[Dict[str, Any]] = []
+
     def fake_run(
         netlist_path: Path,
         output_path: Path,
@@ -112,6 +114,7 @@ def test_prototype_runner_applies_transient_override_and_generates_report(
         use_initial_conditions: bool = False,
     ) -> BackendRunResult:
         payload = yaml.safe_load(netlist_path.read_text(encoding="utf-8"))
+        seen_payloads.append(payload)
         sim = payload.get("simulation", {})
         is_prototype = sim.get("integrator") == "trbdf2"
         output_path.write_text("time\n0\n", encoding="utf-8")
@@ -138,6 +141,14 @@ def test_prototype_runner_applies_transient_override_and_generates_report(
     assert report["cases"][0]["runtime_regression_rel"] is not None
     assert (output_dir / "advanced_solver_prototype_report.json").exists()
     assert (output_dir / "advanced_solver_prototype_results.csv").exists()
+    assert len(seen_payloads) == 2
+
+    baseline_sim = seen_payloads[0]["simulation"]
+    prototype_sim = seen_payloads[1]["simulation"]
+    assert "fallback" not in baseline_sim
+    assert "fallback_policy" not in baseline_sim
+    assert "fallback" not in prototype_sim
+    assert "fallback_policy" not in prototype_sim
 
 
 def test_prototype_runner_does_not_apply_transient_override_on_shooting_mode(
