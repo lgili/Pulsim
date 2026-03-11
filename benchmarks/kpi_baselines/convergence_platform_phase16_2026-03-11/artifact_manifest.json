@@ -1,11 +1,11 @@
 {
   "baseline_id": "convergence_platform_phase16_2026-03-11",
-  "captured_at_utc": "2026-03-11T12:44:15.700933+00:00",
+  "captured_at_utc": "2026-03-11T12:46:29.687553+00:00",
   "files": [
     {
       "path": "benchmarks/phase16_artifacts/benchmarks/results.json",
-      "sha256": "332b9ebfd8426af6e37176bb88382474a1ec405cd63e92f8b127b689339f3b3d",
-      "size_bytes": 93034
+      "sha256": "e870d0d8b58773fb435b7ddb9f80d5167149549aabb3908156a8c4f722aa2e47",
+      "size_bytes": 93743
     },
     {
       "path": "benchmarks/phase16_artifacts/stress/stress_summary.json",

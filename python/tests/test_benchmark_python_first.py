@@ -752,6 +752,49 @@ def test_run_benchmarks_accepts_expected_frequency_failure_for_control_workflow(
     assert result.mode == "frequency_analysis"
     assert "Expected failure matched" in result.message
     assert result.telemetry.get("expected_failure_matched") == 1.0
+    assert result.telemetry.get("classified_fallback_events") == 0.0
+    assert result.telemetry.get("policy_dry_run_events") == 0.0
+    assert result.telemetry.get("policy_recommendation_matches") == 0.0
+    assert result.telemetry.get("policy_recommendation_mismatches") == 0.0
+    assert result.telemetry.get("anti_overfit_violations") == 0.0
+    assert result.telemetry.get("anti_overfit_budget_exceeded") == 0.0
+
+
+def test_run_benchmarks_non_expected_failure_still_emits_typed_schema_defaults(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _write_rc_netlist(
+        tmp_path,
+        benchmark_block={
+            "id": "non_expected_failure_defaults",
+            "validation": {"type": "none"},
+        },
+    )
+    manifest_path = _write_manifest(tmp_path, "circuit.yaml")
+
+    def fake_run_pulsim(
+        netlist_path: Path,
+        output_path: Path,
+        preferred_mode: str | None = None,
+        use_initial_conditions: bool = False,
+    ) -> br.PulsimRunResult:
+        del netlist_path, output_path, preferred_mode, use_initial_conditions
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(br, "run_pulsim", fake_run_pulsim)
+
+    results = br.run_benchmarks(manifest_path, tmp_path / "out")
+
+    assert len(results) == 1
+    row = results[0]
+    assert row.status == "failed"
+    assert row.telemetry.get("classified_fallback_events") == 0.0
+    assert row.telemetry.get("policy_dry_run_events") == 0.0
+    assert row.telemetry.get("policy_recommendation_matches") == 0.0
+    assert row.telemetry.get("policy_recommendation_mismatches") == 0.0
+    assert row.telemetry.get("anti_overfit_violations") == 0.0
+    assert row.telemetry.get("anti_overfit_budget_exceeded") == 0.0
 
 
 def test_run_benchmarks_validates_magnetic_core_saturation_and_hysteresis(

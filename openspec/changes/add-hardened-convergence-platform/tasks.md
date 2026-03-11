@@ -8,7 +8,7 @@
 - [x] 2.1 Implementar schema tipado de convergencia no runtime (`failure_class`, `recovery_stage`, `policy_action`, contexto numerico minimo).
 - [x] 2.2 Instrumentar classificador em modo observacao (somente recomendacao, sem atuar no solver).
 - [x] 2.3 Expor telemetria no `SimulationResult` e preservar compatibilidade com campos legados.
-- [ ] 2.4 Gate A: cobertura de schema obrigatorio >= 99% nos casos da matriz minima e 0 regressao funcional.
+- [x] 2.4 Gate A: cobertura de schema obrigatorio >= 99% nos casos da matriz minima e 0 regressao funcional.
 
 ## 3. M1 - Policy Passive Validation
 - [x] 3.1 Implementar `PolicySelector` em dry-run comparando acao recomendada vs acao aplicada.
