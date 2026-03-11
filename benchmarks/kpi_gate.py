@@ -820,6 +820,7 @@ def compute_metrics(
             # Deterministic last-write-wins if duplicate case keys appear.
             indexed_rows[key] = row
 
+        class_observed_rows: Dict[str, list[Dict[str, Any]]] = {}
         for class_name, case_keys in class_matrix.items():
             slug = _sanitize_metric_slug(class_name)
             expected_total = float(len(case_keys))
@@ -831,6 +832,7 @@ def compute_metrics(
                     continue
                 observed_keys += 1
                 observed_rows.append(row)
+            class_observed_rows[class_name] = list(observed_rows)
 
             metrics[f"class_{slug}_case_count"] = expected_total
             metrics[f"class_{slug}_coverage_rate"] = (
@@ -860,6 +862,68 @@ def compute_metrics(
                 metrics[f"class_{slug}_newton_iterations_p95"] = None
                 metrics[f"class_{slug}_timestep_rejections_p95"] = None
                 metrics[f"class_{slug}_typed_schema_coverage_rate"] = None
+
+        def unique_rows_for_classes(class_names: Set[str]) -> list[Dict[str, Any]]:
+            selected: Dict[Tuple[str, str], Dict[str, Any]] = {}
+            for class_name in class_names:
+                for row in class_observed_rows.get(class_name, []):
+                    key = _case_key(row)
+                    if key is None:
+                        continue
+                    selected[key] = row
+            return list(selected.values())
+
+        target_classes = {
+            "switch_heavy",
+            "zero_cross",
+            "magnetic_nonlinear",
+            "closed_loop_control",
+        }
+        stable_classes = {"diode_heavy"}
+        target_rows = unique_rows_for_classes(target_classes)
+        stable_rows = unique_rows_for_classes(stable_classes)
+
+        if target_rows:
+            target_passed = sum(1 for row in target_rows if row.get("status") == "passed")
+            metrics["policy_target_pass_rate"] = float(target_passed) / float(len(target_rows))
+            target_events = float(sum(telemetry_values("policy_dry_run_events", rows=target_rows)))
+            target_matches = float(sum(telemetry_values("policy_recommendation_matches", rows=target_rows)))
+            target_mismatches = float(
+                sum(telemetry_values("policy_recommendation_mismatches", rows=target_rows))
+            )
+            if target_events > 0.0:
+                metrics["policy_target_match_rate"] = target_matches / target_events
+                metrics["policy_target_mismatch_rate"] = target_mismatches / target_events
+            else:
+                metrics["policy_target_match_rate"] = None
+                metrics["policy_target_mismatch_rate"] = None
+        else:
+            metrics["policy_target_pass_rate"] = None
+            metrics["policy_target_match_rate"] = None
+            metrics["policy_target_mismatch_rate"] = None
+
+        if stable_rows:
+            stable_passed = sum(1 for row in stable_rows if row.get("status") == "passed")
+            metrics["policy_stable_pass_rate"] = float(stable_passed) / float(len(stable_rows))
+            stable_events = float(sum(telemetry_values("policy_dry_run_events", rows=stable_rows)))
+            stable_mismatches = float(
+                sum(telemetry_values("policy_recommendation_mismatches", rows=stable_rows))
+            )
+            stable_violations = float(
+                sum(telemetry_values("anti_overfit_violations", rows=stable_rows))
+            )
+            if stable_events > 0.0:
+                metrics["policy_stable_mismatch_rate"] = stable_mismatches / stable_events
+                metrics["policy_stable_anti_overfit_violation_rate"] = (
+                    stable_violations / stable_events
+                )
+            else:
+                metrics["policy_stable_mismatch_rate"] = None
+                metrics["policy_stable_anti_overfit_violation_rate"] = None
+        else:
+            metrics["policy_stable_pass_rate"] = None
+            metrics["policy_stable_mismatch_rate"] = None
+            metrics["policy_stable_anti_overfit_violation_rate"] = None
 
     metrics["ac_sweep_mag_error"] = telemetry_mean("ac_sweep_mag_error", rows=ac_rows)
     metrics["ac_sweep_phase_error"] = telemetry_mean("ac_sweep_phase_error", rows=ac_rows)

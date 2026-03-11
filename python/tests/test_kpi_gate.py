@@ -585,6 +585,12 @@ def test_compute_metrics_includes_convergence_class_matrix_kpis(tmp_path: Path) 
     assert metrics["class_closed_loop_control_case_count"] == 1.0
     assert metrics["class_closed_loop_control_coverage_rate"] == 0.0
     assert metrics["class_closed_loop_control_pass_rate"] is None
+    assert metrics["policy_target_pass_rate"] == 0.5
+    assert metrics["policy_target_match_rate"] == 0.5
+    assert metrics["policy_target_mismatch_rate"] == 0.5
+    assert metrics["policy_stable_pass_rate"] == 1.0
+    assert metrics["policy_stable_mismatch_rate"] == 0.0
+    assert metrics["policy_stable_anti_overfit_violation_rate"] == 0.0
 
 
 def test_compute_metrics_includes_ac_sweep_accuracy_and_runtime_metrics(tmp_path: Path) -> None:

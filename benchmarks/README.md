@@ -178,7 +178,10 @@ Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `averaged_pair_runtime_speedup_min`, `classified_fallback_events`,
 `policy_dry_run_events`, `policy_recommendation_matches`,
 `policy_recommendation_mismatches`, `anti_overfit_violations`,
-`anti_overfit_budget_exceeded`, and `typed_convergence_schema_coverage_rate`.
+`anti_overfit_budget_exceeded`, `typed_convergence_schema_coverage_rate`,
+`policy_target_pass_rate`, `policy_target_match_rate`,
+`policy_target_mismatch_rate`, `policy_stable_pass_rate`,
+`policy_stable_mismatch_rate`, and `policy_stable_anti_overfit_violation_rate`.
 
 `benchmark_ngspice.py` also emits:
 
