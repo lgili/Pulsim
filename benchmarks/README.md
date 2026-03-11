@@ -27,6 +27,7 @@ This folder contains the YAML benchmark suite and validation runners.
 - `convergence_phase_budgets.yaml` — versioned per-phase (Gate A..F/ADV) functional/performance budget contract.
 - `advanced_solver_decision_matrix.yaml` — objective adoption contract for advanced solver backends (SUNDIALS/PETSc families).
 - `validate_advanced_solver_decision_matrix.py` — schema+policy validator for `advanced_solver_decision_matrix.yaml`.
+- `advanced_solver_prototype_runner.py` — isolated baseline-vs-prototype runner for advanced backend candidate evaluation.
 - `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
 - `kpi_thresholds_averaged.yaml` — required KPI thresholds for averaged-mode paired gate.
 - `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
@@ -48,6 +49,10 @@ python3 benchmarks/validate_reference_examples.py \
   --examples benchmarks/convergence_reference_examples.yaml
 python3 benchmarks/validate_advanced_solver_decision_matrix.py \
   --matrix benchmarks/advanced_solver_decision_matrix.yaml
+python3 benchmarks/advanced_solver_prototype_runner.py \
+  --candidate sundials_ida_direct \
+  --output-dir benchmarks/out_advanced_solver \
+  --enforce-hard-constraints
 python3 benchmarks/run_reference_examples.py \
   --class event_burst_zero_cross \
   --output-dir benchmarks/out_reference_examples
