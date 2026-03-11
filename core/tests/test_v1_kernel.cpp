@@ -2192,6 +2192,11 @@ TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fall
                       [](const FallbackTraceEntry& entry) {
                           return entry.action.find("global_recovery_") != std::string::npos;
                       }));
+    CHECK(std::none_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.failure_class ==
+                                  ConvergenceFailureClass::NonlinearMagneticStiffness;
+                       }));
 }
 
 TEST_CASE("v1 strict convergence profile blocks implicit switching global recovery",

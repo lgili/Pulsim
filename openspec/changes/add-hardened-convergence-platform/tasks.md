@@ -25,7 +25,7 @@
 ## 5. M3 - Solver and Model Hardening
 - [x] 5.1 Evoluir politica de solver linear orientada por saude numerica (com transicoes auditaveis).
 - [x] 5.2 Padronizar regularizacao bounded por familia (`diode`, `switch`, `magnetic`) com trilha de auditoria por intensidade.
-- [ ] 5.3 Incluir testes de nao-ativacao de heuristicas fora do contexto alvo.
+- [x] 5.3 Incluir testes de nao-ativacao de heuristicas fora do contexto alvo.
 - [ ] 5.4 Gate D: matriz estendida passa com 0 regressao funcional em suites de controle PI/C-Block.
 
 ## 6. M4 - Control Robustness and Multirate Contract

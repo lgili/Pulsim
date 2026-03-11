@@ -167,3 +167,27 @@ TEST_CASE("Numerical regularization audit reports per-family bounded changes",
         1e-9);
     CHECK(legacy_changed == audit.total_changed);
 }
+
+TEST_CASE("Numerical regularization audit keeps unrelated families at zero",
+          "[v1][regularization][audit][non-activation]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto n_out = circuit.add_node("out");
+    circuit.add_diode("D1", n_in, n_out, 1e5, 1e-14);
+
+    const auto audit = circuit.apply_numerical_regularization_audit(
+        8.0,
+        1e-7,
+        300.0,
+        1e-9,
+        5e3,
+        1e-9,
+        5e5,
+        1e-9,
+        5e5,
+        1e-9);
+
+    CHECK(audit.diode_changed >= 1);
+    CHECK(audit.switch_changed == 0);
+    CHECK(audit.magnetic_changed == 0);
+}
