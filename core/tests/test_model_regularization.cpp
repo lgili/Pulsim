@@ -104,3 +104,66 @@ TEST_CASE("Numerical regularization clamps switching models deterministically",
         1e-9);
     CHECK(second_changed == 3);
 }
+
+TEST_CASE("Numerical regularization audit reports per-family bounded changes",
+          "[v1][regularization][audit]") {
+    auto build_circuit = []() {
+        Circuit circuit;
+        const auto n_gate = circuit.add_node("gate");
+        const auto n_ctrl = circuit.add_node("ctrl");
+        const auto n_drain = circuit.add_node("drain");
+        const auto n_source = circuit.add_node("source");
+        const auto n_a = circuit.add_node("a");
+        const auto n_b = circuit.add_node("b");
+
+        MOSFET::Params mosfet;
+        mosfet.kp = 80.0;
+        mosfet.g_off = 1e-14;
+        circuit.add_mosfet("M1", n_gate, n_drain, n_source, mosfet);
+        circuit.add_diode("D1", n_source, Circuit::ground(), 1e5, 1e-14);
+        circuit.add_switch("S1", n_drain, n_source, false, 1e7, 1e-14);
+        circuit.add_vcswitch("S2", n_ctrl, n_drain, n_source, 2.5, 1e7, 1e-14);
+
+        circuit.add_inductor("L1", n_a, n_b, 1e-3);
+        circuit.add_virtual_component("saturable_inductor", "LSAT", {n_a, n_b},
+                                      {{"inductance", 1e-12},
+                                       {"saturation_current", 1e-12},
+                                       {"saturation_inductance", 1e-12},
+                                       {"saturation_exponent", 12.0}},
+                                      {{"target_component", "L1"}});
+        return circuit;
+    };
+
+    auto circuit_for_audit = build_circuit();
+    const auto audit = circuit_for_audit.apply_numerical_regularization_audit(
+        8.0,
+        1e-7,
+        300.0,
+        1e-9,
+        5e3,
+        1e-9,
+        5e5,
+        1e-9,
+        5e5,
+        1e-9);
+
+    CHECK(audit.total_changed ==
+          audit.diode_changed + audit.switch_changed + audit.magnetic_changed);
+    CHECK(audit.diode_changed >= 1);
+    CHECK(audit.switch_changed >= 1);
+    CHECK(audit.magnetic_changed >= 1);
+
+    auto circuit_for_legacy = build_circuit();
+    const int legacy_changed = circuit_for_legacy.apply_numerical_regularization(
+        8.0,
+        1e-7,
+        300.0,
+        1e-9,
+        5e3,
+        1e-9,
+        5e5,
+        1e-9,
+        5e5,
+        1e-9);
+    CHECK(legacy_changed == audit.total_changed);
+}

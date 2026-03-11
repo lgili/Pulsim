@@ -335,6 +335,12 @@ struct BackendTelemetry {
     int model_regularization_events = 0;
     int model_regularization_last_changed = 0;
     double model_regularization_last_intensity = 0.0;
+    int model_regularization_diode_changed = 0;
+    int model_regularization_switch_changed = 0;
+    int model_regularization_magnetic_changed = 0;
+    double model_regularization_diode_max_intensity = 0.0;
+    double model_regularization_switch_max_intensity = 0.0;
+    double model_regularization_magnetic_max_intensity = 0.0;
     int classified_fallback_events = 0;
     ConvergenceFailureClass last_failure_class = ConvergenceFailureClass::None;
     RecoveryStage last_recovery_stage = RecoveryStage::None;

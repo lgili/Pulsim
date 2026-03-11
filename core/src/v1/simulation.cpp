@@ -2009,7 +2009,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                         const Real vcswitch_g_off_min =
                             options_.model_regularization.vcswitch_g_off_min * stage_scale;
 
-                        const int changed_devices = circuit_.apply_numerical_regularization(
+                        const auto regularization_audit =
+                            circuit_.apply_numerical_regularization_audit(
                             mosfet_kp_max,
                             mosfet_g_off_min,
                             diode_g_on_max,
@@ -2026,16 +2027,47 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             1.0,
                             static_cast<Real>(model_regularization_escalations) /
                                 static_cast<Real>(std::max(1, model_max_escalations)));
+                        const Real diode_intensity =
+                            regularization_audit.diode_changed > 0 ? intensity : Real{0.0};
+                        const Real switch_intensity =
+                            regularization_audit.switch_changed > 0 ? intensity : Real{0.0};
+                        const Real magnetic_intensity =
+                            regularization_audit.magnetic_changed > 0 ? intensity : Real{0.0};
                         result.backend_telemetry.model_regularization_events += 1;
-                        result.backend_telemetry.model_regularization_last_changed = changed_devices;
+                        result.backend_telemetry.model_regularization_last_changed =
+                            regularization_audit.total_changed;
                         result.backend_telemetry.model_regularization_last_intensity = intensity;
+                        result.backend_telemetry.model_regularization_diode_changed +=
+                            regularization_audit.diode_changed;
+                        result.backend_telemetry.model_regularization_switch_changed +=
+                            regularization_audit.switch_changed;
+                        result.backend_telemetry.model_regularization_magnetic_changed +=
+                            regularization_audit.magnetic_changed;
+                        result.backend_telemetry.model_regularization_diode_max_intensity =
+                            std::max(result.backend_telemetry.model_regularization_diode_max_intensity,
+                                     static_cast<double>(diode_intensity));
+                        result.backend_telemetry.model_regularization_switch_max_intensity =
+                            std::max(result.backend_telemetry.model_regularization_switch_max_intensity,
+                                     static_cast<double>(switch_intensity));
+                        result.backend_telemetry.model_regularization_magnetic_max_intensity =
+                            std::max(result.backend_telemetry.model_regularization_magnetic_max_intensity,
+                                     static_cast<double>(magnetic_intensity));
 
                         std::ostringstream model_action;
                         model_action << "recovery_stage_regularization_model"
-                                     << " changed=" << changed_devices
+                                     << " changed=" << regularization_audit.total_changed
+                                     << " diode_changed=" << regularization_audit.diode_changed
+                                     << " switch_changed=" << regularization_audit.switch_changed
+                                     << " mag_changed=" << regularization_audit.magnetic_changed
                                      << " intensity=" << intensity
+                                     << " diode_intensity=" << diode_intensity
+                                     << " switch_intensity=" << switch_intensity
+                                     << " mag_intensity=" << magnetic_intensity
                                      << " escalation=" << model_regularization_escalations
                                      << "/" << std::max(1, model_max_escalations);
+                        if (regularization_audit.magnetic_changed > 0) {
+                            model_action << " magnetic_family";
+                        }
                         recovery_action = model_action.str();
                     }
 

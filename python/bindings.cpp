@@ -1445,6 +1445,15 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("model_regularization_events", &BackendTelemetry::model_regularization_events)
         .def_readwrite("model_regularization_last_changed", &BackendTelemetry::model_regularization_last_changed)
         .def_readwrite("model_regularization_last_intensity", &BackendTelemetry::model_regularization_last_intensity)
+        .def_readwrite("model_regularization_diode_changed", &BackendTelemetry::model_regularization_diode_changed)
+        .def_readwrite("model_regularization_switch_changed", &BackendTelemetry::model_regularization_switch_changed)
+        .def_readwrite("model_regularization_magnetic_changed", &BackendTelemetry::model_regularization_magnetic_changed)
+        .def_readwrite("model_regularization_diode_max_intensity",
+                       &BackendTelemetry::model_regularization_diode_max_intensity)
+        .def_readwrite("model_regularization_switch_max_intensity",
+                       &BackendTelemetry::model_regularization_switch_max_intensity)
+        .def_readwrite("model_regularization_magnetic_max_intensity",
+                       &BackendTelemetry::model_regularization_magnetic_max_intensity)
         .def_readwrite("classified_fallback_events", &BackendTelemetry::classified_fallback_events)
         .def_readwrite("last_failure_class", &BackendTelemetry::last_failure_class)
         .def_readwrite("last_recovery_stage", &BackendTelemetry::last_recovery_stage)
