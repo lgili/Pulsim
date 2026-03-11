@@ -50,4 +50,4 @@
 - [x] 9.1 Definir benchmark de decisao para SUNDIALS/PETSc/KINSOL/IDA com criterios objetivos.
 - [x] 9.2 Implementar prototipo controlado para pelo menos 1 backend avancado sem impactar fluxo principal.
 - [x] 9.3 Registrar ADR de adocao/nao adocao com custo de manutencao e portabilidade.
-- [ ] 9.4 Gate ADV: decisao formal aprovada com evidencias reproduziveis.
+- [x] 9.4 Gate ADV: decisao formal aprovada com evidencias reproduziveis.

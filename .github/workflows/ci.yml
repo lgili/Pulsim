@@ -489,6 +489,19 @@ jobs:
             --report-out benchmarks/out_ci/kpi_gate_convergence_platform_gate_e_report.json \
             --print-report
 
+      - name: Run advanced solver isolated prototype (Gate ADV evidence)
+        run: |
+          python3 benchmarks/advanced_solver_prototype_runner.py \
+            --candidate sundials_ida_direct \
+            --output-dir benchmarks/out_ci/advanced_solver
+
+      - name: Finalize Gate ADV decision artifact
+        run: |
+          python3 benchmarks/gate_adv_decision.py \
+            --report benchmarks/out_ci/advanced_solver/advanced_solver_prototype_report.json \
+            --adr docs/advanced-solver-adr.md \
+            --decision-out benchmarks/out_ci/advanced_solver/gate_adv_decision.json
+
       - name: Enforce magnetic-core KPI regression gate
         run: |
           python3 benchmarks/kpi_gate.py \
