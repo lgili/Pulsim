@@ -47,6 +47,69 @@ def _load_thresholds(path: Path) -> Dict[str, Any]:
         return yaml.safe_load(handle)
 
 
+def _sanitize_metric_slug(label: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+    return slug or "unknown"
+
+
+def _normalize_matrix_case_keys(cases: Any) -> Set[Tuple[str, str]]:
+    case_keys: Set[Tuple[str, str]] = set()
+    if not isinstance(cases, list):
+        return case_keys
+
+    for entry in cases:
+        if not isinstance(entry, dict):
+            continue
+        benchmark_id_raw = entry.get("benchmark_id")
+        if not isinstance(benchmark_id_raw, str) or not benchmark_id_raw.strip():
+            continue
+        benchmark_id = benchmark_id_raw.strip()
+
+        scenarios_raw = entry.get("scenarios")
+        scenarios: list[str] = []
+        if isinstance(scenarios_raw, list):
+            for item in scenarios_raw:
+                if isinstance(item, str) and item.strip():
+                    scenarios.append(item.strip())
+        elif isinstance(entry.get("scenario"), str) and entry.get("scenario", "").strip():
+            scenarios.append(str(entry.get("scenario")).strip())
+
+        if not scenarios:
+            scenarios = ["default"]
+
+        for scenario in scenarios:
+            case_keys.add((benchmark_id, scenario))
+
+    return case_keys
+
+
+def _load_class_matrix(path: Optional[Path]) -> Dict[str, Set[Tuple[str, str]]]:
+    if path is None:
+        return {}
+    if not path.is_file():
+        raise FileNotFoundError(f"class matrix file not found: {path}")
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to load class matrix YAML files")
+
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle) or {}
+
+    classes = payload.get("classes")
+    if not isinstance(classes, dict):
+        return {}
+
+    matrix: Dict[str, Set[Tuple[str, str]]] = {}
+    for class_name, class_entry in classes.items():
+        if not isinstance(class_name, str) or not class_name.strip():
+            continue
+        if not isinstance(class_entry, dict):
+            continue
+        case_keys = _normalize_matrix_case_keys(class_entry.get("cases"))
+        if case_keys:
+            matrix[class_name.strip()] = case_keys
+    return matrix
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -486,6 +549,7 @@ def compute_metrics(
     parity_ngspice_results_path: Optional[Path] = None,
     stress_summary_path: Optional[Path] = None,
     runtime_case_filter: Optional[Set[Tuple[str, str]]] = None,
+    class_matrix_path: Optional[Path] = None,
 ) -> Dict[str, Optional[float]]:
     metrics: Dict[str, Optional[float]] = {}
 
@@ -501,6 +565,8 @@ def compute_metrics(
     failed = sum(1 for row in executed if row.get("status") == "failed")
     denom = passed + failed
     metrics["convergence_success_rate"] = (float(passed) / float(denom)) if denom > 0 else None
+
+    class_matrix = _load_class_matrix(class_matrix_path)
 
     runtime_rows = executed
     if runtime_case_filter is not None:
@@ -617,6 +683,41 @@ def compute_metrics(
             return None
         return numeric
 
+    typed_schema_keys = (
+        "classified_fallback_events",
+        "policy_dry_run_events",
+        "policy_recommendation_matches",
+        "policy_recommendation_mismatches",
+        "anti_overfit_violations",
+        "anti_overfit_budget_exceeded",
+    )
+
+    def has_typed_convergence_schema(row: Dict[str, Any]) -> bool:
+        telemetry = row.get("telemetry")
+        if not isinstance(telemetry, dict):
+            return False
+        for key in typed_schema_keys:
+            if key not in telemetry:
+                return False
+            value = telemetry.get(key)
+            if value is None:
+                return False
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                return False
+            if not math.isfinite(numeric):
+                return False
+        return True
+
+    if executed:
+        typed_schema_rows = sum(1 for row in executed if has_typed_convergence_schema(row))
+        metrics["typed_convergence_schema_coverage_rate"] = float(typed_schema_rows) / float(
+            len(executed)
+        )
+    else:
+        metrics["typed_convergence_schema_coverage_rate"] = None
+
     module_order_crc_values = telemetry_values("runtime_module_order_crc32")
     if module_order_crc_values:
         histogram: Dict[int, int] = {}
@@ -670,6 +771,56 @@ def compute_metrics(
         metrics["convergence_policy_mismatch_rate"] = None
         metrics["anti_overfit_violation_rate"] = None
     metrics["anti_overfit_budget_exceeded_rate"] = telemetry_mean("anti_overfit_budget_exceeded")
+
+    if class_matrix:
+        indexed_rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for row in executed:
+            key = _case_key(row)
+            if key is None:
+                continue
+            # Deterministic last-write-wins if duplicate case keys appear.
+            indexed_rows[key] = row
+
+        for class_name, case_keys in class_matrix.items():
+            slug = _sanitize_metric_slug(class_name)
+            expected_total = float(len(case_keys))
+            observed_rows: list[Dict[str, Any]] = []
+            observed_keys = 0
+            for key in sorted(case_keys):
+                row = indexed_rows.get(key)
+                if row is None:
+                    continue
+                observed_keys += 1
+                observed_rows.append(row)
+
+            metrics[f"class_{slug}_case_count"] = expected_total
+            metrics[f"class_{slug}_coverage_rate"] = (
+                float(observed_keys) / expected_total if expected_total > 0.0 else None
+            )
+
+            if observed_rows:
+                passed_rows = sum(1 for row in observed_rows if row.get("status") == "passed")
+                metrics[f"class_{slug}_pass_rate"] = float(passed_rows) / float(len(observed_rows))
+                class_runtimes = [
+                    float(row["runtime_s"])
+                    for row in observed_rows
+                    if row.get("runtime_s") is not None
+                ]
+                metrics[f"class_{slug}_runtime_p95"] = _quantile(class_runtimes, 0.95)
+                class_newton = telemetry_values("newton_iterations", rows=observed_rows)
+                class_rejections = telemetry_values("timestep_rejections", rows=observed_rows)
+                metrics[f"class_{slug}_newton_iterations_p95"] = _quantile(class_newton, 0.95)
+                metrics[f"class_{slug}_timestep_rejections_p95"] = _quantile(class_rejections, 0.95)
+                typed_rows = sum(1 for row in observed_rows if has_typed_convergence_schema(row))
+                metrics[f"class_{slug}_typed_schema_coverage_rate"] = float(typed_rows) / float(
+                    len(observed_rows)
+                )
+            else:
+                metrics[f"class_{slug}_pass_rate"] = None
+                metrics[f"class_{slug}_runtime_p95"] = None
+                metrics[f"class_{slug}_newton_iterations_p95"] = None
+                metrics[f"class_{slug}_timestep_rejections_p95"] = None
+                metrics[f"class_{slug}_typed_schema_coverage_rate"] = None
 
     metrics["ac_sweep_mag_error"] = telemetry_mean("ac_sweep_mag_error", rows=ac_rows)
     metrics["ac_sweep_phase_error"] = telemetry_mean("ac_sweep_phase_error", rows=ac_rows)
@@ -961,6 +1112,7 @@ def run_gate(
     parity_ngspice_results_path: Optional[Path],
     stress_summary_path: Optional[Path],
     strict_provenance: bool = True,
+    class_matrix_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     baseline_payload = _load_json(baseline_path)
     threshold_payload = _load_thresholds(thresholds_path)
@@ -999,6 +1151,7 @@ def run_gate(
         parity_ngspice_results_path=parity_ngspice_results_path,
         stress_summary_path=stress_summary_path,
         runtime_case_filter=runtime_case_filter,
+        class_matrix_path=class_matrix_path,
     )
 
     metric_rules = threshold_payload.get("metrics", {})
@@ -1085,6 +1238,7 @@ def run_gate(
         "schema_version": "pulsim-kpi-gate-report-v1",
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
         "baseline_id": baseline_payload.get("baseline_id"),
+        "class_matrix_path": str(class_matrix_path) if class_matrix_path is not None else None,
         "overall_status": overall_status,
         "failed_required_metrics": failed_required,
         "skipped_optional_metrics": skipped_optional,
@@ -1122,6 +1276,11 @@ def main() -> int:
     parser.add_argument("--parity-ltspice-results", type=Path)
     parser.add_argument("--parity-ngspice-results", type=Path)
     parser.add_argument("--stress-summary", type=Path)
+    parser.add_argument(
+        "--class-matrix",
+        type=Path,
+        help="Optional convergence class matrix YAML for per-class KPI derivation",
+    )
     parser.add_argument("--report-out", type=Path)
     parser.add_argument("--print-report", action="store_true")
     parser.add_argument(
@@ -1139,6 +1298,7 @@ def main() -> int:
         parity_ngspice_results_path=args.parity_ngspice_results,
         stress_summary_path=args.stress_summary,
         strict_provenance=not args.no_strict_provenance,
+        class_matrix_path=args.class_matrix,
     )
 
     if args.report_out is not None:

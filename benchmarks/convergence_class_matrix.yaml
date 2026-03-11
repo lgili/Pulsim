@@ -1,0 +1,48 @@
+schema: pulsim-convergence-class-matrix-v1
+version: 1
+classes:
+  diode_heavy:
+    description: Cases with strong diode conduction-state transitions.
+    cases:
+      - benchmark_id: diode_rectifier
+        scenarios: [direct_trap]
+  switch_heavy:
+    description: Cases dominated by switching-device commutations and PWM transitions.
+    cases:
+      - benchmark_id: buck_switching
+        scenarios: [direct_trap, trbdf2]
+      - benchmark_id: boost_switching_complex
+        scenarios: [direct_trap, trbdf2]
+      - benchmark_id: interleaved_buck_3ph
+        scenarios: [direct_trap, trbdf2]
+      - benchmark_id: buck_mosfet_nonlinear
+        scenarios: [trbdf2]
+  zero_cross:
+    description: Cases with recurrent current/voltage zero-cross events.
+    cases:
+      - benchmark_id: diode_rectifier
+        scenarios: [direct_trap]
+      - benchmark_id: periodic_rc_pwm
+        scenarios: [shooting_default, harmonic_balance]
+  magnetic_nonlinear:
+    description: Cases with nonlinear magnetic behavior (saturation/hysteresis/frequency trend).
+    cases:
+      - benchmark_id: magnetic_core_saturation
+        scenarios: [direct_trap]
+      - benchmark_id: magnetic_core_hysteresis
+        scenarios: [direct_trap]
+      - benchmark_id: magnetic_core_frequency_trend_low
+        scenarios: [direct_trap]
+      - benchmark_id: magnetic_core_frequency_trend_high
+        scenarios: [direct_trap]
+      - benchmark_id: magnetic_core_determinism_ref
+        scenarios: [direct_trap]
+      - benchmark_id: magnetic_core_determinism_cmp
+        scenarios: [direct_trap]
+  closed_loop_control:
+    description: Cases covering mixed-domain control workflows (PI/C-Block/frequency workflow contracts).
+    cases:
+      - benchmark_id: periodic_rc_pwm
+        scenarios: [shooting_default, harmonic_balance]
+      - benchmark_id: ac_control_workflow_expected_failure
+        scenarios: [direct_trap]

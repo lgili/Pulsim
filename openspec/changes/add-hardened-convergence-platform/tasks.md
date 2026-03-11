@@ -1,6 +1,6 @@
 ## 1. Baseline and Measurement Contract
 - [ ] 1.1 Congelar baseline de robustez/performance por classe: `diode-heavy`, `switch-heavy`, `zero-cross`, `magnetic-nonlinear`, `closed-loop-control`.
-- [ ] 1.2 Definir KPI canonico por run: sucesso/falha terminal, `timestep_rejections`, `newton_iterations_total`, tempo p50/p95, campos de diagnostico tipado.
+- [x] 1.2 Definir KPI canonico por run: sucesso/falha terminal, `timestep_rejections`, `newton_iterations_total`, tempo p50/p95, campos de diagnostico tipado.
 - [ ] 1.3 Definir budget inicial de nao-regressao por fase (funcional e performance) e registrar em artefato versionado.
 - [ ] 1.4 Montar catalogo de circuitos de estresse reprodutiveis com parametros fixos e fingerprint de ambiente.
 

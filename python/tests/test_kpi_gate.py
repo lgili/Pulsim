@@ -458,6 +458,134 @@ def test_compute_metrics_includes_convergence_policy_kpis(tmp_path: Path) -> Non
     assert metrics["anti_overfit_budget_exceeded_rate"] == 0.5
 
 
+def test_compute_metrics_includes_convergence_class_matrix_kpis(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "diode_rectifier",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "newton_iterations": 10.0,
+                    "timestep_rejections": 2.0,
+                    "classified_fallback_events": 1.0,
+                    "policy_dry_run_events": 1.0,
+                    "policy_recommendation_matches": 1.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "direct_trap",
+                "status": "failed",
+                "runtime_s": 0.20,
+                "telemetry": {
+                    "newton_iterations": 20.0,
+                    "timestep_rejections": 5.0,
+                    "classified_fallback_events": 2.0,
+                    "policy_dry_run_events": 2.0,
+                    "policy_recommendation_matches": 1.0,
+                    "policy_recommendation_mismatches": 1.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "trbdf2",
+                "status": "passed",
+                "runtime_s": 0.25,
+                "telemetry": {
+                    "newton_iterations": 30.0,
+                    "timestep_rejections": 8.0,
+                },
+            },
+            {
+                "benchmark_id": "magnetic_core_saturation",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.05,
+                "telemetry": {
+                    "newton_iterations": 5.0,
+                    "timestep_rejections": 1.0,
+                    "classified_fallback_events": 0.0,
+                    "policy_dry_run_events": 0.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "diode_heavy": {
+                "cases": [
+                    {"benchmark_id": "diode_rectifier", "scenarios": ["direct_trap"]},
+                ]
+            },
+            "switch_heavy": {
+                "cases": [
+                    {"benchmark_id": "buck_switching", "scenarios": ["direct_trap", "trbdf2"]},
+                ]
+            },
+            "closed_loop_control": {
+                "cases": [
+                    {"benchmark_id": "periodic_rc_pwm", "scenarios": ["shooting_default"]},
+                ]
+            },
+        },
+    }
+    bench_path = tmp_path / "bench.json"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    _write_json(bench_path, bench_results)
+    _write_yaml(class_matrix_path, class_matrix)
+
+    metrics = kpi_gate.compute_metrics(
+        bench_results_path=bench_path,
+        class_matrix_path=class_matrix_path,
+    )
+
+    assert math.isclose(
+        float(metrics["typed_convergence_schema_coverage_rate"]),
+        0.75,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+
+    assert metrics["class_diode_heavy_case_count"] == 1.0
+    assert metrics["class_diode_heavy_coverage_rate"] == 1.0
+    assert metrics["class_diode_heavy_pass_rate"] == 1.0
+    assert metrics["class_diode_heavy_typed_schema_coverage_rate"] == 1.0
+
+    assert metrics["class_switch_heavy_case_count"] == 2.0
+    assert metrics["class_switch_heavy_coverage_rate"] == 1.0
+    assert metrics["class_switch_heavy_pass_rate"] == 0.5
+    assert metrics["class_switch_heavy_typed_schema_coverage_rate"] == 0.5
+    assert math.isclose(
+        float(metrics["class_switch_heavy_runtime_p95"]),
+        0.2475,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert math.isclose(
+        float(metrics["class_switch_heavy_newton_iterations_p95"]),
+        29.5,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+
+    assert metrics["class_closed_loop_control_case_count"] == 1.0
+    assert metrics["class_closed_loop_control_coverage_rate"] == 0.0
+    assert metrics["class_closed_loop_control_pass_rate"] is None
+
+
 def test_compute_metrics_includes_ac_sweep_accuracy_and_runtime_metrics(tmp_path: Path) -> None:
     bench_results = {
         "results": [

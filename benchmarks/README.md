@@ -11,6 +11,7 @@ This folder contains the YAML benchmark suite and validation runners.
 - `benchmark_ngspice.py` — Pulsim vs external SPICE parity runner (`ngspice` or `ltspice` backends).
 - `stress_suite.py` — tiered stress validation runner (tiers A/B/C + pass criteria).
 - `stress_catalog.yaml` — stress tier definitions, mapped cases, and acceptance criteria.
+- `convergence_class_matrix.yaml` — canonical convergence-class case matrix (`diode_heavy`, `switch_heavy`, `zero_cross`, `magnetic_nonlinear`, `closed_loop_control`).
 - `electrothermal_benchmarks.yaml` — focused matrix for electrothermal converter validation.
 - `electrothermal_stress_catalog.yaml` — stress criteria for electrothermal KPI coverage.
 - `kpi_gate.py` — regression gate that compares current KPIs against frozen baseline
@@ -51,6 +52,7 @@ python3 benchmarks/kpi_gate.py \
 python3 benchmarks/kpi_gate.py \
   --baseline benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json \
   --bench-results benchmarks/out/results.json \
+  --class-matrix benchmarks/convergence_class_matrix.yaml \
   --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
   --report-out benchmarks/out/kpi_gate_convergence_platform_report.json \
   --print-report
@@ -128,6 +130,9 @@ and fails early when metadata or artifact hashes are inconsistent.
 Use `--no-strict-provenance` only for local debugging.
 Runtime latency KPIs (`runtime_p50`, `runtime_p95`) are auto-skipped when
 `environment.machine_class` differs between baseline and current runner.
+When `--class-matrix` is provided, `kpi_gate.py` also emits per-class KPIs:
+coverage, pass rate, runtime p95, timestep rejections p95, Newton iterations p95,
+and typed convergence schema coverage per class.
 
 `local_limit_suite.py` is intended for PC-local stress discovery and reports
 exact failure reasons per circuit/scenario. It always supports:
@@ -164,7 +169,7 @@ Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `averaged_pair_runtime_speedup_min`, `classified_fallback_events`,
 `policy_dry_run_events`, `policy_recommendation_matches`,
 `policy_recommendation_mismatches`, `anti_overfit_violations`,
-and `anti_overfit_budget_exceeded`.
+`anti_overfit_budget_exceeded`, and `typed_convergence_schema_coverage_rate`.
 
 `benchmark_ngspice.py` also emits:
 
