@@ -647,6 +647,30 @@ def compute_metrics(
     metrics["component_thermal_summary_consistency_error"] = telemetry_mean(
         "component_thermal_summary_consistency_error"
     )
+    classified_fallback_values = telemetry_values("classified_fallback_events")
+    metrics["classified_fallback_events_p95"] = _quantile(classified_fallback_values, 0.95)
+
+    policy_dry_run_events_total = float(sum(telemetry_values("policy_dry_run_events")))
+    policy_matches_total = float(sum(telemetry_values("policy_recommendation_matches")))
+    policy_mismatches_total = float(sum(telemetry_values("policy_recommendation_mismatches")))
+    anti_overfit_violations_total = float(sum(telemetry_values("anti_overfit_violations")))
+
+    if policy_dry_run_events_total > 0.0:
+        metrics["convergence_policy_match_rate"] = (
+            policy_matches_total / policy_dry_run_events_total
+        )
+        metrics["convergence_policy_mismatch_rate"] = (
+            policy_mismatches_total / policy_dry_run_events_total
+        )
+        metrics["anti_overfit_violation_rate"] = (
+            anti_overfit_violations_total / policy_dry_run_events_total
+        )
+    else:
+        metrics["convergence_policy_match_rate"] = None
+        metrics["convergence_policy_mismatch_rate"] = None
+        metrics["anti_overfit_violation_rate"] = None
+    metrics["anti_overfit_budget_exceeded_rate"] = telemetry_mean("anti_overfit_budget_exceeded")
+
     metrics["ac_sweep_mag_error"] = telemetry_mean("ac_sweep_mag_error", rows=ac_rows)
     metrics["ac_sweep_phase_error"] = telemetry_mean("ac_sweep_phase_error", rows=ac_rows)
 

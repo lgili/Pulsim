@@ -18,6 +18,7 @@ This folder contains the YAML benchmark suite and validation runners.
 - `freeze_kpi_baseline.py` — creates `kpi_baseline.json` + `artifact_manifest.json`
   with environment fingerprint and artifact hashes for provenance-safe gating.
 - `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
+- `kpi_thresholds_convergence_platform.yaml` — optional policy-gate thresholds for convergence dry-run KPIs.
 - `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
 - `kpi_thresholds_averaged.yaml` — required KPI thresholds for averaged-mode paired gate.
 - `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
@@ -44,6 +45,14 @@ python3 benchmarks/kpi_gate.py \
   --bench-results benchmarks/out_ac/results.json \
   --thresholds benchmarks/kpi_thresholds_ac.yaml \
   --report-out benchmarks/out_ac/kpi_gate_report.json \
+  --print-report
+
+# Convergence-platform KPI gate (M1 policy dry-run)
+python3 benchmarks/kpi_gate.py \
+  --baseline benchmarks/kpi_baselines/modular_runtime_phase13_2026-03-07/kpi_baseline.json \
+  --bench-results benchmarks/out/results.json \
+  --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
+  --report-out benchmarks/out/kpi_gate_convergence_platform_report.json \
   --print-report
 
 # Freeze a new baseline snapshot from a validated run
@@ -152,7 +161,10 @@ Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `component_loss_summary_consistency_error`, `component_thermal_summary_consistency_error`,
 `runtime_module_order_crc32`, `runtime_module_count_match`, `output_reallocation_total`,
 `ac_sweep_mag_error`, `ac_sweep_phase_error`, `averaged_pair_fidelity_error`,
-and `averaged_pair_runtime_speedup_min`.
+`averaged_pair_runtime_speedup_min`, `classified_fallback_events`,
+`policy_dry_run_events`, `policy_recommendation_matches`,
+`policy_recommendation_mismatches`, `anti_overfit_violations`,
+and `anti_overfit_budget_exceeded`.
 
 `benchmark_ngspice.py` also emits:
 

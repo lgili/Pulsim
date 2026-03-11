@@ -394,6 +394,70 @@ def test_compute_metrics_detects_module_order_mismatch_rate(tmp_path: Path) -> N
     assert math.isclose(float(metrics["module_output_reallocation_p95"]), 0.9, rel_tol=0.0, abs_tol=1e-12)
 
 
+def test_compute_metrics_includes_convergence_policy_kpis(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "classified_fallback_events": 4.0,
+                    "policy_dry_run_events": 4.0,
+                    "policy_recommendation_matches": 3.0,
+                    "policy_recommendation_mismatches": 1.0,
+                    "anti_overfit_violations": 1.0,
+                    "anti_overfit_budget_exceeded": 1.0,
+                },
+            },
+            {
+                "status": "passed",
+                "runtime_s": 0.12,
+                "telemetry": {
+                    "classified_fallback_events": 2.0,
+                    "policy_dry_run_events": 2.0,
+                    "policy_recommendation_matches": 2.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+        ]
+    }
+    bench_path = tmp_path / "bench.json"
+    _write_json(bench_path, bench_results)
+
+    metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
+    assert metrics["classified_fallback_events_p95"] is not None
+    assert math.isclose(
+        float(metrics["classified_fallback_events_p95"]),
+        3.9,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["convergence_policy_match_rate"] is not None
+    assert math.isclose(
+        float(metrics["convergence_policy_match_rate"]),
+        5.0 / 6.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["convergence_policy_mismatch_rate"] is not None
+    assert math.isclose(
+        float(metrics["convergence_policy_mismatch_rate"]),
+        1.0 / 6.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["anti_overfit_violation_rate"] is not None
+    assert math.isclose(
+        float(metrics["anti_overfit_violation_rate"]),
+        1.0 / 6.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["anti_overfit_budget_exceeded_rate"] == 0.5
+
+
 def test_compute_metrics_includes_ac_sweep_accuracy_and_runtime_metrics(tmp_path: Path) -> None:
     bench_results = {
         "results": [
