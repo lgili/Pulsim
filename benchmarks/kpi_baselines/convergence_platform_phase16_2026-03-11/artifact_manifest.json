@@ -1,0 +1,22 @@
+{
+  "baseline_id": "convergence_platform_phase16_2026-03-11",
+  "captured_at_utc": "2026-03-11T12:53:16.047629+00:00",
+  "files": [
+    {
+      "path": "benchmarks/phase16_artifacts/benchmarks/results.json",
+      "sha256": "e870d0d8b58773fb435b7ddb9f80d5167149549aabb3908156a8c4f722aa2e47",
+      "size_bytes": 93743
+    },
+    {
+      "path": "benchmarks/phase16_artifacts/stress/stress_summary.json",
+      "sha256": "74a5ffcb04fc3bec26c2282f083eb0278a3659f86334e883db4f310ef3b144fe",
+      "size_bytes": 2341
+    },
+    {
+      "path": "benchmarks/convergence_class_matrix.yaml",
+      "sha256": "b3d48c31562783e3d8cc08502b1864d1300a422a64bb51150980f2ad40bc6527",
+      "size_bytes": 1894
+    }
+  ],
+  "schema_version": "pulsim-kpi-baseline-manifest-v1"
+}

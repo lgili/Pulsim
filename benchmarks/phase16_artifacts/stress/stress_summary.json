@@ -1,0 +1,78 @@
+{
+  "overall_status": "passed",
+  "reproducibility": {
+    "benchmarks_manifest_path": "/Users/lgili/Documents/01 - Codes/01 - Github/PulsimCore/benchmarks/benchmarks.yaml",
+    "catalog_path": "/Users/lgili/Documents/01 - Codes/01 - Github/PulsimCore/benchmarks/convergence_stress_catalog.yaml",
+    "catalog_sha256": "42a1f6897d55a92bd6e56ba720f551a3c22336e4ab4fd9cf1575cada9f96f914",
+    "contract": {
+      "class_matrix": "benchmarks/convergence_class_matrix.yaml",
+      "environment_fingerprint_fields": [
+        "os",
+        "python",
+        "machine_class",
+        "compiler",
+        "cmake",
+        "cxx_flags"
+      ],
+      "fixed_simulation_contract": {
+        "adaptive_timestep_default": false,
+        "deterministic_mode": true,
+        "seed_policy": "fixed"
+      },
+      "phase_budget_contract": "benchmarks/convergence_phase_budgets.yaml"
+    },
+    "environment": {
+      "machine_class": "arm64",
+      "os": "Darwin-25.4.0-arm64",
+      "python": "3.13.5"
+    }
+  },
+  "schema_version": "pulsim-stress-v1",
+  "tier_evaluations": {
+    "tier_a": {
+      "failed": 0,
+      "max_max_error_observed": 0.04975041850831907,
+      "max_runtime_s_observed": 0.09127112501300871,
+      "max_timestep_rejections_observed": 0.0,
+      "message": "tier criteria satisfied",
+      "missing_telemetry_rows": 0,
+      "pass_rate": 1.0,
+      "passed": 6,
+      "skipped": 0,
+      "status": "passed",
+      "tier": "tier_a",
+      "total": 6
+    },
+    "tier_b": {
+      "failed": 0,
+      "max_max_error_observed": 0.1004142429999999,
+      "max_runtime_s_observed": 0.20010566600831226,
+      "max_timestep_rejections_observed": 0.0,
+      "message": "tier criteria satisfied",
+      "missing_telemetry_rows": 0,
+      "pass_rate": 1.0,
+      "passed": 6,
+      "skipped": 0,
+      "status": "passed",
+      "tier": "tier_b",
+      "total": 6
+    },
+    "tier_c": {
+      "failed": 0,
+      "max_max_error_observed": 0.004313350000003879,
+      "max_runtime_s_observed": 0.16968733401154168,
+      "max_timestep_rejections_observed": 0.0,
+      "message": "tier criteria satisfied",
+      "missing_telemetry_rows": 0,
+      "pass_rate": 1.0,
+      "passed": 7,
+      "skipped": 0,
+      "status": "passed",
+      "tier": "tier_c",
+      "total": 7
+    }
+  },
+  "tiers_failed": 0,
+  "tiers_passed": 3,
+  "tiers_total": 3
+}

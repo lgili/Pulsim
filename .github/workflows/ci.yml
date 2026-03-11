@@ -131,45 +131,6 @@ jobs:
           fi
 
   # =============================================================================
-  # SUNDIALS Backend Validation (optional dependency enabled)
-  # =============================================================================
-  sundials-backend:
-    name: Linux SUNDIALS backend
-    runs-on: ubuntu-24.04
-    if: false  # Temporarily disabled: SUNDIALS backend is not in active use
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
-
-      - name: Configure CMake (SUNDIALS ON)
-        env:
-          CC: clang-17
-          CXX: clang++-17
-        run: |
-          cmake -B build-sundials \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang-17 \
-            -DCMAKE_CXX_COMPILER=clang++-17 \
-            -DPULSIM_BUILD_TESTS=ON \
-            -DPULSIM_BUILD_PYTHON=OFF \
-            -DPULSIM_USE_HYPRE=OFF \
-            -DPULSIM_USE_SUNDIALS=ON \
-            -DPULSIM_ENABLE_LTO=OFF
-
-      - name: Build SUNDIALS backend tests
-        run: cmake --build build-sundials --target pulsim_simulation_tests --config Release
-
-      - name: Run backend tests
-        run: |
-          build-sundials/core/pulsim_simulation_tests "[v1][backend]" --reporter console
-
-  # =============================================================================
   # Python Tests
   # =============================================================================
   python-tests:
@@ -323,6 +284,35 @@ jobs:
             --strict
 
   # =============================================================================
+  # Documentation and Reference Corpus Validation
+  # =============================================================================
+  docs-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/requirements.txt pyyaml
+
+      - name: Validate convergence reference examples catalog
+        run: |
+          python3 benchmarks/validate_reference_examples.py \
+            --manifest benchmarks/benchmarks.yaml \
+            --examples benchmarks/convergence_reference_examples.yaml
+
+      - name: Build docs (strict)
+        run: |
+          mkdocs build --strict
+
+  # =============================================================================
   # Static Analysis (clang-tidy) for v1 core modules
   # =============================================================================
   static-analysis:
@@ -406,6 +396,7 @@ jobs:
       - name: Run stress suite
         run: |
           python3 benchmarks/stress_suite.py \
+            --catalog benchmarks/convergence_stress_catalog.yaml \
             --output-dir benchmarks/stress_out_ci
 
       - name: Enforce KPI regression gate
@@ -416,6 +407,42 @@ jobs:
             --bench-results benchmarks/out_ci/results.json \
             --stress-summary benchmarks/stress_out_ci/stress_summary.json \
             --report-out benchmarks/out_ci/kpi_gate_report.json \
+            --print-report
+
+      - name: Enforce convergence-platform KPI regression gate
+        run: |
+          python3 benchmarks/kpi_gate.py \
+            --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
+            --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
+            --bench-results benchmarks/out_ci/results.json \
+            --class-matrix benchmarks/convergence_class_matrix.yaml \
+            --phase-budget benchmarks/convergence_phase_budgets.yaml \
+            --phase-key gate_c \
+            --report-out benchmarks/out_ci/kpi_gate_convergence_platform_report.json \
+            --print-report
+
+      - name: Enforce convergence-platform closed-loop Gate D
+        run: |
+          python3 benchmarks/kpi_gate.py \
+            --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
+            --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
+            --bench-results benchmarks/out_ci/results.json \
+            --class-matrix benchmarks/convergence_class_matrix.yaml \
+            --phase-budget benchmarks/convergence_phase_budgets.yaml \
+            --phase-key gate_d \
+            --report-out benchmarks/out_ci/kpi_gate_convergence_platform_gate_d_report.json \
+            --print-report
+
+      - name: Enforce convergence-platform closed-loop Gate E
+        run: |
+          python3 benchmarks/kpi_gate.py \
+            --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
+            --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
+            --bench-results benchmarks/out_ci/results.json \
+            --class-matrix benchmarks/convergence_class_matrix.yaml \
+            --phase-budget benchmarks/convergence_phase_budgets.yaml \
+            --phase-key gate_e \
+            --report-out benchmarks/out_ci/kpi_gate_convergence_platform_gate_e_report.json \
             --print-report
 
       - name: Enforce magnetic-core KPI regression gate

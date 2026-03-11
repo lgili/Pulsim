@@ -17,7 +17,7 @@ Pulsim is a high-performance circuit simulator focused on power electronics. It 
 - **Compiler**: Clang 17+ (primary), GCC 14+ (secondary)
 - **Build**: CMake 3.20+
 - **Linear Algebra**: Eigen 3.4+, SuiteSparse (KLU/UMFPACK)
-- **ODE/DAE Solvers**: SUNDIALS (CVODE/IDA/ARKODE)
+- **ODE/DAE Solvers**: Native v1 integrator stack (`trapezoidal`, `BDF`, `TRBDF2`, `RosenbrockW`, `SDIRK2`)
 - **Testing**: Catch2 or Google Test
 - **Optimization**: LTO, PGO, SIMD (AVX2/AVX-512, NEON)
 
@@ -82,7 +82,6 @@ Pulsim is a high-performance circuit simulator focused on power electronics. It 
 - No GPL dependencies in core (LGPL or permissive only)
 
 ## External Dependencies
-- **SUNDIALS**: BSD-3-Clause, Lawrence Livermore National Lab
 - **Eigen**: MPL2, Benoît Jacob et al.
 - **SuiteSparse**: Various (mostly LGPL), Tim Davis
 - **pybind11**: BSD-3-Clause

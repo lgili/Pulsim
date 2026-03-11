@@ -456,6 +456,31 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
             abs(thermal_peak_temperature_c - component_peak_temperature_c) / denom
         )
 
+    classified_fallback_events = (
+        float(getattr(backend, "classified_fallback_events", 0.0)) if backend is not None else None
+    )
+    policy_dry_run_events = (
+        float(getattr(backend, "policy_dry_run_events", 0.0)) if backend is not None else None
+    )
+    policy_recommendation_matches = (
+        float(getattr(backend, "policy_recommendation_matches", 0.0))
+        if backend is not None
+        else None
+    )
+    policy_recommendation_mismatches = (
+        float(getattr(backend, "policy_recommendation_mismatches", 0.0))
+        if backend is not None
+        else None
+    )
+    anti_overfit_violations = (
+        float(getattr(backend, "anti_overfit_violations", 0.0))
+        if backend is not None
+        else None
+    )
+    anti_overfit_budget_exceeded = (
+        1.0 if bool(getattr(backend, "anti_overfit_budget_exceeded", False)) else 0.0
+    ) if backend is not None else None
+
     return {
         "newton_iterations": float(getattr(result, "newton_iterations_total", 0)),
         "linear_iterations": float(getattr(linear, "total_iterations", 0)) if linear is not None else None,
@@ -529,6 +554,12 @@ def _transient_telemetry(result: object, runtime_s: float) -> Dict[str, Optional
         )
         if backend is not None
         else None,
+        "classified_fallback_events": classified_fallback_events,
+        "policy_dry_run_events": policy_dry_run_events,
+        "policy_recommendation_matches": policy_recommendation_matches,
+        "policy_recommendation_mismatches": policy_recommendation_mismatches,
+        "anti_overfit_violations": anti_overfit_violations,
+        "anti_overfit_budget_exceeded": anti_overfit_budget_exceeded,
         "python_backend": 1.0,
     }
 

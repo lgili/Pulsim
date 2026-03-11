@@ -147,30 +147,6 @@ Existing Python runtime APIs SHALL remain functional while new component APIs ar
 - **THEN** behavior remains compatible
 - **AND** introduction of new component APIs does not break prior workflows
 
-### Requirement: Python Configuration for SUNDIALS Backend
-Python bindings SHALL expose SUNDIALS backend configuration fields equivalent to runtime simulation options.
-
-#### Scenario: Configure SUNDIALS backend from Python
-- **WHEN** Python code sets transient backend mode to `SUNDIALS` or `Auto` and selects solver family/tolerances
-- **THEN** `Simulator` and procedural APIs SHALL run with the same backend configuration semantics as kernel options
-- **AND** invalid backend-family combinations SHALL produce clear Python exceptions
-
-### Requirement: Python Telemetry for Backend Selection
-Python bindings SHALL expose backend telemetry including whether SUNDIALS was used and why escalation happened.
-
-#### Scenario: Inspect backend telemetry after run
-- **WHEN** Python code accesses transient simulation result telemetry
-- **THEN** it SHALL read backend selection, solver family, escalation counters, and backend failure diagnostics when applicable
-- **AND** these fields SHALL be structured (not string-parsed)
-
-### Requirement: Backward-Compatible Defaults Without SUNDIALS
-Python APIs SHALL remain backward-compatible on builds without SUNDIALS.
-
-#### Scenario: Existing script on non-SUNDIALS build
-- **WHEN** an existing Python script uses default transient APIs without backend overrides
-- **THEN** behavior SHALL remain compatible with the native backend defaults
-- **AND** capability inspection SHALL report SUNDIALS unavailable without breaking imports
-
 ### Requirement: Python-Only Supported Runtime Surface
 Python bindings SHALL be the only supported user-facing runtime interface for simulation workflows.
 
@@ -504,3 +480,23 @@ All three SHALL be importable directly from `pulsim`.
 - **WHEN** `ps.CBlockCompileError`, `ps.CBlockABIError`, `ps.CBlockRuntimeError` are accessed
 - **THEN** they are the correct exception classes (not `AttributeError`)
 
+### Requirement: Convergence Policy Configuration in Python
+Python bindings SHALL expose convergence-policy profiles and bounded tuning options for transient execution.
+
+#### Scenario: Select robust convergence profile
+- **WHEN** Python code selects profile `robust` for a challenging circuit
+- **THEN** runtime receives corresponding policy configuration
+- **AND** strict-mode contracts remain explicit and deterministic
+
+#### Scenario: Override bounded policy knobs
+- **WHEN** Python code overrides approved policy fields (for example event-burst guard or regularization bounds)
+- **THEN** overrides are validated with deterministic errors for invalid ranges
+- **AND** accepted values are reflected in runtime options
+
+### Requirement: Structured Convergence Telemetry Exposure
+Python result objects SHALL expose structured convergence telemetry produced by the policy engine.
+
+#### Scenario: Inspect convergence diagnostics from Python
+- **WHEN** a transient run completes (success or failure)
+- **THEN** Python code can access failure classes, recovery stages, and policy actions as typed fields
+- **AND** no diagnostic workflow requires string parsing

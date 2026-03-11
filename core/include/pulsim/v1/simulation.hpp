@@ -221,6 +221,38 @@ enum class FallbackReasonCode {
     MaxRetriesExceeded
 };
 
+enum class ConvergenceFailureClass {
+    None,
+    EventBurstZeroCross,
+    SwitchChattering,
+    NonlinearMagneticStiffness,
+    ControlDiscreteStiffness,
+    ControlAlgebraicLoopRisk,
+    LinearBreakdown,
+    NewtonGlobalizationFailure,
+    RetryBudgetExhausted,
+    Unknown
+};
+
+enum class ConvergencePolicyAction {
+    None,
+    ObserveOnly,
+    DtBackoff,
+    EventSplit,
+    StiffnessBackoff,
+    Regularization,
+    TransientGminEscalation,
+    HoldAdvance,
+    GlobalRecovery,
+    AbortStep
+};
+
+enum class ConvergenceProfile {
+    Strict,
+    Balanced,
+    Robust
+};
+
 struct FallbackTraceEntry {
     int step_index = 0;
     int retry_index = 0;
@@ -228,11 +260,21 @@ struct FallbackTraceEntry {
     Real dt = 0.0;
     FallbackReasonCode reason = FallbackReasonCode::NewtonFailure;
     SolverStatus solver_status = SolverStatus::Success;
+    RecoveryStage recovery_stage = RecoveryStage::None;
+    ConvergenceFailureClass failure_class = ConvergenceFailureClass::Unknown;
+    ConvergencePolicyAction policy_action = ConvergencePolicyAction::ObserveOnly;
+    ConvergencePolicyAction recommended_policy_action = ConvergencePolicyAction::None;
+    bool policy_action_matches_recommendation = true;
+    bool anti_overfit_violation = false;
     std::string action;
 };
 
 struct FallbackPolicyOptions {
     bool trace_retries = true;
+    ConvergenceProfile convergence_profile = ConvergenceProfile::Balanced;
+    bool policy_dry_run = false;
+    bool anti_overfit_check = false;
+    int anti_overfit_stable_budget = 0;
     bool enable_transient_gmin = true;
     int gmin_retry_threshold = 2;
     Real gmin_initial = 1e-9;
@@ -294,6 +336,22 @@ struct BackendTelemetry {
     int model_regularization_events = 0;
     int model_regularization_last_changed = 0;
     double model_regularization_last_intensity = 0.0;
+    int model_regularization_diode_changed = 0;
+    int model_regularization_switch_changed = 0;
+    int model_regularization_magnetic_changed = 0;
+    double model_regularization_diode_max_intensity = 0.0;
+    double model_regularization_switch_max_intensity = 0.0;
+    double model_regularization_magnetic_max_intensity = 0.0;
+    int classified_fallback_events = 0;
+    ConvergenceFailureClass last_failure_class = ConvergenceFailureClass::None;
+    RecoveryStage last_recovery_stage = RecoveryStage::None;
+    ConvergencePolicyAction last_policy_action = ConvergencePolicyAction::None;
+    int policy_dry_run_events = 0;
+    int policy_recommendation_matches = 0;
+    int policy_recommendation_mismatches = 0;
+    ConvergencePolicyAction last_recommended_policy_action = ConvergencePolicyAction::None;
+    int anti_overfit_violations = 0;
+    bool anti_overfit_budget_exceeded = false;
     std::string failure_reason;
 };
 
@@ -306,6 +364,7 @@ enum class SimulationDiagnosticCode {
     InvalidThermalConfiguration,
     UserStopRequested,
     TransientStepFailure,
+    ControlAlgebraicLoopRisk,
     PeriodicInvalidPeriod,
     PeriodicInvalidInitialState,
     PeriodicCycleFailure,
@@ -773,7 +832,8 @@ private:
                                Real dt,
                                FallbackReasonCode reason,
                                SolverStatus solver_status,
-                               const std::string& action);
+                               const std::string& action,
+                               RecoveryStage recovery_stage = RecoveryStage::None);
 
     Circuit& circuit_;
     SimulationOptions options_;

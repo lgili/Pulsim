@@ -124,6 +124,33 @@ struct VirtualChannelMetadata {
     std::vector<Index> nodes;
 };
 
+/// Typed control-graph failure for combinational algebraic loops.
+class ControlAlgebraicLoopError : public std::runtime_error {
+public:
+    explicit ControlAlgebraicLoopError(std::vector<std::string> component_cycle)
+        : std::runtime_error(build_message(component_cycle))
+        , component_cycle_(std::move(component_cycle)) {}
+
+    [[nodiscard]] const std::vector<std::string>& component_cycle() const noexcept {
+        return component_cycle_;
+    }
+
+private:
+    [[nodiscard]] static std::string build_message(const std::vector<std::string>& component_cycle) {
+        std::ostringstream oss;
+        oss << "Virtual control algebraic loop: ";
+        for (std::size_t i = 0; i < component_cycle.size(); ++i) {
+            if (i > 0) {
+                oss << " -> ";
+            }
+            oss << component_cycle[i];
+        }
+        return oss.str();
+    }
+
+    std::vector<std::string> component_cycle_;
+};
+
 // =============================================================================
 // Runtime Circuit Class
 // =============================================================================
@@ -1024,16 +1051,12 @@ public:
         // Phase 2: control update
         build_control_eval_order();
         if (!control_eval_cycle_.empty()) {
-            std::ostringstream oss;
-            oss << "Virtual control algebraic loop: ";
-            for (std::size_t i = 0; i < control_eval_cycle_.size(); ++i) {
-                const auto& name = virtual_components_[control_eval_cycle_[i]].name;
-                if (i > 0) {
-                    oss << " -> ";
-                }
-                oss << name;
+            std::vector<std::string> component_cycle;
+            component_cycle.reserve(control_eval_cycle_.size());
+            for (std::size_t idx : control_eval_cycle_) {
+                component_cycle.push_back(virtual_components_[idx].name);
             }
-            throw std::runtime_error(oss.str());
+            throw ControlAlgebraicLoopError(std::move(component_cycle));
         }
 
         for (std::size_t component_index : control_eval_order_) {
@@ -1824,7 +1847,15 @@ public:
 
     /// Clamp overly-ideal nonlinear parameters for better numerical robustness.
     /// This is intended for fallback use when a transient repeatedly fails.
-    [[nodiscard]] int apply_numerical_regularization(
+    struct NumericalRegularizationAudit {
+        int total_changed = 0;
+        int diode_changed = 0;
+        int switch_changed = 0;
+        int magnetic_changed = 0;
+    };
+
+    /// Clamp overly-ideal nonlinear parameters with per-family audit counters.
+    [[nodiscard]] NumericalRegularizationAudit apply_numerical_regularization_audit(
         Real mosfet_kp_max = 8.0,
         Real mosfet_g_off_min = 1e-7,
         Real diode_g_on_max = 300.0,
@@ -1835,11 +1866,24 @@ public:
         Real switch_g_off_min = 1e-9,
         Real vcswitch_g_on_max = 5e5,
         Real vcswitch_g_off_min = 1e-9) {
-        int changed = 0;
+        NumericalRegularizationAudit audit;
         constexpr Real latch_gate_threshold_min = 1e-3;
         constexpr Real latch_holding_current_min = 1e-6;
         constexpr Real latch_g_on_max = 5e5;
         constexpr Real latch_g_off_min = 1e-9;
+
+        auto bump_diode = [&]() {
+            audit.total_changed += 1;
+            audit.diode_changed += 1;
+        };
+        auto bump_switch = [&]() {
+            audit.total_changed += 1;
+            audit.switch_changed += 1;
+        };
+        auto bump_magnetic = [&]() {
+            audit.total_changed += 1;
+            audit.magnetic_changed += 1;
+        };
 
         for (std::size_t i = 0; i < devices_.size(); ++i) {
             auto& device = devices_[i];
@@ -1855,7 +1899,7 @@ public:
                 }
                 // Rebuild device even when unchanged to reset internal ON/OFF history.
                 device = MOSFET(params, conn.name);
-                ++changed;
+                bump_switch();
                 continue;
             }
 
@@ -1864,7 +1908,7 @@ public:
                 const Real g_off = std::max(diode->g_off(), diode_g_off_min);
                 // Rebuild also resets internal conduction state.
                 device = IdealDiode(g_on, g_off, conn.name);
-                ++changed;
+                bump_diode();
                 continue;
             }
 
@@ -1877,7 +1921,7 @@ public:
                     params.g_off = igbt_g_off_min;
                 }
                 device = IGBT(params, conn.name);
-                ++changed;
+                bump_switch();
                 continue;
             }
 
@@ -1886,7 +1930,7 @@ public:
                 const Real g_off = std::max(sw->g_off(), switch_g_off_min);
                 if (g_on != sw->g_on() || g_off != sw->g_off()) {
                     device = IdealSwitch(g_on, g_off, sw->is_closed(), conn.name);
-                    ++changed;
+                    bump_switch();
                 }
                 continue;
             }
@@ -1901,7 +1945,7 @@ public:
                     params.g_on != vc_switch->g_on() || params.g_off != vc_switch->g_off();
                 if (regularized) {
                     device = VoltageControlledSwitch(params, conn.name);
-                    ++changed;
+                    bump_switch();
                 }
                 continue;
             }
@@ -1918,11 +1962,15 @@ public:
                 const auto it = component.numeric_params.find(key);
                 return (it == component.numeric_params.end()) ? fallback : it->second;
             };
-            auto write_param = [&](const std::string& key, Real value) {
+            auto write_param = [&](const std::string& key, Real value, bool magnetic_family) {
                 const auto it = component.numeric_params.find(key);
                 if (it == component.numeric_params.end() || it->second != value) {
                     component.numeric_params[key] = value;
-                    ++changed;
+                    if (magnetic_family) {
+                        bump_magnetic();
+                    } else {
+                        bump_switch();
+                    }
                 }
             };
 
@@ -1936,11 +1984,11 @@ public:
                 const Real latch_current = std::max(
                     std::abs(read_param("latch_current", holding_current * 1.2)), holding_current);
 
-                write_param("g_on", g_on);
-                write_param("g_off", g_off);
-                write_param("gate_threshold", gate_threshold);
-                write_param("holding_current", holding_current);
-                write_param("latch_current", latch_current);
+                write_param("g_on", g_on, false);
+                write_param("g_off", g_off, false);
+                write_param("gate_threshold", gate_threshold, false);
+                write_param("holding_current", holding_current, false);
+                write_param("latch_current", latch_current, false);
                 continue;
             }
 
@@ -1951,23 +1999,50 @@ public:
                     std::abs(read_param("saturation_inductance", l_unsat * 0.2)),
                     1e-9, l_unsat);
                 const Real exponent = std::clamp(read_param("saturation_exponent", 2.0), 1.0, 6.0);
-                write_param("inductance", l_unsat);
-                write_param("saturation_current", i_sat);
-                write_param("saturation_inductance", l_sat);
-                write_param("saturation_exponent", exponent);
+                write_param("inductance", l_unsat, true);
+                write_param("saturation_current", i_sat, true);
+                write_param("saturation_inductance", l_sat, true);
+                write_param("saturation_exponent", exponent, true);
                 continue;
             }
 
             const Real l1 = std::max(std::abs(read_param("l1", 1e-3)), 1e-9);
             const Real l2 = std::max(std::abs(read_param("l2", 1e-3)), 1e-9);
             const Real k = std::clamp(read_param("coupling", read_param("k", 0.98)), -0.999, 0.999);
-            write_param("l1", l1);
-            write_param("l2", l2);
-            write_param("coupling", k);
-            write_param("k", k);
+            write_param("l1", l1, true);
+            write_param("l2", l2, true);
+            write_param("coupling", k, true);
+            write_param("k", k, true);
         }
 
-        return changed;
+        return audit;
+    }
+
+    /// Clamp overly-ideal nonlinear parameters for better numerical robustness.
+    /// This overload preserves legacy return semantics (aggregate changed count).
+    [[nodiscard]] int apply_numerical_regularization(
+        Real mosfet_kp_max = 8.0,
+        Real mosfet_g_off_min = 1e-7,
+        Real diode_g_on_max = 300.0,
+        Real diode_g_off_min = 1e-9,
+        Real igbt_g_on_max = 5e3,
+        Real igbt_g_off_min = 1e-9,
+        Real switch_g_on_max = 5e5,
+        Real switch_g_off_min = 1e-9,
+        Real vcswitch_g_on_max = 5e5,
+        Real vcswitch_g_off_min = 1e-9) {
+        return apply_numerical_regularization_audit(
+                   mosfet_kp_max,
+                   mosfet_g_off_min,
+                   diode_g_on_max,
+                   diode_g_off_min,
+                   igbt_g_on_max,
+                   igbt_g_off_min,
+                   switch_g_on_max,
+                   switch_g_off_min,
+                   vcswitch_g_on_max,
+                   vcswitch_g_off_min)
+            .total_changed;
     }
 
     // =========================================================================

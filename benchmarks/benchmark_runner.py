@@ -786,6 +786,15 @@ def run_benchmarks(
                             "python_backend": 1.0,
                             "expected_failure_matched": 1.0,
                             "expected_failure_case": 1.0,
+                            "newton_iterations": 0.0,
+                            "timestep_rejections": 0.0,
+                            "linear_fallbacks": 0.0,
+                            "classified_fallback_events": 0.0,
+                            "policy_dry_run_events": 0.0,
+                            "policy_recommendation_matches": 0.0,
+                            "policy_recommendation_mismatches": 0.0,
+                            "anti_overfit_violations": 0.0,
+                            "anti_overfit_budget_exceeded": 0.0,
                         }
                         telemetry.update(averaged_pair_telemetry)
                         telemetry.update(magnetic_kpi_telemetry)
@@ -818,7 +827,18 @@ def run_benchmarks(
                             rms_error=None,
                             phase_error_deg=None,
                             message=str(exc),
-                            telemetry={},
+                            telemetry={
+                                "python_backend": 1.0,
+                                "newton_iterations": 0.0,
+                                "timestep_rejections": 0.0,
+                                "linear_fallbacks": 0.0,
+                                "classified_fallback_events": 0.0,
+                                "policy_dry_run_events": 0.0,
+                                "policy_recommendation_matches": 0.0,
+                                "policy_recommendation_mismatches": 0.0,
+                                "anti_overfit_violations": 0.0,
+                                "anti_overfit_budget_exceeded": 0.0,
+                            },
                         )
                     )
                     continue
@@ -838,7 +858,17 @@ def run_benchmarks(
                 telemetry.update(averaged_pair_telemetry)
                 telemetry.update(magnetic_kpi_telemetry)
                 output_index[(benchmark_id, scenario_name)] = output_path
-                for key in ("newton_iterations", "timestep_rejections", "linear_fallbacks"):
+                for key in (
+                    "newton_iterations",
+                    "timestep_rejections",
+                    "linear_fallbacks",
+                    "classified_fallback_events",
+                    "policy_dry_run_events",
+                    "policy_recommendation_matches",
+                    "policy_recommendation_mismatches",
+                    "anti_overfit_violations",
+                    "anti_overfit_budget_exceeded",
+                ):
                     if telemetry.get(key) is None:
                         telemetry[key] = 0.0
                 components_block = scenario_netlist.get("components", [])

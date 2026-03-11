@@ -28,8 +28,10 @@ Campos práticos:
 
 Observação de migração:
 
-- `simulation.backend` e `simulation.sundials` são campos legados para transiente e não
-  fazem parte do caminho suportado; use `simulation.step_mode` + `simulation.formulation`.
+- `simulation.backend`, `simulation.sundials` e o bloco `simulation.advanced`
+  foram removidos da superfície suportada; use `simulation.step_mode` +
+  `simulation.formulation` e ajustes explícitos em `simulation.solver`,
+  `simulation.newton`, `simulation.timestep`, etc.
 
 ## Solver linear em runtime
 

@@ -9,7 +9,7 @@
 #
 # This script installs:
 #   Required: Clang 17+, CMake, Ninja, Python 3, SuiteSparse (KLU)
-#   Optional (--full): SUNDIALS, gRPC, protobuf
+#   Optional (--full): gRPC, protobuf
 #
 # Supports: Ubuntu/Debian, Fedora/RHEL, Arch Linux
 # =============================================================================
@@ -60,7 +60,7 @@ PulsimCore Linux Dependency Installer
 Usage: $0 [OPTIONS]
 
 Options:
-    --full      Install optional dependencies (SUNDIALS, gRPC)
+    --full      Install optional dependencies (gRPC)
     --help, -h  Show this help message
 
 Required dependencies (always installed):
@@ -71,7 +71,6 @@ Required dependencies (always installed):
     - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with --full):
-    - SUNDIALS (advanced ODE/DAE solvers)
     - gRPC and protobuf (remote API)
 
 Supported distributions:
@@ -244,10 +243,6 @@ install_base_deps() {
 install_optional_apt() {
     print_header "Installing Optional Dependencies (apt)"
 
-    # SUNDIALS
-    print_info "Installing SUNDIALS..."
-    sudo apt-get install -y libsundials-dev || print_warning "SUNDIALS not available in repos"
-
     # gRPC
     print_info "Installing gRPC..."
     sudo apt-get install -y libgrpc++-dev protobuf-compiler-grpc || print_warning "gRPC not available in repos"
@@ -258,10 +253,6 @@ install_optional_apt() {
 install_optional_dnf() {
     print_header "Installing Optional Dependencies (dnf)"
 
-    # SUNDIALS
-    print_info "Installing SUNDIALS..."
-    sudo dnf install -y sundials-devel || print_warning "SUNDIALS not available in repos"
-
     # gRPC
     print_info "Installing gRPC..."
     sudo dnf install -y grpc-devel grpc-plugins || print_warning "gRPC not available in repos"
@@ -271,10 +262,6 @@ install_optional_dnf() {
 
 install_optional_pacman() {
     print_header "Installing Optional Dependencies (pacman)"
-
-    # SUNDIALS
-    print_info "Installing SUNDIALS..."
-    sudo pacman -S --noconfirm sundials || print_warning "SUNDIALS not available in repos"
 
     # gRPC
     print_info "Installing gRPC..."
@@ -378,7 +365,6 @@ verify_installation() {
     if [[ "${FULL_INSTALL:-false}" == "true" ]]; then
         echo ""
         echo "Optional dependencies:"
-        ldconfig -p 2>/dev/null | grep -q libsundials && echo "  SUNDIALS:    installed" || echo "  SUNDIALS:    not installed"
         ldconfig -p 2>/dev/null | grep -q libgrpc && echo "  gRPC:        installed" || echo "  gRPC:        not installed"
     fi
 

@@ -9,7 +9,7 @@
 #
 # This script installs:
 #   Required: Homebrew, LLVM/Clang 17+, CMake, Ninja, Python 3, SuiteSparse (KLU)
-#   Optional (--full): SUNDIALS, gRPC, protobuf
+#   Optional (--full): gRPC, protobuf
 # =============================================================================
 
 set -euo pipefail
@@ -58,7 +58,7 @@ PulsimCore macOS Dependency Installer
 Usage: $0 [OPTIONS]
 
 Options:
-    --full      Install optional dependencies (SUNDIALS, gRPC)
+    --full      Install optional dependencies (gRPC)
     --help, -h  Show this help message
 
 Required dependencies (always installed):
@@ -70,7 +70,6 @@ Required dependencies (always installed):
     - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with --full):
-    - SUNDIALS (advanced ODE/DAE solvers)
     - gRPC and protobuf (remote API)
 
 After installation, add these to your shell profile (~/.zshrc or ~/.bashrc):
@@ -227,15 +226,6 @@ install_suitesparse() {
 install_optional_deps() {
     print_header "Installing Optional Dependencies"
 
-    # SUNDIALS
-    if is_installed sundials; then
-        print_success "SUNDIALS already installed"
-    else
-        print_info "Installing SUNDIALS..."
-        brew install sundials
-        print_success "SUNDIALS installed"
-    fi
-
     # gRPC and protobuf
     if is_installed grpc; then
         print_success "gRPC already installed"
@@ -318,7 +308,6 @@ verify_installation() {
     if [[ "${FULL_INSTALL:-false}" == "true" ]]; then
         echo ""
         echo "Optional dependencies:"
-        is_installed sundials && echo "  SUNDIALS:    installed" || echo "  SUNDIALS:    not installed"
         is_installed grpc && echo "  gRPC:        installed" || echo "  gRPC:        not installed"
         is_installed protobuf && echo "  protobuf:    installed" || echo "  protobuf:    not installed"
     fi

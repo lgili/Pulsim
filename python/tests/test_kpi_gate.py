@@ -8,6 +8,7 @@ import math
 import platform
 from pathlib import Path
 
+import pytest
 import yaml
 
 import kpi_gate
@@ -392,6 +393,285 @@ def test_compute_metrics_detects_module_order_mismatch_rate(tmp_path: Path) -> N
     metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
     assert metrics["module_order_mismatch_rate"] == 1.0 / 3.0
     assert math.isclose(float(metrics["module_output_reallocation_p95"]), 0.9, rel_tol=0.0, abs_tol=1e-12)
+
+
+def test_compute_metrics_includes_convergence_policy_kpis(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "classified_fallback_events": 4.0,
+                    "policy_dry_run_events": 4.0,
+                    "policy_recommendation_matches": 3.0,
+                    "policy_recommendation_mismatches": 1.0,
+                    "anti_overfit_violations": 1.0,
+                    "anti_overfit_budget_exceeded": 1.0,
+                },
+            },
+            {
+                "status": "passed",
+                "runtime_s": 0.12,
+                "telemetry": {
+                    "classified_fallback_events": 2.0,
+                    "policy_dry_run_events": 2.0,
+                    "policy_recommendation_matches": 2.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+        ]
+    }
+    bench_path = tmp_path / "bench.json"
+    _write_json(bench_path, bench_results)
+
+    metrics = kpi_gate.compute_metrics(bench_results_path=bench_path)
+    assert metrics["classified_fallback_events_p95"] is not None
+    assert math.isclose(
+        float(metrics["classified_fallback_events_p95"]),
+        3.9,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["convergence_policy_match_rate"] is not None
+    assert math.isclose(
+        float(metrics["convergence_policy_match_rate"]),
+        5.0 / 6.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["convergence_policy_mismatch_rate"] is not None
+    assert math.isclose(
+        float(metrics["convergence_policy_mismatch_rate"]),
+        1.0 / 6.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["anti_overfit_violation_rate"] is not None
+    assert math.isclose(
+        float(metrics["anti_overfit_violation_rate"]),
+        1.0 / 6.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert metrics["anti_overfit_budget_exceeded_rate"] == 0.5
+
+
+def test_compute_metrics_includes_convergence_class_matrix_kpis(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "diode_rectifier",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "newton_iterations": 10.0,
+                    "timestep_rejections": 2.0,
+                    "classified_fallback_events": 1.0,
+                    "policy_dry_run_events": 1.0,
+                    "policy_recommendation_matches": 1.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "direct_trap",
+                "status": "failed",
+                "runtime_s": 0.20,
+                "telemetry": {
+                    "newton_iterations": 20.0,
+                    "timestep_rejections": 5.0,
+                    "classified_fallback_events": 2.0,
+                    "policy_dry_run_events": 2.0,
+                    "policy_recommendation_matches": 1.0,
+                    "policy_recommendation_mismatches": 1.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "trbdf2",
+                "status": "passed",
+                "runtime_s": 0.25,
+                "telemetry": {
+                    "newton_iterations": 30.0,
+                    "timestep_rejections": 8.0,
+                },
+            },
+            {
+                "benchmark_id": "magnetic_core_saturation",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.05,
+                "telemetry": {
+                    "newton_iterations": 5.0,
+                    "timestep_rejections": 1.0,
+                    "classified_fallback_events": 0.0,
+                    "policy_dry_run_events": 0.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                },
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "diode_heavy": {
+                "cases": [
+                    {"benchmark_id": "diode_rectifier", "scenarios": ["direct_trap"]},
+                ]
+            },
+            "switch_heavy": {
+                "cases": [
+                    {"benchmark_id": "buck_switching", "scenarios": ["direct_trap", "trbdf2"]},
+                ]
+            },
+            "closed_loop_control": {
+                "cases": [
+                    {"benchmark_id": "periodic_rc_pwm", "scenarios": ["shooting_default"]},
+                ]
+            },
+        },
+    }
+    bench_path = tmp_path / "bench.json"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    _write_json(bench_path, bench_results)
+    _write_yaml(class_matrix_path, class_matrix)
+
+    metrics = kpi_gate.compute_metrics(
+        bench_results_path=bench_path,
+        class_matrix_path=class_matrix_path,
+    )
+
+    assert math.isclose(
+        float(metrics["typed_convergence_schema_coverage_rate"]),
+        0.75,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+
+    assert metrics["class_diode_heavy_case_count"] == 1.0
+    assert metrics["class_diode_heavy_coverage_rate"] == 1.0
+    assert metrics["class_diode_heavy_pass_rate"] == 1.0
+    assert metrics["class_diode_heavy_typed_schema_coverage_rate"] == 1.0
+
+    assert metrics["class_switch_heavy_case_count"] == 2.0
+    assert metrics["class_switch_heavy_coverage_rate"] == 1.0
+    assert metrics["class_switch_heavy_pass_rate"] == 0.5
+    assert metrics["class_switch_heavy_typed_schema_coverage_rate"] == 0.5
+    assert math.isclose(
+        float(metrics["class_switch_heavy_runtime_p95"]),
+        0.2475,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+    assert math.isclose(
+        float(metrics["class_switch_heavy_newton_iterations_p95"]),
+        29.5,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
+
+    assert metrics["class_closed_loop_control_case_count"] == 1.0
+    assert metrics["class_closed_loop_control_coverage_rate"] == 0.0
+    assert metrics["class_closed_loop_control_pass_rate"] is None
+    assert metrics["policy_target_case_count"] == 2.0
+    assert metrics["policy_target_terminal_failure_count"] == 1.0
+    assert metrics["policy_target_terminal_failure_rate"] == 0.5
+    assert metrics["policy_target_pass_rate"] == 0.5
+    assert metrics["policy_target_match_rate"] == 0.5
+    assert metrics["policy_target_mismatch_rate"] == 0.5
+    assert metrics["policy_stable_case_count"] == 1.0
+    assert metrics["policy_stable_terminal_failure_count"] == 0.0
+    assert metrics["policy_stable_terminal_failure_rate"] == 0.0
+    assert metrics["policy_stable_pass_rate"] == 1.0
+    assert metrics["policy_stable_mismatch_rate"] == 0.0
+    assert metrics["policy_stable_anti_overfit_violation_rate"] == 0.0
+
+
+def test_compute_policy_guard_rates_default_to_zero_without_policy_events(
+    tmp_path: Path,
+) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.20,
+                "telemetry": {
+                    "policy_dry_run_events": 0.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                    "classified_fallback_events": 0.0,
+                },
+            },
+            {
+                "benchmark_id": "diode_rectifier",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "policy_dry_run_events": 0.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 0.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                    "classified_fallback_events": 0.0,
+                },
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {
+                "cases": [
+                    {"benchmark_id": "buck_switching", "scenarios": ["direct_trap"]},
+                ]
+            },
+            "diode_heavy": {
+                "cases": [
+                    {"benchmark_id": "diode_rectifier", "scenarios": ["direct_trap"]},
+                ]
+            },
+        },
+    }
+    bench_path = tmp_path / "bench.json"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    _write_json(bench_path, bench_results)
+    _write_yaml(class_matrix_path, class_matrix)
+
+    metrics = kpi_gate.compute_metrics(
+        bench_results_path=bench_path,
+        class_matrix_path=class_matrix_path,
+    )
+
+    assert metrics["policy_target_case_count"] == 1.0
+    assert metrics["policy_target_terminal_failure_count"] == 0.0
+    assert metrics["policy_target_terminal_failure_rate"] == 0.0
+    assert metrics["policy_target_pass_rate"] == 1.0
+    assert metrics["policy_target_match_rate"] is None
+    assert metrics["policy_target_mismatch_rate"] == 0.0
+    assert metrics["policy_stable_case_count"] == 1.0
+    assert metrics["policy_stable_terminal_failure_count"] == 0.0
+    assert metrics["policy_stable_terminal_failure_rate"] == 0.0
+    assert metrics["policy_stable_pass_rate"] == 1.0
+    assert metrics["policy_stable_mismatch_rate"] == 0.0
+    assert metrics["policy_stable_anti_overfit_violation_rate"] == 0.0
 
 
 def test_compute_metrics_includes_ac_sweep_accuracy_and_runtime_metrics(tmp_path: Path) -> None:
@@ -896,6 +1176,636 @@ def test_kpi_gate_skips_runtime_metrics_on_machine_class_mismatch(tmp_path: Path
     assert report["overall_status"] == "passed"
     assert report["comparisons"]["runtime_p95"]["status"] == "skipped"
     assert "machine_class mismatch" in report["comparisons"]["runtime_p95"]["message"]
+
+
+def test_run_gate_merges_phase_budget_metrics(tmp_path: Path) -> None:
+    bench_results = {"results": [{"status": "passed", "runtime_s": 0.30}]}
+    baseline_metrics = {"runtime_p95": 0.20}
+    thresholds = {
+        "metrics": {
+            "runtime_p95": {
+                "direction": "lower_is_better",
+                "max_regression_rel": 1.0,
+                "required": False,
+            },
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {
+            "gate_b": {
+                "metrics": {
+                    "runtime_p95": {
+                        "direction": "lower_is_better",
+                        "max_regression_rel": 0.05,
+                        "required": True,
+                    },
+                }
+            }
+        },
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_budget_test",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report_without_budget = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+    )
+    assert report_without_budget["overall_status"] == "passed"
+
+    report_with_budget = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_b",
+    )
+    assert report_with_budget["overall_status"] == "failed"
+    assert report_with_budget["phase_budget_key"] == "gate_b"
+    assert report_with_budget["phase_budget_path"] == str(phase_budget_path)
+    assert report_with_budget["comparisons"]["runtime_p95"]["required"] is True
+
+
+def test_run_gate_phase_budget_requires_path_and_key(tmp_path: Path) -> None:
+    bench_results = {"results": [{"status": "passed", "runtime_s": 0.10}]}
+    baseline_metrics = {"runtime_p95": 0.20}
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "max_regression_abs": 1.0,
+                "required": False,
+            }
+        }
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_budget_missing_key",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+
+    with pytest.raises(RuntimeError, match="phase budget requires both"):
+        kpi_gate.run_gate(
+            baseline_path=baseline_path,
+            thresholds_path=thresholds_path,
+            bench_results_path=bench_path,
+            parity_ltspice_results_path=None,
+            parity_ngspice_results_path=None,
+            stress_summary_path=None,
+            phase_budget_path=tmp_path / "missing.yaml",
+            phase_budget_key=None,
+        )
+
+
+def test_gate_b_phase_budget_blocks_cross_class_regression(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "buck_switching",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.20,
+                "telemetry": {
+                    "policy_dry_run_events": 4.0,
+                    "policy_recommendation_matches": 1.0,
+                    "policy_recommendation_mismatches": 3.0,
+                    "anti_overfit_violations": 0.0,
+                    "anti_overfit_budget_exceeded": 0.0,
+                    "classified_fallback_events": 2.0,
+                },
+            },
+            {
+                "benchmark_id": "diode_rectifier",
+                "scenario": "direct_trap",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {
+                    "policy_dry_run_events": 2.0,
+                    "policy_recommendation_matches": 0.0,
+                    "policy_recommendation_mismatches": 2.0,
+                    "anti_overfit_violations": 1.0,
+                    "anti_overfit_budget_exceeded": 1.0,
+                    "classified_fallback_events": 1.0,
+                },
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {
+                "cases": [
+                    {"benchmark_id": "buck_switching", "scenarios": ["direct_trap"]},
+                ]
+            },
+            "diode_heavy": {
+                "cases": [
+                    {"benchmark_id": "diode_rectifier", "scenarios": ["direct_trap"]},
+                ]
+            },
+        },
+    }
+    baseline_metrics = {
+        "policy_target_pass_rate": 1.0,
+        "policy_target_match_rate": 0.9,
+        "policy_target_mismatch_rate": 0.1,
+        "policy_stable_pass_rate": 1.0,
+        "policy_stable_mismatch_rate": 0.0,
+        "policy_stable_anti_overfit_violation_rate": 0.0,
+    }
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "max_regression_abs": 1.0,
+                "required": False,
+            }
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {
+            "gate_b": {
+                "metrics": {
+                    "policy_target_pass_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_target_match_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_target_mismatch_rate": {
+                        "direction": "lower_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_stable_pass_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_stable_mismatch_rate": {
+                        "direction": "lower_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "policy_stable_anti_overfit_violation_rate": {
+                        "direction": "lower_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                }
+            }
+        },
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_b_regression",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_b",
+    )
+
+    assert report["overall_status"] == "failed"
+    assert report["failed_required_metrics"] >= 1
+    assert report["comparisons"]["policy_stable_mismatch_rate"]["status"] == "failed"
+    assert report["comparisons"]["policy_stable_anti_overfit_violation_rate"]["status"] == "failed"
+
+
+def test_gate_d_phase_budget_enforces_zero_closed_loop_regression(tmp_path: Path) -> None:
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "periodic_rc_pwm",
+                "scenario": "shooting_default",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": {},
+            },
+            {
+                "benchmark_id": "periodic_rc_pwm",
+                "scenario": "harmonic_balance",
+                "status": "failed",
+                "runtime_s": 0.12,
+                "telemetry": {},
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "closed_loop_control": {
+                "cases": [
+                    {
+                        "benchmark_id": "periodic_rc_pwm",
+                        "scenarios": ["shooting_default", "harmonic_balance"],
+                    }
+                ]
+            }
+        },
+    }
+    baseline_metrics = {
+        "convergence_success_rate": 1.0,
+        "class_closed_loop_control_coverage_rate": 1.0,
+        "class_closed_loop_control_pass_rate": 1.0,
+    }
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "max_regression_abs": 1.0,
+                "required": False,
+            }
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {
+            "gate_d": {
+                "metrics": {
+                    "class_closed_loop_control_coverage_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "class_closed_loop_control_pass_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                }
+            }
+        },
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_d_closed_loop_no_regression",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_d",
+    )
+
+    assert report["overall_status"] == "failed"
+    assert report["failed_required_metrics"] >= 1
+    assert report["comparisons"]["class_closed_loop_control_coverage_rate"]["status"] == "passed"
+    assert report["comparisons"]["class_closed_loop_control_pass_rate"]["status"] == "failed"
+
+
+def test_gate_e_phase_budget_enforces_closed_loop_repeatability_contract(tmp_path: Path) -> None:
+    typed = {
+        "classified_fallback_events": 1.0,
+        "policy_dry_run_events": 1.0,
+        "policy_recommendation_matches": 1.0,
+        "policy_recommendation_mismatches": 0.0,
+        "anti_overfit_violations": 0.0,
+        "anti_overfit_budget_exceeded": 0.0,
+    }
+    bench_results = {
+        "results": [
+            {
+                "benchmark_id": "periodic_rc_pwm",
+                "scenario": "shooting_default",
+                "status": "passed",
+                "runtime_s": 0.10,
+                "telemetry": dict(typed),
+            },
+            {
+                "benchmark_id": "periodic_rc_pwm",
+                "scenario": "harmonic_balance",
+                "status": "failed",
+                "runtime_s": 0.12,
+                "telemetry": dict(typed),
+            },
+        ]
+    }
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "closed_loop_control": {
+                "cases": [
+                    {
+                        "benchmark_id": "periodic_rc_pwm",
+                        "scenarios": ["shooting_default", "harmonic_balance"],
+                    }
+                ]
+            }
+        },
+    }
+    baseline_metrics = {
+        "convergence_success_rate": 1.0,
+        "class_closed_loop_control_coverage_rate": 1.0,
+        "class_closed_loop_control_pass_rate": 1.0,
+        "class_closed_loop_control_typed_schema_coverage_rate": 1.0,
+    }
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "max_regression_abs": 1.0,
+                "required": False,
+            }
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {
+            "gate_e": {
+                "metrics": {
+                    "class_closed_loop_control_coverage_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "class_closed_loop_control_pass_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                    "class_closed_loop_control_typed_schema_coverage_rate": {
+                        "direction": "higher_is_better",
+                        "max_regression_abs": 0.0,
+                        "required": True,
+                    },
+                }
+            }
+        },
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_e_closed_loop_repeatability",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_e",
+    )
+
+    assert report["overall_status"] == "failed"
+    assert report["failed_required_metrics"] >= 1
+    assert report["comparisons"]["class_closed_loop_control_coverage_rate"]["status"] == "passed"
+    assert report["comparisons"]["class_closed_loop_control_typed_schema_coverage_rate"]["status"] == "passed"
+    assert report["comparisons"]["class_closed_loop_control_pass_rate"]["status"] == "failed"
+
+
+def test_gate_c_target_failure_drop_significance_passes_with_strong_improvement(
+    tmp_path: Path,
+) -> None:
+    cases = []
+    class_cases = []
+    for idx in range(10):
+        benchmark_id = f"switch_case_{idx}"
+        class_cases.append({"benchmark_id": benchmark_id, "scenarios": ["direct_trap"]})
+        cases.append(
+            {
+                "benchmark_id": benchmark_id,
+                "scenario": "direct_trap",
+                "status": "failed" if idx == 0 else "passed",
+                "runtime_s": 0.05 + idx * 1e-3,
+                "telemetry": {},
+            }
+        )
+
+    bench_results = {"results": cases}
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {"cases": class_cases},
+        },
+    }
+    baseline_metrics = {
+        "policy_target_pass_rate": 0.5,  # baseline terminal failure rate = 0.5
+        "class_switch_heavy_case_count": 10.0,
+        "convergence_success_rate": 0.5,
+    }
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "required": False,
+                "max_regression_rel": 1.0,
+            }
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {"gate_c": {"metrics": {}}},
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_c_significant_drop_pass",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_c",
+    )
+
+    cmp = report["comparisons"]["gate_c_target_failure_drop_significance"]
+    assert report["overall_status"] == "passed"
+    assert cmp["status"] == "passed"
+    assert cmp["required"] is True
+    assert cmp["baseline_target_failure_rate"] == pytest.approx(0.5)
+    assert cmp["current_target_failure_rate"] == pytest.approx(0.1)
+
+
+def test_gate_c_target_failure_drop_significance_fails_without_statistical_signal(
+    tmp_path: Path,
+) -> None:
+    cases = []
+    class_cases = []
+    for idx in range(10):
+        benchmark_id = f"switch_case_{idx}"
+        class_cases.append({"benchmark_id": benchmark_id, "scenarios": ["direct_trap"]})
+        cases.append(
+            {
+                "benchmark_id": benchmark_id,
+                "scenario": "direct_trap",
+                "status": "failed" if idx < 3 else "passed",  # failure rate = 0.3
+                "runtime_s": 0.05 + idx * 1e-3,
+                "telemetry": {},
+            }
+        )
+
+    bench_results = {"results": cases}
+    class_matrix = {
+        "schema": "pulsim-convergence-class-matrix-v1",
+        "version": 1,
+        "classes": {
+            "switch_heavy": {"cases": class_cases},
+        },
+    }
+    baseline_metrics = {
+        "policy_target_pass_rate": 0.5,  # baseline terminal failure rate = 0.5
+        "class_switch_heavy_case_count": 10.0,
+        "convergence_success_rate": 0.5,
+    }
+    thresholds = {
+        "metrics": {
+            "convergence_success_rate": {
+                "direction": "higher_is_better",
+                "required": False,
+                "max_regression_rel": 1.0,
+            }
+        }
+    }
+    phase_budget = {
+        "schema": "pulsim-convergence-phase-budgets-v1",
+        "version": 1,
+        "phases": {"gate_c": {"metrics": {}}},
+    }
+
+    bench_path = tmp_path / "bench.json"
+    baseline_path = tmp_path / "kpi_baseline.json"
+    thresholds_path = tmp_path / "thresholds.yaml"
+    class_matrix_path = tmp_path / "class_matrix.yaml"
+    phase_budget_path = tmp_path / "phase_budget.yaml"
+    _write_json(bench_path, bench_results)
+    _write_baseline_with_manifest(
+        baseline_path=baseline_path,
+        baseline_id="phase_gate_c_significant_drop_fail",
+        source_bench_results=bench_path,
+        metrics=baseline_metrics,
+    )
+    _write_yaml(thresholds_path, thresholds)
+    _write_yaml(class_matrix_path, class_matrix)
+    _write_yaml(phase_budget_path, phase_budget)
+
+    report = kpi_gate.run_gate(
+        baseline_path=baseline_path,
+        thresholds_path=thresholds_path,
+        bench_results_path=bench_path,
+        parity_ltspice_results_path=None,
+        parity_ngspice_results_path=None,
+        stress_summary_path=None,
+        class_matrix_path=class_matrix_path,
+        phase_budget_path=phase_budget_path,
+        phase_budget_key="gate_c",
+    )
+
+    cmp = report["comparisons"]["gate_c_target_failure_drop_significance"]
+    assert report["overall_status"] == "failed"
+    assert report["failed_required_metrics"] >= 1
+    assert cmp["status"] == "failed"
+    assert cmp["required"] is True
+    assert "not significant" in cmp["message"]
 
 
 def test_compare_metric_uses_epsilon_guard_for_near_zero_baseline() -> None:

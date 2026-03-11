@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -221,3 +222,72 @@ def test_run_stress_suite_temp_manifest_stays_under_base_dir(tmp_path: Path, mon
 
     assert captured["manifest"].parent == manifest_path.parent
     assert not captured["manifest"].exists()
+
+
+def test_collect_reproducibility_metadata_and_write_artifacts(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "benchmarks.yaml"
+    catalog_path = tmp_path / "stress_catalog.yaml"
+    output_dir = tmp_path / "stress_out"
+
+    manifest_path.write_text(
+        yaml.safe_dump({"benchmarks": [], "scenarios": {}}, sort_keys=False),
+        encoding="utf-8",
+    )
+    catalog_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "pulsim-stress-catalog-v1",
+                "version": 1,
+                "reproducibility": {
+                    "fixed_simulation_contract": {"adaptive_timestep": False},
+                    "class_matrix": "benchmarks/convergence_class_matrix.yaml",
+                },
+                "tiers": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    reproducibility = ss.collect_reproducibility_metadata(
+        benchmarks_manifest_path=manifest_path,
+        stress_catalog_path=catalog_path,
+    )
+    assert reproducibility["catalog_path"] == str(catalog_path.resolve())
+    assert reproducibility["benchmarks_manifest_path"] == str(manifest_path.resolve())
+    assert reproducibility["contract"]["class_matrix"] == "benchmarks/convergence_class_matrix.yaml"
+    assert reproducibility["catalog_sha256"]
+    assert reproducibility["environment"]["machine_class"]
+
+    tier_runs = [
+        ss.TierRunResult(
+            tier="tier_a",
+            description="dummy tier",
+            criteria=ss.TierCriteria(min_pass_rate=1.0),
+            evaluation=ss.TierEvaluation(
+                tier="tier_a",
+                status="passed",
+                message="ok",
+                total=1,
+                passed=1,
+                failed=0,
+                skipped=0,
+                pass_rate=1.0,
+                max_runtime_s_observed=0.1,
+                max_max_error_observed=1e-4,
+                max_timestep_rejections_observed=0.0,
+                missing_telemetry_rows=0,
+            ),
+            results=[_result("rc_step", "direct_trap", status="passed")],
+        )
+    ]
+    ss.write_stress_artifacts(
+        output_dir=output_dir,
+        tier_runs=tier_runs,
+        reproducibility_metadata=reproducibility,
+    )
+
+    summary = json.loads((output_dir / "stress_summary.json").read_text(encoding="utf-8"))
+    payload = json.loads((output_dir / "stress_results.json").read_text(encoding="utf-8"))
+    assert summary["reproducibility"]["catalog_path"] == str(catalog_path.resolve())
+    assert payload["reproducibility"]["catalog_sha256"] == reproducibility["catalog_sha256"]

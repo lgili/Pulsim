@@ -197,7 +197,9 @@ TEST_CASE("v1 fixed-step buck keeps macro-grid outputs with event-aligned subste
     CHECK(has_event_split);
     for (const auto& entry : result.fallback_trace) {
         if (entry.reason == FallbackReasonCode::EventSplit) {
-            CHECK(entry.retry_index == 0);
+            CHECK((entry.action == "event_calendar_clip" ||
+                   entry.action == "split_to_earliest_event"));
+            CHECK(entry.retry_index <= opts.max_step_retries);
         }
     }
 
@@ -310,6 +312,92 @@ TEST_CASE("v1 variable-step switched buck remains stable around pwm edges",
                    entry.action == "abort_step";
         });
     CHECK_FALSE(has_abort);
+}
+
+TEST_CASE("v1 balanced convergence policy activates contextual event guards",
+          "[v1][fallback][policy][m2][regression]") {
+    Circuit circuit;
+
+    auto n_in = circuit.add_node("vin");
+    auto n_out = circuit.add_node("out");
+    auto n_ctrl = circuit.add_node("ctrl");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 5.0);
+
+    PulseParams gate;
+    gate.v_initial = 0.0;
+    gate.v_pulse = 5.0;
+    gate.t_delay = 1e-6;
+    gate.t_rise = 0.2e-6;
+    gate.t_fall = 0.2e-6;
+    gate.t_width = 2e-6;
+    gate.period = 6e-6;
+    circuit.add_pulse_voltage_source("Vctrl", n_ctrl, Circuit::ground(), gate);
+
+    circuit.add_vcswitch("S1", n_ctrl, n_in, n_out, 2.5, 100.0, 1e-9);
+    circuit.add_resistor("Rload", n_out, Circuit::ground(), 100.0);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 40e-6;
+    opts.dt = 2e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 8e-6;
+    opts.step_mode = TransientStepMode::Variable;
+    opts.step_mode_explicit = true;
+    opts.adaptive_timestep = true;
+    opts.enable_events = true;
+    opts.enable_bdf_order_control = true;
+    opts.max_step_retries = 8;
+    opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
+    opts.fallback_policy.policy_dry_run = false;
+    opts.fallback_policy.enable_transient_gmin = true;
+    opts.fallback_policy.gmin_retry_threshold = 1;
+    opts.newton_options.max_iterations = 1;
+    opts.newton_options.auto_damping = false;
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = false;
+    opts.linear_solver.auto_select = false;
+    opts.linear_solver.iterative_config.max_iterations = 2;
+    opts.linear_solver.iterative_config.tolerance = 1e-12;
+    opts.linear_solver.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::None;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    const auto result = sim.run_transient(x0);
+
+    INFO("policy activation status: " << static_cast<int>(result.final_status)
+         << " success=" << result.success
+         << " message=" << result.message
+         << " trace=" << result.fallback_trace.size()
+         << " rejections=" << result.timestep_rejections);
+    CHECK_FALSE(result.fallback_trace.empty());
+
+    const bool has_policy_guard = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.action.find("policy_event_burst_zero_cross_guard") != std::string::npos ||
+                   entry.action.find("policy_switch_chattering_guard") != std::string::npos;
+        });
+    CHECK(has_policy_guard);
+
+    const bool has_target_class = std::any_of(
+        result.fallback_trace.begin(), result.fallback_trace.end(),
+        [](const FallbackTraceEntry& entry) {
+            return entry.failure_class == ConvergenceFailureClass::EventBurstZeroCross ||
+                   entry.failure_class == ConvergenceFailureClass::SwitchChattering;
+        });
+    CHECK(has_target_class);
+
+    for (const auto& entry : result.fallback_trace) {
+        if (entry.action.find("policy_") != std::string::npos) {
+            CHECK(entry.retry_index <= opts.max_step_retries);
+        }
+    }
 }
 
 TEST_CASE("v1 variable-step mosfet buck stays close to fixed-step reference",
@@ -1060,6 +1148,94 @@ TEST_CASE("v1 disconnected C_BLOCK does not perturb dynamic PI buck convergence"
     REQUIRE_FALSE(vout_with_ghost.empty());
 
     CHECK(std::abs(vout_with_ghost.back() - vout_baseline.back()) < 0.5);
+}
+
+TEST_CASE("v1 closed-loop PI and C_BLOCK suites remain stable and repeatable",
+          "[v1][mixed-domain][control][closed-loop][stability][repeatability]") {
+    const auto assert_stable = [](const SimulationResult& result,
+                                  const std::string& output_channel,
+                                  Real vout_abs_max,
+                                  Real tail_ripple_max) {
+        REQUIRE(result.success);
+        REQUIRE(result.virtual_channels.contains(output_channel));
+        const auto& vout = result.virtual_channels.at(output_channel);
+        REQUIRE(vout.size() >= 20);
+        REQUIRE(std::all_of(vout.begin(), vout.end(), [](Real value) { return std::isfinite(value); }));
+        const Real max_abs = std::accumulate(
+            vout.begin(),
+            vout.end(),
+            Real{0.0},
+            [](Real current_max, Real value) {
+                return std::max(current_max, std::abs(value));
+            });
+        CHECK(max_abs < vout_abs_max);
+
+        const std::size_t tail_count = std::max<std::size_t>(5, vout.size() / 5);
+        const auto tail_begin = vout.end() - static_cast<std::ptrdiff_t>(tail_count);
+        const auto [tail_min_it, tail_max_it] = std::minmax_element(tail_begin, vout.end());
+        const Real tail_ripple = *tail_max_it - *tail_min_it;
+        CHECK(tail_ripple < tail_ripple_max);
+    };
+
+    const auto assert_repeatable = [](const SimulationResult& run_a,
+                                      const SimulationResult& run_b,
+                                      const std::string& output_channel) {
+        REQUIRE(run_a.success);
+        REQUIRE(run_b.success);
+        REQUIRE(run_a.total_steps == run_b.total_steps);
+        REQUIRE(run_a.timestep_rejections == run_b.timestep_rejections);
+        REQUIRE(run_a.time.size() == run_b.time.size());
+        REQUIRE(run_a.virtual_channels.contains(output_channel));
+        REQUIRE(run_b.virtual_channels.contains(output_channel));
+
+        const auto& vout_a = run_a.virtual_channels.at(output_channel);
+        const auto& vout_b = run_b.virtual_channels.at(output_channel);
+        REQUIRE(vout_a.size() == vout_b.size());
+        REQUIRE_FALSE(vout_a.empty());
+        CHECK(vout_a.back() == Approx(vout_b.back()).margin(1e-12));
+
+        const std::size_t compare_tail = std::min<std::size_t>(10, vout_a.size());
+        for (std::size_t i = 0; i < compare_tail; ++i) {
+            const std::size_t idx = vout_a.size() - 1 - i;
+            CHECK(vout_a[idx] == Approx(vout_b[idx]).margin(1e-12));
+            CHECK(run_a.time[idx] == Approx(run_b.time[idx]).margin(1e-15));
+        }
+    };
+
+    auto run_dynamic_pi = []() {
+        Circuit circuit = build_closed_loop_buck_with_dynamic_pi(false, true);
+        SimulationOptions opts = closed_loop_buck_regression_options(circuit);
+        opts.tstop = 0.7e-3;
+        return Simulator(circuit, opts).run_transient(circuit.initial_state());
+    };
+
+    auto run_cblock_closed_loop = []() {
+        Circuit circuit = build_closed_loop_buck_for_control_regression(true, false, true);
+        SimulationOptions opts = closed_loop_buck_regression_options(circuit);
+        opts.tstop = 0.7e-3;
+        return Simulator(circuit, opts).run_transient(circuit.initial_state());
+    };
+
+    const auto pi_run_a = run_dynamic_pi();
+    const auto pi_run_b = run_dynamic_pi();
+    assert_stable(pi_run_a, "Xout", 50.0, 5.0);
+    assert_stable(pi_run_b, "Xout", 50.0, 5.0);
+    assert_repeatable(pi_run_a, pi_run_b, "Xout");
+
+    const auto cb_run_a = run_cblock_closed_loop();
+    const auto cb_run_b = run_cblock_closed_loop();
+    assert_stable(cb_run_a, "Xout", 50.0, 5.0);
+    assert_stable(cb_run_b, "Xout", 50.0, 5.0);
+    assert_repeatable(cb_run_a, cb_run_b, "Xout");
+
+    REQUIRE(cb_run_a.virtual_channels.contains("CB1"));
+    REQUIRE(cb_run_b.virtual_channels.contains("CB1"));
+    const auto& duty_a = cb_run_a.virtual_channels.at("CB1");
+    const auto& duty_b = cb_run_b.virtual_channels.at("CB1");
+    REQUIRE_FALSE(duty_a.empty());
+    REQUIRE(duty_a.size() == duty_b.size());
+    CHECK(duty_a.back() == Approx(0.5).margin(1e-12));
+    CHECK(duty_b.back() == Approx(0.5).margin(1e-12));
 }
 
 TEST_CASE("v1 control scheduler updates c_block channels",
@@ -2104,6 +2280,146 @@ TEST_CASE("v1 global recovery path reports automatic regularization", "[v1][fall
                       [](const FallbackTraceEntry& entry) {
                           return entry.action.find("global_recovery_") != std::string::npos;
                       }));
+    CHECK(std::none_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.failure_class ==
+                                  ConvergenceFailureClass::NonlinearMagneticStiffness;
+                       }));
+}
+
+TEST_CASE("v1 strict convergence profile blocks implicit switching global recovery",
+          "[v1][fallback][strict]") {
+    Circuit circuit;
+    auto n_in = circuit.add_node("in");
+    auto n_out = circuit.add_node("out");
+
+    PulseParams pulse;
+    pulse.v_initial = 0.0;
+    pulse.v_pulse = 5.0;
+    pulse.t_delay = 1e-6;
+    pulse.t_rise = 2e-7;
+    pulse.t_fall = 2e-7;
+    pulse.t_width = 2e-6;
+    pulse.period = 4e-6;
+    circuit.add_pulse_voltage_source("Vin", n_in, Circuit::ground(), pulse);
+    circuit.add_resistor("R1", n_in, n_out, 1e3);
+    circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 4e-5;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-3;
+    opts.adaptive_timestep = true;
+    opts.enable_bdf_order_control = false;
+    opts.max_step_retries = 2;
+    opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.convergence_profile = ConvergenceProfile::Strict;
+    opts.fallback_policy.enable_transient_gmin = true;
+    opts.fallback_policy.gmin_retry_threshold = 1;
+    opts.fallback_policy.gmin_initial = 1e-8;
+    opts.fallback_policy.gmin_max = 1e-4;
+    opts.linear_solver.order = {LinearSolverKind::CG};
+    opts.linear_solver.fallback_order = {LinearSolverKind::CG};
+    opts.linear_solver.allow_fallback = false;
+    opts.linear_solver.auto_select = false;
+    opts.linear_solver.iterative_config.max_iterations = 2;
+    opts.linear_solver.iterative_config.tolerance = 1e-16;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const Vector x0 = Vector::Zero(circuit.system_size());
+    auto result = sim.run_transient(x0);
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.backend_telemetry.backend_recovery_count == 0);
+    CHECK(std::none_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.action.find("global_recovery_") != std::string::npos;
+                       }));
+}
+
+TEST_CASE("v1 allow_fallback false blocks global recovery in balanced profile",
+          "[v1][fallback][strict][contract]") {
+    auto build_circuit = []() {
+        Circuit circuit;
+        auto n_in = circuit.add_node("in");
+        auto n_out = circuit.add_node("out");
+
+        PulseParams pulse;
+        pulse.v_initial = 0.0;
+        pulse.v_pulse = 5.0;
+        pulse.t_delay = 1e-6;
+        pulse.t_rise = 2e-7;
+        pulse.t_fall = 2e-7;
+        pulse.t_width = 2e-6;
+        pulse.period = 4e-6;
+        circuit.add_pulse_voltage_source("Vin", n_in, Circuit::ground(), pulse);
+        circuit.add_resistor("R1", n_in, n_out, 1e3);
+        circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+        return circuit;
+    };
+
+    auto configure_options = [](const Circuit& circuit) {
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 4e-5;
+        opts.dt = 1e-6;
+        opts.dt_min = 1e-12;
+        opts.dt_max = 1e-3;
+        opts.adaptive_timestep = true;
+        opts.enable_bdf_order_control = false;
+        opts.max_step_retries = 2;
+        opts.fallback_policy.trace_retries = true;
+        opts.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
+        opts.fallback_policy.enable_transient_gmin = true;
+        opts.fallback_policy.gmin_retry_threshold = 1;
+        opts.fallback_policy.gmin_initial = 1e-8;
+        opts.fallback_policy.gmin_max = 1e-4;
+        opts.linear_solver.order = {LinearSolverKind::CG};
+        opts.linear_solver.fallback_order = {LinearSolverKind::CG};
+        opts.linear_solver.allow_fallback = false;
+        opts.linear_solver.auto_select = false;
+        opts.linear_solver.iterative_config.max_iterations = 2;
+        opts.linear_solver.iterative_config.tolerance = 1e-16;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        return opts;
+    };
+
+    auto run_once = [&]() {
+        Circuit circuit = build_circuit();
+        SimulationOptions opts = configure_options(circuit);
+        Simulator sim(circuit, opts);
+        const Vector x0 = Vector::Zero(circuit.system_size());
+        return sim.run_transient(x0);
+    };
+
+    const auto result_a = run_once();
+    const auto result_b = run_once();
+
+    REQUIRE_FALSE(result_a.success);
+    REQUIRE_FALSE(result_b.success);
+
+    CHECK(result_a.backend_telemetry.backend_recovery_count == 0);
+    CHECK(result_b.backend_telemetry.backend_recovery_count == 0);
+    CHECK(std::none_of(result_a.fallback_trace.begin(), result_a.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.action.find("global_recovery_") != std::string::npos;
+                       }));
+    CHECK(std::none_of(result_b.fallback_trace.begin(), result_b.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.action.find("global_recovery_") != std::string::npos;
+                       }));
+
+    CHECK(result_a.diagnostic == result_b.diagnostic);
+    CHECK(result_a.final_status == result_b.final_status);
+    CHECK(result_a.backend_telemetry.last_failure_class ==
+          result_b.backend_telemetry.last_failure_class);
+    CHECK(result_a.backend_telemetry.last_recovery_stage ==
+          result_b.backend_telemetry.last_recovery_stage);
 }
 
 TEST_CASE("v1 startup fallback recovers when DC operating point fails",
@@ -2164,6 +2480,45 @@ TEST_CASE("v1 startup fallback recovers when DC operating point fails",
     }
 }
 
+TEST_CASE("v1 transient emits typed diagnostic for control algebraic loop risk",
+          "[v1][fallback][control][diagnostics]") {
+    Circuit circuit;
+    const auto n_in = circuit.add_node("in");
+    const auto n_mid = circuit.add_node("mid");
+
+    circuit.add_voltage_source("Vin", n_in, Circuit::ground(), 1.0);
+    circuit.add_resistor("Rin", n_in, Circuit::ground(), 1e3);
+    circuit.add_virtual_component("gain", "GA", {n_in, n_mid}, {{"gain", 1.0}}, {});
+    circuit.add_virtual_component("gain", "GB", {n_mid, n_in}, {{"gain", 1.0}}, {});
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 2e-6;
+    opts.dt = 1e-6;
+    opts.dt_min = 1e-9;
+    opts.dt_max = 1e-6;
+    opts.step_mode = TransientStepMode::Fixed;
+    opts.step_mode_explicit = true;
+    opts.adaptive_timestep = false;
+    opts.fallback_policy.trace_retries = true;
+    opts.newton_options.num_nodes = circuit.num_nodes();
+    opts.newton_options.num_branches = circuit.num_branches();
+
+    Simulator sim(circuit, opts);
+    const Vector x0 = circuit.initial_state();
+    const auto result = sim.run_transient(x0);
+
+    REQUIRE_FALSE(result.success);
+    CHECK(result.diagnostic == SimulationDiagnosticCode::ControlAlgebraicLoopRisk);
+    CHECK(result.final_status == SolverStatus::NumericalError);
+    CHECK(result.backend_telemetry.failure_reason == "control_algebraic_loop_risk");
+    REQUIRE_FALSE(result.fallback_trace.empty());
+    CHECK(result.fallback_trace.back().failure_class ==
+          ConvergenceFailureClass::ControlAlgebraicLoopRisk);
+    CHECK(result.fallback_trace.back().policy_action == ConvergencePolicyAction::AbortStep);
+    CHECK(result.message.find("Virtual control algebraic loop") != std::string::npos);
+}
+
 TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback][regression]") {
     Circuit circuit;
 
@@ -2184,6 +2539,10 @@ TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback
     opts.enable_bdf_order_control = false;
     opts.max_step_retries = 3;
     opts.fallback_policy.trace_retries = true;
+    opts.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
+    opts.fallback_policy.policy_dry_run = true;
+    opts.fallback_policy.anti_overfit_check = true;
+    opts.fallback_policy.anti_overfit_stable_budget = 0;
     opts.fallback_policy.enable_transient_gmin = true;
     opts.fallback_policy.gmin_retry_threshold = 1;
     opts.fallback_policy.gmin_initial = 1e-8;
@@ -2210,6 +2569,19 @@ TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback
     CHECK((has_reason(FallbackReasonCode::TransientGminEscalation) ||
            has_reason(FallbackReasonCode::StiffnessBackoff)));
     CHECK(has_reason(FallbackReasonCode::MaxRetriesExceeded));
+    CHECK(result.backend_telemetry.policy_dry_run_events ==
+          static_cast<int>(result.fallback_trace.size()));
+    CHECK(result.backend_telemetry.policy_recommendation_matches +
+              result.backend_telemetry.policy_recommendation_mismatches ==
+          result.backend_telemetry.policy_dry_run_events);
+    CHECK(result.backend_telemetry.anti_overfit_budget_exceeded ==
+          (result.backend_telemetry.anti_overfit_violations >
+           opts.fallback_policy.anti_overfit_stable_budget));
+    CHECK(std::any_of(result.fallback_trace.begin(), result.fallback_trace.end(),
+                      [](const FallbackTraceEntry& entry) {
+                          return entry.recommended_policy_action !=
+                                 ConvergencePolicyAction::None;
+                      }));
 }
 
 TEST_CASE("v1 linear solver order honored", "[v1][solver][regression]") {
@@ -3184,9 +3556,15 @@ TEST_CASE("v1 control primitives keep bounded deterministic outputs",
         try {
             circuit.execute_mixed_domain_step(x, 1e-6);
             FAIL("Expected algebraic loop failure");
-        } catch (const std::runtime_error& err) {
+        } catch (const ControlAlgebraicLoopError& err) {
             const std::string message = err.what() ? err.what() : "";
             REQUIRE(message.find("Virtual control algebraic loop") != std::string::npos);
+            REQUIRE(err.component_cycle().size() >= 3);
+            CHECK(err.component_cycle().front() == err.component_cycle().back());
+            CHECK(std::find(err.component_cycle().begin(), err.component_cycle().end(), "GA") !=
+                  err.component_cycle().end());
+            CHECK(std::find(err.component_cycle().begin(), err.component_cycle().end(), "GB") !=
+                  err.component_cycle().end());
         }
     }
 

@@ -2267,7 +2267,7 @@ components:
     assert abs(options.fallback_policy.gmin_growth - 5.0) < 1e-12
 
 
-def test_yaml_parser_emits_migration_warnings_for_legacy_backend_controls() -> None:
+def test_yaml_parser_ignores_removed_legacy_backend_keys_in_non_strict_mode() -> None:
     content = """
 schema: pulsim-v1
 version: 1
@@ -2291,20 +2291,12 @@ components:
     parser_opts = ps.YamlParserOptions()
     parser_opts.strict = False
     parser = ps.YamlParser(parser_opts)
-    _, options = parser.load_string(content)
+    parser.load_string(content)
     assert parser.errors == []
-    assert options.step_mode == ps.StepMode.Variable
-    assert parser.warnings
-    joined = "\n".join(parser.warnings)
-    assert "simulation.backend" in joined
-    assert "simulation.sundials" in joined
-    assert "simulation.fallback.enable_backend_escalation" in joined
-    assert "simulation.fallback.backend_escalation_threshold" in joined
-    assert "simulation.fallback.enable_native_reentry" in joined
-    assert "simulation.fallback.sundials_recovery_window" in joined
+    assert parser.warnings == []
 
 
-def test_yaml_parser_maps_canonical_step_mode_and_advanced_overrides() -> None:
+def test_yaml_parser_maps_canonical_step_mode_and_solver_overrides() -> None:
     content = """
 schema: pulsim-v1
 version: 1
@@ -2312,9 +2304,8 @@ simulation:
   tstop: 2e-5
   dt: 1e-6
   step_mode: fixed
-  advanced:
-    solver:
-      order: [klu]
+  solver:
+    order: [klu]
 components:
   - type: resistor
     name: R1
@@ -2345,10 +2336,8 @@ version: 1
 simulation:
   tstop: 2e-5
   dt: 1e-6
-  formulation: direct
+  formulation: projected_wrapper
   direct_formulation_fallback: false
-  advanced:
-    formulation: projected_wrapper
 components:
   - type: resistor
     name: R1
@@ -2380,7 +2369,7 @@ components:
     assert any("simulation.formulation" in msg for msg in parser_invalid.errors)
 
 
-def test_yaml_parser_reports_migration_error_for_legacy_backend_keys_in_strict_mode() -> None:
+def test_yaml_parser_reports_unknown_field_errors_for_removed_legacy_backend_keys_in_strict_mode() -> None:
     content = """
 schema: pulsim-v1
 version: 1
@@ -2388,12 +2377,10 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
   backend: auto
-  advanced:
-    backend: sundials
-    sundials:
-      enabled: true
-    fallback:
-      enable_backend_escalation: true
+  sundials:
+    enabled: true
+  fallback:
+    enable_backend_escalation: true
 components:
   - type: resistor
     name: R1
@@ -2404,10 +2391,9 @@ components:
     parser.load_string(content)
     assert parser.errors
     assert any("simulation.backend" in msg for msg in parser.errors)
-    assert any("simulation.advanced.backend" in msg for msg in parser.errors)
-    assert any("simulation.advanced.sundials" in msg for msg in parser.errors)
-    assert any("simulation.advanced.fallback.enable_backend_escalation" in msg for msg in parser.errors)
-    assert any("simulation.step_mode" in msg for msg in parser.errors)
+    assert any("simulation.sundials" in msg for msg in parser.errors)
+    assert any("simulation.fallback.enable_backend_escalation" in msg for msg in parser.errors)
+    assert any("PULSIM_YAML_E_UNKNOWN_FIELD" in msg for msg in parser.errors)
 
 
 def test_backend_telemetry_binding_fields() -> None:
@@ -4292,6 +4278,10 @@ def test_fallback_trace_records_retry_reasons() -> None:
     opts.linear_solver.allow_fallback = False
     opts.linear_solver.auto_select = False
     opts.fallback_policy.trace_retries = True
+    opts.fallback_policy.convergence_profile = ps.ConvergenceProfile.Balanced
+    opts.fallback_policy.policy_dry_run = True
+    opts.fallback_policy.anti_overfit_check = True
+    opts.fallback_policy.anti_overfit_stable_budget = 0
     opts.fallback_policy.enable_transient_gmin = True
     opts.fallback_policy.gmin_retry_threshold = 1
     opts.fallback_policy.gmin_initial = 1e-8
@@ -4309,6 +4299,80 @@ def test_fallback_trace_records_retry_reasons() -> None:
         or ps.FallbackReasonCode.StiffnessBackoff in reasons
     )
     assert ps.FallbackReasonCode.MaxRetriesExceeded in reasons
+    assert result.backend_telemetry.classified_fallback_events == len(result.fallback_trace)
+    assert result.backend_telemetry.policy_dry_run_events == len(result.fallback_trace)
+    assert (
+        result.backend_telemetry.policy_recommendation_matches
+        + result.backend_telemetry.policy_recommendation_mismatches
+        == len(result.fallback_trace)
+    )
+    assert result.backend_telemetry.anti_overfit_budget_exceeded == (
+        result.backend_telemetry.anti_overfit_violations
+        > opts.fallback_policy.anti_overfit_stable_budget
+    )
+    assert result.backend_telemetry.last_failure_class in (
+        ps.ConvergenceFailureClass.RetryBudgetExhausted,
+        ps.ConvergenceFailureClass.LinearBreakdown,
+        ps.ConvergenceFailureClass.NewtonGlobalizationFailure,
+        ps.ConvergenceFailureClass.EventBurstZeroCross,
+        ps.ConvergenceFailureClass.Unknown,
+    )
+    assert result.backend_telemetry.last_policy_action in (
+        ps.ConvergencePolicyAction.AbortStep,
+        ps.ConvergencePolicyAction.DtBackoff,
+        ps.ConvergencePolicyAction.Regularization,
+        ps.ConvergencePolicyAction.StiffnessBackoff,
+        ps.ConvergencePolicyAction.TransientGminEscalation,
+        ps.ConvergencePolicyAction.ObserveOnly,
+    )
+    assert any(
+        entry.recovery_stage != ps.RecoveryStage.None_
+        for entry in result.fallback_trace
+    )
+    assert any(
+        entry.recommended_policy_action != ps.ConvergencePolicyAction.None_
+        for entry in result.fallback_trace
+    )
+    assert all(
+        isinstance(entry.anti_overfit_violation, bool)
+        for entry in result.fallback_trace
+    )
+
+
+def test_control_algebraic_loop_emits_typed_diagnostic() -> None:
+    circuit = ps.Circuit()
+    n_in = circuit.add_node("in")
+    n_mid = circuit.add_node("mid")
+    gnd = circuit.ground()
+
+    circuit.add_voltage_source("Vin", n_in, gnd, 1.0)
+    circuit.add_resistor("Rin", n_in, gnd, 1_000.0)
+    circuit.add_virtual_component("gain", "GA", [n_in, n_mid], {"gain": 1.0}, {})
+    circuit.add_virtual_component("gain", "GB", [n_mid, n_in], {"gain": 1.0}, {})
+
+    opts = ps.SimulationOptions()
+    opts.tstart = 0.0
+    opts.tstop = 2e-6
+    opts.dt = 1e-6
+    opts.dt_min = 1e-9
+    opts.dt_max = 1e-6
+    opts.step_mode = ps.StepMode.Fixed
+    opts.adaptive_timestep = False
+    opts.fallback_policy.trace_retries = True
+
+    sim = ps.Simulator(circuit, opts)
+    result = sim.run_transient(circuit.initial_state())
+
+    assert not result.success
+    assert result.diagnostic == ps.SimulationDiagnosticCode.ControlAlgebraicLoopRisk
+    assert result.final_status == ps.SolverStatus.NumericalError
+    assert result.backend_telemetry.failure_reason == "control_algebraic_loop_risk"
+    assert result.fallback_trace
+    assert result.fallback_trace[-1].failure_class == (
+        ps.ConvergenceFailureClass.ControlAlgebraicLoopRisk
+    )
+    assert result.fallback_trace[-1].policy_action == ps.ConvergencePolicyAction.AbortStep
+    assert "Virtual control algebraic loop" in result.message
 
 
 def test_recovery_ladder_stages_are_deterministic() -> None:

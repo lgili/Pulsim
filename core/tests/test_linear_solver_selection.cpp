@@ -226,6 +226,155 @@ TEST_CASE("GMRES solve is stable after factorize with temporary matrix",
     CHECK(result.solution->size() == 2);
 }
 
+TEST_CASE("Linear solver health policy transitions to safer solver on degraded iterative signal",
+          "[v1][solver][health]") {
+    LinearSolverStackConfig cfg;
+    cfg.order = {LinearSolverKind::GMRES, LinearSolverKind::SparseLU};
+    cfg.fallback_order = {LinearSolverKind::SparseLU};
+    cfg.auto_select = false;
+    cfg.allow_fallback = true;
+    cfg.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
+    cfg.iterative_config.max_iterations = 40;
+    cfg.iterative_config.tolerance = 1e-12;
+    cfg.enable_health_policy = true;
+    cfg.health_streak_threshold = 1;
+    cfg.health_iteration_ratio_threshold = 0.0; // deterministically flag iterative usage as degraded
+    cfg.health_error_threshold = 0.0;
+    cfg.health_prefer_direct = true;
+
+    RuntimeLinearSolver solver(cfg);
+
+    SparseMatrix A(3, 3);
+    A.insert(0, 0) = 4.0;
+    A.insert(0, 1) = 1.0;
+    A.insert(1, 0) = 1.0;
+    A.insert(1, 1) = 3.0;
+    A.insert(1, 2) = 1.0;
+    A.insert(2, 1) = 1.0;
+    A.insert(2, 2) = 2.0;
+    A.makeCompressed();
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    REQUIRE(solver.factorize(A));
+    auto before = solver.active_kind();
+    REQUIRE(before.has_value());
+    CHECK(*before == LinearSolverKind::GMRES);
+
+    auto result = solver.solve(b);
+    REQUIRE(result);
+
+    auto after = solver.active_kind();
+    REQUIRE(after.has_value());
+    CHECK(*after == LinearSolverKind::SparseLU);
+
+    auto telemetry = solver.telemetry();
+    CHECK(telemetry.health_policy_alerts >= 1);
+    CHECK(telemetry.health_policy_switches >= 1);
+    CHECK(telemetry.last_health_signal == LinearSolverHealthSignal::IterationSaturation);
+    REQUIRE(telemetry.last_transition_from.has_value());
+    REQUIRE(telemetry.last_transition_to.has_value());
+    CHECK(*telemetry.last_transition_from == LinearSolverKind::GMRES);
+    CHECK(*telemetry.last_transition_to == LinearSolverKind::SparseLU);
+}
+
+TEST_CASE("Linear solver health policy keeps active solver in healthy regime",
+          "[v1][solver][health]") {
+    LinearSolverStackConfig cfg;
+    cfg.order = {LinearSolverKind::GMRES, LinearSolverKind::SparseLU};
+    cfg.fallback_order = {LinearSolverKind::SparseLU};
+    cfg.auto_select = false;
+    cfg.allow_fallback = true;
+    cfg.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
+    cfg.iterative_config.max_iterations = 80;
+    cfg.iterative_config.tolerance = 1e-9;
+    cfg.enable_health_policy = true;
+    cfg.health_streak_threshold = 2;
+    cfg.health_iteration_ratio_threshold = 0.95;
+    cfg.health_error_threshold = 1e-3;
+    cfg.health_prefer_direct = true;
+
+    RuntimeLinearSolver solver(cfg);
+
+    SparseMatrix A(3, 3);
+    A.insert(0, 0) = 4.0;
+    A.insert(0, 1) = 1.0;
+    A.insert(1, 0) = 1.0;
+    A.insert(1, 1) = 3.0;
+    A.insert(1, 2) = 1.0;
+    A.insert(2, 1) = 1.0;
+    A.insert(2, 2) = 2.0;
+    A.makeCompressed();
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    REQUIRE(solver.factorize(A));
+    auto before = solver.active_kind();
+    REQUIRE(before.has_value());
+    CHECK(*before == LinearSolverKind::GMRES);
+
+    auto result = solver.solve(b);
+    REQUIRE(result);
+
+    auto after = solver.active_kind();
+    REQUIRE(after.has_value());
+    CHECK(*after == LinearSolverKind::GMRES);
+
+    auto telemetry = solver.telemetry();
+    CHECK(telemetry.health_policy_switches == 0);
+    CHECK_FALSE(telemetry.last_transition_from.has_value());
+    CHECK_FALSE(telemetry.last_transition_to.has_value());
+}
+
+TEST_CASE("Linear solver health policy stays inactive for direct-only active path",
+          "[v1][solver][health][non-activation]") {
+    LinearSolverStackConfig cfg;
+    cfg.order = {LinearSolverKind::SparseLU, LinearSolverKind::GMRES};
+    cfg.fallback_order = {LinearSolverKind::GMRES};
+    cfg.auto_select = false;
+    cfg.allow_fallback = true;
+    cfg.iterative_config.max_iterations = 20;
+    cfg.iterative_config.tolerance = 1e-9;
+    cfg.enable_health_policy = true;
+    cfg.health_streak_threshold = 1;
+    cfg.health_iteration_ratio_threshold = 0.0;
+    cfg.health_error_threshold = 0.0;
+
+    RuntimeLinearSolver solver(cfg);
+
+    SparseMatrix A(3, 3);
+    A.insert(0, 0) = 6.0;
+    A.insert(0, 1) = 1.0;
+    A.insert(1, 0) = 1.0;
+    A.insert(1, 1) = 5.0;
+    A.insert(1, 2) = 1.0;
+    A.insert(2, 1) = 1.0;
+    A.insert(2, 2) = 4.0;
+    A.makeCompressed();
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    REQUIRE(solver.factorize(A));
+    auto before = solver.active_kind();
+    REQUIRE(before.has_value());
+    CHECK(*before == LinearSolverKind::SparseLU);
+
+    auto result = solver.solve(b);
+    REQUIRE(result);
+
+    auto after = solver.active_kind();
+    REQUIRE(after.has_value());
+    CHECK(*after == LinearSolverKind::SparseLU);
+
+    auto telemetry = solver.telemetry();
+    CHECK(telemetry.last_health_signal == LinearSolverHealthSignal::None);
+    CHECK(telemetry.health_policy_alerts == 0);
+    CHECK(telemetry.health_policy_switches == 0);
+}
+
 TEST_CASE("AMG preconditioner is feature-flagged and unavailable by default", "[v1][solver][amg]") {
     LinearSolverStackConfig cfg;
     cfg.order = {LinearSolverKind::GMRES};
@@ -504,6 +653,10 @@ simulation:
   max_step_retries: 4
   fallback:
     trace_retries: true
+    convergence_profile: robust
+    policy_dry_run: true
+    anti_overfit_check: true
+    anti_overfit_stable_budget: 3
     enable_transient_gmin: true
     gmin_retry_threshold: 2
     gmin_initial: 1e-8
@@ -521,6 +674,10 @@ components:
     REQUIRE(parser.errors().empty());
     CHECK(options.max_step_retries == 4);
     CHECK(options.fallback_policy.trace_retries);
+    CHECK(options.fallback_policy.convergence_profile == ConvergenceProfile::Robust);
+    CHECK(options.fallback_policy.policy_dry_run);
+    CHECK(options.fallback_policy.anti_overfit_check);
+    CHECK(options.fallback_policy.anti_overfit_stable_budget == 3);
     CHECK(options.fallback_policy.enable_transient_gmin);
     CHECK(options.fallback_policy.gmin_retry_threshold == 2);
     CHECK(options.fallback_policy.gmin_initial == Approx(1e-8));
@@ -622,8 +779,8 @@ components:
     CHECK(joined.find("simulation.model_regularization.escalation_factor") != std::string::npos);
 }
 
-TEST_CASE("YAML parser emits migration warnings for legacy backend controls in non-strict mode",
-          "[v1][yaml][backend]") {
+TEST_CASE("YAML parser ignores removed legacy backend keys in non-strict mode",
+          "[v1][yaml][legacy]") {
     const std::string yaml = R"(schema: pulsim-v1
 version: 1
 simulation:
@@ -649,24 +806,12 @@ components:
     parser::YamlParser parser(parser_options);
     auto [circuit, options] = parser.load_string(yaml);
     REQUIRE(parser.errors().empty());
+    CHECK(parser.warnings().empty());
     CHECK(options.step_mode == TransientStepMode::Variable);
-    CHECK(options.fallback_policy.trace_retries);
-    REQUIRE_FALSE(parser.warnings().empty());
-    std::string joined;
-    for (const auto& warning : parser.warnings()) {
-        joined += warning;
-        joined.push_back('\n');
-    }
-    CHECK(joined.find("simulation.backend") != std::string::npos);
-    CHECK(joined.find("simulation.sundials") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.enable_backend_escalation") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.backend_escalation_threshold") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.enable_native_reentry") != std::string::npos);
-    CHECK(joined.find("simulation.fallback.sundials_recovery_window") != std::string::npos);
     CHECK(circuit.num_devices() == 1);
 }
 
-TEST_CASE("YAML parser applies canonical step_mode and advanced overrides",
+TEST_CASE("YAML parser applies canonical step_mode and solver overrides",
           "[v1][yaml][step-mode]") {
     const std::string yaml_fixed = R"(schema: pulsim-v1
 version: 1
@@ -674,9 +819,8 @@ simulation:
   tstop: 2e-5
   dt: 1e-6
   step_mode: fixed
-  advanced:
-    solver:
-      order: [klu]
+  solver:
+    order: [klu]
 components:
   - type: resistor
     name: R1
@@ -806,14 +950,12 @@ components:
     CHECK_FALSE(options_direct.direct_formulation_fallback);
     CHECK(circuit_direct.num_devices() == 1);
 
-    const std::string yaml_advanced_override = R"(schema: pulsim-v1
+    const std::string yaml_projected = R"(schema: pulsim-v1
 version: 1
 simulation:
   tstop: 2e-5
   dt: 1e-6
-  formulation: direct
-  advanced:
-    formulation: projected_wrapper
+  formulation: projected_wrapper
 components:
   - type: resistor
     name: R1
@@ -821,7 +963,7 @@ components:
     value: 1k
 )";
 
-    auto [circuit_projected, options_projected] = parser.load_string(yaml_advanced_override);
+    auto [circuit_projected, options_projected] = parser.load_string(yaml_projected);
     REQUIRE(parser.errors().empty());
     CHECK(options_projected.formulation_mode == FormulationMode::ProjectedWrapper);
     CHECK(circuit_projected.num_devices() == 1);
@@ -847,18 +989,18 @@ components:
                       }));
 }
 
-TEST_CASE("YAML parser emits strict migration diagnostics for legacy backend keys",
-          "[v1][yaml][migration]") {
+TEST_CASE("YAML parser emits strict unknown-field diagnostics for removed legacy backend keys",
+          "[v1][yaml][legacy]") {
     const std::string yaml = R"(schema: pulsim-v1
 version: 1
 simulation:
   tstop: 1e-4
   dt: 1e-6
   backend: auto
-  advanced:
-    backend: sundials
-    sundials:
-      enabled: true
+  sundials:
+    enabled: true
+  fallback:
+    enable_backend_escalation: true
 components:
   - type: resistor
     name: R1
@@ -875,9 +1017,9 @@ components:
         joined.push_back('\n');
     }
     CHECK(joined.find("simulation.backend") != std::string::npos);
-    CHECK(joined.find("simulation.advanced.backend") != std::string::npos);
-    CHECK(joined.find("simulation.advanced.sundials") != std::string::npos);
-    CHECK(joined.find("simulation.step_mode") != std::string::npos);
+    CHECK(joined.find("simulation.sundials") != std::string::npos);
+    CHECK(joined.find("simulation.fallback.enable_backend_escalation") != std::string::npos);
+    CHECK(joined.find("PULSIM_YAML_E_UNKNOWN_FIELD") != std::string::npos);
 }
 
 TEST_CASE("YAML parser emits coded unknown-field diagnostics with field paths",

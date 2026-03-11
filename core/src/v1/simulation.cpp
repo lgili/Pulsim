@@ -24,6 +24,23 @@ constexpr int kLteEventGraceSteps = 2;
 constexpr int kMaxDtMinHoldAdvances = 128;
 constexpr std::size_t kMaxSampleReserve = 1'000'000;
 constexpr std::size_t kMaxFallbackReserve = 2'000'000;
+constexpr int kPolicyGuardActivationBudget = 64;
+constexpr int kSwitchChatteringRetryThreshold = 2;
+constexpr int kArbitrationRetryThreshold = 2;
+constexpr Real kBalancedEventBurstBackoff = 0.35;
+constexpr Real kRobustEventBurstBackoff = 0.25;
+constexpr Real kBalancedChatteringSplitScale = 6.0;
+constexpr Real kRobustChatteringSplitScale = 10.0;
+
+/// Enables contextual policy actions after passive validation in M2+.
+[[nodiscard]] bool is_contextual_policy_active(const SimulationOptions& options) {
+    return !options.fallback_policy.policy_dry_run &&
+           options.fallback_policy.convergence_profile != ConvergenceProfile::Strict;
+}
+
+[[nodiscard]] bool is_robust_convergence_profile(const SimulationOptions& options) {
+    return options.fallback_policy.convergence_profile == ConvergenceProfile::Robust;
+}
 
 /// Converts 64-bit counters to int while clamping at int max.
 [[nodiscard]] int saturating_int(std::uint64_t value) {
@@ -421,6 +438,8 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
             return "user_stop_requested";
         case SimulationDiagnosticCode::TransientStepFailure:
             return "transient_step_failure";
+        case SimulationDiagnosticCode::ControlAlgebraicLoopRisk:
+            return "control_algebraic_loop_risk";
         case SimulationDiagnosticCode::PeriodicInvalidPeriod:
             return "periodic_invalid_period";
         case SimulationDiagnosticCode::PeriodicInvalidInitialState:
@@ -970,6 +989,193 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
     }
 }
 
+[[nodiscard]] bool action_contains(std::string_view action, std::string_view token) {
+    return action.find(token) != std::string_view::npos;
+}
+
+[[nodiscard]] RecoveryStage infer_recovery_stage(FallbackReasonCode reason,
+                                                 std::string_view action,
+                                                 RecoveryStage explicit_stage) {
+    if (explicit_stage != RecoveryStage::None) {
+        return explicit_stage;
+    }
+    switch (reason) {
+        case FallbackReasonCode::EventSplit:
+        case FallbackReasonCode::LTERejection:
+            return RecoveryStage::DtBackoff;
+        case FallbackReasonCode::StiffnessBackoff:
+            return RecoveryStage::StiffProfile;
+        case FallbackReasonCode::TransientGminEscalation:
+            return RecoveryStage::Regularization;
+        case FallbackReasonCode::MaxRetriesExceeded:
+            if (action_contains(action, "global_recovery")) {
+                return RecoveryStage::GlobalizationEscalation;
+            }
+            if (action_contains(action, "hold_advance")) {
+                return RecoveryStage::DtBackoff;
+            }
+            if (action_contains(action, "abort")) {
+                return RecoveryStage::Abort;
+            }
+            return RecoveryStage::Abort;
+        case FallbackReasonCode::NewtonFailure:
+        default:
+            if (action_contains(action, "regularization")) {
+                return RecoveryStage::Regularization;
+            }
+            if (action_contains(action, "globalization")) {
+                return RecoveryStage::GlobalizationEscalation;
+            }
+            return RecoveryStage::None;
+    }
+}
+
+[[nodiscard]] ConvergencePolicyAction infer_policy_action(FallbackReasonCode reason,
+                                                          std::string_view action,
+                                                          RecoveryStage stage) {
+    if (action_contains(action, "global_recovery")) {
+        return ConvergencePolicyAction::GlobalRecovery;
+    }
+    if (action_contains(action, "hold_advance")) {
+        return ConvergencePolicyAction::HoldAdvance;
+    }
+    if (action_contains(action, "abort")) {
+        return ConvergencePolicyAction::AbortStep;
+    }
+
+    switch (reason) {
+        case FallbackReasonCode::EventSplit:
+            return ConvergencePolicyAction::EventSplit;
+        case FallbackReasonCode::StiffnessBackoff:
+            return ConvergencePolicyAction::StiffnessBackoff;
+        case FallbackReasonCode::TransientGminEscalation:
+            return ConvergencePolicyAction::TransientGminEscalation;
+        case FallbackReasonCode::NewtonFailure:
+        case FallbackReasonCode::LTERejection:
+        case FallbackReasonCode::MaxRetriesExceeded:
+            if (stage == RecoveryStage::Regularization) {
+                return ConvergencePolicyAction::Regularization;
+            }
+            if (stage == RecoveryStage::DtBackoff) {
+                return ConvergencePolicyAction::DtBackoff;
+            }
+            if (stage == RecoveryStage::StiffProfile) {
+                return ConvergencePolicyAction::StiffnessBackoff;
+            }
+            if (stage == RecoveryStage::Abort) {
+                return ConvergencePolicyAction::AbortStep;
+            }
+            return ConvergencePolicyAction::ObserveOnly;
+        default:
+            return ConvergencePolicyAction::ObserveOnly;
+    }
+}
+
+[[nodiscard]] ConvergenceFailureClass infer_failure_class(FallbackReasonCode reason,
+                                                          SolverStatus solver_status,
+                                                          std::string_view action,
+                                                          RecoveryStage stage) {
+    if (action_contains(action, "algebraic_loop")) {
+        return ConvergenceFailureClass::ControlAlgebraicLoopRisk;
+    }
+    if (action_contains(action, "magnetic")) {
+        return ConvergenceFailureClass::NonlinearMagneticStiffness;
+    }
+    if (action_contains(action, "control")) {
+        return ConvergenceFailureClass::ControlDiscreteStiffness;
+    }
+    if (action_contains(action, "chatter")) {
+        return ConvergenceFailureClass::SwitchChattering;
+    }
+    if (reason == FallbackReasonCode::EventSplit ||
+        action_contains(action, "event") ||
+        action_contains(action, "hold_advance")) {
+        return ConvergenceFailureClass::EventBurstZeroCross;
+    }
+    if (solver_status == SolverStatus::SingularMatrix ||
+        solver_status == SolverStatus::NumericalError) {
+        return ConvergenceFailureClass::LinearBreakdown;
+    }
+    if (reason == FallbackReasonCode::NewtonFailure ||
+        stage == RecoveryStage::GlobalizationEscalation) {
+        return ConvergenceFailureClass::NewtonGlobalizationFailure;
+    }
+    if (reason == FallbackReasonCode::MaxRetriesExceeded ||
+        stage == RecoveryStage::Abort) {
+        return ConvergenceFailureClass::RetryBudgetExhausted;
+    }
+    return ConvergenceFailureClass::Unknown;
+}
+
+[[nodiscard]] ConvergencePolicyAction recommend_policy_action(ConvergenceProfile profile,
+                                                              ConvergenceFailureClass failure_class,
+                                                              FallbackReasonCode reason) {
+    if (reason == FallbackReasonCode::MaxRetriesExceeded) {
+        return profile == ConvergenceProfile::Robust
+            ? ConvergencePolicyAction::HoldAdvance
+            : ConvergencePolicyAction::AbortStep;
+    }
+    if (reason == FallbackReasonCode::TransientGminEscalation) {
+        return ConvergencePolicyAction::TransientGminEscalation;
+    }
+    if (reason == FallbackReasonCode::EventSplit) {
+        return ConvergencePolicyAction::EventSplit;
+    }
+    if (reason == FallbackReasonCode::LTERejection) {
+        return ConvergencePolicyAction::DtBackoff;
+    }
+
+    switch (failure_class) {
+        case ConvergenceFailureClass::EventBurstZeroCross:
+            return profile == ConvergenceProfile::Strict
+                ? ConvergencePolicyAction::DtBackoff
+                : ConvergencePolicyAction::EventSplit;
+        case ConvergenceFailureClass::SwitchChattering:
+            return ConvergencePolicyAction::DtBackoff;
+        case ConvergenceFailureClass::NonlinearMagneticStiffness:
+            return ConvergencePolicyAction::Regularization;
+        case ConvergenceFailureClass::ControlDiscreteStiffness:
+            return ConvergencePolicyAction::StiffnessBackoff;
+        case ConvergenceFailureClass::ControlAlgebraicLoopRisk:
+            return ConvergencePolicyAction::AbortStep;
+        case ConvergenceFailureClass::LinearBreakdown:
+            return profile == ConvergenceProfile::Strict
+                ? ConvergencePolicyAction::AbortStep
+                : ConvergencePolicyAction::GlobalRecovery;
+        case ConvergenceFailureClass::NewtonGlobalizationFailure:
+            return profile == ConvergenceProfile::Strict
+                ? ConvergencePolicyAction::Regularization
+                : ConvergencePolicyAction::GlobalRecovery;
+        case ConvergenceFailureClass::RetryBudgetExhausted:
+            return profile == ConvergenceProfile::Robust
+                ? ConvergencePolicyAction::HoldAdvance
+                : ConvergencePolicyAction::AbortStep;
+        case ConvergenceFailureClass::None:
+            return ConvergencePolicyAction::ObserveOnly;
+        case ConvergenceFailureClass::Unknown:
+        default:
+            return ConvergencePolicyAction::ObserveOnly;
+    }
+}
+
+[[nodiscard]] bool is_policy_target_failure_class(ConvergenceFailureClass failure_class) {
+    switch (failure_class) {
+        case ConvergenceFailureClass::EventBurstZeroCross:
+        case ConvergenceFailureClass::SwitchChattering:
+        case ConvergenceFailureClass::NonlinearMagneticStiffness:
+        case ConvergenceFailureClass::ControlDiscreteStiffness:
+        case ConvergenceFailureClass::ControlAlgebraicLoopRisk:
+            return true;
+        case ConvergenceFailureClass::None:
+        case ConvergenceFailureClass::LinearBreakdown:
+        case ConvergenceFailureClass::NewtonGlobalizationFailure:
+        case ConvergenceFailureClass::RetryBudgetExhausted:
+        case ConvergenceFailureClass::Unknown:
+        default:
+            return false;
+    }
+}
+
 /**
  * @brief Appends one fallback/recovery trace entry for diagnostics.
  * @param result Simulation result accumulator.
@@ -980,6 +1186,7 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
  * @param reason Typed fallback reason code.
  * @param solver_status Solver status at logging instant.
  * @param action Human-readable action tag.
+ * @param recovery_stage Optional typed recovery stage (inferred when None).
  */
 void Simulator::record_fallback_event(SimulationResult& result,
                                       int step_index,
@@ -988,7 +1195,8 @@ void Simulator::record_fallback_event(SimulationResult& result,
                                       Real dt,
                                       FallbackReasonCode reason,
                                       SolverStatus solver_status,
-                                      const std::string& action) {
+                                      const std::string& action,
+                                      RecoveryStage recovery_stage) {
     if (!options_.fallback_policy.trace_retries) {
         return;
     }
@@ -999,8 +1207,48 @@ void Simulator::record_fallback_event(SimulationResult& result,
     entry.dt = dt;
     entry.reason = reason;
     entry.solver_status = solver_status;
+    entry.recovery_stage = infer_recovery_stage(reason, action, recovery_stage);
+    entry.policy_action = infer_policy_action(reason, action, entry.recovery_stage);
+    entry.failure_class = infer_failure_class(reason, solver_status, action, entry.recovery_stage);
+    if (options_.fallback_policy.policy_dry_run) {
+        entry.recommended_policy_action =
+            recommend_policy_action(options_.fallback_policy.convergence_profile,
+                                    entry.failure_class,
+                                    reason);
+        entry.policy_action_matches_recommendation =
+            (entry.recommended_policy_action == entry.policy_action);
+        if (options_.fallback_policy.anti_overfit_check) {
+            const bool targeted_class = is_policy_target_failure_class(entry.failure_class);
+            const bool non_observe_recommendation =
+                entry.recommended_policy_action != ConvergencePolicyAction::ObserveOnly;
+            entry.anti_overfit_violation = !targeted_class && non_observe_recommendation;
+        }
+    }
     entry.action = action;
     result.fallback_trace.push_back(std::move(entry));
+    result.backend_telemetry.classified_fallback_events += 1;
+    result.backend_telemetry.last_failure_class = result.fallback_trace.back().failure_class;
+    result.backend_telemetry.last_recovery_stage = result.fallback_trace.back().recovery_stage;
+    result.backend_telemetry.last_policy_action = result.fallback_trace.back().policy_action;
+    result.backend_telemetry.last_recommended_policy_action =
+        result.fallback_trace.back().recommended_policy_action;
+    if (options_.fallback_policy.policy_dry_run) {
+        result.backend_telemetry.policy_dry_run_events += 1;
+        if (result.fallback_trace.back().policy_action_matches_recommendation) {
+            result.backend_telemetry.policy_recommendation_matches += 1;
+        } else {
+            result.backend_telemetry.policy_recommendation_mismatches += 1;
+        }
+        if (options_.fallback_policy.anti_overfit_check &&
+            result.fallback_trace.back().anti_overfit_violation) {
+            result.backend_telemetry.anti_overfit_violations += 1;
+        }
+        if (options_.fallback_policy.anti_overfit_check) {
+            const int stable_budget = std::max(0, options_.fallback_policy.anti_overfit_stable_budget);
+            result.backend_telemetry.anti_overfit_budget_exceeded =
+                result.backend_telemetry.anti_overfit_violations > stable_budget;
+        }
+    }
 }
 
 /**
@@ -1250,6 +1498,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     int dt_min_hold_advances = 0;
     bool auto_recovery_attempted = false;
     int model_regularization_escalations = 0;
+    int event_burst_policy_activations = 0;
+    int switch_chattering_policy_activations = 0;
     std::optional<Real> pending_dt_override;
     const TransientStepMode step_mode = resolve_step_mode(options_);
     VariableStepPolicy variable_step_policy;
@@ -1291,8 +1541,18 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 },
                 device_variant);
         });
-    const bool can_auto_recover =
-        options_.linear_solver.allow_fallback || switching_recovery_profile;
+    const bool contextual_policy_active =
+        is_contextual_policy_active(options_) && variable_step_policy.enabled();
+    const bool robust_convergence_profile = is_robust_convergence_profile(options_);
+    const CircuitRobustnessHints runtime_hints = analyze_circuit_robustness(circuit_);
+    const bool control_discrete_profile =
+        runtime_hints.control_blocks > 0 &&
+        (options_.control_mode == ControlUpdateMode::Discrete ||
+         options_.control_sample_time > 0.0 ||
+         has_per_block_control_sample_time(circuit_));
+    // Strict contract: disable global recovery transitions whenever explicit
+    // fallback is off, independent of convergence profile.
+    const bool can_auto_recover = options_.linear_solver.allow_fallback;
     const int max_global_recovery_attempts =
         switching_recovery_profile ? (kMaxGlobalRecoveryAttempts + 1) : kMaxGlobalRecoveryAttempts;
 
@@ -1404,14 +1664,40 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         append_virtual_sample(state, sample_time);
     };
 
-    append_sample(t, x);
+    auto fail_control_algebraic_loop = [&](const ControlAlgebraicLoopError& error,
+                                           Real failure_time,
+                                           int retry_index) {
+        record_fallback_event(result,
+                              result.total_steps,
+                              std::max(0, retry_index),
+                              failure_time,
+                              std::max(std::abs(dt), options_.dt_min),
+                              FallbackReasonCode::MaxRetriesExceeded,
+                              SolverStatus::NumericalError,
+                              "control_algebraic_loop_abort",
+                              RecoveryStage::Abort);
+        result.success = false;
+        result.final_status = SolverStatus::NumericalError;
+        result.diagnostic = SimulationDiagnosticCode::ControlAlgebraicLoopRisk;
+        result.message = "Transient failed at t=" + std::to_string(failure_time) + ": " + error.what();
+        result.backend_telemetry.failure_reason =
+            std::string(diagnostic_code_to_reason(result.diagnostic));
+    };
 
-    if (callback) {
+    bool terminal_control_loop_failure = false;
+    try {
+        append_sample(t, x);
+    } catch (const ControlAlgebraicLoopError& error) {
+        fail_control_algebraic_loop(error, t, 0);
+        terminal_control_loop_failure = true;
+    }
+
+    if (!terminal_control_loop_failure && callback) {
         callback(t, x);
     }
     int lte_discontinuity_grace_steps = 0;
 
-    while (t < options_.tstop) {
+    while (t < options_.tstop && !terminal_control_loop_failure) {
         if (control) {
             if (control->should_stop()) {
                 result.message = "Simulation stopped by user";
@@ -1485,6 +1771,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         bool accepted_step_event_adjacent = false;
         bool accepted_step_lte_guarded = false;
         bool split_encountered_this_step = false;
+        int split_retry_count_this_step = 0;
+        int lte_rejections_this_step = 0;
+        int newton_failures_this_step = 0;
 
         while (!accepted && retries <= options_.max_step_retries) {
             auto consume_fixed_recovery_budget = [&](const std::string& action_tag) {
@@ -1667,7 +1956,21 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
 
             if (step_result.status != SolverStatus::Success) {
                 circuit_.clear_stage_context();
+                newton_failures_this_step++;
                 RecoveryDecision recovery = transient_services_.recovery_manager->on_step_failure(step_request);
+                const bool lte_newton_event_loop =
+                    contextual_policy_active &&
+                    step_request.event_adjacent &&
+                    split_retry_count_this_step > 0 &&
+                    lte_rejections_this_step > 0 &&
+                    newton_failures_this_step >= kArbitrationRetryThreshold;
+                if (lte_newton_event_loop &&
+                    recovery.stage == RecoveryStage::DtBackoff) {
+                    recovery.stage = RecoveryStage::StiffProfile;
+                    recovery.next_dt = std::max(step_request.dt_min, step_request.dt_candidate * Real{0.5});
+                    recovery.abort = false;
+                    recovery.reason = "arbitration_lte_newton_event";
+                }
                 transient_services_.telemetry_collector->on_step_reject(recovery);
                 const Real recovered_dt =
                     recovery.next_dt > 0.0 ? recovery.next_dt : (step_request.dt_candidate * 0.5);
@@ -1746,7 +2049,8 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                         const Real vcswitch_g_off_min =
                             options_.model_regularization.vcswitch_g_off_min * stage_scale;
 
-                        const int changed_devices = circuit_.apply_numerical_regularization(
+                        const auto regularization_audit =
+                            circuit_.apply_numerical_regularization_audit(
                             mosfet_kp_max,
                             mosfet_g_off_min,
                             diode_g_on_max,
@@ -1763,16 +2067,47 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             1.0,
                             static_cast<Real>(model_regularization_escalations) /
                                 static_cast<Real>(std::max(1, model_max_escalations)));
+                        const Real diode_intensity =
+                            regularization_audit.diode_changed > 0 ? intensity : Real{0.0};
+                        const Real switch_intensity =
+                            regularization_audit.switch_changed > 0 ? intensity : Real{0.0};
+                        const Real magnetic_intensity =
+                            regularization_audit.magnetic_changed > 0 ? intensity : Real{0.0};
                         result.backend_telemetry.model_regularization_events += 1;
-                        result.backend_telemetry.model_regularization_last_changed = changed_devices;
+                        result.backend_telemetry.model_regularization_last_changed =
+                            regularization_audit.total_changed;
                         result.backend_telemetry.model_regularization_last_intensity = intensity;
+                        result.backend_telemetry.model_regularization_diode_changed +=
+                            regularization_audit.diode_changed;
+                        result.backend_telemetry.model_regularization_switch_changed +=
+                            regularization_audit.switch_changed;
+                        result.backend_telemetry.model_regularization_magnetic_changed +=
+                            regularization_audit.magnetic_changed;
+                        result.backend_telemetry.model_regularization_diode_max_intensity =
+                            std::max(result.backend_telemetry.model_regularization_diode_max_intensity,
+                                     static_cast<double>(diode_intensity));
+                        result.backend_telemetry.model_regularization_switch_max_intensity =
+                            std::max(result.backend_telemetry.model_regularization_switch_max_intensity,
+                                     static_cast<double>(switch_intensity));
+                        result.backend_telemetry.model_regularization_magnetic_max_intensity =
+                            std::max(result.backend_telemetry.model_regularization_magnetic_max_intensity,
+                                     static_cast<double>(magnetic_intensity));
 
                         std::ostringstream model_action;
                         model_action << "recovery_stage_regularization_model"
-                                     << " changed=" << changed_devices
+                                     << " changed=" << regularization_audit.total_changed
+                                     << " diode_changed=" << regularization_audit.diode_changed
+                                     << " switch_changed=" << regularization_audit.switch_changed
+                                     << " mag_changed=" << regularization_audit.magnetic_changed
                                      << " intensity=" << intensity
+                                     << " diode_intensity=" << diode_intensity
+                                     << " switch_intensity=" << switch_intensity
+                                     << " mag_intensity=" << magnetic_intensity
                                      << " escalation=" << model_regularization_escalations
                                      << "/" << std::max(1, model_max_escalations);
+                        if (regularization_audit.magnetic_changed > 0) {
+                            model_action << " magnetic_family";
+                        }
                         recovery_action = model_action.str();
                     }
 
@@ -1817,6 +2152,49 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                     }
                 } else if (recovery.stage == RecoveryStage::Abort) {
                     recovery_reason_code = FallbackReasonCode::MaxRetriesExceeded;
+                }
+
+                const bool control_stiffness_event =
+                    control_discrete_profile &&
+                    (recovery.stage == RecoveryStage::StiffProfile ||
+                     (recovery.stage == RecoveryStage::DtBackoff &&
+                      step_result.iterations >= options_.stiffness_config.newton_iter_threshold));
+                if (control_stiffness_event &&
+                    recovery_action.find("control_discrete_stiffness") == std::string::npos) {
+                    recovery_action += " control_discrete_stiffness";
+                }
+
+                const bool event_burst_stage =
+                    recovery.stage == RecoveryStage::DtBackoff ||
+                    recovery.stage == RecoveryStage::GlobalizationEscalation ||
+                    recovery.stage == RecoveryStage::StiffProfile ||
+                    recovery.stage == RecoveryStage::Regularization;
+                if (contextual_policy_active &&
+                    step_request.event_adjacent &&
+                    event_burst_stage &&
+                    !recovery.abort &&
+                    event_burst_policy_activations < kPolicyGuardActivationBudget) {
+                    const Real dt_before_policy = dt;
+                    const Real event_backoff = robust_convergence_profile
+                        ? kRobustEventBurstBackoff
+                        : kBalancedEventBurstBackoff;
+                    const Real bounded_floor = std::max(
+                        options_.dt_min,
+                        std::max(std::abs(options_.dt) * Real{1e-4}, Real{1e-12}));
+                    const Real dt_policy = clamp_dt_for_mode(
+                        std::max(bounded_floor, dt_before_policy * event_backoff));
+                    if (dt_policy < dt_before_policy) {
+                        dt = dt_policy;
+                        lte_discontinuity_grace_steps =
+                            std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps + 1);
+                        if (options_.stiffness_config.enable) {
+                            stiffness_cooldown = std::max(
+                                stiffness_cooldown,
+                                std::max(1, options_.stiffness_config.cooldown_steps));
+                        }
+                        recovery_action += " policy_event_burst_zero_cross_guard";
+                        event_burst_policy_activations++;
+                    }
                 }
 
                 record_fallback_event(result,
@@ -1881,6 +2259,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             // Avoid deadlock loops when LTE remains high at dt_min.
                             // Accept the step and let event/stiffness policies move
                             // the trajectory forward instead of exhausting retries.
+                            lte_rejections_this_step++;
                             accepted_step_lte_guarded = true;
                             const Real recovered_dt =
                                 std::max(options_.dt_min, dt_used * Real{1.25});
@@ -1894,36 +2273,61 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                                                   step_result.status,
                                                   "lte_min_floor_accept");
                         } else {
-                        circuit_.clear_stage_context();
-                        dt = clamp_dt_for_mode(decision.dt_new);
-                        RecoveryDecision lte_recovery;
-                        lte_recovery.stage = RecoveryStage::DtBackoff;
-                        lte_recovery.next_dt = decision.dt_new;
-                        lte_recovery.abort = false;
-                        lte_recovery.reason = "lte_rejection";
-                        transient_services_.telemetry_collector->on_step_reject(lte_recovery);
-                        result.timestep_rejections++;
-                        retries++;
-                        if (!consume_fixed_recovery_budget("fixed_recovery_budget_lte")) {
-                            continue;
-                        }
-                        std::ostringstream action;
-                        action << "lte_dt=" << decision.dt_new;
-                        record_fallback_event(result,
-                                              result.total_steps,
-                                              retries,
-                                              t,
-                                              dt_used,
-                                              FallbackReasonCode::LTERejection,
-                                              step_result.status,
-                                              action.str());
-                        rejection_streak++;
-                        high_iter_streak = 0;
-                        if (options_.stiffness_config.enable &&
-                            rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
-                            stiffness_cooldown = options_.stiffness_config.cooldown_steps;
-                        }
-                        continue;
+                            const bool lte_newton_event_loop =
+                                contextual_policy_active &&
+                                step_request.event_adjacent &&
+                                split_retry_count_this_step > 0 &&
+                                newton_failures_this_step > 0 &&
+                                retries >= kArbitrationRetryThreshold;
+                            if (lte_newton_event_loop) {
+                                lte_rejections_this_step++;
+                                accepted_step_lte_guarded = true;
+                                const Real recovered_dt =
+                                    std::max(options_.dt_min, dt_used * Real{1.5});
+                                dt = clamp_dt_for_mode(std::min(recovered_dt, options_.dt_max));
+                                lte_discontinuity_grace_steps =
+                                    std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps + 1);
+                                record_fallback_event(result,
+                                                      result.total_steps,
+                                                      retries,
+                                                      t,
+                                                      dt_used,
+                                                      FallbackReasonCode::LTERejection,
+                                                      step_result.status,
+                                                      "lte_newton_event_arbitration_accept");
+                            } else {
+                                lte_rejections_this_step++;
+                                circuit_.clear_stage_context();
+                                dt = clamp_dt_for_mode(decision.dt_new);
+                                RecoveryDecision lte_recovery;
+                                lte_recovery.stage = RecoveryStage::DtBackoff;
+                                lte_recovery.next_dt = decision.dt_new;
+                                lte_recovery.abort = false;
+                                lte_recovery.reason = "lte_rejection";
+                                transient_services_.telemetry_collector->on_step_reject(lte_recovery);
+                                result.timestep_rejections++;
+                                retries++;
+                                if (!consume_fixed_recovery_budget("fixed_recovery_budget_lte")) {
+                                    continue;
+                                }
+                                std::ostringstream action;
+                                action << "lte_dt=" << decision.dt_new;
+                                record_fallback_event(result,
+                                                      result.total_steps,
+                                                      retries,
+                                                      t,
+                                                      dt_used,
+                                                      FallbackReasonCode::LTERejection,
+                                                      step_result.status,
+                                                      action.str());
+                                rejection_streak++;
+                                high_iter_streak = 0;
+                                if (options_.stiffness_config.enable &&
+                                    rejection_streak >= options_.stiffness_config.rejection_streak_threshold) {
+                                    stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+                                }
+                                continue;
+                            }
                         }
                     }
 
@@ -1952,7 +2356,17 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             event_request,
                             t + dt_used);
                     Real dt_event = t_segment - t;
-                    const Real min_event_split_dt = min_event_substep_dt(dt_used);
+                    const Real base_min_event_split_dt = min_event_substep_dt(dt_used);
+                    Real min_event_split_dt = base_min_event_split_dt;
+                    if (contextual_policy_active && split_retry_count_this_step > 0) {
+                        const Real max_scale = robust_convergence_profile
+                            ? kRobustChatteringSplitScale
+                            : kBalancedChatteringSplitScale;
+                        const Real dynamic_scale = std::min(
+                            max_scale,
+                            Real{1.0} + static_cast<Real>(split_retry_count_this_step) * Real{2.0});
+                        min_event_split_dt *= dynamic_scale;
+                    }
                     if (dt_event > min_event_split_dt && dt_event < dt_used * 0.999) {
                         if (fixed_step_policy.enabled() &&
                             !fixed_step_policy.can_take_internal_substep()) {
@@ -1987,7 +2401,30 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                             lte_discontinuity_grace_steps =
                                 std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps);
                             split_encountered_this_step = true;
+                            split_retry_count_this_step++;
                             split_for_event = true;
+                        }
+                    } else if (contextual_policy_active &&
+                               split_retry_count_this_step >= kSwitchChatteringRetryThreshold &&
+                               switch_chattering_policy_activations < kPolicyGuardActivationBudget) {
+                        const Real chattering_backoff = robust_convergence_profile ? Real{0.5} : Real{0.65};
+                        const Real guard_dt = clamp_dt_for_mode(
+                            std::max(options_.dt_min, dt_used * chattering_backoff));
+                        if (guard_dt > 0.0) {
+                            pending_dt_override = guard_dt;
+                            lte_discontinuity_grace_steps =
+                                std::max(lte_discontinuity_grace_steps, kLteEventGraceSteps + 1);
+                            split_encountered_this_step = true;
+                            accepted_step_lte_guarded = true;
+                            switch_chattering_policy_activations++;
+                            record_fallback_event(result,
+                                                  result.total_steps,
+                                                  retries,
+                                                  t,
+                                                  dt_used,
+                                                  FallbackReasonCode::EventSplit,
+                                                  step_result.status,
+                                                  "policy_switch_chattering_guard");
                         }
                     }
                 }
@@ -2216,13 +2653,19 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        runtime_modules.on_step_accepted(
-            t,
-            dt_used,
-            x,
-            step_result.solution,
-            refine_threshold_event,
-            emit_threshold_event);
+        try {
+            runtime_modules.on_step_accepted(
+                t,
+                dt_used,
+                x,
+                step_result.solution,
+                refine_threshold_event,
+                emit_threshold_event);
+        } catch (const ControlAlgebraicLoopError& error) {
+            fail_control_algebraic_loop(error, t + dt_used, retries);
+            terminal_control_loop_failure = true;
+            break;
+        }
 
         t += dt_used;
         variable_step_policy.on_step_accepted(dt_used);
@@ -2246,7 +2689,13 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         }
 
         if (emit_sample || nearly_same_time(t, options_.tstop)) {
-            append_sample(t, x);
+            try {
+                append_sample(t, x);
+            } catch (const ControlAlgebraicLoopError& error) {
+                fail_control_algebraic_loop(error, t, retries);
+                terminal_control_loop_failure = true;
+                break;
+            }
 
             if (callback) {
                 callback(t, x);

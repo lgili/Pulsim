@@ -11,6 +11,11 @@ This folder contains the YAML benchmark suite and validation runners.
 - `benchmark_ngspice.py` — Pulsim vs external SPICE parity runner (`ngspice` or `ltspice` backends).
 - `stress_suite.py` — tiered stress validation runner (tiers A/B/C + pass criteria).
 - `stress_catalog.yaml` — stress tier definitions, mapped cases, and acceptance criteria.
+- `convergence_stress_catalog.yaml` — reproducible stress catalog with fixed simulation contract and fingerprint contract.
+- `convergence_class_matrix.yaml` — canonical convergence-class case matrix (`diode_heavy`, `switch_heavy`, `zero_cross`, `magnetic_nonlinear`, `closed_loop_control`).
+- `convergence_reference_examples.yaml` — executable reference corpus by failure class with expected KPI targets.
+- `validate_reference_examples.py` — schema+consistency validator for `convergence_reference_examples.yaml`.
+- `run_reference_examples.py` — runner wrapper to execute reference examples by class.
 - `electrothermal_benchmarks.yaml` — focused matrix for electrothermal converter validation.
 - `electrothermal_stress_catalog.yaml` — stress criteria for electrothermal KPI coverage.
 - `kpi_gate.py` — regression gate that compares current KPIs against frozen baseline
@@ -18,6 +23,8 @@ This folder contains the YAML benchmark suite and validation runners.
 - `freeze_kpi_baseline.py` — creates `kpi_baseline.json` + `artifact_manifest.json`
   with environment fingerprint and artifact hashes for provenance-safe gating.
 - `kpi_thresholds.yaml` — threshold policy for required/optional KPI regressions.
+- `kpi_thresholds_convergence_platform.yaml` — optional policy-gate thresholds for convergence dry-run KPIs.
+- `convergence_phase_budgets.yaml` — versioned per-phase (Gate A..F) functional/performance budget contract.
 - `kpi_thresholds_electrothermal.yaml` — required KPI thresholds for electrothermal gates.
 - `kpi_thresholds_averaged.yaml` — required KPI thresholds for averaged-mode paired gate.
 - `kpi_baselines/` — frozen baseline snapshots and artifact manifests.
@@ -31,7 +38,15 @@ export PYTHONPATH=build/python
 python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 python3 benchmarks/validation_matrix.py --output-dir benchmarks/matrix
 python3 benchmarks/variable_mode_matrix.py --output-dir benchmarks/out_variable_matrix
-python3 benchmarks/stress_suite.py --output-dir benchmarks/stress_out
+python3 benchmarks/stress_suite.py \
+  --catalog benchmarks/convergence_stress_catalog.yaml \
+  --output-dir benchmarks/stress_out
+python3 benchmarks/validate_reference_examples.py \
+  --manifest benchmarks/benchmarks.yaml \
+  --examples benchmarks/convergence_reference_examples.yaml
+python3 benchmarks/run_reference_examples.py \
+  --class event_burst_zero_cross \
+  --output-dir benchmarks/out_reference_examples
 python3 benchmarks/kpi_gate.py \
   --bench-results benchmarks/out/results.json \
   --stress-summary benchmarks/stress_out/stress_summary.json \
@@ -46,12 +61,24 @@ python3 benchmarks/kpi_gate.py \
   --report-out benchmarks/out_ac/kpi_gate_report.json \
   --print-report
 
+# Convergence-platform KPI gate (M2 active balanced policy)
+python3 benchmarks/kpi_gate.py \
+  --baseline benchmarks/kpi_baselines/convergence_platform_phase16_2026-03-11/kpi_baseline.json \
+  --bench-results benchmarks/out/results.json \
+  --class-matrix benchmarks/convergence_class_matrix.yaml \
+  --phase-budget benchmarks/convergence_phase_budgets.yaml \
+  --phase-key gate_c \
+  --thresholds benchmarks/kpi_thresholds_convergence_platform.yaml \
+  --report-out benchmarks/out/kpi_gate_convergence_platform_report.json \
+  --print-report
+
 # Freeze a new baseline snapshot from a validated run
 python3 benchmarks/freeze_kpi_baseline.py \
-  --baseline-id modular_runtime_phase13_2026-03-07 \
-  --bench-results benchmarks/out/results.json \
-  --stress-summary benchmarks/stress_out/stress_summary.json \
-  --source-artifacts-root benchmarks/out
+  --baseline-id convergence_platform_phase16_2026-03-11 \
+  --bench-results benchmarks/phase16_artifacts/benchmarks/results.json \
+  --stress-summary benchmarks/phase16_artifacts/stress/stress_summary.json \
+  --class-matrix benchmarks/convergence_class_matrix.yaml \
+  --source-artifacts-root benchmarks/phase16_artifacts
 
 # Electrothermal focused matrix + stress
 python3 benchmarks/benchmark_runner.py \
@@ -119,6 +146,23 @@ and fails early when metadata or artifact hashes are inconsistent.
 Use `--no-strict-provenance` only for local debugging.
 Runtime latency KPIs (`runtime_p50`, `runtime_p95`) are auto-skipped when
 `environment.machine_class` differs between baseline and current runner.
+When `--class-matrix` is provided, `kpi_gate.py` also emits per-class KPIs:
+coverage, pass rate, runtime p95, timestep rejections p95, Newton iterations p95,
+and typed convergence schema coverage per class.
+When `--phase-budget` and `--phase-key` are provided, the gate merges
+the selected phase budget with the threshold policy before evaluating regressions.
+Current `gate_c` phase budget enforces required non-regression for
+convergence success, runtime p95 budget, and switch/zero-cross class pass rates.
+In `gate_c`, the KPI gate also enforces a required target-class terminal-failure
+drop significance check (or strict non-regression when baseline failures are zero).
+Current `gate_d` phase budget enforces closed-loop no-regression for control suites:
+`class_closed_loop_control_coverage_rate` and `class_closed_loop_control_pass_rate`
+are both required with zero regression tolerance.
+Current `gate_e` extends the closed-loop contract with typed-schema repeatability
+requirements: `class_closed_loop_control_coverage_rate`,
+`class_closed_loop_control_pass_rate`, and
+`class_closed_loop_control_typed_schema_coverage_rate`
+are required with zero regression tolerance.
 
 `local_limit_suite.py` is intended for PC-local stress discovery and reports
 exact failure reasons per circuit/scenario. It always supports:
@@ -152,7 +196,13 @@ Hybrid/electrothermal KPI fields are emitted per scenario when available:
 `component_loss_summary_consistency_error`, `component_thermal_summary_consistency_error`,
 `runtime_module_order_crc32`, `runtime_module_count_match`, `output_reallocation_total`,
 `ac_sweep_mag_error`, `ac_sweep_phase_error`, `averaged_pair_fidelity_error`,
-and `averaged_pair_runtime_speedup_min`.
+`averaged_pair_runtime_speedup_min`, `classified_fallback_events`,
+`policy_dry_run_events`, `policy_recommendation_matches`,
+`policy_recommendation_mismatches`, `anti_overfit_violations`,
+`anti_overfit_budget_exceeded`, `typed_convergence_schema_coverage_rate`,
+`policy_target_pass_rate`, `policy_target_match_rate`,
+`policy_target_mismatch_rate`, `policy_stable_pass_rate`,
+`policy_stable_mismatch_rate`, and `policy_stable_anti_overfit_violation_rate`.
 
 `benchmark_ngspice.py` also emits:
 
@@ -167,6 +217,10 @@ For `--backend ngspice`, legacy filenames (`ngspice_results.*`, `ngspice_summary
 - `stress_results.csv` — per scenario stress execution rows with telemetry columns.
 - `stress_results.json` — tier criteria + per-tier evaluation + scenario records.
 - `stress_summary.json` — overall pass/fail and per-tier status.
+  - Includes reproducibility metadata with catalog hash, manifest path,
+    runtime environment fingerprint, and declared reproducibility contract.
+- `run_reference_examples.py` emits standard benchmark artifacts (`results.json`, `results.csv`, `summary.json`)
+  for the selected class subset.
 
 `local_limit_suite.py` emits:
 

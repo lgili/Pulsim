@@ -1,0 +1,91 @@
+schema: pulsim-kpi-gates-v1
+version: 1
+metrics:
+  convergence_policy_match_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  convergence_policy_mismatch_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.02
+    required: false
+  anti_overfit_violation_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.01
+    required: false
+  anti_overfit_budget_exceeded_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.0
+    required: false
+  classified_fallback_events_p95:
+    direction: lower_is_better
+    max_regression_rel: 0.10
+    required: false
+  typed_convergence_schema_coverage_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: false
+  class_diode_heavy_coverage_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: false
+  class_switch_heavy_coverage_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: false
+  class_zero_cross_coverage_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: false
+  class_magnetic_nonlinear_coverage_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: false
+  class_closed_loop_control_coverage_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: false
+  class_diode_heavy_pass_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  class_switch_heavy_pass_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  class_zero_cross_pass_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  class_magnetic_nonlinear_pass_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  class_closed_loop_control_pass_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  policy_target_pass_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  policy_target_match_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.02
+    required: false
+  policy_target_mismatch_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.02
+    required: false
+  policy_stable_pass_rate:
+    direction: higher_is_better
+    max_regression_abs: 0.01
+    required: false
+  policy_stable_mismatch_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.01
+    required: false
+  policy_stable_anti_overfit_violation_rate:
+    direction: lower_is_better
+    max_regression_abs: 0.01
+    required: false

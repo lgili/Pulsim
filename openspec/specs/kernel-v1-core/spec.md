@@ -323,45 +323,6 @@ The v1 kernel SHALL support virtual signal routing components (`SIGNAL_MUX`, `SI
 - **WHEN** upstream signals update
 - **THEN** mux/demux outputs reflect configured mapping deterministically
 
-### Requirement: SUNDIALS Transient Backend
-The v1 kernel SHALL provide a SUNDIALS transient backend with selectable solver family support for IDA, CVODE, and ARKODE when compiled with SUNDIALS.
-
-#### Scenario: IDA backend selected for DAE transient
-- **WHEN** transient backend mode is configured to SUNDIALS with solver family `IDA`
-- **THEN** the simulator SHALL execute the transient using SUNDIALS IDA callbacks
-- **AND** the result SHALL include backend telemetry identifying IDA as the active solver family
-
-#### Scenario: SUNDIALS unavailable at build time
-- **WHEN** backend mode requests SUNDIALS but the binary was compiled without SUNDIALS
-- **THEN** the simulator SHALL fail deterministically with an explicit backend-unavailable diagnostic
-- **AND** no undefined behavior or silent fallback SHALL occur
-
-### Requirement: Deterministic Native-to-SUNDIALS Escalation
-The v1 kernel SHALL support deterministic escalation from native transient integration to SUNDIALS based on configured retry thresholds.
-
-#### Scenario: Native retries exhausted in auto mode
-- **WHEN** backend mode is `Auto` and native transient retries exceed configured threshold
-- **THEN** the simulator SHALL reinitialize and continue using configured SUNDIALS solver family
-- **AND** fallback trace SHALL record backend escalation with deterministic reason code and action text
-
-#### Scenario: Auto mode succeeds without escalation
-- **WHEN** native transient integration converges within configured thresholds
-- **THEN** SUNDIALS SHALL NOT be invoked
-- **AND** telemetry SHALL report native backend as final execution path
-
-### Requirement: SUNDIALS Backend Telemetry
-The v1 kernel SHALL expose structured SUNDIALS telemetry counters in simulation results.
-
-#### Scenario: Successful SUNDIALS run
-- **WHEN** a transient run completes with SUNDIALS backend
-- **THEN** telemetry SHALL include backend name, solver family, nonlinear iteration counters, and backend recovery/reinitialization counters
-- **AND** telemetry SHALL be accessible alongside existing linear/nonlinear telemetry fields
-
-#### Scenario: Failed SUNDIALS run
-- **WHEN** SUNDIALS transient execution fails
-- **THEN** result status/message SHALL include mapped solver failure reason
-- **AND** fallback trace SHALL include the final backend failure event
-
 ### Requirement: Runtime Module Lifecycle Contracts
 The v1 kernel SHALL execute transient runtime concerns through explicit module lifecycle contracts so each concern can evolve independently without mandatory edits in central orchestrator logic.
 
@@ -775,3 +736,49 @@ passes).
 - **THEN** the demux output pins carry values `1.1`, `2.2`, `3.3` respectively
 - **AND** downstream consumers of `OUT2` see exactly `2.2`
 
+### Requirement: Convergence Policy Engine
+The v1 kernel SHALL provide a convergence policy engine that classifies transient failures and selects context-aware recovery actions instead of relying only on retry ordinals.
+
+#### Scenario: Failure classified as event-burst zero-cross
+- **WHEN** repeated failures occur near dense switching boundaries around zero crossing
+- **THEN** the failure class is set to `event_burst_zero_cross`
+- **AND** recovery policy applies event-aware backoff/guard actions instead of generic retry-only behavior
+
+#### Scenario: Failure classified as control-discrete stiffness
+- **WHEN** convergence degradation correlates with discrete control update boundaries
+- **THEN** the failure class is set to `control_discrete_stiffness`
+- **AND** policy applies control-aware stabilization actions deterministically
+
+### Requirement: Deterministic Strict-Mode Recovery Contract
+The v1 kernel SHALL keep strict-mode determinism while still allowing bounded internal numerical stabilization consistent with explicit `allow_fallback` policy.
+
+#### Scenario: Strict mode with fallback disabled
+- **WHEN** `allow_fallback=false` is configured
+- **THEN** global fallback transitions remain disabled
+- **AND** deterministic typed diagnostics are returned on exhaustion
+- **AND** bounded internal stabilization follows strict policy limits only
+
+### Requirement: Typed Convergence Diagnostics
+The v1 kernel SHALL expose typed convergence diagnostics for each failed or recovered step.
+
+#### Scenario: Recovered step emits structured diagnostics
+- **WHEN** a step is recovered after one or more recovery actions
+- **THEN** diagnostics include failure class, recovery stage, and policy action identifiers
+- **AND** no text parsing is required to consume the recovery path
+
+#### Scenario: Terminal failure emits structured diagnostics
+- **WHEN** recovery budget is exhausted
+- **THEN** final diagnostics include terminal reason code, last recovery class/stage, and bounded numeric context
+
+### Requirement: Convergence Profile Contract
+The v1 kernel SHALL provide explicit convergence profile semantics (`strict`, `balanced`, `robust`) with deterministic behavior boundaries.
+
+#### Scenario: Strict profile preserves deterministic boundaries
+- **WHEN** profile `strict` is selected
+- **THEN** bounded internal stabilization remains within strict limits
+- **AND** global fallback transitions are only permitted when explicitly enabled by policy
+
+#### Scenario: Balanced/robust profiles remain auditable
+- **WHEN** profile `balanced` or `robust` applies context-aware recovery
+- **THEN** each policy transition is emitted with typed action identifiers
+- **AND** resulting behavior remains reproducible under equivalent run fingerprint
