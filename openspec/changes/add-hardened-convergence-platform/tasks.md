@@ -26,7 +26,7 @@
 - [x] 5.1 Evoluir politica de solver linear orientada por saude numerica (com transicoes auditaveis).
 - [x] 5.2 Padronizar regularizacao bounded por familia (`diode`, `switch`, `magnetic`) com trilha de auditoria por intensidade.
 - [x] 5.3 Incluir testes de nao-ativacao de heuristicas fora do contexto alvo.
-- [ ] 5.4 Gate D: matriz estendida passa com 0 regressao funcional em suites de controle PI/C-Block.
+- [x] 5.4 Gate D: matriz estendida passa com 0 regressao funcional em suites de controle PI/C-Block.
 
 ## 6. M4 - Control Robustness and Multirate Contract
 - [ ] 6.1 Definir semantica multirate explicita entre controle discreto e solver eletrico (global/per-block sample time).

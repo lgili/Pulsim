@@ -132,10 +132,14 @@ phases:
         direction: higher_is_better
         max_regression_abs: 0.01
         required: true
+      class_closed_loop_control_coverage_rate:
+        direction: higher_is_better
+        max_regression_abs: 0.0
+        required: true
       class_closed_loop_control_pass_rate:
         direction: higher_is_better
-        max_regression_abs: 0.02
-        required: false
+        max_regression_abs: 0.0
+        required: true
       class_magnetic_nonlinear_pass_rate:
         direction: higher_is_better
         max_regression_abs: 0.02
