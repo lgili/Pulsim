@@ -118,22 +118,35 @@ enum class LinearSolverKind {
     CG
 };
 
+enum class LinearSolverHealthSignal {
+    None,
+    SolveFailure,
+    ResidualError,
+    IterationSaturation
+};
+
 struct LinearSolverTelemetry {
     int total_solve_calls = 0;
     int total_analyze_calls = 0;
     int total_factorize_calls = 0;
     int total_iterations = 0;
     int total_fallbacks = 0;
+    int health_policy_alerts = 0;
+    int health_policy_switches = 0;
     int last_iterations = 0;
     Real last_error = 0.0;
+    int health_policy_streak = 0;
     double total_analyze_time_seconds = 0.0;
     double total_factorize_time_seconds = 0.0;
     double total_solve_time_seconds = 0.0;
     double last_analyze_time_seconds = 0.0;
     double last_factorize_time_seconds = 0.0;
     double last_solve_time_seconds = 0.0;
+    LinearSolverHealthSignal last_health_signal = LinearSolverHealthSignal::None;
     std::optional<LinearSolverKind> last_solver;
     std::optional<IterativeSolverConfig::PreconditionerKind> last_preconditioner;
+    std::optional<LinearSolverKind> last_transition_from;
+    std::optional<LinearSolverKind> last_transition_to;
 };
 
 struct LinearSolverStackConfig {
@@ -146,6 +159,11 @@ struct LinearSolverStackConfig {
     int size_threshold = 2000;
     int nnz_threshold = 200000;
     Real diag_min_threshold = 1e-12;
+    bool enable_health_policy = true;
+    Real health_error_threshold = 1e-6;
+    Real health_iteration_ratio_threshold = 0.85;
+    int health_streak_threshold = 2;
+    bool health_prefer_direct = true;
 
     [[nodiscard]] static LinearSolverStackConfig defaults() {
         return {};
@@ -1429,7 +1447,15 @@ public:
         auto active_kind = *active_kind_;
         auto result = timed_solve_with(active_kind);
         update_telemetry(active_kind, result);
-        if (result || !config_.allow_fallback || !last_matrix_) {
+        const LinearSolverHealthSignal health_signal = evaluate_health_signal(active_kind, result);
+        update_health_telemetry(health_signal);
+
+        if (result) {
+            maybe_apply_health_transition(active_kind, health_signal);
+            return result;
+        }
+
+        if (!config_.allow_fallback || !last_matrix_) {
             return result;
         }
 
@@ -1513,6 +1539,7 @@ public:
         primary_order_.clear();
         fallback_order_.clear();
         telemetry_ = {};
+        health_streak_ = 0;
     }
 
     [[nodiscard]] std::optional<LinearSolverKind> active_kind() const {
@@ -1526,6 +1553,7 @@ public:
         primary_order_.clear();
         fallback_order_.clear();
         active_kind_.reset();
+        health_streak_ = 0;
     }
 
     [[nodiscard]] bool force_iterative() const { return force_iterative_; }
@@ -1544,10 +1572,21 @@ private:
     std::vector<LinearSolverKind> fallback_order_;
     LinearSolverTelemetry telemetry_{};
     bool force_iterative_ = false;
+    int health_streak_ = 0;
 
     [[nodiscard]] bool is_available(LinearSolverKind kind) const {
         if (kind == LinearSolverKind::KLU) return KLUPolicy::is_available();
         return true;
+    }
+
+    [[nodiscard]] static bool is_iterative_kind(LinearSolverKind kind) {
+        return kind == LinearSolverKind::GMRES ||
+               kind == LinearSolverKind::BiCGSTAB ||
+               kind == LinearSolverKind::CG;
+    }
+
+    [[nodiscard]] static bool is_direct_kind(LinearSolverKind kind) {
+        return !is_iterative_kind(kind);
     }
 
     [[nodiscard]] bool is_symmetric(const SparseMatrix& A, Real tol = 1e-12) const {
@@ -1645,6 +1684,117 @@ private:
             return build_order(A, config_.fallback_order);
         }
         return build_order(A, config_.order);
+    }
+
+    [[nodiscard]] std::vector<LinearSolverKind> build_health_transition_order(
+        const SparseMatrix& A,
+        LinearSolverKind active_kind) const {
+        std::vector<LinearSolverKind> candidates;
+        auto append_unique = [&](LinearSolverKind kind) {
+            if (kind == active_kind) return;
+            if (!is_available(kind)) return;
+            if (std::find(candidates.begin(), candidates.end(), kind) != candidates.end()) return;
+            candidates.push_back(kind);
+        };
+
+        if (primary_order_.empty()) {
+            for (auto kind : build_order(A, config_.order)) {
+                append_unique(kind);
+            }
+        } else {
+            for (auto kind : primary_order_) {
+                append_unique(kind);
+            }
+        }
+        if (fallback_order_.empty()) {
+            for (auto kind : build_fallback_order(A)) {
+                append_unique(kind);
+            }
+        } else {
+            for (auto kind : fallback_order_) {
+                append_unique(kind);
+            }
+        }
+
+        if (config_.health_prefer_direct && is_iterative_kind(active_kind)) {
+            std::stable_sort(candidates.begin(), candidates.end(), [](LinearSolverKind lhs, LinearSolverKind rhs) {
+                return is_direct_kind(lhs) && !is_direct_kind(rhs);
+            });
+        }
+        return candidates;
+    }
+
+    [[nodiscard]] LinearSolverHealthSignal evaluate_health_signal(
+        LinearSolverKind kind,
+        const LinearSolveResult& result) const {
+        if (!result) {
+            return LinearSolverHealthSignal::SolveFailure;
+        }
+        if (!is_iterative_kind(kind)) {
+            return LinearSolverHealthSignal::None;
+        }
+
+        const Real error_threshold = std::max<Real>(0.0, config_.health_error_threshold);
+        if (std::isfinite(telemetry_.last_error) && telemetry_.last_error > error_threshold) {
+            return LinearSolverHealthSignal::ResidualError;
+        }
+
+        const int max_iterations = std::max(1, config_.iterative_config.max_iterations);
+        const Real ratio_threshold = std::max<Real>(0.0, config_.health_iteration_ratio_threshold);
+        const Real used_ratio = static_cast<Real>(std::max(0, telemetry_.last_iterations)) /
+                                static_cast<Real>(max_iterations);
+        if (used_ratio >= ratio_threshold) {
+            return LinearSolverHealthSignal::IterationSaturation;
+        }
+        return LinearSolverHealthSignal::None;
+    }
+
+    void update_health_telemetry(LinearSolverHealthSignal signal) {
+        telemetry_.last_health_signal = signal;
+        if (signal == LinearSolverHealthSignal::None) {
+            health_streak_ = 0;
+            telemetry_.health_policy_streak = 0;
+            return;
+        }
+        telemetry_.health_policy_alerts += 1;
+        health_streak_ += 1;
+        telemetry_.health_policy_streak = health_streak_;
+    }
+
+    void maybe_apply_health_transition(LinearSolverKind active_kind, LinearSolverHealthSignal signal) {
+        if (!config_.enable_health_policy || !config_.allow_fallback || !last_matrix_) {
+            return;
+        }
+        if (signal == LinearSolverHealthSignal::None) {
+            return;
+        }
+
+        const int required_streak = std::max(1, config_.health_streak_threshold);
+        if (health_streak_ < required_streak) {
+            return;
+        }
+
+        const auto candidates = build_health_transition_order(*last_matrix_, active_kind);
+        for (auto candidate : candidates) {
+            const auto factor_start = std::chrono::steady_clock::now();
+            const bool factor_ok = factorize_with(candidate, *last_matrix_);
+            const auto factor_end = std::chrono::steady_clock::now();
+            const double factor_dt = std::chrono::duration<double>(factor_end - factor_start).count();
+            telemetry_.total_factorize_calls += 1;
+            telemetry_.total_factorize_time_seconds += factor_dt;
+            telemetry_.last_factorize_time_seconds = factor_dt;
+            if (!factor_ok) {
+                continue;
+            }
+
+            active_kind_ = candidate;
+            telemetry_.health_policy_switches += 1;
+            telemetry_.last_transition_from = active_kind;
+            telemetry_.last_transition_to = candidate;
+            health_streak_ = 0;
+            telemetry_.health_policy_streak = 0;
+            return;
+        }
     }
 
     bool analyze_with(LinearSolverKind kind, const SparseMatrix& A) {

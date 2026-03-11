@@ -801,6 +801,14 @@ void init_v2_module(py::module_& v2) {
         .value("CG", LinearSolverKind::CG)
         .export_values();
 
+    py::enum_<LinearSolverHealthSignal>(v2, "LinearSolverHealthSignal",
+        "Typed numeric-health signal emitted by linear solver policy")
+        .value("None_", LinearSolverHealthSignal::None)
+        .value("SolveFailure", LinearSolverHealthSignal::SolveFailure)
+        .value("ResidualError", LinearSolverHealthSignal::ResidualError)
+        .value("IterationSaturation", LinearSolverHealthSignal::IterationSaturation)
+        .export_values();
+
     py::enum_<IterativeSolverConfig::PreconditionerKind>(v2, "PreconditionerKind",
         "Iterative preconditioner types")
         .value("None_", IterativeSolverConfig::PreconditionerKind::None)
@@ -835,6 +843,12 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("size_threshold", &LinearSolverStackConfig::size_threshold)
         .def_readwrite("nnz_threshold", &LinearSolverStackConfig::nnz_threshold)
         .def_readwrite("diag_min_threshold", &LinearSolverStackConfig::diag_min_threshold)
+        .def_readwrite("enable_health_policy", &LinearSolverStackConfig::enable_health_policy)
+        .def_readwrite("health_error_threshold", &LinearSolverStackConfig::health_error_threshold)
+        .def_readwrite("health_iteration_ratio_threshold",
+                       &LinearSolverStackConfig::health_iteration_ratio_threshold)
+        .def_readwrite("health_streak_threshold", &LinearSolverStackConfig::health_streak_threshold)
+        .def_readwrite("health_prefer_direct", &LinearSolverStackConfig::health_prefer_direct)
         .def_static("defaults", &LinearSolverStackConfig::defaults);
 
     // =========================================================================
@@ -1163,16 +1177,22 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("total_factorize_calls", &LinearSolverTelemetry::total_factorize_calls)
         .def_readwrite("total_iterations", &LinearSolverTelemetry::total_iterations)
         .def_readwrite("total_fallbacks", &LinearSolverTelemetry::total_fallbacks)
+        .def_readwrite("health_policy_alerts", &LinearSolverTelemetry::health_policy_alerts)
+        .def_readwrite("health_policy_switches", &LinearSolverTelemetry::health_policy_switches)
         .def_readwrite("last_iterations", &LinearSolverTelemetry::last_iterations)
         .def_readwrite("last_error", &LinearSolverTelemetry::last_error)
+        .def_readwrite("health_policy_streak", &LinearSolverTelemetry::health_policy_streak)
         .def_readwrite("total_analyze_time_seconds", &LinearSolverTelemetry::total_analyze_time_seconds)
         .def_readwrite("total_factorize_time_seconds", &LinearSolverTelemetry::total_factorize_time_seconds)
         .def_readwrite("total_solve_time_seconds", &LinearSolverTelemetry::total_solve_time_seconds)
         .def_readwrite("last_analyze_time_seconds", &LinearSolverTelemetry::last_analyze_time_seconds)
         .def_readwrite("last_factorize_time_seconds", &LinearSolverTelemetry::last_factorize_time_seconds)
         .def_readwrite("last_solve_time_seconds", &LinearSolverTelemetry::last_solve_time_seconds)
+        .def_readwrite("last_health_signal", &LinearSolverTelemetry::last_health_signal)
         .def_readwrite("last_solver", &LinearSolverTelemetry::last_solver)
-        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner);
+        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner)
+        .def_readwrite("last_transition_from", &LinearSolverTelemetry::last_transition_from)
+        .def_readwrite("last_transition_to", &LinearSolverTelemetry::last_transition_to);
 
     py::enum_<SimulationEventType>(v2, "SimulationEventType", "Simulation event kind")
         .value("SwitchOn", SimulationEventType::SwitchOn)

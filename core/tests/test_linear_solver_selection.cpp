@@ -226,6 +226,108 @@ TEST_CASE("GMRES solve is stable after factorize with temporary matrix",
     CHECK(result.solution->size() == 2);
 }
 
+TEST_CASE("Linear solver health policy transitions to safer solver on degraded iterative signal",
+          "[v1][solver][health]") {
+    LinearSolverStackConfig cfg;
+    cfg.order = {LinearSolverKind::GMRES, LinearSolverKind::SparseLU};
+    cfg.fallback_order = {LinearSolverKind::SparseLU};
+    cfg.auto_select = false;
+    cfg.allow_fallback = true;
+    cfg.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
+    cfg.iterative_config.max_iterations = 40;
+    cfg.iterative_config.tolerance = 1e-12;
+    cfg.enable_health_policy = true;
+    cfg.health_streak_threshold = 1;
+    cfg.health_iteration_ratio_threshold = 0.0; // deterministically flag iterative usage as degraded
+    cfg.health_error_threshold = 0.0;
+    cfg.health_prefer_direct = true;
+
+    RuntimeLinearSolver solver(cfg);
+
+    SparseMatrix A(3, 3);
+    A.insert(0, 0) = 4.0;
+    A.insert(0, 1) = 1.0;
+    A.insert(1, 0) = 1.0;
+    A.insert(1, 1) = 3.0;
+    A.insert(1, 2) = 1.0;
+    A.insert(2, 1) = 1.0;
+    A.insert(2, 2) = 2.0;
+    A.makeCompressed();
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    REQUIRE(solver.factorize(A));
+    auto before = solver.active_kind();
+    REQUIRE(before.has_value());
+    CHECK(*before == LinearSolverKind::GMRES);
+
+    auto result = solver.solve(b);
+    REQUIRE(result);
+
+    auto after = solver.active_kind();
+    REQUIRE(after.has_value());
+    CHECK(*after == LinearSolverKind::SparseLU);
+
+    auto telemetry = solver.telemetry();
+    CHECK(telemetry.health_policy_alerts >= 1);
+    CHECK(telemetry.health_policy_switches >= 1);
+    CHECK(telemetry.last_health_signal == LinearSolverHealthSignal::IterationSaturation);
+    REQUIRE(telemetry.last_transition_from.has_value());
+    REQUIRE(telemetry.last_transition_to.has_value());
+    CHECK(*telemetry.last_transition_from == LinearSolverKind::GMRES);
+    CHECK(*telemetry.last_transition_to == LinearSolverKind::SparseLU);
+}
+
+TEST_CASE("Linear solver health policy keeps active solver in healthy regime",
+          "[v1][solver][health]") {
+    LinearSolverStackConfig cfg;
+    cfg.order = {LinearSolverKind::GMRES, LinearSolverKind::SparseLU};
+    cfg.fallback_order = {LinearSolverKind::SparseLU};
+    cfg.auto_select = false;
+    cfg.allow_fallback = true;
+    cfg.iterative_config.preconditioner = IterativeSolverConfig::PreconditionerKind::Jacobi;
+    cfg.iterative_config.max_iterations = 80;
+    cfg.iterative_config.tolerance = 1e-9;
+    cfg.enable_health_policy = true;
+    cfg.health_streak_threshold = 2;
+    cfg.health_iteration_ratio_threshold = 0.95;
+    cfg.health_error_threshold = 1e-3;
+    cfg.health_prefer_direct = true;
+
+    RuntimeLinearSolver solver(cfg);
+
+    SparseMatrix A(3, 3);
+    A.insert(0, 0) = 4.0;
+    A.insert(0, 1) = 1.0;
+    A.insert(1, 0) = 1.0;
+    A.insert(1, 1) = 3.0;
+    A.insert(1, 2) = 1.0;
+    A.insert(2, 1) = 1.0;
+    A.insert(2, 2) = 2.0;
+    A.makeCompressed();
+
+    Vector b(3);
+    b << 1.0, 2.0, 3.0;
+
+    REQUIRE(solver.factorize(A));
+    auto before = solver.active_kind();
+    REQUIRE(before.has_value());
+    CHECK(*before == LinearSolverKind::GMRES);
+
+    auto result = solver.solve(b);
+    REQUIRE(result);
+
+    auto after = solver.active_kind();
+    REQUIRE(after.has_value());
+    CHECK(*after == LinearSolverKind::GMRES);
+
+    auto telemetry = solver.telemetry();
+    CHECK(telemetry.health_policy_switches == 0);
+    CHECK_FALSE(telemetry.last_transition_from.has_value());
+    CHECK_FALSE(telemetry.last_transition_to.has_value());
+}
+
 TEST_CASE("AMG preconditioner is feature-flagged and unavailable by default", "[v1][solver][amg]") {
     LinearSolverStackConfig cfg;
     cfg.order = {LinearSolverKind::GMRES};

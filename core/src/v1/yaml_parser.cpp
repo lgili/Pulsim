@@ -1401,7 +1401,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             validate_keys(s, {"linear", "iterative", "nonlinear", "order", "fallback_order",
                               "allow_fallback", "auto_select", "size_threshold", "nnz_threshold",
                               "diag_min_threshold", "preconditioner", "ilut_drop_tolerance",
-                              "ilut_fill_factor"},
+                              "ilut_fill_factor", "enable_health_policy", "health_error_threshold",
+                              "health_iteration_ratio_threshold", "health_streak_threshold",
+                              "health_prefer_direct"},
                           "simulation.solver", errors_, options_.strict);
 
             auto parse_linear_kind = [&](const std::string& value, const std::string& path) -> std::optional<LinearSolverKind> {
@@ -1445,6 +1447,25 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (s["size_threshold"]) options.linear_solver.size_threshold = s["size_threshold"].as<int>();
             if (s["nnz_threshold"]) options.linear_solver.nnz_threshold = s["nnz_threshold"].as<int>();
             if (s["diag_min_threshold"]) options.linear_solver.diag_min_threshold = parse_real(s["diag_min_threshold"], "solver.diag_min_threshold", errors_);
+            if (s["enable_health_policy"]) {
+                options.linear_solver.enable_health_policy = s["enable_health_policy"].as<bool>();
+            }
+            if (s["health_error_threshold"]) {
+                options.linear_solver.health_error_threshold =
+                    parse_real(s["health_error_threshold"], "solver.health_error_threshold", errors_);
+            }
+            if (s["health_iteration_ratio_threshold"]) {
+                options.linear_solver.health_iteration_ratio_threshold = parse_real(
+                    s["health_iteration_ratio_threshold"],
+                    "solver.health_iteration_ratio_threshold",
+                    errors_);
+            }
+            if (s["health_streak_threshold"]) {
+                options.linear_solver.health_streak_threshold = s["health_streak_threshold"].as<int>();
+            }
+            if (s["health_prefer_direct"]) {
+                options.linear_solver.health_prefer_direct = s["health_prefer_direct"].as<bool>();
+            }
 
             if (s["preconditioner"]) {
                 std::string pre = to_lower(s["preconditioner"].as<std::string>());
@@ -1474,7 +1495,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (s["linear"]) {
                 YAML::Node l = s["linear"];
                 validate_keys(l, {"order", "allow_fallback", "auto_select", "size_threshold",
-                                  "nnz_threshold", "diag_min_threshold"},
+                                  "nnz_threshold", "diag_min_threshold", "enable_health_policy",
+                                  "health_error_threshold", "health_iteration_ratio_threshold",
+                                  "health_streak_threshold", "health_prefer_direct"},
                               "simulation.solver.linear", errors_, options_.strict);
                 if (l["order"]) parse_order(l["order"], "simulation.solver.linear.order",
                                             options.linear_solver.order);
@@ -1483,6 +1506,25 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 if (l["size_threshold"]) options.linear_solver.size_threshold = l["size_threshold"].as<int>();
                 if (l["nnz_threshold"]) options.linear_solver.nnz_threshold = l["nnz_threshold"].as<int>();
                 if (l["diag_min_threshold"]) options.linear_solver.diag_min_threshold = parse_real(l["diag_min_threshold"], "solver.linear.diag_min_threshold", errors_);
+                if (l["enable_health_policy"]) {
+                    options.linear_solver.enable_health_policy = l["enable_health_policy"].as<bool>();
+                }
+                if (l["health_error_threshold"]) {
+                    options.linear_solver.health_error_threshold =
+                        parse_real(l["health_error_threshold"], "solver.linear.health_error_threshold", errors_);
+                }
+                if (l["health_iteration_ratio_threshold"]) {
+                    options.linear_solver.health_iteration_ratio_threshold = parse_real(
+                        l["health_iteration_ratio_threshold"],
+                        "solver.linear.health_iteration_ratio_threshold",
+                        errors_);
+                }
+                if (l["health_streak_threshold"]) {
+                    options.linear_solver.health_streak_threshold = l["health_streak_threshold"].as<int>();
+                }
+                if (l["health_prefer_direct"]) {
+                    options.linear_solver.health_prefer_direct = l["health_prefer_direct"].as<bool>();
+                }
             }
 
             if (s["iterative"]) {
