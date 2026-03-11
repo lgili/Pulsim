@@ -29,7 +29,7 @@
 - [x] 5.4 Gate D: matriz estendida passa com 0 regressao funcional em suites de controle PI/C-Block.
 
 ## 6. M4 - Control Robustness and Multirate Contract
-- [ ] 6.1 Definir semantica multirate explicita entre controle discreto e solver eletrico (global/per-block sample time).
+- [x] 6.1 Definir semantica multirate explicita entre controle discreto e solver eletrico (global/per-block sample time).
 - [ ] 6.2 Adicionar diagnostico tipado para eventos de rigidez de controle e risco de loop algebraico.
 - [ ] 6.3 Validar suite fechada PI/C-Block com criterios de estabilidade e repetibilidade.
 - [ ] 6.4 Gate E: closed-loop suite completa verde + determinismo confirmado em repeticoes equivalentes.
