@@ -119,7 +119,12 @@ def _runtime_defaults(netlist: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _build_prototype_simulation_override(candidate: Dict[str, Any], mode: str) -> Dict[str, Any]:
+def _build_prototype_simulation_override(
+    candidate: Dict[str, Any],
+    mode: str,
+    *,
+    case_class: str,
+) -> Dict[str, Any]:
     if mode != "transient":
         return {}
 
@@ -132,13 +137,44 @@ def _build_prototype_simulation_override(candidate: Dict[str, Any], mode: str) -
     elif family == "kinsol":
         integrator = "trapezoidal"
 
+    simulation_override: Dict[str, Any] = {
+        "adaptive_timestep": True,
+        "step_mode": "variable",
+        "integrator": integrator,
+        "formulation": "direct",
+        "direct_formulation_fallback": True,
+    }
+
+    # Switch-heavy cases are more sensitive to aggressive variable-step direct
+    # settings. Use a conservative transient profile to improve robustness.
+    if case_class == "switch_heavy":
+        simulation_override.update(
+            {
+                "adaptive_timestep": False,
+                "step_mode": "fixed",
+                "integrator": "bdf1",
+                "formulation": "projected_wrapper",
+                "max_step_retries": 12,
+                "newton": {
+                    "max_iterations": 320,
+                    "initial_damping": 0.4,
+                    "min_damping": 1e-5,
+                    "auto_damping": True,
+                },
+                "fallback": {
+                    "trace_retries": True,
+                    "enable_transient_gmin": True,
+                    "gmin_retry_threshold": 1,
+                    "gmin_initial": 1e-8,
+                    "gmin_max": 1e-3,
+                    "gmin_growth": 10.0,
+                },
+            }
+        )
+
     return {
         "simulation": {
-            "adaptive_timestep": True,
-            "step_mode": "variable",
-            "integrator": integrator,
-            "formulation": "direct",
-            "direct_formulation_fallback": True,
+            **simulation_override,
         }
     }
 
@@ -434,7 +470,11 @@ def run_advanced_solver_prototype(
 
                 baseline_netlist = _runtime_defaults(_deep_merge(base_netlist, scenario_override))
                 mode = _infer_mode(scenario_name, scenario_override)
-                prototype_override = _build_prototype_simulation_override(candidate, mode)
+                prototype_override = _build_prototype_simulation_override(
+                    candidate,
+                    mode,
+                    case_class=case_class,
+                )
                 prototype_netlist = (
                     _runtime_defaults(_deep_merge(baseline_netlist, prototype_override))
                     if prototype_override

@@ -116,7 +116,7 @@ def test_prototype_runner_applies_transient_override_and_generates_report(
         payload = yaml.safe_load(netlist_path.read_text(encoding="utf-8"))
         seen_payloads.append(payload)
         sim = payload.get("simulation", {})
-        is_prototype = sim.get("integrator") == "trbdf2"
+        is_prototype = sim.get("max_step_retries") == 12
         output_path.write_text("time\n0\n", encoding="utf-8")
         return BackendRunResult(
             runtime_s=1.2 if is_prototype else 1.0,
@@ -147,7 +147,11 @@ def test_prototype_runner_applies_transient_override_and_generates_report(
     prototype_sim = seen_payloads[1]["simulation"]
     assert "fallback" not in baseline_sim
     assert "fallback_policy" not in baseline_sim
-    assert "fallback" not in prototype_sim
+    assert prototype_sim["integrator"] == "bdf1"
+    assert prototype_sim["step_mode"] == "fixed"
+    assert prototype_sim["formulation"] == "projected_wrapper"
+    assert prototype_sim["max_step_retries"] == 12
+    assert prototype_sim["fallback"]["enable_transient_gmin"] is True
     assert "fallback_policy" not in prototype_sim
 
 
@@ -232,7 +236,7 @@ def test_prototype_runner_enforces_hard_constraints_when_requested(
     ) -> BackendRunResult:
         payload = yaml.safe_load(netlist_path.read_text(encoding="utf-8"))
         sim = payload.get("simulation", {})
-        is_prototype = sim.get("integrator") == "trbdf2"
+        is_prototype = sim.get("max_step_retries") == 12
         output_path.write_text("time\n0\n", encoding="utf-8")
         return BackendRunResult(
             runtime_s=2.0 if is_prototype else 1.0,
