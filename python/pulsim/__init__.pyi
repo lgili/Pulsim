@@ -565,6 +565,8 @@ class FallbackPolicyOptions:
     trace_retries: bool
     convergence_profile: ConvergenceProfile
     policy_dry_run: bool
+    anti_overfit_check: bool
+    anti_overfit_stable_budget: int
     enable_transient_gmin: bool
     gmin_retry_threshold: int
     gmin_initial: float
@@ -605,6 +607,8 @@ class BackendTelemetry:
     policy_recommendation_matches: int
     policy_recommendation_mismatches: int
     last_recommended_policy_action: ConvergencePolicyAction
+    anti_overfit_violations: int
+    anti_overfit_budget_exceeded: bool
     failure_reason: str
 
     def __init__(self) -> None: ...
@@ -621,6 +625,7 @@ class FallbackTraceEntry:
     policy_action: ConvergencePolicyAction
     recommended_policy_action: ConvergencePolicyAction
     policy_action_matches_recommendation: bool
+    anti_overfit_violation: bool
     action: str
 
     def __init__(self) -> None: ...

@@ -264,6 +264,7 @@ struct FallbackTraceEntry {
     ConvergencePolicyAction policy_action = ConvergencePolicyAction::ObserveOnly;
     ConvergencePolicyAction recommended_policy_action = ConvergencePolicyAction::None;
     bool policy_action_matches_recommendation = true;
+    bool anti_overfit_violation = false;
     std::string action;
 };
 
@@ -271,6 +272,8 @@ struct FallbackPolicyOptions {
     bool trace_retries = true;
     ConvergenceProfile convergence_profile = ConvergenceProfile::Balanced;
     bool policy_dry_run = false;
+    bool anti_overfit_check = false;
+    int anti_overfit_stable_budget = 0;
     bool enable_transient_gmin = true;
     int gmin_retry_threshold = 2;
     Real gmin_initial = 1e-9;
@@ -340,6 +343,8 @@ struct BackendTelemetry {
     int policy_recommendation_matches = 0;
     int policy_recommendation_mismatches = 0;
     ConvergencePolicyAction last_recommended_policy_action = ConvergencePolicyAction::None;
+    int anti_overfit_violations = 0;
+    bool anti_overfit_budget_exceeded = false;
     std::string failure_reason;
 };
 

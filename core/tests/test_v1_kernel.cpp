@@ -2240,6 +2240,8 @@ TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback
     opts.fallback_policy.trace_retries = true;
     opts.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
     opts.fallback_policy.policy_dry_run = true;
+    opts.fallback_policy.anti_overfit_check = true;
+    opts.fallback_policy.anti_overfit_stable_budget = 0;
     opts.fallback_policy.enable_transient_gmin = true;
     opts.fallback_policy.gmin_retry_threshold = 1;
     opts.fallback_policy.gmin_initial = 1e-8;
@@ -2271,6 +2273,9 @@ TEST_CASE("v1 fallback trace records deterministic reason codes", "[v1][fallback
     CHECK(result.backend_telemetry.policy_recommendation_matches +
               result.backend_telemetry.policy_recommendation_mismatches ==
           result.backend_telemetry.policy_dry_run_events);
+    CHECK(result.backend_telemetry.anti_overfit_budget_exceeded ==
+          (result.backend_telemetry.anti_overfit_violations >
+           opts.fallback_policy.anti_overfit_stable_budget));
     CHECK(std::any_of(result.fallback_trace.begin(), result.fallback_trace.end(),
                       [](const FallbackTraceEntry& entry) {
                           return entry.recommended_policy_action !=

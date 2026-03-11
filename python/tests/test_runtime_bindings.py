@@ -4294,6 +4294,8 @@ def test_fallback_trace_records_retry_reasons() -> None:
     opts.fallback_policy.trace_retries = True
     opts.fallback_policy.convergence_profile = ps.ConvergenceProfile.Balanced
     opts.fallback_policy.policy_dry_run = True
+    opts.fallback_policy.anti_overfit_check = True
+    opts.fallback_policy.anti_overfit_stable_budget = 0
     opts.fallback_policy.enable_transient_gmin = True
     opts.fallback_policy.gmin_retry_threshold = 1
     opts.fallback_policy.gmin_initial = 1e-8
@@ -4318,6 +4320,10 @@ def test_fallback_trace_records_retry_reasons() -> None:
         + result.backend_telemetry.policy_recommendation_mismatches
         == len(result.fallback_trace)
     )
+    assert result.backend_telemetry.anti_overfit_budget_exceeded == (
+        result.backend_telemetry.anti_overfit_violations
+        > opts.fallback_policy.anti_overfit_stable_budget
+    )
     assert result.backend_telemetry.last_failure_class in (
         ps.ConvergenceFailureClass.RetryBudgetExhausted,
         ps.ConvergenceFailureClass.LinearBreakdown,
@@ -4339,6 +4345,10 @@ def test_fallback_trace_records_retry_reasons() -> None:
     )
     assert any(
         entry.recommended_policy_action != ps.ConvergencePolicyAction.None_
+        for entry in result.fallback_trace
+    )
+    assert all(
+        isinstance(entry.anti_overfit_violation, bool)
         for entry in result.fallback_trace
     )
 

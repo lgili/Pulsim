@@ -12,7 +12,7 @@
 
 ## 3. M1 - Policy Passive Validation
 - [x] 3.1 Implementar `PolicySelector` em dry-run comparando acao recomendada vs acao aplicada.
-- [ ] 3.2 Adicionar verificador de anti-overfitting (ganho local nao pode violar budget em classes estaveis).
+- [x] 3.2 Adicionar verificador de anti-overfitting (ganho local nao pode violar budget em classes estaveis).
 - [x] 3.3 Definir e validar contrato de perfis `strict`, `balanced`, `robust` (sem ativar mudancas agressivas ainda).
 - [ ] 3.4 Gate B: recomendacoes de politica melhoram KPI de robustez em classes-alvo sem degradar classes estaveis alem do budget.
 

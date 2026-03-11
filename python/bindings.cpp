@@ -1359,6 +1359,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("trace_retries", &FallbackPolicyOptions::trace_retries)
         .def_readwrite("convergence_profile", &FallbackPolicyOptions::convergence_profile)
         .def_readwrite("policy_dry_run", &FallbackPolicyOptions::policy_dry_run)
+        .def_readwrite("anti_overfit_check", &FallbackPolicyOptions::anti_overfit_check)
+        .def_readwrite("anti_overfit_stable_budget", &FallbackPolicyOptions::anti_overfit_stable_budget)
         .def_readwrite("enable_transient_gmin", &FallbackPolicyOptions::enable_transient_gmin)
         .def_readwrite("gmin_retry_threshold", &FallbackPolicyOptions::gmin_retry_threshold)
         .def_readwrite("gmin_initial", &FallbackPolicyOptions::gmin_initial)
@@ -1431,6 +1433,8 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("policy_recommendation_matches", &BackendTelemetry::policy_recommendation_matches)
         .def_readwrite("policy_recommendation_mismatches", &BackendTelemetry::policy_recommendation_mismatches)
         .def_readwrite("last_recommended_policy_action", &BackendTelemetry::last_recommended_policy_action)
+        .def_readwrite("anti_overfit_violations", &BackendTelemetry::anti_overfit_violations)
+        .def_readwrite("anti_overfit_budget_exceeded", &BackendTelemetry::anti_overfit_budget_exceeded)
         .def_readwrite("failure_reason", &BackendTelemetry::failure_reason);
 
     py::class_<FallbackTraceEntry>(v2, "FallbackTraceEntry",
@@ -1448,6 +1452,7 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("recommended_policy_action", &FallbackTraceEntry::recommended_policy_action)
         .def_readwrite("policy_action_matches_recommendation",
                        &FallbackTraceEntry::policy_action_matches_recommendation)
+        .def_readwrite("anti_overfit_violation", &FallbackTraceEntry::anti_overfit_violation)
         .def_readwrite("action", &FallbackTraceEntry::action);
 
     py::class_<ThermalCouplingOptions>(v2, "ThermalCouplingOptions",

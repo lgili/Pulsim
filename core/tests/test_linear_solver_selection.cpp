@@ -506,6 +506,8 @@ simulation:
     trace_retries: true
     convergence_profile: robust
     policy_dry_run: true
+    anti_overfit_check: true
+    anti_overfit_stable_budget: 3
     enable_transient_gmin: true
     gmin_retry_threshold: 2
     gmin_initial: 1e-8
@@ -525,6 +527,8 @@ components:
     CHECK(options.fallback_policy.trace_retries);
     CHECK(options.fallback_policy.convergence_profile == ConvergenceProfile::Robust);
     CHECK(options.fallback_policy.policy_dry_run);
+    CHECK(options.fallback_policy.anti_overfit_check);
+    CHECK(options.fallback_policy.anti_overfit_stable_budget == 3);
     CHECK(options.fallback_policy.enable_transient_gmin);
     CHECK(options.fallback_policy.gmin_retry_threshold == 2);
     CHECK(options.fallback_policy.gmin_initial == Approx(1e-8));

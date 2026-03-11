@@ -1138,6 +1138,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                                      "gmin_retry_threshold", "gmin_initial",
                                      "gmin_max", "gmin_growth",
                                      "convergence_profile", "policy_dry_run",
+                                     "anti_overfit_check", "anti_overfit_stable_budget",
                                      "enable_backend_escalation", "backend_escalation_threshold",
                                      "enable_native_reentry", "sundials_recovery_window"},
                           "simulation.advanced.fallback", errors_, options_.strict);
@@ -1165,6 +1166,23 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                     "simulation.fallback.policy_dry_run",
                     errors_)) {
                 options.fallback_policy.policy_dry_run = *value;
+            }
+            if (const auto value = parse_bool_scalar(
+                    fallback["anti_overfit_check"],
+                    "simulation.fallback.anti_overfit_check",
+                    errors_)) {
+                options.fallback_policy.anti_overfit_check = *value;
+            }
+            if (const auto value = parse_int_scalar(
+                    fallback["anti_overfit_stable_budget"],
+                    "simulation.fallback.anti_overfit_stable_budget",
+                    errors_)) {
+                if (*value < 0) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "simulation.fallback.anti_overfit_stable_budget must be >= 0");
+                } else {
+                    options.fallback_policy.anti_overfit_stable_budget = *value;
+                }
             }
             if (fallback["enable_transient_gmin"]) {
                 options.fallback_policy.enable_transient_gmin = fallback["enable_transient_gmin"].as<bool>();

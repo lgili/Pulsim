@@ -1134,6 +1134,23 @@ void Simulator::set_switching_energy_surface(const std::string& device_name,
     }
 }
 
+[[nodiscard]] bool is_policy_target_failure_class(ConvergenceFailureClass failure_class) {
+    switch (failure_class) {
+        case ConvergenceFailureClass::EventBurstZeroCross:
+        case ConvergenceFailureClass::SwitchChattering:
+        case ConvergenceFailureClass::NonlinearMagneticStiffness:
+        case ConvergenceFailureClass::ControlDiscreteStiffness:
+            return true;
+        case ConvergenceFailureClass::None:
+        case ConvergenceFailureClass::LinearBreakdown:
+        case ConvergenceFailureClass::NewtonGlobalizationFailure:
+        case ConvergenceFailureClass::RetryBudgetExhausted:
+        case ConvergenceFailureClass::Unknown:
+        default:
+            return false;
+    }
+}
+
 /**
  * @brief Appends one fallback/recovery trace entry for diagnostics.
  * @param result Simulation result accumulator.
@@ -1175,6 +1192,12 @@ void Simulator::record_fallback_event(SimulationResult& result,
                                     reason);
         entry.policy_action_matches_recommendation =
             (entry.recommended_policy_action == entry.policy_action);
+        if (options_.fallback_policy.anti_overfit_check) {
+            const bool targeted_class = is_policy_target_failure_class(entry.failure_class);
+            const bool non_observe_recommendation =
+                entry.recommended_policy_action != ConvergencePolicyAction::ObserveOnly;
+            entry.anti_overfit_violation = !targeted_class && non_observe_recommendation;
+        }
     }
     entry.action = action;
     result.fallback_trace.push_back(std::move(entry));
@@ -1190,6 +1213,15 @@ void Simulator::record_fallback_event(SimulationResult& result,
             result.backend_telemetry.policy_recommendation_matches += 1;
         } else {
             result.backend_telemetry.policy_recommendation_mismatches += 1;
+        }
+        if (options_.fallback_policy.anti_overfit_check &&
+            result.fallback_trace.back().anti_overfit_violation) {
+            result.backend_telemetry.anti_overfit_violations += 1;
+        }
+        if (options_.fallback_policy.anti_overfit_check) {
+            const int stable_budget = std::max(0, options_.fallback_policy.anti_overfit_stable_budget);
+            result.backend_telemetry.anti_overfit_budget_exceeded =
+                result.backend_telemetry.anti_overfit_violations > stable_budget;
         }
     }
 }
