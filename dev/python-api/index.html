@@ -822,6 +822,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../convergence-playbook/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Playbook
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-profile-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Profile Migration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../troubleshooting/" class="md-nav__link">
         
   
@@ -1833,7 +1875,8 @@
 <li><code>ps.run_transient(...)</code> permanece disponível para compatibilidade procedural.</li>
 <li>A superfície canônica para novas integrações é <code>YamlParser</code> + <code>SimulationOptions</code> + <code>Simulator</code>.</li>
 <li>Em casos de migração YAML, prefira <code>simulation.step_mode</code> em vez de
-  <code>simulation.adaptive_timestep</code>/<code>simulation.backend</code>.</li>
+  <code>simulation.adaptive_timestep</code> (legado) e evite campos removidos como
+  <code>simulation.backend</code>/<code>simulation.sundials</code>/<code>simulation.advanced</code>.</li>
 </ul>
 <h2 id="configuracao-tipada-de-nucleo-magnetico">Configuração tipada de núcleo magnético<a class="headerlink" href="#configuracao-tipada-de-nucleo-magnetico" title="Permanent link">&para;</a></h2>
 <p>Para fluxos Python-first com componentes virtuais, a API expõe:</p>
@@ -1929,9 +1972,7 @@ de robustez por padrão:</p>
 <li><code>SimulationOptions.timestep_config</code></li>
 <li><code>SimulationOptions.lte_config</code></li>
 </ul>
-<p><code>SimulationOptions.transient_backend</code> e <code>SimulationOptions.sundials</code> permanecem
-apenas para migração/diagnóstico de legado; o caminho suportado usa core nativo
-com <code>step_mode</code> + <code>formulation_mode</code>.</p>
+<p>O caminho suportado usa o core nativo com <code>step_mode</code> + <code>formulation_mode</code>.</p>
 <h3 id="controle-em-malha-fechada">Controle em malha fechada<a class="headerlink" href="#controle-em-malha-fechada" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
 

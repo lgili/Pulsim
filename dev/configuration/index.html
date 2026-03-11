@@ -822,6 +822,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../convergence-playbook/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Playbook
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-profile-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Profile Migration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../troubleshooting/" class="md-nav__link">
         
   
@@ -1691,8 +1733,10 @@
 </ul>
 <p>Observação de migração:</p>
 <ul>
-<li><code>simulation.backend</code> e <code>simulation.sundials</code> são campos legados para transiente e não
-  fazem parte do caminho suportado; use <code>simulation.step_mode</code> + <code>simulation.formulation</code>.</li>
+<li><code>simulation.backend</code>, <code>simulation.sundials</code> e o bloco <code>simulation.advanced</code>
+  foram removidos da superfície suportada; use <code>simulation.step_mode</code> +
+  <code>simulation.formulation</code> e ajustes explícitos em <code>simulation.solver</code>,
+  <code>simulation.newton</code>, <code>simulation.timestep</code>, etc.</li>
 </ul>
 <h2 id="solver-linear-em-runtime">Solver linear em runtime<a class="headerlink" href="#solver-linear-em-runtime" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>

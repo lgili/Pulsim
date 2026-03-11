@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/averaged-converter-modeling/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/convergence-profile-migration/">
       
       
-        <link rel="prev" href="../post-processing/">
+        <link rel="prev" href="../convergence-playbook/">
       
       
-        <link rel="next" href="../electrothermal-workflow/">
+        <link rel="next" href="../troubleshooting/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Averaged Converter Modeling - PulsimCore</title>
+        <title>Convergence Profile Migration - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#averaged-converter-modeling" class="md-skip">
+        <a href="#convergence-profile-migration-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Averaged Converter Modeling
+              Convergence Profile Migration
             
           </span>
         </div>
@@ -675,30 +675,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Averaged Converter Modeling
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../averaged-converter-modeling/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -707,98 +687,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#scope-and-mvp-limits" class="md-nav__link">
-    <span class="md-ellipsis">
-      Scope and MVP Limits
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#yaml-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      YAML Contract
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#python-api-surface" class="md-nav__link">
-    <span class="md-ellipsis">
-      Python API Surface
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#diagnostics" class="md-nav__link">
-    <span class="md-ellipsis">
-      Diagnostics
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#result-channels-and-metadata" class="md-nav__link">
-    <span class="md-ellipsis">
-      Result Channels and Metadata
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#frontend-responsibilities" class="md-nav__link">
-    <span class="md-ellipsis">
-      Frontend Responsibilities
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#migration-from-switched-transient" class="md-nav__link">
-    <span class="md-ellipsis">
-      Migration From Switched Transient
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#runnable-examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      Runnable Examples
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -955,10 +843,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../convergence-profile-migration/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Convergence Profile Migration
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -967,6 +875,71 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#profile-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      Profile Contract
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migration-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      Migration Path
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#python-api-snippet" class="md-nav__link">
+    <span class="md-ellipsis">
+      Python API Snippet
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gate-expectations-by-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      Gate Expectations by Profile
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollback-guidance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Rollback Guidance
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1559,72 +1532,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#scope-and-mvp-limits" class="md-nav__link">
+  <a href="#profile-contract" class="md-nav__link">
     <span class="md-ellipsis">
-      Scope and MVP Limits
+      Profile Contract
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#yaml-contract" class="md-nav__link">
+  <a href="#migration-path" class="md-nav__link">
     <span class="md-ellipsis">
-      YAML Contract
+      Migration Path
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#python-api-surface" class="md-nav__link">
+  <a href="#python-api-snippet" class="md-nav__link">
     <span class="md-ellipsis">
-      Python API Surface
+      Python API Snippet
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#diagnostics" class="md-nav__link">
+  <a href="#gate-expectations-by-profile" class="md-nav__link">
     <span class="md-ellipsis">
-      Diagnostics
+      Gate Expectations by Profile
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#result-channels-and-metadata" class="md-nav__link">
+  <a href="#rollback-guidance" class="md-nav__link">
     <span class="md-ellipsis">
-      Result Channels and Metadata
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#frontend-responsibilities" class="md-nav__link">
-    <span class="md-ellipsis">
-      Frontend Responsibilities
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#migration-from-switched-transient" class="md-nav__link">
-    <span class="md-ellipsis">
-      Migration From Switched Transient
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#runnable-examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      Runnable Examples
+      Rollback Guidance
     </span>
   </a>
   
@@ -1645,7 +1591,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/averaged-converter-modeling.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/convergence-profile-migration.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1654,163 +1600,87 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/averaged-converter-modeling.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/convergence-profile-migration.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="averaged-converter-modeling">Averaged Converter Modeling<a class="headerlink" href="#averaged-converter-modeling" title="Permanent link">&para;</a></h1>
-<p>This guide defines the backend contract for averaged-converter transient mode.</p>
-<h2 id="scope-and-mvp-limits">Scope and MVP Limits<a class="headerlink" href="#scope-and-mvp-limits" title="Permanent link">&para;</a></h2>
-<p>Current backend support:</p>
-<ul>
-<li>topologies: <code>buck</code>, <code>boost</code>, <code>buck_boost</code></li>
-<li>operating modes: <code>ccm</code>, <code>dcm</code>, <code>auto</code></li>
-<li>execution mode: transient (<code>Simulator.run_transient(...)</code>)</li>
-<li>duty command: constant scalar (<code>simulation.averaged_converter.duty</code>)</li>
-<li>envelope policy: <code>strict</code> or <code>warn</code> (CCM-only check)</li>
-</ul>
-<p>Current explicit non-goals:</p>
-<ul>
-<li>no automatic averaged-model synthesis for arbitrary topologies</li>
-<li>no implicit fallback to switched transient on averaged failures</li>
-<li>no backend consumption of controller/PWM duty channels in averaged mode yet</li>
-</ul>
-<h2 id="yaml-contract">YAML Contract<a class="headerlink" href="#yaml-contract" title="Permanent link">&para;</a></h2>
-<p>Configure averaged mode in <code>simulation.averaged_converter</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">tstart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">350e-6</span>
-<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2e-6</span>
-<span class="w">  </span><span class="nt">averaged_converter</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">topology</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">boost</span><span class="w">            </span><span class="c1"># buck | boost | buck_boost</span>
-<span class="w">    </span><span class="nt">operating_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">       </span><span class="c1"># ccm | dcm | auto</span>
-<span class="w">    </span><span class="nt">envelope_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span><span class="w">       </span><span class="c1"># strict | warn</span>
-<span class="w">    </span><span class="nt">vin_source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vin</span><span class="w">             </span><span class="c1"># voltage_source component name</span>
-<span class="w">    </span><span class="nt">inductor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L1</span><span class="w">                </span><span class="c1"># inductor component name</span>
-<span class="w">    </span><span class="nt">capacitor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">C1</span><span class="w">               </span><span class="c1"># capacitor component name</span>
-<span class="w">    </span><span class="nt">load_resistor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Rload</span><span class="w">        </span><span class="c1"># resistor component name</span>
-<span class="w">    </span><span class="nt">output_node</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">out</span><span class="w">            </span><span class="c1"># output node name</span>
-<span class="w">    </span><span class="nt">duty</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.4</span>
-<span class="w">    </span><span class="nt">duty_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">duty_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">switching_frequency_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000.0</span>
-<span class="w">    </span><span class="nt">initial_inductor_current</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">initial_output_voltage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">ccm_current_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-</code></pre></div>
-<p>Strict parser/runtime checks include:</p>
-<ul>
-<li>missing mapped fields when <code>enabled=true</code></li>
-<li>invalid <code>topology</code>, <code>operating_mode</code>, or <code>envelope_policy</code></li>
-<li>invalid duty bounds (<code>0 &lt;= duty_min &lt;= duty &lt;= duty_max &lt;= 1</code>)</li>
-<li>invalid <code>ccm_current_threshold</code></li>
-<li>invalid <code>switching_frequency_hz</code> (<code>&gt; 0</code>)</li>
-<li>invalid mapped component types (for example mapping <code>inductor</code> to a resistor)</li>
-</ul>
-<h2 id="python-api-surface">Python API Surface<a class="headerlink" href="#python-api-surface" title="Permanent link">&para;</a></h2>
+<h1 id="convergence-profile-migration-guide">Convergence Profile Migration Guide<a class="headerlink" href="#convergence-profile-migration-guide" title="Permanent link">&para;</a></h1>
+<p>This guide explains how to move safely between <code>strict</code>, <code>balanced</code>, and <code>robust</code> convergence profiles.</p>
+<h2 id="profile-contract">Profile Contract<a class="headerlink" href="#profile-contract" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Profile</th>
+<th>Goal</th>
+<th>Typical use</th>
+<th>Risk posture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>strict</code></td>
+<td>deterministic diagnostics, bounded recovery</td>
+<td>CI reproducibility, bug triage, regression isolation</td>
+<td>lowest tolerance for implicit recovery</td>
+</tr>
+<tr>
+<td><code>balanced</code></td>
+<td>broad robustness with bounded cost</td>
+<td>default program gate (Gate B/C)</td>
+<td>moderate adaptive behavior</td>
+</tr>
+<tr>
+<td><code>robust</code></td>
+<td>maximize convergence on hard cases</td>
+<td>deep stress debugging and extreme scenarios</td>
+<td>highest adaptive tolerance</td>
+</tr>
+</tbody>
+</table>
+<h2 id="migration-path">Migration Path<a class="headerlink" href="#migration-path" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Start in <code>strict</code> and ensure baseline reproducibility and typed telemetry coverage.</li>
+<li>Move to <code>balanced</code> only after Gate A is stable.</li>
+<li>Enable Gate B budgets (<code>--phase-key gate_b</code>) and require stable-class non-regression.</li>
+<li>Move to <code>robust</code> only for targeted stress classes and keep artifacts isolated.</li>
+</ol>
+<h2 id="python-api-snippet">Python API Snippet<a class="headerlink" href="#python-api-snippet" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
 
-<span class="n">parser</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParser</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">())</span>
-<span class="n">circuit</span><span class="p">,</span> <span class="n">options</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;examples/10_buck_averaged_mvp_backend.yaml&quot;</span><span class="p">)</span>
-
-<span class="n">options</span><span class="o">.</span><span class="n">newton_options</span><span class="o">.</span><span class="n">num_nodes</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">num_nodes</span><span class="p">())</span>
-<span class="n">options</span><span class="o">.</span><span class="n">newton_options</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">num_branches</span><span class="p">())</span>
-
-<span class="n">result</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">success</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">diagnostic</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">message</span><span class="p">)</span>
+<span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="p">()</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">fallback_policy</span><span class="o">.</span><span class="n">convergence_profile</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">ConvergenceProfile</span><span class="o">.</span><span class="n">Balanced</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">fallback_policy</span><span class="o">.</span><span class="n">policy_dry_run</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">fallback_policy</span><span class="o">.</span><span class="n">anti_overfit_check</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">fallback_policy</span><span class="o">.</span><span class="n">anti_overfit_stable_budget</span> <span class="o">=</span> <span class="mi">0</span>
 </code></pre></div>
-<p>Related typed enums/options:</p>
+<h2 id="gate-expectations-by-profile">Gate Expectations by Profile<a class="headerlink" href="#gate-expectations-by-profile" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>AveragedConverterOptions</code></li>
-<li><code>AveragedConverterTopology</code></li>
-<li><code>AveragedOperatingMode</code></li>
-<li><code>AveragedEnvelopePolicy</code></li>
+<li><code>strict</code></li>
+<li>prioritize deterministic failures over aggressive recovery</li>
+<li>require complete typed diagnostics for each fallback event</li>
+<li><code>balanced</code></li>
+<li>require Gate B pass with stable-class guard metrics</li>
+<li>allow bounded policy recommendations and dry-run comparison</li>
+<li><code>robust</code></li>
+<li>allowed for targeted stress tracks</li>
+<li>must still satisfy cross-class non-regression budgets before promotion</li>
 </ul>
-<h2 id="diagnostics">Diagnostics<a class="headerlink" href="#diagnostics" title="Permanent link">&para;</a></h2>
-<p>Canonical averaged runtime diagnostics:</p>
+<h2 id="rollback-guidance">Rollback Guidance<a class="headerlink" href="#rollback-guidance" title="Permanent link">&para;</a></h2>
+<p>Rollback immediately when any of these occur:</p>
 <ul>
-<li><code>AveragedInvalidConfiguration</code></li>
-<li><code>AveragedUnsupportedConfiguration</code></li>
-<li><code>AveragedOutOfEnvelope</code></li>
-<li><code>AveragedSolverFailure</code></li>
+<li><code>policy_stable_mismatch_rate</code> regresses over budget</li>
+<li><code>policy_stable_anti_overfit_violation_rate</code> regresses over budget</li>
+<li><code>typed_convergence_schema_coverage_rate</code> drops below baseline budget</li>
 </ul>
-<p>Behavior is deterministic:</p>
-<ul>
-<li><code>operating_mode=ccm</code> + <code>strict</code>: fails with <code>AveragedOutOfEnvelope</code></li>
-<li><code>operating_mode=ccm</code> + <code>warn</code>: run succeeds with out-of-envelope warning in message</li>
-<li><code>operating_mode=dcm|auto</code>: uses DCM-capable equations and does not raise CCM-envelope failure</li>
-</ul>
-<h2 id="result-channels-and-metadata">Result Channels and Metadata<a class="headerlink" href="#result-channels-and-metadata" title="Permanent link">&para;</a></h2>
-<p>Successful averaged runs publish canonical virtual channels:</p>
-<ul>
-<li><code>Iavg(&lt;inductor_name&gt;)</code></li>
-<li><code>Vavg(&lt;output_node&gt;)</code></li>
-<li><code>Davg</code></li>
-</ul>
-<p>Current metadata contract for averaged channels (<code>result.virtual_channel_metadata[...]</code>):</p>
-<ul>
-<li><code>component_type = "averaged_converter"</code></li>
-<li><code>source_component = "averaged_state"</code></li>
-<li><code>domain = "time"</code></li>
-<li>unit: <code>A</code>, <code>V</code>, or <code>ratio</code></li>
-</ul>
-<p>All channel series are sample-aligned with <code>result.time</code>.</p>
-<h2 id="frontend-responsibilities">Frontend Responsibilities<a class="headerlink" href="#frontend-responsibilities" title="Permanent link">&para;</a></h2>
-<p>Frontend must:</p>
-<ul>
-<li>expose explicit averaged-mode setup UX for all required mapping fields</li>
-<li>show selected envelope policy (<code>strict</code>/<code>warn</code>) before running</li>
-<li>plot <code>Iavg(...)</code>, <code>Vavg(...)</code>, <code>Davg</code> directly from backend channels</li>
-<li>route channels using metadata first, then canonical names as fallback</li>
-<li>surface typed diagnostics/messages without log regex heuristics</li>
-</ul>
-<p>Frontend must not:</p>
-<ul>
-<li>synthesize averaged channels when backend did not emit them</li>
-<li>silently replace averaged mode by switched mode in UI behavior</li>
-<li>infer physical validity outside backend envelope diagnostics</li>
-<li>hide out-of-envelope warnings returned in backend message/diagnostic</li>
-</ul>
-<h2 id="migration-from-switched-transient">Migration From Switched Transient<a class="headerlink" href="#migration-from-switched-transient" title="Permanent link">&para;</a></h2>
-<p>Recommended migration path for control-design iteration:</p>
+<p>Recommended rollback sequence:</p>
 <ol>
-<li>Start from a switched converter YAML (<code>buck</code>, <code>boost</code>, or <code>buck_boost</code>) that already has mapped <code>Vin</code>, <code>L</code>, <code>C</code>, <code>Rload</code>.</li>
-<li>Add <code>simulation.averaged_converter</code> and keep <code>duty</code> fixed for first parity pass.</li>
-<li>Compare averaged-vs-switching with paired benchmark validation.</li>
-<li>Select <code>operating_mode</code> (<code>ccm</code>, <code>dcm</code>, or <code>auto</code>) based on expected load regime.</li>
-<li>Use averaged mode for rapid controller sweeps in supported envelope.</li>
-<li>Keep switched/electrothermal runs as final validation stage.</li>
+<li>revert profile to <code>strict</code></li>
+<li>capture fresh artifacts (<code>benchmark_runner</code>, <code>stress_suite</code>, <code>kpi_gate</code>)</li>
+<li>inspect fallback trace deltas before re-enabling <code>balanced</code></li>
 </ol>
-<p>Reference files:</p>
-<ul>
-<li>switched pair: <code>benchmarks/circuits/buck_switching_paired.yaml</code></li>
-<li>averaged pair: <code>benchmarks/circuits/buck_averaged_mvp.yaml</code></li>
-<li>deterministic expected-failure case: <code>benchmarks/circuits/buck_averaged_expected_failure.yaml</code></li>
-</ul>
-<h2 id="runnable-examples">Runnable Examples<a class="headerlink" href="#runnable-examples" title="Permanent link">&para;</a></h2>
-<p>YAML:</p>
-<ul>
-<li><code>examples/10_buck_averaged_mvp_backend.yaml</code></li>
-</ul>
-<p>Python:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>examples/run_buck_averaged_mvp.py
-</code></pre></div>
-<p>Benchmark subset + KPI gate:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--only<span class="w"> </span>buck_switching_paired<span class="w"> </span>buck_averaged_mvp<span class="w"> </span>buck_averaged_expected_failure<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/phase14_averaged_artifacts/benchmarks
-
-python3<span class="w"> </span>benchmarks/kpi_gate.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--baseline<span class="w"> </span>benchmarks/kpi_baselines/averaged_converter_phase14_2026-03-07/kpi_baseline.json<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--bench-results<span class="w"> </span>benchmarks/phase14_averaged_artifacts/benchmarks/results.json<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--thresholds<span class="w"> </span>benchmarks/kpi_thresholds_averaged.yaml<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--report-out<span class="w"> </span>benchmarks/phase14_averaged_artifacts/reports/kpi_gate_averaged.json<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--print-report
-</code></pre></div>
 
 
 
@@ -1846,7 +1716,7 @@ python3<span class="w"> </span>benchmarks/kpi_gate.py<span class="w"> </span><sp
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../post-processing/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Waveform Post-Processing">
+          <a href="../convergence-playbook/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Convergence Playbook">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1856,20 +1726,20 @@ python3<span class="w"> </span>benchmarks/kpi_gate.py<span class="w"> </span><sp
                 Previous
               </span>
               <div class="md-ellipsis">
-                Waveform Post-Processing
+                Convergence Playbook
               </div>
             </div>
           </a>
         
         
           
-          <a href="../electrothermal-workflow/" class="md-footer__link md-footer__link--next" aria-label="Next: Electrothermal Workflow">
+          <a href="../troubleshooting/" class="md-footer__link md-footer__link--next" aria-label="Next: Troubleshooting">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Electrothermal Workflow
+                Troubleshooting
               </div>
             </div>
             <div class="md-footer__button md-icon">

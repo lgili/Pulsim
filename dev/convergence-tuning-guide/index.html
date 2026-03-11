@@ -16,7 +16,7 @@
         <link rel="prev" href="../notebooks/">
       
       
-        <link rel="next" href="../troubleshooting/">
+        <link rel="next" href="../convergence-playbook/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -961,6 +961,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../convergence-playbook/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Playbook
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-profile-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Profile Migration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../troubleshooting/" class="md-nav__link">
         
   
@@ -1688,11 +1730,10 @@
 <p>No Python:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">backend_capabilities</span><span class="p">())</span>
-<span class="c1"># {&#39;klu&#39;: True, &#39;hypre_amg&#39;: True/False, &#39;sundials&#39;: True/False}</span>
+<span class="c1"># Exemplo: {&#39;c_block&#39;: True} (chaves podem variar conforme build)</span>
 </code></pre></div>
-<p>Observação: <code>sundials=True</code> indica apenas suporte compilado opcional. No caminho
-suportado de transiente, use o core nativo com <code>simulation.step_mode</code>
-(<code>fixed|variable</code>), sem seleção de backend legado.</p>
+<p>Observação: no caminho suportado de transiente, use o core nativo com
+<code>simulation.step_mode</code> (<code>fixed|variable</code>), sem seleção de backend legado.</p>
 <h2 id="exemplo-de-configuracao-robusta">Exemplo de configuração robusta<a class="headerlink" href="#exemplo-de-configuracao-robusta" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">schema</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pulsim-v1</span>
 <span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
@@ -1817,13 +1858,13 @@ suportado de transiente, use o core nativo com <code>simulation.step_mode</code>
         
         
           
-          <a href="../troubleshooting/" class="md-footer__link md-footer__link--next" aria-label="Next: Troubleshooting">
+          <a href="../convergence-playbook/" class="md-footer__link md-footer__link--next" aria-label="Next: Convergence Playbook">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Troubleshooting
+                Convergence Playbook
               </div>
             </div>
             <div class="md-footer__button md-icon">

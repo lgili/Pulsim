@@ -822,6 +822,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../convergence-playbook/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Playbook
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-profile-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Profile Migration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../troubleshooting/" class="md-nav__link">
         
   
@@ -1298,9 +1340,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#legacy-transient-backend-keys" class="md-nav__link">
+  <a href="#canonical-transient-mode-keys" class="md-nav__link">
     <span class="md-ellipsis">
-      Legacy transient backend keys
+      Canonical transient mode keys
     </span>
   </a>
   
@@ -1334,9 +1376,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#beforeafter-expert-override-location" class="md-nav__link">
+  <a href="#canonical-expert-knobs" class="md-nav__link">
     <span class="md-ellipsis">
-      Before/After: expert override location
+      Canonical expert knobs
     </span>
   </a>
   
@@ -1722,9 +1764,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#legacy-transient-backend-keys" class="md-nav__link">
+  <a href="#canonical-transient-mode-keys" class="md-nav__link">
     <span class="md-ellipsis">
-      Legacy transient backend keys
+      Canonical transient mode keys
     </span>
   </a>
   
@@ -1758,9 +1800,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#beforeafter-expert-override-location" class="md-nav__link">
+  <a href="#canonical-expert-knobs" class="md-nav__link">
     <span class="md-ellipsis">
-      Before/After: expert override location
+      Canonical expert knobs
     </span>
   </a>
   
@@ -1933,14 +1975,14 @@
 <span class="n">sim</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
 <span class="n">result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
 </code></pre></div>
-<h3 id="legacy-transient-backend-keys">Legacy transient backend keys<a class="headerlink" href="#legacy-transient-backend-keys" title="Permanent link">&para;</a></h3>
+<h3 id="canonical-transient-mode-keys">Canonical transient mode keys<a class="headerlink" href="#canonical-transient-mode-keys" title="Permanent link">&para;</a></h3>
 <p>No runtime suportado, a escolha de caminho transiente é canônica por modo:</p>
 <ul>
 <li><code>simulation.step_mode: fixed</code></li>
 <li><code>simulation.step_mode: variable</code></li>
 </ul>
-<p>As chaves legadas <code>simulation.backend</code> / <code>simulation.sundials</code> (e equivalentes em
-<code>simulation.advanced</code>) são tratadas apenas para diagnóstico de migração.</p>
+<p>As chaves legadas <code>simulation.backend</code>, <code>simulation.sundials</code> e os campos antigos
+de <code>simulation.fallback</code> não fazem mais parte do schema ativo.</p>
 <h3 id="beforeafter-legacy-backend-canonical-mode">Before/After: legacy backend -&gt; canonical mode<a class="headerlink" href="#beforeafter-legacy-backend-canonical-mode" title="Permanent link">&para;</a></h3>
 <p>Before (legacy, removed in strict migration path):</p>
 <div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
@@ -1967,19 +2009,23 @@
 <span class="w">  </span><span class="nt">timestep</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">preset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">power_electronics</span>
 </code></pre></div>
-<p>If <code>strict = True</code>, legacy backend keys produce parser diagnostic
-<code>PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND</code>.</p>
+<p>Com <code>strict = True</code>, esses campos geram erro de campo desconhecido
+(<code>PULSIM_YAML_E_UNKNOWN_FIELD</code>). Em <code>strict = False</code>, geram warning com o mesmo
+código.</p>
 <h3 id="schema-evolution-policy-v1">Schema Evolution Policy (v1)<a class="headerlink" href="#schema-evolution-policy-v1" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Deprecated (migration window): <code>simulation.adaptive_timestep</code></li>
 <li>Accepted in schema <code>pulsim-v1</code>, but emits warning
     <code>PULSIM_YAML_W_DEPRECATED_FIELD</code> with replacement guidance to
     <code>simulation.step_mode: fixed|variable</code>.</li>
-<li>Removed (strict migration path): <code>simulation.backend</code>,
-  <code>simulation.sundials</code>, <code>simulation.advanced.backend</code>,
-  <code>simulation.advanced.sundials</code></li>
-<li>In strict mode, parser fails deterministically with
-    <code>PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND</code> and migration guidance.</li>
+<li>Removed: <code>simulation.backend</code>, <code>simulation.sundials</code>,
+  <code>simulation.fallback.enable_backend_escalation</code>,
+  <code>simulation.fallback.backend_escalation_threshold</code>,
+  <code>simulation.fallback.enable_native_reentry</code>,
+  <code>simulation.fallback.sundials_recovery_window</code>,
+  and <code>simulation.advanced</code> block.</li>
+<li>Parser emits deterministic unknown-field diagnostics
+    (<code>PULSIM_YAML_E_UNKNOWN_FIELD</code>) for these keys.</li>
 </ul>
 <h3 id="beforeafter-procedural-compatibility-and-canonical-runtime">Before/After: procedural compatibility and canonical runtime<a class="headerlink" href="#beforeafter-procedural-compatibility-and-canonical-runtime" title="Permanent link">&para;</a></h3>
 <p>Before (procedural path, still supported in migration window):</p>
@@ -2001,25 +2047,17 @@
 <span class="n">result</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">initial_state</span><span class="p">())</span>
 </code></pre></div>
 <p>Both paths share the same v1 kernel semantics; prefer <code>Simulator</code> for new code.</p>
-<h3 id="beforeafter-expert-override-location">Before/After: expert override location<a class="headerlink" href="#beforeafter-expert-override-location" title="Permanent link">&para;</a></h3>
-<p>Before (mixed top-level knobs):</p>
+<h3 id="canonical-expert-knobs">Canonical expert knobs<a class="headerlink" href="#canonical-expert-knobs" title="Permanent link">&para;</a></h3>
+<p>Use the top-level <code>simulation</code> fields for expert tuning:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span>
 <span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span>
 <span class="w">  </span><span class="nt">solver</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">order</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gmres</span><span class="p p-Indicator">]</span>
-</code></pre></div>
-<p>After (canonical mode + explicit expert section):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span>
-<span class="w">  </span><span class="nt">advanced</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span>
-<span class="w">    </span><span class="nt">solver</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">order</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gmres</span><span class="p p-Indicator">]</span>
-<span class="w">      </span><span class="nt">iterative</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">preconditioner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ilut</span>
-<span class="w">        </span><span class="nt">max_iterations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
-<span class="w">        </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-8</span>
+<span class="w">    </span><span class="nt">iterative</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">preconditioner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ilut</span>
+<span class="w">      </span><span class="nt">max_iterations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
+<span class="w">      </span><span class="nt">tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-8</span>
 </code></pre></div>
 <h2 id="4-removed-apiworkflow-mapping">4. Removed API/Workflow Mapping<a class="headerlink" href="#4-removed-apiworkflow-mapping" title="Permanent link">&para;</a></h2>
 <table>
