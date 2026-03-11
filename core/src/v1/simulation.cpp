@@ -1533,14 +1533,12 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
                 },
                 device_variant);
         });
-    const bool strict_convergence_profile =
-        options_.fallback_policy.convergence_profile == ConvergenceProfile::Strict;
     const bool contextual_policy_active =
         is_contextual_policy_active(options_) && variable_step_policy.enabled();
     const bool robust_convergence_profile = is_robust_convergence_profile(options_);
-    const bool can_auto_recover =
-        options_.linear_solver.allow_fallback ||
-        (!strict_convergence_profile && switching_recovery_profile);
+    // Strict contract: disable global recovery transitions whenever explicit
+    // fallback is off, independent of convergence profile.
+    const bool can_auto_recover = options_.linear_solver.allow_fallback;
     const int max_global_recovery_attempts =
         switching_recovery_profile ? (kMaxGlobalRecoveryAttempts + 1) : kMaxGlobalRecoveryAttempts;
 

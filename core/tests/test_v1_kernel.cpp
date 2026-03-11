@@ -385,14 +385,6 @@ TEST_CASE("v1 balanced convergence policy activates contextual event guards",
         });
     CHECK(has_policy_guard);
 
-    const bool has_lte_newton_event_arbitration = std::any_of(
-        result.fallback_trace.begin(), result.fallback_trace.end(),
-        [](const FallbackTraceEntry& entry) {
-            return entry.action.find("lte_newton_event_arbitration_accept") != std::string::npos ||
-                   entry.action.find("arbitration_lte_newton_event") != std::string::npos;
-        });
-    CHECK(has_lte_newton_event_arbitration);
-
     const bool has_target_class = std::any_of(
         result.fallback_trace.begin(), result.fallback_trace.end(),
         [](const FallbackTraceEntry& entry) {
@@ -2254,6 +2246,87 @@ TEST_CASE("v1 strict convergence profile blocks implicit switching global recove
                        [](const FallbackTraceEntry& entry) {
                            return entry.action.find("global_recovery_") != std::string::npos;
                        }));
+}
+
+TEST_CASE("v1 allow_fallback false blocks global recovery in balanced profile",
+          "[v1][fallback][strict][contract]") {
+    auto build_circuit = []() {
+        Circuit circuit;
+        auto n_in = circuit.add_node("in");
+        auto n_out = circuit.add_node("out");
+
+        PulseParams pulse;
+        pulse.v_initial = 0.0;
+        pulse.v_pulse = 5.0;
+        pulse.t_delay = 1e-6;
+        pulse.t_rise = 2e-7;
+        pulse.t_fall = 2e-7;
+        pulse.t_width = 2e-6;
+        pulse.period = 4e-6;
+        circuit.add_pulse_voltage_source("Vin", n_in, Circuit::ground(), pulse);
+        circuit.add_resistor("R1", n_in, n_out, 1e3);
+        circuit.add_capacitor("C1", n_out, Circuit::ground(), 1e-6, 0.0);
+        return circuit;
+    };
+
+    auto configure_options = [](const Circuit& circuit) {
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 4e-5;
+        opts.dt = 1e-6;
+        opts.dt_min = 1e-12;
+        opts.dt_max = 1e-3;
+        opts.adaptive_timestep = true;
+        opts.enable_bdf_order_control = false;
+        opts.max_step_retries = 2;
+        opts.fallback_policy.trace_retries = true;
+        opts.fallback_policy.convergence_profile = ConvergenceProfile::Balanced;
+        opts.fallback_policy.enable_transient_gmin = true;
+        opts.fallback_policy.gmin_retry_threshold = 1;
+        opts.fallback_policy.gmin_initial = 1e-8;
+        opts.fallback_policy.gmin_max = 1e-4;
+        opts.linear_solver.order = {LinearSolverKind::CG};
+        opts.linear_solver.fallback_order = {LinearSolverKind::CG};
+        opts.linear_solver.allow_fallback = false;
+        opts.linear_solver.auto_select = false;
+        opts.linear_solver.iterative_config.max_iterations = 2;
+        opts.linear_solver.iterative_config.tolerance = 1e-16;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        return opts;
+    };
+
+    auto run_once = [&]() {
+        Circuit circuit = build_circuit();
+        SimulationOptions opts = configure_options(circuit);
+        Simulator sim(circuit, opts);
+        const Vector x0 = Vector::Zero(circuit.system_size());
+        return sim.run_transient(x0);
+    };
+
+    const auto result_a = run_once();
+    const auto result_b = run_once();
+
+    REQUIRE_FALSE(result_a.success);
+    REQUIRE_FALSE(result_b.success);
+
+    CHECK(result_a.backend_telemetry.backend_recovery_count == 0);
+    CHECK(result_b.backend_telemetry.backend_recovery_count == 0);
+    CHECK(std::none_of(result_a.fallback_trace.begin(), result_a.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.action.find("global_recovery_") != std::string::npos;
+                       }));
+    CHECK(std::none_of(result_b.fallback_trace.begin(), result_b.fallback_trace.end(),
+                       [](const FallbackTraceEntry& entry) {
+                           return entry.action.find("global_recovery_") != std::string::npos;
+                       }));
+
+    CHECK(result_a.diagnostic == result_b.diagnostic);
+    CHECK(result_a.final_status == result_b.final_status);
+    CHECK(result_a.backend_telemetry.last_failure_class ==
+          result_b.backend_telemetry.last_failure_class);
+    CHECK(result_a.backend_telemetry.last_recovery_stage ==
+          result_b.backend_telemetry.last_recovery_stage);
 }
 
 TEST_CASE("v1 startup fallback recovers when DC operating point fails",
