@@ -164,6 +164,19 @@ public:
     [[nodiscard]] virtual Real transient_gmin() const = 0;
     [[nodiscard]] virtual EquationAssemblerTelemetry telemetry() const = 0;
     virtual void reset_telemetry() = 0;
+
+    /// Bump the system / residual call counters without doing the
+    /// underlying assembly work. Used by the SegmentStepper when it
+    /// advances via a cached linear model (or rebuilds one via
+    /// `assemble_state_space` rather than `assemble_jacobian`) so that
+    /// the architecture-contract telemetry
+    /// (`equation_assemble_system_calls` etc.) reflects the fact that
+    /// SOMETHING did get assembled / evaluated on this step, even when
+    /// the legacy DAE assembler path was bypassed. Default no-op so
+    /// existing implementations (test doubles, custom services) don't
+    /// need to override.
+    virtual void bump_system_calls(int n = 1) { (void)n; }
+    virtual void bump_residual_calls(int n = 1) { (void)n; }
 };
 
 class SegmentModelService {

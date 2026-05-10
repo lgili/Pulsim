@@ -252,6 +252,13 @@ public:
         telemetry_.residual_time_seconds += std::chrono::duration<double>(end - start).count();
     }
 
+    void bump_system_calls(int n) override {
+        if (n > 0) telemetry_.system_calls += static_cast<std::uint64_t>(n);
+    }
+    void bump_residual_calls(int n) override {
+        if (n > 0) telemetry_.residual_calls += static_cast<std::uint64_t>(n);
+    }
+
     void set_transient_gmin(Real gmin) override {
         transient_gmin_ = std::max<Real>(0.0, gmin);
     }
@@ -432,11 +439,27 @@ public:
             entry.build_count = 1;
             topology_cache_.emplace(signature, std::move(entry));
             model.cache_hit = false;
+            // A fresh model build does two `assemble_state_space` calls
+            // (M, N, b at t_now and t_target) — bump the assembler's
+            // `system_calls` counter so the architecture-contract
+            // telemetry reflects that an assembly happened, even on
+            // the SegmentStepper path that bypasses
+            // `EquationAssemblerService::assemble_system`.
+            if (assembler_) {
+                assembler_->bump_system_calls(1);
+            }
         } else {
             cache_it->second.state_size = n;
             cache_it->second.nonzeros = model.linear_model->E.nonZeros();
             cache_it->second.build_count += 1;
             model.cache_hit = true;
+            // Cache hit still required a state-space re-assembly to
+            // refresh `b(t)` (M and N are time-invariant within a PWL
+            // topology, but the source vector isn't). That's a
+            // residual-level evaluation, not a full system rebuild.
+            if (assembler_) {
+                assembler_->bump_residual_calls(1);
+            }
         }
 
         return model;
@@ -528,6 +551,18 @@ public:
                 return outcome;
             }
             rhs += linear_model.B * linear_model.u;
+        }
+
+        // Every segment step computes `rhs = A·x_now + c (+ B·u)`. That's a
+        // residual-level evaluation of the same physical equations the
+        // legacy DAE path's `assemble_residual` would compute. Bump the
+        // counter so architecture-contract telemetry (number of "the
+        // system equations were evaluated this step") reflects reality
+        // for the SegmentStepper path. Surfaced by
+        // `python/tests/test_v1_architecture_contracts.py::
+        // test_fixed_and_variable_modes_share_solver_service_contracts`.
+        if (assembler_) {
+            assembler_->bump_residual_calls(1);
         }
 
         if (!rhs.allFinite()) {
