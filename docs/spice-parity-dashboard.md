@@ -200,8 +200,8 @@ purely a YAML-side change.
 | **3 — IC alignment** | Applied PSIM-style `uic: true` + `ic: 0.0` to all switching benchmarks. Buck dropped from 23.9 V → 0.10 V error (240× improvement). |
 | **3.5 — fill all nonlinear circuits (10/11)** | Wrote ngspice netlists for `boost_switching_complex`, `interleaved_buck_3ph`, `buck_mosfet_nonlinear`. Calibrated `max_error` / `steady_state_max_error` thresholds against actual measurements so the gates reflect real numerical noise, not aspirational targets. |
 | **4 — CI gate (shipped)** | `.github/workflows/ci.yml` `benchmark` job now installs `ngspice` + `rich`, then runs `python scripts/parity_dashboard.py --ascii --output-dir benchmarks/parity_ci_out` after the existing KPI gate. Exit code 2 (any non-skipped circuit fails) blocks the PR. The full per-circuit JSON / CSV plus `dashboard_summary.json` are uploaded as the `benchmark-kpi-artifacts` artifact for post-mortem. |
-| **5 — device-model deep-dive (shipped)** | See "Fase 5 findings" section below. MOSFET threshold tightened from 0.6 V → 0.4 V after the PWM-duty fix; IGBT benchmark added but skipped pending solver fix. |
-| **6 — IGBT solver fix** | `IGBT.stamp_jacobian_behavioral` should add a smooth `gm = ∂ic/∂vge` (sigmoid through Vth) so Newton can find the DC OP. Or `IGBT.stamp_jacobian_ideal` should seed `pwl_state_` from V(gate) at DC OP time so events aren't required for the first cycle. Fixing this re-enables `buck_igbt` (already wired in `benchmarks/circuits/buck_igbt.yaml` + `benchmarks/ngspice/buck_igbt.cir`). |
+| **5 — device-model deep-dive** | See "Fase 5 findings" section below. MOSFET threshold tightened from 0.6 V → 0.4 V after the PWM-duty fix; IGBT benchmark added but skipped pending solver fix. |
+| **6 — IGBT solver fix (shipped, 11/12 passing)** | Implemented the smooth-`gm` form in `IGBT.collector_current_behavioral` and `IGBT.stamp_jacobian_behavioral` (sigmoid blend with κ=50/V, ~120 mV transition window centered on Vth). Existing `test_ad_igbt_stamp` cross-validation (105 assertions) still passes — saturated tails of the sigmoid are bit-equal to the legacy hard step. Fix narrative below. |
 
 ## Fase 5 findings — device-model deep-dive
 
@@ -271,6 +271,54 @@ Both approaches are localized to `core/include/pulsim/v1/components/igbt.hpp`. T
 `buck_igbt` benchmark stays committed (YAML + .cir) so re-enabling
 parity is a one-line edit in `benchmarks/benchmarks.yaml` once the fix
 lands.
+
+### Phase 6 IGBT fix — shipped (post-Fase 5 follow-up)
+
+The smooth-`gm` approach was implemented:
+
+```cpp
+// core/include/pulsim/v1/components/igbt.hpp
+template <typename S>
+S collector_current_behavioral(S v_g, S v_c, S v_e) const {
+    const S vge = v_g - v_e;
+    const S vce = v_c - v_e;
+    const Real kappa = kSmoothGmSharpness;   // 50 V⁻¹
+    const S sigma_g = 1 / (1 + exp(-kappa * (vge - params_.vth)));
+    const S sigma_d = 1 / (1 + exp(-kappa * vce));
+    const S g_eff = params_.g_off + (params_.g_on - params_.g_off)
+                                   * sigma_g * sigma_d;
+    return g_eff * vce;
+}
+```
+
+`stamp_jacobian_behavioral` was rewritten to compute the same blend
+with closed-form partials and stamp via the standard Norton i_eq form.
+The existing `test_ad_igbt_stamp` test (cross-validates manual vs AD,
+105 assertions across cutoff / on-state / saturation / asymmetric
+emitter cases) **passes after the rewrite** — at every test op-point,
+the sigmoid is fully saturated and the new model gives bit-identical
+`g_eff` and partials to the legacy hard step.
+
+Re-enabling `buck_igbt` also surfaced a **circuit-design issue** in the
+benchmark itself: the original YAML used `v_high=15 V` for the gate
+drive, which is fine for a low-side IGBT but **insufficient for
+high-side**: when V(emitter) rises to ≈ Vcc=24 V on conduction,
+`Vge = 15 − 24 = −9 V` falls below `Vth=5 V` and the IGBT shuts off
+instantly → oscillation. Fixed by raising `v_high` to 35 V (matches
+the buck_mosfet_nonlinear gate-drive convention; needs `V_drive >
+Vcc + Vth`). The ngspice mirror also drives at 35 V, even though the
+ngspice `SW` model is gate-vs-ground (no V(emitter) sensitivity) — the
+matching keeps the two simulators on the same nominal rail.
+
+Final dashboard state after Phase 6:
+
+```
+Result: 11/12 passed   failed=0   skipped=1   errors=0   pass_rate=91.7%
+```
+
+The lone skip remains `periodic_rc_pwm` (shooting / harmonic-balance
+scenarios that aren't comparable to a transient ngspice run — design
+limitation, not a solver issue).
 
 ## See also
 

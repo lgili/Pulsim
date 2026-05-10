@@ -43,28 +43,11 @@ benchmarks:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap, trbdf2]
-  # buck_igbt — ngspice mapping is intentionally held off pending
-  # a Phase-5 IGBT solver fix:
-  #   1. Behavioral path (Auto / default): Pulsim's IGBT stamps a hard
-  #      voltage-controlled conductance with NO `gm = ∂ic/∂vge` term in
-  #      the Jacobian. Newton therefore has no gradient information
-  #      around the Vge-vs-Vth threshold, the DC operating point fails
-  #      to converge ("All random restarts failed" on a trivial
-  #      Vdc + IGBT + Rload circuit — confirmed by direct Python test).
-  #   2. Ideal PWL path (`switching_mode: ideal`, `enable_events: true`):
-  #      runs but commutation events on Pulsim's freewheel diode +
-  #      IGBT pair produce numerical chaos in the first few timesteps
-  #      (V(sw) excursions to ±150 V before settling to ~0 V). Both
-  #      simulators end at V(out) ≈ 0 V, but max_error blows up to 17 V
-  #      in transient.
-  # The .cir + YAML are committed (benchmarks/ngspice/buck_igbt.cir,
-  # benchmarks/circuits/buck_igbt.yaml) so re-enabling is one
-  # ngspice_netlist line addition once either:
-  #   (a) IGBT.stamp_jacobian_behavioral adds an explicit gm = sigmoid
-  #       gradient through the Vth threshold, or
-  #   (b) IGBT.stamp_jacobian_ideal seeds pwl_state from V(gate) at
-  #       DC OP time so events aren't required.
   - path: circuits/buck_igbt.yaml
+    ngspice_netlist: ngspice/buck_igbt.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
     scenarios: [direct_trap, trbdf2]
   - path: circuits/boost_switching_complex.yaml
     ngspice_netlist: ngspice/boost_switching_complex.cir

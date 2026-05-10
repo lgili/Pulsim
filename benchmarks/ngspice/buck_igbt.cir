@@ -14,9 +14,11 @@
 *
 * PWM: 50 kHz, duty=0.4 (PSIM convention: high-time = duty * period
 * exactly). PW = 8.0 µs. TR=TF=1n match Pulsim's instantaneous edges.
+* Drive amplitude = 35 V to keep the high-side IGBT solidly above
+* threshold (Vcc + Vth = 29 V).
 
 Vdc  vcc 0 DC 24
-Vpwm ctrl 0 PULSE(0 15 0 1n 1n 8.0u 20u)
+Vpwm ctrl 0 PULSE(0 35 0 1n 1n 8.0u 20u)
 
 * IGBT emulation: control voltage = V(ctrl), threshold = 5 V (with
 * 0.1 V hysteresis). Closed connects vcc → sw with RON = 1/g_on = 5 mΩ.

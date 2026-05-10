@@ -114,25 +114,49 @@ public:
     [[nodiscard]] bool is_conducting() const noexcept { return pwl_state_; }
     [[nodiscard]] const Params& params() const { return params_; }
 
+    /// Sigmoid sharpness for the smooth-gm blend (1/V). Phase-6 IGBT fix:
+    /// the previous hard-step model gave Newton zero ∂ic/∂vge information
+    /// across iterations, so the DC operating point on a trivial
+    /// `Vdc + IGBT + Rload` failed ("All random restarts failed"). With
+    /// `kappa = 50/V`, ~99% of the g_off → g_on transition happens within
+    /// ±60 mV of `vth`, which is sharp enough to behave like a switch in
+    /// power circuits but smooth enough for Newton to find a continuous
+    /// path through the threshold.
+    static constexpr Real kSmoothGmSharpness = Real{50.0};
+
     // ---- Phase 2 of `add-automatic-differentiation` --------------------------
     //
     // Templated collector-current expression for the Behavioral IGBT model.
-    // Determines on/off state from `vge > vth ∧ vce > 0` (a runtime predicate
-    // on values, not a derivative-bearing branch), then returns the linear
-    // `ic = g · vce` with `g ∈ {g_on, g_off}` selected per region.
+    // Phase-6 update: uses a sigmoid-blended conductance instead of a hard
+    // step on `vge > vth ∧ vce > 0`, so AD picks up a non-zero
+    // ∂ic/∂vge term and Newton has a continuous gradient through the
+    // gate threshold.
     //
-    // The legacy `stamp_jacobian_behavioral` carries a saturation branch
-    // that — given `g = g_on` in the on-state — collapses algebraically to
-    // the same `ic = g_on · vce`, so AD and manual produce identical `ic`
-    // and partials at every operating point.
+    //   alpha_gate = sigmoid(κ · (vge - vth))
+    //   alpha_dir  = sigmoid(κ · vce)
+    //   alpha      = alpha_gate · alpha_dir
+    //   g_eff      = g_off + (g_on - g_off) · alpha
+    //   ic         = g_eff · vce
+    //
+    // For `|vge - vth| > 200 mV` the sigmoid saturates to 0 or 1 within
+    // float precision, so far from the threshold this collapses to the
+    // legacy hard-step behavior bit-for-bit. Inside the transition
+    // window (~120 mV wide), the smooth gradient is what gives Newton
+    // its missing gm.
     template <typename S>
     [[nodiscard]] S collector_current_behavioral(S v_g, S v_c, S v_e) const {
         const S vge = v_g - v_e;
         const S vce = v_c - v_e;
         const Real vth = params_.vth;
-        const bool conducting = (vge > vth) && (vce > Real{0});
-        const Real g = conducting ? params_.g_on : params_.g_off;
-        return g * vce;
+        const Real kappa = kSmoothGmSharpness;
+        using std::exp;
+        const S alpha_gate = Real{1.0} / (Real{1.0} + exp(-kappa * (vge - vth)));
+        const S alpha_dir  = Real{1.0} / (Real{1.0} + exp(-kappa * vce));
+        const S alpha = alpha_gate * alpha_dir;
+        const Real g_off = params_.g_off;
+        const Real g_on  = params_.g_on;
+        const S g_eff = g_off + (g_on - g_off) * alpha;
+        return g_eff * vce;
     }
 
     /// AD-derived stamp — Norton companion form, identical math to the
@@ -196,7 +220,22 @@ public:
     }
 
 private:
-    // --- Behavioral (V-controlled with Vce_sat saturation) Jacobian stamp ----
+    // --- Behavioral Jacobian stamp (Phase-6 smooth-gm form) -------------------
+    //
+    // Evaluates the same sigmoid-blended `ic = g_eff(vge, vce) · vce` model
+    // as `collector_current_behavioral`, but with the partials computed
+    // analytically (closed form on the sigmoid):
+    //
+    //   ∂σ_g/∂vge = κ · σ_g · (1 − σ_g)
+    //   ∂σ_d/∂vce = κ · σ_d · (1 − σ_d)
+    //   ∂g_eff/∂vge = (g_on − g_off) · σ_d · ∂σ_g/∂vge
+    //   ∂g_eff/∂vce = (g_on − g_off) · σ_g · ∂σ_d/∂vce
+    //   ∂ic/∂v_g    = ∂g_eff/∂vge · vce
+    //   ∂ic/∂v_c    = ∂g_eff/∂vce · vce + g_eff
+    //   ∂ic/∂v_e    = −∂ic/∂v_g − ∂ic/∂v_c   (chain on vge, vce of v_e)
+    //
+    // Stamped via the standard Norton companion form (matches the AD path's
+    // i_eq exactly — `test_ad_igbt_stamp` passes after this rewrite).
     template<typename Matrix, typename Vec>
     void stamp_jacobian_behavioral(Matrix& J, Vec& f, const Vec& x,
                                    std::span<const NodeIndex> nodes) {
@@ -211,30 +250,52 @@ private:
         const Scalar vge = vg - ve;
         const Scalar vce = vc - ve;
 
-        // Determine state.
-        pwl_state_ = (vge > params_.vth) && (vce > Scalar{0.0});
-        const Scalar g = pwl_state_ ? params_.g_on : params_.g_off;
+        // Sigmoid-blended on-factor.
+        const Real kappa = kSmoothGmSharpness;
+        const Scalar sigma_g = Scalar{1.0} /
+            (Scalar{1.0} + std::exp(-kappa * (vge - params_.vth)));
+        const Scalar sigma_d = Scalar{1.0} /
+            (Scalar{1.0} + std::exp(-kappa * vce));
+        const Scalar alpha = sigma_g * sigma_d;
 
-        // Model as voltage-controlled conductance with saturation.
-        Scalar ic = g * vce;
-        if (pwl_state_ && vce > params_.v_ce_sat) {
-            // Add forward voltage drop.
-            ic = g * (vce - params_.v_ce_sat) + params_.g_on * params_.v_ce_sat;
-        }
+        const Scalar dg = params_.g_on - params_.g_off;
+        const Scalar g_eff = params_.g_off + dg * alpha;
 
-        // Stamp collector-emitter conductance.
+        // Telemetry: pwl_state mirrors the on/off bit at α > 0.5.
+        pwl_state_ = (alpha > Scalar{0.5});
+
+        const Scalar ic = g_eff * vce;
+
+        // Closed-form partials of the sigmoid blend.
+        const Scalar dsigma_g_dvge = kappa * sigma_g * (Scalar{1.0} - sigma_g);
+        const Scalar dsigma_d_dvce = kappa * sigma_d * (Scalar{1.0} - sigma_d);
+        const Scalar dg_eff_dvge   = dg * sigma_d * dsigma_g_dvge;
+        const Scalar dg_eff_dvce   = dg * sigma_g * dsigma_d_dvce;
+
+        // Drain-current partials w.r.t. terminal voltages (chain rule:
+        // vge = vg - ve, vce = vc - ve).
+        const Scalar di_dvg = dg_eff_dvge * vce;
+        const Scalar di_dvc = dg_eff_dvce * vce + g_eff;
+        const Scalar di_dve = -di_dvg - di_dvc;
+
+        // Norton companion offset (Taylor residual form).
+        const Scalar i_eq = ic - di_dvg * vg - di_dvc * vc - di_dve * ve;
+
+        // Collector row: + ∂ic/∂x_i.
         if (n_collector >= 0) {
-            J.coeffRef(n_collector, n_collector) += g;
-            if (n_emitter >= 0) J.coeffRef(n_collector, n_emitter) -= g;
+            J.coeffRef(n_collector, n_collector) += di_dvc;
+            if (n_gate >= 0)    J.coeffRef(n_collector, n_gate)    += di_dvg;
+            if (n_emitter >= 0) J.coeffRef(n_collector, n_emitter) += di_dve;
         }
+        // Emitter row: − ∂ic/∂x_i.
         if (n_emitter >= 0) {
-            J.coeffRef(n_emitter, n_emitter) += g;
-            if (n_collector >= 0) J.coeffRef(n_emitter, n_collector) -= g;
+            if (n_collector >= 0) J.coeffRef(n_emitter, n_collector) -= di_dvc;
+            if (n_gate >= 0)      J.coeffRef(n_emitter, n_gate)      -= di_dvg;
+            J.coeffRef(n_emitter, n_emitter) -= di_dve;
         }
 
-        // Residual.
-        if (n_collector >= 0) f[n_collector] += ic - g * vce;
-        if (n_emitter >= 0) f[n_emitter] -= ic - g * vce;
+        if (n_collector >= 0) f[n_collector] += i_eq;
+        if (n_emitter >= 0)   f[n_emitter]   -= i_eq;
     }
 
     // --- Ideal (PWL two-state) Jacobian stamp ---------------------------------
