@@ -285,7 +285,16 @@ public:
             }, devices_[i]);
         }
 
-        // Apply capacitor initial voltages.
+        // Apply capacitor initial voltages. When a node is already
+        // pinned by a voltage source, do NOT overwrite it with the
+        // capacitor IC — voltage sources dominate (the cap is in
+        // parallel with a stiff voltage rail; its IC is dependent,
+        // not independent). This avoids initial_state() returning a
+        // state that contradicts the source-driven nodes when the
+        // cap shares a node with a voltage source — bug surfaced
+        // by `level1_components/test_basic_components.py::TestCapacitor`,
+        // where `V1 || C1(ic=0)` previously seeded V(in)=0 instead
+        // of V(in)=V_source, producing a 2× source-voltage transient.
         for (std::size_t i = 0; i < devices_.size(); ++i) {
             const auto& conn = connections_[i];
             std::visit([&](const auto& dev) {
@@ -296,9 +305,13 @@ public:
                     Real v = dev.voltage_prev();
 
                     if (n1 >= 0 && n2 < 0) {
-                        set_node(n1, v);
+                        if (!node_set[static_cast<std::size_t>(n1)]) {
+                            set_node(n1, v);
+                        }
                     } else if (n2 >= 0 && n1 < 0) {
-                        set_node(n2, -v);
+                        if (!node_set[static_cast<std::size_t>(n2)]) {
+                            set_node(n2, -v);
+                        }
                     } else if (n1 >= 0 && n2 >= 0) {
                         bool n1_set = node_set[static_cast<std::size_t>(n1)];
                         bool n2_set = node_set[static_cast<std::size_t>(n2)];

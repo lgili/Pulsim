@@ -392,6 +392,76 @@ def _add_diode_with_params_support(self, name, n1, n2, *args, **kwargs):
 _CircuitWrapper.add_diode = _add_diode_with_params_support  # type: ignore[attr-defined]
 
 
+# =============================================================================
+# Legacy SwitchParams + add_switch(name, n1, n2, ctrl, ctrl_neg, params)
+#
+# Legacy tests pass a `SwitchParams` instance to `add_switch` and use a
+# 4-node call form to wire a voltage-controlled switch:
+#
+#   sw_params = sl.SwitchParams()
+#   sw_params.ron = 0.01
+#   sw_params.roff = 1e9
+#   sw_params.vth = 2.5
+#   circuit.add_switch("S1", "in", "out", "ctrl", "0", sw_params)
+#
+# The native `Circuit.add_switch` is a 2-node uncontrolled switch
+# (boolean closed flag). The legacy semantics map cleanly to
+# `Circuit.add_vcswitch` when `ctrl_neg == ground`:
+#   ron → g_on = 1/ron, roff → g_off = 1/roff, vth → v_threshold
+
+class SwitchParams:
+    """Voltage-controlled switch parameters compatible with legacy tests.
+
+    Attributes:
+        ron: ON-state resistance (Ω). Default 1 mΩ.
+        roff: OFF-state resistance (Ω). Default 1 GΩ.
+        vth: Control threshold voltage (V). ctrl > vth → switch ON.
+    """
+
+    __slots__ = ("ron", "roff", "vth")
+
+    def __init__(self, ron: float = 1e-3, roff: float = 1e9, vth: float = 2.5):
+        self.ron = float(ron)
+        self.roff = float(roff)
+        self.vth = float(vth)
+
+
+_native_add_switch = Circuit.add_switch  # type: ignore[attr-defined]
+_native_add_vcswitch = Circuit.add_vcswitch  # type: ignore[attr-defined]
+
+
+def _add_switch_with_params_support(self, name, n1, n2, *args, **kwargs):
+    """Override `add_switch` to also accept the legacy 4-node + params
+    form, dispatching to `add_vcswitch` when applicable. Native form
+    `(name, n1, n2, closed, g_on, g_off)` continues to work."""
+    n1_resolved = _resolve_node(self, n1)
+    n2_resolved = _resolve_node(self, n2)
+
+    # Legacy form: (name, n1, n2, ctrl, ctrl_neg, params)
+    # `ctrl_neg` must be ground for the native vcswitch (which is
+    # ground-referenced). Differential control pairs are not supported.
+    if (
+        len(args) == 3
+        and isinstance(args[2], SwitchParams)
+    ):
+        ctrl_pos = _resolve_node(self, args[0])
+        ctrl_neg = _resolve_node(self, args[1])
+        params = args[2]
+        if ctrl_neg == self.ground():
+            return _native_add_vcswitch(
+                self, name, ctrl_pos, n1_resolved, n2_resolved,
+                params.vth, 1.0 / params.ron, 1.0 / params.roff,
+            )
+        # Differential ctrl not supported — fall through to native
+        # which will reject the args.
+
+    # Native form passthrough.
+    return _native_add_switch(self, name, n1_resolved, n2_resolved, *args, **kwargs)
+
+
+_CircuitWrapper.add_switch = _add_switch_with_params_support  # type: ignore[attr-defined]
+
+
 # Re-export the wrapped class as the public `Circuit`. Existing user
 # code that does `from pulsim import Circuit` and `isinstance(c, Circuit)`
 # checks continues to work — `_CircuitWrapper` IS-A `Circuit` (subclass).
@@ -935,6 +1005,7 @@ __all__ = [
     "IdealDiode",
     "IdealSwitch",
     "DiodeParams",
+    "SwitchParams",
     "MOSFETParams",
     "MOSFET",
     "IGBTParams",
