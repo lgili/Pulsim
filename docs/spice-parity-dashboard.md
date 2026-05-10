@@ -612,27 +612,91 @@ to keep V_out near V_in. Expose `hysteresis` as a fourth
 
 Effect: 9/10 → 10/10 in `test_switch_circuits.py`.
 
-### Final outcome (Phase 13)
+### Phase-13 mid-state
+
+* **C++ tests**: all 4021 + 1090 assertions pass.
+* **SPICE parity**: 13/15 unchanged.
+* **Python validation suite**: 380 → 402 passing, 14 → 2 failures.
+
+### Phase 14 — last two regressions cleaned up
+
+After Phase 13 the residue was 2 deeper failures. The user's
+directive was "fix these two." Both were real Pulsim bugs (a missing
+telemetry contract and a fundamentally wrong residual sign in the
+MOSFET stamp), and both got fixed cleanly.
+
+#### `e1d9a31` — SegmentStepper bumps assembler telemetry counters
+
+`python/tests/test_v1_architecture_contracts.py::
+test_fixed_and_variable_modes_share_solver_service_contracts`
+asserted `backend.equation_assemble_system_calls >= 1` and the
+matching `_residual_calls >= 1` to verify the architectural contract
+that Fixed-step and Variable-step modes go through the same solver
+services. After the SegmentStepper refactor, both modes route through
+`DefaultSegmentStepperService::try_advance` for admissible PWL
+state-space topologies — and that path computes `rhs = A·x_now + c`
+from a cached linear model, completely bypassing
+`EquationAssemblerService::assemble_*`. Counters stayed at 0; the
+test failed.
+
+The bypass is a real architectural fact, not a bug. SegmentStepper IS
+doing the equivalent of "evaluate the residual at this x" — it just
+uses a different code path. Wire that fact into the telemetry:
+
+  * Add `EquationAssemblerService::bump_system_calls(n)` and
+    `bump_residual_calls(n)` as virtual no-op defaults.
+  * `DefaultSegmentModelService::build_model`: cache miss bumps
+    system_calls, cache hit bumps residual_calls (the `b(t)` refresh
+    is still a residual-level evaluation).
+  * `DefaultSegmentStepperService::try_advance` on every successful
+    step bumps residual_calls (rhs = A·x + c is a residual eval).
+
+#### `924e2e8` — MOSFET runtime stamp uses physical Newton residual
+
+`runtime_circuit.hpp::stamp_mosfet_jacobian` was using the
+Norton-companion form `f -= i_eq` where `i_eq = id - Σ ∂id/∂x·x`.
+That form is the right shape for MNA-style direct assembly `G·x = b`,
+but Pulsim's Newton iterates `J·Δx = −f` — with the Norton stamp, the
+convergence equation algebraically reduces to
+`Σ di_dvN·vN = i_R + id`, in which the vth dependency cancels out
+through `di_dvd = kp·Vov` and `di_dvg = kp·Vds`. Newton settled on a
+non-physical fixed point where Pulsim's residual was 0 but
+`id = i_R` was violated by ~50 %.
+
+Smoking gun from
+`level3_nonlinear/test_mosfet.py::test_threshold_voltage_effect`:
+
+  V_DD=5 V, V_GATE=4 V, R_load=100 Ω, kp=0.5:
+    vth=1 → V_drain = 0.0249 V  (analytical 0.033 V — 25 % short)
+    vth=2 → V_drain = 0.0249 V  (analytical 0.050 V — 50 % short)
+    vth=3 → DC OP FAILS         (Newton bouncing across vth boundary)
+
+  All three settled on the SAME V_drain regardless of vth — the
+  algebraic cancellation is visible.
+
+Replace the Norton companion stamp with the standard Newton-Raphson
+form:
+  J[drain, x_N] += +∂id/∂x_N   (same as before)
+  f[drain]      += +id(x_old)  (was: −i_eq)
+
+This matches the sign convention already used by R, IGBT, and
+Capacitor stamps (`f[node] += current leaving node`). Newton converges
+directly to physical KCL `id = i_R`. Post-fix values match the
+analytical quadratic solution to within floating-point precision for
+all three vth.
+
+### Final outcome (after Phase 14)
 
 * **C++ tests**: all 4021 + 1090 assertions pass (273 + 138 cases).
 * **SPICE parity**: 13/15 unchanged.
-* **Python validation suite**: 380 → **402 passing tests**, 14 → 2
-  failures.
-* The two remaining failures are:
-  * `test_v1_architecture_contracts::test_fixed_and_variable_modes
-    _share_solver_service_contracts` — the SegmentStepper bypasses
-    the `EquationAssemblerService` (uses a cached linear model
-    instead of re-assembling), so the test's
-    `equation_assemble_system_calls >= 1` assertion fails. This is
-    an outdated test contract from before the SegmentStepper
-    refactor and needs the test to be updated rather than the
-    runtime.
-  * `test_mosfet.py::TestMOSFETParameters::test_threshold_voltage
-    _effect` for `vth=3`, `kp=0.5` — Newton converges to a fixed
-    point with non-zero residual (~0.025 A on a 0.05 A scale).
-    Deferred to a follow-up — needs a deeper investigation of the
-    smooth-model's Jacobian at the cutoff↔triode boundary or a
-    tighter Newton convergence test inside `DCConvergenceSolver`.
+* **Python validation suite**: 380 → **404 passing tests, 0
+  failing** (1 xfail + 1 xpass are intentional Shockley-diode
+  edge cases).
+* All component-coverage tests pass: RC/RL/RLC step response,
+  capacitor/inductor IC handling, diode forward/reverse bias,
+  voltage-controlled switch, MOSFET cutoff/triode/saturation at
+  multiple `vth` and `kp`, boost/buck converter DC analyses,
+  thermal simulation.
 
 ## See also
 
