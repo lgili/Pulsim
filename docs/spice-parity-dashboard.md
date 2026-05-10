@@ -410,6 +410,118 @@ all 11 previously-passing benchmarks plus 2 new ones (`current_source_
 rc`, `pulse_voltage_rl`) passing. This is a *measurement* expansion,
 not a regression.
 
+## Phase 12 — Python validation suite bug-hunt
+
+After the SPICE parity dashboard stabilized at 13/15, the next ring
+of testing brought the Python validation suite (`python/tests/`) into
+focus. Running it exposed ~88 failing tests, most of which were API
+mismatches where the test code was written against an older Python
+API. A handful of real Pulsim bugs also fell out. Five commits cover
+them.
+
+### `fd57717` — legacy `Circuit.add_*` string-node + SimulationOptions
+
+Older test code passes string node names to every `add_*` method
+(`circuit.add_voltage_source("V1", "in", "0", 5.0)`) and uses the
+legacy attribute names `opts.use_ic`, `opts.dtmin`,
+`opts.integration_method`, plus `IntegrationMethod.GEAR2` (now
+`Integrator.BDF2`). Pybind11 doesn't permit monkey-patching bound
+methods, so the wrapper subclasses `Circuit` and `SimulationOptions`,
+then re-exports the wrappers as the public names. The
+`IntegrationMethod` proxy maps legacy enum names to current
+`Integrator` values.
+
+### `41232ef` — `SimulationResult.signal_names` + `use_ic` actually propagates
+
+Two real bugs:
+
+1. `SimulationResult` had no `signal_names` attribute. The C++ struct
+   doesn't carry node-name metadata (it lives on `Circuit`) and isn't
+   bound with `dynamic_attr`, so we couldn't even patch it from
+   Python. Fix: a Python proxy (`_SimulationResultProxy`) that
+   forwards every attribute access to the raw C++ result and adds a
+   `signal_names` list pulled from the captured circuit.
+
+2. `opts.use_ic = True` was silently ignored end-to-end. The C++
+   struct has the field (`core/include/pulsim/types.hpp:105`) but the
+   Python binding (around `bindings.cpp:1390`) never exposed it. The
+   previous wrapper "aliased" `use_ic` to `uic`, but `uic` wasn't
+   bound either, so the round-trip happened on a Python attribute the
+   C++ side never read. **Result: every test that set `use_ic = True`
+   was actually running through DC operating point** (capacitor
+   voltages immediately at steady-state, ignoring `ic=0.0`), which
+   made every RC/RL/RLC step-response test fail with
+   `max_error ≈ V_source`. Fix: capture the flag at
+   `Simulator.__init__`; on a no-arg `run_transient()` with the flag
+   set, automatically seed `x0` from `circuit.initial_state()`.
+
+3. `opts.dtmax` (no underscore) was unbound — the validation
+   framework's `pulsim_options={"dtmax": dt}` was a no-op. Aliased to
+   `dt_max` on the wrapper.
+
+### `a0849fb` — legacy `DiodeParams` + `add_diode(..., params)` overload
+
+`MOSFETParams` and `IGBTParams` are bound, but `DiodeParams` is not
+(Pulsim's `IdealDiode` uses g_on/g_off directly). Legacy tests follow
+the Params pattern. Add a Python-only `DiodeParams` (`ideal`, `g_on`,
+`g_off`, `is_`, `n`) and override `Circuit.add_diode` to accept it as
+the 4th positional arg.
+
+### `d2cacf6` — voltage sources dominate capacitor IC in `initial_state()` (C++)
+
+`Circuit::initial_state()` processed capacitors AFTER voltage sources
+but unconditionally overwrote source-pinned node voltages with the
+cap's IC. For `V1 || C1(ic=0)`:
+
+```
+1. Process V1 → V(in) ← V_source (5V) ✓
+2. Process C1 → V(in) ← C1.voltage_prev() (0V)  ← OVERWROTE
+```
+
+The wrong IC then fed the trapezoidal integrator with `use_ic=True`,
+which converged to V(in) = 2 · V_source (the source's KCL forcing
+fought the initial-condition violation). Fix: skip the cap-IC override
+when the node is already in `node_set`. The cap's IC is dependent,
+not independent — the voltage source dominates.
+
+### `7b2e078` — `add_vcswitch` runtime stamp honors device hysteresis (C++)
+
+`runtime_circuit.hpp::stamp_vcswitch_jacobian` hardcoded
+`Real hysteresis = 0.5` instead of `dev.hysteresis()`. The device's
+configured hysteresis was completely ignored by the assembled
+Jacobian — only `should_commute` (kernel event detection) used it via
+`event_hysteresis_`. Result: even with v_ctrl 2.5 V below v_threshold
+the sigmoid still gave a ~5e-5 fraction of g_on; on a 1 kΩ load with
+g_on=100 the OFF state still showed V_out ≈ 8.2 V.
+
+Narrowing the runtime hysteresis broke the buck-event-detection
+regression in `test_v1_kernel.cpp`, so the fix exposes `hysteresis` as
+the new last argument of `Circuit::add_vcswitch` (default 0.5 V to
+preserve legacy behavior), aligns the `VoltageControlledSwitch`
+member-init to 0.1 V (matching `Params{}` default — they were
+inconsistent before), and has the new Python `SwitchParams` wrapper
+pass 0.05 V explicitly so sharp-threshold tests resolve cleanly.
+
+### Phase-12 outcome
+
+* **C++ tests**: all 4021 + 1090 assertions pass (273 + 138 cases) —
+  no regression from the two C++ fixes.
+* **SPICE parity**: 13/15 still passes; all previously passing
+  benchmarks unchanged.
+* **Python validation suite**: 380+ tests pass, ~14 still fail. The
+  residue is real-but-deeper Pulsim issues:
+  * Numerical accuracy on RC/RL/RLC step response (1.3 % vs 1 %
+    tolerance) — TRBDF2 + adaptive timestep for stiff RL produces
+    drift when seeded with a non-DC-OP `x0`.
+  * MOSFET DC OP convergence with `V_GATE=4 V`, `vth=2/3 V` — the
+    smooth-region fix from Phase 8 isn't enough for these specific
+    parameter combos.
+  * VC-switch threshold test asks for V_out < 1 V when v_ctrl is only
+    100 mV below threshold — outside the smooth model's range, would
+    need Ideal mode.
+  * Telemetry counter `equation_assemble_system_calls` not
+    incremented by the SegmentStepper path.
+
 ## See also
 
 - [`benchmarks-and-parity.md`](benchmarks-and-parity.md) — the broader
