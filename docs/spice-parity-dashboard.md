@@ -502,25 +502,137 @@ member-init to 0.1 V (matching `Params{}` default — they were
 inconsistent before), and has the new Python `SwitchParams` wrapper
 pass 0.05 V explicitly so sharp-threshold tests resolve cleanly.
 
-### Phase-12 outcome
+### Phase-12 outcome (initial — before deeper round)
 
 * **C++ tests**: all 4021 + 1090 assertions pass (273 + 138 cases) —
   no regression from the two C++ fixes.
 * **SPICE parity**: 13/15 still passes; all previously passing
   benchmarks unchanged.
-* **Python validation suite**: 380+ tests pass, ~14 still fail. The
-  residue is real-but-deeper Pulsim issues:
-  * Numerical accuracy on RC/RL/RLC step response (1.3 % vs 1 %
-    tolerance) — TRBDF2 + adaptive timestep for stiff RL produces
-    drift when seeded with a non-DC-OP `x0`.
-  * MOSFET DC OP convergence with `V_GATE=4 V`, `vth=2/3 V` — the
-    smooth-region fix from Phase 8 isn't enough for these specific
-    parameter combos.
-  * VC-switch threshold test asks for V_out < 1 V when v_ctrl is only
-    100 mV below threshold — outside the smooth model's range, would
-    need Ideal mode.
-  * Telemetry counter `equation_assemble_system_calls` not
-    incremented by the SegmentStepper path.
+* **Python validation suite**: 380+ tests pass, ~14 still fail.
+
+## Phase 13 — reliability round (real Pulsim bugs surfaced post-API-fixes)
+
+After the API-mismatch noise cleared in Phase 12, the residue
+exposed six deeper correctness bugs in the simulator itself. The
+user's directive was to make Pulsim *reliable*: every component
+tested, every result trustable. Six more commits fix them.
+
+### `cc7e85e` — legacy `run_transient(...)` bypasses `make_robust_transient_options`
+
+`pulsim._pulsim.run_transient(circuit, t_start, t_stop, dt, x0)`
+unconditionally overwrote the integrator + timestep config to
+TRBDF2 + adaptive + LTE-controlled stepping + stiffness switching
+to BDF1. For first-order RL circuits seeded with a non-DC-OP `x0`
+— e.g. `level1_linear/test_rl_circuits.py::TestRLStepResponse::
+test_step_response_accuracy` which sets `V_inductor = V_source` at
+t = 0 (treating L as an open circuit, even though the DC OP says
+V_inductor = 0) — the LTE controller grew `dt` toward `tau`, where
+TRBDF2 is numerically unstable. The integrator then drifted the
+source-pinned node voltages by orders of magnitude (V_source went
+from 10 V to **5080 V** at t = 5τ) and reported `success = True`.
+
+Workaround: route the Python wrapper's `run_transient(...)` through
+`Simulator(...)` with a fixed-step Trapezoidal default — stable for
+the dt the user explicitly chose. Callers that need TRBDF2 +
+adaptive construct a `Simulator` directly with `SimulationOptions`
+of their choice.
+
+Effect: `level1_linear/test_*_circuits.py` 9/19 → 19/19 pass.
+
+### `cc25034` — KCL-consistent V-source branch currents in `initial_state()`
+
+`Circuit::initial_state()` set node voltages from source DCs +
+capacitor IC + inductor IC for branch currents, but left V-source
+branch currents at zero. For `V1=10V → R=1kΩ → C(ic=0)`:
+
+    x_initial = [V_in=10, V_out=0, I_branch_V1=0]
+
+The KCL residual at the source-pos node is
+`I_R + I_branch_V1 = 0.01 + 0 = 0.01 ≠ 0` — inconsistent with the
+seeded voltages. With `use_ic=True`, this state then fed the
+BDF1 / Trapezoidal integrator which "absorbed" the inconsistency
+on the first step, oscillating `I_branch_V1` between 0 and
+2·I_true on alternating samples
+(`level1_components/test_basic_components.py::TestCapacitor::
+test_capacitor_charging_current` got 20 mA where the analytical
+charging current is 10 mA).
+
+Fix: after the existing voltage / inductor-current passes, run a
+KCL pass that for each V-source branch sums the deterministic
+neighbor currents (resistor / inductor IC / current source /
+other V-source) and sets the branch current to `−sum`. Added
+`history_initialized()` flags to `Capacitor` and `Inductor` so
+the runtime cap/inductor stamps use BDF1 for the very first step
+from IC, avoiding trapezoidal startup ringing.
+
+Effect: `level1_components/test_basic_components.py` 18/20 → 20/20.
+
+### `9a1f021` + `dbc511a` — MOSFET runtime smooth stamp + DC Newton aids
+
+The runtime's `stamp_mosfet_jacobian` (in `runtime_circuit.hpp`)
+duplicated the legacy hard-branch
+`if (vgs <= vth) ... else if (vds < vov) ... else ...` code path,
+even though `MOSFET::stamp_jacobian_behavioral` (in `mosfet.hpp`)
+got the Phase-8 smooth-region rewrite. The runtime path is what
+`assemble_jacobian` actually invokes, so the smooth model wasn't
+reaching DC OP / Newton at all.
+
+Surfaced by `level3_nonlinear/test_mosfet.py::TestMOSFETParameters::
+test_threshold_voltage_effect` — fixed-gate NMOS (V_GATE=4 V) with
+vth ∈ {2, 3} V and kp=0.5 in deep triode failed across all DC
+strategies (Direct / GminStepping / PseudoTransient / SourceStepping)
+because Newton couldn't cross the hard cutoff↔triode boundary
+from x=0.
+
+Two changes:
+  1. Replace `stamp_mosfet_jacobian` with the smooth blend (κ=50/V)
+     that matches `MOSFET::stamp_jacobian_behavioral` bit-for-bit
+     at saturated tails. Forced-PWL state stays as a pure-conductance
+     shortcut.
+  2. `DCConvergenceSolver::solve` now constructs its inner Newton
+     with `auto_damping=true` by default (no step limiting / trust
+     region — those broke boost DC OP, which has legitimate
+     large-step requirements).
+
+Effect: 7/8 MOSFET tests pass (vth=3 edge case still fails — Newton
+finds a non-physical fixed point with non-zero residual; this is
+the remaining MOSFET bug, deferred).
+
+### `3b24d35` — `SwitchParams.hysteresis` user-tunable, default 0.01 V
+
+`level3_nonlinear/test_switch_circuits.py::TestBasicSwitch::
+test_switch_threshold` sweeps V_ctrl across the threshold in
+100 mV steps and asserts a near-binary V_out. With the previous
+0.05 V hysteresis default, the tanh-smoothed behavioral conductance
+at `V_ctrl = vth − 0.1` gave sigmoid ≈ 0.018 — 1.8 % of g_on, enough
+to keep V_out near V_in. Expose `hysteresis` as a fourth
+`SwitchParams` attribute defaulted to 0.01 V (sigmoid ≈ {0, 1} at
+±100 mV from threshold). Users can soften with
+`SwitchParams(hysteresis=0.1)`.
+
+Effect: 9/10 → 10/10 in `test_switch_circuits.py`.
+
+### Final outcome (Phase 13)
+
+* **C++ tests**: all 4021 + 1090 assertions pass (273 + 138 cases).
+* **SPICE parity**: 13/15 unchanged.
+* **Python validation suite**: 380 → **402 passing tests**, 14 → 2
+  failures.
+* The two remaining failures are:
+  * `test_v1_architecture_contracts::test_fixed_and_variable_modes
+    _share_solver_service_contracts` — the SegmentStepper bypasses
+    the `EquationAssemblerService` (uses a cached linear model
+    instead of re-assembling), so the test's
+    `equation_assemble_system_calls >= 1` assertion fails. This is
+    an outdated test contract from before the SegmentStepper
+    refactor and needs the test to be updated rather than the
+    runtime.
+  * `test_mosfet.py::TestMOSFETParameters::test_threshold_voltage
+    _effect` for `vth=3`, `kp=0.5` — Newton converges to a fixed
+    point with non-zero residual (~0.025 A on a 0.05 A scale).
+    Deferred to a follow-up — needs a deeper investigation of the
+    smooth-model's Jacobian at the cutoff↔triode boundary or a
+    tighter Newton convergence test inside `DCConvergenceSolver`.
 
 ## See also
 
