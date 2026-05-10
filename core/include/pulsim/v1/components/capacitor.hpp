@@ -30,7 +30,8 @@ public:
         : Base(std::move(name))
         , capacitance_(capacitance)
         , v_prev_(initial_voltage)
-        , i_prev_(0.0) {}
+        , i_prev_(0.0)
+        , history_initialized_(false) {}
 
     /// Stamp implementation using Trapezoidal companion model
     /// Correct formula: I_eq = (2C/dt) * V_n - (2C/dt) * V_{n-1} - I_{n-1}
@@ -76,7 +77,18 @@ public:
         // Note: v_current and i_current must be set by the solver after each step
         v_prev_ = v_current_;
         i_prev_ = i_current_;
+        history_initialized_ = true;
     }
+
+    /// Whether the capacitor has stored a real previous-step current
+    /// (i.e. not just the constructor's default `i_prev_=0`). Used by
+    /// the runtime to pick BDF1 for the first step from initial
+    /// conditions, avoiding the trapezoidal startup ringing where
+    /// `i_n = g_eq·v_n - i_{n-1}` doubles the cap current when
+    /// `i_{n-1}` defaults to 0 instead of the analytical t=0+ value.
+    [[nodiscard]] bool history_initialized() const { return history_initialized_; }
+    void mark_history_initialized() { history_initialized_ = true; }
+    void reset_history() { history_initialized_ = false; }
 
     /// Set current state (called by solver after each Newton iteration)
     void set_current_state(Scalar v, Scalar i) {
@@ -103,6 +115,9 @@ private:
     Scalar i_prev_;      // Current at previous timestep (CRITICAL for Trapezoidal!)
     Scalar v_current_ = 0.0;  // Current voltage (set by solver)
     Scalar i_current_ = 0.0;  // Current current (set by solver)
+    bool history_initialized_ = false;  // True once the first accepted
+                                         // step's current/voltage are
+                                         // stored in i_prev_/v_prev_.
 };
 
 template<>

@@ -369,6 +369,122 @@ public:
             }, devices_[i]);
         }
 
+        // Compute KCL-consistent V-source branch currents from the
+        // node voltages and the deterministic device currents (resistor,
+        // inductor IC). Without this pass `initial_state()` returns
+        // x[branch_V] = 0, which makes the t=0+ residual at the source
+        // node non-zero by `i_R = (V_src − V_neighbor)/R`. Trapezoidal /
+        // BDF1 then "settle" the inconsistency by oscillating
+        // `x[branch_V]` between 0 and 2·I_true on the first few
+        // sampled steps — surfaced by
+        // `level1_components/test_basic_components.py::TestCapacitor::test_capacitor_charging_current`.
+        //
+        // For each V-source between (npos, nneg):
+        //   I_branch[V] = −(Σ currents leaving npos via other devices)
+        //
+        // We sum over the deterministic non-V-source neighbors:
+        //   - Resistors:        i = (v_npos − v_other) / R
+        //   - Inductors:        i = ±x[branch_inductor] depending on
+        //                          which terminal of the inductor lands
+        //                          on `npos`
+        //   - Current sources:  i = ±dev.current()
+        //
+        // Reactive devices in their IC state (cap at v_prev, inductor at
+        // i_prev) are treated as instantaneous V/I sources for this
+        // single-node KCL — that is, the cap appears as a voltage rail
+        // (no current contribution at t=0+ unless other devices push
+        // through it) and the inductor as a forced current.
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& vs_conn = connections_[i];
+            if (!std::holds_alternative<VoltageSource>(devices_[i])
+                && !std::holds_alternative<PWMVoltageSource>(devices_[i])
+                && !std::holds_alternative<SineVoltageSource>(devices_[i])
+                && !std::holds_alternative<PulseVoltageSource>(devices_[i])) {
+                continue;
+            }
+            if (vs_conn.branch_index < 0 || vs_conn.branch_index >= system_size()) {
+                continue;
+            }
+            const Index npos = vs_conn.nodes[0];
+            if (npos < 0) {
+                // Source-pos at ground: the branch current is determined
+                // by the negative-side KCL instead. Skip for now (rare).
+                continue;
+            }
+
+            Real sum_leaving = 0.0;
+            for (std::size_t j = 0; j < devices_.size(); ++j) {
+                if (j == i) continue;  // Skip the V-source itself.
+                const auto& other_conn = connections_[j];
+                std::visit([&](const auto& other_dev) {
+                    using OT = std::decay_t<decltype(other_dev)>;
+                    if constexpr (std::is_same_v<OT, Resistor>) {
+                        const Index a = other_conn.nodes[0];
+                        const Index b = other_conn.nodes[1];
+                        const Real R = other_dev.resistance();
+                        if (R <= 0.0) return;
+                        const Real va = (a >= 0) ? x[a] : 0.0;
+                        const Real vb = (b >= 0) ? x[b] : 0.0;
+                        // Current leaves npos only if npos is a or b.
+                        if (a == npos) {
+                            sum_leaving += (va - vb) / R;
+                        } else if (b == npos) {
+                            sum_leaving += (vb - va) / R;
+                        }
+                    } else if constexpr (std::is_same_v<OT, Inductor>) {
+                        // Inductor branch current is x[branch] (set above
+                        // from IC). Convention: branch_current is the
+                        // current flowing from nodes[0] to nodes[1].
+                        const Index a = other_conn.nodes[0];
+                        const Index b = other_conn.nodes[1];
+                        const Index br = other_conn.branch_index;
+                        if (br < 0) return;
+                        const Real i_ind = x[br];
+                        if (a == npos) {
+                            sum_leaving += i_ind;
+                        } else if (b == npos) {
+                            sum_leaving -= i_ind;
+                        }
+                    } else if constexpr (std::is_same_v<OT, CurrentSource>) {
+                        // Current source pushes `dev.current()` from
+                        // nodes[0] to nodes[1] (Pulsim convention).
+                        const Index a = other_conn.nodes[0];
+                        const Index b = other_conn.nodes[1];
+                        const Real i_cs = other_dev.current();
+                        if (a == npos) {
+                            sum_leaving += i_cs;
+                        } else if (b == npos) {
+                            sum_leaving -= i_cs;
+                        }
+                    } else if constexpr (std::is_same_v<OT, VoltageSource>
+                                      || std::is_same_v<OT, PWMVoltageSource>
+                                      || std::is_same_v<OT, SineVoltageSource>
+                                      || std::is_same_v<OT, PulseVoltageSource>) {
+                        // Other V-sources contribute their (already-set)
+                        // branch current. Convention: branch leaves
+                        // nodes[0] (npos of the source).
+                        const Index a = other_conn.nodes[0];
+                        const Index b = other_conn.nodes[1];
+                        const Index br = other_conn.branch_index;
+                        if (br < 0) return;
+                        const Real i_other = x[br];
+                        if (a == npos) {
+                            sum_leaving += i_other;
+                        } else if (b == npos) {
+                            sum_leaving -= i_other;
+                        }
+                    }
+                    // Capacitors, diodes, switches, MOSFETs, IGBTs:
+                    // contribute either 0 at IC (cap is a v_prev rail
+                    // with no current at t=0+ from the integrator's
+                    // companion model) or are nonlinear (handled by
+                    // Newton at the first transient step). Skipping
+                    // them here is conservative.
+                }, devices_[j]);
+            }
+            x[vs_conn.branch_index] = -sum_leaving;
+        }
+
         return x;
     }
 
@@ -1730,6 +1846,13 @@ public:
                     Real v = v1 - v2;
 
                     Real i = 0.0;
+                    // Mirror the stamp's `!history_initialized()` first-step
+                    // BDF1 path so the recorded `i_prev_` matches the value
+                    // used to assemble the Jacobian. If we stamp BDF1 but
+                    // record the trapezoidal-doubled current, the next step
+                    // sees a stale `i_prev_` and propagates the oscillation.
+                    const bool use_bdf1_first_step =
+                        !dev.history_initialized() && !stage_context_.active;
                     if (initialize) {
                         // At t=0: set v_prev = v, i_prev = 0 (DC steady state)
                         i = 0.0;
@@ -1745,7 +1868,7 @@ public:
                         Real vdot1 = stage_cap_vdot_[i];
                         Real vdot2 = (v - v_prev - dt_total * stage_context_.a21 * vdot1) / (a22 * dt_total);
                         i = dev.capacitance() * vdot2;
-                    } else if (integration_order_ == 1) {
+                    } else if (integration_order_ == 1 || use_bdf1_first_step) {
                         // Backward Euler: i = C * (v_n - v_{n-1}) / dt
                         Real g_eq = dev.capacitance() / timestep_;
                         i = g_eq * (v - dev.voltage_prev());
@@ -3249,8 +3372,18 @@ private:
                 Real vdot1 = stage_cap_vdot_[device_index];
                 g_eq = C / (a22 * dt_total);
                 i_hist = -g_eq * (v_prev + dt_total * stage_context_.a21 * vdot1);
-            } else if (integration_order_ == 1) {
+            } else if (integration_order_ == 1 || !dev.history_initialized()) {
                 // Backward Euler: i = (C/dt) * (v - v_prev)
+                //
+                // Also used as the first-step warm-up when the cap's
+                // history is not yet populated (i.e. `i_prev_` still
+                // sits at its constructor default of 0). Trapezoidal
+                // applied at this boundary doubles the cap current
+                // (`i_n = g_eq·v_n - 0` instead of the analytical
+                // `g_eq·(v_n - v_{n-1}) - i_{analytical_t0+}`), which
+                // shows up as I(V1) alternating between 0 and 2·I_true
+                // on the first few samples — surfaced by
+                // `level1_components/test_basic_components.py::TestCapacitor::test_capacitor_charging_current`.
                 g_eq = C / timestep_;
                 i_hist = -g_eq * v_prev;
             } else {
@@ -3290,8 +3423,12 @@ private:
                 Real i_dot1 = stage_ind_idot_[device_index];
                 coeff = L / (a22 * dt_total);
                 v_eq = -coeff * (i_prev + dt_total * stage_context_.a21 * i_dot1);
-            } else if (integration_order_ == 1) {
+            } else if (integration_order_ == 1 || !dev.history_initialized()) {
                 // Backward Euler: v_n - (L/dt) * i_n = - (L/dt) * i_{n-1}
+                // First-step warm-up when history is not yet populated
+                // (mirrors the capacitor logic above). Trapezoidal at
+                // step 1 with `v_prev_=0` would alternate the inductor
+                // voltage between 0 and 2·V_true.
                 coeff = L / timestep_;
                 v_eq = -coeff * i_prev;
             } else {

@@ -75,12 +75,23 @@ public:
     void update_history_impl() {
         i_prev_ = i_current_;
         v_prev_ = v_current_;
+        history_initialized_ = true;
     }
 
     void set_current_state(Scalar v, Scalar i) {
         v_current_ = v;
         i_current_ = i;
     }
+
+    /// Whether the inductor has stored a real previous-step voltage
+    /// (i.e. not just the constructor's default `v_prev_=0`). Used by
+    /// the runtime to pick BDF1 for the first step from initial
+    /// conditions, avoiding the trapezoidal startup ringing where
+    /// `v_n = g_eq·i_n - v_{n-1}` doubles the inductor voltage when
+    /// `v_{n-1}` defaults to 0 instead of the analytical t=0+ value.
+    [[nodiscard]] bool history_initialized() const { return history_initialized_; }
+    void mark_history_initialized() { history_initialized_ = true; }
+    void reset_history() { history_initialized_ = false; }
 
     static constexpr auto jacobian_pattern_impl() {
         return StaticSparsityPattern<4>{{
@@ -101,6 +112,9 @@ private:
     Scalar v_prev_;
     Scalar i_current_ = 0.0;
     Scalar v_current_ = 0.0;
+    bool history_initialized_ = false;  // True once the first accepted
+                                         // step's current/voltage are
+                                         // stored in i_prev_/v_prev_.
 };
 
 template<>
