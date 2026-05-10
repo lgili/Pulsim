@@ -17,6 +17,7 @@ simulation:
   tstop: 200e-6
   dt: 0.5e-6
   dt_max: 2e-6
+  uic: true   # PSIM/ngspice-style: L and C start at zero (or per-component ic:)
   shooting:
     period: 20e-6
     max_iterations: 20

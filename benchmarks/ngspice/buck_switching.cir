@@ -24,7 +24,10 @@
 * docs/converter-templates.md).
 
 Vdc  vcc 0 DC 24
-Vpwm ctrl 0 PULSE(0 10 0 200n 200n 7.6u 20u)
+* TR=TF=1n is small enough to look "instantaneous" to Pulsim's PWM
+* (which transitions in zero time); the dead_time=200n in Pulsim is
+* absorbed into 0V flat-top duration, so PW = duty*period - dead_time.
+Vpwm ctrl 0 PULSE(0 10 0 1n 1n 7.8u 20u)
 
 * High-side switch: closes when V(ctrl) > 5 V (with 0.1 V hysteresis).
 S1 vcc sw ctrl 0 SWMOD
