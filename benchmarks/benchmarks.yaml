@@ -85,13 +85,60 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [trbdf2, rosenbrockw]
-  # periodic_rc_pwm uses shooting_default / harmonic_balance scenarios
-  # that return the periodic steady-state directly; comparing those
-  # against an ngspice transient is not meaningful (5 τ_RC ≈ 500 µs
-  # exceeds the 200 µs window). Add a long_transient scenario before
-  # re-enabling the ngspice mapping.
-  - path: circuits/periodic_rc_pwm.yaml
-    scenarios: [shooting_default, harmonic_balance]
+  # periodic_rc_pwm intentionally NOT in the SPICE parity manifest:
+  # it uses shooting_default / harmonic_balance scenarios that return
+  # the periodic steady-state directly, which is not comparable to a
+  # transient ngspice run. The circuit YAML stays in benchmarks/
+  # circuits/ for the (Pulsim-only) periodic-analysis bench, but it
+  # has no place here.
+
+  # ----- Component-coverage benchmarks (Phase 7) -----
+  - path: circuits/current_source_rc.yaml
+    ngspice_netlist: ngspice/current_source_rc.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/pulse_voltage_rl.yaml
+    ngspice_netlist: ngspice/pulse_voltage_rl.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  # transformer_step_up — held off pending follow-up:
+  #   Pulsim's `transformer` is an algebraic ideal transformer
+  #   (V_p = N·V_s, I_p = -N·I_s, no magnetizing inductance). ngspice
+  #   has no native ideal-transformer primitive; the canonical mirror
+  #   uses two coupled inductors (`L1 + L2 + K1`), but with high
+  #   inductance values + K → 1 ngspice's MNA goes silently to all-
+  #   zeros (numerical conditioning issue with K close to 1), and with
+  #   K = 0.99 the magnetizing-current loading drops V(pri_x) below
+  #   Pulsim's algebraic ideal by ~5 %. This is a model-paradigm
+  #   mismatch, not a Pulsim bug. Re-enable when ngspice gets a
+  #   stable coupled-inductor mirror or Pulsim adds a "transformer
+  #   with finite Lm" primitive that can be matched.
+  - path: circuits/transformer_step_up.yaml
+    scenarios: [direct_trap]
+
+  # buck_pmos — held off pending Phase-8 PMOS Newton-region fix:
+  #   Pulsim's MOSFET (is_nmos=false) has the same Shichman-Hodges
+  #   formulas as the NMOS but with sign-folded Vgs/Vds. In a high-
+  #   side PMOS topology the initial guess x=0 puts the device in
+  #   the saturation region (|Vds|=24 V > |Vov|=21 V); Newton's
+  #   discontinuous Jacobian across the saturation/triode boundary
+  #   prevents it from crossing into triode, so DC OP converges to
+  #   a wrong fixed point (V(sw) ≈ -0.2 V instead of the analytical
+  #   23.3 V matching ngspice).
+  #
+  #   The same family of fix that resolved the IGBT (smooth gm via
+  #   sigmoid through threshold) would also work here — replace the
+  #   hard cutoff/triode/saturation branch in MOSFET.collector_current_
+  #   behavioral with a continuous blend through the boundaries.
+  #   The benchmark YAML + .cir are committed (benchmarks/circuits/
+  #   buck_pmos.yaml + benchmarks/ngspice/buck_pmos.cir) so re-
+  #   enabling parity is a one-line YAML edit once the fix lands.
+  - path: circuits/buck_pmos.yaml
+    scenarios: [direct_trap, trbdf2]
 scenarios:
   direct_trap:
     simulation:

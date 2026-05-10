@@ -1,0 +1,17 @@
+* PulseVoltageSource into RL — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/pulse_voltage_rl.yaml
+*
+* Pulse waveform: v_initial=0, v_pulse=10, t_delay=100µs, t_rise/fall=1µs,
+* t_width=500µs (high-time), period=1ms.
+* SPICE PULSE(V1 V2 TD TR TF PW PER):
+*   V1=0, V2=10, TD=100u, TR=1u, TF=1u, PW=500u, PER=1m.
+*
+* RL: R=100Ω, L=10mH. τ_RL = L/R = 100µs (smaller than t_width so the
+* current settles within each pulse).
+
+V1 in 0 PULSE(0 10 100u 1u 1u 500u 1m)
+R1 in out 100
+L1 out 0 10m IC=0
+
+.tran 5u 5m
+.end

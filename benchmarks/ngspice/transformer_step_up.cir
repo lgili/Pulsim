@@ -1,0 +1,26 @@
+* Step-up transformer driven by 1 kHz sine — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/transformer_step_up.yaml
+*
+* Pulsim's `transformer` is a linear, ideal transformer with a turns
+* ratio `n = N_p/N_s`. The voltage relationship is V_sec = V_pri / n,
+* so n=0.5 → V_sec = 2·V_pri (step-up).
+*
+* In ngspice, an ideal transformer is best modeled by two coupled
+* inductors L1, L2 with K=1 and `L2/L1 = (N2/N1)² = 4`. Choose L_pri
+* high enough that ωL >> Rsrc + reflected_load at f=1kHz.
+*
+* Reflected load: Rload/n² = 1k / 0.25 = 4k seen on primary.
+* For ωL_pri >> 4k at f=1k: L_pri >> 0.64 H. Use 100 H to be safe.
+* L_sec = L_pri · 4 = 400 H.
+*
+* The two coupled inductors require K=1 (perfect coupling).
+
+Vac pri 0 SIN(0 10 1000)
+Rsrc pri pri_x 1
+L1   pri_x 0 100      ; primary inductance — large to keep magnetizing current small
+L2   sec   0 400      ; secondary inductance — n² · L1
+K1 L1 L2 0.99999       ; coupling (K=1 exactly is unstable in ngspice)
+Rload sec 0 1k
+
+.tran 1u 2m
+.end

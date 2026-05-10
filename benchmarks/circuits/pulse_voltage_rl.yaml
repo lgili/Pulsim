@@ -1,0 +1,41 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: pulse_voltage_rl
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 1e-1
+      steady_state_max_error: 5e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/pulse_voltage_rl.csv
+simulation:
+  tstop: 5e-3
+  dt: 5e-6
+  uic: true
+components:
+  - type: voltage_source
+    name: Vp
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 10.0
+      t_delay: 100e-6
+      t_rise: 1e-6
+      t_fall: 1e-6
+      t_width: 500e-6
+      period: 1e-3
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 100
+  - type: inductor
+    name: L1
+    nodes: [out, 0]
+    value: 10e-3
+    ic: 0.0

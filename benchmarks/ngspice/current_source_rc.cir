@@ -1,0 +1,20 @@
+* DC current source charging RC — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/current_source_rc.yaml
+*
+* Analytical: V(out, t) = I·R · (1 − exp(−t/τ)), τ = R·C
+*   I=1mA, R=5kΩ, C=1µF → V_steady = 5 V, τ = 5 ms.
+*   Tstop = 50 ms = 10·τ → settles to 5 V.
+
+I1 0 out DC 1m
+R1 out 0 5k
+C1 out 0 1u
+
+* No UIC: both simulators take the DC operating point as IC, so V(out)
+* sits at I·R steady-state for the full 50 ms window.
+* ngspice convention: `I1 0 out DC 1m` injects positive current into
+* the FIRST node (0); externally the source pulls 1 mA OUT of `out`
+* through R, so V(out) = +I·R = +5 V. Pulsim's matching YAML uses
+* `nodes: [out, 0]` because Pulsim's npos/nneg roles are swapped — same
+* physical current direction.
+.tran 5u 50m
+.end

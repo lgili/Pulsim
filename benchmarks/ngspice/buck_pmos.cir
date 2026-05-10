@@ -1,0 +1,35 @@
+* Buck with high-side PMOS — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/buck_pmos.yaml
+*
+* PMOS high-side: source at vin (24V), drain at sw, gate driven LOW
+* when the switch is ON (vgs = vgate - vsource = 0 - 24 = -24V, well
+* below |Vth|=3V → channel inverted, PMOS conducts).
+*
+* PULSE timing: ngspice convention with v_high → v_low pulse:
+*   Idle high (24V), pulse low (0V) for the ON time.
+*   period = 12.5µs, duty=0.36 ON-time → high-time = 0.64*period = 8.0µs.
+*   Use PULSE(24 0 0 1n 1n 4.5u 12.5u): starts at 24, goes to 0 for
+*   PW=4.5µs, period 12.5µs.
+*
+* PMOS model: KP=0.2, VTO=-3.0 (NEGATIVE for PMOS in ngspice's
+* SPICE Level-1), LAMBDA=0.01. W=L=1u.
+
+Vdc  vin 0 DC 24
+Vgate gate 0 PULSE(24 0 0 1n 1n 4.5u 12.5u)
+
+* PMOS Level-1 — MX <D> <G> <S> <B> model
+M1 sw gate vin vin PMOS_L1 W=1u L=1u
+.model PMOS_L1 PMOS LEVEL=1 VTO=-3.0 KP=0.20 LAMBDA=0.01 IS=0
+
+* Freewheel diode emulation (Pulsim diode g_on=150 → RON=6.67m).
+S2 0 sw 0 sw DMOD
+.model DMOD SW(VT=0 VH=1m RON=6.67m ROFF=1Meg)
+
+Rdcr sw n_l 20m
+L1   n_l out 220u IC=0
+C1   out 0   220u IC=0
+Rload out 0 8.0
+Rbleed_sw sw 0 1Meg
+
+.tran 0.2u 500u
+.end

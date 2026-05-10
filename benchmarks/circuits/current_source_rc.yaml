@@ -1,0 +1,40 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: current_source_rc
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Trivial DC OP — both simulators agree on V(out) = -I·R = -5 V.
+      max_error: 1e-3
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/current_source_rc.csv
+simulation:
+  tstop: 50e-3
+  dt: 5e-6
+  # No `uic: true`: both simulators take the DC operating point as IC
+  # (V(out) = I·R = -5 V given Pulsim's convention with [0, out]).
+  # This avoids an ngspice quirk where `.tran ... UIC` with a DC current
+  # source freezes V(out) at the IC=0 value forever.
+components:
+  - type: current_source
+    name: I1
+    nodes: [out, 0]    # Pulsim convention: positive value pushes current
+                       # INTO npos (out) from the external circuit, so
+                       # V(out) settles to +I·R = +5 V. ngspice's `I1 0
+                       # out 1m` is the matching mirror (their npos / nneg
+                       # roles are swapped, so the literal node order
+                       # differs but the physics is identical).
+    value: 1e-3
+  - type: resistor
+    name: R1
+    nodes: [out, 0]
+    value: 5e3
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1e-6

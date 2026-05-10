@@ -201,7 +201,9 @@ purely a YAML-side change.
 | **3.5 — fill all nonlinear circuits (10/11)** | Wrote ngspice netlists for `boost_switching_complex`, `interleaved_buck_3ph`, `buck_mosfet_nonlinear`. Calibrated `max_error` / `steady_state_max_error` thresholds against actual measurements so the gates reflect real numerical noise, not aspirational targets. |
 | **4 — CI gate (shipped)** | `.github/workflows/ci.yml` `benchmark` job now installs `ngspice` + `rich`, then runs `python scripts/parity_dashboard.py --ascii --output-dir benchmarks/parity_ci_out` after the existing KPI gate. Exit code 2 (any non-skipped circuit fails) blocks the PR. The full per-circuit JSON / CSV plus `dashboard_summary.json` are uploaded as the `benchmark-kpi-artifacts` artifact for post-mortem. |
 | **5 — device-model deep-dive** | See "Fase 5 findings" section below. MOSFET threshold tightened from 0.6 V → 0.4 V after the PWM-duty fix; IGBT benchmark added but skipped pending solver fix. |
-| **6 — IGBT solver fix (shipped, 11/12 passing)** | Implemented the smooth-`gm` form in `IGBT.collector_current_behavioral` and `IGBT.stamp_jacobian_behavioral` (sigmoid blend with κ=50/V, ~120 mV transition window centered on Vth). Existing `test_ad_igbt_stamp` cross-validation (105 assertions) still passes — saturated tails of the sigmoid are bit-equal to the legacy hard step. Fix narrative below. |
+| **6 — IGBT solver fix** | Smooth-`gm` form in `IGBT.collector_current_behavioral` (sigmoid blend with κ=50/V, ~120 mV transition window). Existing `test_ad_igbt_stamp` cross-validation (105 assertions) still passes. Fix narrative below. |
+| **7 — component coverage (13/15 today)** | Removed `periodic_rc_pwm` (shooting/HB scenarios not comparable to ngspice transient). Added 4 new benchmarks for previously-uncovered primitives: `current_source_rc` (CurrentSource), `pulse_voltage_rl` (PulseVoltageSource), `transformer_step_up` (Transformer), `buck_pmos` (PMOS, is_nmos=false). Two pass cleanly; two surface real Pulsim issues — see "Phase 7 findings" below. |
+| **8 — PMOS Newton-region fix + transformer mirror** | Apply the same sigmoid-`gm` fix that resolved IGBT to the MOSFET model's region boundaries (cutoff↔triode↔saturation), so the high-side PMOS converges from x=0 IC. For the transformer, either add a "transformer with finite Lm" Pulsim primitive, or get ngspice's coupled-inductor mirror to behave at K → 1. |
 
 ## Fase 5 findings — device-model deep-dive
 
@@ -319,6 +321,91 @@ Result: 11/12 passed   failed=0   skipped=1   errors=0   pass_rate=91.7%
 The lone skip remains `periodic_rc_pwm` (shooting / harmonic-balance
 scenarios that aren't comparable to a transient ngspice run — design
 limitation, not a solver issue).
+
+## Phase 7 findings — component-coverage expansion
+
+Phase 7 removed `periodic_rc_pwm` from the manifest (per the user
+directive: "if there's no way to compare, remove the test") and added
+four new benchmarks targeting Pulsim primitives that were previously
+not exercised by SPICE parity:
+
+| New benchmark | Component | Status |
+|---|---|---|
+| `current_source_rc` | `CurrentSource` (DC) | ✓ passes — `max_err = 2.5e-8 V` |
+| `pulse_voltage_rl` | `PulseVoltageSource` | ✓ passes — `max_err = 2.7e-3 V` |
+| `transformer_step_up` | `Transformer` (algebraic ideal) | ○ skipped — model mismatch |
+| `buck_pmos` | `MOSFET` (is_nmos=false path) | ○ skipped — Newton region trap |
+
+The two skipped benchmarks revealed real issues:
+
+### Transformer model mismatch (deferred)
+
+Pulsim's `Transformer` is an *algebraic* ideal transformer
+(`V_p = N·V_s`, `I_p = -N·I_s`, no magnetizing inductance). ngspice
+has no native ideal-transformer primitive; the canonical mirror uses
+two coupled inductors (`L1 + L2 + K1`):
+
+- With `L1=L2=large` and `K → 1`, ngspice's MNA goes silently to all-
+  zeros (numerical conditioning issue).
+- With `K = 0.99` and modest `L`, magnetizing-current loading drops
+  `V(pri_x)` by ~5 % below Pulsim's algebraic ideal.
+
+This is a **model-paradigm mismatch**, not a Pulsim bug. The .cir +
+YAML are committed for when either (a) ngspice gets a stable coupled-
+inductor mirror at K → 1, or (b) Pulsim adds a "transformer with
+finite Lm" primitive that can be matched.
+
+### PMOS Newton-region trap — real Pulsim bug (deferred to Phase 8)
+
+Pulsim's `MOSFET` has the same Shichman-Hodges formulas for both NMOS
+and PMOS, with sign-folded Vgs/Vds:
+
+```cpp
+const Real sign = params_.is_nmos ? Real{1.0} : Real{-1.0};
+const S vgs = sign * (v_g - v_s);
+const S vds = sign * (v_d - v_s);
+```
+
+With NMOS in a high-side buck (source = sw, drain = vin), the
+operating point naturally sits in **triode** because `|Vds|` stays
+small (V(sw) ≈ V(vin) when on). Newton converges easily.
+
+With PMOS in a high-side buck (source = vin, drain = sw), the
+**initial guess `x = 0`** puts `V(sw) = 0 V`, hence `|Vds| = 24 V`
+and `|Vov| = |Vgs|-|Vth| = 21 V`. `|Vds| > |Vov|` → **saturation**.
+The saturation branch's id formula gives `id ≈ 44 A` which the
+8 Ω load cannot sink at any feasible `V(out)`. Newton's
+discontinuous Jacobian across the saturation/triode boundary
+prevents the solver from crossing into triode (where the analytical
+solution `V(sw) = 23.3 V` lives, matching ngspice).
+
+Confirmed by isolated Python test:
+
+```
+DC OP success?  True   (random_restart succeeded)
+V(sw) = -0.19 V         # WRONG — converged to a degenerate fixed
+                        # point in saturation; ngspice analytical
+                        # answer is V(sw) = 23.3 V (triode).
+```
+
+Same root cause as the IGBT bug: hard region transitions in the
+Jacobian. Same fix family applies — replace the hard
+cutoff/triode/saturation branch with a continuous sigmoid blend
+through the boundaries. Localized in
+`core/include/pulsim/v1/components/mosfet.hpp::stamp_jacobian_behavioral`
+and `drain_current_behavioral<S>`. Tracked as Phase 8.
+
+### Final dashboard state after Phase 7
+
+```
+Result: 13/15 passed   failed=0   skipped=2   errors=0   pass_rate=86.7%
+```
+
+The pass-rate decreased from 91.7 % → 86.7 % only because Phase 7
+**added 2 new skipped tests** that surface real issues, while keeping
+all 11 previously-passing benchmarks plus 2 new ones (`current_source_
+rc`, `pulse_voltage_rl`) passing. This is a *measurement* expansion,
+not a regression.
 
 ## See also
 
