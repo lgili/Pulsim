@@ -801,13 +801,39 @@ def _parse_run_transient_args(args):
 
 
 def _run_transient_once(circuit, t_start, t_stop, dt, x0, newton_options, linear_solver):
+    """Run a single transient attempt.
+
+    Historically this called the C++ `run_transient` binding which applies
+    `make_robust_transient_options` internally — that path forces TRBDF2 +
+    adaptive timestep + LTE-controlled stepping. For stiff first-order
+    circuits seeded with a non-DC-OP `x0` (e.g. RL with `V_inductor=V_source`
+    initially because the inductor is treated as an open circuit at t=0),
+    that combo lets the LTE controller grow `dt` toward `tau`, where TRBDF2
+    becomes unstable; the integrator then drifts the source-pinned node
+    voltages by orders of magnitude and reports `success=True`.
+
+    Workaround: route through `Simulator(...)` with a fixed-step
+    Trapezoidal default, which is stable for the dt that the user
+    explicitly chose. Callers that need TRBDF2+adaptive can construct a
+    `Simulator` directly with a `SimulationOptions` of their choice. The
+    return shape is preserved (`(times, states, success, message)`).
+    """
+    opts = SimulationOptions()
+    opts.tstart = float(t_start)
+    opts.tstop = float(t_stop)
+    opts.dt = float(dt)
+    opts.adaptive_timestep = False
+    opts.integrator = Integrator.Trapezoidal
+    if newton_options is not None:
+        opts.newton_options = newton_options
+    if linear_solver is not None:
+        opts.linear_solver = linear_solver
+    sim = _SimulatorNative(circuit, opts)
     if x0 is None:
-        return _run_transient_native(
-            circuit, t_start, t_stop, dt, newton_options, linear_solver
-        )
-    return _run_transient_native(
-        circuit, t_start, t_stop, dt, x0, newton_options, linear_solver
-    )
+        result = sim.run_transient()
+    else:
+        result = sim.run_transient(x0)
+    return (result.time, result.states, result.success, result.message)
 
 
 def _is_retryable_failure(message: str) -> bool:
