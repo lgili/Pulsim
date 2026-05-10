@@ -1,72 +1,4 @@
-# linear-solver Specification
-
-## Purpose
-TBD - created by archiving change improve-convergence-algorithms. Update Purpose after archive.
-## Requirements
-### Requirement: AdvancedLinearSolver Enhancement
-
-The existing AdvancedLinearSolver SHALL be enhanced with the new optimization features.
-
-#### Scenario: AdvancedLinearSolver with KLU
-
-- **GIVEN** AdvancedLinearSolver configured with Backend::Auto
-- **WHEN** KLU is available
-- **THEN** KLU is used for all solves
-- **AND** symbolic caching is enabled by default
-
-#### Scenario: Backward compatibility
-
-- **GIVEN** existing code using AdvancedLinearSolver
-- **WHEN** no options are specified
-- **THEN** behavior is compatible with previous version
-- **AND** new optimizations are applied transparently
-
-### Requirement: Signature-Keyed Linear Solver Reuse Contract
-The linear solver service SHALL reuse symbolic, numeric-factorization, and preconditioner assets keyed by deterministic topology signature and solver policy identity.
-
-#### Scenario: Reuse on unchanged signature
-- **WHEN** consecutive solves execute with identical topology signature and compatible solver policy
-- **THEN** reusable symbolic/factorization/preconditioner assets are reused
-- **AND** telemetry records reuse hits for each cache class
-
-#### Scenario: Incompatible policy prevents unsafe reuse
-- **WHEN** solver policy or conditioning class changes in a way that invalidates reuse safety
-- **THEN** incompatible assets are not reused
-- **AND** a deterministic rebuild path is executed
-
-### Requirement: Deterministic Cache Invalidation Reasons
-The linear solver service SHALL expose deterministic invalidation reasons for cache rebuilds and fallback transitions. Reasons SHALL be drawn from a typed `CacheInvalidationReason` enumeration; a string mirror SHALL be retained for backward compatibility with telemetry consumers that parse text labels.
-
-#### Scenario: Topology-driven invalidation
-- **WHEN** switching events produce a new topology signature
-- **THEN** incompatible caches are invalidated with reason `TopologyChanged` (string: `"topology_changed"`)
-- **AND** rebuild telemetry includes per-reason counters in `BackendTelemetry`
-
-#### Scenario: Stability-driven invalidation
-- **WHEN** numeric health checks detect conditioning degradation beyond configured thresholds, OR when an accepted step's matrix hash differs from the previous step's within an unchanged topology
-- **THEN** cache reuse is disabled for that solve with reason `NumericInstability`
-- **AND** recovery follows the configured deterministic solver fallback policy
-
-### Requirement: Allocation-Bounded Solve Loop
-Linear solve hot paths SHALL avoid unbounded dynamic allocation during steady-state reuse windows. The segment-primary path's `build_model` workspaces SHALL be hoisted to `mutable` members so successive accepted steps reuse storage. Newton-DAE workspace migration to `Simulator`-level pre-allocation is tracked as a follow-up; the present requirement covers the hot loop measured by the buck benchmark.
-
-#### Scenario: Iterative steady-state solve sequence
-- **WHEN** iterative solves run across a stable segment sequence with cache-compatible signatures
-- **THEN** dynamic allocations remain within configured bounded setup/rebuild points
-- **AND** the wall-clock signature is consistent with no per-iteration heap growth (351× speedup on the 1000-step buck benchmark vs Newton-DAE baseline; literal heap-counter assertion deferred)
-
-### Requirement: Structured Linear Failure Reasons
-Linear solver failures SHALL be reported with typed reason codes suitable for nonlinear recovery and KPI tracking.
-
-#### Scenario: Iteration budget exhaustion
-- **WHEN** iterative linear solve exceeds configured iteration budget
-- **THEN** the solver reports a structured reason such as `iteration_limit`
-- **AND** nonlinear recovery receives the reason code without text parsing
-
-#### Scenario: Numerical breakdown
-- **WHEN** solver encounters numerical breakdown or singularity
-- **THEN** the solver reports a structured reason such as `numerical_breakdown` or `singular_matrix`
-- **AND** telemetry captures the terminal solver and fallback chain position
+## ADDED Requirements
 
 ### Requirement: Per-Step Numeric Factor LRU Cache
 The linear solver hot path of the segment-primary stepper SHALL maintain a per-key LRU cache of analyzed-and-factorized linear solvers, keyed on a value-aware hash of the discretized system matrix `E = M + (dt/2)·N`. Each cache entry holds its own `RuntimeLinearSolver` instance with persistent `analyzePattern + factorize` state, plus a `shared_ptr` to the underlying `SegmentLinearStateSpace` to keep the matrix alive for the entry's lifetime.
@@ -139,3 +71,25 @@ The segment-primary stepper SHALL avoid per-step heap allocation of `SparseMatri
 - **THEN** `total_analyze_calls`, `total_factorize_calls`, and `total_solve_calls` reflect the union of both paths' workload
 - **AND** the `last_*` fields prefer the segment-primary path's most-recent values when any segment-primary work happened during the run
 
+## MODIFIED Requirements
+
+### Requirement: Deterministic Cache Invalidation Reasons
+The linear solver service SHALL expose deterministic invalidation reasons for cache rebuilds and fallback transitions. Reasons SHALL be drawn from a typed `CacheInvalidationReason` enumeration; a string mirror SHALL be retained for backward compatibility with telemetry consumers that parse text labels.
+
+#### Scenario: Topology-driven invalidation
+- **WHEN** switching events produce a new topology signature
+- **THEN** incompatible caches are invalidated with reason `TopologyChanged` (string: `"topology_changed"`)
+- **AND** rebuild telemetry includes per-reason counters in `BackendTelemetry`
+
+#### Scenario: Stability-driven invalidation
+- **WHEN** numeric health checks detect conditioning degradation beyond configured thresholds, OR when an accepted step's matrix hash differs from the previous step's within an unchanged topology
+- **THEN** cache reuse is disabled for that solve with reason `NumericInstability`
+- **AND** recovery follows the configured deterministic solver fallback policy
+
+### Requirement: Allocation-Bounded Solve Loop
+Linear solve hot paths SHALL avoid unbounded dynamic allocation during steady-state reuse windows. The segment-primary path's `build_model` workspaces SHALL be hoisted to `mutable` members so successive accepted steps reuse storage. Newton-DAE workspace migration to `Simulator`-level pre-allocation is tracked as a follow-up; the present requirement covers the hot loop measured by the buck benchmark.
+
+#### Scenario: Iterative steady-state solve sequence
+- **WHEN** iterative solves run across a stable segment sequence with cache-compatible signatures
+- **THEN** dynamic allocations remain within configured bounded setup/rebuild points
+- **AND** the wall-clock signature is consistent with no per-iteration heap growth (351× speedup on the 1000-step buck benchmark vs Newton-DAE baseline; literal heap-counter assertion deferred)

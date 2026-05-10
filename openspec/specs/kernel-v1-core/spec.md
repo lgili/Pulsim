@@ -213,3 +213,61 @@ Core service interfaces SHALL use modern C++ non-owning views and constrained ex
 - **THEN** compile-time constraints validate required operations/capabilities
 - **AND** incompatible implementations fail with deterministic compile-time diagnostics
 
+### Requirement: Single Robustness Policy Owner
+The kernel SHALL provide `RobustnessProfile` as the single source of truth for robust default configuration of Newton, linear solver, integrator, recovery, and fallback knobs.
+
+#### Scenario: Single declaration site
+- **WHEN** the codebase is grepped for "robust default" / `apply_robust_*` / `_tune_*_for_robust`
+- **THEN** only one definition site (in `robustness_profile.hpp/cpp`) is found
+- **AND** all callers route through this single owner
+
+#### Scenario: Tier resolution
+- **GIVEN** `RobustnessProfile::for_circuit(circuit, RobustnessTier::Aggressive)`
+- **WHEN** the factory runs
+- **THEN** the resulting profile has knobs derived from circuit analysis (switching count, nonlinear count) and the tier
+- **AND** identical inputs produce identical profile (deterministic)
+
+### Requirement: Robustness Profile Telemetry
+`BackendTelemetry` SHALL include `robustness_profile` reflecting the resolved tier, key knob values, and a reproducibility hash.
+
+#### Scenario: Telemetry capture
+- **WHEN** a simulation completes
+- **THEN** `BackendTelemetry.robustness_profile` exposes `tier`, `newton_max_iter`, `linear_solver_order`, `integrator`, `max_step_retries`, `gmin_initial`, `gmin_max`
+- **AND** a hash combining these into a single identifier appears
+
+#### Scenario: Profile diff in verbose mode
+- **GIVEN** verbosity-enabled output and a non-default profile
+- **WHEN** the result message is composed
+- **THEN** the diff vs the default profile is included as a structured list
+
+### Requirement: runtime_circuit.hpp Implementation Split
+The `core/include/pulsim/v1/runtime_circuit.hpp` header SHALL be split such that method bodies move to a corresponding `.cpp`, with explicit template instantiation where applicable.
+
+#### Scenario: Header trimmed
+- **WHEN** the project is built
+- **THEN** `runtime_circuit.hpp` contains declarations and public templates only
+- **AND** method bodies live in `core/src/v1/runtime_circuit.cpp`
+- **AND** the header is below 1000 lines
+
+#### Scenario: Explicit instantiation
+- **GIVEN** any client TU that includes `runtime_circuit.hpp`
+- **WHEN** the TU is compiled
+- **THEN** `extern template` declarations prevent re-instantiation of common specializations
+- **AND** total client compile time is reduced ≥40% on a representative file
+
+### Requirement: Bloated Header Audit
+Headers exceeding 1500 lines (`high_performance.hpp`, `integration.hpp`) SHALL be audited and trimmed by moving inline implementations to `.cpp`, removing dead code, or splitting by concern.
+
+#### Scenario: Header below threshold post-trim
+- **WHEN** the audit completes
+- **THEN** no kernel header in `core/include/pulsim/v1/` exceeds 1500 lines
+- **AND** dead utilities removed from headers are documented in the change history
+
+### Requirement: Build-Time Regression Alerts
+CI SHALL track clean-build wallclock per platform and alert when growth exceeds 10% across two consecutive runs without an associated justification.
+
+#### Scenario: Build-time regression
+- **WHEN** a PR causes clean-build wallclock to grow >10% on any platform
+- **THEN** the CI emits an alert linking the PR
+- **AND** the PR description must include justification or a fix
+
