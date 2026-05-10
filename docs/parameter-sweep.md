@@ -181,3 +181,7 @@ assert result_a.parameters == result_b.parameters
   clean knobs).
 - [`code-generation.md`](code-generation.md) — pair sweep with
   codegen to ship a tuned controller for a yield-analyzed design.
+- Runnable examples: `examples/python/07_parameter_sweep_lhs.py`
+  (64-point LHS over (L, C) with P5/P50/P95 percentile readout) and
+  `examples/python/08_monte_carlo_yield.py` (256 Monte-Carlo draws
+  vs spec window).

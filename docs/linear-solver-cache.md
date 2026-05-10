@@ -268,3 +268,6 @@ tracked but are not gating production use:
   solver stack (KLU, GMRES, fallback chains).
 - [`performance-tuning.md`](performance-tuning.md) — SIMD, memory
   alignment, and other knobs.
+- Runnable example: `examples/python/10_linear_solver_cache.py` —
+  `BackendTelemetry.linear_factor_cache_*` hit-rate readout on a
+  switching buck (≥ 97 % hits after warm-up).

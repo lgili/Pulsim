@@ -217,3 +217,6 @@ Always check `result.success` before accessing `result.measurements`.
 - [`fra.md`](fra.md) — empirical Bode via transient injection.
 - [`linear-solver-cache.md`](linear-solver-cache.md) — the same
   analyze-pattern-once architecture powering the segment-primary cache.
+- Runnable examples: `examples/python/01_ac_sweep_rc.py` (Bode of an RC
+  low-pass), `examples/python/11_yaml_ac_analysis.py` (loading the
+  circuit from YAML).

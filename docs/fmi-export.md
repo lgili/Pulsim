@@ -135,3 +135,6 @@ the export pipeline itself; tool compatibility lives downstream.
 - [`linear-solver-cache.md`](linear-solver-cache.md) — the per-key
   cache that the multi-topology FMU export will reuse via the
   topology bitmask.
+- Runnable example: `examples/python/06_fmu_export.py` (export +
+  zip layout inspection + ctypes load + 13/13 FMI 2.0 CS symbol
+  check).

@@ -182,3 +182,5 @@ enforcement (Phase 6) is tracked as a follow-up.
   bitmask.
 - [`converter-templates.md`](converter-templates.md) — the auto-
   designed converter circuits that are typical codegen inputs.
+- Runnable example: `examples/python/05_codegen_pil.py` (Pulsim →
+  C99 → gcc → ctypes round-trip with rel. error ≤ 1e-6).

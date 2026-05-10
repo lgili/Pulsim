@@ -191,3 +191,6 @@ dead-time effects).
 - [`ac-analysis.md`](ac-analysis.md) — the analytical complement.
 - [`convergence-tuning-guide.md`](convergence-tuning-guide.md) — for
   tuning the transient integrator that FRA runs internally.
+- Runnable example: `examples/python/02_fra_vs_ac_sweep.py` — overlays
+  the empirical FRA against the analytical AC sweep on an RC low-pass
+  and prints the ΔdB / Δdeg per frequency point.

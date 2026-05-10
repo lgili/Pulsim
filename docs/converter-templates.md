@@ -201,3 +201,6 @@ available topologies on unknown lookups.
   switching elements from once the Circuit-variant integration lands.
 - [`ac-analysis.md`](ac-analysis.md) — how to do `run_ac_sweep` on a
   template's circuit to validate loop-gain margins.
+- Runnable examples: `examples/python/03_buck_template.py` (auto-
+  designed buck), `examples/python/04_boost_buckboost_templates.py`
+  (three topologies side by side).

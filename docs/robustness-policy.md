@@ -107,3 +107,5 @@ are explicitly rejected to keep the YAML schema unambiguous.
   individual knobs do, when to tune them by hand.
 - [`linear-solver-cache.md`](linear-solver-cache.md) — the linear-
   solver-fallback knob is one of the bundle items.
+- Runnable example: `examples/python/09_robustness_wrapper.py` —
+  `pulsim.run_transient(robust=True)` retry loop on an RLC ringer.
