@@ -46,18 +46,23 @@ components:
       type: dc
       value: 24.0
   # PMOS high-side: gate is driven LOW to turn ON (for vgs negative).
-  # Vgate idles at v_high=24V (off) and pulses to v_low=0V (on, vgs=-24V).
+  # Vgate idles at v_high=27V (off — needs to be > Vcc + Vth = 27 V to
+  # keep PMOS OFF when V(source) = Vcc rises) and pulses to v_low=0V
+  # (on, |vgs| = 27V, well above |Vth| = 3 V).
+  # PMOS high-side: gate idles HIGH (off, Vgs ≈ 0) and pulses LOW
+  # (on, |Vgs| = 27V). Pulsim's PWM source semantics: duty fraction is
+  # the fraction of the period at v_HIGH. So duty=0.64 → high for 64%
+  # of period (idle-off), low for 36% (PMOS on) — equivalent to the
+  # 0.36 NMOS duty cycle for an analogous low-side topology.
   - type: voltage_source
     name: Vgate
     nodes: [gate, 0]
     waveform:
       type: pwm
-      v_high: 24.0
+      v_high: 27.0
       v_low: 0.0
       frequency: 80000
-      duty: 0.64        # PMOS on when gate=v_low (= idle low fraction).
-                        # 0.64 here means 64% off-time, 36% on-time —
-                        # equivalent to NMOS duty=0.36 on the same buck.
+      duty: 0.64
       dead_time: 80e-9
   - type: pmos
     name: M1

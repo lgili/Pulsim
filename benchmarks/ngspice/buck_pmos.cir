@@ -15,7 +15,7 @@
 * SPICE Level-1), LAMBDA=0.01. W=L=1u.
 
 Vdc  vin 0 DC 24
-Vgate gate 0 PULSE(24 0 0 1n 1n 4.5u 12.5u)
+Vgate gate 0 PULSE(27 0 0 1n 1n 4.5u 12.5u)
 
 * PMOS Level-1 — MX <D> <G> <S> <B> model
 M1 sw gate vin vin PMOS_L1 W=1u L=1u
