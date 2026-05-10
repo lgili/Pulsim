@@ -352,15 +352,41 @@ Circuit = _CircuitWrapper
 # monkey-patching properties on a bound class.
 
 class _SimulationOptionsWrapper(SimulationOptions):
-    """Subclass of `SimulationOptions` with legacy attribute aliases."""
+    """Subclass of `SimulationOptions` with legacy attribute aliases.
 
+    Native C++ binding has these names: tstart, tstop, dt, dt_min,
+    dt_max, integrator, ... The C++ struct also has a `use_ic` field
+    (`core/include/pulsim/types.hpp:105`) but the Python binding does
+    NOT expose it. We approximate it Python-side: legacy `use_ic` /
+    `uic` attribute is stored on the wrapper instance and intercepted
+    by `_SimulatorWrapper.run_transient()` (auto-seeds x0 from
+    `circuit.initial_state()` when set).
+
+    Other legacy aliases:
+      `opts.dtmin`              → `opts.dt_min`
+      `opts.dtmax`              → `opts.dt_max`
+      `opts.integration_method` → `opts.integrator`
+    """
+
+    # `use_ic` / `uic` — both names accepted; stored on the Python
+    # instance and consumed by `_SimulatorWrapper.run_transient()`.
     @property
     def use_ic(self):
-        return self.uic
+        return getattr(self, "_use_ic", False)
 
     @use_ic.setter
     def use_ic(self, value):
-        self.uic = bool(value)
+        # Use object.__setattr__ to avoid triggering pybind11's
+        # `not implemented` exception for an unknown attribute.
+        object.__setattr__(self, "_use_ic", bool(value))
+
+    @property
+    def uic(self):
+        return self.use_ic
+
+    @uic.setter
+    def uic(self, value):
+        self.use_ic = value
 
     @property
     def dtmin(self):
@@ -369,6 +395,14 @@ class _SimulationOptionsWrapper(SimulationOptions):
     @dtmin.setter
     def dtmin(self, value):
         self.dt_min = float(value)
+
+    @property
+    def dtmax(self):
+        return self.dt_max
+
+    @dtmax.setter
+    def dtmax(self, value):
+        self.dt_max = float(value)
 
     @property
     def integration_method(self):
@@ -412,6 +446,123 @@ class _IntegrationMethodAlias:
 
 
 IntegrationMethod = _IntegrationMethodAlias()
+
+
+# =============================================================================
+# Legacy API: result.signal_names + Simulator capturing circuit ref
+# =============================================================================
+#
+# Older test/example code uses `result.signal_names` on the return value
+# of `Simulator.run_transient()`. The C++ `SimulationResult` struct doesn't
+# carry node-name metadata (that lives on the Circuit). It also doesn't
+# support `dynamic_attr`, so we can't just `result.signal_names = ...`
+# from Python.
+#
+# Workaround: wrap the Simulator so `run_transient()` returns a Python
+# proxy object that delegates every attribute access to the raw C++
+# result and adds a `signal_names` attribute pulled from the captured
+# circuit. `result.data` continues to work (def_property_readonly in the
+# C++ binding).
+
+class _SimulationResultProxy:
+    """Lightweight proxy around the C++ `SimulationResult` that adds
+    Python-side `signal_names` and forwards all other attribute access
+    (time, states, data, success, final_status, message, events,
+    timestep_rejections, ...) to the underlying object.
+
+    The proxy is intentionally not a subclass of `SimulationResult` —
+    pybind11 didn't bind it with `dynamic_attr`, and the tests don't do
+    `isinstance(result, SimulationResult)` checks (verified across
+    `python/tests/`). Delegation is sufficient and keeps the wrapper
+    simple."""
+
+    __slots__ = ("_raw", "signal_names")
+
+    def __init__(self, raw_result, signal_names):
+        object.__setattr__(self, "_raw", raw_result)
+        object.__setattr__(self, "signal_names", list(signal_names))
+
+    def __getattr__(self, name):
+        # Only called when the attribute is NOT found via normal lookup
+        # (i.e. not in `__slots__`). Delegate to the wrapped result.
+        raw = object.__getattribute__(self, "_raw")
+        return getattr(raw, name)
+
+    def __setattr__(self, name, value):
+        if name in ("_raw", "signal_names"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._raw, name, value)
+
+    def __repr__(self):
+        return f"<SimulationResult proxy: {self._raw!r}>"
+
+
+# Native C++ Simulator (kept under `_SimulatorNative`). The exposed
+# `Simulator` becomes a Python subclass that captures the circuit
+# reference so `run_transient()` can attach node names to the result.
+_SimulatorNative = Simulator
+
+
+class _SimulatorWrapper(_SimulatorNative):
+    """Subclass of the pybind11 `Simulator` that captures the circuit
+    used at construction time. `run_transient()` returns a
+    `_SimulationResultProxy` which adds `result.signal_names` (pulled
+    from `circuit.signal_names()`) on top of every native field of the
+    C++ result.
+
+    Existing code that doesn't use `signal_names` is unaffected — every
+    other attribute (time, states, data, success, ...) continues to work
+    via the proxy's `__getattr__` delegation."""
+
+    def __init__(self, circuit, options=None):
+        if options is None:
+            super().__init__(circuit)
+            wants_ic = False
+        else:
+            super().__init__(circuit, options)
+            # Capture `use_ic` from the Python-side options at
+            # construction time. The C++ Simulator stores a `Options`
+            # copy, but the Python binding doesn't expose `use_ic`,
+            # so a query via `self.options` would always come back as
+            # the C++ default (false).
+            wants_ic = bool(
+                getattr(options, "use_ic", False)
+                or getattr(options, "uic", False)
+            )
+        # Python-side bookkeeping: subclasses of pybind11 classes get a
+        # `__dict__`, so this is fine.
+        self._captured_circuit = circuit
+        self._captured_use_ic = wants_ic
+
+    def _wrap_result(self, raw_result):
+        try:
+            names = self._captured_circuit.signal_names()
+        except Exception:
+            names = []
+        return _SimulationResultProxy(raw_result, names)
+
+    def run_transient(self, *args, **kwargs):  # type: ignore[override]
+        # Honor the legacy `use_ic` / `uic` flag captured at construction
+        # time. The C++ binding does not expose `SimulationOptions::use_ic`,
+        # so we approximate it: when the flag is set AND the user did not
+        # pass an explicit x0, seed the transient with
+        # `circuit.initial_state()` (built from device IC values:
+        # capacitor voltages and inductor currents).
+        if not args and not kwargs and self._captured_use_ic:
+            try:
+                x0 = self._captured_circuit.initial_state()
+                raw = _SimulatorNative.run_transient(self, x0)
+                return self._wrap_result(raw)
+            except Exception:
+                # Fall back to default behavior if `initial_state`
+                # is unavailable (e.g. very-old circuits).
+                pass
+        raw = super().run_transient(*args, **kwargs)
+        return self._wrap_result(raw)
+
+
+Simulator = _SimulatorWrapper
 
 
 _AUTO_BLEEDER_CIRCUITS = weakref.WeakSet()
