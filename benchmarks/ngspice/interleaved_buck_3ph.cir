@@ -1,0 +1,52 @@
+* Three-phase interleaved buck — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/interleaved_buck_3ph.yaml
+*
+* Topology: three high-side buck legs sharing a common output cap.
+*   Vdc=48V; each phase has its own PWM (100 kHz, duty=0.28, dead_time=80ns).
+*   Phases interleaved by 1/3 of period (≈ 3.333 µs offset).
+*   Each leg: VCswitch (vin→sw_x) + freewheel diode (0→sw_x) + Rdcr +
+*   inductor (330 µH) → common `out` node.
+*   Output: Cout 470 µF, Rload 4 Ω.
+*
+* PULSE timing: period=10 µs, duty=0.28 → PW = duty*period - dead_time
+*   = 2.72 µs. TR=TF=1n. Phase shift = period/3 = 3.333 µs (TD).
+
+Vdc vin 0 DC 48
+
+* Three PWM control sources, phase-shifted by period/3 each.
+Vpwm_a ctrl_a 0 PULSE(0 10  0      1n 1n 2.72u 10u)
+Vpwm_b ctrl_b 0 PULSE(0 10  3.333u 1n 1n 2.72u 10u)
+Vpwm_c ctrl_c 0 PULSE(0 10  6.667u 1n 1n 2.72u 10u)
+
+* Three high-side voltage-controlled switches (RON=5m, ROFF=1Meg).
+S_a vin sw_a ctrl_a 0 SWMOD
+S_b vin sw_b ctrl_b 0 SWMOD
+S_c vin sw_c ctrl_c 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Three freewheel diodes, emulated as voltage-controlled switches on
+* their own A-K voltage. Anode=0, Cathode=sw_x → ON when sw_x < 0.
+S_da 0 sw_a 0 sw_a DMOD
+S_db 0 sw_b 0 sw_b DMOD
+S_dc 0 sw_c 0 sw_c DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+* Per-phase inductor with DCR (15 mΩ each, 330 µH each).
+Rdcr_a sw_a n_la 15m
+Rdcr_b sw_b n_lb 15m
+Rdcr_c sw_c n_lc 15m
+L_a    n_la out 330u IC=0
+L_b    n_lb out 330u IC=0
+L_c    n_lc out 330u IC=0
+
+* Common output stage.
+Cout  out 0 470u IC=0
+Rload out 0 4.0
+
+* Floating-node bleeders (1 MΩ from each sw_x to 0) — match Pulsim.
+Rsnub_a sw_a 0 1Meg
+Rsnub_b sw_b 0 1Meg
+Rsnub_c sw_c 0 1Meg
+
+.tran 0.2u 450u
+.end

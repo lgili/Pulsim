@@ -1,0 +1,42 @@
+* Boost converter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/boost_switching_complex.yaml
+*
+* Topology:
+*   Vdc → L1 → sw (low-side switch) → ground
+*                  └──→ D1 → out → C1, Rload to ground
+*
+* Pulsim circuit:
+*   Vdc=24V, Vpwm 100 kHz, duty=0.58, dead_time=100 ns (v_high=10V).
+*   S1 vcswitch (control=ctrl, [in→sw], threshold=5V, g_on=200, g_off=1e-6)
+*     → SW model with RON=5m, ROFF=1Meg, VT=5, VH=0.1
+*   D1 (sw→out, g_on=200/g_off=1e-6) → SW emulation, RON=5m, ROFF=1Meg.
+*   Rdcr=30m, L1=120µH, C1=220µF, Rload=80Ω.
+*   Rbleed_sw 1Meg from sw → 0 (Pulsim adds for floating-node hygiene).
+*
+* PULSE: duty=0.58 of period 10µs → on-time 5.8µs;
+* with TR=TF=1n (matching Pulsim's instantaneous edges) and dead_time
+* absorbed into PW, set PW = duty*period - dead_time = 5.7µs.
+
+Vdc  in 0 DC 24
+Vpwm ctrl 0 PULSE(0 10 0 1n 1n 5.7u 10u)
+
+* Pulsim YAML has S1 nodes: [ctrl, in, sw] — switch CONNECTS `in` to
+* `sw` when V(ctrl) > 5 V. (This makes the topology an inductor-bypass
+* boost-like ringer rather than a textbook low-side boost; the dashboard
+* mirrors the Pulsim circuit verbatim.)
+S1 in sw ctrl 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Freewheel/output diode: anode=sw, cathode=out.
+* Conducts when sw > out (when L1 current is in continuous conduction).
+S2 sw out sw out DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Rdcr in n_l 30m
+L1   n_l sw  120u IC=0
+C1   out 0   220u IC=0
+Rload out 0  80
+Rbleed_sw sw 0 1Meg
+
+.tran 0.2u 700u
+.end

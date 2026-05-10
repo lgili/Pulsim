@@ -1,0 +1,45 @@
+* Buck with Level-1 MOSFET — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/buck_mosfet_nonlinear.yaml
+*
+* This is the only benchmark today that exercises Pulsim's own
+* nonlinear MOSFET model (vth=3, kp=0.20, lambda=0.01) against
+* ngspice's NMOS Level-1 with matching parameters. Pulsim's `kp` maps
+* directly onto ngspice's KP=KP_eff*W/L; with W=L=1µm we get
+* KP_eff = 0.20 A/V² which matches Pulsim's `kp=0.20`.
+*
+* Pulsim's body-diode behaviour is replaced by an explicit external
+* freewheel diode (D1, g_on=150 → RON=6.67m). The ngspice NMOS model
+* can have an implicit body diode (IS!=0); we set IS=0 so only the
+* explicit S2 acts as the freewheel.
+*
+* Pulsim circuit:
+*   Vdc=24V, Vgate PWM 80 kHz, duty=0.36, dead_time=80 ns
+*   (v_high=35V to drive M1 hard ON, v_low=0V).
+*   M1 NMOS (gate=gate, drain=vin, source=sw) — high-side switch.
+*   D1 freewheel (anode=0, cathode=sw).
+*   Rdcr=20m, L1=220µH, C1=220µF, Rload=8Ω, Rbleed_sw=1MΩ.
+*
+* PULSE timing: period=12.5µs, duty=0.36 → PW=duty*period - dead_time
+*   = 4.42 µs. TR=TF=1n.
+
+Vdc  vin 0 DC 24
+Vgate gate 0 PULSE(0 35 0 1n 1n 4.42u 12.5u)
+
+* High-side NMOS — drain=vin, source=sw, gate=gate.
+* Body terminal tied to source (sw) is the standard buck convention.
+M1 vin gate sw sw NMOS_L1 W=1u L=1u
+.model NMOS_L1 NMOS LEVEL=1 VTO=3.0 KP=0.20 LAMBDA=0.01 IS=0
+
+* Freewheel diode emulated as voltage-controlled switch (Pulsim's
+* `diode` is g_on/g_off PWL — same model as in buck_switching.cir).
+S2 0 sw 0 sw DMOD
+.model DMOD SW(VT=0 VH=1m RON=6.67m ROFF=1Meg)
+
+Rdcr sw n_l 20m
+L1   n_l out 220u IC=0
+C1   out 0   220u IC=0
+Rload out 0 8.0
+Rbleed_sw sw 0 1Meg
+
+.tran 0.2u 500u
+.end
