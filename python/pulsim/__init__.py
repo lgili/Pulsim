@@ -416,14 +416,25 @@ class SwitchParams:
         ron: ON-state resistance (Ω). Default 1 mΩ.
         roff: OFF-state resistance (Ω). Default 1 GΩ.
         vth: Control threshold voltage (V). ctrl > vth → switch ON.
+        hysteresis: tanh-smoothing width (V) for the behavioral model.
+            Smaller → sharper transition (better for "sharp threshold"
+            tests). Default 0.01 V resolves the OFF state to ~g_off
+            within ±10 mV of `vth`. Set explicitly to override.
     """
 
-    __slots__ = ("ron", "roff", "vth")
+    __slots__ = ("ron", "roff", "vth", "hysteresis")
 
-    def __init__(self, ron: float = 1e-3, roff: float = 1e9, vth: float = 2.5):
+    def __init__(
+        self,
+        ron: float = 1e-3,
+        roff: float = 1e9,
+        vth: float = 2.5,
+        hysteresis: float = 0.01,
+    ):
         self.ron = float(ron)
         self.roff = float(roff)
         self.vth = float(vth)
+        self.hysteresis = float(hysteresis)
 
 
 _native_add_switch = Circuit.add_switch  # type: ignore[attr-defined]
@@ -451,12 +462,13 @@ def _add_switch_with_params_support(self, name, n1, n2, *args, **kwargs):
             return _native_add_vcswitch(
                 self, name, ctrl_pos, n1_resolved, n2_resolved,
                 params.vth, 1.0 / params.ron, 1.0 / params.roff,
-                # Narrower hysteresis than the C++ default (0.5 V) so
-                # SwitchParams-style sharp-threshold tests resolve OFF
-                # state to ~g_off and ON state to ~g_on within ±0.05 V
-                # of `vth`. The legacy 0.5 V default is preserved for
-                # the C++ buck event tests that don't use SwitchParams.
-                0.05,
+                # SwitchParams-driven path: honor the user-set
+                # `hysteresis` (default 0.01 V — sharper than the C++
+                # 0.5 V default that's kept for legacy buck-event
+                # tests). At 0.01 V the OFF state resolves to ~g_off
+                # within ±10 mV of `vth`, matching sharp-threshold
+                # test expectations.
+                params.hysteresis,
             )
         # Differential ctrl not supported — fall through to native
         # which will reject the args.
