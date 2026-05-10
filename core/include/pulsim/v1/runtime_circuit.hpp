@@ -435,9 +435,19 @@ public:
 
     /// Add voltage-controlled switch (controlled by a PWM source)
     /// ctrl: control node (typically driven by PWM), t1/t2: switch terminals
+    /// hysteresis: tanh-smoothing width (V) for the behavioral conductance.
+    ///   Default 0.5 preserves the legacy event-detection cadence used by
+    ///   pre-existing converter tests; SwitchParams-driven Python paths
+    ///   pass a narrower value (e.g. 0.05 V) for sharper threshold tests.
     void add_vcswitch(const std::string& name, Index ctrl, Index t1, Index t2,
-                      Real v_threshold = 2.5, Real g_on = 1e3, Real g_off = 1e-9) {
-        devices_.emplace_back(VoltageControlledSwitch(v_threshold, g_on, g_off, name));
+                      Real v_threshold = 2.5, Real g_on = 1e3, Real g_off = 1e-9,
+                      Real hysteresis = 0.5) {
+        VoltageControlledSwitch::Params params;
+        params.v_threshold = v_threshold;
+        params.g_on = g_on;
+        params.g_off = g_off;
+        params.hysteresis = hysteresis;
+        devices_.emplace_back(VoltageControlledSwitch(params, name));
         connections_.push_back({name, {ctrl, t1, t2}, -1});
         register_connection_name(connections_.size() - 1);
     }
@@ -3431,11 +3441,18 @@ private:
         Real v_t1 = (n_t1 >= 0) ? x[n_t1] : 0.0;
         Real v_t2 = (n_t2 >= 0) ? x[n_t2] : 0.0;
 
-        // Smooth transition using tanh for better convergence
+        // Smooth transition using tanh for better convergence.
+        // Honor the device's configured hysteresis instead of the
+        // previously hardcoded 0.5 V — that was too wide for the
+        // typical 100 mV-margin threshold tests and meant a v_ctrl
+        // 2.5 V below threshold still produced a non-trivial residual
+        // conductance (sigmoid ≈ 5e-5 → g ≈ 5e-5 · g_on, R_sw ≈ 200 Ω
+        // for g_on=100 → V_out ≈ 8.2 V instead of ~0 V on a 1 kΩ
+        // load). Surfaced by `level3_nonlinear/test_switch_circuits.py`.
         Real v_th = dev.v_threshold();
         Real g_on = dev.g_on();
         Real g_off = dev.g_off();
-        Real hysteresis = 0.5;  // Smooth transition width
+        Real hysteresis = dev.hysteresis();
 
         Real g = g_off;
         Real dg_dvctrl = 0.0;

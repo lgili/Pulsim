@@ -451,6 +451,12 @@ def _add_switch_with_params_support(self, name, n1, n2, *args, **kwargs):
             return _native_add_vcswitch(
                 self, name, ctrl_pos, n1_resolved, n2_resolved,
                 params.vth, 1.0 / params.ron, 1.0 / params.roff,
+                # Narrower hysteresis than the C++ default (0.5 V) so
+                # SwitchParams-style sharp-threshold tests resolve OFF
+                # state to ~g_off and ON state to ~g_on within ±0.05 V
+                # of `vth`. The legacy 0.5 V default is preserved for
+                # the C++ buck event tests that don't use SwitchParams.
+                0.05,
             )
         # Differential ctrl not supported — fall through to native
         # which will reject the args.

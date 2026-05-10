@@ -256,7 +256,15 @@ private:
     Scalar v_threshold_ = 2.5;
     Scalar g_on_ = 1e3;
     Scalar g_off_ = 1e-9;
-    Scalar hysteresis_ = 0.5;             ///< Behavioral-mode tanh width.
+    // Behavioral-mode tanh width. Matches the `Params::hysteresis`
+    // default (line 36) so the 4-arg `VoltageControlledSwitch(v_th,
+    // g_on, g_off, name)` constructor and the `Params` constructor
+    // produce identical models. The previous 0.5 V default was too
+    // wide for typical 100 mV-margin threshold tests: with v_norm =
+    // (v_ctrl - v_th)/0.5, a v_ctrl 2.5 V below threshold gave
+    // tanh(-5) ≈ -0.9999 → sigmoid ≈ 5e-5 → g ≈ 5e-5 · g_on, leaving
+    // an unphysical residual conductance even in deep cutoff.
+    Scalar hysteresis_ = 0.1;
     Scalar event_hysteresis_ = Scalar{1e-9}; ///< PWL-mode commute hysteresis (V).
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;

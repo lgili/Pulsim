@@ -636,7 +636,12 @@ void init_v2_module(py::module_& v2) {
         .def("add_vcswitch", &Circuit::add_vcswitch,
              py::arg("name"), py::arg("ctrl"), py::arg("t1"), py::arg("t2"),
              py::arg("v_threshold") = 2.5, py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9,
-             "Add voltage-controlled switch: ON when V(ctrl) > v_threshold. Ideal for PWM-driven converters.")
+             py::arg("hysteresis") = 0.5,
+             "Add voltage-controlled switch: ON when V(ctrl) > v_threshold. "
+             "`hysteresis` is the tanh-smoothing width (V) used by the "
+             "behavioral conductance — 0.5 preserves the legacy converter "
+             "event-detection cadence; reduce to ~0.01 V for sharp threshold "
+             "tests.")
         .def("add_mosfet", &Circuit::add_mosfet,
              py::arg("name"), py::arg("gate"), py::arg("drain"), py::arg("source"),
              py::arg("params") = MOSFET::Params{},
