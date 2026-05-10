@@ -5,7 +5,10 @@ build-sundials-local/
 build-sundials/
 build-sundials-py313/
 build-ci/
+build_ad/
+build_py/
 docs/_build/
+
 site/
 cmake-build-*/
 benchmarks/out_*/

@@ -1,0 +1,42 @@
+# GaN Systems GS66508T — 650 V GaN HEMT, 50 mΩ.
+# Datasheet rev 2020-09. PDFN package.
+#
+# Note: GaN HEMTs have NO body diode (Q_rr = 0) — set the embedded
+# diode's Q_rr_table to zero.
+class: mosfet
+vendor: GaNSystems
+part: GS66508T
+
+V_th_25c:           1.7              # GaN low-Vth signature
+V_th_temp_coef:    -2e-3              # nearly flat over T
+R_ds_on_25c:        0.050             # 50 mΩ
+R_ds_on_temp_coef:  4e-3
+V_ds_max:           650.0
+I_dss_25c:          1.0e-7
+
+# GaN has small, very Vds-flat capacitances — almost ideal switch.
+Coss:
+  - { V:   0.0, C: 350.0e-12 }
+  - { V:  20.0, C:  85.0e-12 }
+  - { V: 100.0, C:  65.0e-12 }
+  - { V: 400.0, C:  60.0e-12 }
+  - { V: 650.0, C:  56.0e-12 }
+Ciss:
+  - { V:   0.0, C: 260.0e-12 }
+  - { V: 650.0, C: 260.0e-12 }
+Crss:
+  - { V:   0.0, C:  10.0e-12 }
+  - { V:  20.0, C:   2.0e-12 }
+  - { V: 650.0, C:   1.0e-12 }
+
+# Switching energies at 400 V bus, 25 °C — GaN is the loss champion
+Eon:
+  x: [10.0, 20.0, 30.0]
+  y: [200.0, 400.0]
+  values: [3.0e-6, 6.0e-6, 9.0e-6,
+           6.0e-6, 12.0e-6, 18.0e-6]
+Eoff:
+  x: [10.0, 20.0, 30.0]
+  y: [200.0, 400.0]
+  values: [2.0e-6, 4.0e-6, 6.0e-6,
+           4.0e-6, 8.0e-6, 12.0e-6]

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <list>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -47,6 +48,176 @@ inline void hash_mix(std::uint64_t& seed, std::uint64_t value) {
     }
     return hash;
 }
+
+/// Phase 1 of `refactor-linear-solver-cache`: structural hash of a sparse
+/// matrix (sparsity pattern only — dimensions + (row, col) pairs in column-
+/// major iteration order). Stable across value changes; matches whenever
+/// two matrices share the same non-zero positions, regardless of what the
+/// numeric coefficients look like.
+///
+/// Currently unused at the call sites — Phase 3's per-key LRU subsumes
+/// the within-stepper symbolic-only reuse that this hash powered in
+/// Phase 2. Kept around as a documentation artifact and a hook for a
+/// future "share analyzed pattern across LRU entries with the same
+/// sparsity" optimization (would require deeper Eigen surgery to extract
+/// and reapply the elimination tree).
+[[maybe_unused, nodiscard]] std::uint64_t hash_sparsity_pattern(const SparseMatrix& matrix) {
+    std::uint64_t hash = kFnvOffset;
+    hash_mix(hash, static_cast<std::uint64_t>(matrix.rows()));
+    hash_mix(hash, static_cast<std::uint64_t>(matrix.cols()));
+    hash_mix(hash, static_cast<std::uint64_t>(matrix.nonZeros()));
+    for (Index col = 0; col < matrix.outerSize(); ++col) {
+        for (SparseMatrix::InnerIterator it(matrix, col); it; ++it) {
+            hash_mix(hash, static_cast<std::uint64_t>(it.row() + 1));
+            hash_mix(hash, static_cast<std::uint64_t>(it.col() + 1));
+            // Note: it.value() intentionally NOT hashed.
+        }
+    }
+    return hash;
+}
+
+// =============================================================================
+// Phase 3 of `refactor-linear-solver-cache`: numeric-factor LRU cache.
+//
+// Keyed on `hash_sparse_numeric_signature(E)` — i.e. a value-aware hash that
+// uniquely identifies the (sparsity, topology, dt, parameter values) tuple
+// reflected in the assembled E matrix. Two cache entries with the same
+// numeric hash represent literally the same matrix (modulo astronomical
+// FNV collision), so the previously-computed analyze + factor are reusable
+// without any recomputation — only `solve(rhs)` is called.
+//
+// Why numeric-hash and not (sparsity_hash, topology_signature)? Because in
+// PWL mode the matrix is fully determined by topology + dt + parameters,
+// and a numeric hash captures all three at once. In Behavioral mode the
+// matrix changes per Newton iteration so the hash is unique each time and
+// the cache simply doesn't hit — wasted hash-table inserts but no
+// incorrectness. Default capacity (64) is tuned for the common
+// power-electronics case (≤ 16 distinct topologies × a few dt values after
+// timestep adaptation), with LRU eviction guarding against runaway growth
+// in pathological Behavioral runs.
+//
+// We hold a `shared_ptr<const SegmentLinearStateSpace>` inside each entry
+// to keep the matrix data alive — `RuntimeLinearSolver::solve` may fall
+// through to its fallback retry path and read `last_matrix_`, which would
+// dangle if the underlying SegmentLinearStateSpace was freed.
+// =============================================================================
+class LinearFactorCache {
+public:
+    using Key = std::uint64_t;
+
+    explicit LinearFactorCache(std::size_t capacity = kDefaultCapacity)
+        : capacity_(std::max<std::size_t>(capacity, 1)) {}
+
+    /// Look up a cached entry. Returns a pointer to the analyzed+factorized
+    /// `RuntimeLinearSolver` and bumps it to the MRU position. Returns
+    /// `nullptr` on miss. Caller is responsible for calling
+    /// `solve(rhs)` on the returned solver.
+    [[nodiscard]] RuntimeLinearSolver* find_and_touch(Key key) {
+        auto it = index_.find(key);
+        if (it == index_.end()) {
+            return nullptr;
+        }
+        // Move entry to front of LRU list (MRU)
+        if (it->second != entries_.begin()) {
+            entries_.splice(entries_.begin(), entries_, it->second);
+        }
+        return entries_.front().solver.get();
+    }
+
+    /// Acquire a fresh entry slot for `key`. Evicts LRU entries until under
+    /// capacity, inserts a new entry at MRU front, and returns a reference
+    /// to the (newly-constructed) solver. Caller is expected to call
+    /// `analyze(E) + factorize(E)` on the returned solver before any
+    /// subsequent `find_and_touch` lookup.
+    ///
+    /// `matrix_holder` is stashed in the entry to keep the matrix data
+    /// alive for the entry's lifetime — see class-level comment.
+    [[nodiscard]] RuntimeLinearSolver& acquire_for_factor(
+        Key key,
+        const LinearSolverStackConfig& config,
+        std::shared_ptr<const SegmentLinearStateSpace> matrix_holder) {
+        // If the key already exists, drop it first — caller invokes us only
+        // when a re-factor is needed (e.g. previous solve failed). The old
+        // entry's solver state is now stale.
+        if (auto existing = index_.find(key); existing != index_.end()) {
+            entries_.erase(existing->second);
+            index_.erase(existing);
+        }
+        // Evict LRU until we have room for one more entry.
+        while (entries_.size() >= capacity_) {
+            auto& victim = entries_.back();
+            index_.erase(victim.key);
+            entries_.pop_back();
+        }
+        Entry fresh;
+        fresh.key = key;
+        fresh.solver = std::make_unique<RuntimeLinearSolver>(config);
+        fresh.matrix_holder = std::move(matrix_holder);
+        entries_.push_front(std::move(fresh));
+        index_.emplace(key, entries_.begin());
+        return *entries_.front().solver;
+    }
+
+    /// Drop a single entry (e.g. on factorization or solve failure).
+    void invalidate(Key key) noexcept {
+        if (auto it = index_.find(key); it != index_.end()) {
+            entries_.erase(it->second);
+            index_.erase(it);
+        }
+    }
+
+    /// Aggregate analyze/factorize/solve telemetry across all live entries.
+    /// Used to surface the segment-primary linear-solver workload through
+    /// the existing `BackendTelemetry` linear-solver counters, which the
+    /// pre-Phase-3 single-slot path used to bump on the shared service.
+    [[nodiscard]] LinearSolverTelemetry aggregate_telemetry() const {
+        LinearSolverTelemetry agg{};
+        for (const auto& entry : entries_) {
+            const auto& t = entry.solver->telemetry();
+            agg.total_solve_calls       += t.total_solve_calls;
+            agg.total_analyze_calls     += t.total_analyze_calls;
+            agg.total_factorize_calls   += t.total_factorize_calls;
+            agg.total_iterations        += t.total_iterations;
+            agg.total_fallbacks         += t.total_fallbacks;
+            agg.total_analyze_time_seconds   += t.total_analyze_time_seconds;
+            agg.total_factorize_time_seconds += t.total_factorize_time_seconds;
+            agg.total_solve_time_seconds     += t.total_solve_time_seconds;
+        }
+        // The "last_*" fields take the MRU entry's values when available —
+        // that's the entry most recently touched by a hit/miss.
+        if (!entries_.empty()) {
+            const auto& mru = entries_.front().solver->telemetry();
+            agg.last_iterations             = mru.last_iterations;
+            agg.last_error                  = mru.last_error;
+            agg.last_analyze_time_seconds   = mru.last_analyze_time_seconds;
+            agg.last_factorize_time_seconds = mru.last_factorize_time_seconds;
+            agg.last_solve_time_seconds     = mru.last_solve_time_seconds;
+            agg.last_solver                 = mru.last_solver;
+            agg.last_preconditioner         = mru.last_preconditioner;
+        }
+        return agg;
+    }
+
+    void clear() noexcept {
+        entries_.clear();
+        index_.clear();
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
+    [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
+
+    static constexpr std::size_t kDefaultCapacity = 64;
+
+private:
+    struct Entry {
+        Key key = 0;
+        std::unique_ptr<RuntimeLinearSolver> solver;
+        std::shared_ptr<const SegmentLinearStateSpace> matrix_holder;
+    };
+    std::list<Entry> entries_;  // front = MRU, back = LRU
+    std::unordered_map<Key, std::list<Entry>::iterator> index_;
+    std::size_t capacity_;
+};
 
 class DefaultEquationAssemblerService final : public EquationAssemblerService {
 public:
@@ -155,46 +326,38 @@ public:
         model.t_target = request.t_target;
         model.dt = request.dt_candidate;
 
-        bool has_strong_nonlinearity = false;
+        // -------------------------------------------------------------------
+        // Topology signature
+        // -------------------------------------------------------------------
+        // Signature encodes structural metadata + the PWL switch bitmask. The
+        // bitmask alone determines the linear topology equivalence class; the
+        // structural mix-ins guard against accidental collisions when the
+        // circuit is replaced wholesale (e.g. across simulator instances).
+        const std::uint64_t topology_bits = circuit_.pwl_topology_bitmask();
+
         std::uint64_t signature = kFnvOffset;
         hash_mix(signature, static_cast<std::uint64_t>(circuit_.num_nodes()));
         hash_mix(signature, static_cast<std::uint64_t>(circuit_.num_branches()));
+        hash_mix(signature,
+                 static_cast<std::uint64_t>(circuit_.pwl_switching_device_count()));
         hash_mix(signature, request.mode == TransientStepMode::Fixed ? 0xF1 : 0xA5);
-        hash_mix(signature, request.event_adjacent ? 0xE1 : 0xE0);
-
-        const auto& devices = circuit_.devices();
-        const auto& conns = circuit_.connections();
-        for (std::size_t i = 0; i < devices.size() && i < conns.size(); ++i) {
-            hash_mix(signature, static_cast<std::uint64_t>(i + 1));
-            const auto& conn = conns[i];
-            std::visit([&](const auto& dev) {
-                using T = std::decay_t<decltype(dev)>;
-                if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
-                    Real v_ctrl = 0.0;
-                    if (!conn.nodes.empty() && conn.nodes[0] >= 0 &&
-                        conn.nodes[0] < x_now.size()) {
-                        v_ctrl = x_now[conn.nodes[0]];
-                    }
-                    hash_mix(signature, 0x10);
-                    hash_mix(signature, v_ctrl > dev.v_threshold() ? 0x1 : 0x0);
-                } else if constexpr (std::is_same_v<T, IdealSwitch>) {
-                    hash_mix(signature, 0x11);
-                    hash_mix(signature, dev.is_closed() ? 0x1 : 0x0);
-                } else if constexpr (std::is_same_v<T, IdealDiode> ||
-                                     std::is_same_v<T, MOSFET> ||
-                                     std::is_same_v<T, IGBT>) {
-                    has_strong_nonlinearity = true;
-                    hash_mix(signature, 0x20);
-                } else {
-                    hash_mix(signature, 0x30);
-                }
-            }, devices[i]);
-        }
-
+        hash_mix(signature, topology_bits);
         model.topology_signature = signature;
-        model.admissible = !has_strong_nonlinearity;
-        if (!model.admissible) {
-            model.classification = "segment_not_admissible_nonlinear_device";
+
+        // -------------------------------------------------------------------
+        // PWL admissibility
+        // -------------------------------------------------------------------
+        // Resolve `Auto`-mode devices against the circuit-level default which
+        // the Simulator pushed in from `SimulationOptions.switching_mode`
+        // (refactor-pwl-switching-engine, Phase 5). With the conservative
+        // Auto→Behavioral fallback, the user must explicitly opt in to
+        // SwitchingMode::Ideal at either the simulation or device level.
+        if (!circuit_.all_switching_devices_in_ideal_mode(circuit_.default_switching_mode())) {
+            model.classification = "segment_not_admissible_behavioral_device";
+            return model;
+        }
+        if (!circuit_.pwl_state_space_supports_all_devices()) {
+            model.classification = "segment_not_admissible_unsupported_device";
             return model;
         }
 
@@ -204,36 +367,74 @@ public:
             return model;
         }
 
-        SparseMatrix jacobian(x_now.size(), x_now.size());
-        Vector residual = Vector::Zero(x_now.size());
-        assembler_->assemble_system(x_now, request.t_target, dt_safe, jacobian, residual);
-        if (!residual.allFinite() || jacobian.rows() != x_now.size() ||
-            jacobian.cols() != x_now.size()) {
-            model.classification = "segment_assembly_non_finite";
+        // -------------------------------------------------------------------
+        // Continuous state-space M·ẋ + N·x = b(t) → discrete via Tustin
+        // -------------------------------------------------------------------
+        // Phase 4 of `refactor-linear-solver-cache`: workspace SparseMatrix
+        // and Vector live as members so successive `build_model` calls reuse
+        // the existing storage rather than allocating fresh on every step.
+        // `assemble_state_space` calls `resize` and `setZero` internally — Eigen
+        // keeps the underlying storage when shrinking back to the same size,
+        // so the steady-state hot loop pays no heap cost here.
+        SparseMatrix& M_mat = M_workspace_;
+        SparseMatrix& N_mat = N_workspace_;
+        Vector& b_now = b_now_workspace_;
+        Vector& b_next = b_next_workspace_;
+        circuit_.assemble_state_space(M_mat, N_mat, b_now, request.t_now);
+
+        // Re-assemble b at t_target. M and N are time-invariant within a
+        // PWL topology, so we only need a fresh source-vector evaluation.
+        // Discard buffers reuse the same workspace storage too.
+        SparseMatrix& M_unused = M_discard_workspace_;
+        SparseMatrix& N_unused = N_discard_workspace_;
+        circuit_.assemble_state_space(M_unused, N_unused, b_next, request.t_target);
+
+        const Index n = x_now.size();
+        if (M_mat.rows() != n || N_mat.rows() != n ||
+            b_now.size() != n || b_next.size() != n) {
+            model.classification = "segment_state_size_mismatch";
+            return model;
+        }
+        if (!b_now.allFinite() || !b_next.allFinite()) {
+            model.classification = "segment_source_non_finite";
             return model;
         }
 
-        auto linear_model = std::make_shared<SegmentLinearStateSpace>();
-        linear_model->E = jacobian;
-        linear_model->A = jacobian;
-        linear_model->B.resize(x_now.size(), 0);
-        linear_model->u.resize(0);
-        linear_model->c = -residual;
+        // Tustin (trapezoidal):
+        //   (M + dt/2 · N) x_{n+1} = (M − dt/2 · N) x_n + dt/2 · (b_now + b_next)
+        // The downstream stepper evaluates rhs = A·x_now + c (B·u is unused
+        // for fixed-shape sources because b(t) variability is folded into c).
+        const Real half_dt = 0.5 * dt_safe;
 
+        auto linear_model = std::make_shared<SegmentLinearStateSpace>();
+        linear_model->E = M_mat + half_dt * N_mat;
+        linear_model->A = M_mat - half_dt * N_mat;
+        linear_model->E.makeCompressed();
+        linear_model->A.makeCompressed();
+        linear_model->c = half_dt * (b_now + b_next);
+        linear_model->B.resize(n, 0);
+        linear_model->u.resize(0);
+
+        if (!linear_model->c.allFinite()) {
+            model.classification = "segment_rhs_non_finite";
+            return model;
+        }
+
+        model.admissible = true;
         model.linear_model = std::move(linear_model);
         model.classification = "piecewise_linear_segment";
 
         auto cache_it = topology_cache_.find(signature);
         if (cache_it == topology_cache_.end()) {
             CacheEntry entry;
-            entry.state_size = x_now.size();
-            entry.nonzeros = jacobian.nonZeros();
+            entry.state_size = n;
+            entry.nonzeros = model.linear_model->E.nonZeros();
             entry.build_count = 1;
             topology_cache_.emplace(signature, std::move(entry));
             model.cache_hit = false;
         } else {
-            cache_it->second.state_size = x_now.size();
-            cache_it->second.nonzeros = jacobian.nonZeros();
+            cache_it->second.state_size = n;
+            cache_it->second.nonzeros = model.linear_model->E.nonZeros();
             cache_it->second.build_count += 1;
             model.cache_hit = true;
         }
@@ -251,6 +452,16 @@ private:
     Circuit& circuit_;
     std::shared_ptr<EquationAssemblerService> assembler_;
     mutable std::unordered_map<std::uint64_t, CacheEntry> topology_cache_;
+    // Phase 4 of `refactor-linear-solver-cache`: per-call workspaces hoisted
+    // out of `build_model` so the steady-state hot loop reuses storage.
+    // `mutable` because `build_model` is `const` per the SegmentModelService
+    // interface contract; these are caches, not observable state.
+    mutable SparseMatrix M_workspace_;
+    mutable SparseMatrix N_workspace_;
+    mutable SparseMatrix M_discard_workspace_;
+    mutable SparseMatrix N_discard_workspace_;
+    mutable Vector b_now_workspace_;
+    mutable Vector b_next_workspace_;
 };
 
 class DefaultSegmentStepperService final : public SegmentStepperService {
@@ -325,63 +536,96 @@ public:
             return outcome;
         }
 
-        auto& linear = linear_solve_->solver();
         const std::uint64_t matrix_hash = hash_sparse_numeric_signature(linear_model.E);
-        const bool can_reuse_factorization =
-            factorization_valid_ &&
-            cached_topology_signature_ == model.topology_signature &&
-            cached_matrix_hash_ == matrix_hash &&
-            cached_state_size_ == linear_model.E.rows();
+        const auto& linear_config = linear_solve_->config();
 
-        if (factorization_valid_ && !can_reuse_factorization) {
-            if (cached_topology_signature_ != model.topology_signature ||
-                cached_state_size_ != linear_model.E.rows()) {
-                outcome.cache_invalidation_reason = "topology_changed";
-            } else if (cached_matrix_hash_ != matrix_hash) {
-                outcome.cache_invalidation_reason = "numeric_instability";
+        // Decide the invalidation reason BEFORE we look in the cache. The
+        // reason describes "why is the previous step's hot factor not
+        // valid for this step" — even if we end up hitting the LRU on a
+        // different key (i.e. a previously-visited topology), the reason
+        // still reflects what changed since the last accepted step.
+        const bool first_step = !have_previous_step_;
+        if (!first_step) {
+            if (previous_topology_signature_ != model.topology_signature ||
+                previous_state_size_ != linear_model.E.rows()) {
+                outcome.set_invalidation_reason(CacheInvalidationReason::TopologyChanged);
+            } else if (previous_matrix_hash_ != matrix_hash) {
+                outcome.set_invalidation_reason(CacheInvalidationReason::NumericInstability);
             }
-            factorization_valid_ = false;
+            // else: same matrix as last step → not really invalidated.
         }
 
+        // Phase 3: per-key numeric-factor LRU. Hit ⇒ analyze and factorize
+        // were both done on a previous visit to this exact matrix; just
+        // call solve. The hit case is the central PWL-cycling win:
+        // commutating between a small set of topologies pulls cached
+        // factors instantly.
         LinearSolveResult x_next_result = LinearSolveResult::failure("segment_linear_not_attempted");
-        if (can_reuse_factorization) {
-            x_next_result = linear.solve(rhs);
+        if (auto* cached = linear_factor_cache_.find_and_touch(matrix_hash)) {
+            x_next_result = cached->solve(rhs);
             if (x_next_result.has_value()) {
                 outcome.linear_factor_cache_hit = true;
+                // True hit on a previously-cached topology: no rebuild
+                // happened, so don't tag this step as an invalidation.
+                outcome.set_invalidation_reason(CacheInvalidationReason::None);
             } else {
-                factorization_valid_ = false;
-                outcome.cache_invalidation_reason = "numeric_instability";
+                // Cached factor is no longer valid (rare; e.g. matrix is
+                // numerically singular under current scaling). Drop the
+                // entry and fall through to the miss path which will
+                // build a fresh factor.
+                linear_factor_cache_.invalidate(matrix_hash);
+                outcome.set_invalidation_reason(CacheInvalidationReason::NumericInstability);
             }
         }
 
         if (!x_next_result.has_value()) {
             outcome.linear_factor_cache_miss = true;
-            if (!linear.analyze(linear_model.E) || !linear.factorize(linear_model.E)) {
-                factorization_valid_ = false;
-                if (outcome.cache_invalidation_reason.empty()) {
-                    outcome.cache_invalidation_reason = "numeric_instability";
+
+            // Acquire a fresh entry slot for this matrix_hash, evicting
+            // LRU if needed. We hold model.linear_model alongside the
+            // solver so RuntimeLinearSolver::last_matrix_ stays valid for
+            // the entry's lifetime (its fallback retry path reads
+            // *last_matrix_).
+            auto& solver = linear_factor_cache_.acquire_for_factor(
+                matrix_hash, linear_config, model.linear_model);
+
+            if (!solver.analyze(linear_model.E)) {
+                linear_factor_cache_.invalidate(matrix_hash);
+                if (outcome.invalidation_reason == CacheInvalidationReason::None) {
+                    outcome.set_invalidation_reason(CacheInvalidationReason::NumericInstability);
                 }
                 outcome.requires_fallback = true;
                 outcome.reason = "segment_linear_factorization_failed";
                 return outcome;
             }
 
-            x_next_result = linear.solve(rhs);
+            if (!solver.factorize(linear_model.E)) {
+                linear_factor_cache_.invalidate(matrix_hash);
+                if (outcome.invalidation_reason == CacheInvalidationReason::None) {
+                    outcome.set_invalidation_reason(CacheInvalidationReason::NumericInstability);
+                }
+                outcome.requires_fallback = true;
+                outcome.reason = "segment_linear_factorization_failed";
+                return outcome;
+            }
+
+            x_next_result = solver.solve(rhs);
             if (!x_next_result) {
-                factorization_valid_ = false;
-                if (outcome.cache_invalidation_reason.empty()) {
-                    outcome.cache_invalidation_reason = "numeric_instability";
+                linear_factor_cache_.invalidate(matrix_hash);
+                if (outcome.invalidation_reason == CacheInvalidationReason::None) {
+                    outcome.set_invalidation_reason(CacheInvalidationReason::NumericInstability);
                 }
                 outcome.requires_fallback = true;
                 outcome.reason = "segment_linear_solve_failed";
                 return outcome;
             }
-
-            factorization_valid_ = true;
-            cached_topology_signature_ = model.topology_signature;
-            cached_matrix_hash_ = matrix_hash;
-            cached_state_size_ = linear_model.E.rows();
         }
+
+        // Remember this step's identity for next-step invalidation tagging.
+        previous_topology_signature_ = model.topology_signature;
+        previous_matrix_hash_ = matrix_hash;
+        previous_state_size_ = linear_model.E.rows();
+        have_previous_step_ = true;
 
         Vector x_next = x_next_result.value();
         if (!x_next.allFinite()) {
@@ -390,27 +634,30 @@ public:
             return outcome;
         }
 
-        Vector residual_next = Vector::Zero(x_now.size());
-        assembler_->assemble_residual(x_next, request.t_target, dt_safe, residual_next);
-        if (!residual_next.allFinite()) {
+        // Verify the linear solve was internally consistent: ‖E·x_next − rhs‖
+        // must be near zero relative to the solution magnitude. This replaces
+        // the legacy Newton-residual check (`assemble_residual(x_next) ≤ −c`),
+        // whose contract assumed `c = −residual_at_x_now`. That no longer
+        // holds under the Tustin state-space form introduced in
+        // refactor-pwl-switching-engine Phase 2.
+        const Vector linear_residual = linear_model.E * x_next - rhs;
+        if (!linear_residual.allFinite()) {
             outcome.requires_fallback = true;
-            outcome.reason = "segment_post_residual_non_finite";
+            outcome.reason = "segment_linear_residual_non_finite";
             return outcome;
         }
-
-        const Real r0 = (-linear_model.c).lpNorm<Eigen::Infinity>();
-        const Real r1 = residual_next.lpNorm<Eigen::Infinity>();
-        const Real r0_safe = std::max<Real>(r0, 1e-16);
-        if (r1 > r0_safe * 1.05) {
+        const Real linear_residual_norm = linear_residual.lpNorm<Eigen::Infinity>();
+        const Real solution_scale = std::max<Real>(x_next.lpNorm<Eigen::Infinity>(), 1.0);
+        if (linear_residual_norm > solution_scale * 1e-6) {
             outcome.requires_fallback = true;
-            outcome.reason = "segment_residual_not_improved";
+            outcome.reason = "segment_linear_solve_inconsistent";
             return outcome;
         }
 
         outcome.result.solution = std::move(x_next);
         outcome.result.status = SolverStatus::Success;
         outcome.result.iterations = 1;
-        outcome.result.final_residual = r1;
+        outcome.result.final_residual = linear_residual_norm;
         outcome.result.final_weighted_error = (outcome.result.solution - x_now).lpNorm<Eigen::Infinity>();
         outcome.requires_fallback = false;
         outcome.reason = outcome.linear_factor_cache_hit
@@ -419,13 +666,38 @@ public:
         return outcome;
     }
 
+    /// Phase 3 of `refactor-linear-solver-cache`: aggregate analyze /
+    /// factorize / solve telemetry across all live LRU entries. Surfaced
+    /// up to the simulation consumer via the cache's `aggregate_telemetry`
+    /// so the segment-primary path's linear-solver workload is observable
+    /// in the existing `LinearSolverTelemetry` shape.
+    [[nodiscard]] LinearSolverTelemetry linear_solver_telemetry() const override {
+        return linear_factor_cache_.aggregate_telemetry();
+    }
+
+    [[nodiscard]] std::pair<std::size_t, std::size_t>
+    linear_factor_cache_occupancy() const override {
+        return {linear_factor_cache_.size(), linear_factor_cache_.capacity()};
+    }
+
 private:
     std::shared_ptr<EquationAssemblerService> assembler_;
     std::shared_ptr<LinearSolveService> linear_solve_;
-    bool factorization_valid_ = false;
-    std::uint64_t cached_topology_signature_ = 0;
-    std::uint64_t cached_matrix_hash_ = 0;
-    Index cached_state_size_ = 0;
+    // Phase 3 of `refactor-linear-solver-cache`: per-(topology, dt, params)
+    // numeric-factor cache, keyed on `hash_sparse_numeric_signature(E)`.
+    // Replaces the legacy single-slot `factorization_valid_ + cached_*`
+    // machinery; subsumes the Phase 2 symbolic-only reuse because every
+    // entry persists its own analyzed pattern and numeric factor.
+    LinearFactorCache linear_factor_cache_{};
+    // Previous-step identity, kept for invalidation-reason tagging on the
+    // miss path. The cache itself doesn't need this — it already keys on
+    // matrix_hash — but the telemetry surface wants a reason every time
+    // the new step's key differs from the previous step's, so we replay
+    // the comparison here.
+    bool have_previous_step_ = false;
+    std::uint64_t previous_topology_signature_ = 0;
+    std::uint64_t previous_matrix_hash_ = 0;
+    Index previous_state_size_ = 0;
 };
 
 class DefaultNonlinearSolveService final : public NonlinearSolveService {

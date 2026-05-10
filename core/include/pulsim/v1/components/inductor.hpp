@@ -5,8 +5,14 @@
 namespace pulsim::v1 {
 
 // =============================================================================
-// Example: Inductor Device (CRTP with dynamics)
+// Inductor Device (CRTP with dynamics)
 // =============================================================================
+//
+// AD bypass note (`add-automatic-differentiation`, Phase 3):
+//   Inductor stamps the trapezoidal companion model `G_eq = dt/(2L)` plus a
+//   constant equivalent-current source from the previous step's state.
+//   Jacobian is constant per topology / per timestep — no AD needed.
+//   `stamp_jacobian_via_ad` is intentionally not provided.
 
 class Inductor : public DynamicDeviceBase<Inductor> {
 public:

@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -641,6 +643,10 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     options_.newton_options.num_branches = circuit_.num_branches();
     newton_solver_.set_options(options_.newton_options);
     newton_solver_.linear_solver().set_config(options_.linear_solver);
+    // Push the resolved switching-mode default into the circuit so the
+    // segment-model and event-scan services (Phases 2/4) consume the user's
+    // simulation-level intent (refactor-pwl-switching-engine, Phase 5).
+    circuit_.set_default_switching_mode(options_.switching_mode);
     transient_services_ =
         make_default_transient_service_registry(circuit_, options_, newton_solver_);
 
@@ -694,6 +700,662 @@ void Simulator::set_switching_energy(const std::string& device_name, const Switc
     }
 }
 
+LinearSystem Simulator::linearize_around(const Vector& x_op, Real t_op) {
+    // Phase 1 of `add-frequency-domain-analysis`: lift the segment engine's
+    // PWL state-space `M·dx/dt + N·x = b(t)` into a generic descriptor
+    // form `E·dx/dt = A·x + B·u, y = C·x + D·u`.
+    //
+    // Today only PWL-admissible circuits are linearized — we read M and N
+    // straight off `Circuit::assemble_state_space`, which is exactly what
+    // the segment engine does each step. Behavioral devices fall out via
+    // an explicit `failure_reason`; AD-driven Behavioral linearization is
+    // a Phase 1.2 follow-up.
+    LinearSystem result;
+    result.t_linearization = t_op;
+    result.x_linearization = x_op;
+
+    const Index n = circuit_.system_size();
+    if (x_op.size() != n) {
+        result.failure_reason = "linearize_state_size_mismatch";
+        return result;
+    }
+
+    // PWL admissibility — same gate the segment engine applies. If any
+    // device is in Behavioral mode (or unsupported by the PWL state-space
+    // assembler), bail out with a typed reason. Phase 1.2 will replace
+    // this with an AD/finite-difference path.
+    const auto default_mode = circuit_.default_switching_mode();
+    if (!circuit_.all_switching_devices_in_ideal_mode(default_mode)) {
+        result.method = "non_admissible";
+        result.failure_reason = "linearize_non_admissible_behavioral_device";
+        return result;
+    }
+    if (!circuit_.pwl_state_space_supports_all_devices()) {
+        result.method = "non_admissible";
+        result.failure_reason = "linearize_non_admissible_unsupported_device";
+        return result;
+    }
+
+    // Assemble M, N, b at the operating-point time. M and N are
+    // time-invariant within a PWL topology, so `t_op` only affects b.
+    SparseMatrix M(n, n);
+    SparseMatrix N(n, n);
+    Vector b(n);
+    circuit_.assemble_state_space(M, N, b, t_op);
+
+    if (M.rows() != n || N.rows() != n || b.size() != n) {
+        result.failure_reason = "linearize_state_space_dim_mismatch";
+        return result;
+    }
+    if (!b.allFinite()) {
+        result.failure_reason = "linearize_source_non_finite";
+        return result;
+    }
+
+    // E = M, A = -N. Eigen sparse expressions evaluate into compressed
+    // form via `.eval()` so the returned matrices own their storage.
+    result.E = M;
+    result.A = (-N).eval();
+    result.E.makeCompressed();
+    result.A.makeCompressed();
+
+    // B is a single column = b(t_op), the lumped-source contribution at
+    // the linearization time. AC sweep treats this as a unit perturbation
+    // amplitude on the lumped input. Per-source B columns are Phase 4 of
+    // the change (multi-input transfer-function matrix).
+    SparseMatrix B(n, 1);
+    {
+        std::vector<Eigen::Triplet<Real>> triplets;
+        triplets.reserve(static_cast<std::size_t>(n));
+        for (Index i = 0; i < n; ++i) {
+            if (b[i] != Real{0}) {
+                triplets.emplace_back(i, 0, b[i]);
+            }
+        }
+        B.setFromTriplets(triplets.begin(), triplets.end());
+        B.makeCompressed();
+    }
+    result.B = std::move(B);
+
+    // C = identity (output = full state). User-selected measurement nodes
+    // (a smaller C with one row per requested node) is a Phase 2 / 4
+    // refinement; for now downstream consumers can index into the full x
+    // by node name via `Circuit::get_node`.
+    SparseMatrix C(n, n);
+    {
+        std::vector<Eigen::Triplet<Real>> triplets;
+        triplets.reserve(static_cast<std::size_t>(n));
+        for (Index i = 0; i < n; ++i) {
+            triplets.emplace_back(i, i, Real{1});
+        }
+        C.setFromTriplets(triplets.begin(), triplets.end());
+        C.makeCompressed();
+    }
+    result.C = std::move(C);
+
+    // D = 0 (no direct feedthrough). MNA sources contribute to the
+    // dynamics via b(t), not to the measurement output.
+    SparseMatrix D(n, 1);
+    D.makeCompressed();
+    result.D = std::move(D);
+
+    result.state_size  = n;
+    result.input_size  = 1;
+    result.output_size = n;
+    result.method      = "piecewise_linear_segment";
+    return result;
+}
+
+namespace {
+
+// Build the B column for a named perturbation source. Returns true on
+// success; populates `triplets` with the source's contribution to the
+// linearized RHS. Convention matches `Circuit::assemble_state_space`:
+//   Voltage sources (V/PWM/Sine/Pulse): b[branch_index] = +V_src
+//     → ∂b/∂V = δ(row = branch_index)
+//   Current sources: b[npos] += I, b[nneg] -= I
+//     → ∂b/∂I = +1 at npos, -1 at nneg
+[[nodiscard]] bool build_perturbation_b_column(
+    const Circuit& circuit,
+    const std::string& source_name,
+    Index state_size,
+    std::vector<Eigen::Triplet<Real>>& triplets,
+    std::string& failure_reason) {
+    const auto* conn = circuit.find_connection(source_name);
+    if (conn == nullptr) {
+        failure_reason = "ac_sweep_perturbation_source_not_found:" + source_name;
+        return false;
+    }
+
+    if (circuit.find_device<VoltageSource>(source_name) ||
+        circuit.find_device<PWMVoltageSource>(source_name) ||
+        circuit.find_device<SineVoltageSource>(source_name) ||
+        circuit.find_device<PulseVoltageSource>(source_name)) {
+        if (conn->branch_index < 0 || conn->branch_index >= state_size) {
+            failure_reason = "ac_sweep_perturbation_voltage_source_no_branch_index";
+            return false;
+        }
+        triplets.emplace_back(conn->branch_index, 0, Real{1});
+        return true;
+    }
+
+    if (circuit.find_device<CurrentSource>(source_name)) {
+        if (conn->nodes.size() < 2) {
+            failure_reason = "ac_sweep_perturbation_current_source_missing_nodes";
+            return false;
+        }
+        const Index npos = conn->nodes[0];
+        const Index nneg = conn->nodes[1];
+        if (npos >= 0 && npos < state_size) {
+            triplets.emplace_back(npos, 0, Real{ 1});
+        }
+        if (nneg >= 0 && nneg < state_size) {
+            triplets.emplace_back(nneg, 0, Real{-1});
+        }
+        return true;
+    }
+
+    failure_reason = "ac_sweep_perturbation_source_unsupported_type:" + source_name;
+    return false;
+}
+
+[[nodiscard]] std::vector<Real> generate_frequency_grid(
+    const AcSweepOptions& opt) {
+    std::vector<Real> freqs;
+    if (!(opt.f_start > 0.0) || !(opt.f_stop >= opt.f_start)) {
+        return freqs;
+    }
+    if (opt.scale == AcSweepScale::Logarithmic) {
+        const Real decades = std::log10(opt.f_stop / opt.f_start);
+        const int n = std::max(2, static_cast<int>(
+            std::round(decades * std::max(1, opt.points_per_decade))) + 1);
+        freqs.reserve(static_cast<std::size_t>(n));
+        const Real log_start = std::log10(opt.f_start);
+        const Real log_stop  = std::log10(opt.f_stop);
+        for (int k = 0; k < n; ++k) {
+            const Real t = (n == 1) ? Real{0}
+                                     : static_cast<Real>(k) / static_cast<Real>(n - 1);
+            freqs.push_back(std::pow(Real{10}, log_start + t * (log_stop - log_start)));
+        }
+    } else {
+        const int n = std::max(2, opt.num_points > 0
+                                      ? opt.num_points
+                                      : static_cast<int>(opt.points_per_decade));
+        freqs.reserve(static_cast<std::size_t>(n));
+        for (int k = 0; k < n; ++k) {
+            const Real t = (n == 1) ? Real{0}
+                                     : static_cast<Real>(k) / static_cast<Real>(n - 1);
+            freqs.push_back(opt.f_start + t * (opt.f_stop - opt.f_start));
+        }
+    }
+    return freqs;
+}
+
+}  // namespace
+
+AcSweepResult Simulator::run_ac_sweep(const AcSweepOptions& options) {
+    AcSweepResult result;
+    const auto t_wall_start = std::chrono::steady_clock::now();
+
+    auto fail = [&](std::string reason) {
+        result.success = false;
+        result.failure_reason = std::move(reason);
+        result.wall_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - t_wall_start).count();
+        return result;
+    };
+
+    // 1) Resolve the operating point: either run DC OP or trust a caller-
+    //    supplied `x_op`. For Phase 2 we don't perturb-then-resolve — the
+    //    DC OP is taken as-is and the linearization happens at that
+    //    state.
+    Vector x_op;
+    if (options.use_dc_op) {
+        const auto dc = dc_operating_point();
+        if (!dc.success) {
+            return fail("ac_sweep_dc_op_failed");
+        }
+        x_op = dc.newton_result.solution;
+    } else {
+        x_op = options.x_op;
+    }
+
+    const Index n = circuit_.system_size();
+    if (x_op.size() != n) {
+        return fail("ac_sweep_state_size_mismatch");
+    }
+
+    // 2) PWL admissibility check, mirroring `linearize_around`. Behavioral
+    //    devices fall out with a typed reason; AD-driven Behavioral AC
+    //    sweep is a Phase 1.2 follow-up.
+    const auto default_mode = circuit_.default_switching_mode();
+    if (!circuit_.all_switching_devices_in_ideal_mode(default_mode)) {
+        return fail("ac_sweep_non_admissible_behavioral_device");
+    }
+    if (!circuit_.pwl_state_space_supports_all_devices()) {
+        return fail("ac_sweep_non_admissible_unsupported_device");
+    }
+
+    // 3) Assemble M, N at t_op. We discard b — Phase 2 builds B from the
+    //    named perturbation source, not from the DC b vector.
+    SparseMatrix M(n, n), N(n, n);
+    Vector b_unused(n);
+    circuit_.assemble_state_space(M, N, b_unused, options.t_op);
+    M.makeCompressed();
+    N.makeCompressed();
+
+    // 4) Resolve perturbation source list. Phase 4 of the change supports
+    //    a vector of source names; Phases 2/3 fall back to the single
+    //    `perturbation_source`. Either way we end up with N_inputs ≥ 1.
+    std::vector<std::string> source_names;
+    if (!options.perturbation_sources.empty()) {
+        source_names = options.perturbation_sources;
+    } else {
+        source_names = {options.perturbation_source};
+    }
+    const int n_inputs = static_cast<int>(source_names.size());
+
+    // Build B as a multi-column matrix: column k carries the perturbation
+    // contribution of source k. For Phase-2 single-source sweeps this
+    // collapses to a 1-column matrix identical to the prior behavior.
+    SparseMatrix B(n, n_inputs);
+    {
+        std::vector<Eigen::Triplet<Real>> b_triplets;
+        for (int k = 0; k < n_inputs; ++k) {
+            std::vector<Eigen::Triplet<Real>> col_triplets;
+            if (!build_perturbation_b_column(circuit_, source_names[k],
+                                             n, col_triplets, result.failure_reason)) {
+                return fail(result.failure_reason);
+            }
+            for (const auto& t : col_triplets) {
+                // build_perturbation_b_column emits col=0 by convention;
+                // remap to the requested column k of the multi-input B.
+                b_triplets.emplace_back(t.row(), k, t.value());
+            }
+        }
+        B.setFromTriplets(b_triplets.begin(), b_triplets.end());
+        B.makeCompressed();
+    }
+
+    // 5) Resolve measurement nodes to state indices. Empty list → return
+    //    the full state. Each output node combines with each input source
+    //    to produce one `AcMeasurement` (the H[i,j] cell of the matrix).
+    struct Slot { std::string node; Index state_index; };
+    std::vector<Slot> output_slots;
+    if (options.measurement_nodes.empty()) {
+        output_slots.reserve(static_cast<std::size_t>(n));
+        for (Index i = 0; i < n; ++i) {
+            output_slots.push_back({"", i});
+        }
+    } else {
+        output_slots.reserve(options.measurement_nodes.size());
+        for (const auto& name : options.measurement_nodes) {
+            const Index idx = circuit_.get_node(name);
+            if (idx < 0 || idx >= n) {
+                return fail("ac_sweep_measurement_node_not_found:" + name);
+            }
+            output_slots.push_back({name, idx});
+        }
+    }
+    std::vector<AcMeasurement> measurements;
+    measurements.reserve(output_slots.size() * static_cast<std::size_t>(n_inputs));
+    for (const auto& slot : output_slots) {
+        for (int k = 0; k < n_inputs; ++k) {
+            AcMeasurement m;
+            m.node = slot.node;
+            m.state_index = slot.state_index;
+            // For Phase-2 single-source sweeps `source_names[0]` is the
+            // user's `perturbation_source` (could be empty if they
+            // provided neither); leave it on the measurement for symmetry.
+            m.perturbation_source = source_names[k];
+            measurements.push_back(std::move(m));
+        }
+    }
+
+    // 6) Generate frequency grid.
+    result.frequencies = generate_frequency_grid(options);
+    if (result.frequencies.empty()) {
+        return fail("ac_sweep_invalid_frequency_range");
+    }
+    for (auto& m : measurements) {
+        m.magnitude_db.reserve(result.frequencies.size());
+        m.phase_deg.reserve(result.frequencies.size());
+        m.real_part.reserve(result.frequencies.size());
+        m.imag_part.reserve(result.frequencies.size());
+    }
+
+    // 7) Per-frequency complex solve. K(ω) = jω·E - A where E = M, A = -N
+    //    in our convention, so K(ω) = jω·M + N. Sparsity pattern is the
+    //    union of M and N's patterns and is constant across ω, so we
+    //    `analyzePattern` once and `factorize` per ω.
+    using ComplexScalar = std::complex<Real>;
+    using ComplexSparse = Eigen::SparseMatrix<ComplexScalar>;
+    using ComplexVector = Eigen::Matrix<ComplexScalar, Eigen::Dynamic, 1>;
+
+    // Build the union sparsity pattern by overlaying M and N's complex casts.
+    ComplexSparse K(n, n);
+    {
+        std::vector<Eigen::Triplet<ComplexScalar>> tri;
+        tri.reserve(static_cast<std::size_t>(M.nonZeros() + N.nonZeros()));
+        for (Index col = 0; col < M.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(M, col); it; ++it) {
+                tri.emplace_back(it.row(), it.col(), ComplexScalar{it.value(), Real{0}});
+            }
+        }
+        for (Index col = 0; col < N.outerSize(); ++col) {
+            for (SparseMatrix::InnerIterator it(N, col); it; ++it) {
+                tri.emplace_back(it.row(), it.col(), ComplexScalar{it.value(), Real{0}});
+            }
+        }
+        K.setFromTriplets(tri.begin(), tri.end());
+        K.makeCompressed();
+    }
+
+    // Build the multi-input RHS matrix from B (densified for the solve).
+    using ComplexMatrix = Eigen::Matrix<ComplexScalar, Eigen::Dynamic, Eigen::Dynamic>;
+    ComplexMatrix rhs = ComplexMatrix::Zero(n, n_inputs);
+    for (Index col = 0; col < B.outerSize(); ++col) {
+        for (SparseMatrix::InnerIterator it(B, col); it; ++it) {
+            rhs(it.row(), it.col()) = ComplexScalar{it.value(), Real{0}};
+        }
+    }
+
+    Eigen::SparseLU<ComplexSparse> solver;
+    solver.analyzePattern(K);  // once — pattern is constant across ω
+
+    for (const Real f : result.frequencies) {
+        const Real omega = Real{2} * std::numbers::pi_v<Real> * f;
+        // K(ω) = jω·M + N, computed as a fresh complex matrix.
+        ComplexSparse Kf(n, n);
+        {
+            std::vector<Eigen::Triplet<ComplexScalar>> tri;
+            tri.reserve(static_cast<std::size_t>(M.nonZeros() + N.nonZeros()));
+            for (Index col = 0; col < M.outerSize(); ++col) {
+                for (SparseMatrix::InnerIterator it(M, col); it; ++it) {
+                    tri.emplace_back(it.row(), it.col(),
+                                     ComplexScalar{Real{0}, omega * it.value()});
+                }
+            }
+            for (Index col = 0; col < N.outerSize(); ++col) {
+                for (SparseMatrix::InnerIterator it(N, col); it; ++it) {
+                    tri.emplace_back(it.row(), it.col(),
+                                     ComplexScalar{it.value(), Real{0}});
+                }
+            }
+            Kf.setFromTriplets(tri.begin(), tri.end());
+            Kf.makeCompressed();
+        }
+
+        solver.factorize(Kf);
+        result.total_factorizations += 1;
+        if (solver.info() != Eigen::Success) {
+            return fail("ac_sweep_factorization_failed_at_f:" + std::to_string(f));
+        }
+        // Multi-input solve: X has one column per input source.
+        const ComplexMatrix x = solver.solve(rhs);
+        result.total_solves += 1;
+        if (solver.info() != Eigen::Success) {
+            return fail("ac_sweep_solve_failed_at_f:" + std::to_string(f));
+        }
+
+        // Walk measurements in (output_slot, input_source) order — same
+        // order they were created above.
+        std::size_t mi = 0;
+        for (const auto& slot : output_slots) {
+            for (int k = 0; k < n_inputs; ++k) {
+                auto& m = measurements[mi++];
+                const ComplexScalar y = x(slot.state_index, k);
+                m.real_part.push_back(y.real());
+                m.imag_part.push_back(y.imag());
+                const Real mag = std::abs(y);
+                // Clamp tiny magnitudes so log10(0) doesn't produce -inf
+                // in the returned data — a node with strictly zero
+                // transfer at some frequency reports `-300 dB` rather
+                // than `-inf`.
+                const Real mag_db = (mag > Real{1e-300})
+                                        ? Real{20} * std::log10(mag)
+                                        : Real{-300};
+                m.magnitude_db.push_back(mag_db);
+                m.phase_deg.push_back(
+                    std::arg(y) * Real{180} / std::numbers::pi_v<Real>);
+            }
+        }
+    }
+
+    result.measurements = std::move(measurements);
+    result.success = true;
+    result.wall_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t_wall_start).count();
+    return result;
+}
+
+namespace {
+
+// Goertzel single-bin DFT: for samples y[k] (k = 0 .. N-1) sampled
+// uniformly at dt, return the complex Fourier coefficient at frequency
+// `f_target` Hz. Output is normalized so that a pure cosine of amplitude
+// A at exactly the target bin returns approximately A (real part).
+//
+// Used by FRA to extract the fundamental at the perturbation frequency
+// from a transient-captured time series.
+[[nodiscard]] std::complex<Real> goertzel_dft(const std::vector<Real>& samples,
+                                               Real dt,
+                                               Real f_target) {
+    if (samples.empty() || dt <= Real{0} || f_target <= Real{0}) {
+        return {Real{0}, Real{0}};
+    }
+    const Real omega = Real{2} * std::numbers::pi_v<Real> * f_target * dt;
+    const Real cos_omega = std::cos(omega);
+    const Real sin_omega = std::sin(omega);
+    const Real coeff = Real{2} * cos_omega;
+
+    Real q1 = Real{0};
+    Real q2 = Real{0};
+    for (const Real s : samples) {
+        const Real q0 = s + coeff * q1 - q2;
+        q2 = q1;
+        q1 = q0;
+    }
+    // Real / imag parts of the Goertzel result, scaled to match a unit-
+    // amplitude cosine input (factor 2 / N).
+    const Real real_part = q1 - q2 * cos_omega;
+    const Real imag_part = q2 * sin_omega;
+    const Real scale = Real{2} / static_cast<Real>(samples.size());
+    return {real_part * scale, imag_part * scale};
+}
+
+}  // namespace
+
+FraResult Simulator::run_fra(const FraOptions& options) {
+    FraResult result;
+    const auto t_wall_start = std::chrono::steady_clock::now();
+
+    auto fail = [&](std::string reason) {
+        result.success = false;
+        result.failure_reason = std::move(reason);
+        result.wall_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - t_wall_start).count();
+        return result;
+    };
+
+    // PWL admissibility — same gate as AC sweep. Behavioral devices fall
+    // out with a typed reason; FRA on Behavioral converters is the next
+    // milestone (Phase 3.6 idea: relax PWL gate, accept Newton-DAE).
+    const auto default_mode = circuit_.default_switching_mode();
+    if (!circuit_.all_switching_devices_in_ideal_mode(default_mode)) {
+        return fail("fra_non_admissible_behavioral_device");
+    }
+
+    // Validate the perturbation source by reusing the AC sweep helper —
+    // throws away the resulting B but confirms the source resolves.
+    {
+        std::vector<Eigen::Triplet<Real>> dummy_triplets;
+        std::string reason_buffer;
+        if (!build_perturbation_b_column(circuit_, options.perturbation_source,
+                                         circuit_.system_size(),
+                                         dummy_triplets, reason_buffer)) {
+            return fail(reason_buffer);
+        }
+    }
+
+    // Resolve measurement node indices.
+    std::vector<Index> measurement_indices;
+    measurement_indices.reserve(options.measurement_nodes.size());
+    for (const auto& name : options.measurement_nodes) {
+        const Index idx = circuit_.get_node(name);
+        if (idx < 0) {
+            return fail("fra_measurement_node_not_found:" + name);
+        }
+        measurement_indices.push_back(idx);
+        FraMeasurement m;
+        m.node = name;
+        m.state_index = idx;
+        result.measurements.push_back(std::move(m));
+    }
+    if (measurement_indices.empty()) {
+        return fail("fra_no_measurement_nodes");
+    }
+
+    // Frequency grid (reuse the AC sweep generator semantics).
+    {
+        AcSweepOptions ac_for_grid;
+        ac_for_grid.f_start = options.f_start;
+        ac_for_grid.f_stop  = options.f_stop;
+        ac_for_grid.points_per_decade = options.points_per_decade;
+        ac_for_grid.scale = options.scale;
+        result.frequencies = generate_frequency_grid(ac_for_grid);
+    }
+    if (result.frequencies.empty()) {
+        return fail("fra_invalid_frequency_range");
+    }
+    for (auto& m : result.measurements) {
+        m.magnitude_db.reserve(result.frequencies.size());
+        m.phase_deg.reserve(result.frequencies.size());
+        m.real_part.reserve(result.frequencies.size());
+        m.imag_part.reserve(result.frequencies.size());
+    }
+
+    // Take one DC operating-point snapshot up-front; reuse it as the
+    // initial state for every per-frequency transient. The simulator
+    // mutates `options_` so we save / restore around the FRA loop.
+    const auto baseline_options = options_;
+    SimulationOptions fra_opts = options_;
+    fra_opts.adaptive_timestep = false;
+    fra_opts.enable_bdf_order_control = false;
+    fra_opts.dt_min = 1e-15;
+    // Trapezoidal preserves phase exactly along the unit circle (bilinear
+    // transform; only frequency-warping at higher ω·dt). FRA needs the
+    // tightest phase agreement vs AC sweep — the spec gate is ≤ 5° — so
+    // pin it here regardless of what the user set on the Simulator.
+    fra_opts.integrator = Integrator::Trapezoidal;
+
+    const auto dc = dc_operating_point();
+    if (!dc.success) {
+        options_ = baseline_options;
+        return fail("fra_dc_op_failed");
+    }
+    const Vector x_dc = dc.newton_result.solution;
+
+    // Per-frequency loop.
+    for (const Real f : result.frequencies) {
+        const Real period = Real{1} / f;
+        const Real dt = period /
+                        static_cast<Real>(std::max(4, options.samples_per_cycle));
+        const int total_samples = std::max(1, options.n_cycles) *
+                                  std::max(4, options.samples_per_cycle);
+        const int discard_samples = std::clamp(options.discard_cycles, 0,
+                                               options.n_cycles - 1) *
+                                    std::max(4, options.samples_per_cycle);
+
+        fra_opts.tstart = 0.0;
+        fra_opts.tstop  = static_cast<Real>(total_samples) * dt;
+        fra_opts.dt     = dt;
+        fra_opts.dt_max = dt;
+        options_        = fra_opts;
+
+        // Configure perturbation, then capture the measurement-node time
+        // series via the simulation callback.
+        circuit_.set_ac_perturbation(options.perturbation_source,
+                                     options.perturbation_amplitude,
+                                     f, options.perturbation_phase);
+
+        std::vector<std::vector<Real>> per_node_samples(
+            measurement_indices.size());
+        for (auto& v : per_node_samples) {
+            v.reserve(static_cast<std::size_t>(total_samples + 1));
+        }
+        int captured_steps = 0;
+        SimulationCallback cb = [&](Real /*t*/, const Vector& x) {
+            for (std::size_t k = 0; k < measurement_indices.size(); ++k) {
+                per_node_samples[k].push_back(x[measurement_indices[k]]);
+            }
+            captured_steps += 1;
+            return true;
+        };
+
+        const auto run = run_transient(x_dc, cb);
+        circuit_.clear_ac_perturbation();
+        if (!run.success) {
+            options_ = baseline_options;
+            return fail("fra_transient_failed_at_f:" + std::to_string(f));
+        }
+        result.total_transient_steps += run.total_steps;
+
+        // Discard the warmup window, then Goertzel each measurement node.
+        for (std::size_t k = 0; k < measurement_indices.size(); ++k) {
+            const auto& full = per_node_samples[k];
+            const std::size_t start = std::min<std::size_t>(
+                full.size(), static_cast<std::size_t>(discard_samples));
+            std::vector<Real> window(full.begin() + start, full.end());
+            // Subtract mean to remove the DC operating-point offset, so the
+            // Goertzel result reflects only the small-signal response.
+            if (!window.empty()) {
+                Real mean = Real{0};
+                for (const Real s : window) mean += s;
+                mean /= static_cast<Real>(window.size());
+                for (auto& s : window) s -= mean;
+            }
+
+            // Sample-time correction: the SimulationCallback fires after
+            // each accepted step, so `samples[k]` is observed at
+            // `t = (k + 1)·dt`. Goertzel assumes index 0 is at t=0 and
+            // would otherwise return a phasor rotated by `+ω·dt`. The
+            // simulator's trapezoidal scheme also evaluates the
+            // perturbation at the trapezoidal midpoint t = (k + 0.5)·dt,
+            // so the EFFECTIVE input lags the captured output by `ω·dt/2`,
+            // not the full `ω·dt`. The two effects partially cancel: the
+            // residual offset is `+ω·dt/2`, which we compensate by
+            // multiplying the Goertzel result by `e^{-j·ω·dt/2}`.
+            const std::complex<Real> coef_raw = goertzel_dft(window, dt, f);
+            const Real omega = Real{2} * std::numbers::pi_v<Real> * f;
+            const std::complex<Real> phase_correction =
+                std::polar(Real{1}, -omega * dt / Real{2});
+            const std::complex<Real> coef = coef_raw * phase_correction;
+
+            const std::complex<Real> H =
+                coef / std::complex<Real>{options.perturbation_amplitude, Real{0}};
+
+            const Real mag = std::abs(H);
+            const Real mag_db = (mag > Real{1e-300})
+                                    ? Real{20} * std::log10(mag)
+                                    : Real{-300};
+            const Real phase_deg =
+                std::arg(H) * Real{180} / std::numbers::pi_v<Real>;
+
+            result.measurements[k].real_part.push_back(H.real());
+            result.measurements[k].imag_part.push_back(H.imag());
+            result.measurements[k].magnitude_db.push_back(mag_db);
+            result.measurements[k].phase_deg.push_back(phase_deg);
+        }
+    }
+
+    options_ = baseline_options;
+    result.success = true;
+    result.wall_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t_wall_start).count();
+    return result;
+}
+
 [[nodiscard]] std::string_view formulation_mode_to_string(FormulationMode mode) {
     switch (mode) {
         case FormulationMode::ProjectedWrapper:
@@ -732,6 +1394,218 @@ void Simulator::initialize_thermal_tracking() {
         transient_services_.thermal_service->reset();
     }
 }
+
+// =============================================================================
+// run_transient_native_impl helpers
+// =============================================================================
+
+void Simulator::collect_step_solve_telemetry(SimulationResult& result) {
+    if (last_step_segment_attempted_) {
+        if (last_step_segment_cache_hit_) {
+            result.backend_telemetry.segment_model_cache_hits += 1;
+        } else {
+            result.backend_telemetry.segment_model_cache_misses += 1;
+        }
+        if (last_step_linear_factor_cache_hit_) {
+            result.backend_telemetry.linear_factor_cache_hits += 1;
+        }
+        if (last_step_linear_factor_cache_miss_) {
+            result.backend_telemetry.linear_factor_cache_misses += 1;
+            if (last_step_symbolic_factor_cache_hit_) {
+                result.backend_telemetry.symbolic_factor_cache_hits += 1;
+            }
+            if (last_step_linear_factor_cache_invalidation_reason_typed_ !=
+                CacheInvalidationReason::None) {
+                result.backend_telemetry.linear_factor_cache_invalidations += 1;
+                result.backend_telemetry.linear_factor_cache_last_invalidation_reason =
+                    last_step_linear_factor_cache_invalidation_reason_;
+                result.backend_telemetry.linear_factor_cache_last_invalidation_reason_typed =
+                    last_step_linear_factor_cache_invalidation_reason_typed_;
+                switch (last_step_linear_factor_cache_invalidation_reason_typed_) {
+                    case CacheInvalidationReason::TopologyChanged:
+                        result.backend_telemetry
+                            .linear_factor_cache_invalidations_topology_changed += 1;
+                        break;
+                    case CacheInvalidationReason::StampParamChanged:
+                        result.backend_telemetry
+                            .linear_factor_cache_invalidations_stamp_param_changed += 1;
+                        break;
+                    case CacheInvalidationReason::GminEscalated:
+                        result.backend_telemetry
+                            .linear_factor_cache_invalidations_gmin_escalated += 1;
+                        break;
+                    case CacheInvalidationReason::SourceSteppingActive:
+                        result.backend_telemetry
+                            .linear_factor_cache_invalidations_source_stepping_active += 1;
+                        break;
+                    case CacheInvalidationReason::NumericInstability:
+                        result.backend_telemetry
+                            .linear_factor_cache_invalidations_numeric_instability += 1;
+                        break;
+                    case CacheInvalidationReason::ManualInvalidate:
+                        result.backend_telemetry
+                            .linear_factor_cache_invalidations_manual_invalidate += 1;
+                        break;
+                    case CacheInvalidationReason::None:
+                        break;
+                }
+            }
+        }
+    }
+    if (last_step_solve_path_ == StepSolvePath::SegmentPrimary) {
+        result.backend_telemetry.state_space_primary_steps += 1;
+    } else {
+        result.backend_telemetry.dae_fallback_steps += 1;
+        if (last_step_solve_reason_.find("segment_not_admissible") != std::string::npos) {
+            result.backend_telemetry.segment_non_admissible_steps += 1;
+        }
+    }
+}
+
+void Simulator::apply_post_accept_stiffness_update(const NewtonResult& step_result,
+                                                    Integrator base_integrator,
+                                                    int& high_iter_streak,
+                                                    int& stiffness_cooldown,
+                                                    bool& using_stiff_integrator) {
+    if (!options_.stiffness_config.enable) {
+        return;
+    }
+
+    if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {
+        high_iter_streak++;
+    } else {
+        high_iter_streak = 0;
+    }
+
+    if (high_iter_streak >= options_.stiffness_config.newton_streak_threshold) {
+        stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+    }
+
+    if (options_.stiffness_config.monitor_conditioning) {
+        const auto telemetry = transient_services_.linear_solve->solver().telemetry();
+        if (telemetry.last_error > options_.stiffness_config.conditioning_error_threshold) {
+            stiffness_cooldown = options_.stiffness_config.cooldown_steps;
+        }
+    }
+
+    if (stiffness_cooldown > 0) {
+        stiffness_cooldown--;
+    } else if (using_stiff_integrator && options_.stiffness_config.switch_integrator &&
+               !options_.enable_bdf_order_control) {
+        circuit_.set_integration_method(base_integrator);
+        using_stiff_integrator = false;
+    }
+}
+
+void Simulator::process_accepted_step_events(Real t, Real dt_used,
+                                              const Vector& x_prev,
+                                              const NewtonResult& step_result,
+                                              SimulationResult& result,
+                                              EventCallback event_callback) {
+    if (!options_.enable_events) {
+        return;
+    }
+    for (auto& sw : switch_monitors_) {
+        const Real v_now = (sw.ctrl >= 0) ? step_result.solution[sw.ctrl] : 0.0;
+        const bool now_on = v_now > sw.v_threshold;
+        if (now_on == sw.was_on) {
+            continue;
+        }
+        Real t_event = t + dt_used;
+        Vector x_event = step_result.solution;
+        if (find_switch_event_time(sw, t, t + dt_used, x_prev, t_event, x_event)) {
+            record_switch_event(sw, t_event, x_event, now_on, result, event_callback);
+        } else {
+            record_switch_event(sw, t + dt_used, step_result.solution, now_on, result, event_callback);
+        }
+        sw.was_on = now_on;
+    }
+
+    // refactor-pwl-switching-engine, Phase 4: detect PWL device commutations
+    // (diode sign flip, gate threshold crossing, vcswitch threshold) using
+    // each device's `should_commute()` predicate. First-order: commit at the
+    // end of the accepted step; bisection-to-event is a follow-up (4.4).
+    // The circuit_default reflects `SimulationOptions.switching_mode`
+    // (Phase 5 plumbing).
+    const auto pwl_events = circuit_.scan_pwl_commutations(
+        step_result.solution, circuit_.default_switching_mode());
+    if (!pwl_events.empty()) {
+        circuit_.commit_pwl_commutations(pwl_events);
+        // Phase 6 telemetry: a transition is "≥1 commutation in this step";
+        // commutations counts individual device flips.
+        result.backend_telemetry.pwl_topology_transitions += 1;
+        result.backend_telemetry.pwl_event_commutations +=
+            static_cast<int>(pwl_events.size());
+        for (const auto& evt : pwl_events) {
+            SimulationEvent sim_event;
+            sim_event.time = t + dt_used;
+            sim_event.type = evt.new_state ? SimulationEventType::SwitchOn
+                                            : SimulationEventType::SwitchOff;
+            sim_event.component = evt.device_name;
+            sim_event.description = "pwl_commutation";
+            result.events.push_back(std::move(sim_event));
+            if (event_callback) {
+                SwitchEvent cb;
+                cb.switch_name = evt.device_name;
+                cb.time = t + dt_used;
+                cb.new_state = evt.new_state;
+                event_callback(cb);
+            }
+        }
+    }
+}
+
+void Simulator::finalize_transient_telemetry(SimulationResult& result) {
+    // Phase 3 of `refactor-linear-solver-cache`: aggregate counters from
+    // both the shared linear-solve service (Newton-DAE workload) and the
+    // segment stepper's per-key LRU cache (segment-primary / PWL workload).
+    // Pre-Phase-3 the segment stepper used the shared service so a single
+    // read covered everything; with the per-key cache, the segment-primary
+    // analyze/factorize/solve work lives in the cached entries and must be
+    // summed in here to keep `LinearSolverTelemetry` authoritative.
+    auto shared = transient_services_.linear_solve->solver().telemetry();
+    const auto segment = transient_services_.segment_stepper->linear_solver_telemetry();
+    shared.total_solve_calls       += segment.total_solve_calls;
+    shared.total_analyze_calls     += segment.total_analyze_calls;
+    shared.total_factorize_calls   += segment.total_factorize_calls;
+    shared.total_iterations        += segment.total_iterations;
+    shared.total_fallbacks         += segment.total_fallbacks;
+    shared.total_analyze_time_seconds   += segment.total_analyze_time_seconds;
+    shared.total_factorize_time_seconds += segment.total_factorize_time_seconds;
+    shared.total_solve_time_seconds     += segment.total_solve_time_seconds;
+    // Prefer segment's "last_*" when it has any work — the most recent
+    // segment-primary step is what the user typically wants to inspect.
+    if (segment.total_solve_calls > 0) {
+        shared.last_iterations             = segment.last_iterations;
+        shared.last_error                  = segment.last_error;
+        shared.last_analyze_time_seconds   = segment.last_analyze_time_seconds;
+        shared.last_factorize_time_seconds = segment.last_factorize_time_seconds;
+        shared.last_solve_time_seconds     = segment.last_solve_time_seconds;
+        shared.last_solver                 = segment.last_solver;
+        shared.last_preconditioner         = segment.last_preconditioner;
+    }
+    result.linear_solver_telemetry = shared;
+    const EquationAssemblerTelemetry assembler_telemetry =
+        transient_services_.equation_assembler->telemetry();
+    result.backend_telemetry.equation_assemble_system_calls =
+        saturating_int(assembler_telemetry.system_calls + direct_assemble_system_calls_);
+    result.backend_telemetry.equation_assemble_residual_calls =
+        saturating_int(assembler_telemetry.residual_calls + direct_assemble_residual_calls_);
+    result.backend_telemetry.equation_assemble_system_time_seconds =
+        assembler_telemetry.system_time_seconds + direct_assemble_system_time_seconds_;
+    result.backend_telemetry.equation_assemble_residual_time_seconds =
+        assembler_telemetry.residual_time_seconds + direct_assemble_residual_time_seconds_;
+    result.backend_telemetry.function_evaluations =
+        result.backend_telemetry.equation_assemble_residual_calls;
+    result.backend_telemetry.jacobian_evaluations =
+        result.backend_telemetry.equation_assemble_system_calls;
+    result.backend_telemetry.nonlinear_iterations = result.newton_iterations_total;
+    result.backend_telemetry.error_test_failures = std::max(0, result.timestep_rejections);
+    result.backend_telemetry.nonlinear_convergence_failures =
+        (result.success || result.diagnostic != SimulationDiagnosticCode::TransientStepFailure) ? 0 : 1;
+}
+
+// =============================================================================
 
 DCAnalysisResult Simulator::dc_operating_point() {
     // Large timestep to emulate DC for dynamic elements
@@ -894,7 +1768,9 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     last_step_segment_attempted_ = false;
     last_step_linear_factor_cache_hit_ = false;
     last_step_linear_factor_cache_miss_ = false;
+    last_step_symbolic_factor_cache_hit_ = false;
     last_step_linear_factor_cache_invalidation_reason_.clear();
+    last_step_linear_factor_cache_invalidation_reason_typed_ = CacheInvalidationReason::None;
     direct_assemble_system_calls_ = 0;
     direct_assemble_residual_calls_ = 0;
     direct_assemble_system_time_seconds_ = 0.0;
@@ -1300,32 +2176,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             dt_used = dt;
 
             step_result = solve_step(t_next, dt_used, x);
-            if (last_step_segment_attempted_) {
-                if (last_step_segment_cache_hit_) {
-                    result.backend_telemetry.segment_model_cache_hits += 1;
-                } else {
-                    result.backend_telemetry.segment_model_cache_misses += 1;
-                }
-                if (last_step_linear_factor_cache_hit_) {
-                    result.backend_telemetry.linear_factor_cache_hits += 1;
-                }
-                if (last_step_linear_factor_cache_miss_) {
-                    result.backend_telemetry.linear_factor_cache_misses += 1;
-                    if (!last_step_linear_factor_cache_invalidation_reason_.empty()) {
-                        result.backend_telemetry.linear_factor_cache_invalidations += 1;
-                        result.backend_telemetry.linear_factor_cache_last_invalidation_reason =
-                            last_step_linear_factor_cache_invalidation_reason_;
-                    }
-                }
-            }
-            if (last_step_solve_path_ == StepSolvePath::SegmentPrimary) {
-                result.backend_telemetry.state_space_primary_steps += 1;
-            } else {
-                result.backend_telemetry.dae_fallback_steps += 1;
-                if (last_step_solve_reason_.find("segment_not_admissible") != std::string::npos) {
-                    result.backend_telemetry.segment_non_admissible_steps += 1;
-                }
-            }
+            collect_step_solve_telemetry(result);
 
             if (step_result.status != SolverStatus::Success) {
                 circuit_.clear_stage_context();
@@ -1862,52 +2713,10 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
             }
         }
 
-        if (options_.stiffness_config.enable) {
-            if (step_result.iterations >= options_.stiffness_config.newton_iter_threshold) {
-                high_iter_streak++;
-            } else {
-                high_iter_streak = 0;
-            }
-
-            if (high_iter_streak >= options_.stiffness_config.newton_streak_threshold) {
-                stiffness_cooldown = options_.stiffness_config.cooldown_steps;
-            }
-
-            if (options_.stiffness_config.monitor_conditioning) {
-                auto telemetry = transient_services_.linear_solve->solver().telemetry();
-                if (telemetry.last_error > options_.stiffness_config.conditioning_error_threshold) {
-                    stiffness_cooldown = options_.stiffness_config.cooldown_steps;
-                }
-            }
-
-            if (stiffness_cooldown > 0) {
-                stiffness_cooldown--;
-            } else if (using_stiff_integrator && options_.stiffness_config.switch_integrator &&
-                       !options_.enable_bdf_order_control) {
-                circuit_.set_integration_method(base_integrator);
-                using_stiff_integrator = false;
-            }
-        }
-
-        if (options_.enable_events) {
-            for (auto& sw : switch_monitors_) {
-                Real v_now = (sw.ctrl >= 0) ? step_result.solution[sw.ctrl] : 0.0;
-                bool now_on = v_now > sw.v_threshold;
-
-                if (now_on != sw.was_on) {
-                    Real t_event = t + dt_used;
-                    Vector x_event = step_result.solution;
-
-                    if (find_switch_event_time(sw, t, t + dt_used, x, t_event, x_event)) {
-                        record_switch_event(sw, t_event, x_event, now_on, result, event_callback);
-                    } else {
-                        record_switch_event(sw, t + dt_used, step_result.solution, now_on, result, event_callback);
-                    }
-
-                    sw.was_on = now_on;
-                }
-            }
-        }
+        apply_post_accept_stiffness_update(step_result, base_integrator,
+                                           high_iter_streak, stiffness_cooldown,
+                                           using_stiff_integrator);
+        process_accepted_step_events(t, dt_used, x, step_result, result, event_callback);
 
         accumulate_conduction_losses(step_result.solution, dt_used);
         update_thermal_state(dt_used);
@@ -1961,26 +2770,7 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     finalize_loss_summary(result);
     finalize_thermal_summary(result);
     finalize_component_electrothermal(result);
-
-    result.linear_solver_telemetry = transient_services_.linear_solve->solver().telemetry();
-    const EquationAssemblerTelemetry assembler_telemetry =
-        transient_services_.equation_assembler->telemetry();
-    result.backend_telemetry.equation_assemble_system_calls =
-        saturating_int(assembler_telemetry.system_calls + direct_assemble_system_calls_);
-    result.backend_telemetry.equation_assemble_residual_calls =
-        saturating_int(assembler_telemetry.residual_calls + direct_assemble_residual_calls_);
-    result.backend_telemetry.equation_assemble_system_time_seconds =
-        assembler_telemetry.system_time_seconds + direct_assemble_system_time_seconds_;
-    result.backend_telemetry.equation_assemble_residual_time_seconds =
-        assembler_telemetry.residual_time_seconds + direct_assemble_residual_time_seconds_;
-    result.backend_telemetry.function_evaluations =
-        result.backend_telemetry.equation_assemble_residual_calls;
-    result.backend_telemetry.jacobian_evaluations =
-        result.backend_telemetry.equation_assemble_system_calls;
-    result.backend_telemetry.nonlinear_iterations = result.newton_iterations_total;
-    result.backend_telemetry.error_test_failures = std::max(0, result.timestep_rejections);
-    result.backend_telemetry.nonlinear_convergence_failures =
-        (result.success || result.diagnostic != SimulationDiagnosticCode::TransientStepFailure) ? 0 : 1;
+    finalize_transient_telemetry(result);
 
     return result;
 }

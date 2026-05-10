@@ -1,0 +1,24 @@
+# Vishay VS-30CTH02 — 200 V fast-recovery Si diode, 30 A.
+# Datasheet rev 2018-08. TO-247 package, hard-recovery characteristic.
+class: diode
+vendor: Vishay
+part: VS-30CTH02
+
+V_f_default: 0.95
+R_on:        12e-3
+V_r_max:     200.0
+s_rec:       0.4                     # hard recovery (Si fast-recovery)
+
+# V_f(I_f, T_j) — Si has NEGATIVE temperature coefficient (V drops with Tj).
+V_f_table:
+  x: [1.0, 10.0, 30.0]
+  y: [25.0, 150.0]
+  values: [0.85, 1.05, 1.40,
+           0.70, 0.90, 1.25]
+
+# Q_rr(I_f, di/dt) — fast-recovery Si has substantial Q_rr.
+Q_rr_table:
+  x: [1.0, 10.0, 30.0]
+  y: [1.0e8, 1.0e9]
+  values: [80.0e-9, 250.0e-9, 600.0e-9,
+           120.0e-9, 380.0e-9, 900.0e-9]

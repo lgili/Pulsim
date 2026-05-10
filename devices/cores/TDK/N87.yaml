@@ -1,0 +1,32 @@
+# TDK N87 — MnZn power ferrite, 25 °C
+#
+# Datasheet reference: TDK N87 ferrite material datasheet (rev 2017-11).
+# Geometry below is for an arbitrary E-core; use as parameter-only
+# reference with `SaturableInductor`/`SaturableTransformer` set to your
+# own A_e and l_e via the geometry override.
+
+vendor: TDK
+material: N87
+geometry:
+  area_m2: 1.5e-4
+  path_length_m: 4.5e-2
+bh_curve:
+  - { H: -1500, B: -0.40 }
+  - { H:  -800, B: -0.38 }
+  - { H:  -200, B: -0.30 }
+  - { H:   -50, B: -0.15 }
+  - { H:     0, B:  0.00 }
+  - { H:    50, B:  0.15 }
+  - { H:   200, B:  0.30 }
+  - { H:   800, B:  0.38 }
+  - { H:  1500, B:  0.40 }
+steinmetz:
+  k:     1.5e-3
+  alpha: 1.6
+  beta:  2.7
+jiles_atherton:
+  Ms:    3.5e5
+  a:     150.0
+  alpha: 1.0e-4
+  k:     50.0
+  c:     0.1

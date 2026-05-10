@@ -5,8 +5,18 @@
 namespace pulsim::v1 {
 
 // =============================================================================
-// Example: Resistor Device (CRTP)
+// Resistor Device (CRTP)
 // =============================================================================
+//
+// AD bypass note (`add-automatic-differentiation`, Phase 3):
+//   Resistor's Jacobian contribution is the constant conductance G = 1/R.
+//   AD's value here is to derive ∂i/∂x for *non-linear* devices where a
+//   manual closed-form would be tedious or error-prone. For a constant-G
+//   element, AD evaluation buys nothing while paying the cost of an ADReal
+//   pass; we therefore intentionally do **not** expose `stamp_jacobian_via_ad`
+//   on linear devices. The `stamp_impl` direct-stamp path is the canonical
+//   route, and the build flag `PULSIM_USE_AD_STAMP` only retargets the
+//   nonlinear devices.
 
 class Resistor : public LinearDeviceBase<Resistor> {
 public:

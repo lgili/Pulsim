@@ -67,6 +67,29 @@ if(PULSIM_BUILD_TESTS)
         tests/test_concepts.cpp
         tests/test_richardson_lte.cpp
         tests/test_benchmarks.cpp
+        tests/test_switching_mode.cpp
+        tests/test_pwl_state_space.cpp
+        tests/test_ad_scalar.cpp
+        tests/test_ad_diode_stamp.cpp
+        tests/test_ad_mosfet_stamp.cpp
+        tests/test_ad_igbt_stamp.cpp
+        tests/test_ad_vcswitch_stamp.cpp
+        tests/test_ad_linear_opt_out.cpp
+        tests/test_ad_validate.cpp
+        tests/test_ad_stamp_perf.cpp
+        tests/test_linear_cache_symbolic_reuse.cpp
+        tests/test_magnetic_phase1_primitives.cpp
+        tests/test_magnetic_phase2_saturable_inductor.cpp
+        tests/test_magnetic_phase3_saturable_transformer.cpp
+        tests/test_magnetic_phase4_hysteresis.cpp
+        tests/test_magnetic_phase5_catalog.cpp
+        tests/test_magnetic_phase6_validation.cpp
+        tests/test_catalog_phase1_to_4.cpp
+        tests/test_catalog_phase7_yaml_loader.cpp
+        tests/test_catalog_phase8_validation.cpp
+        tests/test_motor_models.cpp
+        tests/test_grid_library.cpp
+        tests/test_robustness_profile.cpp
     )
 
     target_link_libraries(pulsim_tests
@@ -98,6 +121,18 @@ if(PULSIM_BUILD_TESTS)
         tests/test_model_regularization.cpp
         tests/test_v1_kernel.cpp
         tests/test_stress_simulation.cpp
+        tests/test_pwl_segment_primary.cpp
+        tests/test_pwl_speedup_benchmark.cpp
+        tests/test_linear_cache_numeric_lru.cpp
+        tests/test_linear_cache_phase6_benchmarks.cpp
+        tests/test_frequency_analysis_phase1.cpp
+        tests/test_frequency_analysis_phase2.cpp
+        tests/test_frequency_analysis_phase3.cpp
+        tests/test_frequency_analysis_phase4.cpp
+        tests/test_frequency_analysis_phase7_yaml.cpp
+        tests/test_frequency_analysis_phase8_validation.cpp
+        tests/test_frequency_analysis_phase9_perf.cpp
+        tests/test_converter_templates.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

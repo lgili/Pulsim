@@ -1511,6 +1511,66 @@ public:
         throw std::runtime_error("Switch not found: " + std::string{name});
     }
 
+    // ---------------------------------------------------------------------
+    // Circuit-level default switching mode (refactor-pwl-switching-engine,
+    // Phase 5). The Simulator pushes `SimulationOptions.switching_mode` into
+    // this slot at construction; segment-model and event-scan paths consume
+    // it as the resolution circuit_default for `Auto`-mode devices.
+    // ---------------------------------------------------------------------
+    [[nodiscard]] SwitchingMode default_switching_mode() const noexcept {
+        return default_switching_mode_;
+    }
+    void set_default_switching_mode(SwitchingMode mode) noexcept {
+        default_switching_mode_ = mode;
+    }
+
+    /// Convenience: set `SwitchingMode` on every switching device in the
+    /// circuit. Devices without a `set_switching_mode` method (passives,
+    /// transformers) are silently skipped.
+    void set_switching_mode_for_all(SwitchingMode mode) {
+        for (auto& dev : devices_) {
+            std::visit([&](auto& d) {
+                using T = std::decay_t<decltype(d)>;
+                if constexpr (std::is_same_v<T, IdealDiode> ||
+                              std::is_same_v<T, IdealSwitch> ||
+                              std::is_same_v<T, VoltageControlledSwitch> ||
+                              std::is_same_v<T, MOSFET> ||
+                              std::is_same_v<T, IGBT>) {
+                    d.set_switching_mode(mode);
+                }
+            }, dev);
+        }
+    }
+
+    /// Commit the PWL on/off state of any switching device (diode, switch,
+    /// vcswitch, mosfet, igbt). Differs from `set_switch_state` in that it
+    /// always writes to the device's own `pwl_state_` rather than the
+    /// `forced_switch_state_` legacy override layer; this is the path the
+    /// PWL segment engine uses to commit event transitions.
+    void set_pwl_state(std::string_view name, bool on) {
+        const auto index = find_connection_index(name);
+        if (!index.has_value()) {
+            throw std::runtime_error("PWL device not found: " + std::string{name});
+        }
+        auto& device = devices_[*index];
+        bool committed = false;
+        std::visit([&](auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, IdealDiode> ||
+                          std::is_same_v<T, IdealSwitch> ||
+                          std::is_same_v<T, VoltageControlledSwitch> ||
+                          std::is_same_v<T, MOSFET> ||
+                          std::is_same_v<T, IGBT>) {
+                dev.commit_pwl_state(on);
+                committed = true;
+            }
+        }, device);
+        if (!committed) {
+            throw std::runtime_error(
+                "Device does not support PWL state: " + std::string{name});
+        }
+    }
+
     // =========================================================================
     // Set Timestep for Dynamic Elements
     // =========================================================================
@@ -1928,11 +1988,480 @@ public:
     }
 
     // =========================================================================
+    // PWL state-space assembly (refactor-pwl-switching-engine, Phase 2)
+    // =========================================================================
+
+    /// Compute the topology bitmask over all switching devices currently
+    /// committed to a PWL state. Switching devices are visited in registration
+    /// order; each contributes one bit (0 = off, 1 = on). Returns 0 if there
+    /// are no switching devices. For circuits with more than 64 switching
+    /// devices the upper bits are dropped — telemetry should flag this case.
+    [[nodiscard]] std::uint64_t pwl_topology_bitmask() const {
+        std::uint64_t bits = 0;
+        std::size_t bit_idx = 0;
+        for (const auto& dev : devices_) {
+            std::visit([&](const auto& d) {
+                using T = std::decay_t<decltype(d)>;
+                if constexpr (std::is_same_v<T, IdealDiode> ||
+                              std::is_same_v<T, IdealSwitch> ||
+                              std::is_same_v<T, VoltageControlledSwitch> ||
+                              std::is_same_v<T, MOSFET> ||
+                              std::is_same_v<T, IGBT>) {
+                    if (bit_idx < 64 && d.pwl_state()) {
+                        bits |= (std::uint64_t{1} << bit_idx);
+                    }
+                    ++bit_idx;
+                }
+            }, dev);
+        }
+        return bits;
+    }
+
+    /// Count switching devices for diagnostics / cache sizing.
+    [[nodiscard]] std::size_t pwl_switching_device_count() const {
+        std::size_t count = 0;
+        for (const auto& dev : devices_) {
+            std::visit([&](const auto& d) {
+                using T = std::decay_t<decltype(d)>;
+                if constexpr (std::is_same_v<T, IdealDiode> ||
+                              std::is_same_v<T, IdealSwitch> ||
+                              std::is_same_v<T, VoltageControlledSwitch> ||
+                              std::is_same_v<T, MOSFET> ||
+                              std::is_same_v<T, IGBT>) {
+                    ++count;
+                }
+            }, dev);
+        }
+        return count;
+    }
+
+    /// True iff every switching device in the circuit has SwitchingMode
+    /// resolved to Ideal (either explicitly or via the supplied default).
+    /// Devices that don't have a switching_mode() accessor (passives) are
+    /// ignored. When the circuit contains zero switching devices the
+    /// circuit is trivially eligible for the PWL path.
+    [[nodiscard]] bool all_switching_devices_in_ideal_mode(
+        SwitchingMode circuit_default = SwitchingMode::Behavioral) const {
+        bool all_ideal = true;
+        for (const auto& dev : devices_) {
+            std::visit([&](const auto& d) {
+                using T = std::decay_t<decltype(d)>;
+                if constexpr (std::is_same_v<T, IdealDiode> ||
+                              std::is_same_v<T, IdealSwitch> ||
+                              std::is_same_v<T, VoltageControlledSwitch> ||
+                              std::is_same_v<T, MOSFET> ||
+                              std::is_same_v<T, IGBT>) {
+                    const SwitchingMode resolved =
+                        resolve_switching_mode(d.switching_mode(), circuit_default);
+                    if (resolved != SwitchingMode::Ideal) {
+                        all_ideal = false;
+                    }
+                }
+            }, dev);
+        }
+        return all_ideal;
+    }
+
+    /// Assemble the continuous-time PWL state-space `M·ẋ + N·x = b(t)`.
+    ///
+    /// Sign / KCL conventions match `assemble_residual_hb()`:
+    ///   * KCL residual at node n is `Σ (currents leaving n) = 0`.
+    ///   * Voltage-source branch row: `vpos − vneg − v_src = 0`.
+    ///   * Inductor branch row:       `v1   − v2   − L·di/dt = 0`.
+    ///
+    /// Reactive contributions (capacitors, inductors) populate `M`; resistive
+    /// contributions (resistors, PWL switches in their committed state, and
+    /// branch-coupling identity terms for V-sources / inductors) populate `N`;
+    /// independent sources contribute to `b(t)`.
+    ///
+    /// Switching devices stamp **their committed PWL state**. The caller is
+    /// responsible for committing states before invoking this method (e.g.
+    /// after event scheduling). Behavioral-mode devices are stamped with
+    /// their committed state too (g_on or g_off); their tanh / Shichman
+    /// nonlinearity is *not* honored on this path — it is the segment
+    /// model's responsibility to bail out via `all_switching_devices_in_ideal_mode()`
+    /// when it encounters a Behavioral-mode device.
+    ///
+    /// Time-varying sources (PWM, sine, pulse) are evaluated at `time`.
+    void assemble_state_space(SparseMatrix& M,
+                              SparseMatrix& N,
+                              Vector& b,
+                              Real time) const {
+        const Index n = system_size();
+        M.resize(n, n);
+        M.setZero();
+        N.resize(n, n);
+        N.setZero();
+        b.resize(n);
+        b.setZero();
+
+        std::vector<Eigen::Triplet<Real>> m_triplets;
+        std::vector<Eigen::Triplet<Real>> n_triplets;
+        m_triplets.reserve(devices_.size() * 4);
+        n_triplets.reserve(devices_.size() * 8);
+
+        auto stamp_g = [&](Real g, Index a, Index c) {
+            // Stamp +g symmetrically across (a, c) into N (KCL contribution).
+            if (a >= 0) {
+                n_triplets.emplace_back(a, a, g);
+                if (c >= 0) n_triplets.emplace_back(a, c, -g);
+            }
+            if (c >= 0) {
+                n_triplets.emplace_back(c, c, g);
+                if (a >= 0) n_triplets.emplace_back(c, a, -g);
+            }
+        };
+
+        auto stamp_capacitance = [&](Real C, Index a, Index c) {
+            // KCL: i_C = C·d(va − vc)/dt. M entries:
+            //   M[a, a]=+C, M[a, c]=−C, M[c, a]=−C, M[c, c]=+C
+            if (a >= 0) {
+                m_triplets.emplace_back(a, a, C);
+                if (c >= 0) m_triplets.emplace_back(a, c, -C);
+            }
+            if (c >= 0) {
+                m_triplets.emplace_back(c, c, C);
+                if (a >= 0) m_triplets.emplace_back(c, a, -C);
+            }
+        };
+
+        auto stamp_inductor_branch = [&](Real L, Index a, Index c, Index br) {
+            // Branch eq:  v_a − v_c − L·di/dt = 0
+            // KCL:        f[a] += i_br;  f[c] −= i_br
+            if (br >= 0) {
+                m_triplets.emplace_back(br, br, -L);
+                if (a >= 0) {
+                    n_triplets.emplace_back(br, a, 1.0);
+                    n_triplets.emplace_back(a, br, 1.0);
+                }
+                if (c >= 0) {
+                    n_triplets.emplace_back(br, c, -1.0);
+                    n_triplets.emplace_back(c, br, -1.0);
+                }
+            }
+        };
+
+        auto stamp_voltage_source_eq = [&](Real V, Index npos, Index nneg, Index br) {
+            // Branch eq:  v_pos − v_neg − V_src = 0  →  N[br,pos]=+1, N[br,neg]=−1,  b[br]=+V_src
+            // KCL:        f[npos] += i_br, f[nneg] −= i_br
+            if (br < 0) return;
+            if (npos >= 0) {
+                n_triplets.emplace_back(br, npos, 1.0);
+                n_triplets.emplace_back(npos, br, 1.0);
+            }
+            if (nneg >= 0) {
+                n_triplets.emplace_back(br, nneg, -1.0);
+                n_triplets.emplace_back(nneg, br, -1.0);
+            }
+            b[br] = V;
+        };
+
+        auto stamp_current_source_eq = [&](Real I, Index npos, Index nneg) {
+            // KCL: f[npos] −= I_src;  f[nneg] += I_src
+            //  ⇒  b[npos] = +I, b[nneg] = −I (so N·x = b means residual = 0).
+            if (npos >= 0) b[npos] += I;
+            if (nneg >= 0) b[nneg] -= I;
+        };
+
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                const auto& nodes = conn.nodes;
+
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    if (nodes.size() >= 2) {
+                        stamp_g(1.0 / dev.resistance(), nodes[0], nodes[1]);
+                    }
+                } else if constexpr (std::is_same_v<T, Capacitor>) {
+                    if (nodes.size() >= 2) {
+                        stamp_capacitance(dev.capacitance(), nodes[0], nodes[1]);
+                    }
+                } else if constexpr (std::is_same_v<T, Inductor>) {
+                    if (nodes.size() >= 2 && conn.branch_index >= 0) {
+                        const Real L_eff = effective_inductance_for(
+                            conn.name, /*current=*/0.0, dev.inductance());
+                        stamp_inductor_branch(L_eff, nodes[0], nodes[1], conn.branch_index);
+                    }
+                } else if constexpr (std::is_same_v<T, VoltageSource>) {
+                    if (nodes.size() >= 2) {
+                        stamp_voltage_source_eq(dev.voltage(), nodes[0], nodes[1],
+                                                conn.branch_index);
+                    }
+                } else if constexpr (std::is_same_v<T, PWMVoltageSource> ||
+                                     std::is_same_v<T, SineVoltageSource> ||
+                                     std::is_same_v<T, PulseVoltageSource>) {
+                    if (nodes.size() >= 2) {
+                        stamp_voltage_source_eq(dev.voltage_at(time), nodes[0], nodes[1],
+                                                conn.branch_index);
+                    }
+                } else if constexpr (std::is_same_v<T, CurrentSource>) {
+                    if (nodes.size() >= 2) {
+                        stamp_current_source_eq(dev.current(), nodes[0], nodes[1]);
+                    }
+                } else if constexpr (std::is_same_v<T, IdealDiode>) {
+                    if (nodes.size() >= 2) {
+                        const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
+                        stamp_g(g, nodes[0], nodes[1]);
+                    }
+                } else if constexpr (std::is_same_v<T, IdealSwitch>) {
+                    if (nodes.size() >= 2) {
+                        const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
+                        stamp_g(g, nodes[0], nodes[1]);
+                    }
+                } else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                    if (nodes.size() >= 3) {
+                        const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
+                        // Conducting path is between t1 and t2 (control node is observe-only).
+                        stamp_g(g, nodes[1], nodes[2]);
+                    }
+                } else if constexpr (std::is_same_v<T, MOSFET>) {
+                    if (nodes.size() >= 3) {
+                        const Real g = dev.pwl_state() ? dev.params().g_on
+                                                       : dev.params().g_off;
+                        // Drain–source path only (gate stamps deferred to the
+                        // catalog-tier change once Coss/Ciss are modeled).
+                        stamp_g(g, nodes[1], nodes[2]);
+                    }
+                } else if constexpr (std::is_same_v<T, IGBT>) {
+                    if (nodes.size() >= 3) {
+                        const Real g = dev.pwl_state() ? dev.params().g_on
+                                                       : dev.params().g_off;
+                        stamp_g(g, nodes[1], nodes[2]);
+                    }
+                } else if constexpr (std::is_same_v<T, Transformer>) {
+                    // Coupled inductor support uses a separate stamp pass
+                    // (stamp_coupled_inductor_terms) which currently produces a
+                    // Newton-Jacobian rather than separated M/N matrices. For
+                    // Phase 2 we mark transformers as ineligible for PWL by
+                    // surfacing this through admissibility on the segment side
+                    // (caller checks the device list).
+                    (void)dev;
+                }
+            }, devices_[i]);
+        }
+
+        // Phase 3 of `add-frequency-domain-analysis`: AC perturbation hook.
+        // When `set_ac_perturbation` has been called, overlay
+        // `ε·cos(2π·f·t + φ)` on the named source's RHS contribution. The
+        // cosine convention makes the input's phasor representation
+        // `ε·e^{jφ}` — for φ = 0 the input phasor is purely real, which
+        // matches the AC sweep B-column convention (real-valued B). FRA
+        // can then divide its Goertzel output `Y(f)` by ε directly to
+        // recover `H(jω)`, with no extra rotation needed to match AC
+        // sweep's magnitude / phase reference. The perturbation is
+        // additive on top of the source's existing DC / time-varying
+        // value, so the Simulator can keep the original source unchanged
+        // and inject a small-signal probe for FRA.
+        if (ac_perturbation_active_) {
+            const auto* conn = find_connection(ac_perturbation_source_);
+            if (conn != nullptr) {
+                const Real omega = 2.0 * std::numbers::pi_v<Real> *
+                                   ac_perturbation_frequency_;
+                const Real value = ac_perturbation_amplitude_ *
+                                   std::cos(omega * time + ac_perturbation_phase_);
+                if (conn->branch_index >= 0 && conn->branch_index < n) {
+                    // Voltage source contribution at branch row.
+                    b[conn->branch_index] += value;
+                } else if (conn->nodes.size() >= 2) {
+                    // Current source contribution at node rows
+                    // (matches stamp_current_source_eq sign convention).
+                    const Index npos = conn->nodes[0];
+                    const Index nneg = conn->nodes[1];
+                    if (npos >= 0 && npos < n) b[npos] += value;
+                    if (nneg >= 0 && nneg < n) b[nneg] -= value;
+                }
+            }
+        }
+
+        M.setFromTriplets(m_triplets.begin(), m_triplets.end());
+        N.setFromTriplets(n_triplets.begin(), n_triplets.end());
+        M.makeCompressed();
+        N.makeCompressed();
+    }
+
+    /// Phase 3 of `add-frequency-domain-analysis`: configure a small-signal
+    /// AC perturbation overlaid on a named source's RHS during transient
+    /// runs. Used by `Simulator::run_fra` to inject `ε·sin(2π·f·t + φ)` on
+    /// top of a DC source for frequency-response analysis. The perturbation
+    /// stays active until `clear_ac_perturbation` is called.
+    void set_ac_perturbation(std::string source_name,
+                              Real amplitude,
+                              Real frequency,
+                              Real phase = Real{0}) {
+        ac_perturbation_source_    = std::move(source_name);
+        ac_perturbation_amplitude_ = amplitude;
+        ac_perturbation_frequency_ = frequency;
+        ac_perturbation_phase_     = phase;
+        ac_perturbation_active_    = true;
+    }
+
+    void clear_ac_perturbation() {
+        ac_perturbation_active_ = false;
+        ac_perturbation_source_.clear();
+        ac_perturbation_amplitude_ = Real{0};
+        ac_perturbation_frequency_ = Real{0};
+        ac_perturbation_phase_     = Real{0};
+    }
+
+    [[nodiscard]] bool ac_perturbation_active() const { return ac_perturbation_active_; }
+
+    /// True iff every device in the circuit has a PWL state-space stamp
+    /// implemented by `assemble_state_space()`. Today this excludes coupled
+    /// inductors / transformers; future work expands coverage.
+    [[nodiscard]] bool pwl_state_space_supports_all_devices() const {
+        for (const auto& dev : devices_) {
+            bool ok = true;
+            std::visit([&](const auto& d) {
+                using T = std::decay_t<decltype(d)>;
+                (void)d;
+                if constexpr (std::is_same_v<T, Transformer>) {
+                    ok = false;
+                }
+            }, dev);
+            if (!ok) return false;
+        }
+        return true;
+    }
+
+    // =========================================================================
+    // PWL event detection (refactor-pwl-switching-engine, Phase 4)
+    // =========================================================================
+    //
+    // The PWL segment engine integrates a piecewise-linear DAE assuming the
+    // committed switching states stay valid throughout the step. After each
+    // accepted step the simulator must verify that assumption: was any
+    // device's `should_commute()` predicate triggered by the step's
+    // resulting state vector? If yes, the device's `pwl_state_` is flipped
+    // and the next step rebuilds the segment model under the new topology.
+    //
+    // Phase 4 lands a *first-order* event scheduler: events are recognized
+    // at step boundaries and committed for the next step. Bisection-to-event
+    // (full second-order accuracy at the event time) is a follow-up work
+    // captured in tasks.md (4.4).
+
+    /// One pending PWL state transition discovered by `scan_pwl_commutations`.
+    /// `device_index` is the variant slot in `devices_`; `device_name` mirrors
+    /// the connection registry; `new_state` is the post-commutation pwl_state.
+    struct PwlCommutation {
+        std::size_t device_index = 0;
+        std::string device_name;
+        bool new_state = false;
+    };
+
+    /// Walk every PWL-eligible device, build its `PwlEventContext` from the
+    /// supplied state vector, and collect the devices that report
+    /// `should_commute() == true`. Devices not resolved to
+    /// `SwitchingMode::Ideal` (under `circuit_default`) are skipped — only
+    /// the PWL segment path drives commutations through this channel; the
+    /// legacy `forced_switch_state_` mechanism still owns Behavioral-mode
+    /// switches.
+    [[nodiscard]] std::vector<PwlCommutation> scan_pwl_commutations(
+        const Vector& x,
+        SwitchingMode circuit_default = SwitchingMode::Behavioral) const {
+        std::vector<PwlCommutation> events;
+        events.reserve(devices_.size());
+
+        auto safe_voltage = [&](Index node) -> Real {
+            if (node < 0 || node >= x.size()) return Real{0.0};
+            return x[node];
+        };
+
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, IdealDiode> ||
+                              std::is_same_v<T, VoltageControlledSwitch> ||
+                              std::is_same_v<T, MOSFET> ||
+                              std::is_same_v<T, IGBT>) {
+                    if (resolve_switching_mode(dev.switching_mode(),
+                                               circuit_default) !=
+                        SwitchingMode::Ideal) {
+                        return;
+                    }
+
+                    PwlEventContext ctx;
+                    ctx.event_hysteresis = dev.event_hysteresis();
+
+                    if constexpr (std::is_same_v<T, IdealDiode>) {
+                        if (conn.nodes.size() < 2) return;
+                        const Real v_an = safe_voltage(conn.nodes[0]);
+                        const Real v_ca = safe_voltage(conn.nodes[1]);
+                        ctx.voltage = v_an - v_ca;
+                        const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
+                        ctx.current = g * ctx.voltage;
+                    } else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                        if (conn.nodes.size() < 3) return;
+                        ctx.control_voltage = safe_voltage(conn.nodes[0]);
+                        ctx.voltage = safe_voltage(conn.nodes[1]) -
+                                      safe_voltage(conn.nodes[2]);
+                        const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
+                        ctx.current = g * ctx.voltage;
+                    } else if constexpr (std::is_same_v<T, MOSFET>) {
+                        if (conn.nodes.size() < 3) return;
+                        const Real v_g = safe_voltage(conn.nodes[0]);
+                        const Real v_d = safe_voltage(conn.nodes[1]);
+                        const Real v_s = safe_voltage(conn.nodes[2]);
+                        ctx.control_voltage = v_g - v_s;
+                        ctx.voltage = v_d - v_s;
+                        const Real g = dev.pwl_state() ? dev.params().g_on
+                                                       : dev.params().g_off;
+                        ctx.current = g * ctx.voltage;
+                    } else if constexpr (std::is_same_v<T, IGBT>) {
+                        if (conn.nodes.size() < 3) return;
+                        const Real v_g = safe_voltage(conn.nodes[0]);
+                        const Real v_c = safe_voltage(conn.nodes[1]);
+                        const Real v_e = safe_voltage(conn.nodes[2]);
+                        ctx.control_voltage = v_g - v_e;
+                        ctx.voltage = v_c - v_e;
+                        const Real g = dev.pwl_state() ? dev.params().g_on
+                                                       : dev.params().g_off;
+                        ctx.current = g * ctx.voltage;
+                    }
+
+                    if (dev.should_commute(ctx)) {
+                        PwlCommutation evt;
+                        evt.device_index = i;
+                        evt.device_name = conn.name;
+                        evt.new_state = !dev.pwl_state();
+                        events.push_back(std::move(evt));
+                    }
+                }
+            }, devices_[i]);
+        }
+        return events;
+    }
+
+    /// Apply a list of pending commutations (typically from
+    /// `scan_pwl_commutations`) by writing `new_state` into each device's
+    /// `pwl_state_`. The Simulator's event scheduler is responsible for
+    /// bisection / bookkeeping; this method is a pure mutator.
+    void commit_pwl_commutations(const std::vector<PwlCommutation>& events) {
+        for (const auto& e : events) {
+            if (e.device_index >= devices_.size()) continue;
+            std::visit([&](auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, IdealDiode> ||
+                              std::is_same_v<T, IdealSwitch> ||
+                              std::is_same_v<T, VoltageControlledSwitch> ||
+                              std::is_same_v<T, MOSFET> ||
+                              std::is_same_v<T, IGBT>) {
+                    dev.commit_pwl_state(e.new_state);
+                }
+            }, devices_[e.device_index]);
+        }
+    }
+
+    // =========================================================================
     // Accessors for Circuit Conversion (AC Analysis)
     // =========================================================================
 
     /// Get all devices (for conversion to IR circuit)
     [[nodiscard]] const std::vector<DeviceVariant>& devices() const { return devices_; }
+    /// Mutable accessor used by the AD validation layer (Phase 4 of
+    /// `add-automatic-differentiation`), where stamps may mutate `pwl_state_`.
+    [[nodiscard]] std::vector<DeviceVariant>& devices_mutable() { return devices_; }
 
     /// Get all connections (for conversion to IR circuit)
     [[nodiscard]] const std::vector<DeviceConnection>& connections() const { return connections_; }
@@ -2064,6 +2593,12 @@ private:
         return forced_switch_state_[device_index];
     }
 
+public:
+    /// Public lookups by device name. These are const-correct utilities used
+    /// across the simulator (DC OP, AC sweep, post-processing). They're
+    /// exposed publicly because external services (e.g. AC sweep's
+    /// perturbation-source resolution) need to dispatch on device type
+    /// without re-walking the device list. Mutation paths stay private.
     [[nodiscard]] const DeviceConnection* find_connection(std::string_view name) const {
         if (const auto index = find_connection_index(name); index.has_value()) {
             return &connections_[*index];
@@ -2080,15 +2615,16 @@ private:
     }
 
     template<typename Device>
-    [[nodiscard]] Device* find_device(std::string_view name) {
+    [[nodiscard]] const Device* find_device(std::string_view name) const {
         if (const auto index = find_connection_index(name); index.has_value()) {
             return std::get_if<Device>(&devices_[*index]);
         }
         return nullptr;
     }
 
+private:
     template<typename Device>
-    [[nodiscard]] const Device* find_device(std::string_view name) const {
+    [[nodiscard]] Device* find_device(std::string_view name) {
         if (const auto index = find_connection_index(name); index.has_value()) {
             return std::get_if<Device>(&devices_[*index]);
         }
@@ -2495,7 +3031,18 @@ private:
     Integrator integration_method_ = Integrator::Trapezoidal;
     int integration_order_ = 2;  // companion-model order (1 = BE, 2 = TR)
     Real current_time_ = 0.0;
+    SwitchingMode default_switching_mode_ = SwitchingMode::Auto;
     inline static const std::string ground_name_ = "0";
+
+    // Phase 3 of `add-frequency-domain-analysis`: AC perturbation state.
+    // When `set_ac_perturbation` is called, `assemble_state_space` overlays
+    // `ε·sin(2π·f·t + φ)` on the named source's RHS — used by FRA to
+    // inject a small-signal probe on top of an otherwise-DC source.
+    bool ac_perturbation_active_ = false;
+    std::string ac_perturbation_source_;
+    Real ac_perturbation_amplitude_ = 0.0;
+    Real ac_perturbation_frequency_ = 0.0;
+    Real ac_perturbation_phase_     = 0.0;
 
     StageContext stage_context_{};
     std::vector<Real> stage_cap_v_;

@@ -53,6 +53,11 @@ struct device_traits {
     static constexpr bool has_loss_model = false;
     static constexpr bool has_thermal_model = false;
 
+    /// True when this device supports SwitchingMode::Ideal (sharp piecewise-linear
+    /// stamping with no smoothing, eligible for the PWL state-space segment engine).
+    /// Default false; opted-in by switching-device specializations.
+    static constexpr bool supports_pwl = false;
+
     // Jacobian contribution size (nodes + internal + branches)
     static constexpr std::size_t jacobian_size = 0;
 };
@@ -84,6 +89,23 @@ inline constexpr std::size_t num_pins_v = device_traits<D>::num_pins;
 /// Get the Jacobian contribution size for a device type
 template<typename D>
 inline constexpr std::size_t jacobian_size_v = device_traits<D>::jacobian_size;
+
+/// Check if a device supports piecewise-linear (Ideal) switching mode.
+/// Falls back to `false` for specializations that don't define the field,
+/// so legacy device traits remain valid without per-file edits.
+namespace detail {
+template<typename D>
+concept HasSupportsPwl = requires { { device_traits<D>::supports_pwl } -> std::convertible_to<bool>; };
+}  // namespace detail
+
+template<typename D>
+inline constexpr bool supports_pwl_v = []() {
+    if constexpr (detail::HasSupportsPwl<D>) {
+        return static_cast<bool>(device_traits<D>::supports_pwl);
+    } else {
+        return false;
+    }
+}();
 
 // =============================================================================
 // Sparsity Pattern Types

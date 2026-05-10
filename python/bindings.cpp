@@ -247,6 +247,19 @@ void init_v2_module(py::module_& v2) {
         .value("Ground", DeviceHint::Ground)
         .export_values();
 
+    // refactor-pwl-switching-engine Phase 5: SwitchingMode enum. Registered
+    // before Circuit / SimulationOptions so default arguments referencing
+    // these values resolve at pybind11 module init time.
+    py::enum_<SwitchingMode>(v2, "SwitchingMode",
+                              "Per-device PWL switching mode: Auto (default; resolves "
+                              "to Behavioral for backward compat), Ideal (sharp PWL "
+                              "stamping eligible for the segment engine fast path), or "
+                              "Behavioral (smooth tanh / Shichman-Hodges, Newton-driven).")
+        .value("Auto", SwitchingMode::Auto)
+        .value("Ideal", SwitchingMode::Ideal)
+        .value("Behavioral", SwitchingMode::Behavioral)
+        .export_values();
+
     // =========================================================================
     // CRTP Devices (7.1.1)
     // =========================================================================
@@ -724,6 +737,29 @@ void init_v2_module(py::module_& v2) {
         .def("set_switch_state", &Circuit::set_switch_state,
              py::arg("name"), py::arg("closed"),
              "Set switch state by name")
+        .def("set_pwl_state", &Circuit::set_pwl_state,
+             py::arg("name"), py::arg("on"),
+             "Commit PWL on/off state (refactor-pwl-switching-engine Phase 4): "
+             "writes directly into the device's pwl_state_, the path the PWL "
+             "segment engine uses for event commits.")
+        .def("set_switching_mode_for_all", &Circuit::set_switching_mode_for_all,
+             py::arg("mode"),
+             "Set SwitchingMode on every PWL-eligible device (passives skipped).")
+        .def("set_default_switching_mode", &Circuit::set_default_switching_mode,
+             py::arg("mode"),
+             "Circuit-level default switching mode used when devices are in Auto.")
+        .def("default_switching_mode", &Circuit::default_switching_mode,
+             "Get the circuit-level default switching mode.")
+        .def("pwl_topology_bitmask", &Circuit::pwl_topology_bitmask,
+             "Bitmask over committed PWL switch states; 1 bit per switching device "
+             "in registration order.")
+        .def("pwl_switching_device_count", &Circuit::pwl_switching_device_count,
+             "Count of switching devices the PWL segment engine recognizes.")
+        .def("all_switching_devices_in_ideal_mode",
+             &Circuit::all_switching_devices_in_ideal_mode,
+             py::arg("circuit_default") = SwitchingMode::Behavioral,
+             "True iff every switching device resolves to Ideal under the "
+             "supplied circuit-default fallback.")
         .def("set_timestep", &Circuit::set_timestep, py::arg("dt"),
              "Set timestep for dynamic elements")
         .def("timestep", &Circuit::timestep,
@@ -1260,6 +1296,12 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("state_space_primary_steps", &BackendTelemetry::state_space_primary_steps)
         .def_readwrite("dae_fallback_steps", &BackendTelemetry::dae_fallback_steps)
         .def_readwrite("segment_non_admissible_steps", &BackendTelemetry::segment_non_admissible_steps)
+        .def_readwrite("pwl_topology_transitions", &BackendTelemetry::pwl_topology_transitions,
+                        "Phase 6 telemetry: count of accepted-step boundaries where the "
+                        "PWL switch bitmask changed.")
+        .def_readwrite("pwl_event_commutations", &BackendTelemetry::pwl_event_commutations,
+                        "Phase 6 telemetry: total number of individual PWL device "
+                        "commutations committed during the run.")
         .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
         .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
         .def_readwrite("linear_factor_cache_hits", &BackendTelemetry::linear_factor_cache_hits)
@@ -1380,6 +1422,11 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("timestep_config", &SimulationOptions::timestep_config)
         .def_readwrite("lte_config", &SimulationOptions::lte_config)
         .def_readwrite("integrator", &SimulationOptions::integrator)
+        .def_readwrite("switching_mode", &SimulationOptions::switching_mode,
+                        "PWL switching mode default (refactor-pwl-switching-engine "
+                        "Phase 5). Threads through Circuit::set_default_switching_mode "
+                        "at simulator construction. Auto resolves to Behavioral for "
+                        "backward compat; Ideal opts in to the PWL segment engine.")
         .def_readwrite("enable_bdf_order_control", &SimulationOptions::enable_bdf_order_control)
         .def_readwrite("bdf_config", &SimulationOptions::bdf_config)
         .def_readwrite("stiffness_config", &SimulationOptions::stiffness_config)
@@ -1478,10 +1525,123 @@ void init_v2_module(py::module_& v2) {
            "Run harmonic balance with explicit initial state")
         .def("set_switching_energy", &Simulator::set_switching_energy,
              py::arg("device_name"), py::arg("energy"))
+        .def("linearize_around", &Simulator::linearize_around,
+             py::arg("x_op"), py::arg("t_op"),
+             "Phase 1 of add-frequency-domain-analysis: small-signal linearization "
+             "around (x_op, t_op) into descriptor form E·dx/dt = A·x + B·u, "
+             "y = C·x + D·u. Returns a LinearSystem.")
+        .def("run_ac_sweep", &Simulator::run_ac_sweep, py::arg("options"),
+             "Phase 2 of add-frequency-domain-analysis: AC small-signal sweep. "
+             "Solves (jω·E - A)·X = B per frequency and returns a Bode-data "
+             "AcSweepResult per requested measurement node.")
+        .def("run_fra", &Simulator::run_fra, py::arg("options"),
+             "Phase 3 of add-frequency-domain-analysis: empirical Frequency "
+             "Response Analysis. Per-frequency injection + transient + Goertzel "
+             "DFT. Returns Bode-data FraResult.")
         .def_property("options",
             [](const Simulator& sim) { return sim.options(); },
             &Simulator::set_options,
             "Get or set simulation options");
+
+    // =========================================================================
+    // Frequency-domain analysis bindings (add-frequency-domain-analysis)
+    // =========================================================================
+
+    py::class_<LinearSystem>(v2, "LinearSystem",
+        "Phase 1 of add-frequency-domain-analysis: small-signal descriptor "
+        "form E·dx/dt = A·x + B·u, y = C·x + D·u")
+        .def(py::init<>())
+        .def_readonly("E", &LinearSystem::E)
+        .def_readonly("A", &LinearSystem::A)
+        .def_readonly("B", &LinearSystem::B)
+        .def_readonly("C", &LinearSystem::C)
+        .def_readonly("D", &LinearSystem::D)
+        .def_readonly("state_size",  &LinearSystem::state_size)
+        .def_readonly("input_size",  &LinearSystem::input_size)
+        .def_readonly("output_size", &LinearSystem::output_size)
+        .def_readonly("t_linearization", &LinearSystem::t_linearization)
+        .def_readonly("x_linearization", &LinearSystem::x_linearization)
+        .def_readonly("method", &LinearSystem::method)
+        .def_readonly("failure_reason", &LinearSystem::failure_reason)
+        .def_property_readonly("ok", &LinearSystem::ok);
+
+    py::enum_<AcSweepScale>(v2, "AcSweepScale", "AC sweep frequency-grid scale")
+        .value("Logarithmic", AcSweepScale::Logarithmic)
+        .value("Linear",      AcSweepScale::Linear)
+        .export_values();
+
+    py::class_<AcSweepOptions>(v2, "AcSweepOptions",
+        "Options for Simulator.run_ac_sweep")
+        .def(py::init<>())
+        .def_readwrite("f_start", &AcSweepOptions::f_start)
+        .def_readwrite("f_stop",  &AcSweepOptions::f_stop)
+        .def_readwrite("points_per_decade", &AcSweepOptions::points_per_decade)
+        .def_readwrite("num_points",        &AcSweepOptions::num_points)
+        .def_readwrite("scale",             &AcSweepOptions::scale)
+        .def_readwrite("perturbation_source",  &AcSweepOptions::perturbation_source)
+        .def_readwrite("perturbation_sources", &AcSweepOptions::perturbation_sources)
+        .def_readwrite("measurement_nodes",    &AcSweepOptions::measurement_nodes)
+        .def_readwrite("t_op",      &AcSweepOptions::t_op)
+        .def_readwrite("use_dc_op", &AcSweepOptions::use_dc_op)
+        .def_readwrite("x_op",      &AcSweepOptions::x_op)
+        .def_readwrite("label",     &AcSweepOptions::label);
+
+    py::class_<AcMeasurement>(v2, "AcMeasurement",
+        "Per-(source, node) Bode data for a single AC sweep run")
+        .def(py::init<>())
+        .def_readonly("node",         &AcMeasurement::node)
+        .def_readonly("state_index",  &AcMeasurement::state_index)
+        .def_readonly("perturbation_source", &AcMeasurement::perturbation_source)
+        .def_readonly("magnitude_db", &AcMeasurement::magnitude_db)
+        .def_readonly("phase_deg",    &AcMeasurement::phase_deg)
+        .def_readonly("real_part",    &AcMeasurement::real_part)
+        .def_readonly("imag_part",    &AcMeasurement::imag_part);
+
+    py::class_<AcSweepResult>(v2, "AcSweepResult",
+        "Result of Simulator.run_ac_sweep")
+        .def(py::init<>())
+        .def_readonly("success",         &AcSweepResult::success)
+        .def_readonly("failure_reason",  &AcSweepResult::failure_reason)
+        .def_readonly("frequencies",     &AcSweepResult::frequencies)
+        .def_readonly("measurements",    &AcSweepResult::measurements)
+        .def_readonly("total_factorizations", &AcSweepResult::total_factorizations)
+        .def_readonly("total_solves",         &AcSweepResult::total_solves)
+        .def_readonly("wall_seconds",         &AcSweepResult::wall_seconds);
+
+    py::class_<FraOptions>(v2, "FraOptions",
+        "Options for Simulator.run_fra")
+        .def(py::init<>())
+        .def_readwrite("f_start", &FraOptions::f_start)
+        .def_readwrite("f_stop",  &FraOptions::f_stop)
+        .def_readwrite("points_per_decade", &FraOptions::points_per_decade)
+        .def_readwrite("scale", &FraOptions::scale)
+        .def_readwrite("perturbation_source",    &FraOptions::perturbation_source)
+        .def_readwrite("perturbation_amplitude", &FraOptions::perturbation_amplitude)
+        .def_readwrite("perturbation_phase",     &FraOptions::perturbation_phase)
+        .def_readwrite("measurement_nodes",      &FraOptions::measurement_nodes)
+        .def_readwrite("n_cycles",         &FraOptions::n_cycles)
+        .def_readwrite("discard_cycles",   &FraOptions::discard_cycles)
+        .def_readwrite("samples_per_cycle", &FraOptions::samples_per_cycle);
+
+    py::class_<FraMeasurement>(v2, "FraMeasurement",
+        "Per-node Bode data for a single FRA run")
+        .def(py::init<>())
+        .def_readonly("node",         &FraMeasurement::node)
+        .def_readonly("state_index",  &FraMeasurement::state_index)
+        .def_readonly("magnitude_db", &FraMeasurement::magnitude_db)
+        .def_readonly("phase_deg",    &FraMeasurement::phase_deg)
+        .def_readonly("real_part",    &FraMeasurement::real_part)
+        .def_readonly("imag_part",    &FraMeasurement::imag_part);
+
+    py::class_<FraResult>(v2, "FraResult",
+        "Result of Simulator.run_fra")
+        .def(py::init<>())
+        .def_readonly("success",        &FraResult::success)
+        .def_readonly("failure_reason", &FraResult::failure_reason)
+        .def_readonly("frequencies",    &FraResult::frequencies)
+        .def_readonly("measurements",   &FraResult::measurements)
+        .def_readonly("total_transient_steps", &FraResult::total_transient_steps)
+        .def_readonly("wall_seconds",          &FraResult::wall_seconds);
 
     py::class_<v1parser::YamlParserOptions>(v2, "YamlParserOptions", "YAML parser options")
         .def(py::init<>())

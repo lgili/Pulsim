@@ -21,6 +21,7 @@ from ._pulsim import (
     TimestepMethod,
     StepMode,
     FormulationMode,
+    SwitchingMode,
 
     # Device Classes - Linear
     Resistor,
@@ -172,6 +173,15 @@ from ._pulsim import (
     LossResult,
     SystemLossSummary,
 
+    # Frequency-domain analysis (add-frequency-domain-analysis)
+    LinearSystem,
+    AcSweepScale,
+    AcSweepOptions,
+    AcMeasurement,
+    AcSweepResult,
+    FraOptions,
+    FraMeasurement,
+    FraResult,
 )
 
 # Netlist Parser (Pure Python)
@@ -190,6 +200,31 @@ from .signal_evaluator import (
     AlgebraicLoopError,
     SIGNAL_TYPES,
 )
+
+# Frequency-domain analysis plotting helpers
+# (matplotlib imported lazily inside the helpers — no required dependency)
+from .frequency_analysis import (
+    bode_plot,
+    nyquist_plot,
+    fra_overlay,
+    export_ac_csv,
+    export_fra_csv,
+    export_ac_json,
+    export_fra_json,
+    load_ac_result_csv,
+)
+
+# Converter templates (add-converter-templates)
+from . import templates as templates  # noqa: E402  (re-export submodule)
+
+# Real-time code generation (add-realtime-code-generation)
+from . import codegen as codegen  # noqa: E402
+
+# Parameter sweep (add-monte-carlo-parameter-sweep)
+from . import sweep as sweep  # noqa: E402
+
+# FMI 2.0 Co-Simulation export (add-fmi-export)
+from . import fmu as fmu  # noqa: E402
 
 
 _AUTO_BLEEDER_CIRCUITS = weakref.WeakSet()
@@ -485,6 +520,7 @@ __all__ = [
     "TimestepMethod",
     "StepMode",
     "FormulationMode",
+    "SwitchingMode",
 
     # Device Classes - Linear
     "Resistor",

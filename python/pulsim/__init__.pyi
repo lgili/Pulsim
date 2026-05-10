@@ -428,6 +428,25 @@ class FallbackPolicyOptions:
 
     def __init__(self) -> None: ...
 
+class ModelRegularizationOptions:
+    enable_auto: bool
+    apply_only_in_recovery: bool
+    retry_threshold: int
+    max_escalations: int
+    escalation_factor: float
+    mosfet_kp_max: float
+    mosfet_g_off_min: float
+    diode_g_on_max: float
+    diode_g_off_min: float
+    igbt_g_on_max: float
+    igbt_g_off_min: float
+    switch_g_on_max: float
+    switch_g_off_min: float
+    vcswitch_g_on_max: float
+    vcswitch_g_off_min: float
+
+    def __init__(self) -> None: ...
+
 class BackendTelemetry:
     requested_backend: str
     selected_backend: str
@@ -448,10 +467,19 @@ class BackendTelemetry:
     segment_model_cache_misses: int
     linear_factor_cache_hits: int
     linear_factor_cache_misses: int
+    linear_factor_cache_invalidations: int
+    linear_factor_cache_last_invalidation_reason: str
+    reserved_output_samples: int
+    time_series_reallocations: int
+    state_series_reallocations: int
+    virtual_channel_reallocations: int
     equation_assemble_system_calls: int
     equation_assemble_residual_calls: int
     equation_assemble_system_time_seconds: float
     equation_assemble_residual_time_seconds: float
+    model_regularization_events: int
+    model_regularization_last_changed: int
+    model_regularization_last_intensity: float
     failure_reason: str
 
     def __init__(self) -> None: ...
@@ -563,6 +591,7 @@ class SimulationOptions:
     gmin_fallback: GminConfig
     max_step_retries: int
     fallback_policy: FallbackPolicyOptions
+    model_regularization: ModelRegularizationOptions
 
     def __init__(self) -> None: ...
 

@@ -1,0 +1,19 @@
+# EPCOS N97 — MnZn power ferrite, 25 °C.
+# Effectively a re-branded TDK N87 family; coefficients here come from
+# the EPCOS data brief (rev 2014-10).
+
+vendor: EPCOS
+material: N97
+geometry:
+  area_m2: 1.4e-4
+  path_length_m: 4.4e-2
+bh_curve:
+  - { H: -1400, B: -0.41 }
+  - { H:  -200, B: -0.32 }
+  - { H:     0, B:  0.00 }
+  - { H:   200, B:  0.32 }
+  - { H:  1400, B:  0.41 }
+steinmetz:
+  k:     1.45e-3
+  alpha: 1.6
+  beta:  2.75

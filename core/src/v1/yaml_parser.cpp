@@ -629,7 +629,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         return;
     }
 
-    validate_keys(root, {"schema", "version", "simulation", "models", "components"},
+    validate_keys(root, {"schema", "version", "simulation", "models", "components", "analysis"},
                   "root", errors_, options_.strict);
 
     if (!root["schema"]) {
@@ -667,7 +667,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "enable_events", "enable_losses", "integrator", "integration", "newton", "timestep",
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
-                            "direct_formulation_fallback",
+                            "direct_formulation_fallback", "switching_mode",
                             "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
@@ -1085,6 +1085,29 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             }
         }
 
+        // refactor-pwl-switching-engine, Phase 5: switching_mode controls
+        // whether the PWL state-space segment engine is engaged. Accepted
+        // string values: "auto" (default; resolves to behavioral),
+        // "ideal" (opt-in to PWL fast path), "behavioral" (force the legacy
+        // Newton-companion path). Strict validation rejects unknown values.
+        YAML::Node switching_mode_node = sim["switching_mode"];
+        if (switching_mode_node) {
+            const std::string raw = switching_mode_node.as<std::string>();
+            const std::string mode = normalize_key(raw);
+            if (mode == "auto") {
+                options.switching_mode = SwitchingMode::Auto;
+            } else if (mode == "ideal" || mode == "pwl") {
+                options.switching_mode = SwitchingMode::Ideal;
+            } else if (mode == "behavioral" || mode == "behaviour" ||
+                       mode == "behaviorallegacy" || mode == "smooth") {
+                options.switching_mode = SwitchingMode::Behavioral;
+            } else {
+                errors_.push_back(
+                    "Invalid simulation.switching_mode: '" + raw +
+                    "'. Expected one of: auto, ideal, behavioral.");
+            }
+        }
+
         YAML::Node newton = expert_node("newton");
         if (newton) {
             YAML::Node n = newton;
@@ -1378,6 +1401,170 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (hb["initialize_from_transient"]) {
                 options.harmonic_balance.initialize_from_transient =
                     hb["initialize_from_transient"].as<bool>();
+            }
+        }
+    }
+
+    // Phase 7 of `add-frequency-domain-analysis`: declarative analyses.
+    // `analysis:` is a top-level YAML array of frequency-domain analyses
+    // (AC sweep, FRA). Each entry has a `type:` discriminator that maps
+    // it onto `AcSweepOptions` or `FraOptions`. Sweeps are accumulated
+    // into `options.ac_sweeps` / `options.fra_sweeps`; the order of
+    // each list mirrors the YAML order, so users iterating with the
+    // existing `Simulator::run_ac_sweep` / `run_fra` methods get
+    // deterministic execution and shared DC OP across analyses (the DC
+    // solve is idempotent for a fixed circuit).
+    if (root["analysis"]) {
+        YAML::Node analysis_node = root["analysis"];
+        if (!analysis_node.IsSequence()) {
+            push_error(errors_, kDiagTypeMismatch,
+                       "analysis: must be a sequence (list of analysis blocks)");
+        } else {
+            int idx = 0;
+            for (const auto& entry : analysis_node) {
+                const std::string ctx = "analysis[" + std::to_string(idx) + "]";
+                ++idx;
+                if (!entry.IsMap()) {
+                    push_error(errors_, kDiagTypeMismatch,
+                               ctx + ": each analysis entry must be a map");
+                    continue;
+                }
+                if (!entry["type"]) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               ctx + ": missing required field 'type'");
+                    continue;
+                }
+                const std::optional<std::string> type_raw =
+                    parse_string_scalar(entry["type"], ctx + ".type", errors_);
+                if (!type_raw) continue;
+                const std::string type_norm = normalize_key(*type_raw);
+
+                auto parse_scale = [&](const YAML::Node& scale_node,
+                                       const std::string& scale_ctx,
+                                       AcSweepScale& out) {
+                    if (!scale_node) return;
+                    const auto raw = parse_string_scalar(scale_node, scale_ctx, errors_);
+                    if (!raw) return;
+                    const std::string s = normalize_key(*raw);
+                    if (s == "log" || s == "logarithmic") {
+                        out = AcSweepScale::Logarithmic;
+                    } else if (s == "lin" || s == "linear") {
+                        out = AcSweepScale::Linear;
+                    } else {
+                        push_error(errors_, kDiagInvalidParameter,
+                                   scale_ctx + ": unknown scale '" + *raw +
+                                       "' (expected 'log' or 'linear')");
+                    }
+                };
+                auto parse_node_list = [&](const YAML::Node& seq_node,
+                                            const std::string& seq_ctx,
+                                            std::vector<std::string>& out) {
+                    if (!seq_node) return;
+                    if (!seq_node.IsSequence()) {
+                        push_error(errors_, kDiagTypeMismatch,
+                                   seq_ctx + ": must be a sequence of node names");
+                        return;
+                    }
+                    for (const auto& n : seq_node) {
+                        const auto name =
+                            parse_string_scalar(n, seq_ctx + "[]", errors_);
+                        if (name) out.push_back(*name);
+                    }
+                };
+
+                if (type_norm == "ac" || type_norm == "ac_sweep" || type_norm == "ac-sweep") {
+                    validate_keys(entry,
+                                  {"type", "name", "f_start", "f_stop",
+                                   "points_per_decade", "num_points", "scale",
+                                   "perturbation_source", "measurement_nodes",
+                                   "t_op", "use_dc_op"},
+                                  ctx, errors_, options_.strict);
+                    AcSweepOptions ac;
+                    if (entry["name"]) {
+                        const auto label = parse_string_scalar(entry["name"], ctx + ".name", errors_);
+                        if (label) ac.label = *label;
+                    }
+                    if (entry["f_start"])  ac.f_start = parse_real(entry["f_start"], ctx + ".f_start", errors_);
+                    if (entry["f_stop"])   ac.f_stop  = parse_real(entry["f_stop"],  ctx + ".f_stop",  errors_);
+                    if (entry["points_per_decade"]) {
+                        const auto v = parse_int_scalar(entry["points_per_decade"],
+                                                         ctx + ".points_per_decade", errors_);
+                        if (v) ac.points_per_decade = *v;
+                    }
+                    if (entry["num_points"]) {
+                        const auto v = parse_int_scalar(entry["num_points"],
+                                                         ctx + ".num_points", errors_);
+                        if (v) ac.num_points = *v;
+                    }
+                    parse_scale(entry["scale"], ctx + ".scale", ac.scale);
+                    if (entry["perturbation_source"]) {
+                        const auto src = parse_string_scalar(entry["perturbation_source"],
+                                                              ctx + ".perturbation_source", errors_);
+                        if (src) ac.perturbation_source = *src;
+                    }
+                    parse_node_list(entry["measurement_nodes"],
+                                     ctx + ".measurement_nodes", ac.measurement_nodes);
+                    if (entry["t_op"])     ac.t_op = parse_real(entry["t_op"], ctx + ".t_op", errors_);
+                    if (entry["use_dc_op"]) ac.use_dc_op = entry["use_dc_op"].as<bool>();
+                    options.ac_sweeps.push_back(std::move(ac));
+                } else if (type_norm == "fra") {
+                    validate_keys(entry,
+                                  {"type", "name", "f_start", "f_stop",
+                                   "points_per_decade", "scale",
+                                   "perturbation_source", "perturbation_amplitude",
+                                   "perturbation_phase", "measurement_nodes",
+                                   "n_cycles", "discard_cycles", "samples_per_cycle"},
+                                  ctx, errors_, options_.strict);
+                    FraOptions fra;
+                    if (entry["name"]) {
+                        const auto label = parse_string_scalar(entry["name"], ctx + ".name", errors_);
+                        if (label) fra.label = *label;
+                    }
+                    if (entry["f_start"])  fra.f_start = parse_real(entry["f_start"], ctx + ".f_start", errors_);
+                    if (entry["f_stop"])   fra.f_stop  = parse_real(entry["f_stop"],  ctx + ".f_stop",  errors_);
+                    if (entry["points_per_decade"]) {
+                        const auto v = parse_int_scalar(entry["points_per_decade"],
+                                                         ctx + ".points_per_decade", errors_);
+                        if (v) fra.points_per_decade = *v;
+                    }
+                    parse_scale(entry["scale"], ctx + ".scale", fra.scale);
+                    if (entry["perturbation_source"]) {
+                        const auto src = parse_string_scalar(entry["perturbation_source"],
+                                                              ctx + ".perturbation_source", errors_);
+                        if (src) fra.perturbation_source = *src;
+                    }
+                    if (entry["perturbation_amplitude"]) {
+                        fra.perturbation_amplitude =
+                            parse_real(entry["perturbation_amplitude"],
+                                       ctx + ".perturbation_amplitude", errors_);
+                    }
+                    if (entry["perturbation_phase"]) {
+                        fra.perturbation_phase =
+                            parse_real(entry["perturbation_phase"],
+                                       ctx + ".perturbation_phase", errors_);
+                    }
+                    parse_node_list(entry["measurement_nodes"],
+                                     ctx + ".measurement_nodes", fra.measurement_nodes);
+                    if (entry["n_cycles"]) {
+                        const auto v = parse_int_scalar(entry["n_cycles"], ctx + ".n_cycles", errors_);
+                        if (v) fra.n_cycles = *v;
+                    }
+                    if (entry["discard_cycles"]) {
+                        const auto v = parse_int_scalar(entry["discard_cycles"],
+                                                         ctx + ".discard_cycles", errors_);
+                        if (v) fra.discard_cycles = *v;
+                    }
+                    if (entry["samples_per_cycle"]) {
+                        const auto v = parse_int_scalar(entry["samples_per_cycle"],
+                                                         ctx + ".samples_per_cycle", errors_);
+                        if (v) fra.samples_per_cycle = *v;
+                    }
+                    options.fra_sweeps.push_back(std::move(fra));
+                } else {
+                    push_error(errors_, kDiagInvalidParameter,
+                               ctx + ".type: unknown analysis type '" + *type_raw +
+                                   "' (expected 'ac' or 'fra')");
+                }
             }
         }
     }

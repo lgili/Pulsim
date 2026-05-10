@@ -5,8 +5,13 @@
 namespace pulsim::v1 {
 
 // =============================================================================
-// Example: Current Source Device (CRTP)
+// Current Source Device (CRTP)
 // =============================================================================
+//
+// AD bypass note (`add-automatic-differentiation`, Phase 3):
+//   Current sources contribute only to the b vector (no Jacobian entries —
+//   their current is independent of state). AD has no role here.
+//   `stamp_jacobian_via_ad` is intentionally not provided.
 
 class CurrentSource : public LinearDeviceBase<CurrentSource> {
 public:

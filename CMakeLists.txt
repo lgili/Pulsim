@@ -37,6 +37,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
+
+# refactor `add-automatic-differentiation`, Phase 2.4: opt-in to the
+# AD-derived `stamp_jacobian_via_ad` path for nonlinear devices. Default OFF
+# preserves the legacy manual `stamp_jacobian_behavioral` path. Turn ON to
+# exercise the AD path end-to-end through the full simulation suite.
+option(PULSIM_USE_AD_STAMP "Use AD-derived Jacobian stamps for nonlinear devices" OFF)
+if(PULSIM_USE_AD_STAMP)
+    add_compile_definitions(PULSIM_USE_AD_STAMP=1)
+    message(STATUS "AD stamp: ENABLED (nonlinear devices use stamp_jacobian_via_ad)")
+endif()
 # Note: SuiteSparse/KLU is now a required dependency (default backend for linear solver)
 
 # =============================================================================

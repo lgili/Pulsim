@@ -1,0 +1,37 @@
+# Infineon IKW40N120T2 — 1200 V Si IGBT TrenchStop2, 40 A nominal.
+# Datasheet rev 2014-11. TO-247 package, co-pack diode.
+class: igbt
+vendor: Infineon
+part: IKW40N120T2
+
+V_ce_sat_default: 1.95
+V_ge_th:          5.5
+V_ces_max:        1200.0
+
+# IGBT-signature tail current. TrenchStop2 has fast-tail at ≈ 200 ns.
+tau_tail:         200.0e-9
+I_tail_fraction:  0.10
+
+# V_ce_sat(I_c, T_j) — datasheet Fig. 9.
+V_ce_sat_table:
+  x: [10.0, 20.0, 40.0, 60.0]
+  y: [25.0, 125.0]
+  values: [1.65, 1.85, 2.20, 2.55,
+           1.90, 2.10, 2.50, 2.90]
+
+# Switching energies at 600 V bus, 15 V gate drive (datasheet Fig. 11)
+Eon:
+  x: [10.0, 20.0, 40.0]
+  y: [400.0, 600.0]
+  values: [400.0e-6, 800.0e-6, 1.6e-3,
+           600.0e-6, 1.2e-3, 2.4e-3]
+Eoff:
+  x: [10.0, 20.0, 40.0]
+  y: [400.0, 600.0]
+  values: [200.0e-6, 400.0e-6, 800.0e-6,
+           300.0e-6, 600.0e-6, 1.2e-3]
+Erec:
+  x: [10.0, 20.0, 40.0]
+  y: [400.0, 600.0]
+  values: [150.0e-6, 300.0e-6, 600.0e-6,
+           225.0e-6, 450.0e-6, 900.0e-6]

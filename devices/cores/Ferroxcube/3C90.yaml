@@ -1,0 +1,21 @@
+# Ferroxcube 3C90 — MnZn power ferrite, 25 °C
+#
+# Datasheet reference: Ferroxcube 3C90 datasheet (rev 2008-09).
+
+vendor: Ferroxcube
+material: 3C90
+geometry:
+  area_m2: 1.0e-4
+  path_length_m: 4.0e-2
+bh_curve:
+  - { H: -1200, B: -0.42 }
+  - { H:  -300, B: -0.34 }
+  - { H:   -50, B: -0.10 }
+  - { H:     0, B:  0.00 }
+  - { H:    50, B:  0.10 }
+  - { H:   300, B:  0.34 }
+  - { H:  1200, B:  0.42 }
+steinmetz:
+  k:     1.8e-3
+  alpha: 1.55
+  beta:  2.65

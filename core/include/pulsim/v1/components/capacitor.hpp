@@ -5,8 +5,14 @@
 namespace pulsim::v1 {
 
 // =============================================================================
-// Example: Capacitor Device (CRTP with dynamics)
+// Capacitor Device (CRTP with dynamics)
 // =============================================================================
+//
+// AD bypass note (`add-automatic-differentiation`, Phase 3):
+//   Capacitor stamps the trapezoidal companion model `G_eq = 2C/dt` plus a
+//   constant equivalent-current source `I_eq` derived from the previous
+//   step's state. The Jacobian is constant per topology / per timestep —
+//   no AD needed. `stamp_jacobian_via_ad` is intentionally not provided.
 
 class Capacitor : public DynamicDeviceBase<Capacitor> {
 public:

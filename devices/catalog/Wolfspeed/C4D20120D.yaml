@@ -1,0 +1,28 @@
+# Wolfspeed C4D20120D — 1200 V SiC Schottky diode, 20 A.
+# Datasheet rev 2018-04. TO-247 package.
+#
+# Schottky diodes have NO minority-carrier reverse recovery — Q_rr is
+# small "junction capacitance" and effectively independent of forward
+# current and di/dt. We model it via a small constant Q_rr_table.
+class: diode
+vendor: Wolfspeed
+part: C4D20120D
+
+V_f_default: 1.5
+R_on:        25e-3                  # series resistance from V-I slope
+V_r_max:     1200.0
+s_rec:       1.5                     # nearly soft (no real recovery)
+
+# V_f(I_f, T_j) — Schottky has POSITIVE temperature coefficient.
+V_f_table:
+  x: [1.0, 5.0, 10.0, 20.0]
+  y: [25.0, 150.0]
+  values: [0.95, 1.30, 1.55, 1.95,
+           1.10, 1.45, 1.75, 2.20]
+
+# Q_rr ≈ 50 nC, mostly C·V driven (junction capacitance).
+Q_rr_table:
+  x: [1.0,  20.0]
+  y: [1.0e8, 1.0e9]
+  values: [40.0e-9, 50.0e-9,
+           45.0e-9, 55.0e-9]

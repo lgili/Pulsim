@@ -260,6 +260,69 @@ jobs:
             --strict
 
   # =============================================================================
+  # C++ Code Coverage (lcov → Codecov)
+  # =============================================================================
+  coverage:
+    name: C++ Code Coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 \
+            libsuitesparse-dev libeigen3-dev lcov
+
+      - name: Configure CMake (coverage build)
+        env:
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          cmake -B build-cov \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=gcc-13 \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DPULSIM_BUILD_TESTS=ON \
+            -DPULSIM_ENABLE_LTO=OFF \
+            "-DCMAKE_CXX_FLAGS=--coverage" \
+            "-DCMAKE_EXE_LINKER_FLAGS=--coverage"
+
+      - name: Build
+        run: cmake --build build-cov --parallel 2
+
+      - name: Run C++ tests
+        run: |
+          cd build-cov
+          ctest --output-on-failure --timeout 120
+
+      - name: Capture coverage (core sources only)
+        run: |
+          lcov --capture \
+            --directory build-cov \
+            --output-file coverage_raw.info \
+            --gcov-tool gcov-13 \
+            --no-external
+          lcov --remove coverage_raw.info \
+            '*/tests/*' \
+            '*/FetchContent/*' \
+            '*/yaml-cpp/*' \
+            '*/Catch2/*' \
+            '*/eigen/*' \
+            --output-file coverage.info
+          lcov --list coverage.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.info
+          flags: cpp-unittests
+          name: pulsim-cpp-coverage
+          fail_ci_if_error: false
+
+  # =============================================================================
   # Static Analysis (clang-tidy) for v1 core modules
   # =============================================================================
   static-analysis:

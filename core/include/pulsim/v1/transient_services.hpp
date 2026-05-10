@@ -69,14 +69,64 @@ struct SegmentModel {
     std::shared_ptr<const SegmentLinearStateSpace> linear_model;
 };
 
+/// Phase 5 of `refactor-linear-solver-cache`: typed invalidation reasons
+/// for the linear-factor cache. Each transition from "factor reusable"
+/// to "factor must be rebuilt" carries one of these tags so KPI tracking
+/// and recovery logic can branch on a stable identifier rather than
+/// parsing a free-form string. The companion `to_string` returns the
+/// canonical wire-compat string emitted into telemetry.
+enum class CacheInvalidationReason : std::uint8_t {
+    None = 0,
+    TopologyChanged,         ///< switch state / topology bitmask changed
+    StampParamChanged,       ///< device parameter mutated mid-run (rare)
+    GminEscalated,           ///< transient Gmin bumped during recovery
+    SourceSteppingActive,    ///< source-stepping / homotopy ramp engaged
+    NumericInstability,      ///< factorization failed or matrix hash shifted
+                              ///< unexpectedly within a stable topology
+    ManualInvalidate,        ///< user / kernel forced a rebuild
+};
+
+[[nodiscard]] constexpr std::string_view to_string(CacheInvalidationReason r) noexcept {
+    switch (r) {
+        case CacheInvalidationReason::None:                  return "";
+        case CacheInvalidationReason::TopologyChanged:       return "topology_changed";
+        case CacheInvalidationReason::StampParamChanged:     return "stamp_param_changed";
+        case CacheInvalidationReason::GminEscalated:         return "gmin_escalated";
+        case CacheInvalidationReason::SourceSteppingActive:  return "source_stepping_active";
+        case CacheInvalidationReason::NumericInstability:    return "numeric_instability";
+        case CacheInvalidationReason::ManualInvalidate:      return "manual_invalidate";
+    }
+    return "";
+}
+
 struct SegmentStepOutcome {
     NewtonResult result;
     SegmentSolvePath path = SegmentSolvePath::DaeFallback;
     bool requires_fallback = true;
     bool linear_factor_cache_hit = false;
     bool linear_factor_cache_miss = false;
+    /// Phase 2 of `refactor-linear-solver-cache`: signal that the symbolic
+    /// factor (sparsity-pattern analyze) was reused on this miss path; only
+    /// numeric `factorize` ran. Mutually compatible with
+    /// `linear_factor_cache_miss = true` — the numeric factor missed but the
+    /// symbolic part was preserved.
+    bool symbolic_factor_cache_hit = false;
+    /// Phase 5 of `refactor-linear-solver-cache`: typed invalidation reason
+    /// (None when the cache was reused). Mirror string lives in
+    /// `cache_invalidation_reason` for backward compat with telemetry
+    /// consumers; both fields are written together via
+    /// `set_invalidation_reason` to keep them in sync.
+    CacheInvalidationReason invalidation_reason = CacheInvalidationReason::None;
     std::string cache_invalidation_reason;
     std::string reason;
+
+    /// Set both the typed and the legacy string invalidation fields. Use
+    /// this everywhere instead of poking the raw string — it keeps the two
+    /// representations in lock-step and makes the call site self-documenting.
+    void set_invalidation_reason(CacheInvalidationReason r) {
+        invalidation_reason = r;
+        cache_invalidation_reason = std::string{to_string(r)};
+    }
 };
 
 enum class RecoveryStage {
@@ -133,6 +183,21 @@ public:
         const SegmentModel& model,
         const Vector& x_now,
         const TransientStepRequest& request) = 0;
+
+    /// Phase 3 of `refactor-linear-solver-cache`: aggregate analyze /
+    /// factorize / solve telemetry across the per-key linear-factor LRU.
+    /// Default returns an empty struct so existing implementations
+    /// (test doubles, custom services) don't need to override.
+    [[nodiscard]] virtual LinearSolverTelemetry linear_solver_telemetry() const {
+        return {};
+    }
+
+    /// Phase 3 cache observability: current LRU occupancy / capacity.
+    /// Returns `{0, 0}` for implementations that don't maintain a cache.
+    [[nodiscard]] virtual std::pair<std::size_t, std::size_t>
+    linear_factor_cache_occupancy() const {
+        return {0, 0};
+    }
 };
 
 class NonlinearSolveService {

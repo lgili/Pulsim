@@ -8,6 +8,7 @@
 #include "pulsim/v1/extensions.hpp"
 #include "pulsim/v1/losses.hpp"
 #include "pulsim/v1/transient_services.hpp"
+#include "pulsim/v1/frequency_analysis.hpp"
 #include "pulsim/simulation_control.hpp"
 
 #include <cstdint>
@@ -136,12 +137,37 @@ struct BackendTelemetry {
     int state_space_primary_steps = 0;
     int dae_fallback_steps = 0;
     int segment_non_admissible_steps = 0;
+    // refactor-pwl-switching-engine, Phase 6: PWL event-scheduler telemetry.
+    // `pwl_topology_transitions` counts accepted-step boundaries where the
+    // PWL switch bitmask changed. `pwl_event_commutations` is the total number
+    // of individual device commutations committed (a single step that flips
+    // two switches contributes 2 commutations and 1 transition).
+    int pwl_topology_transitions = 0;
+    int pwl_event_commutations = 0;
     int segment_model_cache_hits = 0;
     int segment_model_cache_misses = 0;
     int linear_factor_cache_hits = 0;
     int linear_factor_cache_misses = 0;
     int linear_factor_cache_invalidations = 0;
     std::string linear_factor_cache_last_invalidation_reason;
+    /// Phase 2 of `refactor-linear-solver-cache`: count of cache misses
+    /// where the symbolic factor (sparsity-pattern analyze) was reused —
+    /// i.e. only `factorize` ran. Strict subset of
+    /// `linear_factor_cache_misses`.
+    int symbolic_factor_cache_hits = 0;
+    /// Phase 5 of `refactor-linear-solver-cache`: per-reason invalidation
+    /// counters. Sum of all `_*` counters equals
+    /// `linear_factor_cache_invalidations`. The typed last-reason field
+    /// mirrors `linear_factor_cache_last_invalidation_reason` for
+    /// consumers that prefer a discriminated value over string parsing.
+    int linear_factor_cache_invalidations_topology_changed = 0;
+    int linear_factor_cache_invalidations_stamp_param_changed = 0;
+    int linear_factor_cache_invalidations_gmin_escalated = 0;
+    int linear_factor_cache_invalidations_source_stepping_active = 0;
+    int linear_factor_cache_invalidations_numeric_instability = 0;
+    int linear_factor_cache_invalidations_manual_invalidate = 0;
+    CacheInvalidationReason linear_factor_cache_last_invalidation_reason_typed =
+        CacheInvalidationReason::None;
     int reserved_output_samples = 0;
     int time_series_reallocations = 0;
     int state_series_reallocations = 0;
@@ -279,6 +305,11 @@ struct SimulationOptions {
     // Integration method selection
     Integrator integrator = Integrator::Trapezoidal;
 
+    // PWL switching mode default (refactor-pwl-switching-engine, Phase 5).
+    // Threads through to Circuit::set_default_switching_mode() at simulator
+    // construction. `Auto` resolves to `Behavioral` for backward compat.
+    SwitchingMode switching_mode = SwitchingMode::Auto;
+
     // BDF order control (currently supports order 1/2)
     bool enable_bdf_order_control = false;
     BDFOrderConfig bdf_config = BDFOrderConfig::defaults();
@@ -304,6 +335,18 @@ struct SimulationOptions {
     int max_step_retries = 6;
     FallbackPolicyOptions fallback_policy{};
     ModelRegularizationOptions model_regularization{};
+
+    /// Phase 7 of `add-frequency-domain-analysis`: declarative analyses
+    /// loaded from the YAML `analysis:` array. The user runs them via the
+    /// existing `Simulator::run_ac_sweep` / `Simulator::run_fra` methods,
+    /// iterating over these vectors. Order within each list matches YAML
+    /// input order; running them sequentially against a single `Simulator`
+    /// instance reuses the DC operating point automatically (the
+    /// per-sweep `dc_operating_point` call is idempotent for a fixed
+    /// circuit, so 7.4's "shared DC OP" contract is satisfied without
+    /// special plumbing).
+    std::vector<AcSweepOptions> ac_sweeps;
+    std::vector<FraOptions>     fra_sweeps;
 };
 
 struct SimulationResult {
@@ -353,6 +396,13 @@ struct HarmonicBalanceResult {
     std::string message;
 };
 
+// Phase 1/2/3 frequency-analysis types (`LinearSystem`, `AcSweepScale`,
+// `AcSweepOptions`, `AcMeasurement`, `AcSweepResult`, `FraOptions`,
+// `FraMeasurement`, `FraResult`) live in
+// `pulsim/v1/frequency_analysis.hpp`, included above. Extracted there so
+// `SimulationOptions` can hold `std::vector<AcSweepOptions>` /
+// `std::vector<FraOptions>` for the YAML `analysis:` array (Phase 7).
+
 class Simulator {
 public:
     explicit Simulator(Circuit& circuit, const SimulationOptions& options = {});
@@ -393,6 +443,39 @@ public:
     [[nodiscard]] HarmonicBalanceResult run_harmonic_balance(
         const Vector& x0,
         const HarmonicBalanceOptions& options = {});
+
+    /// Phase 1 of `add-frequency-domain-analysis`: linearize the circuit
+    /// around `(x_op, t_op)` into descriptor state-space form
+    /// `E·dx/dt = A·x + B·u`, `y = C·x + D·u`. The result feeds AC sweep
+    /// (Phase 2) and downstream eigenvalue / observer-design tools.
+    ///
+    /// Today PWL-admissible circuits return `method == "piecewise_linear_segment"`
+    /// directly from the segment engine's state-space machinery. Circuits with
+    /// Behavioral-mode devices populate `failure_reason = "non_admissible_..."`
+    /// — Behavioral linearization (AD-derived or finite-difference) is Phase 1.2.
+    [[nodiscard]] LinearSystem linearize_around(const Vector& x_op, Real t_op);
+
+    /// Phase 2 of `add-frequency-domain-analysis`: AC small-signal sweep.
+    /// Linearizes around `(x_op, t_op)` (or runs DC OP first when
+    /// `options.use_dc_op = true`), constructs the per-frequency complex
+    /// pencil `K(ω) = jω·E - A`, and returns Bode data
+    /// `H(jω) = (jωE - A)⁻¹·B` for each requested measurement node.
+    ///
+    /// The sparsity pattern of `K(ω)` is constant across the frequency
+    /// sweep — `analyzePattern` runs once and `factorize` runs once per
+    /// frequency, mirroring the Phase-3 cache architecture from
+    /// `refactor-linear-solver-cache`.
+    [[nodiscard]] AcSweepResult run_ac_sweep(const AcSweepOptions& options);
+
+    /// Phase 3 of `add-frequency-domain-analysis`: Frequency Response
+    /// Analysis. Per-frequency: configures `Circuit::set_ac_perturbation`
+    /// to overlay `ε·sin(2π·f·t + φ)` on the named source, runs a transient
+    /// for `n_cycles` periods at `samples_per_cycle` samples each,
+    /// captures the measurement node's time series, discards the first
+    /// `discard_cycles`, and DFTs the remainder at the perturbation
+    /// frequency via Goertzel. Returns Bode magnitude / phase for each
+    /// measurement node.
+    [[nodiscard]] FraResult run_fra(const FraOptions& options);
 
     // Loss model attachment (optional)
     void set_switching_energy(const std::string& device_name, const SwitchingEnergy& energy);
@@ -459,6 +542,31 @@ private:
                                SolverStatus solver_status,
                                const std::string& action);
 
+    // ── Helpers extracted from run_transient_native_impl ──────────────────────
+    // Collects segment/cache path telemetry from the last solve_step() call.
+    void collect_step_solve_telemetry(SimulationResult& result);
+
+    // Updates stiffness-detection counters and integrator switching after a
+    // step is accepted. Mutates high_iter_streak, stiffness_cooldown, and
+    // using_stiff_integrator via out-parameters; reads options_ / circuit_.
+    void apply_post_accept_stiffness_update(const NewtonResult& step_result,
+                                            Integrator base_integrator,
+                                            int& high_iter_streak,
+                                            int& stiffness_cooldown,
+                                            bool& using_stiff_integrator);
+
+    // Detects switch-state transitions in an accepted step and records events.
+    void process_accepted_step_events(Real t, Real dt_used,
+                                      const Vector& x_prev,
+                                      const NewtonResult& step_result,
+                                      SimulationResult& result,
+                                      EventCallback event_callback);
+
+    // Collects equation-assembler and Newton counters into result after the
+    // transient loop completes (called once, just before return).
+    void finalize_transient_telemetry(SimulationResult& result);
+    // ─────────────────────────────────────────────────────────────────────────
+
     Circuit& circuit_;
     SimulationOptions options_;
     NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
@@ -477,7 +585,10 @@ private:
     bool last_step_segment_attempted_ = false;
     bool last_step_linear_factor_cache_hit_ = false;
     bool last_step_linear_factor_cache_miss_ = false;
+    bool last_step_symbolic_factor_cache_hit_ = false;
     std::string last_step_linear_factor_cache_invalidation_reason_;
+    CacheInvalidationReason last_step_linear_factor_cache_invalidation_reason_typed_ =
+        CacheInvalidationReason::None;
     bool segment_primary_disabled_for_run_ = false;
     std::uint64_t direct_assemble_system_calls_ = 0;
     std::uint64_t direct_assemble_residual_calls_ = 0;

@@ -5,8 +5,14 @@
 namespace pulsim::v1 {
 
 // =============================================================================
-// Example: Voltage Source Device (CRTP)
+// Voltage Source Device (CRTP)
 // =============================================================================
+//
+// AD bypass note (`add-automatic-differentiation`, Phase 3):
+//   Voltage sources contribute identity-block coupling (`±1`) between their
+//   branch row and the terminal node rows; b[branch] holds the source value.
+//   Jacobian is structurally constant — no AD needed.
+//   `stamp_jacobian_via_ad` is intentionally not provided.
 
 class VoltageSource : public LinearDeviceBase<VoltageSource> {
 public:

@@ -1,0 +1,21 @@
+# Magnetics Inc MPP (Molypermalloy) µ=60 distributed-air-gap powder core.
+#
+# Datasheet reference: Magnetics MPP catalog (rev 2019).
+
+vendor: Magnetics
+material: MPP_60u
+geometry:
+  area_m2: 0.85e-4
+  path_length_m: 5.5e-2
+bh_curve:
+  - { H: -8000, B: -0.50 }
+  - { H: -3000, B: -0.45 }
+  - { H:  -500, B: -0.20 }
+  - { H:     0, B:  0.00 }
+  - { H:   500, B:  0.20 }
+  - { H:  3000, B:  0.45 }
+  - { H:  8000, B:  0.50 }
+steinmetz:
+  k:     2.5e-3
+  alpha: 1.4
+  beta:  2.4

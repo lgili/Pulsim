@@ -1,0 +1,39 @@
+# Wolfspeed C3M0065090J — 900 V SiC MOSFET, 65 mΩ.
+# Datasheet rev 2018-04. TO-247 package.
+class: mosfet
+vendor: Wolfspeed
+part: C3M0065090J
+
+V_th_25c:           2.6
+V_th_temp_coef:    -8e-3            # SiC has steeper Vth roll-off than Si
+R_ds_on_25c:        0.065           # 65 mΩ
+R_ds_on_temp_coef:  4e-3
+V_ds_max:           900.0
+I_dss_25c:          1.0e-9
+
+Coss:
+  - { V:   0.0, C: 1.8e-9 }
+  - { V:  20.0, C: 250.0e-12 }
+  - { V: 100.0, C: 100.0e-12 }
+  - { V: 600.0, C:  50.0e-12 }
+  - { V: 900.0, C:  40.0e-12 }
+Ciss:
+  - { V:   0.0, C: 1.5e-9 }
+  - { V: 900.0, C: 1.4e-9 }
+Crss:
+  - { V:   0.0, C: 100.0e-12 }
+  - { V: 100.0, C:  10.0e-12 }
+  - { V: 600.0, C:   3.0e-12 }
+  - { V: 900.0, C:   2.5e-12 }
+
+# Switching energies at 600 V bus, 25 °C
+Eon:
+  x: [10.0, 20.0, 35.0]
+  y: [400.0, 600.0]
+  values: [50.0e-6, 100.0e-6, 175.0e-6,
+           75.0e-6, 150.0e-6, 260.0e-6]
+Eoff:
+  x: [10.0, 20.0, 35.0]
+  y: [400.0, 600.0]
+  values: [20.0e-6, 40.0e-6, 70.0e-6,
+           30.0e-6, 60.0e-6, 105.0e-6]

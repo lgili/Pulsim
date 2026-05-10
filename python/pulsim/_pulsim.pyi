@@ -705,6 +705,98 @@ class Simulator:
         options: Optional[HarmonicBalanceOptions] = ...,
     ) -> HarmonicBalanceResult: ...
     def set_switching_energy(self, device_name: str, energy: SwitchingEnergy) -> None: ...
+    def linearize_around(self, x_op: List[float], t_op: float) -> "LinearSystem": ...
+    def run_ac_sweep(self, options: "AcSweepOptions") -> "AcSweepResult": ...
+    def run_fra(self, options: "FraOptions") -> "FraResult": ...
+
+# =============================================================================
+# Frequency-domain analysis (add-frequency-domain-analysis)
+# =============================================================================
+
+class LinearSystem:
+    E: object  # scipy.sparse.csc_matrix or numpy.ndarray
+    A: object
+    B: object
+    C: object
+    D: object
+    state_size: int
+    input_size: int
+    output_size: int
+    t_linearization: float
+    x_linearization: List[float]
+    method: str
+    failure_reason: str
+    @property
+    def ok(self) -> bool: ...
+    def __init__(self) -> None: ...
+
+class AcSweepScale:
+    Logarithmic: "AcSweepScale"
+    Linear: "AcSweepScale"
+
+class AcSweepOptions:
+    f_start: float
+    f_stop: float
+    points_per_decade: int
+    num_points: int
+    scale: AcSweepScale
+    perturbation_source: str
+    measurement_nodes: List[str]
+    t_op: float
+    use_dc_op: bool
+    x_op: List[float]
+    def __init__(self) -> None: ...
+
+class AcMeasurement:
+    node: str
+    state_index: int
+    magnitude_db: List[float]
+    phase_deg: List[float]
+    real_part: List[float]
+    imag_part: List[float]
+    def __init__(self) -> None: ...
+
+class AcSweepResult:
+    success: bool
+    failure_reason: str
+    frequencies: List[float]
+    measurements: List[AcMeasurement]
+    total_factorizations: int
+    total_solves: int
+    wall_seconds: float
+    def __init__(self) -> None: ...
+
+class FraOptions:
+    f_start: float
+    f_stop: float
+    points_per_decade: int
+    scale: AcSweepScale
+    perturbation_source: str
+    perturbation_amplitude: float
+    perturbation_phase: float
+    measurement_nodes: List[str]
+    n_cycles: int
+    discard_cycles: int
+    samples_per_cycle: int
+    def __init__(self) -> None: ...
+
+class FraMeasurement:
+    node: str
+    state_index: int
+    magnitude_db: List[float]
+    phase_deg: List[float]
+    real_part: List[float]
+    imag_part: List[float]
+    def __init__(self) -> None: ...
+
+class FraResult:
+    success: bool
+    failure_reason: str
+    frequencies: List[float]
+    measurements: List[FraMeasurement]
+    total_transient_steps: int
+    wall_seconds: float
+    def __init__(self) -> None: ...
 
 class YamlParserOptions:
     strict: bool
