@@ -699,10 +699,27 @@ public:
         // Generate initial guess
         Vector x_init = init_.warm_start(x0, num_nodes, num_branches);
 
-        // Configure Newton solver
+        // Configure Newton solver. The DC solve has to walk a smooth
+        // MOSFET / IGBT / diode landscape from a zero-vector start in
+        // most cases, so we enable Newton's convergence aids
+        // (auto-damping + voltage/current step limiting + trust
+        // region) by default. Without these, fixed-V_GATE NMOS DC OP
+        // tests with V_DD=5 V, V_GATE=4 V, vth=2/3 V, kp=0.5 fail
+        // because the smooth Shichman-Hodges Jacobian at x=0 has
+        // sigmoid tails ≈ 0 (mosfet contributes ~g_off), then jumps
+        // to high gradient once Vov > 0; a vanilla Newton step
+        // overshoots and oscillates between cutoff and triode.
         NewtonOptions newton_opts;
         newton_opts.num_nodes = num_nodes;
         newton_opts.num_branches = num_branches;
+        newton_opts.max_iterations = std::max(newton_opts.max_iterations, 200);
+        newton_opts.auto_damping = true;
+        newton_opts.min_damping = std::min(newton_opts.min_damping, Real{1e-4});
+        newton_opts.enable_limiting = true;
+        newton_opts.max_voltage_step = std::max(newton_opts.max_voltage_step, Real{2.0});
+        newton_opts.max_current_step = std::max(newton_opts.max_current_step, Real{5.0});
+        newton_opts.enable_trust_region = true;
+        newton_opts.trust_radius = std::max(newton_opts.trust_radius, Real{5.0});
         NewtonRaphsonSolver<LinearPolicy> newton(newton_opts);
         if (linear_solver_config_) {
             if constexpr (requires(LinearPolicy policy, const LinearSolverStackConfig& cfg) {

@@ -3630,65 +3630,130 @@ private:
                                std::size_t device_index,
                                Triplets& triplets,
                                Vector& f, const Vector& x) const {
-        Index n_gate = nodes[0];
-        Index n_drain = nodes[1];
-        Index n_source = nodes[2];
+        // Phase 12 fix: replace the legacy hard-branch (cutoff /
+        // triode / saturation) stamp with the same smooth blend used
+        // by `MOSFET::stamp_jacobian_behavioral` in `mosfet.hpp`. The
+        // hard branches gave Newton no continuous gradient across
+        // region transitions, so DC OP for fixed-V_GATE NMOS tests
+        // (`level3_nonlinear/test_mosfet.py::test_threshold_voltage_effect`
+        // with V_GATE=4 V, vth=2/3 V, kp=0.5) failed across all
+        // strategies (Direct, GminStepping, PseudoTransient,
+        // SourceStepping). The smooth model reduces to the legacy
+        // hard branches at saturated tails, so SPICE-parity benches
+        // are bit-identical.
+        const Index n_gate = nodes[0];
+        const Index n_drain = nodes[1];
+        const Index n_source = nodes[2];
 
-        Real vg = (n_gate >= 0) ? x[n_gate] : 0.0;
-        Real vd = (n_drain >= 0) ? x[n_drain] : 0.0;
-        Real vs = (n_source >= 0) ? x[n_source] : 0.0;
+        const Real vg = (n_gate >= 0) ? x[n_gate] : 0.0;
+        const Real vd = (n_drain >= 0) ? x[n_drain] : 0.0;
+        const Real vs = (n_source >= 0) ? x[n_source] : 0.0;
 
         const auto& p = dev.params();
         const Real scale = device_temperature_scale(device_index);
         const Real inv_scale = 1.0 / std::max<Real>(scale, Real{0.05});
         const Real kp_eff = p.kp * inv_scale;
         const Real g_off_eff = p.g_off * inv_scale;
-        Real sign = p.is_nmos ? 1.0 : -1.0;
+        const Real sign = p.is_nmos ? 1.0 : -1.0;
         Real vgs = sign * (vg - vs);
         Real vds = sign * (vd - vs);
+
         const auto forced = forced_switch_state(device_index);
         if (forced.has_value()) {
-            vgs = *forced ? (p.vth + 5.0) : 0.0;
+            // Forced PWL state: stamp as a pure conductance (g_on or
+            // g_off) without the smooth-model overhead. This matches
+            // the legacy behavior when the kernel pins the device.
+            const Real g = *forced ? p.g_on : g_off_eff;
+            const Real id = g * vds;
+            if (n_drain >= 0) {
+                triplets.emplace_back(n_drain, n_drain, g);
+                if (n_source >= 0) triplets.emplace_back(n_drain, n_source, -g);
+            }
+            if (n_source >= 0) {
+                triplets.emplace_back(n_source, n_source, g);
+                if (n_drain >= 0) triplets.emplace_back(n_source, n_drain, -g);
+            }
+            const Real i_eq_forced = id * sign - g * vds;  // = 0
+            if (n_drain >= 0) f[n_drain] -= sign * id - i_eq_forced;
+            if (n_source >= 0) f[n_source] += sign * id - i_eq_forced;
+            return;
         }
 
-        Real id = 0.0, gm = 0.0, gds = 0.0;
+        // Smooth Shichman-Hodges (Phase-8 model, replicated here for
+        // the runtime triplet-based stamping pipeline). Symbols match
+        // `MOSFET::stamp_jacobian_behavioral` in mosfet.hpp.
+        constexpr Real kappa = 50.0;
+        const Real vth = p.vth;
+        const Real lambda = p.lambda;
+        const Real g_off = g_off_eff;
 
-        if (vgs <= p.vth) {
-            // Cutoff
-            id = g_off_eff * vds;
-            gds = g_off_eff;
-        } else if (vds < vgs - p.vth) {
-            // Linear
-            Real vov = vgs - p.vth;
-            id = kp_eff * (vov * vds - 0.5 * vds * vds) * (1.0 + p.lambda * vds);
-            gm = kp_eff * vds * (1.0 + p.lambda * vds);
-            gds = kp_eff * (vov - vds) * (1.0 + p.lambda * vds) +
-                  kp_eff * (vov * vds - 0.5 * vds * vds) * p.lambda;
-        } else {
-            // Saturation
-            Real vov = vgs - p.vth;
-            id = 0.5 * kp_eff * vov * vov * (1.0 + p.lambda * vds);
-            gm = kp_eff * vov * (1.0 + p.lambda * vds);
-            gds = 0.5 * kp_eff * vov * vov * p.lambda;
-        }
+        // --- Smooth Vov_eff ---
+        const Real sigma_g = 1.0 / (1.0 + std::exp(-kappa * (vgs - vth)));
+        const Real dsigma_g_d_vgs = kappa * sigma_g * (1.0 - sigma_g);
+        const Real vov_eff = (vgs - vth) * sigma_g;
+        const Real dvov_dvgs = sigma_g + (vgs - vth) * dsigma_g_d_vgs;
 
-        id *= sign;
-        Real i_eq = id - gm * vgs - gds * vds;
+        // --- Smooth Vds_eff = soft_min(vds, vov_eff) ---
+        const Real sigma_sat = 1.0 / (1.0 + std::exp(-kappa * (vov_eff - vds)));
+        const Real dsigma_sat_d_arg = kappa * sigma_sat * (1.0 - sigma_sat);
+        const Real dsigma_sat_dvgs = dsigma_sat_d_arg * dvov_dvgs;
+        const Real dsigma_sat_dvds = -dsigma_sat_d_arg;
 
-        // Stamp Jacobian
+        const Real vds_eff = sigma_sat * vds + (1.0 - sigma_sat) * vov_eff;
+        const Real dvds_eff_dvgs =
+            dsigma_sat_dvgs * vds
+            - dsigma_sat_dvgs * vov_eff
+            + (1.0 - sigma_sat) * dvov_dvgs;
+        const Real dvds_eff_dvds =
+            sigma_sat
+            + dsigma_sat_dvds * vds
+            - dsigma_sat_dvds * vov_eff;
+
+        // --- Channel current id_ch = kp · (Vov_eff·Vds_eff − ½·Vds_eff²) · (1+λvds)
+        const Real core = vov_eff * vds_eff - 0.5 * vds_eff * vds_eff;
+        const Real lambda_factor = 1.0 + lambda * vds;
+        const Real id_ch = kp_eff * core * lambda_factor;
+
+        const Real dcore_dvgs = vds_eff * dvov_dvgs
+                                + (vov_eff - vds_eff) * dvds_eff_dvgs;
+        const Real dcore_dvds = (vov_eff - vds_eff) * dvds_eff_dvds;
+
+        const Real di_ch_dvgs = kp_eff * dcore_dvgs * lambda_factor;
+        const Real di_ch_dvds = kp_eff * (dcore_dvds * lambda_factor + core * lambda);
+
+        // --- Total id (with g_off leakage) ---
+        const Real id_internal = id_ch + g_off * vds;
+        const Real di_internal_dvgs = di_ch_dvgs;
+        const Real di_internal_dvds = di_ch_dvds + g_off;
+
+        // PMOS sign-fold of the OUTPUT current (i_actual = sign · i_internal).
+        // ∂id_actual/∂vg = di_internal_dvgs   (sign factors cancel)
+        // ∂id_actual/∂vd = di_internal_dvds   (sign factors cancel)
+        // ∂id_actual/∂vs = − di_internal_dvgs − di_internal_dvds
+        const Real id = sign * id_internal;
+        const Real di_dvg = di_internal_dvgs;
+        const Real di_dvd = di_internal_dvds;
+        const Real di_dvs = -di_internal_dvgs - di_internal_dvds;
+
+        // Norton companion residual (Taylor-offset form, matches AD path).
+        const Real i_eq = id - di_dvg * vg - di_dvd * vd - di_dvs * vs;
+
+        // Drain row: + ∂id/∂x_i.
         if (n_drain >= 0) {
-            triplets.emplace_back(n_drain, n_drain, gds);
-            if (n_source >= 0) triplets.emplace_back(n_drain, n_source, -(gds + gm));
-            if (n_gate >= 0) triplets.emplace_back(n_drain, n_gate, gm);
+            triplets.emplace_back(n_drain, n_drain, di_dvd);
+            if (n_gate >= 0)   triplets.emplace_back(n_drain, n_gate, di_dvg);
+            if (n_source >= 0) triplets.emplace_back(n_drain, n_source, di_dvs);
         }
+        // Source row: − ∂id/∂x_i.
         if (n_source >= 0) {
-            triplets.emplace_back(n_source, n_source, gds + gm);
-            if (n_drain >= 0) triplets.emplace_back(n_source, n_drain, -gds);
-            if (n_gate >= 0) triplets.emplace_back(n_source, n_gate, -gm);
+            triplets.emplace_back(n_source, n_source, -di_dvs);
+            if (n_drain >= 0) triplets.emplace_back(n_source, n_drain, -di_dvd);
+            if (n_gate >= 0)  triplets.emplace_back(n_source, n_gate, -di_dvg);
         }
 
-        // Residual
-        if (n_drain >= 0) f[n_drain] -= i_eq;
+        // Residual contribution (Norton companion form, matches the
+        // legacy MOSFET sign convention).
+        if (n_drain >= 0)  f[n_drain]  -= i_eq;
         if (n_source >= 0) f[n_source] += i_eq;
     }
 
