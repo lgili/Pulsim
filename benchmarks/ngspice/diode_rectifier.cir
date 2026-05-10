@@ -1,0 +1,21 @@
+* Diode rectifier — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/diode_rectifier.yaml
+*
+* The Pulsim 'diode' component is a piecewise-linear conductance
+* (g_on=1e3 / g_off=1e-9), NOT a Shockley diode. We mirror that
+* with ngspice's voltage-controlled SW model whose control is the
+* device's own anode-cathode voltage:
+*    V(in) - V(out) > 0  →  RON = 1/g_on = 1m
+*    V(in) - V(out) < 0  →  ROFF = 1/g_off = 1G
+*
+* Pulsim contract: max_error ≤ 5e-2 vs the reference baseline.
+
+V1 in 0 SIN(0 10 50000 0 0 0)
+S1 in out in out DMOD
+.model DMOD SW(VT=0 VH=1m RON=1m ROFF=1Geg)
+Rload out 0 100
+Cfilter out 0 10u IC=0
+
+* No UIC: align with Pulsim, which uses the DC operating point as IC.
+.tran 1u 2m
+.end

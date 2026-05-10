@@ -1,0 +1,45 @@
+* Buck switching converter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/buck_switching.yaml
+*
+* Pulsim circuit:
+*   Vdc  vcc          24 V DC source
+*   Vpwm ctrl         50 kHz PWM, duty=0.4, dead_time=200 ns
+*   S1   high-side voltage-controlled switch (vcswitch in Pulsim:
+*        threshold=5 V, g_on=200, g_off=1e-6 → RON=5m, ROFF=1Meg)
+*   D1   freewheel diode (Pulsim 'diode' g_on=200, g_off=1e-6 → same
+*        switch model, control = own A-K voltage)
+*   Rdcr 20 mΩ inductor DCR
+*   L1   47 µH output inductor
+*   C1   100 µF output capacitor
+*   Rload 10 Ω load (Iout = Vout / Rload)
+*
+* PWM duty = 0.4, period = 20 µs → on-time = 8 µs.
+* Subtracting dead_time/2 each side → PW = 7.6 µs, TR = TF = 200 ns.
+*
+* Pulsim contract: max_error ≤ 1e-1 vs the reference baseline.
+* This is one of the cases the parity dashboard is designed to keep
+* honest: the open-loop transient should agree with SPICE within the
+* threshold even if it doesn't settle exactly at the design Vout
+* (the closed-loop PI compensator is the production answer; see
+* docs/converter-templates.md).
+
+Vdc  vcc 0 DC 24
+Vpwm ctrl 0 PULSE(0 10 0 200n 200n 7.6u 20u)
+
+* High-side switch: closes when V(ctrl) > 5 V (with 0.1 V hysteresis).
+S1 vcc sw ctrl 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Freewheel diode emulated as voltage-controlled switch on its own
+* anode-cathode voltage: anode=0, cathode=sw → conducts when sw < 0.
+S2 0 sw 0 sw DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Rdcr sw n_l 20m
+L1   n_l out 47u IC=0
+C1   out 0 100u IC=0
+Rload out 0 10
+
+* No UIC: align with Pulsim, which uses the DC operating point as IC.
+.tran 0.2u 350u
+.end

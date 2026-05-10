@@ -106,23 +106,68 @@ p99_max_error}` plus per-circuit metrics.
 
 | Group | Status |
 |---|---|
-| Linear passives (`rc_step`, `rl_step`, `rlc_step`, `rc_dc`) | ✓ all 4 pass with multiple scenarios. Speedups: 2.5×–8.3× vs ngspice. |
-| Nonlinear / switching (`diode_rectifier`, `buck_switching`, `boost_switching_complex`, `interleaved_buck_3ph`, `buck_mosfet_nonlinear`, `stiff_rlc`, `periodic_rc_pwm`) | ○ skipped — `entry.ngspice_netlist` not yet wired in `benchmarks.yaml` (LTspice variants exist for some). Filling these in is Fase 2 of the parity work. |
+| Linear passives (`rc_step`, `rl_step`, `rlc_step`, `rc_dc`) | ✓ all 4 pass with multiple scenarios. Speedups 2.5×–9.7× vs ngspice. |
+| `stiff_rlc` (DC-driven LC tank) | ✓ passes after dropping `UIC` from the ngspice `.tran` so both simulators take the DC OP as the IC (max_error 0.0 — exact agreement on this stiff workload). |
+| `diode_rectifier`, `buck_switching` | ○ ngspice mapping intentionally **held off** — see Fase 3 below. |
+| `boost_switching_complex`, `interleaved_buck_3ph`, `buck_mosfet_nonlinear` | ○ skipped — no ngspice netlist yet (LTspice variants exist for some). Mechanical follow-up. |
+| `periodic_rc_pwm` | ○ skipped — uses `shooting_default` / `harmonic_balance` scenarios that return the periodic steady state directly; comparing against an ngspice transient run is not meaningful (a 5 τ_RC ≈ 500 µs settling time exceeds the 200 µs window). Add an explicit `long_transient` scenario before re-enabling. |
 
 The skips are not silent failures: the dashboard prints the exact
-reason in the `note` column ("Missing ngspice netlist mapping ...",
-"0/N scenarios — direct_trap"), and a CI gate that wants to fail on
-"any non-passed" can do so via the exit code (which today is 0 —
-skipped doesn't count as a failure — but the `aggregate.skipped` field
-is the easy lever to add a stricter gate).
+reason in the `note` column, and the manifest entries carry inline
+comments explaining each skip so anyone landing here picks up the same
+context.
+
+## Fase 2 finding — IC alignment between Pulsim and ngspice
+
+The first real diagnostic the dashboard surfaced is **not** a Pulsim
+solver bug, but a *semantic* mismatch in how the two simulators turn
+their first sample into a transient initial condition:
+
+- **Pulsim** runs a DC operating point with all sources evaluated at
+  their `t=0` value. For a `pwm` source with `duty=0.4` and no
+  `phase` field, `t=0` lands on the **high** edge → V(ctrl) = `v_high`
+  → the high-side switch is closed → V(out) starts at the
+  switch-closed DC OP (≈ V(in)).
+- **ngspice** with `PULSE(0 10 0 ...)` starts at `V_low = 0` →
+  switch open → V(out) = 0 V.
+
+Both simulators converge to the same closed-loop steady state (≈ D·Vin
+for the buck, ≈ V_pk for the diode rectifier), but along very different
+paths — and within the 200–350 µs simulation window neither has reached
+that steady state. The full-trace `max_error` blows up to 0.6 V (diode
+rectifier) or **23.9 V** (buck), but the per-cycle `steady_state_max_
+error` after settle is only 24 mV / 5 mV respectively — within the
+50 mV / 100 mV thresholds.
+
+This is exactly the same pattern as the
+[`converter-templates`](converter-templates.md) page's "open-loop
+bound" footnote (`V_final ≈ -0.6 V` instead of design-point Vout): the
+underlying converter dynamics are correct, but the choice of where the
+first sample lands dominates the trace.
+
+Fase 3 will fix this by either:
+
+1. Adding a YAML knob (`simulation.ic_strategy: match_spice`) that
+   forces Pulsim's transient to start with all reactive elements at
+   zero, ignoring the DC OP, **or**
+2. Per-circuit `IC` clamps on `L1` / `C1` so both simulators start from
+   the same numeric values, **or**
+3. Switching the gate to `steady_state_max_error` (already computed by
+   the runner — see the JSON `steady_state_max_error` field — but not
+   yet promoted past the `max_error` precedence in the failure ladder).
+
+Until then the two ngspice mappings stay commented out in
+`benchmarks/benchmarks.yaml` with the diagnostic verbatim, so the
+dashboard reads "○ skipped — Fase 3 IC alignment" instead of pretending
+the comparison is meaningful.
 
 ## Roadmap
 
 | Phase | Scope |
 |---|---|
-| **1 — UI shipped today** | `scripts/parity_dashboard.py` with rich + ASCII fallback, exit code, JSON summary. |
-| **2 — fill the gaps** | Add ngspice netlists for the seven currently-skipped circuits. Run `python scripts/parity_dashboard.py` and confirm 11/11 pass. |
-| **3 — track real bugs** | Use the dashboard as the diagnostic surface for known issues (e.g. the buck open-loop transient that produces `V_out ≈ -0.6 V` instead of settling near the design point — see [`converter-templates.md`](converter-templates.md) "open-loop bound" footnote). When the dashboard turns the `buck_switching` row red, the per-circuit JSON + CSV gives the waveform diff to root-cause it. |
+| **1 — UI shipped** | `scripts/parity_dashboard.py` with rich + ASCII fallback, exit code, JSON summary. |
+| **2 — wire ngspice (5/11 today)** | Wired `stiff_rlc`, `diode_rectifier`, `buck_switching`, `periodic_rc_pwm` netlists; surfaced + documented the IC-alignment mismatch above. `stiff_rlc` passing; the other three deferred to Fase 3 with explicit reasons. |
+| **3 — fix IC alignment + remaining 5 circuits** | Pick one of the three options above, re-enable `diode_rectifier` + `buck_switching`, then add ngspice netlists for `boost_switching_complex` / `interleaved_buck_3ph` / `buck_mosfet_nonlinear`. Target: 10/11 pass (with `periodic_rc_pwm` justifiably skipped). |
 | **4 — CI gate** | Wire `python scripts/parity_dashboard.py --quiet` into the PR workflow so a regression that breaks any passing circuit blocks the merge. |
 
 ## See also

@@ -27,8 +27,23 @@ benchmarks:
       - column: V(out)
         ltspice_vector: V(out)
     scenarios: [direct_trap]
+  # diode_rectifier ngspice mapping is held off pending Fase 3 of the
+  # parity dashboard: Pulsim's DC operating point evaluates the AC
+  # source at its t=0 phase (so the cap charges within microseconds),
+  # while ngspice's transient with `SIN(0 10 ...)` starts at V_in=0 V
+  # and chargess slowly. The ngspice .cir + observable mapping are
+  # ready in benchmarks/ngspice/diode_rectifier.cir and the steady-
+  # state max_error is 24 mV (well within 50 mV threshold) — only the
+  # warmup transient differs. Re-enable once IC alignment is resolved
+  # (either via per-circuit `IC` clamps or a "match-spice-ic" YAML knob).
   - path: circuits/diode_rectifier.yaml
     scenarios: [direct_trap]
+  # buck_switching: same Fase 3 IC-alignment issue, more dramatic.
+  # Pulsim DC OP evaluates the PWM source at v_high → switch closed →
+  # V(out) = 24 V at t=0. ngspice PULSE(0 10 ...) starts at v_low → switch
+  # open → V(out) = 0 V. Both converge to ~9.6 V steady state but neither
+  # reaches it within the 350 µs simulation window. The ngspice .cir is
+  # ready (benchmarks/ngspice/buck_switching.cir).
   - path: circuits/buck_switching.yaml
     ltspice_netlist: ltspice/buck_switching.cir
     ltspice_observables:
@@ -54,7 +69,16 @@ benchmarks:
         ltspice_vector: V(out)
     scenarios: [trbdf2]
   - path: circuits/stiff_rlc.yaml
+    ngspice_netlist: ngspice/stiff_rlc.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
     scenarios: [trbdf2, rosenbrockw]
+  # periodic_rc_pwm: scenarios are 'shooting_default' and 'harmonic_balance'
+  # which return the periodic steady-state directly. ngspice transient
+  # would need 5+ tau_RC to settle (≈ 500 µs vs the 200 µs window) so a
+  # naive parity check is not meaningful here. Re-add an ngspice mapping
+  # together with a 'long_transient' scenario when one is added upstream.
   - path: circuits/periodic_rc_pwm.yaml
     scenarios: [shooting_default, harmonic_balance]
 scenarios:
