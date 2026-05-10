@@ -120,29 +120,43 @@ benchmarks:
   - path: circuits/transformer_step_up.yaml
     scenarios: [direct_trap]
 
-  # buck_pmos — held off pending Phase-9 PWM source fix:
-  #   Phase 8 successfully shipped the smooth-region MOSFET fix (cutoff
-  #   /triode/saturation sigmoid blend in core/include/pulsim/v1/
-  #   components/mosfet.hpp), and the PMOS DC OP now converges cleanly
-  #   on a trivial Vdc + PMOS + Rload bench. ALL 273 existing C++ tests
-  #   (4021 assertions) continue to pass after the rewrite — the saturated
-  #   sigmoid tails are bit-identical to the legacy hard-branch code.
+  # buck_pmos — held off after Phase-9 investigation:
   #
-  #   But re-enabling buck_pmos surfaced a SEPARATE Pulsim bug: the
-  #   pwm waveform source with `duty > 0.5` does not toggle (V(gate)
-  #   stays pinned at v_high for the entire run). Buck_pmos needs
-  #   duty=0.64 because the gate idles HIGH (off) and pulses LOW (on),
-  #   so the OFF fraction = duty fraction is > 0.5.
-  #   Verified by a 30 µs trace at every dt=500 ns sample point: V(gate)
-  #   = 27 V from t=0 to 30 µs without a single transition.
+  #   Phase 8 shipped the smooth-region MOSFET fix
+  #   (drain_current_behavioral with sigmoid blend through cutoff /
+  #   triode / saturation boundaries). All 273 existing C++ tests
+  #   (4021 assertions) still pass — the new model is bit-identical
+  #   to the legacy hard-branch code at saturated sigmoid tails. PMOS
+  #   DC OP now converges in 6 Newton iterations on a trivial
+  #   Vdc + PMOS + Rload bench (V(sw) = 23.94 V matching analytical).
   #
-  #   Workaround attempted: pulse waveform (`type: pulse`) toggles
-  #   correctly in isolation but in this circuit context attenuates
-  #   v_pulse from 0 V → 20.94 V (also a real issue, deferred).
+  #   Phase 9 investigated re-enabling buck_pmos. Initial symptom:
+  #   "PWM duty > 0.5 doesn't toggle" — V(gate) stays pinned at
+  #   v_high for the whole transient. But:
   #
-  #   The benchmark .cir and YAML remain committed (with `pulse`
-  #   waveform); re-enabling parity is one ngspice_netlist line edit
-  #   once Phase 9 ships.
+  #   * PWM source IS toggling correctly in isolation at duty=0.64
+  #     (verified directly: t=0..8 µs HIGH, t=8..12.5 µs LOW, repeats).
+  #   * Same buck circuit with NMOS + duty=0.64 toggles correctly —
+  #     the issue is PMOS-specific.
+  #   * Pulsim reports 963 timestep rejections over 30 µs — the
+  #     adaptive integrator is rolling back almost every step. PMOS
+  #     in deep saturation (Vov=21 V → id=44 A in Level-1 Shichman-
+  #     Hodges) demands currents the 8 Ω load can't sink, the
+  #     residual blows up, the step is rejected, and the rejected
+  #     samples carry the stale V(gate) value forward.
+  #
+  #   Root cause: Shichman-Hodges Level-1 with kp=0.2 + Vov=21 V
+  #   produces unphysical saturation currents (44 A) for power
+  #   MOSFETs. Real power MOSFETs operate in DEEP TRIODE; Level-1
+  #   doesn't model channel-length modulation at low Vds well.
+  #   Tuning kp for realistic R_DSon (≪ 50 mΩ) requires kp ≫ 1,
+  #   which makes the saturation current even more unphysical.
+  #
+  #   Phase 10 (deferred): improve Pulsim's adaptive timestep to
+  #   handle the discontinuous current step at PWM transitions
+  #   without rejecting; OR migrate buck_pmos to a more realistic
+  #   model (BSIM3 / Level-3, or use the catalog MOSFET tier with
+  #   datasheet I-V curves).
   - path: circuits/buck_pmos.yaml
     scenarios: [direct_trap, trbdf2]
 scenarios:
