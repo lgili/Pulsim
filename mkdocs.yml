@@ -129,6 +129,7 @@ nav:
       - FMI Export: fmi-export.md
       - Robustness Policy: robustness-policy.md
       - Build System: build-system.md
+      - SPICE Parity Dashboard: spice-parity-dashboard.md
       - Troubleshooting: troubleshooting.md
   - API:
       - API Reference: api-reference.md
