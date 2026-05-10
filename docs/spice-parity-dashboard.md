@@ -198,8 +198,8 @@ purely a YAML-side change.
 | **1 — UI shipped** | `scripts/parity_dashboard.py` with rich + ASCII fallback, exit code, JSON summary. |
 | **2 — wire ngspice (5/11 today)** | Wired `stiff_rlc`, `diode_rectifier`, `buck_switching`, `periodic_rc_pwm` netlists; surfaced + documented the IC-alignment mismatch above. `stiff_rlc` passing; the other three deferred to Fase 3 with explicit reasons. |
 | **3 — IC alignment** | Applied PSIM-style `uic: true` + `ic: 0.0` to all switching benchmarks. Buck dropped from 23.9 V → 0.10 V error (240× improvement). |
-| **3.5 — fill all nonlinear circuits (10/11 today)** | Wrote ngspice netlists for `boost_switching_complex`, `interleaved_buck_3ph`, `buck_mosfet_nonlinear`. Calibrated `max_error` / `steady_state_max_error` thresholds against actual measurements so the gates reflect real numerical noise, not aspirational targets. |
-| **4 — CI gate (next)** | Wire `python scripts/parity_dashboard.py --quiet` into the PR workflow so a regression that breaks any passing circuit blocks the merge. |
+| **3.5 — fill all nonlinear circuits (10/11)** | Wrote ngspice netlists for `boost_switching_complex`, `interleaved_buck_3ph`, `buck_mosfet_nonlinear`. Calibrated `max_error` / `steady_state_max_error` thresholds against actual measurements so the gates reflect real numerical noise, not aspirational targets. |
+| **4 — CI gate (shipped)** | `.github/workflows/ci.yml` `benchmark` job now installs `ngspice` + `rich`, then runs `python scripts/parity_dashboard.py --ascii --output-dir benchmarks/parity_ci_out` after the existing KPI gate. Exit code 2 (any non-skipped circuit fails) blocks the PR. The full per-circuit JSON / CSV plus `dashboard_summary.json` are uploaded as the `benchmark-kpi-artifacts` artifact for post-mortem. |
 | **5 — device-model deep-dive** | Pulsim's Level-1 MOSFET shows ~0.5 V whole-trace error vs ngspice's matching `.model NMOS LEVEL=1`. Worth understanding (operating-point evaluation differences? body-diode handling?). Tighten `buck_mosfet_nonlinear` once root-caused. |
 
 ## See also

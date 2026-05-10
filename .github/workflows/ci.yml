@@ -380,12 +380,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev gcc-13 g++-13
+          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev gcc-13 g++-13 ngspice
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml numpy scipy pytest
+          pip install pyyaml numpy scipy pytest rich
 
       - name: Build and install Python runtime
         env:
@@ -418,6 +418,14 @@ jobs:
             --report-out benchmarks/out_ci/kpi_gate_report.json \
             --print-report
 
+      - name: SPICE parity dashboard (Pulsim vs ngspice)
+        # Fails the workflow if any of the 10 currently-passing parity
+        # benchmarks regresses past its tuned threshold. Skipped circuits
+        # don't fail the gate. See docs/spice-parity-dashboard.md.
+        run: |
+          python3 scripts/parity_dashboard.py --ascii \
+            --output-dir benchmarks/parity_ci_out
+
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -426,3 +434,4 @@ jobs:
           path: |
             benchmarks/out_ci
             benchmarks/stress_out_ci
+            benchmarks/parity_ci_out
