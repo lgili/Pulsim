@@ -328,6 +328,70 @@ for _name, _n_nodes in _ADD_METHOD_NODE_COUNTS.items():
                 _make_string_resolving_method(_name, _n_nodes))
 
 
+# =============================================================================
+# Legacy DiodeParams support for `Circuit.add_diode(name, n1, n2, params)`.
+#
+# The C++ binding's `add_diode` only accepts `(name, anode, cathode,
+# g_on=1000, g_off=1e-9)`. Older test code passes a `DiodeParams` object
+# in the 4th slot (mirroring how `MOSFETParams` and `IGBTParams` work).
+# We expose a Python-only `DiodeParams` that carries `g_on`, `g_off`,
+# `ideal`, `is_`, `n`, and translate to the native conductance form when
+# a `DiodeParams` is detected in the 4th slot.
+
+class DiodeParams:
+    """Diode parameters compatible with legacy test code.
+
+    Attributes:
+        ideal: Use ideal piecewise-linear conduction (default `True`).
+        g_on: Forward-biased conductance (S). Default 1000 (RON ≈ 1 mΩ).
+        g_off: Reverse-biased conductance (S). Default 1e-9.
+        is_: Shockley saturation current. Stored but not used by the
+            current `IdealDiode` model — included for API compatibility
+            with legacy non-ideal Shockley tests.
+        n: Ideality factor. Same as `is_` — stored, not consumed.
+    """
+
+    __slots__ = ("ideal", "g_on", "g_off", "is_", "n")
+
+    def __init__(
+        self,
+        ideal: bool = True,
+        g_on: float = 1000.0,
+        g_off: float = 1e-9,
+        is_: float = 1e-12,
+        n: float = 1.0,
+    ):
+        self.ideal = bool(ideal)
+        self.g_on = float(g_on)
+        self.g_off = float(g_off)
+        self.is_ = float(is_)
+        self.n = float(n)
+
+
+_native_add_diode = Circuit.add_diode  # type: ignore[attr-defined]
+
+
+def _add_diode_with_params_support(self, name, n1, n2, *args, **kwargs):
+    """Override `add_diode` to also accept a `DiodeParams` object as the
+    4th positional argument (legacy form). Native form
+    `(name, n1, n2, g_on, g_off)` continues to work."""
+    n1_resolved = _resolve_node(self, n1)
+    n2_resolved = _resolve_node(self, n2)
+
+    # Legacy form: 4th arg is a DiodeParams.
+    if args and isinstance(args[0], DiodeParams):
+        params = args[0]
+        return _native_add_diode(
+            self, name, n1_resolved, n2_resolved,
+            params.g_on, params.g_off,
+        )
+    # Native form passthrough.
+    return _native_add_diode(self, name, n1_resolved, n2_resolved, *args, **kwargs)
+
+
+_CircuitWrapper.add_diode = _add_diode_with_params_support  # type: ignore[attr-defined]
+
+
 # Re-export the wrapped class as the public `Circuit`. Existing user
 # code that does `from pulsim import Circuit` and `isinstance(c, Circuit)`
 # checks continues to work — `_CircuitWrapper` IS-A `Circuit` (subclass).
@@ -870,6 +934,7 @@ __all__ = [
     # Device Classes - Nonlinear
     "IdealDiode",
     "IdealSwitch",
+    "DiodeParams",
     "MOSFETParams",
     "MOSFET",
     "IGBTParams",
