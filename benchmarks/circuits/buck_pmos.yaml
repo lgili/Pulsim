@@ -7,9 +7,11 @@ benchmark:
     - column: V(out)
   expectations:
     metrics:
-      # Same threshold structure as buck_mosfet_nonlinear; the
-      # is_nmos=false path through MOSFET.stamp_jacobian_behavioral
-      # has the same Shichman-Hodges formulas with sign-folded vgs/vds.
+      # Phase-8 (smooth-region) thresholds. Phase-10 retune (kp=0.02)
+      # was reverted — the small gradient kills DC OP. Looser
+      # thresholds reflect that this benchmark is in the deferred
+      # state pending Phase-11 PMOS sign audit + saturation-overdrive
+      # work.
       max_error: 4e-1
       steady_state_max_error: 4e-1
   validation:
@@ -23,7 +25,10 @@ simulation:
   dt_max: 0.8e-6
   adaptive_timestep: false
   integrator: bdf1
-  enable_events: false
+  enable_events: false  # Phase 10: tried `true` to land exactly at PWM
+                        # breakpoints — no improvement; the deeper issue
+                        # is the PMOS saturation-region overdrive, not
+                        # the integrator's breakpoint awareness.
   uic: true
   max_step_retries: 8
   newton:
@@ -72,7 +77,13 @@ components:
                              # node order is always [gate, drain, source].
     vth: 3.0                  # |Vth| = 3 V — Pulsim's PMOS path takes the
                               # absolute value internally via is_nmos=false.
-    kp: 0.20
+    kp: 0.20                  # Phase-10 attempt: retuning to kp=0.02
+                              # breaks DC OP convergence (the Phase-8
+                              # smooth-region gradient needs enough
+                              # magnitude to drive Newton). Stay at
+                              # 0.2; the saturation overdrive at
+                              # startup is the deferred Phase-11
+                              # problem — see manifest comment.
     lambda: 0.01
     g_off: 1e-8
   - type: diode

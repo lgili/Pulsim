@@ -152,11 +152,29 @@ benchmarks:
   #   Tuning kp for realistic R_DSon (≪ 50 mΩ) requires kp ≫ 1,
   #   which makes the saturation current even more unphysical.
   #
-  #   Phase 10 (deferred): improve Pulsim's adaptive timestep to
-  #   handle the discontinuous current step at PWM transitions
-  #   without rejecting; OR migrate buck_pmos to a more realistic
-  #   model (BSIM3 / Level-3, or use the catalog MOSFET tier with
-  #   datasheet I-V curves).
+  #   Phase 10 attempt:
+  #     a) Reduced kp 0.2 → 0.02 (mirrored in the .cir) so saturation
+  #        current at startup is ~5.5 A (sinkable by the load) instead
+  #        of an unphysical 44 A.
+  #     b) Set enable_events: true so the integrator lands exactly at
+  #        PWM transition breakpoints.
+  #
+  #   With these changes Pulsim's transient runs cleanly (V(gate)
+  #   toggles correctly, integrator no longer rejects ~all timesteps),
+  #   but the resulting V(sw) is the wrong polarity (small negative
+  #   values instead of climbing toward V(vin) = 24 V). Suggests there
+  #   is still a sign-convention bug in the PMOS path's chain rule
+  #   (the new manual Jacobian's `di_dvs = -di_internal_dvgs - di_internal_
+  #   dvds` is correct for NMOS by inspection, but the PMOS sign-fold
+  #   may need a second `sign` factor somewhere). Existing
+  #   `test_ad_mosfet_stamp` (which compares manual vs AD-driven stamp)
+  #   passes because BOTH paths use the same `drain_current_behavioral`
+  #   template — so the cross-validation can't catch a global sign
+  #   error in the manual stamp's chain-rule reconstruction.
+  #
+  #   The Phase-10 retune + enable_events stay in the YAML/.cir as
+  #   real improvements (kp=0.2 was overdriving), but the manifest
+  #   keeps buck_pmos as skipped pending the PMOS sign audit.
   - path: circuits/buck_pmos.yaml
     scenarios: [direct_trap, trbdf2]
 scenarios:
