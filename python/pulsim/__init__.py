@@ -227,6 +227,193 @@ from . import sweep as sweep  # noqa: E402
 from . import fmu as fmu  # noqa: E402
 
 
+# =============================================================================
+# Ergonomic API extension: string node names in Circuit.add_*
+# =============================================================================
+#
+# Pulsim's C++ Circuit API takes integer node IDs (returned by `add_node`).
+# That's awkward for higher-level code that wants to reference nodes by
+# name (`"in"`, `"out"`, `"sw"`, ...). This wrapper monkey-patches the
+# Pulsim Circuit class so every `add_*` method auto-resolves a string
+# argument by:
+#   1. Looking it up via `circuit.get_node(name)`. If found, use that
+#      integer ID.
+#   2. Otherwise, calling `circuit.add_node(name)` to create the node and
+#      use the returned ID.
+#
+# Special string `"0"` is treated as ground (no `add_node`, returns
+# `circuit.ground()` = -1).
+#
+# This is purely additive — passing integer IDs continues to work
+# untouched, so existing user code is not affected.
+
+def _resolve_node(circuit, node):
+    """Resolve a node argument: integer → unchanged; string → looked up
+    in the circuit (or auto-added). The string `"0"` always means ground."""
+    if isinstance(node, (int, np.integer)):
+        return int(node)
+    if isinstance(node, str):
+        if node in ("0", "gnd", "GND", "ground"):
+            return circuit.ground()
+        try:
+            existing = circuit.get_node(node)
+            return existing
+        except RuntimeError:
+            return circuit.add_node(node)
+    raise TypeError(
+        f"node argument must be int or str, got {type(node).__name__}"
+    )
+
+
+# Map of (method_name, number_of_leading_node_args).
+# Two-terminal: voltage_source, resistor, inductor, capacitor, diode,
+#   current_source, snubber_rc, switch, pulse/pwm/sine_voltage_source.
+# Three-terminal: vcswitch ([ctrl, A, B]), mosfet/igbt ([gate, drain/coll,
+#   source/em]).
+# Four-terminal: transformer ([p1, p2, s1, s2]).
+_ADD_METHOD_NODE_COUNTS = {
+    "add_voltage_source": 2,
+    "add_pulse_voltage_source": 2,
+    "add_pwm_voltage_source": 2,
+    "add_sine_voltage_source": 2,
+    "add_current_source": 2,
+    "add_resistor": 2,
+    "add_inductor": 2,
+    "add_capacitor": 2,
+    "add_diode": 2,
+    "add_snubber_rc": 2,
+    "add_switch": 2,
+    "add_vcswitch": 3,
+    "add_mosfet": 3,
+    "add_igbt": 3,
+    "add_transformer": 4,
+}
+
+
+class _CircuitWrapper(Circuit):
+    """Subclass of the pybind11-bound Circuit that auto-resolves
+    string node names in every `add_*` method. pybind11 doesn't permit
+    monkey-patching the bound class methods directly, so subclassing
+    is the cleanest path. The subclass overrides each known `add_*`
+    method by name and forwards to `super().<method>()` after
+    converting string args to integer IDs."""
+    pass
+
+
+def _make_string_resolving_method(method_name, n_node_args):
+    """Generate an override for `_CircuitWrapper.<method_name>`."""
+    raw = getattr(Circuit, method_name)
+
+    def override(self, name, *args, **kwargs):
+        if len(args) < n_node_args:
+            return raw(self, name, *args, **kwargs)
+        nodes = [_resolve_node(self, args[i]) for i in range(n_node_args)]
+        rest = args[n_node_args:]
+        return raw(self, name, *nodes, *rest, **kwargs)
+
+    override.__name__ = method_name
+    override.__qualname__ = f"_CircuitWrapper.{method_name}"
+    override.__doc__ = (raw.__doc__ or "") + (
+        "\n\nAccepts string node names — they're auto-resolved to integer "
+        "IDs (looked up via `get_node` or created via `add_node`). The "
+        "string `'0'` (or `'gnd'` / `'GND'` / `'ground'`) always resolves "
+        "to ground (-1)."
+    )
+    return override
+
+
+for _name, _n_nodes in _ADD_METHOD_NODE_COUNTS.items():
+    if hasattr(Circuit, _name):
+        setattr(_CircuitWrapper, _name,
+                _make_string_resolving_method(_name, _n_nodes))
+
+
+# Re-export the wrapped class as the public `Circuit`. Existing user
+# code that does `from pulsim import Circuit` and `isinstance(c, Circuit)`
+# checks continues to work — `_CircuitWrapper` IS-A `Circuit` (subclass).
+# Callers that constructed via the C-side `_pulsim.Circuit` directly are
+# unaffected.
+Circuit = _CircuitWrapper
+
+
+# =============================================================================
+# Legacy API aliases on SimulationOptions
+# =============================================================================
+#
+# Older test/example code uses different attribute names than the
+# current C++ binding. Provide aliases so legacy code still works.
+#
+# Mappings:
+#   `opts.use_ic`              → `opts.uic`
+#   `opts.dtmin`               → `opts.dt_min`
+#   `opts.integration_method`  → `opts.integrator`
+#
+# Subclass approach (same as Circuit) since pybind11 doesn't permit
+# monkey-patching properties on a bound class.
+
+class _SimulationOptionsWrapper(SimulationOptions):
+    """Subclass of `SimulationOptions` with legacy attribute aliases."""
+
+    @property
+    def use_ic(self):
+        return self.uic
+
+    @use_ic.setter
+    def use_ic(self, value):
+        self.uic = bool(value)
+
+    @property
+    def dtmin(self):
+        return self.dt_min
+
+    @dtmin.setter
+    def dtmin(self, value):
+        self.dt_min = float(value)
+
+    @property
+    def integration_method(self):
+        return self.integrator
+
+    @integration_method.setter
+    def integration_method(self, value):
+        self.integrator = value
+
+
+SimulationOptions = _SimulationOptionsWrapper
+
+
+# Module-level alias: `pulsim.IntegrationMethod` → `pulsim.Integrator`.
+# Plus map legacy enum names like `GEAR2` to their current equivalents.
+class _IntegrationMethodAlias:
+    """Alias for the older `IntegrationMethod` enum name. Legacy names
+    map to current `Integrator` values:
+      GEAR2 → BDF2  (second-order GEAR is the BDF2 multistep family)
+      BACKWARD_EULER → BDF1
+      TRAPEZOIDAL → Trapezoidal
+    """
+
+    def __getattr__(self, name):
+        # Direct passthroughs.
+        if hasattr(Integrator, name):
+            return getattr(Integrator, name)
+        # Legacy aliases.
+        legacy_map = {
+            "GEAR2": Integrator.BDF2,
+            "BACKWARD_EULER": Integrator.BDF1,
+            "TRAPEZOIDAL": Integrator.Trapezoidal,
+            "TRBDF2": Integrator.TRBDF2,
+        }
+        if name in legacy_map:
+            return legacy_map[name]
+        raise AttributeError(
+            f"IntegrationMethod has no member {name!r}. "
+            f"Use one of {[v for v in dir(Integrator) if not v.startswith('_')]}"
+        )
+
+
+IntegrationMethod = _IntegrationMethodAlias()
+
+
 _AUTO_BLEEDER_CIRCUITS = weakref.WeakSet()
 
 
