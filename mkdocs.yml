@@ -115,6 +115,20 @@ nav:
       - Benchmarks and Parity: benchmarks-and-parity.md
       - Notebooks: notebooks.md
       - Convergence Tuning: convergence-tuning-guide.md
+      - Linear-Solver Cache: linear-solver-cache.md
+      - AC Analysis: ac-analysis.md
+      - Frequency Response Analysis (FRA): fra.md
+      - Magnetic Models: magnetic-models.md
+      - Catalog Devices: catalog-devices.md
+      - Converter Templates: converter-templates.md
+      - Motor Models: motor-models.md
+      - Three-Phase Grid Library: three-phase-grid.md
+      - Real-Time Code Generation: code-generation.md
+      - Parameter Sweep: parameter-sweep.md
+      - Property-Based Testing: property-based-testing.md
+      - FMI Export: fmi-export.md
+      - Robustness Policy: robustness-policy.md
+      - Build System: build-system.md
       - Troubleshooting: troubleshooting.md
   - API:
       - API Reference: api-reference.md
