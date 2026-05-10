@@ -3735,8 +3735,25 @@ private:
         const Real di_dvd = di_internal_dvds;
         const Real di_dvs = -di_internal_dvgs - di_internal_dvds;
 
-        // Norton companion residual (Taylor-offset form, matches AD path).
-        const Real i_eq = id - di_dvg * vg - di_dvd * vd - di_dvs * vs;
+        // Newton-Raphson Jacobian + physical residual stamp. The
+        // legacy Norton-companion form (`J += di_dvN`, `f -= i_eq`
+        // with `i_eq = id - Σ di_dvN·vN`) is meant for MNA-style
+        // direct assembly `G·x = b`, NOT for Pulsim's Newton iteration
+        // `J·Δx = −f` — in the latter the convergence equation
+        // becomes `Σ di_dvN·vN = i_R + id`, which has the vth
+        // dependency algebraically cancel out. Newton then settles on
+        // a non-physical fixed point where Pulsim's residual is 0
+        // even though the actual KCL `id = i_R` is violated by ~50 %.
+        // Surfaced by `level3_nonlinear/test_mosfet.py::
+        // TestMOSFETParameters::test_threshold_voltage_effect` (same
+        // V_drain = 0.025 V for vth ∈ {1, 2}, when physically they
+        // should differ).
+        //
+        // Replace with the standard Newton-Raphson stamp: `J = ∂id/∂x`
+        // (same as before), `f = +id(x_old)` (the actual current
+        // physically leaving drain via the channel). This is the same
+        // sign convention as the R and IGBT stamps (`f[node] +=
+        // current leaving node`).
 
         // Drain row: + ∂id/∂x_i.
         if (n_drain >= 0) {
@@ -3744,17 +3761,16 @@ private:
             if (n_gate >= 0)   triplets.emplace_back(n_drain, n_gate, di_dvg);
             if (n_source >= 0) triplets.emplace_back(n_drain, n_source, di_dvs);
         }
-        // Source row: − ∂id/∂x_i.
+        // Source row: − ∂id/∂x_i  (current arriving at source = −id).
         if (n_source >= 0) {
             triplets.emplace_back(n_source, n_source, -di_dvs);
             if (n_drain >= 0) triplets.emplace_back(n_source, n_drain, -di_dvd);
             if (n_gate >= 0)  triplets.emplace_back(n_source, n_gate, -di_dvg);
         }
 
-        // Residual contribution (Norton companion form, matches the
-        // legacy MOSFET sign convention).
-        if (n_drain >= 0)  f[n_drain]  -= i_eq;
-        if (n_source >= 0) f[n_source] += i_eq;
+        // Physical residual: +id leaves drain, −id arrives at source.
+        if (n_drain >= 0)  f[n_drain]  += id;
+        if (n_source >= 0) f[n_source] -= id;
     }
 
     template<typename Triplets>
