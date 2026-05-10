@@ -7,13 +7,23 @@ benchmark:
     - column: V(out)
   expectations:
     metrics:
-      # Pulsim's Level-1-style MOSFET (vth/kp/lambda) and ngspice's
-      # NMOS LEVEL=1 model agree on the parameters but evaluate the
-      # operating-point differently (Vds-conditioned current, body
-      # diode handling). The ~0.5 V whole-trace error is the real
-      # device-model gap, not a solver bug.
-      max_error: 6e-1
-      steady_state_max_error: 6e-1
+      # Phase-5 finding: Pulsim's Level-1 MOSFET (vth/kp/lambda) and
+      # ngspice's .model NMOS LEVEL=1 with W=L=1u use identical
+      # Shichman-Hodges formulas (verified by DC operating-point match,
+      # kp=0.2 → R_DSon ≈ 0.7 Ω at Vov=7 V triode). The 0.31 V whole-
+      # trace residual is composite:
+      #   - PWM duty interpretation: Pulsim duty=0.36 means high-time
+      #     = 0.36*period exactly (dead_time is a transition delay,
+      #     not subtracted). ngspice PULSE PW = 4.5 µs, not 4.42 µs.
+      #     This alone reduces the error from 0.5 V → 0.31 V.
+      #   - LC-filter ringing phase: ζ ≈ 0.06 (severely underdamped),
+      #     14 ms settling time vs 500 µs window means both simulators
+      #     are still on different phases of the same ring.
+      # On this underdamped LC the runner's steady-state detector
+      # ends up returning the whole window (ss_err == max_err), so
+      # both gates are 4e-1.
+      max_error: 4e-1
+      steady_state_max_error: 4e-1
   validation:
     type: reference
     observable: V(out)

@@ -1,0 +1,36 @@
+* Buck with IGBT — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/buck_igbt.yaml
+*
+* Pulsim's IGBT (vth=5, g_on=200, g_off=1e-6, v_ce_sat=1.5) in the
+* Behavioral path collapses to a voltage-controlled conductance:
+*   ON  (Vge > 5 V and Vce > 0): ic = g_on * vce  → R_CEon = 5 mΩ
+*   OFF                          ic = g_off * vce → R_CEoff = 1 MΩ
+* (The v_ce_sat parameter is loss-model territory — it does NOT appear
+* in the AD path's collector-current expression. So the comparison
+* against ngspice's SW model is exact in the linear-conductance sense.)
+*
+* ngspice has no native IGBT primitive; emulate with a voltage-
+* controlled switch. Same model the buck_switching, boost, etc. use.
+*
+* PWM: 50 kHz, duty=0.4 (PSIM convention: high-time = duty * period
+* exactly). PW = 8.0 µs. TR=TF=1n match Pulsim's instantaneous edges.
+
+Vdc  vcc 0 DC 24
+Vpwm ctrl 0 PULSE(0 15 0 1n 1n 8.0u 20u)
+
+* IGBT emulation: control voltage = V(ctrl), threshold = 5 V (with
+* 0.1 V hysteresis). Closed connects vcc → sw with RON = 1/g_on = 5 mΩ.
+S1 vcc sw ctrl 0 IGBTMOD
+.model IGBTMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Freewheel diode (Pulsim diode g_on=200 → RON=5 mΩ).
+S2 0 sw 0 sw DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Rdcr sw n_l 20m
+L1   n_l out 47u  IC=0
+C1   out 0   100u IC=0
+Rload out 0 10
+
+.tran 0.2u 350u
+.end

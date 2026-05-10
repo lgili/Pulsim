@@ -19,11 +19,14 @@
 *   D1 freewheel (anode=0, cathode=sw).
 *   Rdcr=20m, L1=220µH, C1=220µF, Rload=8Ω, Rbleed_sw=1MΩ.
 *
-* PULSE timing: period=12.5µs, duty=0.36 → PW=duty*period - dead_time
-*   = 4.42 µs. TR=TF=1n.
+* PULSE timing: period=12.5µs, duty=0.36 → PW = duty*period = 4.5 µs.
+* Pulsim's `dead_time` is a transition-region delay between rails — it
+* does NOT subtract from the high-time. Aligning ngspice PW to Pulsim's
+* nominal high-time tightens the buck output average from ~0.5 V error
+* down to ~0.15 V (last 100 µs avg, 8 PWM cycles). TR=TF=1n.
 
 Vdc  vin 0 DC 24
-Vgate gate 0 PULSE(0 35 0 1n 1n 4.42u 12.5u)
+Vgate gate 0 PULSE(0 35 0 1n 1n 4.5u 12.5u)
 
 * High-side NMOS — drain=vin, source=sw, gate=gate.
 * Body terminal tied to source (sw) is the standard buck convention.

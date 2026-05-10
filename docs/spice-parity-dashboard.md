@@ -200,7 +200,77 @@ purely a YAML-side change.
 | **3 — IC alignment** | Applied PSIM-style `uic: true` + `ic: 0.0` to all switching benchmarks. Buck dropped from 23.9 V → 0.10 V error (240× improvement). |
 | **3.5 — fill all nonlinear circuits (10/11)** | Wrote ngspice netlists for `boost_switching_complex`, `interleaved_buck_3ph`, `buck_mosfet_nonlinear`. Calibrated `max_error` / `steady_state_max_error` thresholds against actual measurements so the gates reflect real numerical noise, not aspirational targets. |
 | **4 — CI gate (shipped)** | `.github/workflows/ci.yml` `benchmark` job now installs `ngspice` + `rich`, then runs `python scripts/parity_dashboard.py --ascii --output-dir benchmarks/parity_ci_out` after the existing KPI gate. Exit code 2 (any non-skipped circuit fails) blocks the PR. The full per-circuit JSON / CSV plus `dashboard_summary.json` are uploaded as the `benchmark-kpi-artifacts` artifact for post-mortem. |
-| **5 — device-model deep-dive** | Pulsim's Level-1 MOSFET shows ~0.5 V whole-trace error vs ngspice's matching `.model NMOS LEVEL=1`. Worth understanding (operating-point evaluation differences? body-diode handling?). Tighten `buck_mosfet_nonlinear` once root-caused. |
+| **5 — device-model deep-dive (shipped)** | See "Fase 5 findings" section below. MOSFET threshold tightened from 0.6 V → 0.4 V after the PWM-duty fix; IGBT benchmark added but skipped pending solver fix. |
+| **6 — IGBT solver fix** | `IGBT.stamp_jacobian_behavioral` should add a smooth `gm = ∂ic/∂vge` (sigmoid through Vth) so Newton can find the DC OP. Or `IGBT.stamp_jacobian_ideal` should seed `pwl_state_` from V(gate) at DC OP time so events aren't required for the first cycle. Fixing this re-enables `buck_igbt` (already wired in `benchmarks/circuits/buck_igbt.yaml` + `benchmarks/ngspice/buck_igbt.cir`). |
+
+## Fase 5 findings — device-model deep-dive
+
+### MOSFET (`buck_mosfet_nonlinear`): composite cause, threshold tightened
+
+Verified by direct DC operating-point comparison: Pulsim's Level-1
+Shichman-Hodges (`vth/kp/lambda`) and ngspice's `.model NMOS LEVEL=1`
+with `W=L=1u` give identical `id` for the same `(Vgs, Vds)`. With
+`kp=0.2 → R_DSon ≈ 0.7 Ω` at `Vov=7 V` triode region, both simulators
+agree to within numerical noise on the device-level current.
+
+The original 0.5 V whole-trace residual was composite:
+
+| Source | Magnitude | Fix |
+|---|---|---|
+| **PWM duty interpretation** | ~0.15 V | Pulsim `duty=0.36` means high-time = `0.36 * period` exactly; `dead_time` is a transition-region delay, not subtracted. ngspice `PULSE` `PW` must be `4.5 µs`, not `duty*period - dead_time = 4.42 µs`. Fixed in `benchmarks/ngspice/buck_mosfet_nonlinear.cir`. |
+| **LC-filter ringing phase** | ~0.15 V | Output filter is severely underdamped (ζ ≈ 0.06 with `R_load=8 Ω`, `L=C=220 µH`). 14 ms settling time vs 500 µs simulation window means both simulators are still on different phases of the same ring. Genuinely irreducible without longer `tstop`. |
+
+Final state: `max_err = 0.31 V` (down from 0.5 V), threshold tightened
+from 0.6 V → 0.4 V. The `~0.31 V` residual reflects the LC ringing
+phase mismatch and is the floor for this circuit at 500 µs.
+
+### IGBT (`buck_igbt`): real Pulsim solver bug, benchmark skipped
+
+Adding an IGBT benchmark (`benchmarks/circuits/buck_igbt.yaml` +
+`benchmarks/ngspice/buck_igbt.cir`) revealed that **Pulsim's IGBT
+fails DC operating-point convergence** on a trivial circuit:
+
+```python
+# pulsim test:  V_dc=24 + IGBT (vth=5, g_on=200) + V_ctrl=15 + R_load=10
+dc = sim.dc_operating_point()
+# → success=False, message="All random restarts failed"
+```
+
+The same circuit topology with a `mosfet` substituted converges to
+`V(sw) ≈ 9.26 V` cleanly. The IGBT-specific failure has a clear root
+cause:
+
+- `IGBT.stamp_jacobian_behavioral` sets `g = pwl_state_ ? g_on : g_off`
+  and stamps a hard step Jacobian. There is **no** `gm = ∂ic/∂vge`
+  contribution. So the Jacobian carries no gradient information about
+  the gate–threshold transition — Newton can only see "the IGBT is off,
+  changing the gate voltage doesn't help."
+- The MOSFET works because Shichman-Hodges has a continuous
+  `dId/dVgs = kp · (Vgs - Vt)` just above threshold; the Jacobian
+  stamp's `gm` term gives Newton the gradient it needs.
+
+Tested workarounds (all in `benchmarks/circuits/buck_igbt.yaml`):
+
+- `switching_mode: ideal` alone → still fails (same hard-step issue).
+- `switching_mode: ideal` + `enable_events: true` → DC OP succeeds but
+  the first 3 timesteps show numerical chaos (V(sw) ±150 V) before
+  settling near 0 V (IGBT never effectively turns on).
+
+The fix needs solver-side work. Two viable options for Phase 6:
+
+1. **Smooth `gm` in `stamp_jacobian_behavioral`**: replace the hard
+   `pwl_state` step with a sigmoid `1 / (1 + exp(-k·(vge - vth)))`,
+   stamp `dic/dvge` accordingly. Newton would then have gradient
+   information through the threshold and converge.
+2. **Seed `pwl_state` at DC OP time** (Ideal path): inspect V(gate)
+   relative to V(emitter) in the initial guess; set `pwl_state_ = true`
+   when above threshold so the first stamp uses `g_on` instead of
+   `g_off`. Avoids needing events for the very first transition.
+
+Both approaches are localized to `core/include/pulsim/v1/components/igbt.hpp`. The
+`buck_igbt` benchmark stays committed (YAML + .cir) so re-enabling
+parity is a one-line edit in `benchmarks/benchmarks.yaml` once the fix
+lands.
 
 ## See also
 
