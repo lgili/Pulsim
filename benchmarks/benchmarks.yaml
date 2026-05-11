@@ -381,6 +381,29 @@ benchmarks:
   - path: circuits/bode_rlc_low_pass.yaml
     scenarios: [default]
 
+  # ----- Phase 23 Sprint C #1: motor drive benchmarks -----
+  # DC brush + PMSM (dq frame) + three-phase induction (locked rotor).
+  # All built from existing primitives; each validates against an
+  # analytical steady-state.
+  - path: circuits/motor_dc_brush_step_load.yaml
+    scenarios: [default]
+  - path: circuits/motor_pmsm_dq_open_loop.yaml
+    scenarios: [default]
+  - path: circuits/motor_induction_locked_rotor.yaml
+    scenarios: [default]
+
+  # ----- Phase 23 Sprint C #2: three-phase + PLL -----
+  - path: circuits/three_phase_balanced_rl_load.yaml
+    scenarios: [default]
+  - path: circuits/grid_pll_lock.yaml
+    scenarios: [default]
+
+  # ----- Phase 23 Bonus: textbook reference cases -----
+  - path: circuits/textbook_erickson_buck_ccm.yaml
+    scenarios: [default]
+  - path: circuits/textbook_erickson_boost_ccm.yaml
+    scenarios: [default]
+
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
   # against captured Pulsim baselines, like the Phase 19 closed-

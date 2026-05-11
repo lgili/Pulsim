@@ -1,0 +1,85 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: textbook_erickson_boost_ccm
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e+0
+      steady_state_max_error: 5.0e+0
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/textbook_erickson_boost_ccm.csv
+  # Erickson & Maksimovic 3rd ed § 6.1 — CCM boost steady-state:
+  #   V_out = V_in / (1 − D)
+  # For V_in = 12 V, D = 0.4: V_out = 12 / 0.6 = 20.0 V
+  kpi:
+    - metric: ripple_pkpk
+      observable: V(out)
+      steady_state_fraction: 0.2
+      label: vout_dvc
+simulation:
+  tstart: 0.0
+  tstop: 1.5e-3
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 220
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  # Citation: Erickson & Maksimovic 3rd ed § 6.1, eq. 6.1.
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: voltage_source
+    name: Vg
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.4
+      dead_time: 200e-9
+  - type: inductor
+    name: L1
+    nodes: [vin, sw_node]
+    value: 47e-6
+    ic: 0.0
+  - type: vcswitch
+    name: SW
+    nodes: [gate, sw_node, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Drect
+    nodes: [sw_node, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 20.0

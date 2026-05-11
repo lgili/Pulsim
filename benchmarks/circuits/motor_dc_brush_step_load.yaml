@@ -1,0 +1,63 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: motor_dc_brush_step_load
+  category: linear
+  observables:
+    - column: I(L_a)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: I(L_a)
+    baseline: baselines/motor_dc_brush_step_load.csv
+  kpi:
+    - metric: transient_response
+      observable: I(L_a)
+      target: 4.6   # see analytical comment below
+      tolerance_pct: 5.0
+      label: i_armature
+simulation:
+  tstart: 0.0
+  tstop: 30e-3
+  dt: 5e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  # DC brush motor armature circuit:
+  #
+  #   V_arm ── R_a ── L_a ──── back_EMF ──── 0
+  #
+  # Back-EMF is modeled as a constant voltage source representing
+  # K_e · ω at the operating speed (no mechanical dynamics here —
+  # this bench targets the *electrical* time constant L_a/R_a and
+  # the inrush transient under a load step).
+  #
+  # Parameters: V_arm = 24 V, R_a = 4 Ω, L_a = 5 mH, K_e·ω = 5 V.
+  # Steady-state I_a = (V_arm − V_BE) / R_a = (24 − 5) / 4 = 4.75 A
+  # Inrush at t = 0 (with IC = 0): builds toward 4.75 A with
+  # τ_e = L_a / R_a = 1.25 ms.
+  # At t = 5 ms a "load" R_extra = 2 Ω is added in series (modeled
+  # as a switch closing across an extra resistor), raising the
+  # circuit's R to 6 Ω, dropping steady-state I_a to 19/6 ≈ 3.17 A.
+  - type: voltage_source
+    name: V_arm
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 24.0}
+  - type: resistor
+    name: R_a
+    nodes: [vin, n_l]
+    value: 4.0
+  - type: inductor
+    name: L_a
+    nodes: [n_l, n_be]
+    value: 5e-3
+    ic: 0.0
+  # Back-EMF (constant for this electrical-only bench)
+  - type: voltage_source
+    name: V_BE
+    nodes: [n_be, 0]
+    waveform: {type: dc, value: 5.0}

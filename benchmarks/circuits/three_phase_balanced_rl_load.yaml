@@ -1,0 +1,76 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: three_phase_balanced_rl_load
+  category: linear
+  observables:
+    - column: I(L_a)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: I(L_a)
+    baseline: baselines/three_phase_balanced_rl_load.csv
+simulation:
+  tstart: 0.0
+  tstop: 100e-3
+  dt: 20e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  # Three 60 Hz sine sources at 120° apart driving a wye-connected
+  # RL load (each phase: 10 Ω + 5 mH). Validates Pulsim's handling
+  # of multi-phase sinusoidal steady state.
+  #
+  # Per-phase impedance: Z = 10 + jωL = 10 + j1.88 Ω at 60 Hz
+  # |Z| = 10.18 Ω
+  # I_pk = 120 / 10.18 ≈ 11.79 A_pk
+  - type: voltage_source
+    name: Va
+    nodes: [va, 0]
+    waveform: {type: sine, amplitude: 120.0, frequency: 60.0, offset: 0.0, phase: 0.0}
+  - type: voltage_source
+    name: Vb
+    nodes: [vb, 0]
+    waveform: {type: sine, amplitude: 120.0, frequency: 60.0, offset: 0.0, phase: 2.0943951}
+  - type: voltage_source
+    name: Vc
+    nodes: [vc, 0]
+    waveform: {type: sine, amplitude: 120.0, frequency: 60.0, offset: 0.0, phase: 4.1887902}
+
+  - type: resistor
+    name: R_a
+    nodes: [va, n_la]
+    value: 10.0
+  - type: inductor
+    name: L_a
+    nodes: [n_la, neutral]
+    value: 5e-3
+    ic: 0.0
+  - type: resistor
+    name: R_b
+    nodes: [vb, n_lb]
+    value: 10.0
+  - type: inductor
+    name: L_b
+    nodes: [n_lb, neutral]
+    value: 5e-3
+    ic: 0.0
+  - type: resistor
+    name: R_c
+    nodes: [vc, n_lc]
+    value: 10.0
+  - type: inductor
+    name: L_c
+    nodes: [n_lc, neutral]
+    value: 5e-3
+    ic: 0.0
+  # In a balanced 3-phase wye, the neutral is theoretically at 0V.
+  # Tie via tiny R to anchor the node.
+  - type: resistor
+    name: R_neutral
+    nodes: [neutral, 0]
+    value: 1.0e6

@@ -1,0 +1,80 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: motor_pmsm_dq_open_loop
+  category: linear
+  observables:
+    - column: I(L_q)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: I(L_q)
+    baseline: baselines/motor_pmsm_dq_open_loop.csv
+  kpi:
+    - metric: transient_response
+      observable: I(L_q)
+      target: 8.0    # steady-state i_q (see analytical comment)
+      tolerance_pct: 5.0
+      label: iq
+simulation:
+  tstart: 0.0
+  tstop: 100e-3
+  dt: 10e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  # PMSM in the synchronous (dq) reference frame, decoupled axes.
+  # This is the "torque-axis" model:
+  #
+  #   d-axis: V_d ─ R_s ─ L_d ─ 0  (controlled to keep i_d = 0)
+  #   q-axis: V_q ─ R_s ─ L_q ─ V_emf_q ─ 0
+  #
+  # where V_emf_q = ω_e · λ_pm represents the rotor flux's back-EMF
+  # on the q-axis. With constant V_d = 0 and V_q at nominal, the
+  # steady-state currents are:
+  #
+  #   i_d_ss = 0                                  (by symmetric V_d)
+  #   i_q_ss = (V_q − ω_e · λ_pm) / R_s
+  #
+  # For V_q = 12 V, R_s = 0.5 Ω, ω_e · λ_pm = 8 V (rated speed
+  # back-EMF) → i_q_ss = (12 − 8) / 0.5 = 8 A.
+  # Electromagnetic torque: T_e = (3/2) · p · λ_pm · i_q
+  # (computed from i_q via a KPI; not directly observable here).
+
+  - type: voltage_source
+    name: V_d
+    nodes: [vd, 0]
+    waveform: {type: dc, value: 0.0}
+  - type: voltage_source
+    name: V_q
+    nodes: [vq, 0]
+    waveform: {type: dc, value: 12.0}
+  # d-axis branch (purely resistive at constant speed for this bench)
+  - type: resistor
+    name: R_s_d
+    nodes: [vd, n_ld_in]
+    value: 0.5
+  - type: inductor
+    name: L_d
+    nodes: [n_ld_in, 0]
+    value: 2.0e-3
+    ic: 0.0
+  # q-axis branch with back-EMF
+  - type: resistor
+    name: R_s_q
+    nodes: [vq, n_lq_in]
+    value: 0.5
+  - type: inductor
+    name: L_q
+    nodes: [n_lq_in, n_emf]
+    value: 2.0e-3
+    ic: 0.0
+  # Rotor back-EMF on the q-axis (ω_e · λ_pm at rated speed)
+  - type: voltage_source
+    name: V_emf_q
+    nodes: [n_emf, 0]
+    waveform: {type: dc, value: 8.0}

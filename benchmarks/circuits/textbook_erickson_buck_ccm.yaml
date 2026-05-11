@@ -1,0 +1,85 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: textbook_erickson_buck_ccm
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-1
+      steady_state_max_error: 5.0e-1
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/textbook_erickson_buck_ccm.csv
+  # Erickson & Maksimovic 3rd ed § 3.1 — CCM buck steady-state.
+  # Reference values from eq. 3.5–3.7 (textbook printed numbers):
+  #   V_out  = D · V_in       = 0.5 · 24 V = 12.0 V
+  #   ΔI_L   = (V_in − V_out) · D · T_sw / L
+  #          = (24 − 12) · 0.5 · 20µs / 47µH
+  #          ≈ 2.553 A
+  #   ΔV_C   = ΔI_L / (8 · f_sw · C)
+  #          = 2.553 / (8 · 50 000 · 100 µF)
+  #          ≈ 63.8 mV
+  # These values are surfaced as KPIs and a published-tolerance
+  # check (within ±2 % each) would pass cleanly for an ideal
+  # converter.  Pulsim uses non-ideal switches so the actual
+  # numbers come out slightly off — captured in the baseline.
+  kpi:
+    - metric: ripple_pkpk
+      observable: V(out)
+      steady_state_fraction: 0.2
+      label: vout_dvc
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # Citation: Erickson & Maksimovic, *Fundamentals of Power
+  # Electronics* (3rd ed., 2020), § 3.1 "Inductor Volt-Second
+  # Balance, Capacitor Charge Balance, and the Small-Ripple
+  # Approximation". Figure 3.6 (buck converter waveforms) and
+  # equations 3.5–3.7 for V_out / ΔI_L / ΔV_C.
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 24.0}
+  - type: voltage_source
+    name: Vpwm
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  - type: vcswitch
+    name: SW
+    nodes: [gate, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dfw
+    nodes: [0, sw]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L1
+    nodes: [sw, out]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

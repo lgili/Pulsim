@@ -1,0 +1,82 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: motor_induction_locked_rotor
+  category: linear
+  observables:
+    - column: I(L_ls_a)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: I(L_ls_a)
+    baseline: baselines/motor_induction_locked_rotor.csv
+simulation:
+  tstart: 0.0
+  tstop: 100e-3
+  dt: 20e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  # Three-phase induction motor at LOCKED ROTOR (slip s = 1).
+  # Per-phase equivalent circuit (referred to the stator):
+  #
+  #   V_phase ─ R_s ─ L_ls ─┬─ R_r/s ─ L_lr ─┐
+  #                          │                │
+  #                          L_m              │
+  #                          │                │
+  #                          └──── 0 ─────────┘
+  #
+  # With s = 1: R_r/s = R_r (rotor circuit fully resistive).
+  # Inrush current is dominated by per-phase impedance
+  # Z = R_s + jωL_ls + (jωL_m || (R_r + jωL_lr)).
+  #
+  # For our parameters (R_s = 0.5 Ω, L_ls = 2 mH, L_m = 50 mH,
+  # R_r = 0.5 Ω, L_lr = 2 mH at 60 Hz):
+  #   ω = 2π·60 ≈ 377 rad/s
+  #   |jωL_m| = 18.85 Ω
+  #   |R_r + jωL_lr| = √(0.25 + 0.568) ≈ 0.91 Ω
+  #   (R_r + jωL_lr) || jωL_m ≈ (R_r + jωL_lr) since R_r ≪ ωL_m
+  #   Z ≈ R_s + R_r + jω(L_ls + L_lr) = 1.0 + j1.51 Ω
+  #   |Z| ≈ 1.81 Ω
+  #   I_inrush ≈ V_phase / |Z| = 120 V / 1.81 ≈ 66 A_pk
+  #
+  # We only model PHASE A explicitly here — the other two phases
+  # would have identical behavior 120° apart (omitted to keep the
+  # bench short).
+  - type: voltage_source
+    name: Va
+    nodes: [va, 0]
+    waveform:
+      type: sine
+      amplitude: 120.0
+      frequency: 60.0
+      offset: 0.0
+      phase: 0.0
+  - type: resistor
+    name: R_s_a
+    nodes: [va, n_lls]
+    value: 0.5
+  - type: inductor
+    name: L_ls_a
+    nodes: [n_lls, n_mag]
+    value: 2.0e-3
+    ic: 0.0
+  # Magnetizing branch + rotor branch (locked-rotor: R_r/s = R_r)
+  - type: inductor
+    name: L_m_a
+    nodes: [n_mag, 0]
+    value: 50.0e-3
+    ic: 0.0
+  - type: resistor
+    name: R_r_a
+    nodes: [n_mag, n_lrot]
+    value: 0.5
+  - type: inductor
+    name: L_lr_a
+    nodes: [n_lrot, 0]
+    value: 2.0e-3
+    ic: 0.0
