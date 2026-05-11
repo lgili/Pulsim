@@ -732,6 +732,22 @@ def run_benchmarks(
                                     r = compute_zcs_fraction(sw_states, series[i_obs], thr_a, lookback)
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "junction_temperature":
+                                try:
+                                    from kpi import compute_junction_temperature, compute_power_dissipation_resistor
+                                except ImportError:
+                                    from .kpi import compute_junction_temperature, compute_power_dissipation_resistor  # type: ignore
+                                if obs in series:
+                                    R = float(kpi_entry.get("r_resistor", 1.0))
+                                    R_th = float(kpi_entry.get("r_th_jc", 5.0))
+                                    C_th = float(kpi_entry.get("c_th_jc", 0.1))
+                                    T_amb = float(kpi_entry.get("t_ambient_c", 25.0))
+                                    v_a = series[obs]
+                                    v_b = [0.0] * len(v_a)
+                                    p_diss = compute_power_dissipation_resistor(v_a, v_b, R)
+                                    r = compute_junction_temperature(p_diss, times, R_th, C_th, T_amb)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
                             elif metric == "core_loss_steinmetz":
                                 try:
                                     from kpi import compute_core_loss_steinmetz, compute_inductor_flux_density

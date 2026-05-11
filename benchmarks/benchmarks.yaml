@@ -424,6 +424,10 @@ benchmarks:
   - path: circuits/core_loss_steinmetz_sine.yaml
     scenarios: [default]
 
+  # ----- Phase 27: electrothermal coupling (Python-side estimator) -----
+  - path: circuits/electrothermal_resistor_self_heating.yaml
+    scenarios: [default]
+
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
   # against captured Pulsim baselines, like the Phase 19 closed-

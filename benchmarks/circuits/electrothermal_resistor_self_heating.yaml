@@ -1,0 +1,53 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: electrothermal_resistor_self_heating
+  category: linear
+  observables:
+    - column: V(vin)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(vin)
+    baseline: baselines/electrothermal_resistor_self_heating.csv
+  kpi:
+    # Junction temperature estimate: read V(vin) (= V across the 1 Ω
+    # resistor), compute P = V²/R, then integrate the thermal RC
+    # network (R_th_jc = 5 K/W, C_th = 0.1 J/K, T_amb = 25 °C).
+    # Steady-state: T_j = T_a + R_th · P = 25 + 5 · 25 = 150 °C.
+    - metric: junction_temperature
+      observable: V(vin)
+      r_resistor: 1.0
+      r_th_jc: 5.0
+      c_th_jc: 0.1
+      t_ambient_c: 25.0
+      label: r_diss
+  # Simplest electrothermal demo: a resistor dissipating constant
+  # power. The Python KPI layer reads V across the resistor and
+  # computes P = V²/R, then solves a 1st-order thermal RC network
+  # forward in time to predict T_j.
+  #
+  # Parameters: 5 V across 1 Ω → P = 25 W steady-state.
+  # Thermal model: R_th_jc = 5 K/W (typical small TO-220-mounted
+  # part), C_th = 0.1 J/K → τ_thermal = R·C = 0.5 s.
+  # Steady-state T_j rise above ambient: 25 W · 5 K/W = 125 K.
+  # → T_j = 25 + 125 = 150 °C at steady state.
+simulation:
+  tstart: 0.0
+  tstop: 2.0     # 2 seconds — gets close to thermal steady state
+  dt: 5e-3
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 5.0}
+  - type: resistor
+    name: R_diss
+    nodes: [vin, 0]
+    value: 1.0

@@ -15,7 +15,7 @@ drive the API.
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import math
 
@@ -466,6 +466,66 @@ def compute_inductor_flux_density(
     return [factor * i for i in current_samples]
 
 
+# =============================================================================
+# Electrothermal: junction temperature from electrical loss + thermal RC
+# =============================================================================
+
+
+def compute_power_dissipation_resistor(
+    v_a_samples: Sequence[float],
+    v_b_samples: Sequence[float],
+    resistance: float,
+) -> List[float]:
+    """Instantaneous power dissipation P(t) = (V_a − V_b)² / R."""
+    if resistance <= 0:
+        return [0.0] * len(v_a_samples)
+    n = min(len(v_a_samples), len(v_b_samples))
+    return [((v_a_samples[k] - v_b_samples[k]) ** 2) / resistance for k in range(n)]
+
+
+def compute_junction_temperature(
+    power_dissipation_samples: Sequence[float],
+    times: Sequence[float],
+    r_th_jc: float,
+    c_th_jc: float,
+    t_ambient_c: float = 25.0,
+    r_th_ca: float = 0.0,
+) -> Dict[str, float]:
+    """Solve a first-order thermal RC network forward in time to predict
+    junction temperature T_j(t) from a P_diss(t) trace.
+
+    Model: C_th · dT_j/dt + (T_j − T_a)/R_th = P(t)
+    Steady-state: T_j − T_a = R_th · P_avg.
+
+    Returns:
+        {"t_j_max_c", "t_j_final_c", "delta_t_j_c"}.
+    """
+    n = min(len(power_dissipation_samples), len(times))
+    if n < 2:
+        return {"t_j_max_c": t_ambient_c, "t_j_final_c": t_ambient_c, "delta_t_j_c": 0.0}
+
+    R_total = r_th_jc + r_th_ca
+    if R_total <= 0:
+        return {"t_j_max_c": t_ambient_c, "t_j_final_c": t_ambient_c, "delta_t_j_c": 0.0}
+
+    t_j = t_ambient_c
+    t_max = t_j
+    use_c = c_th_jc if c_th_jc > 0 else 1.0
+    for k in range(1, n):
+        dt = times[k] - times[k - 1]
+        p = power_dissipation_samples[k]
+        dtj = (p - (t_j - t_ambient_c) / R_total) * dt / use_c
+        t_j = t_j + dtj
+        if t_j > t_max:
+            t_max = t_j
+
+    return {
+        "t_j_max_c": t_max,
+        "t_j_final_c": t_j,
+        "delta_t_j_c": t_j - t_ambient_c,
+    }
+
+
 __all__ = [
     "compute_thd",
     "compute_power_factor",
@@ -478,4 +538,6 @@ __all__ = [
     "compute_switching_loss_per_event",
     "compute_core_loss_steinmetz",
     "compute_inductor_flux_density",
+    "compute_power_dissipation_resistor",
+    "compute_junction_temperature",
 ]
