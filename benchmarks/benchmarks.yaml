@@ -404,6 +404,10 @@ benchmarks:
   - path: circuits/textbook_erickson_boost_ccm.yaml
     scenarios: [default]
 
+  # ----- Phase 24: soft-switching detection (ZVS / ZCS) -----
+  - path: circuits/buck_hard_switching_reference.yaml
+    scenarios: [default]
+
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
   # against captured Pulsim baselines, like the Phase 19 closed-

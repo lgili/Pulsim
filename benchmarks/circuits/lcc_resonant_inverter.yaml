@@ -19,6 +19,18 @@ benchmark:
       fundamental_hz: 100000.0
       num_harmonics: 10
       label: vout
+    - metric: zvs_fraction
+      switch_observable: V(g_h)
+      voltage_observable: V(sw)
+      threshold_v: 2.0
+      lookback_samples: 2
+      label: SH
+    - metric: zvs_fraction
+      switch_observable: V(g_l)
+      voltage_observable: V(sw)
+      threshold_v: 2.0
+      lookback_samples: 2
+      label: SL
 simulation:
   tstart: 0.0
   tstop: 200e-6

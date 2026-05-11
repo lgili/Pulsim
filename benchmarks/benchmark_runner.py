@@ -652,15 +652,28 @@ def run_benchmarks(
                     times, series = load_csv_series(output_path)
                     sample_rate = (1.0 / (times[1] - times[0])) if len(times) > 1 else 0.0
 
+                    # Metrics that use a single `observable` field as the
+                    # primary signal — required for these to be looked up.
+                    _SINGLE_OBS_METRICS = {
+                        "thd", "power_factor", "transient_response",
+                        "ripple_pkpk",
+                    }
+
                     for kpi_entry in kpi_block:
                         if not isinstance(kpi_entry, dict):
                             continue
                         metric = kpi_entry.get("metric")
                         obs = kpi_entry.get("observable")
                         label = kpi_entry.get("label", metric or "kpi")
-                        if metric is None or obs not in series:
+                        if metric is None:
                             continue
-                        samples = series[obs]
+                        # Only check `obs in series` for metrics that need it
+                        if metric in _SINGLE_OBS_METRICS:
+                            if obs not in series:
+                                continue
+                            samples = series[obs]
+                        else:
+                            samples = series[obs] if obs in series else []
                         try:
                             if metric == "thd":
                                 f0 = float(kpi_entry.get("fundamental_hz", 60.0))
@@ -689,6 +702,53 @@ def run_benchmarks(
                             elif metric == "ripple_pkpk":
                                 ss_frac = float(kpi_entry.get("steady_state_fraction", 0.2))
                                 kpis[f"kpi__ripple_pkpk__{label}"] = compute_ripple_pkpk(samples, ss_frac)
+                            elif metric == "zvs_fraction":
+                                try:
+                                    from kpi import compute_zvs_fraction
+                                except ImportError:
+                                    from .kpi import compute_zvs_fraction  # type: ignore
+                                sw_obs = kpi_entry.get("switch_observable")
+                                v_obs = kpi_entry.get("voltage_observable")
+                                thr_v = float(kpi_entry.get("threshold_v", 1.0))
+                                lookback = int(kpi_entry.get("lookback_samples", 1))
+                                if (isinstance(sw_obs, str) and isinstance(v_obs, str)
+                                        and sw_obs in series and v_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    r = compute_zvs_fraction(sw_states, series[v_obs], thr_v, lookback)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "zcs_fraction":
+                                try:
+                                    from kpi import compute_zcs_fraction
+                                except ImportError:
+                                    from .kpi import compute_zcs_fraction  # type: ignore
+                                sw_obs = kpi_entry.get("switch_observable")
+                                i_obs = kpi_entry.get("current_observable")
+                                thr_a = float(kpi_entry.get("threshold_a", 0.1))
+                                lookback = int(kpi_entry.get("lookback_samples", 1))
+                                if (isinstance(sw_obs, str) and isinstance(i_obs, str)
+                                        and sw_obs in series and i_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    r = compute_zcs_fraction(sw_states, series[i_obs], thr_a, lookback)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "switching_loss":
+                                try:
+                                    from kpi import compute_switching_loss_per_event
+                                except ImportError:
+                                    from .kpi import compute_switching_loss_per_event  # type: ignore
+                                sw_obs = kpi_entry.get("switch_observable")
+                                v_obs = kpi_entry.get("voltage_observable")
+                                i_obs = kpi_entry.get("current_observable")
+                                if (isinstance(sw_obs, str) and isinstance(v_obs, str)
+                                        and isinstance(i_obs, str)
+                                        and sw_obs in series and v_obs in series and i_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    r = compute_switching_loss_per_event(
+                                        sw_states, series[v_obs], series[i_obs], times
+                                    )
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
                             elif metric == "loss_breakdown":
                                 sw_obs = kpi_entry.get("switch_observable")
                                 i_obs = kpi_entry.get("current_observable")

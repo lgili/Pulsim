@@ -1,0 +1,79 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: buck_hard_switching_reference
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 1.0e-1
+      steady_state_max_error: 1.0e-1
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/buck_hard_switching_reference.csv
+  # Reference case: a hard-switched buck.  At each ON-event the V_DS
+  # is the full V_in (24 V); at each OFF-event the diode current is
+  # at its peak.  ZVS fraction should be ~ 0 % and switching loss
+  # is the documented non-zero value — used as the "no soft
+  # switching" reference for ZVS / LLC benches.
+  kpi:
+    - metric: zvs_fraction
+      switch_observable: V(gate)
+      voltage_observable: V(sw)
+      threshold_v: 1.0
+      lookback_samples: 2
+      label: SH
+    - metric: switching_loss
+      switch_observable: V(gate)
+      voltage_observable: V(sw)
+      current_observable: I(L1)
+      label: SH
+simulation:
+  tstart: 0.0
+  tstop: 500e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 24.0}
+  - type: voltage_source
+    name: Vpwm
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  - type: vcswitch
+    name: SH
+    nodes: [gate, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dfw
+    nodes: [0, sw]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L1
+    nodes: [sw, out]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

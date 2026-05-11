@@ -316,6 +316,110 @@ def compute_loss_breakdown(
     }
 
 
+# =============================================================================
+# Soft-switching detection: ZVS / ZCS fraction + switching loss
+# =============================================================================
+
+
+def compute_zvs_fraction(
+    switch_states: Sequence[bool],
+    v_ds_samples: Sequence[float],
+    threshold_v: float = 1.0,
+    lookback_samples: int = 1,
+) -> Dict[str, float]:
+    """Fraction of turn-ON events that occur at near-zero V_DS (ZVS).
+
+    Walks the switch_state sequence; at each False→True transition (turn-ON),
+    looks at the V_DS sample `lookback_samples` indices earlier. If |V_DS| <
+    `threshold_v` at that moment, the event counts as ZVS.
+
+    Returns:
+        {"zvs_fraction": <0..1>, "total_turn_on_events": <int>}
+    """
+    n = min(len(switch_states), len(v_ds_samples))
+    if n < 2:
+        return {"zvs_fraction": 0.0, "total_turn_on_events": 0.0}
+
+    total = 0
+    zvs = 0
+    for k in range(1, n):
+        if switch_states[k] and not switch_states[k - 1]:  # OFF→ON
+            total += 1
+            j = max(0, k - lookback_samples)
+            if abs(v_ds_samples[j]) < threshold_v:
+                zvs += 1
+    if total == 0:
+        return {"zvs_fraction": 0.0, "total_turn_on_events": 0.0}
+    return {
+        "zvs_fraction": float(zvs) / float(total),
+        "total_turn_on_events": float(total),
+    }
+
+
+def compute_zcs_fraction(
+    switch_states: Sequence[bool],
+    i_d_samples: Sequence[float],
+    threshold_a: float = 0.1,
+    lookback_samples: int = 1,
+) -> Dict[str, float]:
+    """Fraction of turn-OFF events that occur at near-zero I_D (ZCS).
+
+    Walks the switch_state sequence; at each True→False transition
+    (turn-OFF), looks at the I_D sample `lookback_samples` indices earlier.
+    If |I_D| < `threshold_a` at that moment, the event counts as ZCS.
+
+    Returns:
+        {"zcs_fraction": <0..1>, "total_turn_off_events": <int>}
+    """
+    n = min(len(switch_states), len(i_d_samples))
+    if n < 2:
+        return {"zcs_fraction": 0.0, "total_turn_off_events": 0.0}
+
+    total = 0
+    zcs = 0
+    for k in range(1, n):
+        if not switch_states[k] and switch_states[k - 1]:  # ON→OFF
+            total += 1
+            j = max(0, k - lookback_samples)
+            if abs(i_d_samples[j]) < threshold_a:
+                zcs += 1
+    if total == 0:
+        return {"zcs_fraction": 0.0, "total_turn_off_events": 0.0}
+    return {
+        "zcs_fraction": float(zcs) / float(total),
+        "total_turn_off_events": float(total),
+    }
+
+
+def compute_switching_loss_per_event(
+    switch_states: Sequence[bool],
+    v_ds_samples: Sequence[float],
+    i_d_samples: Sequence[float],
+    times: Sequence[float],
+) -> Dict[str, float]:
+    """Average switching loss in W. At each switch state transition, treats
+    the local V·I product as the switching loss of one event:
+    E_event = ½ · V_DS · I_D (the pre-transition sample). Energy summed
+    over all events ÷ total simulated time = average loss in W.
+    """
+    n = min(len(switch_states), len(v_ds_samples), len(i_d_samples), len(times))
+    if n < 2:
+        return {"switching_loss_w_avg": 0.0, "switching_event_count": 0.0}
+    total_time = max(1e-18, times[n - 1] - times[0])
+    energy = 0.0
+    events = 0
+    for k in range(1, n):
+        if switch_states[k] != switch_states[k - 1]:
+            v = v_ds_samples[k - 1]
+            i = i_d_samples[k - 1]
+            energy += 0.5 * abs(v * i)
+            events += 1
+    return {
+        "switching_loss_w_avg": energy / total_time,
+        "switching_event_count": float(events),
+    }
+
+
 __all__ = [
     "compute_thd",
     "compute_power_factor",
@@ -323,4 +427,7 @@ __all__ = [
     "compute_transient_response",
     "compute_ripple_pkpk",
     "compute_loss_breakdown",
+    "compute_zvs_fraction",
+    "compute_zcs_fraction",
+    "compute_switching_loss_per_event",
 ]
