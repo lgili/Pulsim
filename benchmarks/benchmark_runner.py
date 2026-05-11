@@ -481,6 +481,14 @@ def run_benchmarks(
                 if validation_type != "none" and not observable:
                     status = "failed"
                     message = "Missing validation observable"
+                elif validation_type == "bode":
+                    # Bode validation doesn't read from the transient CSV — it
+                    # runs its own FRA sweep against the YAML. We still need
+                    # the observable string (it's a node name into Simulator),
+                    # but we don't require it to be a column of the captured
+                    # transient.
+                    times_eval, values_eval = [], []
+                    # Fall through to the validation dispatch below
                 elif validation_type != "none":
                     times, series = load_csv_series(output_path)
                     if observable not in series:
@@ -542,6 +550,75 @@ def run_benchmarks(
                                                 message = (
                                                     f"max_error {max_error:.6e} > threshold {max_threshold:.6e}"
                                                 )
+                            elif validation_type == "bode":
+                                # Phase 23 Sprint B: FRA-based Bode validation
+                                # against an analytical transfer function.
+                                try:
+                                    import importlib
+                                    try:
+                                        from frequency import run_fra_sweep, compare_to_analytical, extract_margins
+                                    except ImportError:
+                                        from .frequency import run_fra_sweep, compare_to_analytical, extract_margins
+
+                                    pert_src = validation.get("perturbation_source")
+                                    obs_node = validation.get("observable")
+                                    f_start = float(validation.get("f_start", 10.0))
+                                    f_stop = float(validation.get("f_stop", 1e5))
+                                    ppd = int(validation.get("points_per_decade", 10))
+                                    amp = float(validation.get("amplitude", 0.01))
+
+                                    measured = run_fra_sweep(
+                                        yaml_path=scenario_file,
+                                        perturbation_source=pert_src,
+                                        observable=obs_node,
+                                        f_start=f_start,
+                                        f_stop=f_stop,
+                                        points_per_decade=ppd,
+                                        amplitude=amp,
+                                    )
+
+                                    # Resolve the analytical model
+                                    a_spec = validation.get("analytical", {})
+                                    model_module = a_spec.get("module")
+                                    model_fn_name = a_spec.get("function")
+                                    model_params = a_spec.get("params", {})
+                                    if not model_module or not model_fn_name:
+                                        raise RuntimeError("bode validation requires analytical.module and analytical.function")
+
+                                    mod = importlib.import_module(model_module)
+                                    fn_factory = getattr(mod, model_fn_name)
+                                    H_model = fn_factory(**model_params)
+
+                                    cmp = compare_to_analytical(measured, H_model)
+                                    margins = extract_margins(measured)
+
+                                    tol = validation.get("tolerance", {})
+                                    db_tol = float(tol.get("max_db_err", 2.0))
+                                    phase_tol = float(tol.get("max_phase_err_deg", 10.0))
+
+                                    max_error = cmp.max_db_err  # surface |H| error as the primary metric
+                                    rms_error = cmp.max_phase_err_deg
+
+                                    # KPIs: per-measurement margin + worst-case errors
+                                    telemetry = telemetry or {}
+                                    telemetry["bode_max_db_err"] = cmp.max_db_err
+                                    telemetry["bode_max_phase_err_deg"] = cmp.max_phase_err_deg
+                                    for k, v in margins.items():
+                                        if v is not None:
+                                            telemetry[f"bode_{k}"] = float(v)
+
+                                    if cmp.max_db_err <= db_tol and cmp.max_phase_err_deg <= phase_tol:
+                                        status = "passed"
+                                    else:
+                                        status = "failed"
+                                        message = (
+                                            f"Bode tol exceeded: |H|_err={cmp.max_db_err:.2f}dB "
+                                            f"(thr {db_tol}dB), ∠H_err={cmp.max_phase_err_deg:.2f}° "
+                                            f"(thr {phase_tol}°)"
+                                        )
+                                except Exception as exc:
+                                    status = "failed"
+                                    message = f"bode validation error: {exc}"
                             else:
                                 status = "failed"
                                 message = f"Unsupported validation type: {validation_type}"

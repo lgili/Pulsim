@@ -86,7 +86,9 @@ def _discover_closed_loop_ids(manifest_path: Path) -> List[str]:
         except Exception:
             continue
         validation = circuit.get("benchmark", {}).get("validation", {}) or {}
-        if validation.get("type") == "reference":
+        # Phase 23: include `bode` validation type as well — these are
+        # regression-only benches (no SPICE comparison) just like `reference`.
+        if validation.get("type") in ("reference", "bode"):
             ids.append(circuit_path.stem)
     return ids
 

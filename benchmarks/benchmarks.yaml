@@ -377,6 +377,10 @@ benchmarks:
   - path: circuits/npc_three_level_halfbridge.yaml
     scenarios: [default]
 
+  # ----- Phase 23 Sprint B: Bode / frequency-domain validation -----
+  - path: circuits/bode_rlc_low_pass.yaml
+    scenarios: [default]
+
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
   # against captured Pulsim baselines, like the Phase 19 closed-

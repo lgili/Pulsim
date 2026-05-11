@@ -1,0 +1,58 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: bode_rlc_low_pass
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 1.0e+0
+      steady_state_max_error: 1.0e+0
+  # Phase 23 Sprint B — Bode validation against analytical RLC.
+  # The runner sweeps the perturbation source `Vac` from 100 Hz to
+  # 100 kHz and compares the measured |H(jω)| / ∠H(jω) at V(out)
+  # against `rlc_low_pass.rlc_low_pass(R_s=10, L=1e-3, C=1e-6, R_load=100)`.
+  validation:
+    type: bode
+    perturbation_source: Vac
+    observable: out
+    f_start: 100.0
+    f_stop: 100000.0
+    points_per_decade: 5
+    analytical:
+      module: benchmarks.frequency.models.rlc_low_pass
+      function: rlc_low_pass
+      params: {R_s: 10.0, L: 1.0e-3, C: 1.0e-6, R_load: 100.0}
+    tolerance:
+      max_db_err: 2.0
+      max_phase_err_deg: 8.0
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 1e-6
+  integrator: trapezoidal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vac
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 0.0}     # DC OP at 0; FRA injects sine on top
+  - type: resistor
+    name: R_s
+    nodes: [vin, n_l]
+    value: 10.0
+  - type: inductor
+    name: L1
+    nodes: [n_l, out]
+    value: 1.0e-3
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1.0e-6
+    ic: 0.0
+  - type: resistor
+    name: R_load
+    nodes: [out, 0]
+    value: 100.0
