@@ -1,0 +1,79 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: diode_bridge_rectifier
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Sine-wave input (24 V_peak, 100 Hz — fast enough to settle
+      # in a 50 ms window) feeds a 4-diode full-wave bridge into a
+      # 470 µF / 100 Ω output filter. Tests the simultaneous PWL
+      # state changes of 4 diodes at every zero crossing — at each
+      # crossing, one pair turns off and the other turns on. Output
+      # ripples around V_peak − V_diode ≈ 23.5 V.
+      max_error: 1.5e+0
+      steady_state_max_error: 1.0e+0
+simulation:
+  tstart: 0.0
+  tstop: 50e-3
+  dt: 50e-6
+  dt_max: 100e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 220
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vac
+    nodes: [ac_p, ac_n]
+    waveform:
+      type: sine
+      amplitude: 24.0
+      frequency: 100.0
+      offset: 0.0
+      phase: 0.0
+  # 4-diode full-wave bridge: ac_p / ac_n → out / 0
+  - type: diode
+    name: D1
+    nodes: [ac_p, out]   # high-side from ac_p
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D2
+    nodes: [ac_n, out]   # high-side from ac_n
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D3
+    nodes: [0, ac_p]     # low-side returns ac_p to 0 when negative
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D4
+    nodes: [0, ac_n]     # low-side returns ac_n to 0 when negative
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 470e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 100.0

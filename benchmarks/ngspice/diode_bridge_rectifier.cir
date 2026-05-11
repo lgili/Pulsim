@@ -1,0 +1,20 @@
+* Full-wave diode-bridge rectifier — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/diode_bridge_rectifier.yaml.
+*
+* 24 V_pk sine at 100 Hz → 4-diode bridge → 470 µF / 100 Ω. Tests
+* simultaneous diode PWL transitions at every zero crossing.
+
+Vac ac_p ac_n SIN(0 24 100 0 0 0)
+
+* Diodes emulated as switches on their own A-K voltage
+SD1 ac_p out  ac_p out  DMOD
+SD2 ac_n out  ac_n out  DMOD
+SD3 0    ac_p 0    ac_p DMOD
+SD4 0    ac_n 0    ac_n DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Cout out 0 470u IC=0
+Rload out 0 100
+
+.tran 50u 50m UIC
+.end

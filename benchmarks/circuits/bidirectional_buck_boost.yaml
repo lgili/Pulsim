@@ -1,0 +1,112 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: bidirectional_buck_boost
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # 4-switch bidirectional buck-boost (a.k.a. "4-switch buck-
+      # boost"). Two half-bridges in series with an inductor in the
+      # middle: when running in BUCK mode the left half-bridge
+      # chops V_in and the right half-bridge is held with the
+      # high-side OFF / low-side ON (=> inductor drives out_cap).
+      # Here we configure it as a steady BUCK from 24 V → ≈12 V
+      # (duty_left = 0.5, right half-bridge: high-side perma-OFF,
+      # low-side perma-ON). Four vcswitches active simultaneously.
+      max_error: 8.0e-1
+      steady_state_max_error: 4.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 500e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  # Left half-bridge: complementary PWM at 50 % duty
+  - type: voltage_source
+    name: VgLh
+    nodes: [g_lh, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  - type: voltage_source
+    name: VgLl
+    nodes: [g_ll, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+  # Right half-bridge: high-side OFF (DC 0V gate), low-side ON
+  # (DC 10V gate) → output side held to the inductor terminal
+  - type: voltage_source
+    name: VgRh
+    nodes: [g_rh, 0]
+    waveform:
+      type: dc
+      value: 0.0
+  - type: voltage_source
+    name: VgRl
+    nodes: [g_rl, 0]
+    waveform:
+      type: dc
+      value: 10.0
+  # Left high-side
+  - type: vcswitch
+    name: S_lh
+    nodes: [g_lh, vcc, sw_l]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Left low-side
+  - type: vcswitch
+    name: S_ll
+    nodes: [g_ll, sw_l, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Right high-side (held OFF in buck mode)
+  - type: vcswitch
+    name: S_rh
+    nodes: [g_rh, vcc, sw_r]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Right low-side (held ON, ties sw_r to ground… wait we need a
+  # CONDUCTING path: actually in 4-switch buck-boost, when running
+  # in buck the right LOW switch stays OFF and the right HIGH stays
+  # ON so that the inductor's far terminal = out_cap. Fixed:
+  - type: vcswitch
+    name: S_rl
+    nodes: [g_rl, sw_r, out]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L1
+    nodes: [sw_l, sw_r]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 5.0

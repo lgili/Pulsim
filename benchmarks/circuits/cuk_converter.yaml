@@ -1,0 +1,99 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cuk_converter
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Cuk converter: dual to the SEPIC but produces INVERTED
+      # output. Topology:
+      #   V_in → L1 → A (switch midpoint)
+      #         switch (low-side): A → 0
+      #         C_coupling (energy transfer): A → B
+      #         L2: B → out
+      #         diode: 0 → B (anode at 0, cathode at B)
+      #         C_out + R_load on out (out is NEGATIVE)
+      # duty=0.5 → V_out = −V_in · duty/(1−duty) = −12 V.
+      # Cuk uniquely stores energy in C_coupling (not the inductors)
+      # which gives continuous input AND output currents.
+      max_error: 1.0e+1
+      steady_state_max_error: 8.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 2.0e-3
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 220
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 12.0
+  - type: voltage_source
+    name: Vg
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      dead_time: 200e-9
+  - type: inductor
+    name: L1
+    nodes: [vin, sw_node]
+    value: 47e-6
+    ic: 0.0
+  - type: vcswitch
+    name: S1
+    nodes: [gate, sw_node, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Energy transfer cap, pre-charged to V_in − V_out = 24 V
+  - type: capacitor
+    name: Ccpl
+    nodes: [sw_node, mid]
+    value: 22e-6
+    ic: 24.0
+  - type: inductor
+    name: L2
+    nodes: [mid, out]
+    value: 47e-6
+    ic: 0.0
+  # Freewheel diode: 0 → mid (mid swings negative when SW is on,
+  # so diode forward-conducts during the SW-ON half of the cycle)
+  - type: diode
+    name: Drect
+    nodes: [0, mid]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 20.0

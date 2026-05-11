@@ -1,0 +1,28 @@
+* SEPIC converter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/sepic.yaml.
+*
+* Non-inverting buck-boost: V_in=12V, single low-side switch +
+* coupling cap + L2 + freewheel diode. duty=0.5 at 50 kHz →
+* V_out ≈ V_in · duty/(1−duty) = 12 V.
+
+Vin vin 0 DC 12
+Vg  gate 0 PULSE(0 10 0 1n 1n 9.8u 20u)
+
+L1   vin sw_node 47u IC=0
+S1   sw_node 0 gate 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Coupling cap (steady-state V ≈ V_in = 12 V)
+Ccpl sw_node mid 10u IC=12
+
+L2   mid 0 47u IC=0
+
+* Output diode emulated as a switch on its own A-K voltage
+SDrect mid out mid out DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Cout out 0 47u IC=0
+Rload out 0 20
+
+.tran 0.2u 2m UIC
+.end

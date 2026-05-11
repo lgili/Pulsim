@@ -1,0 +1,32 @@
+* Two-phase interleaved boost — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/two_phase_interleaved_boost.yaml.
+*
+* Two boost legs share V_in = 12 V and a 100 µF output cap.
+* Phase A PWM starts at t=0; phase B is 180° shifted (= 10 µs).
+* duty = 0.4 → V_out ≈ 20 V on a 10 Ω load.
+
+Vin vin 0 DC 12
+
+* Phase A: 200 ns dead-time → on-time = 7.8 µs
+Vga g_a 0 PULSE(0 10 0     1n 1n 7.8u 20u)
+* Phase B: shifted by 10 µs (half period)
+Vgb g_b 0 PULSE(0 10 10u   1n 1n 7.8u 20u)
+
+* Leg A
+L_a vin sw_a 47u IC=0
+S_a sw_a 0 g_a 0 SWMOD
+SDa sw_a out sw_a out DMOD
+
+* Leg B
+L_b vin sw_b 47u IC=0
+S_b sw_b 0 g_b 0 SWMOD
+SDb sw_b out sw_b out DMOD
+
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+.model DMOD  SW(VT=0 VH=1m  RON=5m ROFF=1Meg)
+
+Cout out 0 100u IC=0
+Rload out 0 10
+
+.tran 0.2u 2m UIC
+.end

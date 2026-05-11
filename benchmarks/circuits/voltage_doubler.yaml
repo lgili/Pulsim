@@ -1,0 +1,78 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: voltage_doubler
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Half-wave voltage doubler (Greinacher / Villard cell):
+      # AC source → C1 → diode D1 → out, diode D2 → ground.
+      # During the negative half-cycle D2 conducts, charging C1 to
+      # V_peak. During the positive half-cycle D1 conducts, adding
+      # the source's positive half to C1's charge → C_out sees
+      # 2·V_peak. With V_pk = 12 V, V_out ≈ 24 V.
+      max_error: 1.0e+0
+      steady_state_max_error: 5.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 50e-3
+  dt: 50e-6
+  dt_max: 100e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 220
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vac
+    nodes: [ac, 0]
+    waveform:
+      type: sine
+      amplitude: 12.0
+      frequency: 100.0
+      offset: 0.0
+      phase: 0.0
+  # Pump cap: AC swings ± 12 V, this cap couples to node `cp` which
+  # gets clamped to ground on negative half-cycles and lifted to
+  # +12 V on positive half-cycles (so cp swings 0 .. +24 V).
+  - type: capacitor
+    name: C1
+    nodes: [ac, cp]
+    value: 100e-6
+    ic: 0.0
+  # D2 clamps cp to ground during the AC negative half-cycle
+  - type: diode
+    name: D2
+    nodes: [0, cp]
+    g_on: 200.0
+    g_off: 1e-6
+  # D1 transfers the lifted cp charge to the output cap
+  - type: diode
+    name: D1
+    nodes: [cp, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 470e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 1.0e3

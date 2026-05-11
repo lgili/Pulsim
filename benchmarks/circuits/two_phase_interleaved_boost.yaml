@@ -1,0 +1,117 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: two_phase_interleaved_boost
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Two boost legs with PWM phases shifted 180° feed a shared
+      # output cap → ripple cancellation. Same V_in=12 V → V_out
+      # ≈ 20 V (duty=0.4) but two L's, two switches, two diodes
+      # operating with their PWM trains exactly 10 µs apart.
+      # The shared output node sees both legs simultaneously,
+      # which tests how the solver handles two phase-shifted
+      # commutation events per cycle.
+      max_error: 1.0e+1
+      steady_state_max_error: 1.0e+0
+simulation:
+  tstart: 0.0
+  tstop: 2.0e-3
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 12.0
+  # Phase A: starts at t=0
+  - type: voltage_source
+    name: Vg_a
+    nodes: [g_a, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.4
+      phase: 0.0
+      dead_time: 200e-9
+  # Phase B: 180° shifted (half-period delay)
+  - type: voltage_source
+    name: Vg_b
+    nodes: [g_b, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.4
+      phase: 0.5
+      dead_time: 200e-9
+
+  # Leg A
+  - type: inductor
+    name: L_a
+    nodes: [vin, sw_a]
+    value: 47e-6
+    ic: 0.0
+  - type: vcswitch
+    name: S_a
+    nodes: [g_a, sw_a, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D_a
+    nodes: [sw_a, out]
+    g_on: 200.0
+    g_off: 1e-6
+
+  # Leg B
+  - type: inductor
+    name: L_b
+    nodes: [vin, sw_b]
+    value: 47e-6
+    ic: 0.0
+  - type: vcswitch
+    name: S_b
+    nodes: [g_b, sw_b, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D_b
+    nodes: [sw_b, out]
+    g_on: 200.0
+    g_off: 1e-6
+
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

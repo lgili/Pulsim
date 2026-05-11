@@ -1,0 +1,31 @@
+* 4-switch bidirectional buck-boost (running as a buck) — ngspice
+* Matches Pulsim benchmarks/circuits/bidirectional_buck_boost.yaml.
+*
+* Left half-bridge chops V_in=24V at duty=0.5 → mid-node ≈ 12 V.
+* Right half-bridge: high-side OFF, low-side fixed ON so the
+* inductor's far terminal is the output cap node.
+* Output: 12 V (buck mode, no boost stage active).
+
+Vdc vcc 0 DC 24
+
+* Left half-bridge complementary PWM
+Vglh g_lh 0 PULSE(0  10 0 1n 1n 10u 20u)
+Vgll g_ll 0 PULSE(10 0  0 1n 1n 10u 20u)
+* Right half-bridge: high-side off, low-side on
+Vgrh g_rh 0 DC 0
+Vgrl g_rl 0 DC 10
+
+* Left
+S_lh vcc sw_l g_lh 0 SWMOD
+S_ll sw_l 0   g_ll 0 SWMOD
+* Right
+S_rh vcc sw_r g_rh 0 SWMOD
+S_rl sw_r out g_rl 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+L1   sw_l sw_r 47u IC=0
+Cout out 0   100u IC=0
+Rload out 0  5
+
+.tran 0.2u 500u UIC
+.end

@@ -260,6 +260,93 @@ benchmarks:
         spice_vector: v(out)
     scenarios: [direct_trap]
 
+  # ----- Phase 18: heavier topology stress tests -----
+  # 10 new converter / inverter topologies covering most of the
+  # PE textbook taxonomy.  3 deferred (sync_boost, half_bridge_
+  # transformer_dc, npc_three_level_halfbridge) — see DEFERRED
+  # comments below.
+  - path: circuits/diode_bridge_rectifier.yaml
+    ngspice_netlist: ngspice/diode_bridge_rectifier.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/sepic.yaml
+    ngspice_netlist: ngspice/sepic.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/cuk_converter.yaml
+    ngspice_netlist: ngspice/cuk_converter.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/voltage_doubler.yaml
+    ngspice_netlist: ngspice/voltage_doubler.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/two_phase_interleaved_boost.yaml
+    ngspice_netlist: ngspice/two_phase_interleaved_boost.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/synchronous_flyback.yaml
+    ngspice_netlist: ngspice/synchronous_flyback.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [trbdf2]
+  - path: circuits/bidirectional_buck_boost.yaml
+    ngspice_netlist: ngspice/bidirectional_buck_boost.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/three_phase_diode_rectifier.yaml
+    ngspice_netlist: ngspice/three_phase_diode_rectifier.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    # YAML uses bdf1 + robust Newton config; need direct_bdf1
+    # scenario so the manifest doesn't override to trapezoidal/
+    # trbdf2 (both of which lose accuracy on this circuit).
+    scenarios: [direct_bdf1]
+  - path: circuits/forward_converter.yaml
+    ngspice_netlist: ngspice/forward_converter.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [trbdf2]
+  - path: circuits/buck_with_current_sense.yaml
+    ngspice_netlist: ngspice/buck_with_current_sense.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+
+  # synchronous_boost DEFERRED: sync rectifier instead of a
+  #   freewheel diode means the inductor can reverse-conduct
+  #   during the OFF half-cycle, which excites the LC tank into
+  #   sustained oscillation.  Real sync-boost controllers use
+  #   zero-current detection to gate the sync switch off when
+  #   iL → 0; with a fixed PWM both Pulsim and ngspice diverge
+  #   into multi-mode resonance (verified end-to-end).
+  # half_bridge_transformer_dc DEFERRED: the half-bridge mid-rail
+  #   topology with phase-shifted PWMs and a 4-node coupled_inductor
+  #   leaves V(g_l) stuck in BDF1 mode and triggers max-iterations
+  #   in trapezoidal — needs proper dead-time + complementary gating
+  #   that the simple PWM source can't express robustly.
+  # npc_three_level_halfbridge DEFERRED: 4 series vcswitches + 2
+  #   clamp diodes + LC filter is numerically pathological without
+  #   body diodes on each switch and active mid-rail balancing;
+  #   both Pulsim and ngspice diverge into multi-kilovolt swings
+  #   at the first transition.
+
   # buck_pmos — Phase 14 re-test: Pulsim's PMOS now DC-OP-converges
   #   and the transient settles to ~12 V at t = 500 µs (with the
   #   MOSFET runtime-stamp sign fix). However, the **ngspice
@@ -306,6 +393,11 @@ scenarios:
   trbdf2:
     simulation:
       integrator: trbdf2
+      solver:
+        order: [klu]
+  direct_bdf1:
+    simulation:
+      integrator: bdf1
       solver:
         order: [klu]
   rosenbrockw:

@@ -1,0 +1,109 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: three_phase_diode_rectifier
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Three-phase six-pulse diode rectifier ("3-phase bridge").
+      # Three 24 V_pk AC sources at 100 Hz, phases 0° / 120° /
+      # 240° feed a 6-diode bridge into a 1 mF / 200 Ω output
+      # filter. At any instant exactly one high-side and one
+      # low-side diode conduct (whichever phase is highest /
+      # lowest). Tests 6 simultaneously-active PWL devices, all
+      # commutating six times per AC period.
+      max_error: 2.0e+0
+      steady_state_max_error: 1.5e+0
+simulation:
+  tstart: 0.0
+  tstop: 80e-3
+  dt: 50e-6
+  dt_max: 100e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Va
+    nodes: [a, 0]
+    waveform:
+      type: sine
+      amplitude: 24.0
+      frequency: 100.0
+      offset: 0.0
+      phase: 0.0
+  - type: voltage_source
+    name: Vb
+    nodes: [b, 0]
+    waveform:
+      type: sine
+      amplitude: 24.0
+      frequency: 100.0
+      offset: 0.0
+      phase: 2.0943951  # 120° = 2π/3 rad
+  - type: voltage_source
+    name: Vc
+    nodes: [c, 0]
+    waveform:
+      type: sine
+      amplitude: 24.0
+      frequency: 100.0
+      offset: 0.0
+      phase: 4.1887902  # 240° = 4π/3 rad
+  # High-side diodes (anode at AC phase, cathode at out)
+  - type: diode
+    name: Dah
+    nodes: [a, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dbh
+    nodes: [b, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dch
+    nodes: [c, out]
+    g_on: 200.0
+    g_off: 1e-6
+  # Low-side diodes (anode at ground, cathode at AC phase)
+  - type: diode
+    name: Dal
+    nodes: [0, a]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dbl
+    nodes: [0, b]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dcl
+    nodes: [0, c]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 1.0e-3
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 200.0

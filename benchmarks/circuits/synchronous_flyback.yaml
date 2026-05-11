@@ -1,0 +1,96 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: synchronous_flyback
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Flyback converter with SYNCHRONOUS rectification on the
+      # secondary: a vcswitch replaces the rectifier diode. Gate
+      # drive: secondary switch is ON exactly when primary switch
+      # is OFF (complementary). Same V_in=24 V, K=0.95, 1:1
+      # transformer, duty=0.4. Steady-state output ≈ 14 V (slightly
+      # higher than plain flyback because sync rectifier has no
+      # forward-voltage drop). This stresses coupled inductor +
+      # TWO vcswitches in the same simulation.
+      max_error: 5.0e+1
+      steady_state_max_error: 1.5e+0
+simulation:
+  tstart: 0.0
+  tstop: 2.0e-3
+  dt: 0.1e-6
+  dt_max: 1e-6
+  integrator: bdf1
+  adaptive_timestep: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  # Primary gate (ON during 0..8 µs of each 20 µs period)
+  - type: voltage_source
+    name: Vg_p
+    nodes: [g_p, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.4
+  # Secondary gate (complementary: ON during 8..20 µs)
+  - type: voltage_source
+    name: Vg_s
+    nodes: [g_s, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.4
+  - type: coupled_inductor
+    name: T1
+    nodes: [vin, sw_drain, sec_dot, 0]
+    l1: 100e-6
+    l2: 100e-6
+    coupling: 0.95
+  # Primary switch (low-side)
+  - type: vcswitch
+    name: S_pri
+    nodes: [g_p, sw_drain, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Secondary synchronous rectifier (replaces Drect)
+  - type: vcswitch
+    name: S_sec
+    nodes: [g_s, sec_dot, out]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

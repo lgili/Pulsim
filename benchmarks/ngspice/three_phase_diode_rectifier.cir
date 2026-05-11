@@ -1,0 +1,25 @@
+* Three-phase 6-pulse diode rectifier — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/three_phase_diode_rectifier.yaml.
+*
+* Three 24 V_pk AC sources at 100 Hz, phases 0° / 120° / 240°.
+* 6-diode bridge → 1 mF / 200 Ω output filter.
+
+Va a 0 SIN(0 24 100 0 0 0)
+Vb b 0 SIN(0 24 100 0 0 120)
+Vc c 0 SIN(0 24 100 0 0 240)
+
+* High-side diodes (anode at AC, cathode at out)
+SDah a out a out DMOD
+SDbh b out b out DMOD
+SDch c out c out DMOD
+* Low-side diodes (anode at ground, cathode at AC)
+SDal 0 a 0 a DMOD
+SDbl 0 b 0 b DMOD
+SDcl 0 c 0 c DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Cout out 0 1m  IC=0
+Rload out 0 200
+
+.tran 50u 80m UIC
+.end

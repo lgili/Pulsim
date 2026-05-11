@@ -1,0 +1,26 @@
+* Cuk converter (inverting) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/cuk_converter.yaml.
+*
+* Single low-side switch + energy-transfer cap + L2 + freewheel
+* diode on the mid node. Output is NEGATIVE.
+* duty=0.5 → V_out ≈ −12 V at 50 kHz.
+
+Vin vin 0 DC 12
+Vg  gate 0 PULSE(0 10 0 1n 1n 9.8u 20u)
+
+L1   vin sw_node 47u IC=0
+S1   sw_node 0 gate 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+Ccpl sw_node mid 22u IC=24
+L2   mid out 47u IC=0
+
+* Diode emulated as a switch on its own A-K voltage
+SDrect 0 mid 0 mid DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Cout out 0 47u IC=0
+Rload out 0 20
+
+.tran 0.2u 2m UIC
+.end

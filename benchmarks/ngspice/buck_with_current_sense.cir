@@ -1,0 +1,24 @@
+* Synchronous buck with current-sense shunt — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/buck_with_current_sense.yaml.
+*
+* Same as synchronous_buck but with a 10 mΩ current-sense
+* resistor between the inductor and the output cap. Tests
+* the solver against an additional stiff series element.
+
+Vdc vcc 0 DC 24
+
+Vgh gate_h 0 PULSE(0  10 0 1n 1n 10u 20u)
+Vgl gate_l 0 PULSE(10 0  0 1n 1n 10u 20u)
+
+Sh vcc sw gate_h 0 SWMOD
+Sl sw 0   gate_l 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+L1      sw n_sense 47u IC=0
+R_sense n_sense out 10m
+
+C1   out 0 100u IC=0
+Rload out 0 5
+
+.tran 0.2u 500u UIC
+.end

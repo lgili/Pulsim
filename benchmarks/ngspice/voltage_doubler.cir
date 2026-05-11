@@ -1,0 +1,19 @@
+* Half-wave voltage doubler (Greinacher / Villard) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/voltage_doubler.yaml.
+*
+* V_ac = 12 V_pk sine at 100 Hz → C1 → D1 → output.
+* D2 clamps the pump node to ground on negative half-cycles.
+* Output settles at ~2·V_pk = 24 V.
+
+Vac ac 0 SIN(0 12 100 0 0 0)
+
+C1 ac cp 100u IC=0
+SD2 0  cp 0  cp DMOD
+SD1 cp out cp out DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Cout out 0 470u IC=0
+Rload out 0 1k
+
+.tran 50u 50m UIC
+.end

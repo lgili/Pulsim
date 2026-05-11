@@ -1,0 +1,100 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: forward_converter
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Single-switch forward converter: V_in across primary
+      # (V_p) when switch is ON, secondary delivers V_in to the
+      # output inductor (via the rectifier diode). When switch
+      # turns OFF, the freewheel diode takes over and the LC
+      # output filter holds the output. Unlike a flyback, the
+      # transformer doesn't store energy — it just couples
+      # power directly. duty = 0.4 → V_out ≈ V_in · duty = 9.6 V.
+      max_error: 5.0e+1
+      steady_state_max_error: 1.5e+0
+simulation:
+  tstart: 0.0
+  tstop: 2.0e-3
+  dt: 0.1e-6
+  dt_max: 1e-6
+  integrator: bdf1
+  adaptive_timestep: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  - type: voltage_source
+    name: Vg
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.4
+  # Single primary switch (low-side)
+  - type: vcswitch
+    name: SW
+    nodes: [gate, sw_drain, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Transformer 1:1, K=0.95 (vin → sw_drain primary, sec_p → sec_n secondary)
+  - type: coupled_inductor
+    name: T1
+    nodes: [vin, sw_drain, sec_p, sec_n]
+    l1: 200e-6
+    l2: 200e-6
+    coupling: 0.95
+  # Tie sec_n to ground (forward topology has DC-coupled secondary)
+  - type: resistor
+    name: R_st
+    nodes: [sec_n, 0]
+    value: 1e-3
+  # Rectifier diode (forward path)
+  - type: diode
+    name: D_rect
+    nodes: [sec_p, n_lo]
+    g_on: 200.0
+    g_off: 1e-6
+  # Freewheel diode (catches inductor current during switch OFF)
+  - type: diode
+    name: D_fw
+    nodes: [0, n_lo]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L_o
+    nodes: [n_lo, out]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C_o
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 5.0

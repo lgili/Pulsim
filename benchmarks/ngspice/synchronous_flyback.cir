@@ -1,0 +1,30 @@
+* Synchronous flyback — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/synchronous_flyback.yaml.
+*
+* Same 1:1 K=0.95 coupled inductor + primary switch as the
+* plain flyback, but the secondary rectifier is a sync switch.
+* duty = 0.4 → V_out ≈ 14 V (no diode drop).
+
+Vin vin 0 DC 24
+
+* Primary gate (ON 0..8 µs of 20 µs period)
+Vgp g_p 0 PULSE(0  10 0 1n 1n 8u  20u)
+* Secondary gate (ON 8..20 µs — inverted)
+Vgs g_s 0 PULSE(10 0  0 1n 1n 8u  20u)
+
+* Primary inductor (vin → sw_drain). Secondary (sec_dot → 0).
+L1 vin sw_drain 100u
+L2 sec_dot 0    100u
+K1 L1 L2 0.95
+
+* Primary switch
+S_pri sw_drain 0 g_p 0 SWMOD
+* Secondary sync rectifier
+S_sec sec_dot out g_s 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+Cout out 0 47u IC=0
+Rload out 0 10
+
+.tran 0.1u 2m UIC
+.end
