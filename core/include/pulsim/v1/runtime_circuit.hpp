@@ -3032,39 +3032,69 @@ private:
     /// Anchor virtual control block output nodes to ground via a
     /// tiny conductance (g_anchor = 1 nS, i.e. ~1 GΩ pull-down).
     ///
-    /// Control blocks like `pi_controller`, `pid_controller`, and
-    /// `op_amp` declare three nodes [in_pos, in_neg, output] for
-    /// ergonomic wiring — but virtual blocks only emit channel
-    /// values; they never stamp anything electrically into the
-    /// output node. With nothing else touching that node, the MNA
-    /// matrix has an unconstrained row/column and the DC OP /
-    /// Newton solve fails with "Max iterations reached" or
-    /// "DC operating point failed". Users currently have to hand-
-    /// add a `resistor: pi_out → 0  value: 1e6` to every YAML
-    /// (every Phase 19 closed-loop bench did this).
+    /// Control blocks declare nodes for ergonomic wiring (e.g.
+    /// pi_controller takes [in_pos, in_neg, output];
+    /// lookup_table / gain / integrator / etc. take [in, out]).
+    /// But virtual blocks only emit channel values — they never
+    /// stamp anything electrically into the output node. With
+    /// nothing else touching that node, the MNA matrix has an
+    /// unconstrained row/column and the DC OP / Newton solve
+    /// fails with "Max iterations reached" or "DC operating
+    /// point failed", with no indication that the fix was to
+    /// hand-add a high-impedance pull-down.
     ///
-    /// The anchor here makes the floating node fully equivalent to
-    /// adding that pull-down, but transparent to the user — and at
-    /// 1 nS the bias current through it (e.g. ~10 nA at 10 V) is
-    /// well below the gmin/iref scales the solver already tolerates,
-    /// so no observable circuit behavior changes.
+    /// We anchor:
+    ///   - node[2] of pi_controller / pid_controller / op_amp
+    ///     (the "output" of a 3-node block)
+    ///   - node[1] of all "single-input" control blocks where
+    ///     in1 is conventionally a reference and the second node
+    ///     is read but rarely driven (lookup_table, gain,
+    ///     integrator, differentiator, limiter, rate_limiter,
+    ///     sample_hold, transfer_function, delay_block,
+    ///     hysteresis, comparator)
+    ///
+    /// Truly differential blocks (sum, subtraction, math_block,
+    /// signal_mux, signal_demux) are NOT anchored — both their
+    /// nodes are real inputs that the user is expected to drive.
+    ///
+    /// pwm_generator is also excluded: its "output" goes to a
+    /// switch's PWL state via `target_component`, never to a
+    /// node, so anchoring would be meaningless.
+    ///
+    /// At 1 nS the bias current through the anchor (e.g. ~10 nA
+    /// at 10 V) is well below the gmin/iref scales the solver
+    /// already tolerates, so no observable circuit behavior
+    /// changes — verified bit-for-bit against the existing
+    /// closed-loop baselines.
     template<typename Triplets>
     void stamp_virtual_block_output_anchors(Triplets& triplets) const {
         if (virtual_components_.empty()) return;
         constexpr Real g_anchor = 1.0e-9;  // 1 GΩ to ground
+        // Single-input blocks whose 2nd node is read but not
+        // user-driven by typical usage.
+        static const std::unordered_set<std::string> kAnchorNode1 = {
+            "lookup_table", "gain", "integrator", "differentiator",
+            "limiter", "rate_limiter", "sample_hold",
+            "transfer_function", "delay_block",
+            "hysteresis", "comparator",
+        };
+        // 3-node analog-output blocks; node[2] is the synthesized
+        // output and never electrically driven.
+        static const std::unordered_set<std::string> kAnchorNode2 = {
+            "pi_controller", "pid_controller", "op_amp",
+        };
+
+        auto anchor = [&](Index node) {
+            if (node < 0 || node >= system_size()) return;
+            triplets.emplace_back(node, node, g_anchor);
+        };
+
         for (const auto& component : virtual_components_) {
-            // Only 3-node analog-output control blocks need anchoring.
-            // pwm_generator's "output" goes to a switch state, not a
-            // node, so it doesn't need this even when given 3 nodes.
-            const bool is_anchored_type =
-                (component.type == "pi_controller") ||
-                (component.type == "pid_controller") ||
-                (component.type == "op_amp");
-            if (!is_anchored_type) continue;
-            if (component.nodes.size() < 3) continue;
-            const Index out_node = component.nodes[2];
-            if (out_node < 0 || out_node >= system_size()) continue;
-            triplets.emplace_back(out_node, out_node, g_anchor);
+            if (kAnchorNode2.find(component.type) != kAnchorNode2.end()) {
+                if (component.nodes.size() >= 3) anchor(component.nodes[2]);
+            } else if (kAnchorNode1.find(component.type) != kAnchorNode1.end()) {
+                if (component.nodes.size() >= 2) anchor(component.nodes[1]);
+            }
         }
     }
 

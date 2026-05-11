@@ -1,0 +1,184 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cascaded_h_bridge_5level
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/cascaded_h_bridge_5level.csv
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # Two H-bridge cells stacked in series. Each cell can output
+  # +Vcell, 0, or −Vcell, so two cells in series can produce
+  # five levels: +2V, +V, 0, −V, −2V. Each cell has its own DC
+  # source (no charge balancing needed here).
+  #
+  # Cell 1: vdc1+ → S1H → mid1 → S1L → vdc1−   plus a return
+  # leg with S1H'/S1L'.
+  # Output node of cell 1 is `out1`.
+  # Cell 2 sits on top of cell 1: out1 → cell2 → out_final.
+
+  # ------- Cell 1 source + bridge -------
+  - type: voltage_source
+    name: Vdc1
+    nodes: [vdc1p, vdc1n]
+    waveform: {type: dc, value: 12.0}
+  - type: resistor
+    name: R_v1n
+    nodes: [vdc1n, 0]
+    value: 1.0e-3
+  - type: voltage_source
+    name: Vg1_AH
+    nodes: [g1_ah, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 5000
+      duty: 0.5
+  - type: voltage_source
+    name: Vg1_AL
+    nodes: [g1_al, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 5000
+      duty: 0.5
+  - type: voltage_source
+    name: Vg1_BH
+    nodes: [g1_bh, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 5000
+      duty: 0.5
+      phase: 0.5
+  - type: voltage_source
+    name: Vg1_BL
+    nodes: [g1_bl, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 5000
+      duty: 0.5
+      phase: 0.5
+  - type: vcswitch
+    name: S1_AH
+    nodes: [g1_ah, vdc1p, cell1_a]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S1_AL
+    nodes: [g1_al, cell1_a, vdc1n]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S1_BH
+    nodes: [g1_bh, vdc1p, cell1_b]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S1_BL
+    nodes: [g1_bl, cell1_b, vdc1n]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+
+  # ------- Cell 2 source + bridge -------
+  - type: voltage_source
+    name: Vdc2
+    nodes: [vdc2p, vdc2n]
+    waveform: {type: dc, value: 12.0}
+  # Series the second cell on top of cell 1: cell1_b → vdc2n
+  - type: resistor
+    name: R_link
+    nodes: [cell1_b, vdc2n]
+    value: 1.0e-3
+  - type: voltage_source
+    name: Vg2_AH
+    nodes: [g2_ah, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 5000
+      duty: 0.25
+  - type: voltage_source
+    name: Vg2_AL
+    nodes: [g2_al, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 5000
+      duty: 0.25
+  - type: voltage_source
+    name: Vg2_BH
+    nodes: [g2_bh, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 5000
+      duty: 0.25
+      phase: 0.5
+  - type: voltage_source
+    name: Vg2_BL
+    nodes: [g2_bl, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 5000
+      duty: 0.25
+      phase: 0.5
+  - type: vcswitch
+    name: S2_AH
+    nodes: [g2_ah, vdc2p, cell2_a]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2_AL
+    nodes: [g2_al, cell2_a, vdc2n]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2_BH
+    nodes: [g2_bh, vdc2p, out]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2_BL
+    nodes: [g2_bl, out, vdc2n]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+
+  # Output: cell1_a is reference (low side), out is upper terminal
+  - type: resistor
+    name: Rload
+    nodes: [out, cell1_a]
+    value: 50.0

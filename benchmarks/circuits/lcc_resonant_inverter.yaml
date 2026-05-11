@@ -1,0 +1,83 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: lcc_resonant_inverter
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/lcc_resonant_inverter.csv
+simulation:
+  tstart: 0.0
+  tstop: 200e-6
+  dt: 0.05e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # LCC resonant tank driven by a half-bridge running at the tank's
+  # resonant frequency (~100 kHz). Output across the parallel cap
+  # gets a near-sinusoidal envelope.
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 24.0}
+  - type: voltage_source
+    name: VgH
+    nodes: [g_h, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 100000
+      duty: 0.5
+  - type: voltage_source
+    name: VgL
+    nodes: [g_l, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 100000
+      duty: 0.5
+  - type: vcswitch
+    name: SH
+    nodes: [g_h, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: SL
+    nodes: [g_l, sw, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # LCC tank: Lr in series, then Cs (series cap) and Cp
+  # (parallel cap). Lr = 22 µH, Cs = 100 nF, Cp = 22 nF.
+  # f0 ≈ 1/(2π√(Lr · Cs)) ≈ 107 kHz.
+  - type: inductor
+    name: Lr
+    nodes: [sw, n_cs]
+    value: 22e-6
+    ic: 0.0
+  - type: capacitor
+    name: Cs
+    nodes: [n_cs, out]
+    value: 100e-9
+    ic: 0.0
+  - type: capacitor
+    name: Cp
+    nodes: [out, 0]
+    value: 22e-9
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 50.0

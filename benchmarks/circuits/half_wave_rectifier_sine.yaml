@@ -1,0 +1,53 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: half_wave_rectifier_sine
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/half_wave_rectifier_sine.csv
+simulation:
+  tstart: 0.0
+  tstop: 50e-3
+  dt: 50e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 220
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+components:
+  # Single-diode half-wave rectifier with RC smoothing.
+  - type: voltage_source
+    name: Vac
+    nodes: [ac, 0]
+    waveform:
+      type: sine
+      amplitude: 24.0
+      frequency: 100.0
+      offset: 0.0
+      phase: 0.0
+  - type: diode
+    name: D1
+    nodes: [ac, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 220e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 500.0

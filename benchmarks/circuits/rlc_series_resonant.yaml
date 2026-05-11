@@ -1,0 +1,51 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: rlc_series_resonant
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 1.0e-2
+      steady_state_max_error: 1.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/rlc_series_resonant.csv
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 1e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  # Series RLC excited at its own resonant frequency: f0 =
+  # 1/(2π·sqrt(LC)) with L=1mH, C=1µF → f0 ≈ 5.033 kHz.
+  # At resonance, X_L = X_C and the impedance is purely R = 5 Ω.
+  # The voltage across C peaks at Q·V_in, where Q = (1/R)·√(L/C)
+  # = (1/5)·√(1000) ≈ 6.32 → V(out)_pk ≈ 6.32 V on a 1 V_pk input.
+  - type: voltage_source
+    name: Vac
+    nodes: [ac, 0]
+    waveform:
+      type: sine
+      amplitude: 1.0
+      frequency: 5033.0
+      offset: 0.0
+      phase: 0.0
+  - type: resistor
+    name: R1
+    nodes: [ac, n_l]
+    value: 5.0
+  - type: inductor
+    name: L1
+    nodes: [n_l, out]
+    value: 1.0e-3
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1.0e-6
+    ic: 0.0

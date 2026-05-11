@@ -1,0 +1,88 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: half_bridge_inverter_lc
+  category: nonlinear
+  observables:
+    - column: V(load)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(load)
+    baseline: baselines/half_bridge_inverter_lc.csv
+simulation:
+  tstart: 0.0
+  tstop: 50e-3
+  dt: 1e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # Half-bridge inverter chopped at 1 kHz drives an LC filter
+  # tuned roughly to f_chop, so V(load) is a near-sinusoidal
+  # output at 1 kHz around mid-rail (V_in/2 = 12 V).
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 24.0}
+  - type: voltage_source
+    name: VgH
+    nodes: [g_h, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 1000
+      duty: 0.5
+  - type: voltage_source
+    name: VgL
+    nodes: [g_l, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 1000
+      duty: 0.5
+  - type: vcswitch
+    name: SH
+    nodes: [g_h, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: SL
+    nodes: [g_l, sw, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Mid-rail virtual ground via capacitor divider
+  - type: capacitor
+    name: Cup
+    nodes: [vcc, mid]
+    value: 1.0e-3
+    ic: 12.0
+  - type: capacitor
+    name: Cdn
+    nodes: [mid, 0]
+    value: 1.0e-3
+    ic: 12.0
+  # LC filter tuned near 1 kHz: f = 1/(2π√(LC)).  L = 1 mH,
+  # C = 22 µF → f ≈ 1.07 kHz.
+  - type: inductor
+    name: L1
+    nodes: [sw, load]
+    value: 1.0e-3
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [load, mid]
+    value: 22e-6
+    ic: 12.0
+  - type: resistor
+    name: Rload
+    nodes: [load, mid]
+    value: 50.0

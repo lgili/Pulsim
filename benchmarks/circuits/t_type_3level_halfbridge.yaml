@@ -1,0 +1,123 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: t_type_3level_halfbridge
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/t_type_3level_halfbridge.csv
+simulation:
+  tstart: 0.0
+  tstop: 600e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # T-type 3-level half-bridge.
+  #
+  #            vcc ── S1 ──┐
+  #                        │
+  #                        out ──── (LC filter)
+  #                        │
+  #            mid ── S2 ──┘
+  #                        │
+  #                       ──
+  #            mid ── S3 ──┐
+  #                        │
+  #            0 ── S4 ────┘
+  #
+  # Cap divider creates the mid-rail at Vcc/2. S2 and S3 are the
+  # "T" switches between mid and out. With the right gating
+  # pattern the output goes to vcc (S1 closed), 0 (S4 closed),
+  # or mid (S2+S3 closed).
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 48.0}
+  - type: capacitor
+    name: Cup
+    nodes: [vcc, mid]
+    value: 470e-6
+    ic: 24.0
+  - type: capacitor
+    name: Cdn
+    nodes: [mid, 0]
+    value: 470e-6
+    ic: 24.0
+  # S1 chopped at 50 % between vcc and out (top phase of cycle)
+  - type: voltage_source
+    name: Vg_S1
+    nodes: [g1, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  # S4 complementary (bottom phase)
+  - type: voltage_source
+    name: Vg_S4
+    nodes: [g4, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+  # S2 + S3 always ON: mid → out is conducting whenever the
+  # outer switches are OFF (this is the dead-time path).
+  - type: voltage_source
+    name: Vg_inner
+    nodes: [g_inner, 0]
+    waveform: {type: dc, value: 10.0}
+
+  - type: vcswitch
+    name: S1
+    nodes: [g1, vcc, out]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2
+    nodes: [g_inner, mid, n_mid_in]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Series clamp resistor instead of a diode (avoids the
+  # diode-commutation chatter we've seen with PWL diodes during
+  # forced switch transitions).
+  - type: resistor
+    name: R_t
+    nodes: [n_mid_in, out]
+    value: 10e-3
+  - type: vcswitch
+    name: S4
+    nodes: [g4, out, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+
+  # LC output filter
+  - type: inductor
+    name: Lo
+    nodes: [out, n_lo]
+    value: 100e-6
+    ic: 0.0
+  - type: capacitor
+    name: Co
+    nodes: [n_lo, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [n_lo, 0]
+    value: 10.0

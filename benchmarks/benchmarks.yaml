@@ -355,6 +355,37 @@ benchmarks:
   - path: circuits/cl_buck_limiter_chain.yaml
     scenarios: [default]
 
+  # ----- Phase 20: sine input/output + multilevel converters -----
+  # No ngspice equivalents wired up here either — these validate
+  # against captured Pulsim baselines, like the Phase 19 closed-
+  # loop benches.  Each one exercises a different mix of:
+  # sine-source AC behavior, multi-cell switching topologies,
+  # transformer-isolated paths, and high-Q resonant tanks.
+  - path: circuits/rlc_series_resonant.yaml
+    scenarios: [default]
+  - path: circuits/lc_low_pass_sine.yaml
+    scenarios: [default]
+  - path: circuits/half_wave_rectifier_sine.yaml
+    scenarios: [default]
+  - path: circuits/half_bridge_lc_filter.yaml
+    scenarios: [default]
+  - path: circuits/flying_capacitor_3level.yaml
+    scenarios: [default]
+  - path: circuits/cascaded_h_bridge_5level.yaml
+    scenarios: [default]
+  - path: circuits/t_type_3level_halfbridge.yaml
+    scenarios: [default]
+  - path: circuits/lcc_resonant_inverter.yaml
+    scenarios: [default]
+  - path: circuits/active_clamp_forward.yaml
+    scenarios: [default]
+  - path: circuits/boost_pfc_open_loop.yaml
+    scenarios: [default]
+  - path: circuits/dual_active_bridge.yaml
+    scenarios: [default]
+  - path: circuits/half_bridge_inverter_lc.yaml
+    scenarios: [default]
+
   # synchronous_boost DEFERRED: sync rectifier instead of a
   #   freewheel diode means the inductor can reverse-conduct
   #   during the OFF half-cycle, which excites the LC tank into

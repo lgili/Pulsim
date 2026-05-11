@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Pretty terminal dashboard for the closed-loop / control-block bench.
+"""Pretty terminal dashboard for the regression-only bench
+(closed-loop control blocks + sine / multilevel circuits).
 
 Companion to ``scripts/parity_dashboard.py``: where that one wraps
 benchmark_ngspice.py for SPICE-parity tests, this one wraps
 benchmark_runner.py for tests that validate against a captured
-Pulsim baseline (the closed-loop / control-block coverage from
-Phase 19).  The presentation is intentionally the same style so
-the two dashboards feel like a pair.
+Pulsim baseline.  The presentation is intentionally the same
+style so the two dashboards feel like a pair.
+
+Auto-discovers any benchmark in the manifest that has a
+`validation: type: reference` block and no `ngspice_netlist`
+mapping — i.e. anything that's regression-only against a
+captured Pulsim baseline. This currently covers Phase 19
+(closed-loop / control-block coverage) and Phase 20 (sine
+input/output + multilevel converters).
 
 Usage::
 
@@ -40,10 +47,10 @@ DEFAULT_MANIFEST = REPO_ROOT / "benchmarks" / "benchmarks.yaml"
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "closed_loop_dashboard_out"
 RUNNER = REPO_ROOT / "benchmarks" / "benchmark_runner.py"
 
-# Default set: every benchmark with a `closed_loop` category. We
-# discover them from the manifest so the script picks up new ones
-# automatically.
-CL_PREFIX = "cl_"
+# Default set: every benchmark in the manifest that has no
+# ngspice netlist (i.e. validates against a captured Pulsim
+# baseline). We probe each entry's circuit YAML for a
+# `validation: type: reference` block to confirm.
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -56,19 +63,31 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
 
 
 def _discover_closed_loop_ids(manifest_path: Path) -> List[str]:
-    """Return the list of benchmark IDs that live under
-    `benchmarks/circuits/cl_*.yaml`. We use the file-name prefix
-    rather than the category field so that adding a new closed-loop
-    bench only requires placing the YAML in the right directory."""
+    """Return the list of benchmark IDs that validate against a
+    captured Pulsim baseline (no ngspice reference). We look for:
+      - manifest entries with no `ngspice_netlist` field, AND
+      - circuit YAMLs with `validation: type: reference`.
+    """
     manifest = _load_yaml(manifest_path)
+    base_dir = manifest_path.parent
     ids: List[str] = []
     for entry in manifest.get("benchmarks", []) or []:
         path = entry.get("path", "")
         if not path:
             continue
-        name = Path(path).stem
-        if name.startswith(CL_PREFIX):
-            ids.append(name)
+        if entry.get("ngspice_netlist") or entry.get("ltspice_netlist"):
+            continue  # has an external SPICE reference — handled by parity_dashboard
+        # Open the circuit YAML and check the validation type
+        circuit_path = (base_dir / path).resolve()
+        if not circuit_path.exists():
+            continue
+        try:
+            circuit = _load_yaml(circuit_path)
+        except Exception:
+            continue
+        validation = circuit.get("benchmark", {}).get("validation", {}) or {}
+        if validation.get("type") == "reference":
+            ids.append(circuit_path.stem)
     return ids
 
 

@@ -1,0 +1,107 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: boost_pfc_open_loop
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/boost_pfc_open_loop.csv
+simulation:
+  tstart: 0.0
+  tstop: 60e-3
+  dt: 2e-6
+  dt_max: 5e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  # Open-loop PFC front end: 60 Hz sine + diode bridge produces a
+  # rectified sine that feeds a boost stage. The boost runs at
+  # fixed PWM (no closed-loop) so it doesn't track unity PF — but
+  # the topology exercises bridge rectifier + boost in cascade.
+  - type: voltage_source
+    name: Vac
+    nodes: [ac_p, ac_n]
+    waveform:
+      type: sine
+      amplitude: 24.0
+      frequency: 60.0
+      offset: 0.0
+      phase: 0.0
+  # 4-diode bridge → bus_p (positive rail)
+  - type: diode
+    name: D1
+    nodes: [ac_p, bus_p]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D2
+    nodes: [ac_n, bus_p]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D3
+    nodes: [0, ac_p]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D4
+    nodes: [0, ac_n]
+    g_on: 200.0
+    g_off: 1e-6
+  # Boost stage on the rectified bus
+  - type: voltage_source
+    name: VgateB
+    nodes: [g_b, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 20000
+      duty: 0.5
+      dead_time: 200e-9
+  - type: inductor
+    name: L_boost
+    nodes: [bus_p, n_l]
+    value: 1e-3
+    ic: 0.0
+  - type: vcswitch
+    name: SW_boost
+    nodes: [g_b, n_l, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D_boost
+    nodes: [n_l, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cbulk
+    nodes: [out, 0]
+    value: 470e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 50.0

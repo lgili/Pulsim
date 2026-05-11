@@ -1,0 +1,139 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: dual_active_bridge
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-1
+      steady_state_max_error: 5.0e-1
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/dual_active_bridge.csv
+simulation:
+  tstart: 0.0
+  tstop: 800e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # Primary H-bridge across a 1:1 coupled inductor; secondary
+  # H-bridge dumps into the output cap. Both bridges run at 50 %
+  # duty 50 kHz; the secondary is phase-shifted 90° to enable
+  # power transfer (standard DAB control).
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 24.0}
+  # Primary gates (diagonal pairs)
+  - type: voltage_source
+    name: Vg_PA
+    nodes: [g_pa, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  - type: voltage_source
+    name: Vg_PB
+    nodes: [g_pb, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      phase: 0.5
+  # Secondary gates (90° phase-shifted relative to primary)
+  - type: voltage_source
+    name: Vg_SA
+    nodes: [g_sa, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      phase: 0.25
+  - type: voltage_source
+    name: Vg_SB
+    nodes: [g_sb, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      phase: 0.75
+  # Primary H-bridge
+  - type: vcswitch
+    name: P_AH
+    nodes: [g_pa, vin, pri_p]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: P_AL
+    nodes: [g_pb, pri_p, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: P_BH
+    nodes: [g_pb, vin, pri_n]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: P_BL
+    nodes: [g_pa, pri_n, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Transformer 1:1
+  - type: coupled_inductor
+    name: T1
+    nodes: [pri_p, pri_n, sec_p, sec_n]
+    l1: 100e-6
+    l2: 100e-6
+    coupling: 0.95
+  # Secondary H-bridge (active rectifier)
+  - type: vcswitch
+    name: S_AH
+    nodes: [g_sa, out, sec_p]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_AL
+    nodes: [g_sb, sec_p, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_BH
+    nodes: [g_sb, out, sec_n]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_BL
+    nodes: [g_sa, sec_n, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 220e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 50.0

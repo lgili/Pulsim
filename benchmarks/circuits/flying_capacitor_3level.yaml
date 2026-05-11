@@ -1,0 +1,133 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: flying_capacitor_3level
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/flying_capacitor_3level.csv
+simulation:
+  tstart: 0.0
+  tstop: 800e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # 3-level flying-capacitor half-bridge.
+  #
+  #   vcc ──S1── A ──S2── out ──S3── B ──S4── 0
+  #                ╰──── Cflying ────╯
+  #
+  # Switching patterns (all four switches at 50 % duty, paired
+  # with their counterpart but phase-shifted 180° between the
+  # two pairs):
+  #   S1+S4 closed, S2+S3 open: out = vcc, Cflying charges
+  #   S1+S3 closed, S2+S4 open: out = vcc/2 (Cflying provides)
+  #   S2+S4 closed, S1+S3 open: out = vcc/2 (Cflying discharges)
+  #   S2+S3 closed, S1+S4 open: out = 0
+  #
+  # Pulsim doesn't have a multi-state PWM generator, so we drive
+  # two pairs of complementary PWM sources at 50 kHz, phase-
+  # shifted by half a period. The output is the average of those
+  # — ≈ vcc/2 = 12 V on the LC-filtered side.
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 24.0}
+  # Pair A (S1/S4): chopper at phase 0
+  - type: voltage_source
+    name: Vg_A_h
+    nodes: [g_ah, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      phase: 0.0
+  - type: voltage_source
+    name: Vg_A_l
+    nodes: [g_al, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+      phase: 0.0
+  # Pair B (S2/S3): phase-shifted by half period
+  - type: voltage_source
+    name: Vg_B_h
+    nodes: [g_bh, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      phase: 0.5
+  - type: voltage_source
+    name: Vg_B_l
+    nodes: [g_bl, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+      phase: 0.5
+  # Stack: vcc → A → out → B → 0
+  - type: vcswitch
+    name: S1
+    nodes: [g_ah, vcc, node_a]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2
+    nodes: [g_bh, node_a, out]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S3
+    nodes: [g_bl, out, node_b]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S4
+    nodes: [g_al, node_b, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Flying capacitor between node_a and node_b
+  - type: capacitor
+    name: Cflying
+    nodes: [node_a, node_b]
+    value: 22e-6
+    ic: 12.0
+  # Output filter and load
+  - type: inductor
+    name: Lo
+    nodes: [out, n_lo]
+    value: 100e-6
+    ic: 0.0
+  - type: capacitor
+    name: Co
+    nodes: [n_lo, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [n_lo, 0]
+    value: 10.0
