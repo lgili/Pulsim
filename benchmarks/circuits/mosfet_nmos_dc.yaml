@@ -1,0 +1,48 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: mosfet_nmos_dc
+  category: nonlinear
+  observables:
+    - column: V(drain)
+  expectations:
+    metrics:
+      # DC operating point of an NMOS in triode region. Quadratic
+      # solution: 25·Vds² − 101·Vds + 5 = 0 → Vds ≈ 0.0502 V.
+      # This benchmark guards the Phase-14 MOSFET-stamp fix
+      # (924e2e8) where the Norton-companion residual was masking
+      # vth dependency — pre-fix all (vth, kp) combinations gave the
+      # same wrong Vds = 0.025 V.
+      max_error: 5e-3
+      steady_state_max_error: 5e-3
+simulation:
+  tstart: 0.0
+  tstop: 1e-4
+  dt: 1e-7
+  integrator: trapezoidal
+  adaptive_timestep: false
+  uic: false  # Start from DC OP
+components:
+  - type: voltage_source
+    name: Vdd
+    nodes: [vdd, 0]
+    waveform:
+      type: dc
+      value: 5.0
+  - type: resistor
+    name: Rload
+    nodes: [vdd, drain]
+    value: 100
+  - type: voltage_source
+    name: Vgate
+    nodes: [gate, 0]
+    waveform:
+      type: dc
+      value: 4.0
+  - type: mosfet
+    name: M1
+    nodes: [gate, drain, 0]
+    vth: 2.0
+    kp: 0.5
+    lambda: 0.01
+    is_nmos: true

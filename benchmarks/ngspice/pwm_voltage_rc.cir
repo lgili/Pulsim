@@ -1,0 +1,13 @@
+* PWM voltage source + RC filter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/pwm_voltage_rc.yaml
+*
+* PWM: 50 kHz, duty=0.4 → period=20µs, t_high=8µs.
+* RC: 1k·1µF = 1 ms.
+* Steady-state V_out ≈ duty·V_high = 4 V.
+
+Vpwm in 0 PULSE(0 10 0 1n 1n 8u 20u)
+R1 in out 1k
+C1 out 0 1u IC=0
+
+.tran 1u 5m UIC
+.end

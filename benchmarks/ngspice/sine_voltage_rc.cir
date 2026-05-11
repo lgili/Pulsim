@@ -1,0 +1,13 @@
+* Sine source + RC low-pass filter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/sine_voltage_rc.yaml
+*
+* fc = 1/(2π·R·C) = 1/(2π·1k·1µ) = 159 Hz
+* Source at 1 kHz → attenuation factor 1/(2π·f·R·C) ≈ 1/6.28 ≈ 0.16
+* (steady-state amplitude ≈ 5·0.158 = 0.79 V).
+
+Vsig in 0 SIN(0 5 1000)
+R1 in out 1k
+C1 out 0 1u IC=0
+
+.tran 5u 10m UIC
+.end

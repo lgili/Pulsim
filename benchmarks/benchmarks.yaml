@@ -120,61 +120,51 @@ benchmarks:
   - path: circuits/transformer_step_up.yaml
     scenarios: [direct_trap]
 
-  # buck_pmos — held off after Phase-9 investigation:
-  #
-  #   Phase 8 shipped the smooth-region MOSFET fix
-  #   (drain_current_behavioral with sigmoid blend through cutoff /
-  #   triode / saturation boundaries). All 273 existing C++ tests
-  #   (4021 assertions) still pass — the new model is bit-identical
-  #   to the legacy hard-branch code at saturated sigmoid tails. PMOS
-  #   DC OP now converges in 6 Newton iterations on a trivial
-  #   Vdc + PMOS + Rload bench (V(sw) = 23.94 V matching analytical).
-  #
-  #   Phase 9 investigated re-enabling buck_pmos. Initial symptom:
-  #   "PWM duty > 0.5 doesn't toggle" — V(gate) stays pinned at
-  #   v_high for the whole transient. But:
-  #
-  #   * PWM source IS toggling correctly in isolation at duty=0.64
-  #     (verified directly: t=0..8 µs HIGH, t=8..12.5 µs LOW, repeats).
-  #   * Same buck circuit with NMOS + duty=0.64 toggles correctly —
-  #     the issue is PMOS-specific.
-  #   * Pulsim reports 963 timestep rejections over 30 µs — the
-  #     adaptive integrator is rolling back almost every step. PMOS
-  #     in deep saturation (Vov=21 V → id=44 A in Level-1 Shichman-
-  #     Hodges) demands currents the 8 Ω load can't sink, the
-  #     residual blows up, the step is rejected, and the rejected
-  #     samples carry the stale V(gate) value forward.
-  #
-  #   Root cause: Shichman-Hodges Level-1 with kp=0.2 + Vov=21 V
-  #   produces unphysical saturation currents (44 A) for power
-  #   MOSFETs. Real power MOSFETs operate in DEEP TRIODE; Level-1
-  #   doesn't model channel-length modulation at low Vds well.
-  #   Tuning kp for realistic R_DSon (≪ 50 mΩ) requires kp ≫ 1,
-  #   which makes the saturation current even more unphysical.
-  #
-  #   Phase 10 attempt:
-  #     a) Reduced kp 0.2 → 0.02 (mirrored in the .cir) so saturation
-  #        current at startup is ~5.5 A (sinkable by the load) instead
-  #        of an unphysical 44 A.
-  #     b) Set enable_events: true so the integrator lands exactly at
-  #        PWM transition breakpoints.
-  #
-  #   With these changes Pulsim's transient runs cleanly (V(gate)
-  #   toggles correctly, integrator no longer rejects ~all timesteps),
-  #   but the resulting V(sw) is the wrong polarity (small negative
-  #   values instead of climbing toward V(vin) = 24 V). Suggests there
-  #   is still a sign-convention bug in the PMOS path's chain rule
-  #   (the new manual Jacobian's `di_dvs = -di_internal_dvgs - di_internal_
-  #   dvds` is correct for NMOS by inspection, but the PMOS sign-fold
-  #   may need a second `sign` factor somewhere). Existing
-  #   `test_ad_mosfet_stamp` (which compares manual vs AD-driven stamp)
-  #   passes because BOTH paths use the same `drain_current_behavioral`
-  #   template — so the cross-validation can't catch a global sign
-  #   error in the manual stamp's chain-rule reconstruction.
-  #
-  #   The Phase-10 retune + enable_events stay in the YAML/.cir as
-  #   real improvements (kp=0.2 was overdriving), but the manifest
-  #   keeps buck_pmos as skipped pending the PMOS sign audit.
+  # ----- Phase 14 component-coverage additions -----
+  # Each new entry validates one Pulsim primitive end-to-end against
+  # ngspice. The goal: a runnable matrix that proves every supported
+  # component in the parser still produces SPICE-equivalent behavior.
+  - path: circuits/sine_voltage_rc.yaml
+    ngspice_netlist: ngspice/sine_voltage_rc.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/pwm_voltage_rc.yaml
+    ngspice_netlist: ngspice/pwm_voltage_rc.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/snubber_rc.yaml
+    ngspice_netlist: ngspice/snubber_rc.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/vcswitch_resistor.yaml
+    ngspice_netlist: ngspice/vcswitch_resistor.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [direct_trap]
+  - path: circuits/mosfet_nmos_dc.yaml
+    ngspice_netlist: ngspice/mosfet_nmos_dc.cir
+    ngspice_observables:
+      - column: V(drain)
+        spice_vector: v(drain)
+    scenarios: [direct_trap]
+
+  # buck_pmos — Phase 14 re-test: Pulsim's PMOS now DC-OP-converges
+  #   and the transient settles to ~12 V at t = 500 µs (with the
+  #   MOSFET runtime-stamp sign fix). However, the **ngspice
+  #   reference** itself fails to converge on this circuit:
+  #     ngspice doAnalyses: TRAN: Timestep too small; trouble with
+  #     node "sw"
+  #   ngspice aborts after 7 data rows, so there's nothing to compare
+  #   against. This is a SPICE-side numerical issue with the Level-1
+  #   PMOS model + 64 % duty cycle, not a Pulsim correctness gap.
+  #   Kept here as a future "needs ngspice .cir tuning" item.
   - path: circuits/buck_pmos.yaml
     scenarios: [direct_trap, trbdf2]
 scenarios:

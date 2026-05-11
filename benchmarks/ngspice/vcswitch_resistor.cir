@@ -1,0 +1,14 @@
+* Voltage-controlled switch driving resistive load — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/vcswitch_resistor.yaml
+
+Vin  vin 0 DC 10
+Vctrl ctrl 0 PULSE(0 10 20u 1n 1n 30u 50u)
+
+* SW VT=5V, VH=0.1V, RON=1m, ROFF=1G
+S1 vin out ctrl 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=1m ROFF=1G)
+
+Rload out 0 100
+
+.tran 0.1u 100u
+.end

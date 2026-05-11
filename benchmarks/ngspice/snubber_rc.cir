@@ -1,0 +1,23 @@
+* RC snubber test — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/snubber_rc.yaml
+*
+* Pulsim `add_snubber_rc` stamps R and C in PARALLEL across the same
+* two nodes (cf. `RuntimeCircuit::add_snubber_rc` in
+* `core/include/pulsim/v1/runtime_circuit.hpp`). Match that
+* topology here.
+*
+* Pulse source steps from 0 V to 10 V at t = 100 µs; R_load=1kΩ
+* drops the source onto an output node that has R=10Ω ∥ C=1µF
+* (snubber) to ground. Steady-state V(out) = V_in · R_snub/(R_snub +
+* R_load) ≈ 0.099 V (snubber bleeds the line). The dominant
+* transient is the cap discharge through the 10 Ω snubber resistor.
+
+Vstep in 0 PULSE(0 10 100u 0.1u 0.1u 1m 2m)
+Rload in out 1k
+
+* R and C in parallel between out and ground.
+Rsnub out 0 10
+Csnub out 0 1u IC=0
+
+.tran 1u 1m UIC
+.end

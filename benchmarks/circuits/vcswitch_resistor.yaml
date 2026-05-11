@@ -1,0 +1,54 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: vcswitch_resistor
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Voltage-controlled switch fed by a PWM source, driving a
+      # resistive load. Pure switching topology, no L/C — keeps the
+      # parity check focused on the switch's `tanh`-smoothed
+      # conductance transition. The PWM step from 0 to 10 V crosses
+      # the 5 V threshold cleanly, so V_out flips between
+      # V_in·R_load/(R_on + R_load) and V_in·R_load/(R_off + R_load).
+      max_error: 1e-1
+      steady_state_max_error: 5e-2
+simulation:
+  tstart: 0.0
+  tstop: 100e-6
+  dt: 1e-7
+  integrator: trapezoidal
+  adaptive_timestep: false
+  uic: false
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 10.0
+  - type: voltage_source
+    name: Vctrl
+    nodes: [ctrl, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 10.0
+      t_delay: 20e-6
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 30e-6
+      period: 50e-6
+  - type: vcswitch
+    name: SW1
+    nodes: [ctrl, vin, out]
+    v_threshold: 5.0
+    g_on: 1000.0
+    g_off: 1e-9
+    hysteresis: 0.1
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 100

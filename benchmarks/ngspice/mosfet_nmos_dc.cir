@@ -1,0 +1,18 @@
+* NMOS DC operating point — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/mosfet_nmos_dc.yaml
+*
+* Simple NMOS in triode: V_DD=5V → R_load=100Ω → drain, V_GATE=4V,
+* source=gnd. Vth=2, kp=0.5, λ=0.01.
+*
+* Triode quadratic: 25·Vds² − 101·Vds + 5 = 0 → Vds ≈ 0.0502 V.
+
+Vdd  vdd 0 DC 5
+Rload vdd drain 100
+Vgate gate 0 DC 4
+
+* M <D> <G> <S> <B> model — body tied to source (gnd).
+M1 drain gate 0 0 NMOS_L1 W=1u L=1u
+.model NMOS_L1 NMOS LEVEL=1 VTO=2.0 KP=0.5 LAMBDA=0.01 IS=0
+
+.tran 1u 100u
+.end

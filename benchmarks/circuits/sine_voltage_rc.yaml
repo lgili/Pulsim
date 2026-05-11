@@ -1,0 +1,41 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: sine_voltage_rc
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Sine source + RC low-pass filter at 1 kHz, fc = 1/(2π·R·C) =
+      # 159 Hz. Source frequency well above fc, so attenuation is
+      # strong; the test checks both phase lag and amplitude — the
+      # first cycle has a transient kick from the IC=0 cap that
+      # ngspice and Pulsim both model the same way.
+      max_error: 1e-1
+      steady_state_max_error: 5e-2
+simulation:
+  tstart: 0.0
+  tstop: 10e-3
+  dt: 5e-6
+  integrator: trapezoidal
+  adaptive_timestep: false
+  uic: true
+components:
+  - type: voltage_source
+    name: Vsig
+    nodes: [in, 0]
+    waveform:
+      type: sine
+      amplitude: 5.0
+      frequency: 1000
+      offset: 0.0
+  - type: resistor
+    name: R1
+    nodes: [in, out]
+    value: 1000
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 1e-6
+    ic: 0.0
