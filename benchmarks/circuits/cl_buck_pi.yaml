@@ -31,10 +31,6 @@ components:
     name: Vref
     nodes: [vref, 0]
     waveform: {type: dc, value: 5.0}
-  - type: resistor
-    name: R_piout
-    nodes: [pi_out, 0]
-    value: 1.0e6
   # PI controller: error = V(vref) - V(out)
   - type: pi_controller
     name: PI1

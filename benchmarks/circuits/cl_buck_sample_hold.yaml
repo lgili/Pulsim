@@ -36,10 +36,6 @@ components:
     name: SH_fb
     nodes: [out, 0]
     sample_period: 20.0e-6
-  - type: resistor
-    name: R_piout
-    nodes: [pi_out, 0]
-    value: 1.0e6
   - type: pi_controller
     name: PI
     nodes: [vref, out, pi_out]

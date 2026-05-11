@@ -1983,6 +1983,7 @@ public:
         }
 
         stamp_coupled_inductor_terms(triplets, f, x);
+        stamp_virtual_block_output_anchors(triplets);
 
         J.setFromTriplets(triplets.begin(), triplets.end());
     }
@@ -2019,6 +2020,9 @@ public:
         }
 
         stamp_coupled_inductor_terms(null_triplets, f, x);
+        // (anchors don't contribute to the residual — they're pure
+        // Jacobian diagonals — but the symmetric helper keeps the
+        // assembly paths in lock-step so the M/N stamp can reuse it.)
     }
 
     /// Assemble residual for harmonic balance using direct time-derivatives
@@ -2419,6 +2423,11 @@ public:
                 }
             }
         }
+
+        // Anchor floating output nodes of analog-output control blocks
+        // before finalizing N. See stamp_virtual_block_output_anchors
+        // for rationale.
+        stamp_virtual_block_output_anchors(n_triplets);
 
         M.setFromTriplets(m_triplets.begin(), m_triplets.end());
         N.setFromTriplets(n_triplets.begin(), n_triplets.end());
@@ -3018,6 +3027,45 @@ private:
             return saturable_effective_inductance(component, i_est, fallback_l);
         }
         return fallback_l;
+    }
+
+    /// Anchor virtual control block output nodes to ground via a
+    /// tiny conductance (g_anchor = 1 nS, i.e. ~1 GΩ pull-down).
+    ///
+    /// Control blocks like `pi_controller`, `pid_controller`, and
+    /// `op_amp` declare three nodes [in_pos, in_neg, output] for
+    /// ergonomic wiring — but virtual blocks only emit channel
+    /// values; they never stamp anything electrically into the
+    /// output node. With nothing else touching that node, the MNA
+    /// matrix has an unconstrained row/column and the DC OP /
+    /// Newton solve fails with "Max iterations reached" or
+    /// "DC operating point failed". Users currently have to hand-
+    /// add a `resistor: pi_out → 0  value: 1e6` to every YAML
+    /// (every Phase 19 closed-loop bench did this).
+    ///
+    /// The anchor here makes the floating node fully equivalent to
+    /// adding that pull-down, but transparent to the user — and at
+    /// 1 nS the bias current through it (e.g. ~10 nA at 10 V) is
+    /// well below the gmin/iref scales the solver already tolerates,
+    /// so no observable circuit behavior changes.
+    template<typename Triplets>
+    void stamp_virtual_block_output_anchors(Triplets& triplets) const {
+        if (virtual_components_.empty()) return;
+        constexpr Real g_anchor = 1.0e-9;  // 1 GΩ to ground
+        for (const auto& component : virtual_components_) {
+            // Only 3-node analog-output control blocks need anchoring.
+            // pwm_generator's "output" goes to a switch state, not a
+            // node, so it doesn't need this even when given 3 nodes.
+            const bool is_anchored_type =
+                (component.type == "pi_controller") ||
+                (component.type == "pid_controller") ||
+                (component.type == "op_amp");
+            if (!is_anchored_type) continue;
+            if (component.nodes.size() < 3) continue;
+            const Index out_node = component.nodes[2];
+            if (out_node < 0 || out_node >= system_size()) continue;
+            triplets.emplace_back(out_node, out_node, g_anchor);
+        }
     }
 
     template<typename Triplets>

@@ -30,10 +30,6 @@ components:
     name: Vref
     nodes: [vref, 0]
     waveform: {type: dc, value: 5.0}
-  - type: resistor
-    name: R_piout
-    nodes: [pi_out, 0]
-    value: 1.0e6
   # PI without internal clamping (output_min/max wide) → feeds a
   # `limiter` block that hard-clips to [0.1, 0.9] before reaching
   # the PWM.  Tests the limiter block in isolation from the PI.
