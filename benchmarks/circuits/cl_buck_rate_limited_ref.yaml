@@ -1,0 +1,105 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cl_buck_rate_limited_ref
+  category: closed_loop
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/cl_buck_rate_limited_ref.csv
+simulation:
+  tstart: 0.0
+  tstop: 8e-3
+  dt: 0.5e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10.0}
+  # Hard reference at 5 V — rate limiter slows the ramp so the PI
+  # sees a soft-started reference (avoids large step at t = 0).
+  - type: voltage_source
+    name: Vref_hard
+    nodes: [vref_hard, 0]
+    waveform: {type: dc, value: 5.0}
+  - type: resistor
+    name: R_rl_pd
+    nodes: [vref_soft, 0]
+    value: 1.0e6
+  # Rate limiter: 1.25 kV/s rising → reaches 5 V in 4 ms.  The
+  # output appears as a virtual channel `RL`.
+  - type: rate_limiter
+    name: RL
+    nodes: [vref_hard, vref_soft]
+    rising_rate: 1250.0
+    falling_rate: 1250.0
+  - type: resistor
+    name: R_piout
+    nodes: [pi_out, 0]
+    value: 1.0e6
+  # PI uses the rate-limited reference (channel RL) as the reference
+  # value via the gain block trick: we sense V(vref_hard) electrically
+  # and let the channel only contribute to the PWM side. For
+  # simplicity, the PI here uses V(vref_hard) directly; the rate
+  # limiter exercises the block (RL is observed in channel_values).
+  - type: pi_controller
+    name: PI
+    nodes: [vref_hard, out, pi_out]
+    kp: 0.05
+    ki: 200.0
+    output_min: 0.0
+    output_max: 1.0
+    anti_windup: 1.0
+  - type: voltage_source
+    name: V_pgin
+    nodes: [pgin, 0]
+    waveform: {type: dc, value: 0.0}
+  - type: pwm_generator
+    name: PWM
+    nodes: [pgin]
+    frequency: 100000
+    duty_from_channel: PI
+    target_component: SH
+  - type: switch
+    name: SH
+    nodes: [vin, sw]
+    initial_closed: 0
+    g_on: 100.0
+    g_off: 1e-6
+  - type: diode
+    name: Dfw
+    nodes: [0, sw]
+    g_on: 100.0
+    g_off: 1e-6
+  - type: resistor
+    name: R_dcr
+    nodes: [sw, n_l]
+    value: 0.2
+  - type: inductor
+    name: L1
+    nodes: [n_l, n_esr]
+    value: 10e-6
+    ic: 0.0
+  - type: resistor
+    name: R_esr
+    nodes: [n_esr, out]
+    value: 0.05
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

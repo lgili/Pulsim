@@ -1,0 +1,85 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cl_buck_hysteresis
+  category: closed_loop
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/cl_buck_hysteresis.csv
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 0.5e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10.0}
+  - type: voltage_source
+    name: Vref
+    nodes: [vref, 0]
+    waveform: {type: dc, value: 5.0}
+  # Hysteresis block: signal = V(vref) - V(out); HIGH when signal
+  # > +band/2 (V(out) too low), LOW when signal < -band/2 (V(out)
+  # too high).  Band = 0.1 V around V_ref = 5 V.
+  - type: hysteresis
+    name: HYS
+    nodes: [vref, out]
+    threshold: 0.0
+    hysteresis: 0.1
+    high: 1.0
+    low: 0.0
+  - type: voltage_source
+    name: V_pgin
+    nodes: [pgin, 0]
+    waveform: {type: dc, value: 0.0}
+  - type: pwm_generator
+    name: PWM
+    nodes: [pgin]
+    frequency: 200000
+    duty_from_channel: HYS
+    target_component: SH
+  - type: switch
+    name: SH
+    nodes: [vin, sw]
+    initial_closed: 0
+    g_on: 100.0
+    g_off: 1e-6
+  - type: diode
+    name: Dfw
+    nodes: [0, sw]
+    g_on: 100.0
+    g_off: 1e-6
+  - type: resistor
+    name: R_dcr
+    nodes: [sw, n_l]
+    value: 0.2
+  - type: inductor
+    name: L1
+    nodes: [n_l, n_esr]
+    value: 10e-6
+    ic: 0.0
+  - type: resistor
+    name: R_esr
+    nodes: [n_esr, out]
+    value: 0.05
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

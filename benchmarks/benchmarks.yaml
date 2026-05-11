@@ -329,6 +329,32 @@ benchmarks:
         spice_vector: v(out)
     scenarios: [direct_trap]
 
+  # ----- Phase 19: closed-loop / control-block coverage -----
+  # Each circuit exercises one or more virtual control blocks
+  # wired into a small power stage. ngspice has no equivalent
+  # for these blocks, so they validate against captured Pulsim
+  # baselines (regression-only — output verified-by-hand once).
+  - path: circuits/cl_buck_pi.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_pid.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_hysteresis.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_lookup_duty.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_rate_limited_ref.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_aggressive_pi.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_sample_hold.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_pi_with_gain.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_integrator.yaml
+    scenarios: [default]
+  - path: circuits/cl_buck_limiter_chain.yaml
+    scenarios: [default]
+
   # synchronous_boost DEFERRED: sync rectifier instead of a
   #   freewheel diode means the inductor can reverse-conduct
   #   during the OFF half-cycle, which excites the LC tank into

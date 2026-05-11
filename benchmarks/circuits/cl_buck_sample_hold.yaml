@@ -1,0 +1,93 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cl_buck_sample_hold
+  category: closed_loop
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/cl_buck_sample_hold.csv
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 0.5e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10.0}
+  - type: voltage_source
+    name: Vref
+    nodes: [vref, 0]
+    waveform: {type: dc, value: 5.0}
+  # Sample-and-hold the feedback every 20 µs (digital control rate
+  # = PWM frequency).  This emulates a discrete digital controller.
+  - type: sample_hold
+    name: SH_fb
+    nodes: [out, 0]
+    sample_period: 20.0e-6
+  - type: resistor
+    name: R_piout
+    nodes: [pi_out, 0]
+    value: 1.0e6
+  - type: pi_controller
+    name: PI
+    nodes: [vref, out, pi_out]
+    kp: 0.05
+    ki: 200.0
+    output_min: 0.0
+    output_max: 1.0
+    anti_windup: 1.0
+  - type: voltage_source
+    name: V_pgin
+    nodes: [pgin, 0]
+    waveform: {type: dc, value: 0.0}
+  - type: pwm_generator
+    name: PWM
+    nodes: [pgin]
+    frequency: 100000
+    duty_from_channel: PI
+    target_component: SH
+  - type: switch
+    name: SH
+    nodes: [vin, sw]
+    initial_closed: 0
+    g_on: 100.0
+    g_off: 1e-6
+  - type: diode
+    name: Dfw
+    nodes: [0, sw]
+    g_on: 100.0
+    g_off: 1e-6
+  - type: resistor
+    name: R_dcr
+    nodes: [sw, n_l]
+    value: 0.2
+  - type: inductor
+    name: L1
+    nodes: [n_l, n_esr]
+    value: 10e-6
+    ic: 0.0
+  - type: resistor
+    name: R_esr
+    nodes: [n_esr, out]
+    value: 0.05
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

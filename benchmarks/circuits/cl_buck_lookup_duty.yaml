@@ -1,0 +1,94 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cl_buck_lookup_duty
+  category: closed_loop
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/cl_buck_lookup_duty.csv
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 0.5e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 10.0}
+  # Time-varying reference fed via a "clock" voltage source whose
+  # value linearly ramps with time — but Pulsim only supports DC /
+  # PWM / sine / pulse sources, so we use a slow sine instead and
+  # let the lookup table map V(clk) → duty.
+  - type: voltage_source
+    name: Vclk
+    nodes: [clk, 0]
+    waveform:
+      type: sine
+      amplitude: 1.0
+      frequency: 200.0
+      offset: 0.0
+      phase: 0.0
+  - type: resistor
+    name: R_lookup_pd
+    nodes: [lut_out, 0]
+    value: 1.0e6
+  # Lookup table: maps V(clk) ∈ [−1, +1] to duty ∈ [0.2, 0.6]
+  - type: lookup_table
+    name: LUT
+    nodes: [clk, lut_out]
+    x: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    y: [0.20, 0.30, 0.40, 0.50, 0.60]
+  - type: voltage_source
+    name: V_pgin
+    nodes: [pgin, 0]
+    waveform: {type: dc, value: 0.0}
+  - type: pwm_generator
+    name: PWM
+    nodes: [pgin]
+    frequency: 100000
+    duty_from_channel: LUT
+    target_component: SH
+  - type: switch
+    name: SH
+    nodes: [vin, sw]
+    initial_closed: 0
+    g_on: 100.0
+    g_off: 1e-6
+  - type: diode
+    name: Dfw
+    nodes: [0, sw]
+    g_on: 100.0
+    g_off: 1e-6
+  - type: resistor
+    name: R_dcr
+    nodes: [sw, n_l]
+    value: 0.2
+  - type: inductor
+    name: L1
+    nodes: [n_l, n_esr]
+    value: 10e-6
+    ic: 0.0
+  - type: resistor
+    name: R_esr
+    nodes: [n_esr, out]
+    value: 0.05
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0
