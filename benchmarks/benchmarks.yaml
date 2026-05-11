@@ -418,6 +418,12 @@ benchmarks:
   - path: circuits/mmc_4cell_chain.yaml
     scenarios: [default]
 
+  # ----- Phase 26: magnetic saturation + core loss (Steinmetz) -----
+  - path: circuits/saturating_inductor_step.yaml
+    scenarios: [default]
+  - path: circuits/core_loss_steinmetz_sine.yaml
+    scenarios: [default]
+
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
   # against captured Pulsim baselines, like the Phase 19 closed-

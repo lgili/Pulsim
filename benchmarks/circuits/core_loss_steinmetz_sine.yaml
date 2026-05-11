@@ -1,0 +1,70 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: core_loss_steinmetz_sine
+  category: linear
+  observables:
+    - column: I(L1)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: I(L1)
+    baseline: baselines/core_loss_steinmetz_sine.csv
+  # Sinusoidal voltage drives an inductor; the resulting i(t) is
+  # used to compute B(t) and apply the Steinmetz equation
+  #   P = k · f^α · B^β
+  # to estimate core loss. Steinmetz coefficients for typical
+  # ferrite (3C95): k = 16 (W/m³ at SI units), α = 1.45, β = 2.7.
+  kpi:
+    - metric: thd
+      observable: I(L1)
+      fundamental_hz: 100000.0
+      num_harmonics: 5
+      label: i_l
+    # Steinmetz core loss extracted from I(L1) via B = L·I/(N·A).
+    # 3C95-like ferrite: k = 16 (SI W/m³), α = 1.45, β = 2.7.
+    - metric: core_loss_steinmetz
+      observable: I(L1)
+      fundamental_hz: 100000.0
+      inductance_h: 100.0e-6
+      turns: 50
+      area_m2: 1.0e-4
+      k: 16.0
+      alpha: 1.45
+      beta: 2.7
+      label: ferrite
+    - metric: thd
+      observable: I(L1)
+      fundamental_hz: 100000.0
+      num_harmonics: 5
+      label: i_l
+simulation:
+  tstart: 0.0
+  tstop: 100e-6
+  dt: 0.1e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  # 1 V_pk, 100 kHz sine driving a small inductor
+  - type: voltage_source
+    name: Vac
+    nodes: [vac, 0]
+    waveform:
+      type: sine
+      amplitude: 5.0
+      frequency: 100000.0
+      offset: 0.0
+      phase: 0.0
+  - type: resistor
+    name: R_ser
+    nodes: [vac, n_l]
+    value: 0.5
+  - type: inductor
+    name: L1
+    nodes: [n_l, 0]
+    value: 100e-6
+    ic: 0.0

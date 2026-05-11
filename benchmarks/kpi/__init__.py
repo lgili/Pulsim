@@ -420,6 +420,52 @@ def compute_switching_loss_per_event(
     }
 
 
+# =============================================================================
+# Magnetic core loss (Steinmetz)
+# =============================================================================
+
+
+def compute_core_loss_steinmetz(
+    flux_density_samples: Sequence[float],
+    sample_rate_hz: float,
+    fundamental_hz: float,
+    k: float,
+    alpha: float,
+    beta: float,
+) -> Dict[str, float]:
+    """Average core loss density (W/kg or W/m³ depending on `k` units)
+    from a B(t) waveform via Steinmetz: P = k · f^α · B^β.
+
+    `flux_density_samples` is B(t) in Tesla. The peak amplitude at
+    `fundamental_hz` is recovered via Goertzel, then plugged into
+    Steinmetz with the given material coefficients.
+    """
+    n = len(flux_density_samples)
+    if n < 4 or fundamental_hz <= 0:
+        return {"core_loss_w_per_kg": 0.0, "b_peak_tesla": 0.0}
+    b_peak = _bin_magnitude(flux_density_samples, fundamental_hz, sample_rate_hz)
+    p = k * (fundamental_hz ** alpha) * (b_peak ** beta)
+    return {"core_loss_w_per_kg": p, "b_peak_tesla": b_peak}
+
+
+def compute_inductor_flux_density(
+    current_samples: Sequence[float],
+    inductance_h: float,
+    turns: int,
+    area_m2: float,
+) -> List[float]:
+    """Convert an inductor current trace to a B(t) trace in Tesla.
+
+    Uses B ≈ (L · I) / (N · A) — exact for an ideal inductor, an
+    approximation for real cores. Good enough for relative
+    Steinmetz comparisons.
+    """
+    if turns <= 0 or area_m2 <= 0:
+        return [0.0] * len(current_samples)
+    factor = inductance_h / (float(turns) * area_m2)
+    return [factor * i for i in current_samples]
+
+
 __all__ = [
     "compute_thd",
     "compute_power_factor",
@@ -430,4 +476,6 @@ __all__ = [
     "compute_zvs_fraction",
     "compute_zcs_fraction",
     "compute_switching_loss_per_event",
+    "compute_core_loss_steinmetz",
+    "compute_inductor_flux_density",
 ]

@@ -732,6 +732,23 @@ def run_benchmarks(
                                     r = compute_zcs_fraction(sw_states, series[i_obs], thr_a, lookback)
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
+                            elif metric == "core_loss_steinmetz":
+                                try:
+                                    from kpi import compute_core_loss_steinmetz, compute_inductor_flux_density
+                                except ImportError:
+                                    from .kpi import compute_core_loss_steinmetz, compute_inductor_flux_density  # type: ignore
+                                if obs in series:
+                                    L = float(kpi_entry.get("inductance_h", 1e-3))
+                                    N = int(kpi_entry.get("turns", 50))
+                                    A = float(kpi_entry.get("area_m2", 1e-4))
+                                    f0 = float(kpi_entry.get("fundamental_hz", 60.0))
+                                    k_st = float(kpi_entry.get("k", 16.0))
+                                    alpha = float(kpi_entry.get("alpha", 1.45))
+                                    beta = float(kpi_entry.get("beta", 2.7))
+                                    B = compute_inductor_flux_density(samples, L, N, A)
+                                    r = compute_core_loss_steinmetz(B, sample_rate, f0, k_st, alpha, beta)
+                                    for k, v in r.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
                             elif metric == "switching_loss":
                                 try:
                                     from kpi import compute_switching_loss_per_event
@@ -763,9 +780,12 @@ def run_benchmarks(
                                     )
                                     for k, v in loss.items():
                                         kpis[f"kpi__{k}__{label}"] = v
-                        except Exception:
-                            # KPI extraction errors must not break the run;
-                            # leave the metric out of the output.
+                        except Exception as exc:
+                            import os
+                            if os.environ.get("PULSIM_KPI_DEBUG"):
+                                import traceback
+                                print(f"[KPI debug] {metric} for {benchmark_id}: {exc}")
+                                traceback.print_exc()
                             continue
 
                 results.append(

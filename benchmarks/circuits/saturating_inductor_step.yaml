@@ -1,0 +1,55 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: saturating_inductor_step
+  category: nonlinear
+  observables:
+    - column: I(L_sat)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: I(L_sat)
+    baseline: baselines/saturating_inductor_step.csv
+  # Voltage source steps an inductor whose effective inductance
+  # drops once the current exceeds the saturation knee. Validates
+  # that the saturation_current/saturation_inductance parameters
+  # of `saturable_inductor` produce a current trace that bends
+  # upward at the knee.
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 5e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vstep
+    nodes: [vin, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 5.0
+      t_delay: 100e-6
+      t_rise: 10e-6
+      t_fall: 10e-6
+      t_width: 5e-3
+      period: 1.0
+  - type: resistor
+    name: R_ser
+    nodes: [vin, n_l]
+    value: 1.0
+  # Saturable inductor: 1 mH below 2 A, drops to 0.2 mH above the
+  # knee. The smooth power-law transition mimics a real core's
+  # B-H curve in the saturation region.
+  - type: saturable_inductor
+    name: L_sat
+    nodes: [n_l, 0]
+    inductance: 1.0e-3
+    saturation_current: 2.0
+    saturation_inductance: 0.2e-3
+    saturation_exponent: 4.0
+    ic: 0.0
