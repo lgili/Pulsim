@@ -163,11 +163,19 @@ def _run_one(
         *extra_runner_args,
     ]
     env = os.environ.copy()
-    # Make the local build_py importable transparently.
+    # Make the local build_py importable transparently — but ONLY if
+    # the .so in it matches the current Python's ABI tag. Stale
+    # cross-version artifacts (e.g. cp314 .so left over while running
+    # Python 3.13) would shadow a working installed pulsim and break
+    # the runner with "Python package 'pulsim' is not available".
     if "PYTHONPATH" not in env:
         local_build = REPO_ROOT / "build_py" / "python"
         if local_build.exists():
-            env["PYTHONPATH"] = str(local_build)
+            import sysconfig
+            ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ""
+            compatible_sos = list((local_build / "pulsim").glob(f"_pulsim*{ext_suffix}"))
+            if compatible_sos:
+                env["PYTHONPATH"] = str(local_build)
     proc = subprocess.run(
         cmd,
         capture_output=True,
