@@ -1289,7 +1289,254 @@ public:
             }
         }
 
+        // ------------------------------------------------------------------
+        // Post-control diode-commutation re-scan.
+        //
+        // Phase 2 (pwm_generator, switch_driver_bindings, state_machine) can
+        // forcibly toggle switch states via `set_switch_state`. In topologies
+        // where a freewheel diode provides the inductor's discharge path
+        // during the switch-OFF half-cycle (e.g. async boost / buck), the
+        // diode needs to flip ON *together with* the switch turning OFF —
+        // otherwise the next Newton step solves with switch=OFF / diode=OFF
+        // and finds an artificial high-V "consistent" solution where the
+        // inductor's stored current sits across the device's g_off.
+        //
+        // Two passes here:
+        //   1. The standard scan_pwl_commutations(x) catches diodes whose
+        //      anode-cathode voltage in the current solved x already crosses
+        //      the conduction threshold.
+        //   2. An inductor-current-aware pass forces any OFF diode whose
+        //      anode (or cathode) sits on a node that an inductor is
+        //      currently pumping current INTO — even when the *voltage* in
+        //      x still looks reverse-biased. This is the case for the
+        //      async-buck / async-boost freewheel right after the chopper
+        //      switch turns OFF: V(sw) hasn't risen yet (it's stale from
+        //      the previous step's solve), but the inductor branch current
+        //      tells us the diode must commute.
+        const auto post_control_events = scan_pwl_commutations(
+            x, default_switching_mode_);
+        if (!post_control_events.empty()) {
+            commit_pwl_commutations(post_control_events);
+        }
+
+        force_inductor_driven_diode_commutations(x, result);
+
         return result;
+    }
+
+    /// Pre-empt diode commutations that the voltage-based admissibility
+    /// scan can't see. For each IdealDiode in the OFF state, check whether:
+    ///   (a) an inductor adjacent to the diode is pumping current that
+    ///       must commutate somewhere; AND
+    ///   (b) no ON conductor (closed switch / vcswitch / mosfet / igbt /
+    ///       another already-ON diode) is currently providing an
+    ///       alternative path at the diode's anode or cathode.
+    /// When both are true, force the diode ON.
+    ///
+    /// This is the "inductor stored energy needs somewhere to go" rule
+    /// that the voltage-only admissibility scan misses when Newton has
+    /// just converged to an artificial high-V solution (because all
+    /// switches around the inductor flipped OFF simultaneously). The
+    /// adjacency check prevents false positives during the normal ON-
+    /// chopping half-cycle, when a switch already handles the current.
+    void force_inductor_driven_diode_commutations(
+        const Vector& x,
+        MixedDomainStepResult& result) {
+        if (devices_.empty()) return;
+        constexpr Real I_THRESHOLD = 1e-3;  // 1 mA
+        constexpr Real R_ADJACENCY_MAX = 10.0;  // Ω — anything below this we
+                                                //     treat as "near-DCR";
+                                                //     two nodes joined by
+                                                //     such a resistor are
+                                                //     electrically adjacent.
+
+        // Lookup #1: node → list of (inductor branch, sign, history current).
+        // sign = +1: node is the "from" end (current leaves here);
+        // sign = -1: node is the "to" end (current arrives here).
+        // i_history is the inductor's previous-step current — using the
+        // committed history rather than x[branch] avoids the "bad Newton
+        // solution" trap where the current solution has inverted-sign IL.
+        //
+        // We also flatten "DCR-like" topology: any resistor < R_ADJACENCY_MAX
+        // joins two nodes into the same electrical neighborhood, so e.g.
+        // [sw → R_dcr → n_l → L1 → n_esr] sees L1 as adjacent to both sw and
+        // n_esr. This is critical for real-world converter wiring where the
+        // inductor's DCR is modeled as a separate series resistor.
+        struct InductorRef {
+            Index branch;
+            int sign_at_node;
+            Real i_history;
+        };
+        std::unordered_map<Index, std::vector<InductorRef>> node_to_inductors;
+
+        // First, collect raw inductor → node mapping
+        struct InductorInfo {
+            Index branch;
+            Index node_a;  // "from" end (sign +1)
+            Index node_b;  // "to" end (sign -1)
+            Real i_history;
+        };
+        std::vector<InductorInfo> inductors;
+
+        // Lookup #2: node → does any currently-ON conductive device
+        // touch this node? If yes, the diode at this node doesn't
+        // need to commute — the other device handles the current.
+        std::unordered_set<Index> nodes_with_on_conductor;
+
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Inductor>) {
+                    if (conn.nodes.size() < 2 || conn.branch_index < 0) return;
+                    const Index br = conn.branch_index;
+                    const Real i_hist = dev.history_initialized()
+                                            ? dev.current_prev()
+                                            : x[br];
+                    inductors.push_back({br, conn.nodes[0], conn.nodes[1], i_hist});
+                } else if constexpr (std::is_same_v<T, IdealSwitch>) {
+                    if (!dev.pwl_state() || conn.nodes.size() < 2) return;
+                    for (Index n : conn.nodes)
+                        if (n >= 0) nodes_with_on_conductor.insert(n);
+                } else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                    if (!dev.pwl_state() || conn.nodes.size() < 3) return;
+                    // For a vcswitch, only the conducting pair (nodes[1], nodes[2])
+                    // is a current path; nodes[0] is the control input.
+                    if (conn.nodes[1] >= 0) nodes_with_on_conductor.insert(conn.nodes[1]);
+                    if (conn.nodes[2] >= 0) nodes_with_on_conductor.insert(conn.nodes[2]);
+                } else if constexpr (std::is_same_v<T, MOSFET> ||
+                                     std::is_same_v<T, IGBT>) {
+                    if (!dev.pwl_state() || conn.nodes.size() < 3) return;
+                    if (conn.nodes[1] >= 0) nodes_with_on_conductor.insert(conn.nodes[1]);
+                    if (conn.nodes[2] >= 0) nodes_with_on_conductor.insert(conn.nodes[2]);
+                } else if constexpr (std::is_same_v<T, IdealDiode>) {
+                    if (!dev.pwl_state() || conn.nodes.size() < 2) return;
+                    if (conn.nodes[0] >= 0) nodes_with_on_conductor.insert(conn.nodes[0]);
+                    if (conn.nodes[1] >= 0) nodes_with_on_conductor.insert(conn.nodes[1]);
+                }
+            }, devices_[i]);
+        }
+        if (inductors.empty()) return;
+
+        // Build union-find groups of nodes joined by small-R resistors.
+        // Each group is one "electrical neighborhood".
+        std::unordered_map<Index, Index> parent;
+        std::function<Index(Index)> find = [&](Index n) -> Index {
+            auto it = parent.find(n);
+            if (it == parent.end()) {
+                parent[n] = n;
+                return n;
+            }
+            if (it->second == n) return n;
+            Index root = find(it->second);
+            parent[n] = root;
+            return root;
+        };
+        auto unite = [&](Index a, Index b) {
+            const Index ra = find(a), rb = find(b);
+            if (ra != rb) parent[ra] = rb;
+        };
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    if (conn.nodes.size() < 2) return;
+                    if (dev.resistance() > R_ADJACENCY_MAX) return;
+                    if (conn.nodes[0] >= 0 && conn.nodes[1] >= 0)
+                        unite(conn.nodes[0], conn.nodes[1]);
+                }
+            }, devices_[i]);
+        }
+
+        // Now populate node_to_inductors: each inductor terminal entry
+        // gets registered against the GROUP REPRESENTATIVE of that node.
+        for (const auto& ind : inductors) {
+            if (ind.node_a >= 0) {
+                const Index ra = find(ind.node_a);
+                node_to_inductors[ra].push_back({ind.branch, +1, ind.i_history});
+            }
+            if (ind.node_b >= 0) {
+                const Index rb = find(ind.node_b);
+                node_to_inductors[rb].push_back({ind.branch, -1, ind.i_history});
+            }
+        }
+        // Also fold the "ON conductor" set through the same neighborhoods
+        std::unordered_set<Index> on_conductor_groups;
+        for (Index n : nodes_with_on_conductor) {
+            on_conductor_groups.insert(find(n));
+        }
+        if (node_to_inductors.empty()) return;
+
+        std::vector<PwlCommutation> forced;
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, IdealDiode>) {
+                    if (dev.pwl_state()) return;  // already ON
+                    if (resolve_switching_mode(dev.switching_mode(),
+                                               default_switching_mode_) !=
+                        SwitchingMode::Ideal) {
+                        return;
+                    }
+                    if (conn.nodes.size() < 2) return;
+                    const Index anode = conn.nodes[0];
+                    const Index cathode = conn.nodes[1];
+                    const Index anode_group = find(anode);
+                    const Index cathode_group = find(cathode);
+
+                    // Compute the net inductor current arriving at the
+                    // anode (positive = current flows toward anode, i.e.
+                    // diode wants to forward-conduct) and the net current
+                    // leaving the cathode (same direction).
+                    auto sum_inductor_current = [&](Index group, bool incoming) -> Real {
+                        Real sum = 0.0;
+                        auto it = node_to_inductors.find(group);
+                        if (it == node_to_inductors.end()) return 0.0;
+                        for (const auto& ind : it->second) {
+                            // Use HISTORY current (last accepted step), not
+                            // x[branch] — Newton may have just converged to
+                            // an artifact-sign solution that the heuristic
+                            // would otherwise miss.
+                            const Real i_br = ind.i_history;
+                            sum += (incoming ? -ind.sign_at_node : ind.sign_at_node) * i_br;
+                        }
+                        return sum;
+                    };
+
+                    const Real i_into_anode = sum_inductor_current(anode_group, true);
+                    const Real i_out_of_cathode = sum_inductor_current(cathode_group, false);
+
+                    // Skip if an alternative ON conductor (closed switch /
+                    // diode) is already handling current at *either*
+                    // electrical neighborhood — that conductor provides a
+                    // much lower-impedance path than the diode's g_off, so
+                    // we don't need to force-commute.
+                    if (on_conductor_groups.find(anode_group) != on_conductor_groups.end() ||
+                        on_conductor_groups.find(cathode_group) != on_conductor_groups.end()) {
+                        return;
+                    }
+
+                    // Forward-conduction trigger
+                    if (i_into_anode > I_THRESHOLD ||
+                        i_out_of_cathode > I_THRESHOLD) {
+                        PwlCommutation evt;
+                        evt.device_index = i;
+                        evt.device_name = conn.name;
+                        evt.new_state = true;
+                        forced.push_back(std::move(evt));
+                    }
+                }
+            }, devices_[i]);
+        }
+
+        if (!forced.empty()) {
+            commit_pwl_commutations(forced);
+            for (const auto& evt : forced) {
+                result.channel_values[evt.device_name + ".forced_commute"] = 1.0;
+            }
+        }
     }
 
     /// Evaluate available probe-style virtual signals for a given state vector.

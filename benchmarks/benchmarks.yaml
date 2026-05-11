@@ -354,6 +354,16 @@ benchmarks:
     scenarios: [default]
   - path: circuits/cl_buck_limiter_chain.yaml
     scenarios: [default]
+  # cl_boost_pi un-deferred in Phase 21 after the diode-commutation
+  # heuristic landed (force_inductor_driven_diode_commutations).  The
+  # V(sw) ±10 kV chatter that previously killed this bench is gone;
+  # the boost now runs deterministically and the regression dashboard
+  # tracks it.  Steady-state regulation is still mediocre (~1 V on a
+  # 10 V target) because the open-loop boost is intrinsically slow to
+  # come up with these gains — the test verifies stability, not the
+  # exact operating point.
+  - path: circuits/cl_boost_pi.yaml
+    scenarios: [default]
 
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
