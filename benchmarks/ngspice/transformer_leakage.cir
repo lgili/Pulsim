@@ -1,0 +1,20 @@
+* Real transformer with leakage (2:1 step-down, K=0.95) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/transformer_leakage.yaml
+*
+* Lp = 400 µH, Ls = 100 µH → turn ratio √(Lp/Ls) = 2.
+* K = 0.95 → about 10 % leakage inductance per side, typical SMPS xfmr.
+* The 50 kHz sine excites the magnetizing branch heavily — V(sec)
+* settles at ~ (1/2)·V(prim) under load, modulated by the K=0.95
+* leakage drop.
+
+Vac  prim_p 0 SIN(0 10 50000)
+Rser prim_p prim_n 0.1
+
+L1   prim_n 0 400u
+L2   sec    0 100u
+K1   L1 L2 0.95
+
+Rload sec 0 5
+
+.tran 1u 500u UIC
+.end

@@ -1,0 +1,49 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: transformer_leakage
+  category: linear
+  observables:
+    - column: V(sec)
+  expectations:
+    metrics:
+      # Real transformer with leakage: 2:1 step-down (Lp=400µH,
+      # Ls=100µH → turns ratio √(Lp/Ls) = 2). K=0.95 gives ~10 %
+      # leakage inductance per side, which is typical for an SMPS
+      # transformer. The Pulsim `coupled_inductor` builds exactly the
+      # same two-inductor-plus-K model that ngspice's `K1 L1 L2 0.95`
+      # statement describes; the only difference from the algebraic
+      # `transformer` primitive is the presence of finite L_m and
+      # L_leakage so transient response has real magnetizing-current
+      # ramp + leakage-driven voltage spikes at switching edges.
+      max_error: 1e-1
+      steady_state_max_error: 5e-2
+simulation:
+  tstart: 0.0
+  tstop: 500e-6
+  dt: 1e-6
+  integrator: trapezoidal
+  adaptive_timestep: false
+components:
+  - type: voltage_source
+    name: Vac
+    nodes: [prim_p, 0]
+    waveform:
+      type: sine
+      amplitude: 10.0
+      frequency: 50000
+      offset: 0.0
+  - type: resistor
+    name: Rser
+    nodes: [prim_p, prim_n]
+    value: 0.1
+  - type: coupled_inductor
+    name: T1
+    nodes: [prim_n, 0, sec, 0]
+    l1: 400e-6
+    l2: 100e-6
+    coupling: 0.95
+  - type: resistor
+    name: Rload
+    nodes: [sec, 0]
+    value: 5.0

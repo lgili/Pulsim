@@ -1,0 +1,28 @@
+* Coupled inductor (1:1, K=0.99) with pulse drive — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/coupled_inductor_step.yaml
+*
+* SPICE-canonical mutual-inductor syntax:
+*   L1 ... L1_value
+*   L2 ... L2_value
+*   K1 L1 L2 <coupling>
+*
+* This is exactly the topology that `add_virtual_component(coupled_
+* inductor)` builds in Pulsim — two physical inductors plus a virtual
+* "mutual" wrapper that stamps M·dI/dt into each branch equation via
+* `stamp_coupled_inductor_terms`.
+
+* PULSE(v_initial v_pulse t_delay t_rise t_fall t_width period)
+* Slower 10 µs rise/fall avoids discretization mismatch at the step
+* edge when dt = 1 µs (Pulsim and ngspice round the discontinuity
+* differently when t_rise = dt).
+Vsrc vin 0 PULSE(0 5 100u 10u 10u 1m 2m)
+Rser vin prim 0.5
+
+L1   prim 0 100u
+L2   sec  0 100u
+K1   L1 L2 0.99
+
+Rload sec 0 10
+
+.tran 1u 1m UIC
+.end

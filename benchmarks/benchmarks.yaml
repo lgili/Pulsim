@@ -154,6 +154,18 @@ benchmarks:
       - column: V(drain)
         spice_vector: v(drain)
     scenarios: [direct_trap]
+  - path: circuits/coupled_inductor_step.yaml
+    ngspice_netlist: ngspice/coupled_inductor_step.cir
+    ngspice_observables:
+      - column: V(sec)
+        spice_vector: v(sec)
+    scenarios: [direct_trap]
+  - path: circuits/transformer_leakage.yaml
+    ngspice_netlist: ngspice/transformer_leakage.cir
+    ngspice_observables:
+      - column: V(sec)
+        spice_vector: v(sec)
+    scenarios: [direct_trap]
 
   # buck_pmos — Phase 14 re-test: Pulsim's PMOS now DC-OP-converges
   #   and the transient settles to ~12 V at t = 500 µs (with the

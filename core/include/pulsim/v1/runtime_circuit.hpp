@@ -2453,8 +2453,13 @@ public:
     [[nodiscard]] bool ac_perturbation_active() const { return ac_perturbation_active_; }
 
     /// True iff every device in the circuit has a PWL state-space stamp
-    /// implemented by `assemble_state_space()`. Today this excludes coupled
-    /// inductors / transformers; future work expands coverage.
+    /// implemented by `assemble_state_space()`. Today this excludes
+    /// transformers (algebraic ideal) and coupled inductors (mutual
+    /// stamp lives in `stamp_coupled_inductor_terms`, which assemble_-
+    /// state_space does not invoke). Circuits with either drop through
+    /// to the DAE fallback path which assembles via `assemble_jacobian`
+    /// — that path DOES call `stamp_coupled_inductor_terms` and so
+    /// faithfully models `V_i = L_i·dI_i/dt + Σ_j M_ij·dI_j/dt`.
     [[nodiscard]] bool pwl_state_space_supports_all_devices() const {
         for (const auto& dev : devices_) {
             bool ok = true;
@@ -2466,6 +2471,14 @@ public:
                 }
             }, dev);
             if (!ok) return false;
+        }
+        // Virtual coupled-inductor wrapper: the segment-stepper's
+        // assemble_state_space does not stamp the mutual term, so any
+        // coupled-inductor circuit forces the DAE fallback path.
+        for (const auto& component : virtual_components_) {
+            if (component.type == "coupled_inductor") {
+                return false;
+            }
         }
         return true;
     }
