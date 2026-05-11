@@ -1,0 +1,125 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cascaded_buck_buck
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Two-stage step-down: synchronous-buck #1 takes 24 V to ~12 V on
+      # the intermediate "bus" rail, sync-buck #2 takes that to ~6 V.
+      # 8 switching nodes in one simulation (4 vcswitches), shared DC
+      # supply, intermediate filter cap that the second stage sees as
+      # its source. The two PWMs share frequency (50 kHz) but are
+      # otherwise independent — the second stage rides on the first
+      # stage's output ripple.
+      max_error: 8.0e-1
+      steady_state_max_error: 4.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 800e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  # Buck-1 high-side: duty=0.5 → bus ≈ 12 V
+  - type: voltage_source
+    name: Vg1H
+    nodes: [g1h, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  # Buck-1 low-side: complementary
+  - type: voltage_source
+    name: Vg1L
+    nodes: [g1l, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+  # Buck-2 high-side: duty=0.5 → out ≈ 6 V
+  - type: voltage_source
+    name: Vg2H
+    nodes: [g2h, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  # Buck-2 low-side: complementary
+  - type: voltage_source
+    name: Vg2L
+    nodes: [g2l, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+
+  # ---- Buck-1 stage ----
+  - type: vcswitch
+    name: S1H
+    nodes: [g1h, vcc, sw1]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S1L
+    nodes: [g1l, sw1, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L1
+    nodes: [sw1, bus]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: Cbus
+    nodes: [bus, 0]
+    value: 100e-6
+    ic: 0.0
+
+  # ---- Buck-2 stage ----
+  - type: vcswitch
+    name: S2H
+    nodes: [g2h, bus, sw2]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2L
+    nodes: [g2l, sw2, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L2
+    nodes: [sw2, out]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 5.0

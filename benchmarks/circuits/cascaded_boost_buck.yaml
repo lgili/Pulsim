@@ -1,0 +1,145 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: cascaded_boost_buck
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Two-stage converter: boost (12 V → ~24 V) feeding a
+      # synchronous buck (~24 V → ~6 V). Five switching devices in
+      # one simulation: boost low-side switch, boost freewheel diode,
+      # buck high-side switch, buck low-side switch. The two stages
+      # share a DC bus (C_bus = 100 µF) and run with INDEPENDENT
+      # PWM sources at the same 50 kHz.  Real stress here:
+      # the boost output (= bus) is itself a switched voltage source
+      # that the buck stage sees as its supply, so the buck's
+      # commutation has to ride on top of the boost's ripple. This
+      # tests that the solver can handle stage-to-stage interaction
+      # without losing convergence at a transition.
+      max_error: 1.0e+1
+      steady_state_max_error: 6.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 2.5e-3
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 12.0
+  # Boost low-side PWM (duty = 0.5 → V_bus = V_in/(1-0.5) = 24 V)
+  - type: voltage_source
+    name: Vg_boost
+    nodes: [g_boost, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  # Buck high-side PWM (duty = 0.25 → V_out = 0.25·V_bus = 6 V)
+  - type: voltage_source
+    name: Vg_buck_h
+    nodes: [g_buck_h, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.25
+  # Buck low-side PWM (complementary, duty = 0.75)
+  - type: voltage_source
+    name: Vg_buck_l
+    nodes: [g_buck_l, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.25
+
+  # ---- Boost stage ----
+  - type: resistor
+    name: R_dcr_boost
+    nodes: [vin, n_lboost]
+    value: 20e-3
+  - type: inductor
+    name: L_boost
+    nodes: [n_lboost, boost_sw]
+    value: 47e-6
+    ic: 0.0
+  - type: vcswitch
+    name: S_boost
+    nodes: [g_boost, boost_sw, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D_boost
+    nodes: [boost_sw, bus]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: C_bus
+    nodes: [bus, 0]
+    value: 100e-6
+    ic: 0.0
+  # Tiny preload prevents the bus from floating in the limit duty→0
+  - type: resistor
+    name: R_pre
+    nodes: [bus, 0]
+    value: 1.0e3
+
+  # ---- Buck stage ----
+  - type: vcswitch
+    name: S_buck_h
+    nodes: [g_buck_h, bus, buck_sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_buck_l
+    nodes: [g_buck_l, buck_sw, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: resistor
+    name: R_dcr_buck
+    nodes: [buck_sw, n_lbuck]
+    value: 20e-3
+  - type: inductor
+    name: L_buck
+    nodes: [n_lbuck, out]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C_out
+    nodes: [out, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: R_load
+    nodes: [out, 0]
+    value: 5.0

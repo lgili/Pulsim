@@ -1,0 +1,23 @@
+* DCM buck (light load) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/buck_dcm.yaml.
+*
+* V_in=24V, single high-side switch, freewheel diode to ground.
+* duty=0.5 at 50 kHz, but the load is light enough (R=200Ω) that
+* the inductor current hits zero mid-cycle → discontinuous mode.
+* During the iL=0 interval the diode reverse-recovers, the output
+* cap holds, and V(out) settles ABOVE V_in·duty.
+
+Vdc vcc 0 DC 24
+Vg  ctrl 0 PULSE(0 10 0 1n 1n 9.8u 20u)
+
+S1  vcc sw ctrl 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+SD1 0 sw 0 sw DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+L1  sw out 47u IC=0
+C1  out 0   47u IC=0
+Rload out 0 200
+
+.tran 0.2u 800u UIC
+.end

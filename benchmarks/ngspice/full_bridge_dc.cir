@@ -1,0 +1,35 @@
+* Full-bridge (H-bridge) DC with body diodes — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/full_bridge_dc.yaml
+*
+* 4 switches + 4 anti-parallel diodes (body diode emulation).
+* 50 kHz PWM, 50 % duty, diagonal-pair alternation.
+
+Vdc vcc 0 DC 24
+Vgp gate_p 0 PULSE(0 10 0 1n 1n 10u 20u)
+Vgn gate_n 0 PULSE(10 0 0 1n 1n 10u 20u)
+
+SQ1 vcc load_p gate_p 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+SQ2 load_n 0 gate_p 0 SWMOD
+SQ3 vcc load_n gate_n 0 SWMOD
+SQ4 load_p 0 gate_n 0 SWMOD
+
+* Anti-parallel diodes (emulated as voltage-controlled switches on
+* their own anode-cathode voltage):
+*   D1: load_p -> vcc (conducts when load_p > vcc)
+*   D2: 0 -> load_n (conducts when load_n < 0)
+*   D3: load_n -> vcc (conducts when load_n > vcc)
+*   D4: 0 -> load_p (conducts when load_p < 0)
+* `Sxd` for diode "Sx-derived"
+* Use Schottky-ish diode model (Is large for fast turn-on, low Vf)
+D1 load_p vcc DMOD
+.model DMOD D(IS=1m N=2 RS=5m)
+D2 0 load_n DMOD
+D3 load_n vcc DMOD
+D4 0 load_p DMOD
+
+L1   load_p mid 100u IC=0
+Rload mid load_n 10
+
+.tran 0.2u 500u UIC
+.end

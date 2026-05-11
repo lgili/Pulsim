@@ -1,0 +1,28 @@
+* Flyback converter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/flyback_converter.yaml
+*
+* Vin=24V → primary inductor L1 → switch drain → ground (when ON).
+* Secondary L2 → diode → output cap → load.
+* L1 = L2 = 100µH, K=0.95, duty=0.4, fsw=50kHz.
+
+Vin vin 0 DC 24
+Vg gate 0 PULSE(0 10 0 1n 1n 8u 20u)
+
+* Primary inductor (vin → sw_drain). Secondary inductor (sec_dot → 0).
+L1 vin sw_drain 100u
+L2 sec_dot 0 100u
+K1 L1 L2 0.95
+
+* Primary switch (sw_drain → 0 when gate > 5V)
+SW sw_drain 0 gate 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Secondary diode
+Drect sec_dot out DMOD
+.model DMOD D(IS=1m N=2 RS=5m)
+
+Cout out 0 47u IC=0
+Rload out 0 10
+
+.tran 0.5u 2m UIC
+.end

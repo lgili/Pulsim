@@ -1,0 +1,84 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: buck_boost
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Buck-boost converter: V_in=12V, low-side switch in series
+      # with inductor (to ground), freewheel diode from gnd to
+      # inductor's far end, output cap referenced to that node.
+      # Duty=0.5 → V_out_ideal = −V_in · duty/(1−duty) = −12 V.
+      # Output is INVERTING (sign flip).
+      max_error: 1.0e+1
+      steady_state_max_error: 5.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 1.5e-3
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 220
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform:
+      type: dc
+      value: 12.0
+  - type: voltage_source
+    name: Vgate
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      dead_time: 200e-9
+  # Q1: vin → sw_top (high-side switch, ON during high-time)
+  - type: vcswitch
+    name: SW
+    nodes: [gate, vin, sw_top]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Inductor: sw_top → gnd (current builds when SW is ON)
+  - type: inductor
+    name: L1
+    nodes: [sw_top, 0]
+    value: 47e-6
+    ic: 0.0
+  # Freewheel diode: out → sw_top (current can only flow toward out
+  # when sw_top < out, which is automatic since out is negative).
+  - type: diode
+    name: Drect
+    nodes: [out, sw_top]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

@@ -1,0 +1,76 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: half_bridge_inverter
+  category: nonlinear
+  observables:
+    - column: V(load)
+  expectations:
+    metrics:
+      # Half-bridge inverter (open-loop): same 2-switch topology as
+      # synchronous_buck, but heavier L (470 µH, 10x larger) +
+      # higher R (10 Ω, 2x larger). Larger LC time-constant gives
+      # a slower transient, exercising the integrator over more
+      # PWM periods before V(load) settles. Steady-state V(load) ≈
+      # 12 V (V_DC/2 at 50 % duty).
+      max_error: 8.0e-1
+      steady_state_max_error: 4.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 2e-3
+  dt: 0.2e-6
+  integrator: trapezoidal
+  adaptive_timestep: false
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  - type: voltage_source
+    name: VgateH
+    nodes: [gate_h, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  - type: voltage_source
+    name: VgateL
+    nodes: [gate_l, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+  - type: vcswitch
+    name: SH
+    nodes: [gate_h, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: SL
+    nodes: [gate_l, sw, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L1
+    nodes: [sw, load]
+    value: 470e-6
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [load, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [load, 0]
+    value: 10.0

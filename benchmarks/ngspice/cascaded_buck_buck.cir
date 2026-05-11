@@ -1,0 +1,34 @@
+* Cascaded synchronous-buck × 2 — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/cascaded_buck_buck.yaml.
+*
+* 24 V DC bus → buck-1 (duty 0.5) → bus ≈ 12 V → buck-2 (duty 0.5)
+* → out ≈ 6 V. Each leg is a synchronous-buck (no body diode needed
+* because the LOW-side switch is the freewheel). 8 switching nodes
+* in one simulation.
+
+Vdc vcc 0 DC 24
+
+* PWM #1 (50 kHz, 50 % duty)
+Vg1h g1h 0 PULSE(0  10 0 1n 1n 10u 20u)
+Vg1l g1l 0 PULSE(10 0  0 1n 1n 10u 20u)
+* PWM #2 (50 kHz, 50 % duty) — same frequency, independent train
+Vg2h g2h 0 PULSE(0  10 0 1n 1n 10u 20u)
+Vg2l g2l 0 PULSE(10 0  0 1n 1n 10u 20u)
+
+* Buck-1
+S1h vcc sw1 g1h 0 SWMOD
+S1l sw1 0   g1l 0 SWMOD
+L1  sw1 bus 47u IC=0
+Cbus bus 0 100u IC=0
+
+* Buck-2 (rides on the bus rail)
+S2h bus sw2 g2h 0 SWMOD
+S2l sw2 0   g2l 0 SWMOD
+L2  sw2 out 47u IC=0
+Cout out 0 47u IC=0
+Rload out 0 5
+
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+.tran 0.2u 800u UIC
+.end

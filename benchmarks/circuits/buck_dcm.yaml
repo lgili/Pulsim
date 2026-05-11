@@ -1,0 +1,84 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: buck_dcm
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # Discontinuous-conduction-mode (DCM) buck: light load
+      # (R=200 Ω) means the inductor current hits zero mid-cycle and
+      # the freewheel diode REVERSE-RECOVERS into the high-impedance
+      # state for the rest of the OFF interval. This is the third
+      # solver state (S off, D off, iL = 0) that doesn't exist in
+      # CCM. The output voltage settles ABOVE V_in·duty because no
+      # current flows during the dead phase, so D = 0.5 doesn't
+      # mean V_out = 12 V here. We just check that Pulsim's solver
+      # tracks ngspice through the iL = 0 boundary.
+      max_error: 1.0e+0
+      steady_state_max_error: 4.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 800e-6
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 220
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  - type: voltage_source
+    name: Vpwm
+    nodes: [ctrl, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+      dead_time: 200e-9
+  - type: vcswitch
+    name: S1
+    nodes: [ctrl, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D1
+    nodes: [0, sw]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L1
+    nodes: [sw, out]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 47e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 200.0

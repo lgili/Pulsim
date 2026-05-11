@@ -1,0 +1,169 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: triple_sync_buck
+  category: nonlinear
+  observables:
+    - column: V(out_b)
+  expectations:
+    metrics:
+      # Three independent synchronous-buck legs running on a shared
+      # 24 V supply, each with its own LC filter and resistive load.
+      # 6 vcswitches × 3 LC filters × 3 PWM trains all stepping in
+      # one solver invocation. Duties 25 / 50 / 75 % give outputs
+      # ≈ 6 / 12 / 18 V. We score V(out_b) (the 50 %-duty leg) so
+      # parity is unaffected by the other legs' steady-state values.
+      max_error: 8.0e-1
+      steady_state_max_error: 4.0e-1
+simulation:
+  tstart: 0.0
+  tstop: 500e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  # ----- Leg A (duty 0.25 → 6 V) -----
+  - type: voltage_source
+    name: VgaH
+    nodes: [g_ah, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.25
+  - type: voltage_source
+    name: VgaL
+    nodes: [g_al, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.25
+  - type: vcswitch
+    name: S_a_h
+    nodes: [g_ah, vcc, sw_a]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_a_l
+    nodes: [g_al, sw_a, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L_a
+    nodes: [sw_a, out_a]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C_a
+    nodes: [out_a, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: R_a
+    nodes: [out_a, 0]
+    value: 5.0
+
+  # ----- Leg B (duty 0.50 → 12 V) -----
+  - type: voltage_source
+    name: VgbH
+    nodes: [g_bh, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.50
+  - type: voltage_source
+    name: VgbL
+    nodes: [g_bl, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.50
+  - type: vcswitch
+    name: S_b_h
+    nodes: [g_bh, vcc, sw_b]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_b_l
+    nodes: [g_bl, sw_b, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L_b
+    nodes: [sw_b, out_b]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C_b
+    nodes: [out_b, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: R_b
+    nodes: [out_b, 0]
+    value: 5.0
+
+  # ----- Leg C (duty 0.75 → 18 V) -----
+  - type: voltage_source
+    name: VgcH
+    nodes: [g_ch, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.75
+  - type: voltage_source
+    name: VgcL
+    nodes: [g_cl, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.75
+  - type: vcswitch
+    name: S_c_h
+    nodes: [g_ch, vcc, sw_c]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_c_l
+    nodes: [g_cl, sw_c, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L_c
+    nodes: [sw_c, out_c]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C_c
+    nodes: [out_c, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: R_c
+    nodes: [out_c, 0]
+    value: 5.0

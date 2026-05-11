@@ -1,0 +1,23 @@
+* Synchronous buck — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/synchronous_buck.yaml
+*
+* 24V → 12V (50% duty) at 50 kHz. Synchronous topology: high-side
+* switch when ON connects vcc to sw; low-side switch when ON pulls
+* sw to gnd. Complementary PWM. 47µH / 100µF / 5Ω output filter.
+
+Vdc vcc 0 DC 24
+
+Vgh gate_h 0 PULSE(0 10 0 1n 1n 10u 20u)
+Vgl gate_l 0 PULSE(10 0 0 1n 1n 10u 20u)
+
+Sh vcc sw gate_h 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+Sl sw 0 gate_l 0 SWMOD
+
+L1 sw out 47u IC=0
+C1 out 0 100u IC=0
+Rload out 0 5
+
+.tran 0.2u 500u UIC
+.end

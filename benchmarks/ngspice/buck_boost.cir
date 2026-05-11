@@ -1,0 +1,29 @@
+* Buck-boost converter (inverting) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/buck_boost.yaml.
+*
+* Topology: Vin → SW (high-side) → sw_top → L → gnd, with freewheel
+* diode `out → sw_top`. Output cap from `out` to gnd; load `out → gnd`.
+* When SW is ON: L charges from Vin (sw_top = Vin, L current builds).
+* When SW is OFF: L drives sw_top NEGATIVE, freewheel D conducts
+* `out → sw_top` (i.e. current flows out → sw_top → L → gnd, charging
+* the output cap to a NEGATIVE voltage).
+*
+* duty=0.5 → V_out ≈ −Vin · duty/(1−duty) = −12 V.
+
+Vin vin 0 DC 12
+Vg  gate 0 PULSE(0 10 0 1n 1n 9.8u 20u)
+
+SW   vin sw_top gate 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+L1   sw_top 0 47u IC=0
+
+* Freewheel diode emulated as switch
+SDrect out sw_top out sw_top DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Cout out 0 100u IC=0
+Rload out 0 10
+
+.tran 0.2u 1.5m UIC
+.end

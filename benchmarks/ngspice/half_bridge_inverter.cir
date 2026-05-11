@@ -1,0 +1,33 @@
+* Half-bridge inverter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/half_bridge_inverter.yaml
+*
+* 24V DC bus, two complementary voltage-controlled switches at
+* 50 kHz, 50% duty. Freewheel diode (emulated by a voltage-
+* controlled switch on V(sw)) clamps V(sw) ≈ 0 when the inductor
+* current would force it negative. Output LC filter (470µH/100µF) +
+* 10Ω load. With 50% duty + freewheel-conducting on the LOW half,
+* V(load) ≈ V_DC/2 = 12V at steady state.
+
+Vdc vcc 0 DC 24
+
+* PWM duty=0.5 → 10µs HIGH, 10µs LOW
+Vgh gate_h 0 PULSE(0 10 0 1n 1n 10u 20u)
+Vgl gate_l 0 PULSE(10 0 0 1n 1n 10u 20u)
+
+* High-side switch (vcc → sw when gate_h > 5V)
+Sh vcc sw gate_h 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Low-side switch (sw → 0 when gate_l > 5V)
+Sl sw 0 gate_l 0 SWMOD
+
+* Freewheel diode (0 → sw) — conducts when sw < 0
+Sfw 0 sw 0 sw DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+L1 sw load 470u IC=0
+C1 load 0 100u IC=0
+Rload load 0 10
+
+.tran 0.2u 2m UIC
+.end

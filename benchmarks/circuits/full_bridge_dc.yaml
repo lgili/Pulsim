@@ -1,0 +1,107 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: full_bridge_dc
+  category: nonlinear
+  observables:
+    - column: V(load_p)
+  expectations:
+    metrics:
+      # Full-bridge (H-bridge) with body diodes. 4 switches +
+      # 4 anti-parallel diodes (body diode emulation). 50 % duty PWM,
+      # diagonal-pair alternating excitation. The diodes carry the
+      # inductor current during the switch-state transition where
+      # the FETs are OFF for both diagonals briefly.
+      max_error: 2.0e+0
+      steady_state_max_error: 1.0e+0
+simulation:
+  tstart: 0.0
+  tstop: 500e-6
+  dt: 0.2e-6
+  integrator: trapezoidal
+  adaptive_timestep: false
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform:
+      type: dc
+      value: 24.0
+  - type: voltage_source
+    name: Vgate_p
+    nodes: [gate_p, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  - type: voltage_source
+    name: Vgate_n
+    nodes: [gate_n, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+  # Q1 (top-left): vcc → load_p when gate_p HIGH
+  - type: vcswitch
+    name: Q1
+    nodes: [gate_p, vcc, load_p]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: Q2
+    nodes: [gate_p, load_n, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: Q3
+    nodes: [gate_n, vcc, load_n]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: Q4
+    nodes: [gate_n, load_p, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Anti-parallel "body" diodes on each switch — provide a path for
+  # inductor current during the brief OFF gap between PWM transitions
+  # and prevent voltage spikes.
+  - type: diode
+    name: D1
+    nodes: [load_p, vcc]   # anti-parallel with Q1 (anode=load_p, cathode=vcc)
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D2
+    nodes: [0, load_n]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D3
+    nodes: [load_n, vcc]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D4
+    nodes: [0, load_p]
+    g_on: 200.0
+    g_off: 1e-6
+  # Simple RL load between load_p and load_n
+  - type: inductor
+    name: L1
+    nodes: [load_p, mid]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [mid, load_n]
+    value: 10.0

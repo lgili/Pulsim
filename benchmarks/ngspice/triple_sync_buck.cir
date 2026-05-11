@@ -1,0 +1,44 @@
+* Triple synchronous-buck array — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/triple_sync_buck.yaml.
+*
+* Three independent sync-buck legs share a 24 V DC bus.  Duties
+* are 25 % / 50 % / 75 % (outputs ≈ 6 / 12 / 18 V).  Six switching
+* nodes in one simulation, parity scored on V(out_b).
+
+Vdc vcc 0 DC 24
+
+* Leg A — 25 % duty
+Vgah g_ah 0 PULSE(0  10 0 1n 1n 5u  20u)
+Vgal g_al 0 PULSE(10 0  0 1n 1n 5u  20u)
+* Leg B — 50 % duty
+Vgbh g_bh 0 PULSE(0  10 0 1n 1n 10u 20u)
+Vgbl g_bl 0 PULSE(10 0  0 1n 1n 10u 20u)
+* Leg C — 75 % duty
+Vgch g_ch 0 PULSE(0  10 0 1n 1n 15u 20u)
+Vgcl g_cl 0 PULSE(10 0  0 1n 1n 15u 20u)
+
+* Leg A
+Sah vcc sw_a g_ah 0 SWMOD
+Sal sw_a 0   g_al 0 SWMOD
+La  sw_a out_a 47u IC=0
+Ca  out_a 0   100u IC=0
+Ra  out_a 0   5
+
+* Leg B
+Sbh vcc sw_b g_bh 0 SWMOD
+Sbl sw_b 0   g_bl 0 SWMOD
+Lb  sw_b out_b 47u IC=0
+Cb  out_b 0   100u IC=0
+Rb  out_b 0   5
+
+* Leg C
+Sch vcc sw_c g_ch 0 SWMOD
+Scl sw_c 0   g_cl 0 SWMOD
+Lc  sw_c out_c 47u IC=0
+Cc  out_c 0   100u IC=0
+Rc  out_c 0   5
+
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+.tran 0.2u 500u UIC
+.end

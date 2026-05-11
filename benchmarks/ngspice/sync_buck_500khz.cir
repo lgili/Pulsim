@@ -1,0 +1,22 @@
+* Synchronous buck at 500 kHz — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/sync_buck_500khz.yaml.
+*
+* 24 V → 12 V (50 % duty) at 500 kHz. Same topology as the 50 kHz
+* synchronous_buck benchmark but 10× the switching frequency, with
+* the LC filter scaled by 1/10 to keep the same ripple magnitude.
+
+Vdc vcc 0 DC 24
+* 500 kHz, 50 % duty cycle → period 2 µs, on-time 1 µs
+Vgh gate_h 0 PULSE(0  10 0 1n 1n 1u 2u)
+Vgl gate_l 0 PULSE(10 0  0 1n 1n 1u 2u)
+
+Sh vcc sw gate_h 0 SWMOD
+Sl sw 0   gate_l 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+L1 sw out 4.7u IC=0
+C1 out 0   10u IC=0
+Rload out 0 5
+
+.tran 40n 200u UIC
+.end

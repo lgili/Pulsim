@@ -1,0 +1,25 @@
+* Boost converter — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/boost_classic.yaml.
+*
+* V_in=12V, L=47µH, low-side switch, freewheel diode to C_out=47µF
+* on R_load=20Ω. duty=0.4 → V_out ≈ 12 / (1 - 0.4) = 20V.
+
+Vin vin 0 DC 12
+* PWM duty=0.4 with 200ns dead-time → on-time = 0.4·20µs − 0.2µs ≈ 7.8µs
+Vg  gate 0 PULSE(0 10 0 1n 1n 7.8u 20u)
+
+L1  vin sw_node 47u IC=0
+SW  sw_node 0 gate 0 SWMOD
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+
+* Diode emulated as a switch on its own A-K voltage (D-prefix → diode
+* in ngspice but takes a `D` model; rename to S-prefix so it stays a
+* voltage-controlled switch and our SWMOD model applies).
+SDrect sw_node out sw_node out DMOD
+.model DMOD SW(VT=0 VH=1m RON=5m ROFF=1Meg)
+
+Cout out 0 47u IC=0
+Rload out 0 20
+
+.tran 0.2u 1.5m UIC
+.end

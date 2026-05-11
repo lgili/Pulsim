@@ -1,0 +1,35 @@
+* Cascaded boost + synchronous-buck — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/cascaded_boost_buck.yaml.
+*
+* Boost: V_in=12V, duty=0.5 → V_bus ≈ 24 V (= 12/(1-0.5)).
+* Sync-buck stage on the bus: duty=0.25 → V_out ≈ 6 V.
+* Two PWMs are independent (both 50 kHz, no relative phase).
+
+Vin vin 0 DC 12
+
+Vgb g_boost  0 PULSE(0 10 0 1n 1n 9.8u 20u)
+Vgh g_buck_h 0 PULSE(0 10 0 1n 1n 4.8u 20u)
+* buck low-side: complementary, 75 % on-time
+Vgl g_buck_l 0 PULSE(10 0 0 1n 1n 4.8u 20u)
+
+* Boost stage
+R_dcr_boost vin n_lboost 20m
+L_boost n_lboost boost_sw 47u IC=0
+S_boost boost_sw 0 g_boost 0 SWMOD
+SDb     boost_sw bus boost_sw bus DMOD
+C_bus   bus 0 100u IC=0
+R_pre   bus 0 1k
+
+* Buck stage
+S_buck_h bus buck_sw g_buck_h 0 SWMOD
+S_buck_l buck_sw 0   g_buck_l 0 SWMOD
+R_dcr_buck buck_sw n_lbuck 20m
+L_buck   n_lbuck out 47u IC=0
+C_out    out 0 47u IC=0
+R_load   out 0 5
+
+.model SWMOD SW(VT=5 VH=0.1 RON=5m ROFF=1Meg)
+.model DMOD  SW(VT=0 VH=1m  RON=5m ROFF=1Meg)
+
+.tran 0.2u 2.5m UIC
+.end
