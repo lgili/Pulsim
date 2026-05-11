@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/getting-started/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/motor-models/">
       
       
-        <link rel="prev" href="../backend-architecture/">
+        <link rel="prev" href="../converter-templates/">
       
       
-        <link rel="next" href="../user-guide/">
+        <link rel="next" href="../three-phase-grid/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Getting Started - PulsimCore</title>
+        <title>Motor Models - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#motor-models" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting Started
+              Motor Models
             
           </span>
         </div>
@@ -210,12 +210,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
@@ -230,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -353,30 +353,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -387,7 +384,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             Overview
@@ -440,30 +437,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -472,80 +449,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      Prerequisites
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option B: Install Package
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
-    <span class="md-ellipsis">
-      First Simulation (RC Step)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run Core Validation Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      Next Steps
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -562,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -593,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -877,10 +783,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../motor-models/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -889,6 +815,164 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr-pmsm-foc-current-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR — PMSM-FOC current loop
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mechanical-primitives" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mechanical primitives
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mechanical primitives">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shaft" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shaft
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gearbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      GearBox
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      Loads
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frame-transforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      Frame transforms
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pmsm" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMSM
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PMSM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-load-gate-g4" class="md-nav__link">
+    <span class="md-ellipsis">
+      No-load gate (G.4)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#locked-rotor-gate-g4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Locked-rotor gate (G.4)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dc-motor" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC motor
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pmsm-foc-current-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMSM-FOC current loop
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1411,54 +1495,138 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#tldr-pmsm-foc-current-loop" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      TL;DR — PMSM-FOC current loop
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
+  <a href="#mechanical-primitives" class="md-nav__link">
     <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
+      Mechanical primitives
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mechanical primitives">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shaft" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shaft
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gearbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      GearBox
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      Loads
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frame-transforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      Frame transforms
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
+  <a href="#pmsm" class="md-nav__link">
     <span class="md-ellipsis">
-      Option B: Install Package
+      PMSM
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PMSM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-load-gate-g4" class="md-nav__link">
+    <span class="md-ellipsis">
+      No-load gate (G.4)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#locked-rotor-gate-g4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Locked-rotor gate (G.4)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dc-motor" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC motor
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
+  <a href="#pmsm-foc-current-loop" class="md-nav__link">
     <span class="md-ellipsis">
-      First Simulation (RC Step)
+      PMSM-FOC current loop
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
+  <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
-      Run Core Validation Commands
+      Validation
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
+  <a href="#follow-ups" class="md-nav__link">
     <span class="md-ellipsis">
-      Next Steps
+      Follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
     </span>
   </a>
   
@@ -1479,7 +1647,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/motor-models.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1488,73 +1656,313 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/motor-models.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<p>This guide takes you from a clean checkout to your first backend simulation.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<h1 id="motor-models">Motor Models<a class="headerlink" href="#motor-models" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Status: shipped — mechanical primitives + Park/Clarke + PMSM + DC
+motor + PMSM-FOC current loop. Induction / BLDC / sensors are the
+natural follow-ups.</p>
+</blockquote>
+<p>Motor models are the mechanical-electrical bridge of the simulator.
+Phase 1.2's <code>add-motor-models</code> lays down the rotor-frame primitives
+that every drive design needs:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Header</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mechanical primitives</td>
+<td><code>motors/mechanical.hpp</code></td>
+<td><code>Shaft</code>, <code>GearBox</code>, <code>ConstantTorqueLoad</code>, <code>FanLoad</code>, <code>FlywheelLoad</code></td>
+</tr>
+<tr>
+<td>Frame transforms</td>
+<td><code>motors/frame_transforms.hpp</code></td>
+<td>Clarke / Park / inverse, plus composite <code>abc_to_dq</code> and <code>dq_to_abc</code></td>
+</tr>
+<tr>
+<td>PMSM</td>
+<td><code>motors/pmsm.hpp</code></td>
+<td><code>Pmsm</code> device in dq-frame, including saliency (Ld ≠ Lq) for IPM machines</td>
+</tr>
+<tr>
+<td>DC motor</td>
+<td><code>motors/dc_motor.hpp</code></td>
+<td>Separately-excited armature equations + closed-form steady-state speed</td>
+</tr>
+<tr>
+<td>FOC current loop</td>
+<td><code>motors/pmsm_foc.hpp</code></td>
+<td>Cascaded PI for id / iq, auto-tuned from the motor's (Rs, Ld, Lq) and a target bandwidth</td>
+</tr>
+</tbody>
+</table>
+<p>Like the other Fase 1 / 2 changes, the motor layer is <strong>header-only</strong>.
+Full Circuit-side integration (registering motors as
+<code>Circuit::DeviceVariant</code> entries that stamp the right phase voltages
+into MNA) lands in a follow-up; today the math objects compose freely
+in user-space code and tests.</p>
+<h2 id="tldr-pmsm-foc-current-loop">TL;DR — PMSM-FOC current loop<a class="headerlink" href="#tldr-pmsm-foc-current-loop" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/motors/pmsm.hpp&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/motors/pmsm_foc.hpp&quot;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">pulsim</span><span class="o">::</span><span class="nn">v1</span><span class="o">::</span><span class="nn">motors</span><span class="p">;</span>
+
+<span class="n">PmsmParams</span><span class="w"> </span><span class="n">motor_p</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">Rs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.5</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Ld</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Lq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">psi_pm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">pole_pairs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">J</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">b_friction</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-4</span><span class="p">,</span>
+<span class="p">};</span>
+<span class="n">Pmsm</span><span class="w"> </span><span class="nf">motor</span><span class="p">(</span><span class="n">motor_p</span><span class="p">);</span>
+
+<span class="c1">// 500 Hz current-loop bandwidth, ±50 V output clamp.</span>
+<span class="n">PmsmFocCurrentLoop</span><span class="w"> </span><span class="nf">foc</span><span class="p">(</span><span class="n">motor_p</span><span class="p">,</span><span class="w"> </span><span class="p">{.</span><span class="n">bandwidth_hz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">500.0</span><span class="p">,</span>
+<span class="w">                                  </span><span class="p">.</span><span class="n">Vd_min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">-50</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Vd_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">50</span><span class="p">,</span>
+<span class="w">                                  </span><span class="p">.</span><span class="n">Vq_min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">-50</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Vq_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">50</span><span class="p">});</span>
+
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">iq_ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">5.0</span><span class="p">,</span><span class="w"> </span><span class="n">id_ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">;</span><span class="w">     </span><span class="c1">// 5 A torque-producing</span>
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">dt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-5</span><span class="p">;</span><span class="w">                       </span><span class="c1">// 100 kHz control loop</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">N_steps</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">Vd</span><span class="p">,</span><span class="w"> </span><span class="n">Vq</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">foc</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">id_ref</span><span class="p">,</span><span class="w"> </span><span class="n">iq_ref</span><span class="p">,</span>
+<span class="w">                              </span><span class="n">motor</span><span class="p">.</span><span class="n">i_d</span><span class="p">(),</span><span class="w"> </span><span class="n">motor</span><span class="p">.</span><span class="n">i_q</span><span class="p">(),</span><span class="w"> </span><span class="n">dt</span><span class="p">);</span>
+<span class="w">    </span><span class="n">motor</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">Vd</span><span class="p">,</span><span class="w"> </span><span class="n">Vq</span><span class="p">,</span><span class="w"> </span><span class="cm">/*tau_load*/</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">dt</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The PI tuning <code>K_p = ω_c · L</code>, <code>K_i = K_p · R_s / L</code> cancels the plant
+pole at <code>R_s/L</code> and places unity-gain crossover at <code>ω_c</code>. Both d-axis
+and q-axis loops use the same recipe with their respective inductances.</p>
+<h2 id="mechanical-primitives">Mechanical primitives<a class="headerlink" href="#mechanical-primitives" title="Permanent link">&para;</a></h2>
+<h3 id="shaft"><code>Shaft</code><a class="headerlink" href="#shaft" title="Permanent link">&para;</a></h3>
+<p>Implements <code>J · dω/dt = τ_input − τ_load − b·ω − τ_coulomb·sign(ω)</code> via
+forward-Euler. Used as the mechanical port for every motor model.</p>
+<div class="highlight"><pre><span></span><code><span class="n">Shaft</span><span class="w"> </span><span class="n">sh</span><span class="p">{.</span><span class="n">J</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">b_friction</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">};</span>
+<span class="n">sh</span><span class="p">.</span><span class="n">advance</span><span class="p">(</span><span class="cm">/*tau_net*/</span><span class="mf">0.5</span><span class="p">,</span><span class="w"> </span><span class="cm">/*dt*/</span><span class="mf">1e-5</span><span class="p">);</span>
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">omega</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sh</span><span class="p">.</span><span class="n">omega</span><span class="p">;</span>
+</code></pre></div>
+<p>Time constant: <code>τ_m = J / b</code>. After <code>5·τ_m</code> of constant input torque
+the shaft settles within 1 % of <code>ω_ss = τ/b</code>.</p>
+<h3 id="gearbox"><code>GearBox</code><a class="headerlink" href="#gearbox" title="Permanent link">&para;</a></h3>
+<p>Ideal speed reducer. <code>ratio = ω_in / ω_out</code>, <code>efficiency</code> ∈ (0, 1].</p>
+<div class="highlight"><pre><span></span><code><span class="n">GearBox</span><span class="w"> </span><span class="n">gb</span><span class="p">{.</span><span class="n">ratio</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">10.0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">efficiency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.95</span><span class="p">};</span>
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">omega_load_side</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gb</span><span class="p">.</span><span class="n">omega_out</span><span class="p">(</span><span class="n">motor</span><span class="p">.</span><span class="n">omega_m</span><span class="p">());</span>
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">torque_load_side</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gb</span><span class="p">.</span><span class="n">torque_out</span><span class="p">(</span><span class="n">motor_torque</span><span class="p">);</span>
+</code></pre></div>
+<p>Reflecting load torque back to the motor side: <code>gb.reflect_load(τ_out) =
+τ_out / (ratio · η)</code>.</p>
+<h3 id="loads">Loads<a class="headerlink" href="#loads" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Load</th>
+<th>Math</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ConstantTorqueLoad</code></td>
+<td><code>τ_load = τ</code></td>
+<td>Industrial motor with a fixed mechanical brake</td>
+</tr>
+<tr>
+<td><code>FanLoad</code></td>
+<td><code>τ_load = k · ω · |ω|</code></td>
+<td>Fans / blowers / propellers / quadratic torque profiles</td>
+</tr>
+<tr>
+<td><code>FlywheelLoad</code></td>
+<td><code>τ_load = 0</code>, <code>J += J_extra</code></td>
+<td>Pure-inertia load (sums into the shaft's J)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="frame-transforms">Frame transforms<a class="headerlink" href="#frame-transforms" title="Permanent link">&para;</a></h2>
+<p>The Clarke / Park transforms convert between three coordinate frames
+power-electronics engineers reach for hourly:</p>
+<table>
+<thead>
+<tr>
+<th>Frame</th>
+<th>Variables</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3φ stationary</td>
+<td><code>(a, b, c)</code></td>
+<td>Inverter output / motor terminals</td>
+</tr>
+<tr>
+<td>2φ stationary</td>
+<td><code>(α, β)</code></td>
+<td>Compact transient analysis</td>
+</tr>
+<tr>
+<td>2φ rotating</td>
+<td><code>(d, q)</code></td>
+<td>dq-frame steady-state for FOC / control design</td>
+</tr>
+</tbody>
+</table>
+<p>Pulsim uses the <strong>amplitude-invariant</strong> convention (Clarke prefactor
+<code>2/3</code>) — the same one Texas Instruments / STMicro motor-control
+libraries use. Round-tripping <code>abc → dq → abc</code> at any rotor angle is
+identity within numerical noise (pinned by the unit tests).</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// abc → dq at rotor angle θ_e</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">d</span><span class="p">,</span><span class="w"> </span><span class="n">q</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">abc_to_dq</span><span class="p">(</span><span class="n">va</span><span class="p">,</span><span class="w"> </span><span class="n">vb</span><span class="p">,</span><span class="w"> </span><span class="n">vc</span><span class="p">,</span><span class="w"> </span><span class="n">motor</span><span class="p">.</span><span class="n">theta_electrical</span><span class="p">());</span>
+
+<span class="c1">// dq → abc (PWM modulator gets these phase references)</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">Va</span><span class="p">,</span><span class="w"> </span><span class="n">Vb</span><span class="p">,</span><span class="w"> </span><span class="n">Vc</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dq_to_abc</span><span class="p">(</span><span class="n">Vd_ref</span><span class="p">,</span><span class="w"> </span><span class="n">Vq_ref</span><span class="p">,</span><span class="w"> </span><span class="n">motor</span><span class="p">.</span><span class="n">theta_electrical</span><span class="p">());</span>
+</code></pre></div>
+<h2 id="pmsm">PMSM<a class="headerlink" href="#pmsm" title="Permanent link">&para;</a></h2>
+<p>Standard rotor-frame equations:</p>
+<div class="highlight"><pre><span></span><code>v_d = R_s · i_d + L_d · di_d/dt − ω_e · L_q · i_q
+v_q = R_s · i_q + L_q · di_q/dt + ω_e · (L_d · i_d + ψ_PM)
+τ_em = (3/2) · p · (ψ_PM · i_q + (L_d − L_q) · i_d · i_q)
+</code></pre></div>
+<p><code>L_d ≠ L_q</code> produces the reluctance torque term <code>(L_d − L_q)·i_d·i_q</code>
+— relevant for interior-permanent-magnet (IPM) machines where saliency
+is significant. Surface-PMSM / <code>L_d = L_q</code> reduces to the classical
+<code>τ_em = (3/2)·p·ψ_PM·i_q</code>.</p>
+<h3 id="no-load-gate-g4">No-load gate (G.4)<a class="headerlink" href="#no-load-gate-g4" title="Permanent link">&para;</a></h3>
+<p>Spinning the unexcited rotor produces back-EMF
+<code>v_back = ψ_PM · ω_e = ψ_PM · p · ω_m</code> per phase (peak). Pinned by
+<code>Phase 3.4</code> in the test suite.</p>
+<h3 id="locked-rotor-gate-g4">Locked-rotor gate (G.4)<a class="headerlink" href="#locked-rotor-gate-g4" title="Permanent link">&para;</a></h3>
+<p>With ω_m forced to zero (huge inertia), applying <code>V_q</code> drives <code>i_q</code>
+toward <code>V_q / R_s</code> on the L_q time constant. Pinned by <code>Phase 3.5</code>.</p>
+<h2 id="dc-motor">DC motor<a class="headerlink" href="#dc-motor" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>v_a  = R_a · i_a + L_a · di_a/dt + K_e · ω
+τ_em = K_t · i_a
+J · dω/dt = τ_em − τ_load − b · ω
+</code></pre></div>
+<p>Closed-form steady-state speed:</p>
+<div class="highlight"><pre><span></span><code>ω_ss = (V·K_t − τ_load·R_a) / (K_t·K_e + b·R_a)
+</code></pre></div>
+<p>Mechanical time constant: <code>τ_m ≈ J · R_a / (K_t · K_e)</code>. Both helpers
+are exposed on the <code>DcMotor</code> class so the test gate ("speed step
+matches first-order analytical within ≤ 5 %") is direct.</p>
+<h2 id="pmsm-foc-current-loop">PMSM-FOC current loop<a class="headerlink" href="#pmsm-foc-current-loop" title="Permanent link">&para;</a></h2>
+<p><code>PmsmFocCurrentLoop</code> wraps two <code>PiCompensator</code> instances (from the
+<code>add-converter-templates</code> change) with the canonical "pole-zero
+cancellation" tuning. Bandwidth defaults to 1 kHz — fast enough for
+typical PWM rates of 10–20 kHz.</p>
+<table>
+<thead>
+<tr>
+<th>Tuning rule</th>
+<th>Formula</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>K_p_d</code></td>
+<td><code>ω_c · L_d</code></td>
+</tr>
+<tr>
+<td><code>K_i_d</code></td>
+<td><code>K_p_d · R_s / L_d</code></td>
+</tr>
+<tr>
+<td><code>K_p_q</code></td>
+<td><code>ω_c · L_q</code></td>
+</tr>
+<tr>
+<td><code>K_i_q</code></td>
+<td><code>K_p_q · R_s / L_q</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>retune(motor, foc_params)</code> rebuilds the gains from updated motor
+parameters or a new bandwidth target — useful for adaptive control or
+parameter identification flows.</p>
+<p>The loop's <code>step(id_ref, iq_ref, id_meas, iq_meas, dt)</code> returns
+<code>(Vd_ref, Vq_ref)</code> which the user feeds either into a PMSM model
+directly (for control-loop bench tests) or into an inverse-Park +
+Space-Vector-Modulator chain (for full PWM-on-inverter simulation).</p>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<p>Six gate-level tests (all in <code>test_motor_models.cpp</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Test</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>G.1</strong> Shaft / friction model</td>
+<td><code>Phase 1: shaft + flywheel + step torque</code></td>
+<td>ω_ss within ±2 % at 5·τ_m for J=b=1e-3</td>
+</tr>
+<tr>
+<td><strong>G.1</strong> Park round-trip</td>
+<td><code>Phase 2: Clarke / Park identity</code></td>
+<td>Sinusoidal balanced 3φ → (d=1, q=0) within 1e-12</td>
+</tr>
+<tr>
+<td><strong>G.4</strong> PMSM no-load</td>
+<td><code>Phase 3.4</code></td>
+<td><code>back_emf_peak() == ψ_PM · p · ω_m</code> to machine precision</td>
+</tr>
+<tr>
+<td><strong>G.4</strong> PMSM locked-rotor</td>
+<td><code>Phase 3.5</code></td>
+<td>i_q converges to V_q / R_s within ±1 % over 0.5 s</td>
+</tr>
+<tr>
+<td><strong>G.1</strong> DC motor speed step</td>
+<td><code>Phase 5.2</code></td>
+<td>ω matches <code>(V·K_t − τ·R_a) / (K_t·K_e + b·R_a)</code> within ±5 % at 12·τ_m</td>
+</tr>
+<tr>
+<td><strong>G.3</strong> PMSM-FOC tracking</td>
+<td><code>Phase 7</code></td>
+<td>i_q tracks i_q_ref within ±5 % after ≈ 50 ms at 500 Hz bandwidth</td>
+</tr>
+</tbody>
+</table>
+<h2 id="follow-ups">Follow-ups<a class="headerlink" href="#follow-ups" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Python 3.10+</li>
-<li>CMake 3.20+</li>
-<li>Ninja</li>
-<li>A C++ toolchain compatible with project requirements</li>
+<li><strong>Induction motor</strong> (<code>InductionMotorDevice</code>): rotor flux observer,
+  slip computation, V/f start-up tutorial. Math is well-known; ships
+  alongside the <code>add-three-phase-grid-library</code> change which provides
+  the inverter side.</li>
+<li><strong>BLDC / trapezoidal back-EMF</strong>: hall-sensor commutation table,
+  6-step modulation. Tracked separately from the sinusoidal PMSM.</li>
+<li><strong>Sensor models</strong>: <code>EncoderQuadrature</code>, <code>HallSensor</code>, <code>Resolver</code>.
+  Encoder is straightforward; resolver wants a sinusoidal-modulator +
+  demodulator pair that justifies its own change.</li>
+<li><strong>Saturation <code>L_d(i_d), L_q(i_q)</code></strong>: lookup-table extension of the
+  PMSM's constant inductances. Lands when the magnetic catalog's
+  <code>BHCurveTable</code> is wired through to motor stators.</li>
+<li><strong>Speed / position outer loops</strong>: the FOC current loop is final;
+  the cascaded speed PI + position-loop PI follow alongside the
+  closed-loop benchmark suite (<code>add-closed-loop-benchmarks</code>).</li>
+<li><strong><code>Circuit::DeviceVariant</code> integration</strong>: register <code>Pmsm</code> /
+  <code>DcMotor</code> so a YAML netlist can declare <code>type: pmsm, parameters:
+  {Rs: ..., Ld: ..., ...}</code> and the existing parser dispatches to
+  these models. Pairs with the <code>add-three-phase-grid-library</code> change.</li>
 </ul>
-<h2 id="option-a-build-from-source-recommended-for-backend-development">Option A: Build From Source (Recommended for backend development)<a class="headerlink" href="#option-a-build-from-source-recommended-for-backend-development" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-</code></pre></div>
-<p>Confirm that the package is importable from the local build tree:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
-</code></pre></div>
-<h2 id="option-b-install-package">Option B: Install Package<a class="headerlink" href="#option-b-install-package" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
-</code></pre></div>
-<h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim as ps</span>
-
-<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
-
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
-<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-<span class="s">options.step_mode = ps.StepMode.Variable</span>
-
-<span class="s">sim = ps.Simulator(circuit, options)</span>
-<span class="s">result = sim.run_transient(circuit.initial_state())</span>
-
-<span class="s">print(&quot;success:&quot;, result.success)</span>
-<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
-<span class="s">print(&quot;samples:&quot;, len(result.time))</span>
-<span class="s">PY</span>
-</code></pre></div>
-<p>Expected outcome:</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>success: True</code></li>
-<li>non-zero <code>steps</code> and <code>samples</code></li>
-<li>monotonic RC charging behavior on <code>V(out)</code></li>
+<li><a href="../converter-templates/"><code>converter-templates.md</code></a> — the PMSM-FOC
+  loop's <code>PiCompensator</code> ships with the converter-templates change.</li>
+<li><a href="../ac-analysis/"><code>ac-analysis.md</code></a> — when the motor + inverter is
+  part of a closed loop, the AC sweep helper lets you verify the
+  measured loop-gain margin against the FOC's design target.</li>
 </ul>
-<h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
-
-<span class="c1"># C++ core tests (if build already includes tests)</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
-</code></pre></div>
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
-<li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
-<li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
-</ol>
 
 
 
@@ -1590,7 +1998,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../backend-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend Architecture">
+          <a href="../converter-templates/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Converter Templates">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1600,20 +2008,20 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
                 Previous
               </span>
               <div class="md-ellipsis">
-                Backend Architecture
+                Converter Templates
               </div>
             </div>
           </a>
         
         
           
-          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: User Guide">
+          <a href="../three-phase-grid/" class="md-footer__link md-footer__link--next" aria-label="Next: Three-Phase Grid Library">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                User Guide
+                Three-Phase Grid Library
               </div>
             </div>
             <div class="md-footer__button md-icon">

@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/electrothermal-workflow/">
       
       
-        <link rel="prev" href="../averaged-converter-modeling/">
+        <link rel="prev" href="../netlist-format/">
       
       
-        <link rel="next" href="../electrothermal-migration-scalar-to-datasheet/">
+        <link rel="next" href="../examples-and-results/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -252,24 +252,6 @@
     
     
       <li class="md-tabs__item">
-        <a href="../cblock/" class="md-tabs__link">
-          
-  
-  Signal Domain
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
         <a href="../api-reference/" class="md-tabs__link">
           
   
@@ -288,7 +270,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../supported-components-catalog/" class="md-tabs__link">
+        <a href="../gui-component-parity/" class="md-tabs__link">
           
   
   Compatibility
@@ -552,137 +534,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../backend-cpp-contributor-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Backend C++ Contributor Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../netlist-format/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Netlist YAML Format
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../magnetic-core-backend-frontend-contract/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Magnetic Core Backend/Frontend Contract
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../frontend-control-signals/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frontend Control and Signals Contract
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frequency Analysis (AC Sweep)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../post-processing/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Waveform Post-Processing
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../averaged-converter-modeling/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Averaged Converter Modeling
   </span>
   
 
@@ -745,99 +601,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-enable-global-loss-and-thermal-blocks" class="md-nav__link">
+  <a href="#thermal-capable-components" class="md-nav__link">
     <span class="md-ellipsis">
-      1) Enable Global Loss and Thermal Blocks
+      Thermal-Capable Components
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-thermal-capable-component-types" class="md-nav__link">
+  <a href="#global-thermal-block-simulationthermal" class="md-nav__link">
     <span class="md-ellipsis">
-      2) Thermal-Capable Component Types
+      Global Thermal Block (simulation.thermal)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-per-component-thermal-port" class="md-nav__link">
+  <a href="#per-component-thermal-port-componentthermal" class="md-nav__link">
     <span class="md-ellipsis">
-      3) Per-Component Thermal Port
+      Per-Component Thermal Port (component.thermal)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-closed-loop-control-sampling-important-for-stability" class="md-nav__link">
+  <a href="#strict-vs-non-strict-parsing" class="md-nav__link">
     <span class="md-ellipsis">
-      4) Closed-Loop Control Sampling (Important for Stability)
+      Strict vs Non-Strict Parsing
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-strict-vs-non-strict-thermal-validation" class="md-nav__link">
+  <a href="#python-result-consumption" class="md-nav__link">
     <span class="md-ellipsis">
-      5) Strict vs Non-Strict Thermal Validation
+      Python Result Consumption
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-integrated-closed-loop-thermal-yaml-example" class="md-nav__link">
+  <a href="#programmatic-configuration-no-yaml-thermal-block" class="md-nav__link">
     <span class="md-ellipsis">
-      6) Integrated Closed-Loop + Thermal YAML Example
+      Programmatic Configuration (No YAML Thermal Block)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-python-result-consumption" class="md-nav__link">
+  <a href="#benchmarkkpi-gate-integration" class="md-nav__link">
     <span class="md-ellipsis">
-      7) Python Result Consumption
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#8-kpi-gate-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      8) KPI Gate Integration
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-backend-contract-gui-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      9) Backend Contract (GUI Integration)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#10-gui-responsibility-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      10) GUI Responsibility Boundary
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#11-scalar-to-datasheet-migration" class="md-nav__link">
-    <span class="md-ellipsis">
-      11) Scalar-to-Datasheet Migration
+      Benchmark/KPI Gate Integration
     </span>
   </a>
   
@@ -847,27 +667,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../electrothermal-migration-scalar-to-datasheet/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Electrothermal Migration (Scalar to Datasheet)
-  </span>
-  
-
-      </a>
     </li>
   
 
@@ -964,11 +763,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../convergence-playbook/" class="md-nav__link">
+      <a href="../linear-solver-cache/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Convergence Playbook
+    Linear-Solver Cache
   </span>
   
 
@@ -985,11 +784,284 @@
   
   
     <li class="md-nav__item">
-      <a href="../convergence-profile-migration/" class="md-nav__link">
+      <a href="../ac-analysis/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Convergence Profile Migration
+    AC Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fra/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Response Analysis (FRA)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-devices/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog Devices
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converter-templates/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Converter Templates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motor-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../three-phase-grid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-generation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Real-Time Code Generation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../property-based-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../robustness-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Robustness Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spice-parity-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
   </span>
   
 
@@ -1055,7 +1127,7 @@
             
   
   <span class="md-ellipsis">
-    Signal Domain
+    API
   </span>
   
 
@@ -1064,160 +1136,6 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            Signal Domain
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C-Block Overview
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/user-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C-Block User Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/abi-reference/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C ABI Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/api-reference/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Python API Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/examples/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Examples Walkthrough
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    API
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             API
           </label>
@@ -1293,10 +1211,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1307,33 +1225,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             Compatibility
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../supported-components-catalog/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Supported Components Catalog
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
             
               
                 
@@ -1426,10 +1323,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1440,8 +1337,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             Operations
           </label>
@@ -1475,74 +1372,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../psim-plecs-gap-and-modular-architecture-roadmap/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PSIM/PLECS Gap and Modular Roadmap
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../versioning-and-release/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Docs Versioning and Release
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../release-notes-electrothermal-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Release Notes (Electrothermal Parity)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../pr-electrothermal-datasheet-parity-package/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PR Package (Electrothermal)
   </span>
   
 
@@ -1586,99 +1420,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-enable-global-loss-and-thermal-blocks" class="md-nav__link">
+  <a href="#thermal-capable-components" class="md-nav__link">
     <span class="md-ellipsis">
-      1) Enable Global Loss and Thermal Blocks
+      Thermal-Capable Components
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-thermal-capable-component-types" class="md-nav__link">
+  <a href="#global-thermal-block-simulationthermal" class="md-nav__link">
     <span class="md-ellipsis">
-      2) Thermal-Capable Component Types
+      Global Thermal Block (simulation.thermal)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-per-component-thermal-port" class="md-nav__link">
+  <a href="#per-component-thermal-port-componentthermal" class="md-nav__link">
     <span class="md-ellipsis">
-      3) Per-Component Thermal Port
+      Per-Component Thermal Port (component.thermal)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-closed-loop-control-sampling-important-for-stability" class="md-nav__link">
+  <a href="#strict-vs-non-strict-parsing" class="md-nav__link">
     <span class="md-ellipsis">
-      4) Closed-Loop Control Sampling (Important for Stability)
+      Strict vs Non-Strict Parsing
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-strict-vs-non-strict-thermal-validation" class="md-nav__link">
+  <a href="#python-result-consumption" class="md-nav__link">
     <span class="md-ellipsis">
-      5) Strict vs Non-Strict Thermal Validation
+      Python Result Consumption
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-integrated-closed-loop-thermal-yaml-example" class="md-nav__link">
+  <a href="#programmatic-configuration-no-yaml-thermal-block" class="md-nav__link">
     <span class="md-ellipsis">
-      6) Integrated Closed-Loop + Thermal YAML Example
+      Programmatic Configuration (No YAML Thermal Block)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-python-result-consumption" class="md-nav__link">
+  <a href="#benchmarkkpi-gate-integration" class="md-nav__link">
     <span class="md-ellipsis">
-      7) Python Result Consumption
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#8-kpi-gate-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      8) KPI Gate Integration
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-backend-contract-gui-integration" class="md-nav__link">
-    <span class="md-ellipsis">
-      9) Backend Contract (GUI Integration)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#10-gui-responsibility-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      10) GUI Responsibility Boundary
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#11-scalar-to-datasheet-migration" class="md-nav__link">
-    <span class="md-ellipsis">
-      11) Scalar-to-Datasheet Migration
+      Benchmark/KPI Gate Integration
     </span>
   </a>
   
@@ -1716,9 +1514,21 @@
 
 
 <h1 id="electrothermal-workflow">Electrothermal Workflow<a class="headerlink" href="#electrothermal-workflow" title="Permanent link">&para;</a></h1>
-<p>This guide documents the supported backend path for coupled electrical + control + thermal simulation in PulsimCore.</p>
-<h2 id="1-enable-global-loss-and-thermal-blocks">1) Enable Global Loss and Thermal Blocks<a class="headerlink" href="#1-enable-global-loss-and-thermal-blocks" title="Permanent link">&para;</a></h2>
-<p>Use <code>simulation.enable_losses</code> and <code>simulation.thermal</code> together:</p>
+<p>This guide shows the supported way to configure and consume electrothermal simulations in PulsimCore.</p>
+<h2 id="thermal-capable-components">Thermal-Capable Components<a class="headerlink" href="#thermal-capable-components" title="Permanent link">&para;</a></h2>
+<p><code>component.thermal.enabled: true</code> is accepted only for these canonical component types:</p>
+<ul>
+<li><code>mosfet</code> (aliases: <code>m</code>, <code>nmos</code>, <code>pmos</code>)</li>
+<li><code>igbt</code> (alias: <code>q</code>)</li>
+<li><code>bjt_npn</code> (aliases: <code>bjtnpn</code>, <code>bjt-npn</code>)</li>
+<li><code>bjt_pnp</code> (aliases: <code>bjtpnp</code>, <code>bjt-pnp</code>)</li>
+</ul>
+<p>If thermal is enabled on unsupported components (for example <code>resistor</code>), parsing fails with:</p>
+<ul>
+<li><code>PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT</code></li>
+</ul>
+<h2 id="global-thermal-block-simulationthermal">Global Thermal Block (<code>simulation.thermal</code>)<a class="headerlink" href="#global-thermal-block-simulationthermal" title="Permanent link">&para;</a></h2>
+<p>Use <code>simulation.thermal</code> to define ambient and defaults:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">enable_losses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">thermal</span><span class="p">:</span>
@@ -1728,29 +1538,16 @@
 <span class="w">    </span><span class="nt">default_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
 <span class="w">    </span><span class="nt">default_cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
 </code></pre></div>
-<p>Field semantics:</p>
+<p>Fields:</p>
 <ul>
-<li><code>enabled</code>: enables thermal state integration.</li>
-<li><code>ambient</code>: ambient temperature in degC.</li>
-<li><code>policy</code>: <code>loss_only</code> or <code>loss_with_temperature_scaling</code>.</li>
-<li><code>default_rth</code>: non-strict fallback for missing per-device <code>rth</code>.</li>
-<li><code>default_cth</code>: non-strict fallback for missing per-device <code>cth</code>.</li>
+<li><code>enabled</code>: enables electrothermal coupling</li>
+<li><code>ambient</code>: ambient temperature (degC)</li>
+<li><code>policy</code>: <code>loss_only</code> or <code>loss_with_temperature_scaling</code></li>
+<li><code>default_rth</code>: default thermal resistance used by non-strict fallback</li>
+<li><code>default_cth</code>: default thermal capacitance used by non-strict fallback</li>
 </ul>
-<h2 id="2-thermal-capable-component-types">2) Thermal-Capable Component Types<a class="headerlink" href="#2-thermal-capable-component-types" title="Permanent link">&para;</a></h2>
-<p><code>component.thermal.enabled: true</code> is supported for:</p>
-<ul>
-<li><code>resistor</code></li>
-<li><code>diode</code></li>
-<li><code>mosfet</code> (aliases: <code>m</code>, <code>nmos</code>, <code>pmos</code>)</li>
-<li><code>igbt</code> (alias: <code>q</code>)</li>
-<li><code>bjt_npn</code> (aliases: <code>bjtnpn</code>, <code>bjt-npn</code>)</li>
-<li><code>bjt_pnp</code> (aliases: <code>bjtpnp</code>, <code>bjt-pnp</code>)</li>
-</ul>
-<p>If thermal is enabled on an unsupported type, YAML parsing fails with:</p>
-<ul>
-<li><code>PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT</code></li>
-</ul>
-<h2 id="3-per-component-thermal-port">3) Per-Component Thermal Port<a class="headerlink" href="#3-per-component-thermal-port" title="Permanent link">&para;</a></h2>
+<h2 id="per-component-thermal-port-componentthermal">Per-Component Thermal Port (<code>component.thermal</code>)<a class="headerlink" href="#per-component-thermal-port-componentthermal" title="Permanent link">&para;</a></h2>
+<p>Example:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
 <span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
@@ -1761,138 +1558,26 @@
 <span class="w">    </span><span class="nt">loss</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">eon</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0e-6</span>
 <span class="w">      </span><span class="nt">eoff</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0e-6</span>
-<span class="w">      </span><span class="nt">err</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5e-6</span>
 <span class="w">    </span><span class="nt">thermal</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">      </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.8</span>
-<span class="w">      </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.02</span>
+<span class="w">      </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+<span class="w">      </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
 <span class="w">      </span><span class="nt">temp_init</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
 <span class="w">      </span><span class="nt">temp_ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
 <span class="w">      </span><span class="nt">alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.004</span>
 </code></pre></div>
-<p>Datasheet switching-loss surface (optional, backend-evaluated):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gate</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">drain</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">source</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">loss</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">datasheet</span>
-<span class="w">      </span><span class="nt">axes</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">current</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">10.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">20.0</span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># A</span>
-<span class="w">        </span><span class="nt">voltage</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">200.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">400.0</span><span class="p p-Indicator">]</span><span class="w">    </span><span class="c1"># V</span>
-<span class="w">        </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">25.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">125.0</span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># degC</span>
-<span class="w">      </span><span class="nt">eon</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">... flat table ...</span><span class="w"> </span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># J</span>
-<span class="w">      </span><span class="nt">eoff</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">... flat table ...</span><span class="w"> </span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># J</span>
-<span class="w">      </span><span class="nt">err</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">... flat table ...</span><span class="w"> </span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># J (optional)</span>
-</code></pre></div>
-<p>Table order is row-major <code>(current, voltage, temperature)</code>:
-<code>index = ((i_current * N_voltage) + i_voltage) * N_temperature + i_temperature</code>.</p>
-<p>Validation for datasheet loss model:</p>
+<p>Thermal validation rules when <code>thermal.enabled=true</code>:</p>
 <ul>
-<li><code>axes.current/voltage/temperature</code> must be finite and strictly increasing</li>
-<li>each table length must match <code>N_current * N_voltage * N_temperature</code></li>
-<li>each energy sample must be finite and <code>&gt;= 0</code></li>
-</ul>
-<p>Validation rules when <code>thermal.enabled: true</code>:</p>
-<ul>
-<li><code>rth</code> finite and <code>&gt; 0</code></li>
-<li><code>cth</code> finite and <code>&gt;= 0</code></li>
-<li><code>temp_init</code>, <code>temp_ref</code>, <code>alpha</code> finite</li>
+<li><code>rth</code> must be finite and <code>&gt; 0</code></li>
+<li><code>cth</code> must be finite and <code>&gt;= 0</code></li>
+<li><code>temp_init</code>, <code>temp_ref</code>, <code>alpha</code> must be finite</li>
 </ul>
 <p>Invalid ranges fail with:</p>
 <ul>
 <li><code>PULSIM_YAML_E_THERMAL_RANGE_INVALID</code></li>
 </ul>
-<p>Optional staged thermal networks:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">network</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">foster</span><span class="w">      </span><span class="c1"># single_rc | foster | cauer</span>
-<span class="w">  </span><span class="nt">rth_stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.3</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.7</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">cth_stages</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.01</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0.05</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">temp_init</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
-<span class="w">  </span><span class="nt">temp_ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
-<span class="w">  </span><span class="nt">alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.004</span>
-</code></pre></div>
-<p>Staged thermal validation:</p>
-<ul>
-<li><code>rth_stages</code> and <code>cth_stages</code> are required for <code>foster</code>/<code>cauer</code></li>
-<li>stage arrays must be non-empty and same size</li>
-<li>each <code>rth_stages[i]</code> finite and <code>&gt; 0</code></li>
-<li>each <code>cth_stages[i]</code> finite and <code>&gt;= 0</code></li>
-</ul>
-<p>Deterministic diagnostics:</p>
-<ul>
-<li><code>PULSIM_YAML_E_THERMAL_NETWORK_INVALID</code></li>
-<li><code>PULSIM_YAML_E_THERMAL_DIMENSION_INVALID</code></li>
-</ul>
-<p>Optional shared sink coupling (multiple devices on one heatsink):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gate</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">      </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
-<span class="w">      </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.02</span>
-<span class="w">      </span><span class="nt">shared_sink_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hs_main</span>
-<span class="w">      </span><span class="nt">shared_sink_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.35</span>
-<span class="w">      </span><span class="nt">shared_sink_cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.10</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">diode</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">D1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">      </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.2</span>
-<span class="w">      </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.03</span>
-<span class="w">      </span><span class="nt">shared_sink_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hs_main</span>
-<span class="w">      </span><span class="nt">shared_sink_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.35</span>
-<span class="w">      </span><span class="nt">shared_sink_cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.10</span>
-</code></pre></div>
-<p>Shared sink rules:</p>
-<ul>
-<li><code>shared_sink_id</code> groups devices into one common sink.</li>
-<li>all devices in the same <code>shared_sink_id</code> must use identical
-  <code>shared_sink_rth/shared_sink_cth</code>.</li>
-<li><code>shared_sink_rth</code> must be finite and <code>&gt; 0</code>.</li>
-<li><code>shared_sink_cth</code> must be finite and <code>&gt;= 0</code>.</li>
-<li><code>shared_sink_rth/shared_sink_cth</code> without <code>shared_sink_id</code> is invalid.</li>
-</ul>
-<h2 id="4-closed-loop-control-sampling-important-for-stability">4) Closed-Loop Control Sampling (Important for Stability)<a class="headerlink" href="#4-closed-loop-control-sampling-important-for-stability" title="Permanent link">&para;</a></h2>
-<p>Control scheduling is primarily configured per control block via <code>sample_time</code> (<code>Ts</code>):</p>
-<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pi_controller</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vref</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.08</span>
-<span class="w">    </span><span class="nt">ki</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span>
-<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100e-6</span><span class="w"> </span><span class="c1"># Ts local (0 ou ausente =&gt; contínuo)</span>
-</code></pre></div>
-<p>Legacy global fallback is still available via <code>simulation.control</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">control</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">        </span><span class="c1"># auto | continuous | discrete</span>
-<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span><span class="w"> </span><span class="c1"># fallback global (legacy)</span>
-</code></pre></div>
-<p>Behavior:</p>
-<ul>
-<li>per-block (<code>component.sample_time|ts|Ts</code>):</li>
-<li><code>Ts = 0</code> or missing: continuous execution for that block;</li>
-<li><code>Ts &gt; 0</code>: discrete execution with output hold between updates.</li>
-<li><code>auto</code>:</li>
-<li>if global <code>sample_time</code> is provided, uses global fallback;</li>
-<li>if any control block already declares local <code>Ts</code>, global PWM inference is disabled;</li>
-<li>otherwise infers legacy fallback <code>Ts = 1 / f_pwm_max</code> from <code>pwm_generator</code>/PWM sources.</li>
-<li><code>continuous</code>: updates control blocks at every accepted solver step.</li>
-<li><code>discrete</code>: applies global fallback sampling when local <code>Ts</code> is not set.</li>
-</ul>
-<p>Notes:</p>
-<ul>
-<li><code>sample_time/ts/Ts</code> is accepted only for control virtual blocks (not probes/scopes).</li>
-<li>In YAML strict validation, legacy <code>mode: discrete</code> still requires global <code>sample_time &gt; 0</code>.</li>
-<li><code>sample_hold</code> has independent <code>sample_period</code> behavior.</li>
-</ul>
-<h2 id="5-strict-vs-non-strict-thermal-validation">5) Strict vs Non-Strict Thermal Validation<a class="headerlink" href="#5-strict-vs-non-strict-thermal-validation" title="Permanent link">&para;</a></h2>
-<p>Strict parser mode requires per-component <code>rth</code> and <code>cth</code> when thermal is enabled:</p>
+<h2 id="strict-vs-non-strict-parsing">Strict vs Non-Strict Parsing<a class="headerlink" href="#strict-vs-non-strict-parsing" title="Permanent link">&para;</a></h2>
+<p>In strict parser mode, <code>rth</code> and <code>cth</code> are required for each thermal-enabled component.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
 
 <span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">()</span>
@@ -1903,103 +1588,22 @@
 <ul>
 <li><code>PULSIM_YAML_E_THERMAL_MISSING_REQUIRED</code></li>
 </ul>
-<p>In non-strict mode, missing <code>rth</code>/<code>cth</code> are filled from <code>simulation.thermal.default_rth/default_cth</code>, and warnings are emitted:</p>
+<p>In non-strict mode, missing <code>rth</code>/<code>cth</code> are defaulted from <code>simulation.thermal.default_rth/default_cth</code> and warnings are emitted:</p>
 <ul>
 <li><code>PULSIM_YAML_W_THERMAL_DEFAULT_APPLIED</code></li>
 </ul>
-<h2 id="6-integrated-closed-loop-thermal-yaml-example">6) Integrated Closed-Loop + Thermal YAML Example<a class="headerlink" href="#6-integrated-closed-loop-thermal-yaml-example" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nt">schema</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pulsim-v1</span>
-<span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
-<span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">tstart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20e-3</span>
-<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-6</span>
-<span class="w">  </span><span class="nt">step_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variable</span>
-<span class="w">  </span><span class="nt">enable_events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">enable_losses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">control</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<span class="w">  </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">ambient</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
-<span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loss_with_temperature_scaling</span>
-<span class="w">    </span><span class="nt">default_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
-<span class="w">    </span><span class="nt">default_cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.05</span>
-
-<span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_source</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vin</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">waveform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">dc</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">12.0</span><span class="p p-Indicator">}</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_source</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vref</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vref</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">waveform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">dc</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">6.0</span><span class="p p-Indicator">}</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">vth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3.0</span>
-<span class="w">    </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.35</span>
-<span class="w">    </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-8</span>
-<span class="w">    </span><span class="nt">loss</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">eon</span><span class="p">:</span><span class="w"> </span><span class="nv">2e-6</span><span class="p p-Indicator">,</span><span class="nt"> eoff</span><span class="p">:</span><span class="w"> </span><span class="nv">2e-6</span><span class="p p-Indicator">}</span>
-<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> rth</span><span class="p">:</span><span class="w"> </span><span class="nv">1.0</span><span class="p p-Indicator">,</span><span class="nt"> cth</span><span class="p">:</span><span class="w"> </span><span class="nv">0.05</span><span class="p p-Indicator">}</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">diode</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">D1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">g_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">350.0</span>
-<span class="w">    </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-9</span>
-<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> rth</span><span class="p">:</span><span class="w"> </span><span class="nv">2.0</span><span class="p p-Indicator">,</span><span class="nt"> cth</span><span class="p">:</span><span class="w"> </span><span class="nv">0.03</span><span class="p p-Indicator">}</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">inductor</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">220u</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">capacitor</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cout</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">220u</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resistor</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Rload</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8.0</span>
-<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> rth</span><span class="p">:</span><span class="w"> </span><span class="nv">3.0</span><span class="p p-Indicator">,</span><span class="nt"> cth</span><span class="p">:</span><span class="w"> </span><span class="nv">0.2</span><span class="p p-Indicator">}</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pi_controller</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vref</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.08</span>
-<span class="w">    </span><span class="nt">ki</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span>
-<span class="w">    </span><span class="nt">output_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">output_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">anti_windup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pwm_generator</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PWM1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10000.0</span>
-<span class="w">    </span><span class="nt">duty_from_channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
-<span class="w">    </span><span class="nt">duty_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">duty_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">target_component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
-</code></pre></div>
-<h2 id="7-python-result-consumption">7) Python Result Consumption<a class="headerlink" href="#7-python-result-consumption" title="Permanent link">&para;</a></h2>
-<p><code>SimulationResult</code> keeps summary and per-component telemetry:</p>
+<h2 id="python-result-consumption">Python Result Consumption<a class="headerlink" href="#python-result-consumption" title="Permanent link">&para;</a></h2>
+<p><code>SimulationResult</code> keeps legacy summaries and now exposes unified per-component electrothermal telemetry:</p>
 <ul>
 <li><code>result.loss_summary</code></li>
 <li><code>result.thermal_summary</code></li>
 <li><code>result.component_electrothermal</code></li>
-<li><code>result.virtual_channels</code> (includes canonical thermal traces when enabled)</li>
-<li><code>result.virtual_channel_metadata</code></li>
 </ul>
+<p>Example:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
 
 <span class="n">parser</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParser</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">())</span>
-<span class="n">circuit</span><span class="p">,</span> <span class="n">options</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;examples/09_buck_closed_loop_loss_thermal_validation_backend.yaml&quot;</span><span class="p">)</span>
+<span class="n">circuit</span><span class="p">,</span> <span class="n">options</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;benchmarks/circuits/buck_electrothermal.yaml&quot;</span><span class="p">)</span>
 <span class="n">options</span><span class="o">.</span><span class="n">newton_options</span><span class="o">.</span><span class="n">num_nodes</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">num_nodes</span><span class="p">())</span>
 <span class="n">options</span><span class="o">.</span><span class="n">newton_options</span><span class="o">.</span><span class="n">num_branches</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">circuit</span><span class="o">.</span><span class="n">num_branches</span><span class="p">())</span>
 
@@ -2010,51 +1614,37 @@
     <span class="nb">print</span><span class="p">(</span>
         <span class="n">item</span><span class="o">.</span><span class="n">component_name</span><span class="p">,</span>
         <span class="s2">&quot;thermal=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">thermal_enabled</span><span class="p">,</span>
-        <span class="s2">&quot;Pavg=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">average_power</span><span class="p">,</span>
-        <span class="s2">&quot;Tfinal=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">final_temperature</span><span class="p">,</span>
-        <span class="s2">&quot;Tpeak=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">peak_temperature</span><span class="p">,</span>
+        <span class="s2">&quot;P_loss=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">total_loss</span><span class="p">,</span>
+        <span class="s2">&quot;E_loss=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">total_energy</span><span class="p">,</span>
+        <span class="s2">&quot;T_peak=&quot;</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">peak_temperature</span><span class="p">,</span>
     <span class="p">)</span>
-
-<span class="n">t_m1</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">virtual_channels</span><span class="p">[</span><span class="s2">&quot;T(M1)&quot;</span><span class="p">]</span>
-<span class="n">meta_m1</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">virtual_channel_metadata</span><span class="p">[</span><span class="s2">&quot;T(M1)&quot;</span><span class="p">]</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;T(M1) samples:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">t_m1</span><span class="p">),</span> <span class="s2">&quot;time:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">time</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;metadata:&quot;</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">domain</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">source_component</span><span class="p">,</span> <span class="n">meta_m1</span><span class="o">.</span><span class="n">unit</span><span class="p">)</span>
 </code></pre></div>
 <p>Notes:</p>
 <ul>
-<li>All non-virtual components are listed in <code>component_electrothermal</code>.</li>
-<li>Components with thermal disabled are still reported with deterministic ambient-based thermal fields.</li>
-<li>When <code>enable_losses=true</code> and <code>thermal.enabled=true</code>, transient output includes canonical thermal traces
-  in <code>result.virtual_channels</code> named <code>T(&lt;component_name&gt;)</code> (for thermal-enabled components).</li>
-<li>When <code>enable_losses=true</code>, transient output also includes canonical per-component loss traces:</li>
-<li><code>Pcond(&lt;component&gt;)</code></li>
-<li><code>Psw_on(&lt;component&gt;)</code></li>
-<li><code>Psw_off(&lt;component&gt;)</code></li>
-<li><code>Prr(&lt;component&gt;)</code></li>
-<li><code>Ploss(&lt;component&gt;)</code>
-  All these channels are aligned with <code>result.time</code> and tagged in
-  <code>result.virtual_channel_metadata</code> with <code>domain="loss"</code> and <code>unit="W"</code>.</li>
-<li>YAML parser validates <code>loss.eon/eoff/err</code> as finite and non-negative; invalid values
-  fail deterministically with <code>PULSIM_YAML_E_LOSS_RANGE_INVALID</code>.</li>
-<li>Datasheet loss schema errors are deterministic:</li>
-<li><code>PULSIM_YAML_E_LOSS_MODEL_INVALID</code></li>
-<li><code>PULSIM_YAML_E_LOSS_AXIS_INVALID</code></li>
-<li><code>PULSIM_YAML_E_LOSS_DIMENSION_INVALID</code></li>
-<li>Runtime now enforces a deterministic post-run consistency guard between canonical
-  electrothermal channels and summary surfaces (<code>loss_summary</code>, <code>thermal_summary</code>,
-  <code>component_electrothermal</code>). Any mismatch beyond tolerance fails the run with a
-  deterministic diagnostic.</li>
-<li>Thermal traces are emitted only when all conditions hold:</li>
-<li><code>simulation.enable_losses: true</code></li>
-<li><code>simulation.thermal.enabled: true</code></li>
-<li><code>component.thermal.enabled: true</code> (or equivalent runtime thermal config)</li>
-<li>Consistency constraints for each thermal-enabled component <code>X</code>:</li>
-<li><code>component_electrothermal[X].final_temperature == last(T(X))</code></li>
-<li><code>component_electrothermal[X].peak_temperature == max(T(X))</code></li>
-<li><code>component_electrothermal[X].average_temperature == mean(T(X))</code></li>
+<li>All non-virtual circuit components are included.</li>
+<li>Zero-loss components are still reported.</li>
+<li>Components without enabled thermal port still include deterministic thermal fields, with ambient-derived values.</li>
 </ul>
-<h2 id="8-kpi-gate-integration">8) KPI Gate Integration<a class="headerlink" href="#8-kpi-gate-integration" title="Permanent link">&para;</a></h2>
-<p>The electrothermal gate validates consistency KPIs:</p>
+<h2 id="programmatic-configuration-no-yaml-thermal-block">Programmatic Configuration (No YAML Thermal Block)<a class="headerlink" href="#programmatic-configuration-no-yaml-thermal-block" title="Permanent link">&para;</a></h2>
+<p>You can configure thermal coupling directly in Python:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+
+<span class="n">options</span><span class="o">.</span><span class="n">enable_losses</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">options</span><span class="o">.</span><span class="n">thermal</span><span class="o">.</span><span class="n">enable</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">options</span><span class="o">.</span><span class="n">thermal</span><span class="o">.</span><span class="n">ambient</span> <span class="o">=</span> <span class="mf">25.0</span>
+<span class="n">options</span><span class="o">.</span><span class="n">thermal</span><span class="o">.</span><span class="n">policy</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">ThermalCouplingPolicy</span><span class="o">.</span><span class="n">LossWithTemperatureScaling</span>
+
+<span class="n">cfg</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">ThermalDeviceConfig</span><span class="p">()</span>
+<span class="n">cfg</span><span class="o">.</span><span class="n">enabled</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">cfg</span><span class="o">.</span><span class="n">rth</span> <span class="o">=</span> <span class="mf">0.5</span>
+<span class="n">cfg</span><span class="o">.</span><span class="n">cth</span> <span class="o">=</span> <span class="mf">1e-4</span>
+<span class="n">cfg</span><span class="o">.</span><span class="n">temp_init</span> <span class="o">=</span> <span class="mf">25.0</span>
+<span class="n">cfg</span><span class="o">.</span><span class="n">temp_ref</span> <span class="o">=</span> <span class="mf">25.0</span>
+<span class="n">cfg</span><span class="o">.</span><span class="n">alpha</span> <span class="o">=</span> <span class="mf">0.004</span>
+<span class="n">options</span><span class="o">.</span><span class="n">thermal_devices</span><span class="p">[</span><span class="s2">&quot;M1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cfg</span>
+</code></pre></div>
+<h2 id="benchmarkkpi-gate-integration">Benchmark/KPI Gate Integration<a class="headerlink" href="#benchmarkkpi-gate-integration" title="Permanent link">&para;</a></h2>
+<p>The electrothermal gate now checks component-level consistency KPIs:</p>
 <ul>
 <li><code>component_coverage_rate</code></li>
 <li><code>component_coverage_gap</code></li>
@@ -2065,48 +1655,6 @@
 <ul>
 <li><code>benchmarks/kpi_thresholds.yaml</code> (optional in general gate)</li>
 <li><code>benchmarks/kpi_thresholds_electrothermal.yaml</code> (required in electrothermal gate)</li>
-</ul>
-<h2 id="9-backend-contract-gui-integration">9) Backend Contract (GUI Integration)<a class="headerlink" href="#9-backend-contract-gui-integration" title="Permanent link">&para;</a></h2>
-<p>For each accepted transient sample index <code>k</code>, backend guarantees:</p>
-<ul>
-<li><code>result.time[k]</code> exists and is monotonic.</li>
-<li>every exported <code>result.virtual_channels[name][k]</code> is aligned to the same <code>k</code>.</li>
-<li>channel metadata exists in <code>result.virtual_channel_metadata[name]</code>.</li>
-</ul>
-<p>Electrothermal canonical guarantees:</p>
-<ul>
-<li>thermal channels use <code>T(&lt;component_name&gt;)</code>.</li>
-<li>loss channels use:</li>
-<li><code>Pcond(&lt;component&gt;)</code></li>
-<li><code>Psw_on(&lt;component&gt;)</code></li>
-<li><code>Psw_off(&lt;component&gt;)</code></li>
-<li><code>Prr(&lt;component&gt;)</code></li>
-<li><code>Ploss(&lt;component&gt;)</code></li>
-<li>thermal/loss channels are backend-computed physics outputs (not UI post-processing).</li>
-<li>reductions are internally consistent:</li>
-<li><code>component_electrothermal[i].final_temperature == last(T(component))</code></li>
-<li><code>component_electrothermal[i].peak_temperature == max(T(component))</code></li>
-<li><code>component_electrothermal[i].average_temperature == mean(T(component))</code></li>
-</ul>
-<h2 id="10-gui-responsibility-boundary">10) GUI Responsibility Boundary<a class="headerlink" href="#10-gui-responsibility-boundary" title="Permanent link">&para;</a></h2>
-<p>GUI should own:</p>
-<ul>
-<li>form/wizard UX for scalar and datasheet model entry.</li>
-<li>unit conversion helpers and validation message presentation.</li>
-<li>curve import UX (CSV/PDF digitization) before sending numeric arrays to backend.</li>
-<li>plotting and dashboard composition.</li>
-</ul>
-<p>GUI must not own:</p>
-<ul>
-<li>synthetic thermal curve generation.</li>
-<li>reconstruction of switching/conduction losses from electrical channels.</li>
-<li>replacement or smoothing of backend physical traces.</li>
-<li>heuristic domain inference from channel names when metadata is available.</li>
-</ul>
-<h2 id="11-scalar-to-datasheet-migration">11) Scalar-to-Datasheet Migration<a class="headerlink" href="#11-scalar-to-datasheet-migration" title="Permanent link">&para;</a></h2>
-<p>Use the dedicated migration guide:</p>
-<ul>
-<li><code>docs/electrothermal-migration-scalar-to-datasheet.md</code></li>
 </ul>
 
 
@@ -2143,7 +1691,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../averaged-converter-modeling/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Averaged Converter Modeling">
+          <a href="../netlist-format/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Netlist YAML Format">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2153,20 +1701,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Averaged Converter Modeling
+                Netlist YAML Format
               </div>
             </div>
           </a>
         
         
           
-          <a href="../electrothermal-migration-scalar-to-datasheet/" class="md-footer__link md-footer__link--next" aria-label="Next: Electrothermal Migration (Scalar to Datasheet)">
+          <a href="../examples-and-results/" class="md-footer__link md-footer__link--next" aria-label="Next: Examples and Results">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Electrothermal Migration (Scalar to Datasheet)
+                Examples and Results
               </div>
             </div>
             <div class="md-footer__button md-icon">

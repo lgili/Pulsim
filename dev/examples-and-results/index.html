@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/examples-and-results/">
       
       
-        <link rel="prev" href="../electrothermal-migration-scalar-to-datasheet/">
+        <link rel="prev" href="../electrothermal-workflow/">
       
       
         <link rel="next" href="../benchmarks-and-parity/">
@@ -252,24 +252,6 @@
     
     
       <li class="md-tabs__item">
-        <a href="../cblock/" class="md-tabs__link">
-          
-  
-  Signal Domain
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
         <a href="../api-reference/" class="md-tabs__link">
           
   
@@ -288,7 +270,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../supported-components-catalog/" class="md-tabs__link">
+        <a href="../gui-component-parity/" class="md-tabs__link">
           
   
   Compatibility
@@ -552,27 +534,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../backend-cpp-contributor-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Backend C++ Contributor Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../netlist-format/" class="md-nav__link">
         
   
@@ -594,137 +555,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../magnetic-core-backend-frontend-contract/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Magnetic Core Backend/Frontend Contract
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../frontend-control-signals/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frontend Control and Signals Contract
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frequency Analysis (AC Sweep)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../post-processing/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Waveform Post-Processing
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../averaged-converter-modeling/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Averaged Converter Modeling
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../electrothermal-workflow/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Electrothermal Workflow
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../electrothermal-migration-scalar-to-datasheet/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Electrothermal Migration (Scalar to Datasheet)
   </span>
   
 
@@ -787,6 +622,24 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#runnable-python-examples-for-new-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Runnable Python examples for new features
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#legacy-notebook-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      Legacy notebook examples
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#example-1-rc-step-sanity-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       Example 1: RC Step (sanity baseline)
@@ -805,24 +658,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#example-2a-buck-averaged-pair-switching-reference-averaged-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 2a: Buck Averaged Pair (switching reference + averaged mode)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#example-3-closed-loop-buck-controller-pwm-path" class="md-nav__link">
     <span class="md-ellipsis">
       Example 3: Closed-Loop Buck (controller + PWM path)
@@ -835,24 +670,6 @@
   <a href="#example-4-electro-thermal-scenario" class="md-nav__link">
     <span class="md-ellipsis">
       Example 4: Electro-Thermal Scenario
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example-5-closed-loop-buck-thermal-port-validation" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 5: Closed-Loop Buck + Thermal Port Validation
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 6: Magnetic Core MVP (saturation + frequency-sensitive loss)
     </span>
   </a>
   
@@ -970,11 +787,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../convergence-playbook/" class="md-nav__link">
+      <a href="../linear-solver-cache/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Convergence Playbook
+    Linear-Solver Cache
   </span>
   
 
@@ -991,11 +808,284 @@
   
   
     <li class="md-nav__item">
-      <a href="../convergence-profile-migration/" class="md-nav__link">
+      <a href="../ac-analysis/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Convergence Profile Migration
+    AC Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fra/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Response Analysis (FRA)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-devices/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog Devices
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converter-templates/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Converter Templates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motor-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../three-phase-grid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-generation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Real-Time Code Generation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../property-based-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../robustness-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Robustness Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spice-parity-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
   </span>
   
 
@@ -1061,7 +1151,7 @@
             
   
   <span class="md-ellipsis">
-    Signal Domain
+    API
   </span>
   
 
@@ -1070,160 +1160,6 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            Signal Domain
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C-Block Overview
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/user-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C-Block User Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/abi-reference/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C ABI Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/api-reference/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Python API Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/examples/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Examples Walkthrough
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    API
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             API
           </label>
@@ -1299,10 +1235,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1313,33 +1249,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             Compatibility
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../supported-components-catalog/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Supported Components Catalog
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
             
               
                 
@@ -1432,10 +1347,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1446,8 +1361,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             Operations
           </label>
@@ -1481,74 +1396,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../psim-plecs-gap-and-modular-architecture-roadmap/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PSIM/PLECS Gap and Modular Roadmap
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../versioning-and-release/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Docs Versioning and Release
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../release-notes-electrothermal-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Release Notes (Electrothermal Parity)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../pr-electrothermal-datasheet-parity-package/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PR Package (Electrothermal)
   </span>
   
 
@@ -1592,6 +1444,24 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#runnable-python-examples-for-new-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Runnable Python examples for new features
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#legacy-notebook-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      Legacy notebook examples
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#example-1-rc-step-sanity-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       Example 1: RC Step (sanity baseline)
@@ -1610,24 +1480,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#example-2a-buck-averaged-pair-switching-reference-averaged-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 2a: Buck Averaged Pair (switching reference + averaged mode)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#example-3-closed-loop-buck-controller-pwm-path" class="md-nav__link">
     <span class="md-ellipsis">
       Example 3: Closed-Loop Buck (controller + PWM path)
@@ -1640,24 +1492,6 @@
   <a href="#example-4-electro-thermal-scenario" class="md-nav__link">
     <span class="md-ellipsis">
       Example 4: Electro-Thermal Scenario
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example-5-closed-loop-buck-thermal-port-validation" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 5: Closed-Loop Buck + Thermal Port Validation
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss" class="md-nav__link">
-    <span class="md-ellipsis">
-      Example 6: Magnetic Core MVP (saturation + frequency-sensitive loss)
     </span>
   </a>
   
@@ -1729,6 +1563,84 @@
 
 <h1 id="examples-and-results">Examples and Results<a class="headerlink" href="#examples-and-results" title="Permanent link">&para;</a></h1>
 <p>This page focuses on practical backend runs with expected outputs and validation criteria.</p>
+<h2 id="runnable-python-examples-for-new-features">Runnable Python examples for new features<a class="headerlink" href="#runnable-python-examples-for-new-features" title="Permanent link">&para;</a></h2>
+<p>The May 9–10 roadmap (Fase 0–4) ships a set of runnable Python scripts
+covering every new user-facing feature. They live under
+<a href="https://github.com/lgili/Pulsim/tree/main/examples/python"><code>examples/python/</code></a>
+and each one is a self-contained file with a TL;DR docstring at the
+top, sensible defaults, and an optional matplotlib plot guarded by
+<code>PULSIM_EXAMPLE_NOPLOT=1</code> so it runs cleanly in headless CI:</p>
+<table>
+<thead>
+<tr>
+<th>Script</th>
+<th>Demonstrates</th>
+<th>Doc page</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>01_ac_sweep_rc.py</code></td>
+<td>Analytical AC sweep + Bode (validates -3 dB / -45° corner).</td>
+<td><a href="../ac-analysis/">AC Analysis</a></td>
+</tr>
+<tr>
+<td><code>02_fra_vs_ac_sweep.py</code></td>
+<td>Empirical FRA overlaid on the analytical AC sweep.</td>
+<td><a href="../fra/">FRA</a></td>
+</tr>
+<tr>
+<td><code>03_buck_template.py</code></td>
+<td><code>pulsim.templates.buck</code> auto-design + transient.</td>
+<td><a href="../converter-templates/">Converter Templates</a></td>
+</tr>
+<tr>
+<td><code>04_boost_buckboost_templates.py</code></td>
+<td>Boost + buck-boost templates side by side.</td>
+<td><a href="../converter-templates/">Converter Templates</a></td>
+</tr>
+<tr>
+<td><code>05_codegen_pil.py</code></td>
+<td>Codegen → C99 → gcc → PIL parity diff.</td>
+<td><a href="../code-generation/">Code Generation</a></td>
+</tr>
+<tr>
+<td><code>06_fmu_export.py</code></td>
+<td>FMI 2.0 CS <code>.fmu</code> export + 13/13 callback symbol check.</td>
+<td><a href="../fmi-export/">FMI Export</a></td>
+</tr>
+<tr>
+<td><code>07_parameter_sweep_lhs.py</code></td>
+<td>64-point LHS over (L, C) with P5/P50/P95 metrics.</td>
+<td><a href="../parameter-sweep/">Parameter Sweep</a></td>
+</tr>
+<tr>
+<td><code>08_monte_carlo_yield.py</code></td>
+<td>256 MC draws under component tolerance, yield histogram.</td>
+<td><a href="../parameter-sweep/">Parameter Sweep</a></td>
+</tr>
+<tr>
+<td><code>09_robustness_wrapper.py</code></td>
+<td><code>pulsim.run_transient(robust=True)</code> retry loop.</td>
+<td><a href="../robustness-policy/">Robustness Policy</a></td>
+</tr>
+<tr>
+<td><code>10_linear_solver_cache.py</code></td>
+<td>Per-key cache hit rate via <code>BackendTelemetry</code>.</td>
+<td><a href="../linear-solver-cache/">Linear-Solver Cache</a></td>
+</tr>
+<tr>
+<td><code>11_yaml_ac_analysis.py</code></td>
+<td>Load circuit from YAML + dispatch AC sweep.</td>
+<td><a href="../ac-analysis/">AC Analysis</a></td>
+</tr>
+</tbody>
+</table>
+<p>Header-only features (magnetic models, motors, three-phase grid,
+robustness profile) don't have Python bindings yet — their runnable
+counterparts live in
+<a href="https://github.com/lgili/Pulsim/tree/main/examples/cpp"><code>examples/cpp/</code></a>.</p>
+<h2 id="legacy-notebook-examples">Legacy notebook examples<a class="headerlink" href="#legacy-notebook-examples" title="Permanent link">&para;</a></h2>
 <h2 id="example-1-rc-step-sanity-baseline">Example 1: RC Step (sanity baseline)<a class="headerlink" href="#example-1-rc-step-sanity-baseline" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--only<span class="w"> </span>rc_step<span class="w"> </span><span class="se">\</span>
@@ -1742,7 +1654,7 @@
 </ul>
 <h2 id="example-2-buck-converter-switching-transient">Example 2: Buck Converter (switching transient)<a class="headerlink" href="#example-2-buck-converter-switching-transient" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--only<span class="w"> </span>buck_switching<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--only<span class="w"> </span>buck_converter<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_buck
 </code></pre></div>
 <p>Checkpoints:</p>
@@ -1750,31 +1662,6 @@
 <li>output settles around expected duty-dependent value.</li>
 <li>ripple remains physically plausible for chosen L/C and switching frequency.</li>
 <li>telemetry does not show runaway fallback escalation.</li>
-</ul>
-<h2 id="example-2a-buck-averaged-pair-switching-reference-averaged-mode">Example 2a: Buck Averaged Pair (switching reference + averaged mode)<a class="headerlink" href="#example-2a-buck-averaged-pair-switching-reference-averaged-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--only<span class="w"> </span>buck_switching_paired<span class="w"> </span>buck_averaged_mvp<span class="w"> </span>buck_averaged_expected_failure<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_buck_averaged
-</code></pre></div>
-<p>Checkpoints:</p>
-<ul>
-<li>both pair runs (<code>buck_switching_paired</code>, <code>buck_averaged_mvp</code>) are <code>passed</code>.</li>
-<li><code>buck_averaged_mvp</code> emits <code>max_error</code> from <code>paired_reference</code> validation.</li>
-<li>expected-failure case matches typed diagnostic (<code>AveragedInvalidConfiguration</code>).</li>
-</ul>
-<p>Runnable Python example:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>examples/run_buck_averaged_mvp.py
-</code></pre></div>
-<h2 id="example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline">Example 2b: AC Sweep RC Low-Pass (frequency-domain baseline)<a class="headerlink" href="#example-2b-ac-sweep-rc-low-pass-frequency-domain-baseline" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--only<span class="w"> </span>ac_rc_lowpass<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--output-dir<span class="w"> </span>benchmarks/out_ac_rc
-</code></pre></div>
-<p>Checkpoints:</p>
-<ul>
-<li>output artifact includes <code>frequency_hz</code>, <code>magnitude_db</code>, and <code>phase_deg</code>.</li>
-<li>analytical validation (<code>ac_analytical</code>) remains within configured magnitude/phase thresholds.</li>
-<li>benchmark telemetry exposes <code>ac_sweep_mag_error</code> and <code>ac_sweep_phase_error</code>.</li>
 </ul>
 <h2 id="example-3-closed-loop-buck-controller-pwm-path">Example 3: Closed-Loop Buck (controller + PWM path)<a class="headerlink" href="#example-3-closed-loop-buck-controller-pwm-path" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span><span class="se">\</span>
@@ -1797,46 +1684,6 @@
 <li>device temperatures increase consistently with losses.</li>
 <li><code>thermal_summary.max_temperature</code> remains within design envelope.</li>
 <li>efficiency and loss totals are coherent with operating point.</li>
-</ul>
-<h2 id="example-5-closed-loop-buck-thermal-port-validation">Example 5: Closed-Loop Buck + Thermal Port Validation<a class="headerlink" href="#example-5-closed-loop-buck-thermal-port-validation" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim as ps</span>
-
-<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;examples/09_buck_closed_loop_loss_thermal_validation_backend.yaml&quot;)</span>
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
-<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-
-<span class="s">sim = ps.Simulator(circuit, options)</span>
-<span class="s">result = sim.run_transient(circuit.initial_state())</span>
-
-<span class="s">print(&quot;success:&quot;, result.success)</span>
-<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
-<span class="s">print(&quot;max_temp:&quot;, result.thermal_summary.max_temperature)</span>
-<span class="s">for item in result.component_electrothermal:</span>
-<span class="s">    if item.thermal_enabled:</span>
-<span class="s">        print(item.component_name, item.average_power, item.final_temperature)</span>
-<span class="s">PY</span>
-</code></pre></div>
-<p>Checkpoints:</p>
-<ul>
-<li>closed-loop control remains bounded (<code>PI</code> output and PWM duty).</li>
-<li>thermal-enabled devices report non-empty telemetry in <code>component_electrothermal</code>.</li>
-<li>run remains stable for longer windows (10 ms, 20 ms, ...).</li>
-</ul>
-<h2 id="example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss">Example 6: Magnetic Core MVP (saturation + frequency-sensitive loss)<a class="headerlink" href="#example-6-magnetic-core-mvp-saturation-frequency-sensitive-loss" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>examples/run_magnetic_core_saturation_freq_loss.py
-</code></pre></div>
-<p>Checkpoints:</p>
-<ul>
-<li><code>Lsat.core_loss</code> exists in <code>result.virtual_channels</code> and stays non-negative.</li>
-<li>metadata for <code>Lsat.core_loss</code> is coherent (<code>domain=loss</code>, <code>unit=W</code>, <code>source_component=Lsat</code>).</li>
-<li>when <code>loss_policy: loss_summary</code>, summary row <code>Lsat.core</code> is present in <code>loss_summary.device_losses</code>.</li>
-<li>average/peak trends are deterministic for repeated runs with the same setup.</li>
-</ul>
-<p>Notebook walkthrough:</p>
-<ul>
-<li><code>examples/notebooks/35_magnetic_core_mvp_tutorial.ipynb</code></li>
 </ul>
 <h2 id="output-artifacts-for-automation">Output Artifacts for Automation<a class="headerlink" href="#output-artifacts-for-automation" title="Permanent link">&para;</a></h2>
 <p>Main files used in CI/regression tooling:</p>
@@ -1904,7 +1751,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../electrothermal-migration-scalar-to-datasheet/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Electrothermal Migration (Scalar to Datasheet)">
+          <a href="../electrothermal-workflow/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Electrothermal Workflow">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1914,7 +1761,7 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Electrothermal Migration (Scalar to Datasheet)
+                Electrothermal Workflow
               </div>
             </div>
           </a>

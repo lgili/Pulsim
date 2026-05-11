@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/getting-started/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/parameter-sweep/">
       
       
-        <link rel="prev" href="../backend-architecture/">
+        <link rel="prev" href="../code-generation/">
       
       
-        <link rel="next" href="../user-guide/">
+        <link rel="next" href="../property-based-testing/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Getting Started - PulsimCore</title>
+        <title>Parameter Sweep - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#parameter-sweep" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting Started
+              Parameter Sweep
             
           </span>
         </div>
@@ -210,12 +210,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
@@ -230,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -353,30 +353,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -387,7 +384,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             Overview
@@ -440,30 +437,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -472,80 +449,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      Prerequisites
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option B: Install Package
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
-    <span class="md-ellipsis">
-      First Simulation (RC Step)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run Core Validation Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      Next Steps
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -562,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -593,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -940,10 +846,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../parameter-sweep/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -952,6 +878,116 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sampling-strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sampling strategies
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#distributions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Distributions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metric-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      Metric library
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#executors" class="md-nav__link">
+    <span class="md-ellipsis">
+      Executors
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sweepresult" class="md-nav__link">
+    <span class="md-ellipsis">
+      SweepResult
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reproducibility-gate-g4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reproducibility (gate G.4)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation (gates)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limitations / follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1411,54 +1447,90 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#tldr" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      TL;DR
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
+  <a href="#sampling-strategies" class="md-nav__link">
     <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
+      Sampling strategies
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
+  <a href="#distributions" class="md-nav__link">
     <span class="md-ellipsis">
-      Option B: Install Package
+      Distributions
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
+  <a href="#metric-library" class="md-nav__link">
     <span class="md-ellipsis">
-      First Simulation (RC Step)
+      Metric library
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
+  <a href="#executors" class="md-nav__link">
     <span class="md-ellipsis">
-      Run Core Validation Commands
+      Executors
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
+  <a href="#sweepresult" class="md-nav__link">
     <span class="md-ellipsis">
-      Next Steps
+      SweepResult
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reproducibility-gate-g4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reproducibility (gate G.4)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation (gates)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limitations / follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
     </span>
   </a>
   
@@ -1479,7 +1551,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/parameter-sweep.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1488,73 +1560,297 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/parameter-sweep.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<p>This guide takes you from a clean checkout to your first backend simulation.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<h1 id="parameter-sweep">Parameter Sweep<a class="headerlink" href="#parameter-sweep" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Status: shipped — Cartesian / Monte-Carlo / LHS / Sobol / Halton
+sampling, distribution library, metric library, serial + joblib
+executors, Pandas export. GPU / Sobol indices / Optuna optimization
+wrappers are stretch follow-ups.</p>
+</blockquote>
+<p><code>pulsim.sweep</code> runs a Pulsim simulation across a parameter space and
+collects user-defined metrics into a clean DataFrame-able result.
+Standard tool for <strong>yield analysis</strong> ("what's my P95 Vout?"),
+<strong>design exploration</strong> ("which <code>(L, C)</code> pair gives &lt; 1 % overshoot?"),
+<strong>worst-case analysis</strong>, and <strong>sensitivity studies</strong>.</p>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span>
+<span class="n">sw</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">sweep</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">make_buck</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">C</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">templates</span><span class="o">.</span><span class="n">buck</span><span class="p">(</span>
+        <span class="n">Vin</span><span class="o">=</span><span class="mi">24</span><span class="p">,</span> <span class="n">Vout</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">Iout</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">fsw</span><span class="o">=</span><span class="mf">100e3</span><span class="p">,</span> <span class="n">L</span><span class="o">=</span><span class="n">L</span><span class="p">,</span> <span class="n">C</span><span class="o">=</span><span class="n">C</span><span class="p">,</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">circuit</span>
+
+<span class="n">result</span> <span class="o">=</span> <span class="n">sw</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+    <span class="n">circuit_factory</span><span class="o">=</span><span class="n">make_buck</span><span class="p">,</span>
+    <span class="n">parameters</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;L&quot;</span><span class="p">:</span> <span class="n">sw</span><span class="o">.</span><span class="n">Distribution</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">40e-6</span><span class="p">,</span> <span class="mf">80e-6</span><span class="p">),</span>
+        <span class="s2">&quot;C&quot;</span><span class="p">:</span> <span class="n">sw</span><span class="o">.</span><span class="n">Distribution</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">10e-6</span><span class="p">,</span> <span class="mf">30e-6</span><span class="p">),</span>
+    <span class="p">},</span>
+    <span class="n">metrics</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">sw</span><span class="o">.</span><span class="n">steady_state</span><span class="p">(</span><span class="s2">&quot;out&quot;</span><span class="p">),</span>
+        <span class="n">sw</span><span class="o">.</span><span class="n">peak</span><span class="p">(</span><span class="s2">&quot;out&quot;</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="n">n_samples</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
+    <span class="n">strategy</span><span class="o">=</span><span class="s2">&quot;lhs&quot;</span><span class="p">,</span>
+    <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Succeeded: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">n_succeeded</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">n_samples</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;P95 of steady_state[out] = </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="s1">&#39;steady_state[out]&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">95</span><span class="p">)</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V&quot;</span><span class="p">)</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
+</code></pre></div>
+<h2 id="sampling-strategies">Sampling strategies<a class="headerlink" href="#sampling-strategies" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"cartesian"</code></td>
+<td>Explicit grid sweep over discrete value lists; <code>n_samples</code> ignored, full product enumerated</td>
+</tr>
+<tr>
+<td><code>"monte_carlo"</code></td>
+<td>i.i.d. random draws from each distribution; statistical convergence at <code>O(1/√N)</code></td>
+</tr>
+<tr>
+<td><code>"lhs"</code></td>
+<td>Latin-Hypercube — stratified sampling, faster convergence than IID for moderate <code>N</code></td>
+</tr>
+<tr>
+<td><code>"sobol"</code></td>
+<td>Low-discrepancy quasi-MC; convergence near <code>O(1/N)</code> for smooth integrands</td>
+</tr>
+<tr>
+<td><code>"halton"</code></td>
+<td>Alternative low-discrepancy sequence; good for <code>n_samples</code> not a power of 2</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">samples</span> <span class="o">=</span> <span class="n">sw</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span>
+    <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="n">sw</span><span class="o">.</span><span class="n">Distribution</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)},</span>
+    <span class="n">n_samples</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">strategy</span><span class="o">=</span><span class="s2">&quot;lhs&quot;</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<p><code>sample()</code> returns <code>list[dict[str, float]]</code> directly; <code>run()</code> calls it
+internally and pairs each sample with the simulation outcome.</p>
+<h2 id="distributions">Distributions<a class="headerlink" href="#distributions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Constructor</th>
+<th>Math</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Distribution.uniform(low, high)</code></td>
+<td><code>U(low, high)</code></td>
+</tr>
+<tr>
+<td><code>Distribution.normal(mean, std)</code></td>
+<td><code>N(μ, σ²)</code></td>
+</tr>
+<tr>
+<td><code>Distribution.loguniform(low, high)</code></td>
+<td><code>exp(U(log(low), log(high)))</code></td>
+</tr>
+<tr>
+<td><code>Distribution.triangular(low, mode, high)</code></td>
+<td>Triangular density peaking at <code>mode</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every distribution exposes an <code>inverse_cdf(u)</code> callable that maps
+uniform-(0,1) to its quantile, so the LHS / Sobol / Halton samplers
+can drive every parameter type uniformly.</p>
+<p>Pass a plain Python list to opt into Cartesian enumeration:</p>
+<div class="highlight"><pre><span></span><code><span class="n">parameters</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;L&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mf">40e-6</span><span class="p">,</span> <span class="mf">50e-6</span><span class="p">,</span> <span class="mf">60e-6</span><span class="p">,</span> <span class="mf">70e-6</span><span class="p">],</span>          <span class="c1"># discrete grid</span>
+    <span class="s2">&quot;fsw&quot;</span><span class="p">:</span> <span class="n">sw</span><span class="o">.</span><span class="n">Distribution</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">80e3</span><span class="p">,</span> <span class="mf">120e3</span><span class="p">),</span> <span class="c1"># continuous draw</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="metric-library">Metric library<a class="headerlink" href="#metric-library" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Helper</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>steady_state(channel, t_window=None)</code></td>
+<td>Mean of the channel over <code>t_window</code>. Default window is the last 10 % of the run.</td>
+</tr>
+<tr>
+<td><code>peak(channel)</code></td>
+<td>Maximum value of the channel over the entire run</td>
+</tr>
+<tr>
+<td><code>rms(channel)</code></td>
+<td>RMS over the entire run</td>
+</tr>
+<tr>
+<td><code>settling_time(channel, target, tolerance=0.02)</code></td>
+<td>First time the channel stays inside <code>±tolerance·target</code> until the end</td>
+</tr>
+<tr>
+<td><code>custom(name, fn)</code></td>
+<td>User-supplied callable <code>(SimulationResult, Circuit) → float</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">metrics</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="n">sw</span><span class="o">.</span><span class="n">steady_state</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">),</span>
+    <span class="n">sw</span><span class="o">.</span><span class="n">peak</span><span class="p">(</span><span class="s2">&quot;iL&quot;</span><span class="p">),</span>
+    <span class="n">sw</span><span class="o">.</span><span class="n">settling_time</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">,</span> <span class="n">target</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">0.01</span><span class="p">),</span>
+    <span class="n">sw</span><span class="o">.</span><span class="n">custom</span><span class="p">(</span><span class="s2">&quot;efficiency&quot;</span><span class="p">,</span>
+              <span class="k">lambda</span> <span class="n">r</span><span class="p">,</span> <span class="n">c</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">loss_summary</span><span class="o">.</span><span class="n">total_efficiency_pct</span><span class="p">),</span>
+<span class="p">]</span>
+</code></pre></div>
+<h2 id="executors">Executors<a class="headerlink" href="#executors" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Executor</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"serial"</code> (default)</td>
+<td>Small sweeps (&lt; 64 samples) or debugging</td>
+</tr>
+<tr>
+<td><code>"joblib"</code></td>
+<td>Medium-large CPU-bound sweeps; uses <code>loky</code> process pool by default</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">sw</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">executor</span><span class="o">=</span><span class="s2">&quot;joblib&quot;</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+</code></pre></div>
+<p><code>n_workers=0</code> defaults to <code>cpu_count() - 1</code>. Joblib does not require
+the per-sample circuit to be pickle-able as long as the
+<code>circuit_factory</code> is — Pulsim's <code>Circuit</code> is recreated inside each
+worker.</p>
+<p>A <code>dask</code> executor is the natural follow-up for cluster-scale sweeps.</p>
+<h2 id="sweepresult">SweepResult<a class="headerlink" href="#sweepresult" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Attribute / method</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parameters[k]</code></td>
+<td>Input parameter dict for sample <code>k</code></td>
+</tr>
+<tr>
+<td><code>metrics[k]</code></td>
+<td>Output metric dict for sample <code>k</code> (empty if failed)</td>
+</tr>
+<tr>
+<td><code>failed[k]</code></td>
+<td><code>None</code> for success, otherwise an error string</td>
+</tr>
+<tr>
+<td><code>n_succeeded</code> / <code>n_failed</code> / <code>n_samples</code></td>
+<td>Aggregate counts</td>
+</tr>
+<tr>
+<td><code>wall_seconds</code></td>
+<td>Total wall-clock for the sweep</td>
+</tr>
+<tr>
+<td><code>percentile(metric_name, q)</code></td>
+<td><code>q</code>-th percentile of a named metric</td>
+</tr>
+<tr>
+<td><code>to_pandas()</code></td>
+<td>Wide-format DataFrame; columns = parameters + metrics + <code>__failed__</code></td>
+</tr>
+</tbody>
+</table>
+<p>A failed sample doesn't abort the sweep — the failure reason is
+captured in <code>failed[k]</code> and the run continues.</p>
+<h2 id="reproducibility-gate-g4">Reproducibility (gate G.4)<a class="headerlink" href="#reproducibility-gate-g4" title="Permanent link">&para;</a></h2>
+<p><code>seed=int</code> makes the RNG deterministic across reruns: identical seed
++ identical parameter spec + identical strategy → identical sample
+list, bit-for-bit. Pinned by
+<code>test_monte_carlo_seeded_produces_identical_samples</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="n">result_a</span> <span class="o">=</span> <span class="n">sw</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+<span class="n">result_b</span> <span class="o">=</span> <span class="n">sw</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">result_a</span><span class="o">.</span><span class="n">parameters</span> <span class="o">==</span> <span class="n">result_b</span><span class="o">.</span><span class="n">parameters</span>
+</code></pre></div>
+<h2 id="validation-gates">Validation (gates)<a class="headerlink" href="#validation-gates" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Test</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>G.1</strong> Cartesian sweep performance</td>
+<td><code>test_sweep_end_to_end_on_rc_circuit</code></td>
+<td>3-sample Cartesian completes in tens of ms; the 125-sample buck case scales linearly through the joblib executor</td>
+</tr>
+<tr>
+<td><strong>G.2</strong> LHS / quasi-MC fills the hypercube</td>
+<td><code>test_lhs_produces_n_samples_in_unit_hypercube</code> + <code>test_sobol_quasi_random_samples_have_low_discrepancy</code></td>
+<td>Sobol max-gap ≤ ~6/N (low-discrepancy proxy)</td>
+</tr>
+<tr>
+<td><strong>G.4</strong> Reproducibility</td>
+<td><code>test_monte_carlo_seeded_produces_identical_samples</code></td>
+<td>Same seed → same sample list</td>
+</tr>
+</tbody>
+</table>
+<h2 id="limitations-follow-ups">Limitations / follow-ups<a class="headerlink" href="#limitations-follow-ups" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Python 3.10+</li>
-<li>CMake 3.20+</li>
-<li>Ninja</li>
-<li>A C++ toolchain compatible with project requirements</li>
+<li><strong>GPU backend</strong> (<code>add-monte-carlo-parameter-sweep</code> Phase 5):
+  CuPy / Numba CUDA batched matrix-vector for PWL state-space sweeps
+  with identical topology shape. Deferred.</li>
+<li><strong>Sobol / Sensitivity indices</strong> (Phase 7):
+  <code>pulsim.sensitivity(sweep_result, target_metric)</code> for first/total-
+  order Sobol indices + tornado plot. Deferred.</li>
+<li><strong>Optimization wrapper</strong> (Phase 8):
+  <code>pulsim.optimize(circuit_factory, objective, bounds)</code> via Optuna /
+  NSGA-II for multi-objective. Deferred.</li>
+<li><strong>Dask executor</strong> for cluster-scale sweeps. Deferred.</li>
+<li><strong><code>to_xarray()</code></strong> for multi-D parameter spaces with native
+  N-dimensional indexing.</li>
+<li><strong>Plotting helpers</strong>: histogram, scatter, parallel-coordinates.</li>
 </ul>
-<h2 id="option-a-build-from-source-recommended-for-backend-development">Option A: Build From Source (Recommended for backend development)<a class="headerlink" href="#option-a-build-from-source-recommended-for-backend-development" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-</code></pre></div>
-<p>Confirm that the package is importable from the local build tree:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
-</code></pre></div>
-<h2 id="option-b-install-package">Option B: Install Package<a class="headerlink" href="#option-b-install-package" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
-</code></pre></div>
-<h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim as ps</span>
-
-<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
-
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
-<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-<span class="s">options.step_mode = ps.StepMode.Variable</span>
-
-<span class="s">sim = ps.Simulator(circuit, options)</span>
-<span class="s">result = sim.run_transient(circuit.initial_state())</span>
-
-<span class="s">print(&quot;success:&quot;, result.success)</span>
-<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
-<span class="s">print(&quot;samples:&quot;, len(result.time))</span>
-<span class="s">PY</span>
-</code></pre></div>
-<p>Expected outcome:</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>success: True</code></li>
-<li>non-zero <code>steps</code> and <code>samples</code></li>
-<li>monotonic RC charging behavior on <code>V(out)</code></li>
+<li><a href="../converter-templates/"><code>converter-templates.md</code></a> — converter
+  templates make excellent sweep targets (parametric circuits with
+  clean knobs).</li>
+<li><a href="../code-generation/"><code>code-generation.md</code></a> — pair sweep with
+  codegen to ship a tuned controller for a yield-analyzed design.</li>
+<li>Runnable examples: <code>examples/python/07_parameter_sweep_lhs.py</code>
+  (64-point LHS over (L, C) with P5/P50/P95 percentile readout) and
+  <code>examples/python/08_monte_carlo_yield.py</code> (256 Monte-Carlo draws
+  vs spec window).</li>
 </ul>
-<h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
-
-<span class="c1"># C++ core tests (if build already includes tests)</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
-</code></pre></div>
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
-<li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
-<li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
-</ol>
 
 
 
@@ -1590,7 +1886,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../backend-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend Architecture">
+          <a href="../code-generation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Real-Time Code Generation">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1600,20 +1896,20 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
                 Previous
               </span>
               <div class="md-ellipsis">
-                Backend Architecture
+                Real-Time Code Generation
               </div>
             </div>
           </a>
         
         
           
-          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: User Guide">
+          <a href="../property-based-testing/" class="md-footer__link md-footer__link--next" aria-label="Next: Property-Based Testing">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                User Guide
+                Property-Based Testing
               </div>
             </div>
             <div class="md-footer__button md-icon">

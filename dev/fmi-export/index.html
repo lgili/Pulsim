@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/getting-started/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/fmi-export/">
       
       
-        <link rel="prev" href="../backend-architecture/">
+        <link rel="prev" href="../property-based-testing/">
       
       
-        <link rel="next" href="../user-guide/">
+        <link rel="next" href="../robustness-policy/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Getting Started - PulsimCore</title>
+        <title>FMI Export - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#fmi-export" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting Started
+              FMI Export
             
           </span>
         </div>
@@ -210,12 +210,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
@@ -230,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -353,30 +353,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -387,7 +384,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             Overview
@@ -440,30 +437,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -472,80 +449,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      Prerequisites
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option B: Install Package
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
-    <span class="md-ellipsis">
-      First Simulation (RC Step)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run Core Validation Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      Next Steps
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -562,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -593,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -982,10 +888,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../fmi-export/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -994,6 +920,89 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-inside" class="md-nav__link">
+    <span class="md-ellipsis">
+      What's inside
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#value-reference-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      Value reference layout
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fmi2dostep-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      fmi2DoStep semantics
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation gates
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limitations / follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1411,54 +1420,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#tldr" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      TL;DR
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
+  <a href="#whats-inside" class="md-nav__link">
     <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
+      What's inside
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
+  <a href="#value-reference-layout" class="md-nav__link">
     <span class="md-ellipsis">
-      Option B: Install Package
+      Value reference layout
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
+  <a href="#fmi2dostep-semantics" class="md-nav__link">
     <span class="md-ellipsis">
-      First Simulation (RC Step)
+      fmi2DoStep semantics
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
+  <a href="#validation-gates" class="md-nav__link">
     <span class="md-ellipsis">
-      Run Core Validation Commands
+      Validation gates
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
+  <a href="#limitations-follow-ups" class="md-nav__link">
     <span class="md-ellipsis">
-      Next Steps
+      Limitations / follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
     </span>
   </a>
   
@@ -1479,7 +1497,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/fmi-export.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1488,73 +1506,181 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/fmi-export.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<p>This guide takes you from a clean checkout to your first backend simulation.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Python 3.10+</li>
-<li>CMake 3.20+</li>
-<li>Ninja</li>
-<li>A C++ toolchain compatible with project requirements</li>
-</ul>
-<h2 id="option-a-build-from-source-recommended-for-backend-development">Option A: Build From Source (Recommended for backend development)<a class="headerlink" href="#option-a-build-from-source-recommended-for-backend-development" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-</code></pre></div>
-<p>Confirm that the package is importable from the local build tree:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
-</code></pre></div>
-<h2 id="option-b-install-package">Option B: Install Package<a class="headerlink" href="#option-b-install-package" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
-</code></pre></div>
-<h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim as ps</span>
+<h1 id="fmi-export">FMI Export<a class="headerlink" href="#fmi-export" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Status: shipped — FMI 2.0 Co-Simulation export pipeline. ME export +
+FMU import + FMI 3.0 + cross-tool validation are the natural
+follow-ups.</p>
+</blockquote>
+<p><code>pulsim.fmu</code> packages a Pulsim Circuit as a self-contained
+<strong>FMI 2.0 Co-Simulation</strong> <code>.fmu</code> file. The exported FMU drops into any
+FMI master that speaks 2.0 — OMSimulator, Dymola, MATLAB/Simulink (via
+the Co-Simulation block), FMPy, ANSYS Twin Builder. The internal solver
+is the discrete state-space machinery shipped in
+<a href="../code-generation/"><code>add-realtime-code-generation</code></a>, so the FMU runs
+deterministically at the codegen-fixed dt.</p>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span>
 
-<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
-
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
-<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-<span class="s">options.step_mode = ps.StepMode.Variable</span>
-
-<span class="s">sim = ps.Simulator(circuit, options)</span>
-<span class="s">result = sim.run_transient(circuit.initial_state())</span>
-
-<span class="s">print(&quot;success:&quot;, result.success)</span>
-<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
-<span class="s">print(&quot;samples:&quot;, len(result.time))</span>
-<span class="s">PY</span>
+<span class="n">ckt</span> <span class="o">=</span> <span class="o">...</span>   <span class="c1"># your Pulsim Circuit</span>
+<span class="n">summary</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">fmu</span><span class="o">.</span><span class="n">export</span><span class="p">(</span>
+    <span class="n">ckt</span><span class="p">,</span>
+    <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span>
+    <span class="n">out_path</span><span class="o">=</span><span class="s2">&quot;gen/buck.fmu&quot;</span><span class="p">,</span>
+    <span class="n">model_name</span><span class="o">=</span><span class="s2">&quot;buck&quot;</span><span class="p">,</span>
+    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;vout&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>         <span class="c1"># gen/buck.fmu</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="o">.</span><span class="n">guid</span><span class="p">)</span>         <span class="c1"># auto-generated UUID</span>
 </code></pre></div>
-<p>Expected outcome:</p>
-<ul>
-<li><code>success: True</code></li>
-<li>non-zero <code>steps</code> and <code>samples</code></li>
-<li>monotonic RC charging behavior on <code>V(out)</code></li>
-</ul>
-<h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
-
-<span class="c1"># C++ core tests (if build already includes tests)</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
+<p>The exported file is a valid <code>.fmu</code> archive with the standard layout:</p>
+<div class="highlight"><pre><span></span><code>buck.fmu
+├── modelDescription.xml          # FMI 2.0 metadata
+├── binaries/
+│   └── &lt;platform&gt;/buck.&lt;ext&gt;      # compiled shared library
+└── sources/
+    ├── model.c                    # codegen output
+    ├── model.h
+    └── fmu_entry.c                # FMI 2.0 CS callback wrapper
 </code></pre></div>
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<h2 id="whats-inside">What's inside<a class="headerlink" href="#whats-inside" title="Permanent link">&para;</a></h2>
+<p><code>pulsim.fmu.export</code> orchestrates four steps:</p>
 <ol>
-<li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
-<li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
-<li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
+<li><strong>Codegen</strong> the discrete state-space C via
+   <code>pulsim.codegen.generate(circuit, dt, out_dir, target='c99')</code>.</li>
+<li><strong>Emit</strong> an FMI 2.0 CS wrapper (<code>fmu_entry.c</code>) implementing the
+   minimal callback set:<ul>
+<li><code>fmi2GetVersion</code>, <code>fmi2GetTypesPlatform</code></li>
+<li><code>fmi2Instantiate</code>, <code>fmi2FreeInstance</code>, <code>fmi2Reset</code>,
+  <code>fmi2Terminate</code></li>
+<li><code>fmi2SetupExperiment</code>, <code>fmi2EnterInitializationMode</code>,
+  <code>fmi2ExitInitializationMode</code></li>
+<li><code>fmi2SetReal</code>, <code>fmi2GetReal</code></li>
+<li><code>fmi2DoStep</code>, <code>fmi2CancelStep</code></li>
+</ul>
+</li>
+<li><strong>Generate</strong> <code>modelDescription.xml</code> with the model's metadata,
+   inputs / outputs / states declared with FMI value references.</li>
+<li><strong>Compile</strong> <code>model.c + fmu_entry.c</code> into a shared library
+   (<code>.so</code> / <code>.dylib</code> / <code>.dll</code> per platform) and <strong>zip</strong> everything
+   into the <code>.fmu</code>.</li>
 </ol>
+<h2 id="value-reference-layout">Value reference layout<a class="headerlink" href="#value-reference-layout" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Range</th>
+<th>Variable kind</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1, 2, ...</code></td>
+<td>Inputs (FMI causality <code>input</code>)</td>
+</tr>
+<tr>
+<td><code>1000, 1001, ...</code></td>
+<td>Outputs (FMI causality <code>output</code>)</td>
+</tr>
+<tr>
+<td><code>2000, 2001, ...</code></td>
+<td>Internal state (FMI causality <code>local</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The exporter writes one <code>&lt;ScalarVariable&gt;</code> per requested input /
+output node plus one <code>x_i</code> for each internal state coordinate so
+masters can inspect the model's evolution.</p>
+<h2 id="fmi2dostep-semantics">fmi2DoStep semantics<a class="headerlink" href="#fmi2dostep-semantics" title="Permanent link">&para;</a></h2>
+<p>Each call to <code>fmi2DoStep(c, t_now, h, ...)</code> advances the FMU's
+internal state by <code>floor(h / dt_internal + 0.5)</code> substeps of the
+codegen-fixed <code>dt_internal</code>. For an FMU built with <code>dt=1e-6</code> and a
+master calling <code>fmi2DoStep(..., 1e-4, ...)</code>, each call runs 100
+internal substeps.</p>
+<p>The FMU advertises <code>canHandleVariableCommunicationStepSize="true"</code> —
+the master may pick its own <code>h</code> per call — but <code>h</code> should be a
+multiple of <code>dt_internal</code> (or close to it) for bit-deterministic
+behavior.</p>
+<h2 id="validation-gates">Validation gates<a class="headerlink" href="#validation-gates" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Test</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>G.1</strong> Valid FMI 2.0 layout</td>
+<td><code>test_fmu_export_produces_valid_zip_layout</code></td>
+<td>Zip contains <code>modelDescription.xml</code> + <code>binaries/&lt;platform&gt;/&lt;lib&gt;</code> + <code>sources/</code></td>
+</tr>
+<tr>
+<td><strong>G.1 partial</strong> Compliance via XML structure</td>
+<td><code>test_model_description_xml_is_well_formed</code></td>
+<td>XML parses; <code>fmiVersion="2.0"</code>; <code>&lt;CoSimulation&gt;</code> block present with required attributes</td>
+</tr>
+<tr>
+<td><strong>G.1 partial</strong> Symbol exports</td>
+<td><code>test_fmu_shared_library_exports_fmi2_symbols</code></td>
+<td>All 13 FMI 2.0 CS callback symbols load via <code>dlsym</code></td>
+</tr>
+<tr>
+<td><strong>G.3</strong> Cross-tool parity</td>
+<td><code>test_fmu_round_trip_step_via_ctypes</code></td>
+<td>ctypes-loaded library executes <code>fmi2Instantiate</code> + 10 <code>fmi2DoStep</code> calls without crashing</td>
+</tr>
+</tbody>
+</table>
+<p>The full <code>fmuCheck</code> integration + cross-tool benchmark in OMSimulator
+/ Simulink / Dymola is deferred to Phase 7 (cross-tool validation).
+The structural + ctypes-roundtrip tests above catch regressions on
+the export pipeline itself; tool compatibility lives downstream.</p>
+<h2 id="limitations-follow-ups">Limitations / follow-ups<a class="headerlink" href="#limitations-follow-ups" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Model Exchange export</strong> (Phase 3): would expose
+  <code>fmi2GetDerivatives</code> / <code>fmi2GetEventIndicators</code> /
+  <code>fmi2NewDiscreteStates</code> / <code>fmi2EnterEventMode</code>. Requires the AD
+  Jacobian path from <code>add-automatic-differentiation</code> — deferred.</li>
+<li><strong>FMU import</strong> (Phase 4): load a third-party FMU as a Pulsim
+  signal-domain block via DLL/dylib loading + Gauss-Seidel master
+  loop. Deferred (separate change for the master orchestration).</li>
+<li><strong>FMI 3.0 support</strong> (Phase 6): <code>fmi3Float64</code> types, updated XML
+  schema, terminal kinds. Deferred until FMI 3.0 ecosystem support
+  is broader.</li>
+<li><strong>Cross-tool validation</strong> (Phase 7): explicit OMSimulator /
+  Simulink / Dymola / Twin Builder runs in CI — license-permitting.</li>
+<li><strong>Performance optimization</strong> (Phase 8): <code>fmi2DoStep</code> overhead ≤
+  50 µs per call on buck-size models. Today's wrapper does one
+  matrix-vector multiply per substep with no allocation; the basic
+  performance is fine. The cycle-budget enforcement that codegen
+  Phase 6 covers carries over directly here.</li>
+<li><strong>YAML <code>fmu_export:</code> section</strong> (Phase 5.1): declarative export
+  config alongside the simulation block. Lands once the
+  Circuit-variant integration's parser dispatch is final.</li>
+<li><strong>Multi-topology FMU</strong> (per-topology switching matrices): same
+  follow-up as the multi-topology codegen tracked under
+  <code>add-realtime-code-generation</code>.</li>
+</ul>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../code-generation/"><code>code-generation.md</code></a> — the discrete
+  state-space pipeline this module sits on top of.</li>
+<li><a href="../linear-solver-cache/"><code>linear-solver-cache.md</code></a> — the per-key
+  cache that the multi-topology FMU export will reuse via the
+  topology bitmask.</li>
+<li>Runnable example: <code>examples/python/06_fmu_export.py</code> (export +
+  zip layout inspection + ctypes load + 13/13 FMI 2.0 CS symbol
+  check).</li>
+</ul>
 
 
 
@@ -1590,7 +1716,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../backend-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend Architecture">
+          <a href="../property-based-testing/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Property-Based Testing">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1600,20 +1726,20 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
                 Previous
               </span>
               <div class="md-ellipsis">
-                Backend Architecture
+                Property-Based Testing
               </div>
             </div>
           </a>
         
         
           
-          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: User Guide">
+          <a href="../robustness-policy/" class="md-footer__link md-footer__link--next" aria-label="Next: Robustness Policy">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                User Guide
+                Robustness Policy
               </div>
             </div>
             <div class="md-footer__button md-icon">

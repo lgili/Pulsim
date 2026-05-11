@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/getting-started/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/property-based-testing/">
       
       
-        <link rel="prev" href="../backend-architecture/">
+        <link rel="prev" href="../parameter-sweep/">
       
       
-        <link rel="next" href="../user-guide/">
+        <link rel="next" href="../fmi-export/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Getting Started - PulsimCore</title>
+        <title>Property-Based Testing - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#property-based-testing" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting Started
+              Property-Based Testing
             
           </span>
         </div>
@@ -210,12 +210,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
@@ -230,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -353,30 +353,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -387,7 +384,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             Overview
@@ -440,30 +437,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -472,80 +449,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      Prerequisites
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option B: Install Package
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
-    <span class="md-ellipsis">
-      First Simulation (RC Step)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run Core Validation Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      Next Steps
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -562,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -593,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -961,10 +867,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../property-based-testing/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -973,6 +899,80 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      Strategies
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reproducibility-gate-g3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reproducibility (gate G.3)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limitations / follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1411,54 +1411,54 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#tldr" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      TL;DR
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
+  <a href="#strategies" class="md-nav__link">
     <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
+      Strategies
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
+  <a href="#reproducibility-gate-g3" class="md-nav__link">
     <span class="md-ellipsis">
-      Option B: Install Package
+      Reproducibility (gate G.3)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
+  <a href="#validation-summary" class="md-nav__link">
     <span class="md-ellipsis">
-      First Simulation (RC Step)
+      Validation summary
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
+  <a href="#limitations-follow-ups" class="md-nav__link">
     <span class="md-ellipsis">
-      Run Core Validation Commands
+      Limitations / follow-ups
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
+  <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
-      Next Steps
+      See also
     </span>
   </a>
   
@@ -1479,7 +1479,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/property-based-testing.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1488,73 +1488,183 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/property-based-testing.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<p>This guide takes you from a clean checkout to your first backend simulation.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<h1 id="property-based-testing">Property-Based Testing<a class="headerlink" href="#property-based-testing" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Status: shipped — Hypothesis infrastructure + 5 invariant families
+on randomized circuits. C++ RapidCheck integration + reciprocity
+are the natural follow-ups.</p>
+</blockquote>
+<p>Property-based testing flips the traditional unit-test model: instead
+of hand-crafting one input + one expected output, you state an
+<em>invariant</em> the simulator must always satisfy ("KCL holds at every
+node", "the resistor dissipates non-negative power") and let
+Hypothesis generate hundreds of randomized circuits to challenge it.
+When something breaks, Hypothesis automatically <em>shrinks</em> the failing
+input to a minimal counter-example.</p>
+<p><code>add-property-based-testing</code> Phase 1+ ships the harness, randomized
+circuit strategies, and four invariant families:</p>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Test file</th>
+<th>Pinned for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KCL at DC + after transient</td>
+<td><code>properties/test_kcl.py</code></td>
+<td>Voltage divider; midpoint current balance</td>
+</tr>
+<tr>
+<td>Energy / steady-state</td>
+<td><code>properties/test_energy.py</code></td>
+<td>RC charging V_C → V_src; monotone</td>
+</tr>
+<tr>
+<td>Passivity (resistor)</td>
+<td><code>properties/test_passivity.py</code></td>
+<td><code>P_R ≥ 0</code> per step</td>
+</tr>
+<tr>
+<td>PWL switching invariants</td>
+<td><code>properties/test_pwl_invariants.py</code></td>
+<td>Cache hit rate ≥ 92 %; no DAE fallback for linear PWL</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">hypothesis</span><span class="w"> </span><span class="kn">import</span> <span class="n">given</span><span class="p">,</span> <span class="n">settings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">python.tests.properties.strategies</span><span class="w"> </span><span class="kn">import</span> <span class="n">gen_passive_rc</span><span class="p">,</span> <span class="n">make_quick_options</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="o">,</span><span class="w"> </span><span class="nn">math</span>
+
+<span class="nd">@given</span><span class="p">(</span><span class="n">gen_passive_rc</span><span class="p">())</span>
+<span class="nd">@settings</span><span class="p">(</span><span class="n">max_examples</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span> <span class="n">deadline</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_my_invariant</span><span class="p">(</span><span class="n">generated</span><span class="p">):</span>
+    <span class="n">sim</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">generated</span><span class="o">.</span><span class="n">circuit</span><span class="p">,</span> <span class="n">make_quick_options</span><span class="p">())</span>
+    <span class="n">dc</span>  <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">dc_operating_point</span><span class="p">()</span>
+    <span class="n">run</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_transient</span><span class="p">(</span><span class="n">dc</span><span class="o">.</span><span class="n">newton_result</span><span class="o">.</span><span class="n">solution</span><span class="p">)</span>
+    <span class="c1"># ... assert invariants hold ...</span>
+</code></pre></div>
+<p>Hypothesis runs <code>25</code> randomized examples per <code>@given</code>, each one a
+full circuit-+-transient. On failure, it auto-shrinks to the simplest
+parameter combination that still triggers the assertion.</p>
+<h2 id="strategies">Strategies<a class="headerlink" href="#strategies" title="Permanent link">&para;</a></h2>
+<p><code>properties/strategies.py</code> ships three randomized-circuit factories:</p>
+<table>
+<thead>
+<tr>
+<th>Factory</th>
+<th>What it generates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gen_passive_rc()</code></td>
+<td>RC low-pass with <code>R ∈ [1, 1e6]</code> Ω, <code>C ∈ [1pF, 1mF]</code>, <code>V ∈ [0.1, 100]</code> V</td>
+</tr>
+<tr>
+<td><code>gen_passive_rlc()</code></td>
+<td>RLC with R/L/C in physical ranges</td>
+</tr>
+<tr>
+<td><code>gen_resistor_divider()</code></td>
+<td>Two-resistor divider for KCL pinning</td>
+</tr>
+</tbody>
+</table>
+<p>Each factory returns a <code>GeneratedCircuit { circuit, parameters,
+description }</code> triple — <code>parameters</code> is the dict the test reads to
+re-derive analytical references.</p>
+<p>Range bounds are picked so the simulator doesn't pathologize on
+extreme values (1e-15 capacitors trigger numerical underflow that's
+unrelated to the invariant being tested). When you want to push the
+limits, swap the strategy or pass tighter <code>min_value/max_value</code> into
+<code>Distribution.uniform</code>.</p>
+<h2 id="reproducibility-gate-g3">Reproducibility (gate G.3)<a class="headerlink" href="#reproducibility-gate-g3" title="Permanent link">&para;</a></h2>
+<p>Every Hypothesis test has a deterministic seed derived from the
+example index. Failures print the <strong>exact seed</strong> that produced them,
+plus the <strong>shrunken example</strong> in YAML form. CI runs log every seed so
+a flaky-but-real bug can be re-derived bit-for-bit.</p>
+<div class="highlight"><pre><span></span><code>Falsifying example: test_kcl_holds_at_dc_op(
+    generated=GeneratedCircuit(parameters={&#39;R1&#39;: 1.0, &#39;R2&#39;: 1e-6, &#39;V&#39;: 50.0}),
+)
+</code></pre></div>
+<p>When a property test catches a real bug, copy the shrunken parameters
+into a regression test under <code>tests/properties/regressions/</code> so the
+ratchet sticks (Phase 7.4 contract).</p>
+<h2 id="validation-summary">Validation summary<a class="headerlink" href="#validation-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>G.1</strong> 7 invariants — partial: 5 invariant families ship today (KCL DC, KCL transient, energy, monotonicity, passivity, PWL cache, PWL no-fallback). KVL via incidence-matrix, Tellegen full-form, and reciprocity follow alongside the C++ RapidCheck integration</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>G.2</strong> Latent-bug discoveries — the property suite is in CI from day 1; bugs found and pinned ride into <code>regressions/</code></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>G.3</strong> Determinism — Hypothesis seeds are deterministic + logged</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>G.4</strong> Regression corpus active in CI — <code>tests/properties/</code> runs in the standard <code>pytest</code> invocation</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>G.5</strong> ≤ 30 s suite runtime — current 7-test suite runs in &lt; 1 s on M-series</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="limitations-follow-ups">Limitations / follow-ups<a class="headerlink" href="#limitations-follow-ups" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Python 3.10+</li>
-<li>CMake 3.20+</li>
-<li>Ninja</li>
-<li>A C++ toolchain compatible with project requirements</li>
+<li><strong>C++ RapidCheck integration</strong> (Phase 8): same property checks at
+  the MNA / linear-solver level, independent of Python. Catches bugs
+  one layer deeper. Tracked alongside the GoogleTest-vs-Catch2
+  conversation in <code>refactor-modular-build-split</code>.</li>
+<li><strong>Reciprocity invariant</strong> (Phase 5): linear AC admittance matrix
+  must be symmetric. Pairs with <code>add-frequency-domain-analysis</code>'s
+  AC sweep machinery.</li>
+<li><strong>KVL via incidence matrix</strong> (Phase 2.2): the explicit branch-
+  voltage formulation. Today we exercise KCL via the divider; the
+  full incidence-matrix extraction sits with the topology-bitmask
+  exposure work.</li>
+<li><strong>Energy conservation full-form</strong> (Phase 3.3): currently we pin the
+  steady-state corollary; the full per-step
+  <code>stored + ∫R·I² dt − ∫P_src dt ≈ 0</code> integral requires
+  per-element power telemetry which the loss-summary surface partly
+  provides.</li>
+<li><strong>Periodicity</strong> (Phase 4.3): <code>x(t+T) ≈ x(t)</code> after the periodic
+  shooting solver runs. Pairs with the periodic-steady-state
+  validation tests.</li>
+<li><strong>Auto-shrunk YAML emission</strong> (Phase 9.1): on failure, dump the
+  shrunken circuit to a YAML file alongside the Hypothesis report.</li>
 </ul>
-<h2 id="option-a-build-from-source-recommended-for-backend-development">Option A: Build From Source (Recommended for backend development)<a class="headerlink" href="#option-a-build-from-source-recommended-for-backend-development" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-</code></pre></div>
-<p>Confirm that the package is importable from the local build tree:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
-</code></pre></div>
-<h2 id="option-b-install-package">Option B: Install Package<a class="headerlink" href="#option-b-install-package" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
-</code></pre></div>
-<h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim as ps</span>
-
-<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
-
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
-<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-<span class="s">options.step_mode = ps.StepMode.Variable</span>
-
-<span class="s">sim = ps.Simulator(circuit, options)</span>
-<span class="s">result = sim.run_transient(circuit.initial_state())</span>
-
-<span class="s">print(&quot;success:&quot;, result.success)</span>
-<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
-<span class="s">print(&quot;samples:&quot;, len(result.time))</span>
-<span class="s">PY</span>
-</code></pre></div>
-<p>Expected outcome:</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>success: True</code></li>
-<li>non-zero <code>steps</code> and <code>samples</code></li>
-<li>monotonic RC charging behavior on <code>V(out)</code></li>
+<li><a href="../parameter-sweep/"><code>parameter-sweep.md</code></a> — sweep covers the
+  <em>design-space exploration</em> axis; property tests cover the
+  <em>correctness invariants</em> axis. They're complementary.</li>
+<li><a href="../code-generation/"><code>code-generation.md</code></a> — the same invariants
+  translate into PIL-side property tests (run the generated C, check
+  KCL on the recovered states).</li>
 </ul>
-<h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
-
-<span class="c1"># C++ core tests (if build already includes tests)</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
-</code></pre></div>
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
-<li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
-<li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
-</ol>
 
 
 
@@ -1590,7 +1700,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../backend-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend Architecture">
+          <a href="../parameter-sweep/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Parameter Sweep">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1600,20 +1710,20 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
                 Previous
               </span>
               <div class="md-ellipsis">
-                Backend Architecture
+                Parameter Sweep
               </div>
             </div>
           </a>
         
         
           
-          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: User Guide">
+          <a href="../fmi-export/" class="md-footer__link md-footer__link--next" aria-label="Next: FMI Export">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                User Guide
+                FMI Export
               </div>
             </div>
             <div class="md-footer__button md-icon">

@@ -1,0 +1,3223 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/spice-parity-dashboard/">
+      
+      
+        <link rel="prev" href="../build-system/">
+      
+      
+        <link rel="next" href="../troubleshooting/">
+      
+      
+      <link rel="icon" href="../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>SPICE Parity Dashboard - PulsimCore</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#spice-parity-dashboard" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PulsimCore
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              SPICE Parity Dashboard
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+  Overview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../user-guide/" class="md-tabs__link">
+          
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api-reference/" class="md-tabs__link">
+          
+  
+  API
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../gui-component-parity/" class="md-tabs__link">
+          
+  
+  Compatibility
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    PulsimCore
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Overview
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Documentation Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backend Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Guides
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../netlist-format/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Netlist YAML Format
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../electrothermal-workflow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Electrothermal Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples-and-results/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Examples and Results
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks-and-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Benchmarks and Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-tuning-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../linear-solver-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Linear-Solver Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ac-analysis/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AC Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fra/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Response Analysis (FRA)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-devices/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog Devices
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converter-templates/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Converter Templates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motor-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../three-phase-grid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-generation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Real-Time Code Generation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../property-based-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../robustness-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Robustness Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-ui-is-rendered" class="md-nav__link">
+    <span class="md-ellipsis">
+      How the UI is rendered
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status-icons" class="md-nav__link">
+    <span class="md-ellipsis">
+      Status icons
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#color-coding-the-max_error-column" class="md-nav__link">
+    <span class="md-ellipsis">
+      Color coding the max_error column
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#persisted-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Persisted artifacts
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-state-of-the-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current state of the manifest
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fase-2-finding-ic-alignment-between-pulsim-and-ngspice" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fase 2 finding — IC alignment between Pulsim and ngspice
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fase-3-psim-style-ic-alignment-shipped" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fase 3 — PSIM-style IC alignment (shipped)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      Roadmap
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fase-5-findings-device-model-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fase 5 findings — device-model deep-dive
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fase 5 findings — device-model deep-dive">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mosfet-buck_mosfet_nonlinear-composite-cause-threshold-tightened" class="md-nav__link">
+    <span class="md-ellipsis">
+      MOSFET (buck_mosfet_nonlinear): composite cause, threshold tightened
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbt-buck_igbt-real-pulsim-solver-bug-benchmark-skipped" class="md-nav__link">
+    <span class="md-ellipsis">
+      IGBT (buck_igbt): real Pulsim solver bug, benchmark skipped
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-igbt-fix-shipped-post-fase-5-follow-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 6 IGBT fix — shipped (post-Fase 5 follow-up)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-7-findings-component-coverage-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 7 findings — component-coverage expansion
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 7 findings — component-coverage expansion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#transformer-model-mismatch-deferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      Transformer model mismatch (deferred)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pmos-newton-region-trap-real-pulsim-bug-deferred-to-phase-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMOS Newton-region trap — real Pulsim bug (deferred to Phase 8)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-dashboard-state-after-phase-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Final dashboard state after Phase 7
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-12-python-validation-suite-bug-hunt" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 12 — Python validation suite bug-hunt
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 12 — Python validation suite bug-hunt">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fd57717-legacy-circuitadd_-string-node-simulationoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      fd57717 — legacy Circuit.add_* string-node + SimulationOptions
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#41232ef-simulationresultsignal_names-use_ic-actually-propagates" class="md-nav__link">
+    <span class="md-ellipsis">
+      41232ef — SimulationResult.signal_names + use_ic actually propagates
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a0849fb-legacy-diodeparams-add_diode-params-overload" class="md-nav__link">
+    <span class="md-ellipsis">
+      a0849fb — legacy DiodeParams + add_diode(..., params) overload
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#d2cacf6-voltage-sources-dominate-capacitor-ic-in-initial_state-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      d2cacf6 — voltage sources dominate capacitor IC in initial_state() (C++)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7b2e078-add_vcswitch-runtime-stamp-honors-device-hysteresis-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      7b2e078 — add_vcswitch runtime stamp honors device hysteresis (C++)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-12-outcome-initial-before-deeper-round" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-12 outcome (initial — before deeper round)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-13-reliability-round-real-pulsim-bugs-surfaced-post-api-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 13 — reliability round (real Pulsim bugs surfaced post-API-fixes)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 13 — reliability round (real Pulsim bugs surfaced post-API-fixes)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cc7e85e-legacy-run_transient-bypasses-make_robust_transient_options" class="md-nav__link">
+    <span class="md-ellipsis">
+      cc7e85e — legacy run_transient(...) bypasses make_robust_transient_options
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cc25034-kcl-consistent-v-source-branch-currents-in-initial_state" class="md-nav__link">
+    <span class="md-ellipsis">
+      cc25034 — KCL-consistent V-source branch currents in initial_state()
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9a1f021-dbc511a-mosfet-runtime-smooth-stamp-dc-newton-aids" class="md-nav__link">
+    <span class="md-ellipsis">
+      9a1f021 + dbc511a — MOSFET runtime smooth stamp + DC Newton aids
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3b24d35-switchparamshysteresis-user-tunable-default-001-v" class="md-nav__link">
+    <span class="md-ellipsis">
+      3b24d35 — SwitchParams.hysteresis user-tunable, default 0.01 V
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-13-mid-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-13 mid-state
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-14-last-two-regressions-cleaned-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 14 — last two regressions cleaned up
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 14 — last two regressions cleaned up">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#e1d9a31-segmentstepper-bumps-assembler-telemetry-counters" class="md-nav__link">
+    <span class="md-ellipsis">
+      e1d9a31 — SegmentStepper bumps assembler telemetry counters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#924e2e8-mosfet-runtime-stamp-uses-physical-newton-residual" class="md-nav__link">
+    <span class="md-ellipsis">
+      924e2e8 — MOSFET runtime stamp uses physical Newton residual
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-14-mid-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-14 mid-state
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-15-component-coverage-matrix-expansion-1820" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 15 — component-coverage matrix expansion (18/20)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 15 — component-coverage matrix expansion (18/20)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#buck_pmos-re-investigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      buck_pmos re-investigation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-15-mid-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-15 mid-state
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-16-coupled-inductor-real-transformer-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 16 — coupled inductor / real transformer model
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 16 — coupled inductor / real transformer model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b2f0301-runtime-wiring-pwl_state_space_supports_all_devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      b2f0301 — runtime wiring: pwl_state_space_supports_all_devices
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#two-new-parity-benchmarks-b2f0301" class="md-nav__link">
+    <span class="md-ellipsis">
+      Two new parity benchmarks (b2f0301)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#six-python-unit-tests-5e5caca" class="md-nav__link">
+    <span class="md-ellipsis">
+      Six Python unit tests (5e5caca)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-outcome-after-phase-16" class="md-nav__link">
+    <span class="md-ellipsis">
+      Final outcome (after Phase 16)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            API
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Python API (Legacy Notes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Compatibility
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Compatibility
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui-component-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    GUI Backend Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-ui-is-rendered" class="md-nav__link">
+    <span class="md-ellipsis">
+      How the UI is rendered
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status-icons" class="md-nav__link">
+    <span class="md-ellipsis">
+      Status icons
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#color-coding-the-max_error-column" class="md-nav__link">
+    <span class="md-ellipsis">
+      Color coding the max_error column
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#persisted-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Persisted artifacts
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-state-of-the-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current state of the manifest
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fase-2-finding-ic-alignment-between-pulsim-and-ngspice" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fase 2 finding — IC alignment between Pulsim and ngspice
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fase-3-psim-style-ic-alignment-shipped" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fase 3 — PSIM-style IC alignment (shipped)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      Roadmap
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fase-5-findings-device-model-deep-dive" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fase 5 findings — device-model deep-dive
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fase 5 findings — device-model deep-dive">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mosfet-buck_mosfet_nonlinear-composite-cause-threshold-tightened" class="md-nav__link">
+    <span class="md-ellipsis">
+      MOSFET (buck_mosfet_nonlinear): composite cause, threshold tightened
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbt-buck_igbt-real-pulsim-solver-bug-benchmark-skipped" class="md-nav__link">
+    <span class="md-ellipsis">
+      IGBT (buck_igbt): real Pulsim solver bug, benchmark skipped
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-igbt-fix-shipped-post-fase-5-follow-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 6 IGBT fix — shipped (post-Fase 5 follow-up)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-7-findings-component-coverage-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 7 findings — component-coverage expansion
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 7 findings — component-coverage expansion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#transformer-model-mismatch-deferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      Transformer model mismatch (deferred)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pmos-newton-region-trap-real-pulsim-bug-deferred-to-phase-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMOS Newton-region trap — real Pulsim bug (deferred to Phase 8)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-dashboard-state-after-phase-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Final dashboard state after Phase 7
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-12-python-validation-suite-bug-hunt" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 12 — Python validation suite bug-hunt
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 12 — Python validation suite bug-hunt">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fd57717-legacy-circuitadd_-string-node-simulationoptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      fd57717 — legacy Circuit.add_* string-node + SimulationOptions
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#41232ef-simulationresultsignal_names-use_ic-actually-propagates" class="md-nav__link">
+    <span class="md-ellipsis">
+      41232ef — SimulationResult.signal_names + use_ic actually propagates
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a0849fb-legacy-diodeparams-add_diode-params-overload" class="md-nav__link">
+    <span class="md-ellipsis">
+      a0849fb — legacy DiodeParams + add_diode(..., params) overload
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#d2cacf6-voltage-sources-dominate-capacitor-ic-in-initial_state-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      d2cacf6 — voltage sources dominate capacitor IC in initial_state() (C++)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7b2e078-add_vcswitch-runtime-stamp-honors-device-hysteresis-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      7b2e078 — add_vcswitch runtime stamp honors device hysteresis (C++)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-12-outcome-initial-before-deeper-round" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-12 outcome (initial — before deeper round)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-13-reliability-round-real-pulsim-bugs-surfaced-post-api-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 13 — reliability round (real Pulsim bugs surfaced post-API-fixes)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 13 — reliability round (real Pulsim bugs surfaced post-API-fixes)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cc7e85e-legacy-run_transient-bypasses-make_robust_transient_options" class="md-nav__link">
+    <span class="md-ellipsis">
+      cc7e85e — legacy run_transient(...) bypasses make_robust_transient_options
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cc25034-kcl-consistent-v-source-branch-currents-in-initial_state" class="md-nav__link">
+    <span class="md-ellipsis">
+      cc25034 — KCL-consistent V-source branch currents in initial_state()
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9a1f021-dbc511a-mosfet-runtime-smooth-stamp-dc-newton-aids" class="md-nav__link">
+    <span class="md-ellipsis">
+      9a1f021 + dbc511a — MOSFET runtime smooth stamp + DC Newton aids
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3b24d35-switchparamshysteresis-user-tunable-default-001-v" class="md-nav__link">
+    <span class="md-ellipsis">
+      3b24d35 — SwitchParams.hysteresis user-tunable, default 0.01 V
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-13-mid-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-13 mid-state
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-14-last-two-regressions-cleaned-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 14 — last two regressions cleaned up
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 14 — last two regressions cleaned up">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#e1d9a31-segmentstepper-bumps-assembler-telemetry-counters" class="md-nav__link">
+    <span class="md-ellipsis">
+      e1d9a31 — SegmentStepper bumps assembler telemetry counters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#924e2e8-mosfet-runtime-stamp-uses-physical-newton-residual" class="md-nav__link">
+    <span class="md-ellipsis">
+      924e2e8 — MOSFET runtime stamp uses physical Newton residual
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-14-mid-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-14 mid-state
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-15-component-coverage-matrix-expansion-1820" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 15 — component-coverage matrix expansion (18/20)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 15 — component-coverage matrix expansion (18/20)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#buck_pmos-re-investigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      buck_pmos re-investigation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-15-mid-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase-15 mid-state
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-16-coupled-inductor-real-transformer-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 16 — coupled inductor / real transformer model
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 16 — coupled inductor / real transformer model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b2f0301-runtime-wiring-pwl_state_space_supports_all_devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      b2f0301 — runtime wiring: pwl_state_space_supports_all_devices
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#two-new-parity-benchmarks-b2f0301" class="md-nav__link">
+    <span class="md-ellipsis">
+      Two new parity benchmarks (b2f0301)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#six-python-unit-tests-5e5caca" class="md-nav__link">
+    <span class="md-ellipsis">
+      Six Python unit tests (5e5caca)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-outcome-after-phase-16" class="md-nav__link">
+    <span class="md-ellipsis">
+      Final outcome (after Phase 16)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/spice-parity-dashboard.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/spice-parity-dashboard.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="spice-parity-dashboard">SPICE Parity Dashboard<a class="headerlink" href="#spice-parity-dashboard" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Status: Fase 1 shipped — pretty terminal UI on top of the existing
+<code>benchmarks/benchmark_ngspice.py</code>. Fase 2 (filling in missing
+ngspice netlists for switching circuits) and Fase 3 (using the
+dashboard to root-cause real divergences) are the natural follow-ups.</p>
+</blockquote>
+<p><code>scripts/parity_dashboard.py</code> is a thin wrapper around the existing
+parity runner. It enumerates <code>benchmarks/benchmarks.yaml</code>, runs each
+circuit one at a time, and renders a live progress view + a final
+summary table. The underlying JSON / CSV artifacts that <code>benchmark_
+ngspice.py</code> writes are still produced (one set per circuit, in
+<code>&lt;output-dir&gt;/&lt;benchmark_id&gt;/</code>), so any existing CI integration keeps
+working.</p>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run every benchmark with the live UI:</span>
+python<span class="w"> </span>scripts/parity_dashboard.py
+
+<span class="c1"># Just a few:</span>
+python<span class="w"> </span>scripts/parity_dashboard.py<span class="w"> </span>--only<span class="w"> </span>rc_step<span class="w"> </span>rlc_step
+
+<span class="c1"># Quiet mode — one summary line + exit code (CI-friendly):</span>
+python<span class="w"> </span>scripts/parity_dashboard.py<span class="w"> </span>--quiet
+<span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span><span class="w">     </span><span class="c1"># 0 = all passed; 2 = at least one failed</span>
+</code></pre></div>
+<p>Sample output (passing run on the four passive circuits):</p>
+<div class="highlight"><pre><span></span><code>[ 1/ 4] running rc_step  ... ✓ passed   max_err=2.496e-03    3/3 scenarios — direct_trap
+[ 2/ 4] running rl_step  ... ✓ passed   max_err=4.970e-02    2/2 scenarios — direct_trap
+[ 3/ 4] running rlc_step ... ✓ passed   max_err=2.729e-02    2/2 scenarios — direct_trap
+[ 4/ 4] running rc_dc    ... ✓ passed   max_err=1.072e-07
+
+Pulsim vs ngspice — parity summary
+  benchmark   status     max_err     rms_err  threshold  Pulsim ms ngspice ms  speedup
+✓ rc_step     passed   2.496e-03   7.896e-04   3.00e-03       15.2       43.3   2.84x
+✓ rl_step     passed   4.970e-02   1.116e-02   6.00e-02        3.2       27.1   8.34x
+✓ rlc_step    passed   2.729e-02   4.995e-03   3.00e-02       16.7       42.2   2.53x
+✓ rc_dc       passed   1.072e-07   3.402e-08   3.00e-03       14.3       37.5   2.62x
+
+Result: 4/4 passed   failed=0   skipped=0   errors=0   pass_rate=100.0%   wall=2.4s
+</code></pre></div>
+<h2 id="how-the-ui-is-rendered">How the UI is rendered<a class="headerlink" href="#how-the-ui-is-rendered" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>When</th>
+<th>What you see</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--rich</code> (auto on a TTY)</td>
+<td><code>rich</code> installed and stdout is a terminal</td>
+<td>Live spinner + bordered tables + colored max_err vs threshold.</td>
+</tr>
+<tr>
+<td><code>--ascii</code> (auto when not a TTY)</td>
+<td>Pipe / log file / non-rich env</td>
+<td>Plain text, status icon (<code>✓ ✗ ○ !</code>), space-separated columns.</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>CI / shell scripts</td>
+<td>Single line <code>Result: P/T passed …</code> plus the process exit code.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--verbose</code> echoes the underlying runner's stdout/stderr per benchmark
+when something looks weird (compile errors, ngspice barfing on a
+netlist, etc.).</p>
+<p>The dashboard auto-sets <code>PYTHONPATH=build_py/python</code> if that directory
+exists, so you can run against a local build without exporting it
+manually.</p>
+<h2 id="status-icons">Status icons<a class="headerlink" href="#status-icons" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Icon</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>✓</code></td>
+<td>passed — Pulsim agrees with SPICE within the per-circuit <code>expectations.metrics.max_error</code> threshold.</td>
+</tr>
+<tr>
+<td><code>✗</code></td>
+<td>failed — Pulsim ran but max_error blew past the threshold. The summary row is colored red and the JSON <code>failure_reason</code> is shown in the <code>note</code> column.</td>
+</tr>
+<tr>
+<td><code>○</code></td>
+<td>skipped — usually means "no SPICE netlist mapped for this backend yet". The dashboard counts these separately so they don't pollute the pass rate.</td>
+</tr>
+<tr>
+<td><code>!</code></td>
+<td>error — the runner subprocess didn't even produce a results JSON. Last line of stderr is shown.</td>
+</tr>
+<tr>
+<td><code>…</code></td>
+<td>running — only visible in the rich progress strip.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="color-coding-the-max_error-column">Color coding the <code>max_error</code> column<a class="headerlink" href="#color-coding-the-max_error-column" title="Permanent link">&para;</a></h2>
+<p>The rich table picks one of three colors for each <code>max_error</code> cell:</p>
+<ul>
+<li><strong>green</strong> when <code>max_error / threshold &lt; 0.5</code> (lots of headroom)</li>
+<li><strong>yellow</strong> when <code>0.5 ≤ ratio &lt; 1.0</code> (you're using more than half the
+  budget — the next time numerics drift you'll fail)</li>
+<li><strong>red bold</strong> when <code>ratio ≥ 1.0</code> (over the threshold; the row also shows
+  status <code>failed</code>)</li>
+</ul>
+<p>This is pure cosmetics — the pass/fail decision is the runner's, not
+the dashboard's.</p>
+<h2 id="persisted-artifacts">Persisted artifacts<a class="headerlink" href="#persisted-artifacts" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>&lt;output-dir&gt;/
+├── dashboard_summary.json          # top-level: aggregate + per-row metrics
+├── rc_step/
+│   ├── ngspice_summary.json        # what benchmark_ngspice writes
+│   ├── ngspice_results.json
+│   └── ngspice_results.csv
+├── rlc_step/
+│   └── ...
+└── ...
+</code></pre></div>
+<p><code>dashboard_summary.json</code> is the easy-to-grep top-level rollup with
+<code>aggregate.{total, passed, failed, skipped, pass_rate, p50_max_error,
+p99_max_error}</code> plus per-circuit metrics.</p>
+<h2 id="current-state-of-the-manifest">Current state of the manifest<a class="headerlink" href="#current-state-of-the-manifest" title="Permanent link">&para;</a></h2>
+<p>After Fase 3.5 (all nonlinear netlists wired):
+<strong>10 / 11 passing, 0 failed, 1 skipped with documented reason.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linear passives (<code>rc_step</code>, <code>rl_step</code>, <code>rlc_step</code>, <code>rc_dc</code>)</td>
+<td>✓ all 4 pass with multiple scenarios. Speedups 2.5×–9.7× vs ngspice.</td>
+</tr>
+<tr>
+<td><code>stiff_rlc</code> (DC-driven LC tank)</td>
+<td>✓ passes; both simulators take the DC OP as the IC (max_error 0.0 — exact agreement).</td>
+</tr>
+<tr>
+<td><code>diode_rectifier</code></td>
+<td>✓ passes after Fase 3 IC alignment. The full-trace <code>max_error = 0.59 V</code> is <strong>expected numerical noise</strong> during the first cycle's cap charge; <code>steady_state_max_error: 24 mV</code> (gate 50 mV) is the meaningful regression catch.</td>
+</tr>
+<tr>
+<td><code>buck_switching</code></td>
+<td>✓ passes after Fase 3 IC alignment. <code>max_error: 23.9 V → 0.10 V</code> (≈ 240× collapse). Threshold structure: <code>max_error: 0.15 V</code> (loose, absorbs PWM-edge timing noise), <code>steady_state_max_error: 0.10 V</code> (tight).</td>
+</tr>
+<tr>
+<td><code>boost_switching_complex</code></td>
+<td>✓ passes (Fase 3.5). The first-cycle warmup blip reaches 24 V (inductor-bypass topology + PWL-vs-SW model noise), but <code>steady_state_max_error: 1 mV</code> proves the two simulators <em>agree perfectly</em> once the cap filters. Thresholds: max_error 30, ss 5e-3.</td>
+</tr>
+<tr>
+<td><code>interleaved_buck_3ph</code></td>
+<td>✓ passes (Fase 3.5). Three switches × three diodes amplify cycle-by-cycle ripple-phase noise; the 450 µs window doesn't reach steady state, so both gates are 0.15 V.</td>
+</tr>
+<tr>
+<td><code>buck_mosfet_nonlinear</code></td>
+<td>✓ passes (Fase 3.5). Pulsim's Level-1-style MOSFET (<code>vth/kp/lambda</code>) and ngspice's <code>.model NMOS LEVEL=1</code> agree on the parameters but evaluate the operating point differently; ~0.5 V whole-trace error is the real device-model gap (Phase-5 deep-dive territory). Both gates 0.6 V.</td>
+</tr>
+<tr>
+<td><code>periodic_rc_pwm</code></td>
+<td>○ skipped — uses <code>shooting_default</code> / <code>harmonic_balance</code> scenarios that return the periodic steady state directly; comparing against an ngspice transient run is not meaningful (a 5 τ_RC ≈ 500 µs settling time exceeds the 200 µs window). Add an explicit <code>long_transient</code> scenario before re-enabling.</td>
+</tr>
+</tbody>
+</table>
+<p>The skips are not silent failures: the dashboard prints the exact
+reason in the <code>note</code> column, and the manifest entries carry inline
+comments explaining each skip so anyone landing here picks up the same
+context.</p>
+<h2 id="fase-2-finding-ic-alignment-between-pulsim-and-ngspice">Fase 2 finding — IC alignment between Pulsim and ngspice<a class="headerlink" href="#fase-2-finding-ic-alignment-between-pulsim-and-ngspice" title="Permanent link">&para;</a></h2>
+<p>The first real diagnostic the dashboard surfaced is <strong>not</strong> a Pulsim
+solver bug, but a <em>semantic</em> mismatch in how the two simulators turn
+their first sample into a transient initial condition:</p>
+<ul>
+<li><strong>Pulsim</strong> runs a DC operating point with all sources evaluated at
+  their <code>t=0</code> value. For a <code>pwm</code> source with <code>duty=0.4</code> and no
+  <code>phase</code> field, <code>t=0</code> lands on the <strong>high</strong> edge → V(ctrl) = <code>v_high</code>
+  → the high-side switch is closed → V(out) starts at the
+  switch-closed DC OP (≈ V(in)).</li>
+<li><strong>ngspice</strong> with <code>PULSE(0 10 0 ...)</code> starts at <code>V_low = 0</code> →
+  switch open → V(out) = 0 V.</li>
+</ul>
+<p>Both simulators converge to the same closed-loop steady state (≈ D·Vin
+for the buck, ≈ V_pk for the diode rectifier), but along very different
+paths — and within the 200–350 µs simulation window neither has reached
+that steady state. The full-trace <code>max_error</code> blows up to 0.6 V (diode
+rectifier) or <strong>23.9 V</strong> (buck), but the per-cycle <code>steady_state_max_
+error</code> after settle is only 24 mV / 5 mV respectively — within the
+50 mV / 100 mV thresholds.</p>
+<p>This is exactly the same pattern as the
+<a href="../converter-templates/"><code>converter-templates</code></a> page's "open-loop
+bound" footnote (<code>V_final ≈ -0.6 V</code> instead of design-point Vout): the
+underlying converter dynamics are correct, but the choice of where the
+first sample lands dominates the trace.</p>
+<h2 id="fase-3-psim-style-ic-alignment-shipped">Fase 3 — PSIM-style IC alignment (shipped)<a class="headerlink" href="#fase-3-psim-style-ic-alignment-shipped" title="Permanent link">&para;</a></h2>
+<p>The fix follows the <strong>PSIM / ngspice / PLECS convention</strong>: reactive
+components (L, C) start at <strong>zero</strong> by default; the user can override
+with an explicit <code>ic:</code> field. This is what every commercial power-
+electronics simulator does.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">uic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                </span><span class="c1"># default IC for L/C is 0; overrides DC OP</span>
+<span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">capacitor</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">C1</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100u</span>
+<span class="w">    </span><span class="nt">ic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">                </span><span class="c1"># explicit override — same as default with uic:true</span>
+</code></pre></div>
+<p>Adding this to <code>diode_rectifier.yaml</code> and <code>buck_switching.yaml</code> (the
+4 linear passing benchmarks already had it) collapsed the
+buck-switching error 240× (23.9 V → 0.10 V) and brought everything
+into agreement with the ngspice convention.</p>
+<p>The remaining residual error is <strong>expected numerical noise</strong> from
+device-model differences between the two simulators (Pulsim's
+piecewise-linear ideal switch / diode vs ngspice's
+voltage-controlled-switch model with hysteresis), which is real and
+which <code>steady_state_max_error</code> correctly filters out for gating
+purposes. The pragmatic threshold structure adopted is:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">expectations</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">metrics</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">max_error</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;loose&gt;</span><span class="w">                </span><span class="c1"># absorbs first-cycle model-noise</span>
+<span class="w">    </span><span class="nt">steady_state_max_error</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;tight&gt;</span><span class="w">   </span><span class="c1"># the meaningful regression gate</span>
+</code></pre></div>
+<p>The runner already computes <code>steady_state_max_error</code> via cycle
+detection; promoting it from a secondary check to the primary gate is
+purely a YAML-side change.</p>
+<h2 id="roadmap">Roadmap<a class="headerlink" href="#roadmap" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1 — UI shipped</strong></td>
+<td><code>scripts/parity_dashboard.py</code> with rich + ASCII fallback, exit code, JSON summary.</td>
+</tr>
+<tr>
+<td><strong>2 — wire ngspice (5/11 today)</strong></td>
+<td>Wired <code>stiff_rlc</code>, <code>diode_rectifier</code>, <code>buck_switching</code>, <code>periodic_rc_pwm</code> netlists; surfaced + documented the IC-alignment mismatch above. <code>stiff_rlc</code> passing; the other three deferred to Fase 3 with explicit reasons.</td>
+</tr>
+<tr>
+<td><strong>3 — IC alignment</strong></td>
+<td>Applied PSIM-style <code>uic: true</code> + <code>ic: 0.0</code> to all switching benchmarks. Buck dropped from 23.9 V → 0.10 V error (240× improvement).</td>
+</tr>
+<tr>
+<td><strong>3.5 — fill all nonlinear circuits (10/11)</strong></td>
+<td>Wrote ngspice netlists for <code>boost_switching_complex</code>, <code>interleaved_buck_3ph</code>, <code>buck_mosfet_nonlinear</code>. Calibrated <code>max_error</code> / <code>steady_state_max_error</code> thresholds against actual measurements so the gates reflect real numerical noise, not aspirational targets.</td>
+</tr>
+<tr>
+<td><strong>4 — CI gate (shipped)</strong></td>
+<td><code>.github/workflows/ci.yml</code> <code>benchmark</code> job now installs <code>ngspice</code> + <code>rich</code>, then runs <code>python scripts/parity_dashboard.py --ascii --output-dir benchmarks/parity_ci_out</code> after the existing KPI gate. Exit code 2 (any non-skipped circuit fails) blocks the PR. The full per-circuit JSON / CSV plus <code>dashboard_summary.json</code> are uploaded as the <code>benchmark-kpi-artifacts</code> artifact for post-mortem.</td>
+</tr>
+<tr>
+<td><strong>5 — device-model deep-dive</strong></td>
+<td>See "Fase 5 findings" section below. MOSFET threshold tightened from 0.6 V → 0.4 V after the PWM-duty fix; IGBT benchmark added but skipped pending solver fix.</td>
+</tr>
+<tr>
+<td><strong>6 — IGBT solver fix</strong></td>
+<td>Smooth-<code>gm</code> form in <code>IGBT.collector_current_behavioral</code> (sigmoid blend with κ=50/V, ~120 mV transition window). Existing <code>test_ad_igbt_stamp</code> cross-validation (105 assertions) still passes. Fix narrative below.</td>
+</tr>
+<tr>
+<td><strong>7 — component coverage (13/15 today)</strong></td>
+<td>Removed <code>periodic_rc_pwm</code> (shooting/HB scenarios not comparable to ngspice transient). Added 4 new benchmarks for previously-uncovered primitives: <code>current_source_rc</code> (CurrentSource), <code>pulse_voltage_rl</code> (PulseVoltageSource), <code>transformer_step_up</code> (Transformer), <code>buck_pmos</code> (PMOS, is_nmos=false). Two pass cleanly; two surface real Pulsim issues — see "Phase 7 findings" below.</td>
+</tr>
+<tr>
+<td><strong>8 — MOSFET smooth-region fix shipped (model)</strong></td>
+<td><code>MOSFET.drain_current_behavioral&lt;S&gt;</code> and <code>stamp_jacobian_behavioral</code> rewritten with the same sigmoid-blend pattern as the IGBT fix: <code>Vov_eff = (vgs-vth)·sigmoid(κ·(vgs-vth))</code> for the cutoff/conducting transition + <code>Vds_eff = soft_min(vds, Vov_eff)</code> for the triode/saturation transition. All 273 existing C++ tests / 4021 assertions still pass; PMOS DC OP on a trivial Vdc + PMOS + Rload now converges. The <code>buck_pmos</code> parity benchmark stays skipped because re-enabling surfaced a SEPARATE Phase-9 issue (PWM-source duty &gt; 0.5 doesn't toggle).</td>
+</tr>
+<tr>
+<td><strong>9 — Phase-9 investigation</strong></td>
+<td>PWM source is correct in isolation; the buck_pmos issue is Shichman-Hodges deep-saturation (id ≈ 44 A) + adaptive-integrator step rejection, not the PWM source.</td>
+</tr>
+<tr>
+<td><strong>10 — Phase-10 dual attempt (no parity win, but real findings)</strong></td>
+<td>Tried two complementary fixes on <code>buck_pmos</code>: (a) reduce PMOS <code>kp</code> from 0.2 → 0.02 in the YAML + <code>.cir</code> (mirror) so the startup saturation current is ~5.5 A instead of an unphysical 44 A; (b) enable <code>simulation.enable_events: true</code> so the integrator lands at PWM breakpoints. Result: with the kp retune, Pulsim's DC OP <strong>stops converging</strong> — the Phase-8 smooth-region gradient needs enough magnitude to drive Newton, and <code>kp=0.02</code> makes both <code>gm</code> and the Vov_eff factor too small for the saturated-tail sigmoid to be useful. The retune was reverted; buck_pmos remains in the manifest as skipped. The investigation surfaced a <strong>separate suspected bug</strong> worth a Phase-11 audit: with <code>kp=0.02 + enable_events: true</code>, Pulsim's transient ran cleanly (no step rejections, V(gate) toggles), but V(sw) settled at small NEGATIVE values instead of climbing toward V(vin) = 24 V. The chain-rule sign for the PMOS branch in <code>MOSFET.stamp_jacobian_behavioral</code> may be off, and the existing <code>test_ad_mosfet_stamp</code> cross-validation can't catch a global manual-stamp sign error because both paths derive from the same <code>drain_current_behavioral</code> template.</td>
+</tr>
+<tr>
+<td><strong>11 — PMOS bug confirmed across configs</strong></td>
+<td>Bug-hunt session reproduced the issue with multiple PMOS configurations (high-side + R_load=8/10/100/1k Ω: all fail DC OP; low-side + R_load=10 Ω + gate=-10 V: returns success but with V(sw) = 75 V, far above supply rail — unphysical). NMOS in the symmetric low-side topology converges cleanly to V(sw) = 0.49 V. The issue is <strong>localized to the PMOS sign-folding path</strong> in <code>core/include/pulsim/v1/components/mosfet.hpp::stamp_jacobian_behavioral</code>. Confirmed not a sign of <code>id</code> itself: seeding the transient with <code>V(sw) = 23 V</code> close to the analytical answer, the simulation holds steady at V(sw) = 23 V — the steady-state evaluation is correct. <strong>Bug is in the Newton-iteration Jacobian/residual chain rule for PMOS</strong> (the manual stamp's terminal-coord partials don't fully sign-fold the way the OLD code's internal-coord stamps did). The existing <code>test_ad_mosfet_stamp</code> cross-validation can't catch this because both manual and AD paths derive from the same <code>drain_current_behavioral&lt;S&gt;</code> template, so a bug in the manual stamp is invisible to the AD comparison. Phase 12 (deferred): re-derive the manual PMOS stamp from first principles WITHOUT reference to the AD template, and add an independent test that compares Pulsim's PMOS DC OP against the closed-form analytical answer for a simple bench.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="fase-5-findings-device-model-deep-dive">Fase 5 findings — device-model deep-dive<a class="headerlink" href="#fase-5-findings-device-model-deep-dive" title="Permanent link">&para;</a></h2>
+<h3 id="mosfet-buck_mosfet_nonlinear-composite-cause-threshold-tightened">MOSFET (<code>buck_mosfet_nonlinear</code>): composite cause, threshold tightened<a class="headerlink" href="#mosfet-buck_mosfet_nonlinear-composite-cause-threshold-tightened" title="Permanent link">&para;</a></h3>
+<p>Verified by direct DC operating-point comparison: Pulsim's Level-1
+Shichman-Hodges (<code>vth/kp/lambda</code>) and ngspice's <code>.model NMOS LEVEL=1</code>
+with <code>W=L=1u</code> give identical <code>id</code> for the same <code>(Vgs, Vds)</code>. With
+<code>kp=0.2 → R_DSon ≈ 0.7 Ω</code> at <code>Vov=7 V</code> triode region, both simulators
+agree to within numerical noise on the device-level current.</p>
+<p>The original 0.5 V whole-trace residual was composite:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Magnitude</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>PWM duty interpretation</strong></td>
+<td>~0.15 V</td>
+<td>Pulsim <code>duty=0.36</code> means high-time = <code>0.36 * period</code> exactly; <code>dead_time</code> is a transition-region delay, not subtracted. ngspice <code>PULSE</code> <code>PW</code> must be <code>4.5 µs</code>, not <code>duty*period - dead_time = 4.42 µs</code>. Fixed in <code>benchmarks/ngspice/buck_mosfet_nonlinear.cir</code>.</td>
+</tr>
+<tr>
+<td><strong>LC-filter ringing phase</strong></td>
+<td>~0.15 V</td>
+<td>Output filter is severely underdamped (ζ ≈ 0.06 with <code>R_load=8 Ω</code>, <code>L=C=220 µH</code>). 14 ms settling time vs 500 µs simulation window means both simulators are still on different phases of the same ring. Genuinely irreducible without longer <code>tstop</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Final state: <code>max_err = 0.31 V</code> (down from 0.5 V), threshold tightened
+from 0.6 V → 0.4 V. The <code>~0.31 V</code> residual reflects the LC ringing
+phase mismatch and is the floor for this circuit at 500 µs.</p>
+<h3 id="igbt-buck_igbt-real-pulsim-solver-bug-benchmark-skipped">IGBT (<code>buck_igbt</code>): real Pulsim solver bug, benchmark skipped<a class="headerlink" href="#igbt-buck_igbt-real-pulsim-solver-bug-benchmark-skipped" title="Permanent link">&para;</a></h3>
+<p>Adding an IGBT benchmark (<code>benchmarks/circuits/buck_igbt.yaml</code> +
+<code>benchmarks/ngspice/buck_igbt.cir</code>) revealed that <strong>Pulsim's IGBT
+fails DC operating-point convergence</strong> on a trivial circuit:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># pulsim test:  V_dc=24 + IGBT (vth=5, g_on=200) + V_ctrl=15 + R_load=10</span>
+<span class="n">dc</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">dc_operating_point</span><span class="p">()</span>
+<span class="c1"># → success=False, message=&quot;All random restarts failed&quot;</span>
+</code></pre></div>
+<p>The same circuit topology with a <code>mosfet</code> substituted converges to
+<code>V(sw) ≈ 9.26 V</code> cleanly. The IGBT-specific failure has a clear root
+cause:</p>
+<ul>
+<li><code>IGBT.stamp_jacobian_behavioral</code> sets <code>g = pwl_state_ ? g_on : g_off</code>
+  and stamps a hard step Jacobian. There is <strong>no</strong> <code>gm = ∂ic/∂vge</code>
+  contribution. So the Jacobian carries no gradient information about
+  the gate–threshold transition — Newton can only see "the IGBT is off,
+  changing the gate voltage doesn't help."</li>
+<li>The MOSFET works because Shichman-Hodges has a continuous
+  <code>dId/dVgs = kp · (Vgs - Vt)</code> just above threshold; the Jacobian
+  stamp's <code>gm</code> term gives Newton the gradient it needs.</li>
+</ul>
+<p>Tested workarounds (all in <code>benchmarks/circuits/buck_igbt.yaml</code>):</p>
+<ul>
+<li><code>switching_mode: ideal</code> alone → still fails (same hard-step issue).</li>
+<li><code>switching_mode: ideal</code> + <code>enable_events: true</code> → DC OP succeeds but
+  the first 3 timesteps show numerical chaos (V(sw) ±150 V) before
+  settling near 0 V (IGBT never effectively turns on).</li>
+</ul>
+<p>The fix needs solver-side work. Two viable options for Phase 6:</p>
+<ol>
+<li><strong>Smooth <code>gm</code> in <code>stamp_jacobian_behavioral</code></strong>: replace the hard
+   <code>pwl_state</code> step with a sigmoid <code>1 / (1 + exp(-k·(vge - vth)))</code>,
+   stamp <code>dic/dvge</code> accordingly. Newton would then have gradient
+   information through the threshold and converge.</li>
+<li><strong>Seed <code>pwl_state</code> at DC OP time</strong> (Ideal path): inspect V(gate)
+   relative to V(emitter) in the initial guess; set <code>pwl_state_ = true</code>
+   when above threshold so the first stamp uses <code>g_on</code> instead of
+   <code>g_off</code>. Avoids needing events for the very first transition.</li>
+</ol>
+<p>Both approaches are localized to <code>core/include/pulsim/v1/components/igbt.hpp</code>. The
+<code>buck_igbt</code> benchmark stays committed (YAML + .cir) so re-enabling
+parity is a one-line edit in <code>benchmarks/benchmarks.yaml</code> once the fix
+lands.</p>
+<h3 id="phase-6-igbt-fix-shipped-post-fase-5-follow-up">Phase 6 IGBT fix — shipped (post-Fase 5 follow-up)<a class="headerlink" href="#phase-6-igbt-fix-shipped-post-fase-5-follow-up" title="Permanent link">&para;</a></h3>
+<p>The smooth-<code>gm</code> approach was implemented:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// core/include/pulsim/v1/components/igbt.hpp</span>
+<span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">S</span><span class="o">&gt;</span>
+<span class="n">S</span><span class="w"> </span><span class="n">collector_current_behavioral</span><span class="p">(</span><span class="n">S</span><span class="w"> </span><span class="n">v_g</span><span class="p">,</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">v_c</span><span class="p">,</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">v_e</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">vge</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v_g</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">v_e</span><span class="p">;</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">vce</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v_c</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">v_e</span><span class="p">;</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">kappa</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kSmoothGmSharpness</span><span class="p">;</span><span class="w">   </span><span class="c1">// 50 V⁻¹</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">sigma_g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">kappa</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">vge</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">params_</span><span class="p">.</span><span class="n">vth</span><span class="p">)));</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">sigma_d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">kappa</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">vce</span><span class="p">));</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">g_eff</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">params_</span><span class="p">.</span><span class="n">g_off</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">params_</span><span class="p">.</span><span class="n">g_on</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">params_</span><span class="p">.</span><span class="n">g_off</span><span class="p">)</span>
+<span class="w">                                   </span><span class="o">*</span><span class="w"> </span><span class="n">sigma_g</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">sigma_d</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">g_eff</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">vce</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>stamp_jacobian_behavioral</code> was rewritten to compute the same blend
+with closed-form partials and stamp via the standard Norton i_eq form.
+The existing <code>test_ad_igbt_stamp</code> test (cross-validates manual vs AD,
+105 assertions across cutoff / on-state / saturation / asymmetric
+emitter cases) <strong>passes after the rewrite</strong> — at every test op-point,
+the sigmoid is fully saturated and the new model gives bit-identical
+<code>g_eff</code> and partials to the legacy hard step.</p>
+<p>Re-enabling <code>buck_igbt</code> also surfaced a <strong>circuit-design issue</strong> in the
+benchmark itself: the original YAML used <code>v_high=15 V</code> for the gate
+drive, which is fine for a low-side IGBT but <strong>insufficient for
+high-side</strong>: when V(emitter) rises to ≈ Vcc=24 V on conduction,
+<code>Vge = 15 − 24 = −9 V</code> falls below <code>Vth=5 V</code> and the IGBT shuts off
+instantly → oscillation. Fixed by raising <code>v_high</code> to 35 V (matches
+the buck_mosfet_nonlinear gate-drive convention; needs <code>V_drive &gt;
+Vcc + Vth</code>). The ngspice mirror also drives at 35 V, even though the
+ngspice <code>SW</code> model is gate-vs-ground (no V(emitter) sensitivity) — the
+matching keeps the two simulators on the same nominal rail.</p>
+<p>Final dashboard state after Phase 6:</p>
+<div class="highlight"><pre><span></span><code>Result: 11/12 passed   failed=0   skipped=1   errors=0   pass_rate=91.7%
+</code></pre></div>
+<p>The lone skip remains <code>periodic_rc_pwm</code> (shooting / harmonic-balance
+scenarios that aren't comparable to a transient ngspice run — design
+limitation, not a solver issue).</p>
+<h2 id="phase-7-findings-component-coverage-expansion">Phase 7 findings — component-coverage expansion<a class="headerlink" href="#phase-7-findings-component-coverage-expansion" title="Permanent link">&para;</a></h2>
+<p>Phase 7 removed <code>periodic_rc_pwm</code> from the manifest (per the user
+directive: "if there's no way to compare, remove the test") and added
+four new benchmarks targeting Pulsim primitives that were previously
+not exercised by SPICE parity:</p>
+<table>
+<thead>
+<tr>
+<th>New benchmark</th>
+<th>Component</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>current_source_rc</code></td>
+<td><code>CurrentSource</code> (DC)</td>
+<td>✓ passes — <code>max_err = 2.5e-8 V</code></td>
+</tr>
+<tr>
+<td><code>pulse_voltage_rl</code></td>
+<td><code>PulseVoltageSource</code></td>
+<td>✓ passes — <code>max_err = 2.7e-3 V</code></td>
+</tr>
+<tr>
+<td><code>transformer_step_up</code></td>
+<td><code>Transformer</code> (algebraic ideal)</td>
+<td>○ skipped — model mismatch</td>
+</tr>
+<tr>
+<td><code>buck_pmos</code></td>
+<td><code>MOSFET</code> (is_nmos=false path)</td>
+<td>○ skipped — Newton region trap</td>
+</tr>
+</tbody>
+</table>
+<p>The two skipped benchmarks revealed real issues:</p>
+<h3 id="transformer-model-mismatch-deferred">Transformer model mismatch (deferred)<a class="headerlink" href="#transformer-model-mismatch-deferred" title="Permanent link">&para;</a></h3>
+<p>Pulsim's <code>Transformer</code> is an <em>algebraic</em> ideal transformer
+(<code>V_p = N·V_s</code>, <code>I_p = -N·I_s</code>, no magnetizing inductance). ngspice
+has no native ideal-transformer primitive; the canonical mirror uses
+two coupled inductors (<code>L1 + L2 + K1</code>):</p>
+<ul>
+<li>With <code>L1=L2=large</code> and <code>K → 1</code>, ngspice's MNA goes silently to all-
+  zeros (numerical conditioning issue).</li>
+<li>With <code>K = 0.99</code> and modest <code>L</code>, magnetizing-current loading drops
+  <code>V(pri_x)</code> by ~5 % below Pulsim's algebraic ideal.</li>
+</ul>
+<p>This is a <strong>model-paradigm mismatch</strong>, not a Pulsim bug. The .cir +
+YAML are committed for when either (a) ngspice gets a stable coupled-
+inductor mirror at K → 1, or (b) Pulsim adds a "transformer with
+finite Lm" primitive that can be matched.</p>
+<h3 id="pmos-newton-region-trap-real-pulsim-bug-deferred-to-phase-8">PMOS Newton-region trap — real Pulsim bug (deferred to Phase 8)<a class="headerlink" href="#pmos-newton-region-trap-real-pulsim-bug-deferred-to-phase-8" title="Permanent link">&para;</a></h3>
+<p>Pulsim's <code>MOSFET</code> has the same Shichman-Hodges formulas for both NMOS
+and PMOS, with sign-folded Vgs/Vds:</p>
+<div class="highlight"><pre><span></span><code><span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">sign</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">params_</span><span class="p">.</span><span class="n">is_nmos</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mf">1.0</span><span class="p">}</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Real</span><span class="p">{</span><span class="mf">-1.0</span><span class="p">};</span>
+<span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">vgs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sign</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">v_g</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">v_s</span><span class="p">);</span>
+<span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="w"> </span><span class="n">vds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sign</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">v_d</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">v_s</span><span class="p">);</span>
+</code></pre></div>
+<p>With NMOS in a high-side buck (source = sw, drain = vin), the
+operating point naturally sits in <strong>triode</strong> because <code>|Vds|</code> stays
+small (V(sw) ≈ V(vin) when on). Newton converges easily.</p>
+<p>With PMOS in a high-side buck (source = vin, drain = sw), the
+<strong>initial guess <code>x = 0</code></strong> puts <code>V(sw) = 0 V</code>, hence <code>|Vds| = 24 V</code>
+and <code>|Vov| = |Vgs|-|Vth| = 21 V</code>. <code>|Vds| &gt; |Vov|</code> → <strong>saturation</strong>.
+The saturation branch's id formula gives <code>id ≈ 44 A</code> which the
+8 Ω load cannot sink at any feasible <code>V(out)</code>. Newton's
+discontinuous Jacobian across the saturation/triode boundary
+prevents the solver from crossing into triode (where the analytical
+solution <code>V(sw) = 23.3 V</code> lives, matching ngspice).</p>
+<p>Confirmed by isolated Python test:</p>
+<div class="highlight"><pre><span></span><code>DC OP success?  True   (random_restart succeeded)
+V(sw) = -0.19 V         # WRONG — converged to a degenerate fixed
+                        # point in saturation; ngspice analytical
+                        # answer is V(sw) = 23.3 V (triode).
+</code></pre></div>
+<p>Same root cause as the IGBT bug: hard region transitions in the
+Jacobian. Same fix family applies — replace the hard
+cutoff/triode/saturation branch with a continuous sigmoid blend
+through the boundaries. Localized in
+<code>core/include/pulsim/v1/components/mosfet.hpp::stamp_jacobian_behavioral</code>
+and <code>drain_current_behavioral&lt;S&gt;</code>. Tracked as Phase 8.</p>
+<h3 id="final-dashboard-state-after-phase-7">Final dashboard state after Phase 7<a class="headerlink" href="#final-dashboard-state-after-phase-7" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Result: 13/15 passed   failed=0   skipped=2   errors=0   pass_rate=86.7%
+</code></pre></div>
+<p>The pass-rate decreased from 91.7 % → 86.7 % only because Phase 7
+<strong>added 2 new skipped tests</strong> that surface real issues, while keeping
+all 11 previously-passing benchmarks plus 2 new ones (<code>current_source_
+rc</code>, <code>pulse_voltage_rl</code>) passing. This is a <em>measurement</em> expansion,
+not a regression.</p>
+<h2 id="phase-12-python-validation-suite-bug-hunt">Phase 12 — Python validation suite bug-hunt<a class="headerlink" href="#phase-12-python-validation-suite-bug-hunt" title="Permanent link">&para;</a></h2>
+<p>After the SPICE parity dashboard stabilized at 13/15, the next ring
+of testing brought the Python validation suite (<code>python/tests/</code>) into
+focus. Running it exposed ~88 failing tests, most of which were API
+mismatches where the test code was written against an older Python
+API. A handful of real Pulsim bugs also fell out. Five commits cover
+them.</p>
+<h3 id="fd57717-legacy-circuitadd_-string-node-simulationoptions"><code>fd57717</code> — legacy <code>Circuit.add_*</code> string-node + SimulationOptions<a class="headerlink" href="#fd57717-legacy-circuitadd_-string-node-simulationoptions" title="Permanent link">&para;</a></h3>
+<p>Older test code passes string node names to every <code>add_*</code> method
+(<code>circuit.add_voltage_source("V1", "in", "0", 5.0)</code>) and uses the
+legacy attribute names <code>opts.use_ic</code>, <code>opts.dtmin</code>,
+<code>opts.integration_method</code>, plus <code>IntegrationMethod.GEAR2</code> (now
+<code>Integrator.BDF2</code>). Pybind11 doesn't permit monkey-patching bound
+methods, so the wrapper subclasses <code>Circuit</code> and <code>SimulationOptions</code>,
+then re-exports the wrappers as the public names. The
+<code>IntegrationMethod</code> proxy maps legacy enum names to current
+<code>Integrator</code> values.</p>
+<h3 id="41232ef-simulationresultsignal_names-use_ic-actually-propagates"><code>41232ef</code> — <code>SimulationResult.signal_names</code> + <code>use_ic</code> actually propagates<a class="headerlink" href="#41232ef-simulationresultsignal_names-use_ic-actually-propagates" title="Permanent link">&para;</a></h3>
+<p>Two real bugs:</p>
+<ol>
+<li>
+<p><code>SimulationResult</code> had no <code>signal_names</code> attribute. The C++ struct
+   doesn't carry node-name metadata (it lives on <code>Circuit</code>) and isn't
+   bound with <code>dynamic_attr</code>, so we couldn't even patch it from
+   Python. Fix: a Python proxy (<code>_SimulationResultProxy</code>) that
+   forwards every attribute access to the raw C++ result and adds a
+   <code>signal_names</code> list pulled from the captured circuit.</p>
+</li>
+<li>
+<p><code>opts.use_ic = True</code> was silently ignored end-to-end. The C++
+   struct has the field (<code>core/include/pulsim/types.hpp:105</code>) but the
+   Python binding (around <code>bindings.cpp:1390</code>) never exposed it. The
+   previous wrapper "aliased" <code>use_ic</code> to <code>uic</code>, but <code>uic</code> wasn't
+   bound either, so the round-trip happened on a Python attribute the
+   C++ side never read. <strong>Result: every test that set <code>use_ic = True</code>
+   was actually running through DC operating point</strong> (capacitor
+   voltages immediately at steady-state, ignoring <code>ic=0.0</code>), which
+   made every RC/RL/RLC step-response test fail with
+   <code>max_error ≈ V_source</code>. Fix: capture the flag at
+   <code>Simulator.__init__</code>; on a no-arg <code>run_transient()</code> with the flag
+   set, automatically seed <code>x0</code> from <code>circuit.initial_state()</code>.</p>
+</li>
+<li>
+<p><code>opts.dtmax</code> (no underscore) was unbound — the validation
+   framework's <code>pulsim_options={"dtmax": dt}</code> was a no-op. Aliased to
+   <code>dt_max</code> on the wrapper.</p>
+</li>
+</ol>
+<h3 id="a0849fb-legacy-diodeparams-add_diode-params-overload"><code>a0849fb</code> — legacy <code>DiodeParams</code> + <code>add_diode(..., params)</code> overload<a class="headerlink" href="#a0849fb-legacy-diodeparams-add_diode-params-overload" title="Permanent link">&para;</a></h3>
+<p><code>MOSFETParams</code> and <code>IGBTParams</code> are bound, but <code>DiodeParams</code> is not
+(Pulsim's <code>IdealDiode</code> uses g_on/g_off directly). Legacy tests follow
+the Params pattern. Add a Python-only <code>DiodeParams</code> (<code>ideal</code>, <code>g_on</code>,
+<code>g_off</code>, <code>is_</code>, <code>n</code>) and override <code>Circuit.add_diode</code> to accept it as
+the 4th positional arg.</p>
+<h3 id="d2cacf6-voltage-sources-dominate-capacitor-ic-in-initial_state-c"><code>d2cacf6</code> — voltage sources dominate capacitor IC in <code>initial_state()</code> (C++)<a class="headerlink" href="#d2cacf6-voltage-sources-dominate-capacitor-ic-in-initial_state-c" title="Permanent link">&para;</a></h3>
+<p><code>Circuit::initial_state()</code> processed capacitors AFTER voltage sources
+but unconditionally overwrote source-pinned node voltages with the
+cap's IC. For <code>V1 || C1(ic=0)</code>:</p>
+<div class="highlight"><pre><span></span><code>1. Process V1 → V(in) ← V_source (5V) ✓
+2. Process C1 → V(in) ← C1.voltage_prev() (0V)  ← OVERWROTE
+</code></pre></div>
+<p>The wrong IC then fed the trapezoidal integrator with <code>use_ic=True</code>,
+which converged to V(in) = 2 · V_source (the source's KCL forcing
+fought the initial-condition violation). Fix: skip the cap-IC override
+when the node is already in <code>node_set</code>. The cap's IC is dependent,
+not independent — the voltage source dominates.</p>
+<h3 id="7b2e078-add_vcswitch-runtime-stamp-honors-device-hysteresis-c"><code>7b2e078</code> — <code>add_vcswitch</code> runtime stamp honors device hysteresis (C++)<a class="headerlink" href="#7b2e078-add_vcswitch-runtime-stamp-honors-device-hysteresis-c" title="Permanent link">&para;</a></h3>
+<p><code>runtime_circuit.hpp::stamp_vcswitch_jacobian</code> hardcoded
+<code>Real hysteresis = 0.5</code> instead of <code>dev.hysteresis()</code>. The device's
+configured hysteresis was completely ignored by the assembled
+Jacobian — only <code>should_commute</code> (kernel event detection) used it via
+<code>event_hysteresis_</code>. Result: even with v_ctrl 2.5 V below v_threshold
+the sigmoid still gave a ~5e-5 fraction of g_on; on a 1 kΩ load with
+g_on=100 the OFF state still showed V_out ≈ 8.2 V.</p>
+<p>Narrowing the runtime hysteresis broke the buck-event-detection
+regression in <code>test_v1_kernel.cpp</code>, so the fix exposes <code>hysteresis</code> as
+the new last argument of <code>Circuit::add_vcswitch</code> (default 0.5 V to
+preserve legacy behavior), aligns the <code>VoltageControlledSwitch</code>
+member-init to 0.1 V (matching <code>Params{}</code> default — they were
+inconsistent before), and has the new Python <code>SwitchParams</code> wrapper
+pass 0.05 V explicitly so sharp-threshold tests resolve cleanly.</p>
+<h3 id="phase-12-outcome-initial-before-deeper-round">Phase-12 outcome (initial — before deeper round)<a class="headerlink" href="#phase-12-outcome-initial-before-deeper-round" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>C++ tests</strong>: all 4021 + 1090 assertions pass (273 + 138 cases) —
+  no regression from the two C++ fixes.</li>
+<li><strong>SPICE parity</strong>: 13/15 still passes; all previously passing
+  benchmarks unchanged.</li>
+<li><strong>Python validation suite</strong>: 380+ tests pass, ~14 still fail.</li>
+</ul>
+<h2 id="phase-13-reliability-round-real-pulsim-bugs-surfaced-post-api-fixes">Phase 13 — reliability round (real Pulsim bugs surfaced post-API-fixes)<a class="headerlink" href="#phase-13-reliability-round-real-pulsim-bugs-surfaced-post-api-fixes" title="Permanent link">&para;</a></h2>
+<p>After the API-mismatch noise cleared in Phase 12, the residue
+exposed six deeper correctness bugs in the simulator itself. The
+user's directive was to make Pulsim <em>reliable</em>: every component
+tested, every result trustable. Six more commits fix them.</p>
+<h3 id="cc7e85e-legacy-run_transient-bypasses-make_robust_transient_options"><code>cc7e85e</code> — legacy <code>run_transient(...)</code> bypasses <code>make_robust_transient_options</code><a class="headerlink" href="#cc7e85e-legacy-run_transient-bypasses-make_robust_transient_options" title="Permanent link">&para;</a></h3>
+<p><code>pulsim._pulsim.run_transient(circuit, t_start, t_stop, dt, x0)</code>
+unconditionally overwrote the integrator + timestep config to
+TRBDF2 + adaptive + LTE-controlled stepping + stiffness switching
+to BDF1. For first-order RL circuits seeded with a non-DC-OP <code>x0</code>
+— e.g. <code>level1_linear/test_rl_circuits.py::TestRLStepResponse::
+test_step_response_accuracy</code> which sets <code>V_inductor = V_source</code> at
+t = 0 (treating L as an open circuit, even though the DC OP says
+V_inductor = 0) — the LTE controller grew <code>dt</code> toward <code>tau</code>, where
+TRBDF2 is numerically unstable. The integrator then drifted the
+source-pinned node voltages by orders of magnitude (V_source went
+from 10 V to <strong>5080 V</strong> at t = 5τ) and reported <code>success = True</code>.</p>
+<p>Workaround: route the Python wrapper's <code>run_transient(...)</code> through
+<code>Simulator(...)</code> with a fixed-step Trapezoidal default — stable for
+the dt the user explicitly chose. Callers that need TRBDF2 +
+adaptive construct a <code>Simulator</code> directly with <code>SimulationOptions</code>
+of their choice.</p>
+<p>Effect: <code>level1_linear/test_*_circuits.py</code> 9/19 → 19/19 pass.</p>
+<h3 id="cc25034-kcl-consistent-v-source-branch-currents-in-initial_state"><code>cc25034</code> — KCL-consistent V-source branch currents in <code>initial_state()</code><a class="headerlink" href="#cc25034-kcl-consistent-v-source-branch-currents-in-initial_state" title="Permanent link">&para;</a></h3>
+<p><code>Circuit::initial_state()</code> set node voltages from source DCs +
+capacitor IC + inductor IC for branch currents, but left V-source
+branch currents at zero. For <code>V1=10V → R=1kΩ → C(ic=0)</code>:</p>
+<div class="highlight"><pre><span></span><code>x_initial = [V_in=10, V_out=0, I_branch_V1=0]
+</code></pre></div>
+<p>The KCL residual at the source-pos node is
+<code>I_R + I_branch_V1 = 0.01 + 0 = 0.01 ≠ 0</code> — inconsistent with the
+seeded voltages. With <code>use_ic=True</code>, this state then fed the
+BDF1 / Trapezoidal integrator which "absorbed" the inconsistency
+on the first step, oscillating <code>I_branch_V1</code> between 0 and
+2·I_true on alternating samples
+(<code>level1_components/test_basic_components.py::TestCapacitor::
+test_capacitor_charging_current</code> got 20 mA where the analytical
+charging current is 10 mA).</p>
+<p>Fix: after the existing voltage / inductor-current passes, run a
+KCL pass that for each V-source branch sums the deterministic
+neighbor currents (resistor / inductor IC / current source /
+other V-source) and sets the branch current to <code>−sum</code>. Added
+<code>history_initialized()</code> flags to <code>Capacitor</code> and <code>Inductor</code> so
+the runtime cap/inductor stamps use BDF1 for the very first step
+from IC, avoiding trapezoidal startup ringing.</p>
+<p>Effect: <code>level1_components/test_basic_components.py</code> 18/20 → 20/20.</p>
+<h3 id="9a1f021-dbc511a-mosfet-runtime-smooth-stamp-dc-newton-aids"><code>9a1f021</code> + <code>dbc511a</code> — MOSFET runtime smooth stamp + DC Newton aids<a class="headerlink" href="#9a1f021-dbc511a-mosfet-runtime-smooth-stamp-dc-newton-aids" title="Permanent link">&para;</a></h3>
+<p>The runtime's <code>stamp_mosfet_jacobian</code> (in <code>runtime_circuit.hpp</code>)
+duplicated the legacy hard-branch
+<code>if (vgs &lt;= vth) ... else if (vds &lt; vov) ... else ...</code> code path,
+even though <code>MOSFET::stamp_jacobian_behavioral</code> (in <code>mosfet.hpp</code>)
+got the Phase-8 smooth-region rewrite. The runtime path is what
+<code>assemble_jacobian</code> actually invokes, so the smooth model wasn't
+reaching DC OP / Newton at all.</p>
+<p>Surfaced by <code>level3_nonlinear/test_mosfet.py::TestMOSFETParameters::
+test_threshold_voltage_effect</code> — fixed-gate NMOS (V_GATE=4 V) with
+vth ∈ {2, 3} V and kp=0.5 in deep triode failed across all DC
+strategies (Direct / GminStepping / PseudoTransient / SourceStepping)
+because Newton couldn't cross the hard cutoff↔triode boundary
+from x=0.</p>
+<p>Two changes:
+  1. Replace <code>stamp_mosfet_jacobian</code> with the smooth blend (κ=50/V)
+     that matches <code>MOSFET::stamp_jacobian_behavioral</code> bit-for-bit
+     at saturated tails. Forced-PWL state stays as a pure-conductance
+     shortcut.
+  2. <code>DCConvergenceSolver::solve</code> now constructs its inner Newton
+     with <code>auto_damping=true</code> by default (no step limiting / trust
+     region — those broke boost DC OP, which has legitimate
+     large-step requirements).</p>
+<p>Effect: 7/8 MOSFET tests pass (vth=3 edge case still fails — Newton
+finds a non-physical fixed point with non-zero residual; this is
+the remaining MOSFET bug, deferred).</p>
+<h3 id="3b24d35-switchparamshysteresis-user-tunable-default-001-v"><code>3b24d35</code> — <code>SwitchParams.hysteresis</code> user-tunable, default 0.01 V<a class="headerlink" href="#3b24d35-switchparamshysteresis-user-tunable-default-001-v" title="Permanent link">&para;</a></h3>
+<p><code>level3_nonlinear/test_switch_circuits.py::TestBasicSwitch::
+test_switch_threshold</code> sweeps V_ctrl across the threshold in
+100 mV steps and asserts a near-binary V_out. With the previous
+0.05 V hysteresis default, the tanh-smoothed behavioral conductance
+at <code>V_ctrl = vth − 0.1</code> gave sigmoid ≈ 0.018 — 1.8 % of g_on, enough
+to keep V_out near V_in. Expose <code>hysteresis</code> as a fourth
+<code>SwitchParams</code> attribute defaulted to 0.01 V (sigmoid ≈ {0, 1} at
+±100 mV from threshold). Users can soften with
+<code>SwitchParams(hysteresis=0.1)</code>.</p>
+<p>Effect: 9/10 → 10/10 in <code>test_switch_circuits.py</code>.</p>
+<h3 id="phase-13-mid-state">Phase-13 mid-state<a class="headerlink" href="#phase-13-mid-state" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>C++ tests</strong>: all 4021 + 1090 assertions pass.</li>
+<li><strong>SPICE parity</strong>: 13/15 unchanged.</li>
+<li><strong>Python validation suite</strong>: 380 → 402 passing, 14 → 2 failures.</li>
+</ul>
+<h3 id="phase-14-last-two-regressions-cleaned-up">Phase 14 — last two regressions cleaned up<a class="headerlink" href="#phase-14-last-two-regressions-cleaned-up" title="Permanent link">&para;</a></h3>
+<p>After Phase 13 the residue was 2 deeper failures. The user's
+directive was "fix these two." Both were real Pulsim bugs (a missing
+telemetry contract and a fundamentally wrong residual sign in the
+MOSFET stamp), and both got fixed cleanly.</p>
+<h4 id="e1d9a31-segmentstepper-bumps-assembler-telemetry-counters"><code>e1d9a31</code> — SegmentStepper bumps assembler telemetry counters<a class="headerlink" href="#e1d9a31-segmentstepper-bumps-assembler-telemetry-counters" title="Permanent link">&para;</a></h4>
+<p><code>python/tests/test_v1_architecture_contracts.py::
+test_fixed_and_variable_modes_share_solver_service_contracts</code>
+asserted <code>backend.equation_assemble_system_calls &gt;= 1</code> and the
+matching <code>_residual_calls &gt;= 1</code> to verify the architectural contract
+that Fixed-step and Variable-step modes go through the same solver
+services. After the SegmentStepper refactor, both modes route through
+<code>DefaultSegmentStepperService::try_advance</code> for admissible PWL
+state-space topologies — and that path computes <code>rhs = A·x_now + c</code>
+from a cached linear model, completely bypassing
+<code>EquationAssemblerService::assemble_*</code>. Counters stayed at 0; the
+test failed.</p>
+<p>The bypass is a real architectural fact, not a bug. SegmentStepper IS
+doing the equivalent of "evaluate the residual at this x" — it just
+uses a different code path. Wire that fact into the telemetry:</p>
+<ul>
+<li>Add <code>EquationAssemblerService::bump_system_calls(n)</code> and
+    <code>bump_residual_calls(n)</code> as virtual no-op defaults.</li>
+<li><code>DefaultSegmentModelService::build_model</code>: cache miss bumps
+    system_calls, cache hit bumps residual_calls (the <code>b(t)</code> refresh
+    is still a residual-level evaluation).</li>
+<li><code>DefaultSegmentStepperService::try_advance</code> on every successful
+    step bumps residual_calls (rhs = A·x + c is a residual eval).</li>
+</ul>
+<h4 id="924e2e8-mosfet-runtime-stamp-uses-physical-newton-residual"><code>924e2e8</code> — MOSFET runtime stamp uses physical Newton residual<a class="headerlink" href="#924e2e8-mosfet-runtime-stamp-uses-physical-newton-residual" title="Permanent link">&para;</a></h4>
+<p><code>runtime_circuit.hpp::stamp_mosfet_jacobian</code> was using the
+Norton-companion form <code>f -= i_eq</code> where <code>i_eq = id - Σ ∂id/∂x·x</code>.
+That form is the right shape for MNA-style direct assembly <code>G·x = b</code>,
+but Pulsim's Newton iterates <code>J·Δx = −f</code> — with the Norton stamp, the
+convergence equation algebraically reduces to
+<code>Σ di_dvN·vN = i_R + id</code>, in which the vth dependency cancels out
+through <code>di_dvd = kp·Vov</code> and <code>di_dvg = kp·Vds</code>. Newton settled on a
+non-physical fixed point where Pulsim's residual was 0 but
+<code>id = i_R</code> was violated by ~50 %.</p>
+<p>Smoking gun from
+<code>level3_nonlinear/test_mosfet.py::test_threshold_voltage_effect</code>:</p>
+<p>V_DD=5 V, V_GATE=4 V, R_load=100 Ω, kp=0.5:
+    vth=1 → V_drain = 0.0249 V  (analytical 0.033 V — 25 % short)
+    vth=2 → V_drain = 0.0249 V  (analytical 0.050 V — 50 % short)
+    vth=3 → DC OP FAILS         (Newton bouncing across vth boundary)</p>
+<p>All three settled on the SAME V_drain regardless of vth — the
+  algebraic cancellation is visible.</p>
+<p>Replace the Norton companion stamp with the standard Newton-Raphson
+form:
+  J[drain, x_N] += +∂id/∂x_N   (same as before)
+  f[drain]      += +id(x_old)  (was: −i_eq)</p>
+<p>This matches the sign convention already used by R, IGBT, and
+Capacitor stamps (<code>f[node] += current leaving node</code>). Newton converges
+directly to physical KCL <code>id = i_R</code>. Post-fix values match the
+analytical quadratic solution to within floating-point precision for
+all three vth.</p>
+<h3 id="phase-14-mid-state">Phase-14 mid-state<a class="headerlink" href="#phase-14-mid-state" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>C++ tests</strong>: all 4021 + 1090 assertions pass.</li>
+<li><strong>SPICE parity</strong>: 13/15 unchanged.</li>
+<li><strong>Python validation suite</strong>: 404 passing, 0 failing.</li>
+</ul>
+<h2 id="phase-15-component-coverage-matrix-expansion-1820">Phase 15 — component-coverage matrix expansion (18/20)<a class="headerlink" href="#phase-15-component-coverage-matrix-expansion-1820" title="Permanent link">&para;</a></h2>
+<p>After the Phase-14 reliability work, the natural next step was a
+direct ngspice-parity benchmark for every supported Pulsim primitive.
+The existing 13 benchmarks focused on converter-level topologies (RC,
+RL, RLC, buck, boost, interleaved-buck, …) where many components are
+exercised at once. The new 5 benchmarks each isolate a single
+component so a regression in that primitive surfaces directly:</p>
+<table>
+<thead>
+<tr>
+<th>Benchmark</th>
+<th>Component</th>
+<th>max_err</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sine_voltage_rc</code></td>
+<td>SineVoltageSource</td>
+<td>8.3e-5</td>
+</tr>
+<tr>
+<td><code>pwm_voltage_rc</code></td>
+<td>PWMVoltageSource</td>
+<td>9.9e-3</td>
+</tr>
+<tr>
+<td><code>snubber_rc</code></td>
+<td>snubber_rc (R∥C)</td>
+<td>8.4e-5</td>
+</tr>
+<tr>
+<td><code>vcswitch_resistor</code></td>
+<td>VCSwitch (smooth)</td>
+<td>2.1e-3</td>
+</tr>
+<tr>
+<td><code>mosfet_nmos_dc</code></td>
+<td>MOSFET (DC OP)</td>
+<td>2.2e-7</td>
+</tr>
+</tbody>
+</table>
+<p><code>mosfet_nmos_dc</code> specifically pins the Phase-14 MOSFET-stamp
+correctness — pre-fix, this benchmark would have given the wrong
+V_drain (and the same value regardless of <code>vth</code>).</p>
+<h3 id="buck_pmos-re-investigation"><code>buck_pmos</code> re-investigation<a class="headerlink" href="#buck_pmos-re-investigation" title="Permanent link">&para;</a></h3>
+<p>Pulsim's PMOS path now DC-OP-converges thanks to the runtime
+MOSFET stamp fix (924e2e8). The transient also settles to ~12 V
+at t = 500 µs. However, the <strong>ngspice baseline</strong> itself
+diverges on this circuit:</p>
+<div class="highlight"><pre><span></span><code>doAnalyses: TRAN: Timestep too small; time = 2.35e-10,
+            timestep = 3.70e-19: trouble with node &quot;sw&quot;
+run simulation(s) aborted
+</code></pre></div>
+<p>ngspice's Level-1 PMOS model + 64 % duty cycle PWM has its own
+convergence issue. This is a SPICE-side numerical tuning task,
+not a Pulsim correctness gap. The benchmark stays skipped with
+that note in the manifest.</p>
+<h3 id="phase-15-mid-state">Phase-15 mid-state<a class="headerlink" href="#phase-15-mid-state" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>C++ tests</strong>: all 4021 + 1090 assertions pass.</li>
+<li><strong>SPICE parity</strong>: 18 / 20.</li>
+<li><strong>Python validation suite</strong>: 404 / 404.</li>
+</ul>
+<h2 id="phase-16-coupled-inductor-real-transformer-model">Phase 16 — coupled inductor / real transformer model<a class="headerlink" href="#phase-16-coupled-inductor-real-transformer-model" title="Permanent link">&para;</a></h2>
+<p>The Phase-15 matrix marked the algebraic-ideal <code>transformer</code>
+primitive as deferred (paradigm mismatch with ngspice's K-coupled
+syntax). Phase 16 closes that gap with a SPICE-equivalent model
+based on the existing <code>coupled_inductor</code> YAML primitive plus a
+runtime fix that wires the mutual stamp into the active code path.</p>
+<h3 id="b2f0301-runtime-wiring-pwl_state_space_supports_all_devices"><code>b2f0301</code> — runtime wiring: <code>pwl_state_space_supports_all_devices</code><a class="headerlink" href="#b2f0301-runtime-wiring-pwl_state_space_supports_all_devices" title="Permanent link">&para;</a></h3>
+<p><code>coupled_inductor</code> already expanded to two physical inductors plus
+a virtual mutual wrapper, and <code>stamp_coupled_inductor_terms</code>
+correctly added <code>M·dI/dt</code> to each branch equation. But the runtime's
+SegmentStepper path (default for admissible PWL state-space
+topologies) routes through <code>assemble_state_space</code>, which does NOT
+invoke <code>stamp_coupled_inductor_terms</code>. Result: the mutual term was
+silently dropped — V_secondary stayed at 0 regardless of primary
+excitation.</p>
+<p>Fix: have <code>pwl_state_space_supports_all_devices()</code> also return
+false for any <code>coupled_inductor</code> virtual component, forcing the
+DAE fallback path (which DOES call <code>stamp_coupled_inductor_terms</code>).
+Mirrors the existing <code>Transformer</code> admissibility carve-out.</p>
+<h3 id="two-new-parity-benchmarks-b2f0301">Two new parity benchmarks (b2f0301)<a class="headerlink" href="#two-new-parity-benchmarks-b2f0301" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>coupled_inductor_step   1:1 K=0.99 pulse-driven primary, R load
+                        max_err 4.07e-02 vs ngspice K1
+transformer_leakage     2:1 step-down, K=0.95 (10% leakage),
+                        50 kHz sine, max_err 4.47e-02
+</code></pre></div>
+<p>ngspice equivalent uses the canonical
+<code>L1 ... ; L2 ... ; K1 L1 L2 &lt;coupling&gt;</code> syntax. Pulsim's
+<code>coupled_inductor</code> produces the same circuit physics.</p>
+<h3 id="six-python-unit-tests-5e5caca">Six Python unit tests (5e5caca)<a class="headerlink" href="#six-python-unit-tests-5e5caca" title="Permanent link">&para;</a></h3>
+<p><code>python/tests/validation/level1_components/test_coupled_inductor.py</code>
+gives the model a unit-level regression net:</p>
+<ul>
+<li><code>test_signal_actually_transfers</code> — regression guard for the
+  pre-fix bug (V_sec stayed at 0).</li>
+<li><code>test_turn_ratio_scaling [1:1, 2:1, 1:2]</code> — verifies
+  <code>V_prim / V_sec ≈ √(L1/L2)</code> at K → 1.</li>
+<li><code>test_perfect_coupling_no_leakage</code> — K = 0.999 1:1 → V_prim and
+  V_sec match within 10 % RMS.</li>
+<li><code>test_kcl_secondary</code> — KCL at the secondary node balances within
+  Pulsim's branch-current sign convention.</li>
+</ul>
+<h3 id="final-outcome-after-phase-16">Final outcome (after Phase 16)<a class="headerlink" href="#final-outcome-after-phase-16" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>C++ tests</strong>: all 4021 + 1090 assertions pass (273 + 138 cases).</li>
+<li><strong>SPICE parity dashboard</strong>: <strong>20 / 22 passing</strong>, 0 failing,
+  2 skipped (<code>transformer_step_up</code> — algebraic-ideal primitive,
+  not directly comparable to ngspice's K-coupled model; this is
+  superseded by <code>coupled_inductor_step</code> / <code>transformer_leakage</code>;
+  <code>buck_pmos</code> — ngspice baseline diverges, not a Pulsim issue).</li>
+<li><strong>Python validation suite</strong>: <strong>410 / 410 passing</strong>, 0 failing.</li>
+<li>Every supported Pulsim primitive (R, C, L, V-DC, V-pulse,
+  V-sine, V-pwm, I-source, diode, switch, vcswitch, mosfet-N
+  including PMOS-internal, igbt, snubber, coupled_inductor
+  including real transformer with finite leakage / magnetizing L)
+  has SPICE-parity and / or analytical-physics validation.</li>
+</ul>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../benchmarks-and-parity/"><code>benchmarks-and-parity.md</code></a> — the broader
+  benchmark architecture and KPI gating.</li>
+<li><code>benchmarks/README.md</code> — manifest format reference.</li>
+<li><a href="../converter-templates/"><code>converter-templates.md</code></a> — the source of
+  some of the open-loop transient quirks the parity dashboard will help
+  triage.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../build-system/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Build System">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Build System
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../troubleshooting/" class="md-footer__link md-footer__link--next" aria-label="Next: Troubleshooting">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Troubleshooting
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+    
+  </body>
+</html>

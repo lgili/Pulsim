@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/getting-started/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/build-system/">
       
       
-        <link rel="prev" href="../backend-architecture/">
+        <link rel="prev" href="../robustness-policy/">
       
       
-        <link rel="next" href="../user-guide/">
+        <link rel="next" href="../spice-parity-dashboard/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Getting Started - PulsimCore</title>
+        <title>Build System - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#build-system" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting Started
+              Build System
             
           </span>
         </div>
@@ -210,12 +210,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
@@ -230,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -353,30 +353,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -387,7 +384,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             Overview
@@ -440,30 +437,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -472,80 +449,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      Prerequisites
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option B: Install Package
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
-    <span class="md-ellipsis">
-      First Simulation (RC Step)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run Core Validation Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      Next Steps
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -562,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -593,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -1024,10 +930,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../build-system/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -1036,6 +962,71 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-in-baseline-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      What's in baseline today
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-the-bench" class="md-nav__link">
+    <span class="md-ellipsis">
+      Running the bench
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limitations / follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1411,54 +1402,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#tldr" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      TL;DR
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
+  <a href="#whats-in-baseline-today" class="md-nav__link">
     <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
+      What's in baseline today
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
+  <a href="#running-the-bench" class="md-nav__link">
     <span class="md-ellipsis">
-      Option B: Install Package
+      Running the bench
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
+  <a href="#limitations-follow-ups" class="md-nav__link">
     <span class="md-ellipsis">
-      First Simulation (RC Step)
+      Limitations / follow-ups
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
+  <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
-      Run Core Validation Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      Next Steps
+      See also
     </span>
   </a>
   
@@ -1479,7 +1461,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/build-system.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1488,73 +1470,121 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/build-system.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<p>This guide takes you from a clean checkout to your first backend simulation.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<h1 id="build-system">Build System<a class="headerlink" href="#build-system" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Status: build-bench helper shipped. Full bindings.cpp + modular-
+CMake split is the mechanical follow-up that benefits from the
+baseline this change establishes.</p>
+</blockquote>
+<p><code>refactor-modular-build-split</code> Phase 1: a benchmark harness that
+measures Pulsim's clean + incremental rebuild wallclock so the
+mechanical bindings/modular-CMake split work that follows can prove
+a real wall-clock win.</p>
+<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>scripts/build_bench.py<span class="w"> </span>--build-dir<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>pulsim_tests
+</code></pre></div>
+<p>Sample output on Apple Silicon / AppleClang 17 / Release+LTO baseline:</p>
+<div class="highlight"><pre><span></span><code>Clean:        39.16 s
+Incremental:  26.13 s
+Ratio:        66.7 %
+</code></pre></div>
+<p>The Phase 2 target is ≤ 10 % incremental ratio — touching one
+device-header should not trigger half a clean build. Today's 67 %
+ratio is the baseline against which the planned split work will be
+measured.</p>
+<h2 id="whats-in-baseline-today">What's in baseline today<a class="headerlink" href="#whats-in-baseline-today" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Translation units</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pulsim_core</code></td>
+<td>header-only</td>
+<td>All v1/v2 device classes + frequency analysis + magnetic + catalog + templates + motors + grid sit here</td>
+</tr>
+<tr>
+<td><code>pulsim</code></td>
+<td>5 source files</td>
+<td><code>simulation.cpp</code>, <code>simulation_periodic.cpp</code>, <code>simulation_step.cpp</code>, <code>transient_services.cpp</code>, <code>yaml_parser.cpp</code> + <code>simulation_control.cpp</code></td>
+</tr>
+<tr>
+<td><code>pulsim_tests</code></td>
+<td>21 source files</td>
+<td>header-only tests (concepts, devices, stamps, frequency-analysis Phases 1-9, magnetic Phases 1-6, catalog Phases 1-8, motors, grid, robustness)</td>
+</tr>
+<tr>
+<td><code>pulsim_simulation_tests</code></td>
+<td>16 source files</td>
+<td>tests that need the compiled <code>pulsim</code> lib (transient/PWL/buck benchmarks/AC sweep)</td>
+</tr>
+<tr>
+<td><code>_pulsim</code> Python module</td>
+<td>1 source file (<code>bindings.cpp</code>, 2857 lines)</td>
+<td>the canonical bottleneck — touching anything that bindings.cpp includes triggers a 30+ s rebuild on its own</td>
+</tr>
+</tbody>
+</table>
+<p>The largest leverage point is <code>bindings.cpp</code>: all category bindings
+(devices, control, simulation, parser, solver, frequency analysis,
+templates, motors, grid, ...) live in one TU. Splitting it into
+<code>bindings/devices.cpp</code>, <code>bindings/control.cpp</code>, etc., each calling
+into a <code>register_*(m)</code> function from a thin <code>bindings/main.cpp</code>,
+turns "edit one device → recompile bindings.cpp" (~35 s) into
+"recompile only the affected category file" (~5 s).</p>
+<h2 id="running-the-bench">Running the bench<a class="headerlink" href="#running-the-bench" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Baseline (touch a leaf header):</span>
+python3<span class="w"> </span>scripts/build_bench.py<span class="w"> </span>--build-dir<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>pulsim_tests<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--touch-file<span class="w"> </span>core/include/pulsim/v1/numeric_types.hpp
+
+<span class="c1"># After a bindings split: touching just one category file</span>
+python3<span class="w"> </span>scripts/build_bench.py<span class="w"> </span>--build-dir<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>_pulsim<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--touch-file<span class="w"> </span>python/bindings/devices.cpp<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--json<span class="w"> </span>bench.json
+</code></pre></div>
+<p>The <code>--json</code> artifact is the CI-ratchet hook: regress past the
+recorded baseline by 10 % → fail the build. The CI integration is the
+deferred Phase 1.3 follow-up; the bench tool itself is final today.</p>
+<h2 id="limitations-follow-ups">Limitations / follow-ups<a class="headerlink" href="#limitations-follow-ups" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Python 3.10+</li>
-<li>CMake 3.20+</li>
-<li>Ninja</li>
-<li>A C++ toolchain compatible with project requirements</li>
+<li><strong>bindings.cpp split</strong> (Phases 2-3 of the proposal): mechanical
+  refactor of 2857 lines into category files. Requires care to keep
+  the pybind11 module entry point + every type registration in the
+  right order (some types reference others' bindings during
+  registration). The bench harness is the prerequisite that lets us
+  measure the wall-clock win — without a baseline number the split
+  is blind. Tracked as the next change.</li>
+<li><strong>Library-level split</strong> (Phases 4-6 of the proposal): split the
+  <code>pulsim</code> static library into <code>pulsim_core</code> (no compiled deps) +
+  <code>pulsim_simulation</code> (Newton-DAE + LTE) + <code>pulsim_periodic</code>
+  (shooting, harmonic balance) — the Newton-DAE consumers pull a
+  smaller graph than today's monolith. Same prerequisite: baseline
+  bench numbers.</li>
+<li><strong>CI ratchet</strong>: emit the JSON artifact on every PR build and fail
+  if the incremental ratio regresses past N %. Pairs with the splits
+  above so the gate has somewhere to land.</li>
+<li><strong>Unity builds opt-in</strong>: CMake <code>set(CMAKE_UNITY_BUILD ON)</code> for
+  release-build CI runs that don't care about incremental rebuild;
+  trades incremental friendliness for ~ 30 % faster clean build.</li>
 </ul>
-<h2 id="option-a-build-from-source-recommended-for-backend-development">Option A: Build From Source (Recommended for backend development)<a class="headerlink" href="#option-a-build-from-source-recommended-for-backend-development" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
-</code></pre></div>
-<p>Confirm that the package is importable from the local build tree:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
-</code></pre></div>
-<h2 id="option-b-install-package">Option B: Install Package<a class="headerlink" href="#option-b-install-package" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
-</code></pre></div>
-<h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim as ps</span>
-
-<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
-
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
-<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-<span class="s">options.step_mode = ps.StepMode.Variable</span>
-
-<span class="s">sim = ps.Simulator(circuit, options)</span>
-<span class="s">result = sim.run_transient(circuit.initial_state())</span>
-
-<span class="s">print(&quot;success:&quot;, result.success)</span>
-<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
-<span class="s">print(&quot;samples:&quot;, len(result.time))</span>
-<span class="s">PY</span>
-</code></pre></div>
-<p>Expected outcome:</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>success: True</code></li>
-<li>non-zero <code>steps</code> and <code>samples</code></li>
-<li>monotonic RC charging behavior on <code>V(out)</code></li>
+<li><a href="../backend-architecture/"><code>backend-architecture.md</code></a> — the layered
+  TU graph the split work will follow.</li>
+<li>The <code>python/bindings.cpp</code> file itself — start of the largest TU
+  in the project.</li>
 </ul>
-<h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
-
-<span class="c1"># C++ core tests (if build already includes tests)</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
-</code></pre></div>
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
-<li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
-<li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
-</ol>
 
 
 
@@ -1590,7 +1620,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../backend-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend Architecture">
+          <a href="../robustness-policy/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Robustness Policy">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1600,20 +1630,20 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
                 Previous
               </span>
               <div class="md-ellipsis">
-                Backend Architecture
+                Robustness Policy
               </div>
             </div>
           </a>
         
         
           
-          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: User Guide">
+          <a href="../spice-parity-dashboard/" class="md-footer__link md-footer__link--next" aria-label="Next: SPICE Parity Dashboard">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                User Guide
+                SPICE Parity Dashboard
               </div>
             </div>
             <div class="md-footer__button md-icon">

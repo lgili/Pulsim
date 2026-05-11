@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/netlist-format/">
       
       
-        <link rel="prev" href="../backend-cpp-contributor-guide/">
+        <link rel="prev" href="../user-guide/">
       
       
-        <link rel="next" href="../magnetic-core-backend-frontend-contract/">
+        <link rel="next" href="../electrothermal-workflow/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -252,24 +252,6 @@
     
     
       <li class="md-tabs__item">
-        <a href="../cblock/" class="md-tabs__link">
-          
-  
-  Signal Domain
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
         <a href="../api-reference/" class="md-tabs__link">
           
   
@@ -288,7 +270,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../supported-components-catalog/" class="md-tabs__link">
+        <a href="../gui-component-parity/" class="md-tabs__link">
           
   
   Compatibility
@@ -549,27 +531,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../backend-cpp-contributor-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Backend C++ Contributor Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -706,15 +667,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#magnetic-core-mvp" class="md-nav__link">
-    <span class="md-ellipsis">
-      Magnetic Core (MVP)
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -747,51 +699,6 @@
   
     <nav class="md-nav" aria-label="Simulation Options">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#control-update-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Update Mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#frequency-analysis-ac-sweep" class="md-nav__link">
-    <span class="md-ellipsis">
-      Frequency Analysis (AC Sweep)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#averaged-converter-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Averaged Converter Mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#control-blocks-for-closed-loop-converters" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Blocks for Closed-Loop Converters
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#thermal-ports-and-supported-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal Ports and Supported Types
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#solver-configuration" class="md-nav__link">
@@ -841,137 +748,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../magnetic-core-backend-frontend-contract/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Magnetic Core Backend/Frontend Contract
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../frontend-control-signals/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frontend Control and Signals Contract
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../frequency-analysis-ac-sweep/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Frequency Analysis (AC Sweep)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../post-processing/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Waveform Post-Processing
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../averaged-converter-modeling/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Averaged Converter Modeling
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../electrothermal-workflow/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Electrothermal Workflow
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../electrothermal-migration-scalar-to-datasheet/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Electrothermal Migration (Scalar to Datasheet)
   </span>
   
 
@@ -1072,11 +853,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../convergence-playbook/" class="md-nav__link">
+      <a href="../linear-solver-cache/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Convergence Playbook
+    Linear-Solver Cache
   </span>
   
 
@@ -1093,11 +874,284 @@
   
   
     <li class="md-nav__item">
-      <a href="../convergence-profile-migration/" class="md-nav__link">
+      <a href="../ac-analysis/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Convergence Profile Migration
+    AC Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fra/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Response Analysis (FRA)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-devices/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog Devices
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converter-templates/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Converter Templates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motor-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../three-phase-grid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-generation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Real-Time Code Generation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../property-based-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../robustness-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Robustness Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spice-parity-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
   </span>
   
 
@@ -1163,7 +1217,7 @@
             
   
   <span class="md-ellipsis">
-    Signal Domain
+    API
   </span>
   
 
@@ -1172,160 +1226,6 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            Signal Domain
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C-Block Overview
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/user-guide/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C-Block User Guide
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/abi-reference/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    C ABI Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/api-reference/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Python API Reference
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cblock/examples/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Examples Walkthrough
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
-            
-  
-  <span class="md-ellipsis">
-    API
-  </span>
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             API
           </label>
@@ -1401,10 +1301,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1415,33 +1315,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             Compatibility
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../supported-components-catalog/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Supported Components Catalog
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
             
               
                 
@@ -1534,10 +1413,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1548,8 +1427,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             Operations
           </label>
@@ -1583,74 +1462,11 @@
   
   
     <li class="md-nav__item">
-      <a href="../psim-plecs-gap-and-modular-architecture-roadmap/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PSIM/PLECS Gap and Modular Roadmap
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../versioning-and-release/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
     Docs Versioning and Release
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../release-notes-electrothermal-parity/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Release Notes (Electrothermal Parity)
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../pr-electrothermal-datasheet-parity-package/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    PR Package (Electrothermal)
   </span>
   
 
@@ -1781,15 +1597,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#magnetic-core-mvp" class="md-nav__link">
-    <span class="md-ellipsis">
-      Magnetic Core (MVP)
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1822,51 +1629,6 @@
   
     <nav class="md-nav" aria-label="Simulation Options">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#control-update-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Update Mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#frequency-analysis-ac-sweep" class="md-nav__link">
-    <span class="md-ellipsis">
-      Frequency Analysis (AC Sweep)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#averaged-converter-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      Averaged Converter Mode
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#control-blocks-for-closed-loop-converters" class="md-nav__link">
-    <span class="md-ellipsis">
-      Control Blocks for Closed-Loop Converters
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#thermal-ports-and-supported-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      Thermal Ports and Supported Types
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#solver-configuration" class="md-nav__link">
@@ -2001,9 +1763,8 @@
 </tbody>
 </table>
 <h2 id="components">Components<a class="headerlink" href="#components" title="Permanent link">&para;</a></h2>
-<p>For the full canonical backend catalog (all supported YAML types), see
-<a href="../supported-components-catalog/">Supported Components Catalog</a>. For GUI-focused
-parity status, see <a href="../gui-component-parity/">GUI Backend Parity</a>.</p>
+<p>Para a matriz completa de paridade do catálogo do PulsimGui com status de
+suporte backend, veja <code>gui-component-parity</code>.</p>
 <h3 id="passive-components">Passive Components<a class="headerlink" href="#passive-components" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Resistor</strong>: <code>type: resistor</code> (or <code>R</code>), <code>value</code></li>
@@ -2031,58 +1792,6 @@ parity status, see <a href="../gui-component-parity/">GUI Backend Parity</a>.</p
 <ul>
 <li><strong>Transformer</strong>: <code>type: transformer</code> (or <code>T</code>), <code>turns_ratio</code></li>
 </ul>
-<h3 id="magnetic-core-mvp">Magnetic Core (MVP)<a class="headerlink" href="#magnetic-core-mvp" title="Permanent link">&para;</a></h3>
-<p>Supported components for <code>magnetic_core</code> block:</p>
-<ul>
-<li><code>saturable_inductor</code></li>
-<li><code>coupled_inductor</code></li>
-<li><code>transformer</code></li>
-</ul>
-<p>Canonical fields (current MVP):</p>
-<ul>
-<li><code>enabled</code> (bool)</li>
-<li><code>model</code> (<code>saturation</code> or <code>hysteresis</code>)</li>
-<li><code>saturation_current</code> (optional, component-dependent)</li>
-<li><code>saturation_inductance</code> (optional, component-dependent)</li>
-<li><code>saturation_exponent</code> (optional, component-dependent)</li>
-<li><code>core_loss_k</code> (optional, default <code>0.0</code>)</li>
-<li><code>core_loss_alpha</code> (optional, default <code>2.0</code>)</li>
-<li><code>core_loss_freq_coeff</code> (optional, default <code>0.0</code>, multiplies loss by a <code>|di/dt|</code> proxy term)</li>
-<li><code>hysteresis_band</code> (optional, default derived from <code>saturation_current</code>)</li>
-<li><code>hysteresis_strength</code> (optional, default <code>0.15</code>)</li>
-<li><code>hysteresis_loss_coeff</code> (optional, default <code>0.2</code>)</li>
-<li><code>hysteresis_state_init</code> (optional, default <code>1</code>)</li>
-<li><code>loss_policy</code> (optional: <code>telemetry_only</code> or <code>loss_summary</code>, default <code>telemetry_only</code>)</li>
-<li><code>i_equiv_init</code> (optional, default <code>0.0</code>, initialization for magnetic current proxy)</li>
-</ul>
-<p>Example:</p>
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transformer</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tmag</span>
-<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">p1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">s1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">turns_ratio</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
-<span class="w">  </span><span class="nt">magnetic_core</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">saturation</span>
-<span class="w">    </span><span class="nt">loss_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loss_summary</span>
-<span class="w">    </span><span class="nt">i_equiv_init</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">core_loss_k</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.08</span>
-<span class="w">    </span><span class="nt">core_loss_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
-<span class="w">    </span><span class="nt">core_loss_freq_coeff</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
-</code></pre></div>
-<p>When enabled with <code>core_loss_k &gt; 0</code>, backend exports <code>"&lt;component&gt;.core_loss"</code> in
-<code>result.virtual_channels</code> with metadata:</p>
-<ul>
-<li><code>domain: loss</code></li>
-<li><code>unit: W</code></li>
-<li><code>source_component: &lt;component_name&gt;</code></li>
-</ul>
-<p>When <code>model: hysteresis</code>, backend also exports <code>"&lt;component&gt;.h_state"</code> as the
-deterministic magnetic memory-state channel (bounded in <code>[-1, 1]</code>).</p>
-<p>When <code>simulation.enable_losses: true</code>, <code>simulation.thermal.enabled: true</code>, and
-<code>loss_policy: loss_summary</code>, backend additionally exports <code>T(&lt;component&gt;.core)</code>
-with deterministic thermal evolution for magnetic core-loss coupling.</p>
-<p>For GUI/backend ownership boundaries, see
-<a href="../magnetic-core-backend-frontend-contract/">Magnetic Core Backend/Frontend Contract</a>.</p>
 <h2 id="waveforms">Waveforms<a class="headerlink" href="#waveforms" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">waveform</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dc</span>
@@ -2144,157 +1853,9 @@ with deterministic thermal evolution for magnetic core-loss coupling.</p>
 <span class="w">  </span><span class="nt">enable_events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">enable_losses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">integrator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trbdf2</span><span class="w">   </span><span class="c1"># trapezoidal, bdf1, bdf2, trbdf2, rosenbrockw, sdirk2</span>
-<span class="w">  </span><span class="nt">control</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">         </span><span class="c1"># auto | continuous | discrete</span>
-<span class="w">    </span><span class="nt">sample_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span><span class="w">  </span><span class="c1"># required when mode=discrete</span>
-<span class="w">  </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">ambient</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
-<span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loss_with_temperature_scaling</span>
-<span class="w">    </span><span class="nt">default_rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
-<span class="w">    </span><span class="nt">default_cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
 </code></pre></div>
-<p><code>simulation.backend</code>, <code>simulation.sundials</code> e <code>simulation.advanced</code> foram removidos
+<p><code>simulation.backend</code> e <code>simulation.sundials</code> são chaves legadas e não fazem parte
 da superfície suportada de transiente. Use <code>step_mode</code> + <code>formulation</code>.</p>
-<h3 id="control-update-mode">Control Update Mode<a class="headerlink" href="#control-update-mode" title="Permanent link">&para;</a></h3>
-<p>You can configure control update policy using either flat keys:</p>
-<ul>
-<li><code>simulation.control_mode</code></li>
-<li><code>simulation.control_sample_time</code></li>
-</ul>
-<p>or nested keys:</p>
-<ul>
-<li><code>simulation.control.mode</code></li>
-<li><code>simulation.control.sample_time</code></li>
-</ul>
-<p>Supported values for mode:</p>
-<ul>
-<li><code>auto</code>: use explicit sample time if set, otherwise infer from highest PWM frequency.</li>
-<li><code>continuous</code>: update control on every accepted simulation step.</li>
-<li><code>discrete</code>: update PI/PID blocks only at sample boundaries.</li>
-</ul>
-<p>In strict parsing, <code>discrete</code> requires <code>sample_time &gt; 0</code>.</p>
-<h3 id="frequency-analysis-ac-sweep">Frequency Analysis (AC Sweep)<a class="headerlink" href="#frequency-analysis-ac-sweep" title="Permanent link">&para;</a></h3>
-<p>Use <code>simulation.frequency_analysis</code> for backend AC sweep workflows:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">frequency_analysis</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">open_loop_transfer</span>
-<span class="w">    </span><span class="nt">anchor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<span class="w">    </span><span class="nt">sweep</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">scale</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">log</span>
-<span class="w">      </span><span class="nt">f_start_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
-<span class="w">      </span><span class="nt">f_stop_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000.0</span>
-<span class="w">      </span><span class="nt">points</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
-<span class="w">    </span><span class="nt">injection_current_amplitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
-<span class="w">    </span><span class="nt">perturbation</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="nt"> negative</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
-<span class="w">    </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">positive</span><span class="p">:</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="nt"> negative</span><span class="p">:</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">}</span>
-</code></pre></div>
-<p>Supported <code>mode</code> values:</p>
-<ul>
-<li><code>open_loop_transfer</code></li>
-<li><code>closed_loop_transfer</code></li>
-<li><code>input_impedance</code></li>
-<li><code>output_impedance</code></li>
-</ul>
-<p>Supported <code>anchor</code> values:</p>
-<ul>
-<li><code>dc</code></li>
-<li><code>periodic</code></li>
-<li><code>averaged</code></li>
-<li><code>auto</code></li>
-</ul>
-<p>The parser enforces deterministic validation for sweep ranges, point count, and port bindings.
-For full backend contract and Python result usage, see
-<a href="../frequency-analysis-ac-sweep/">Frequency Analysis (AC Sweep)</a>.</p>
-<h3 id="averaged-converter-mode">Averaged Converter Mode<a class="headerlink" href="#averaged-converter-mode" title="Permanent link">&para;</a></h3>
-<p>Use <code>simulation.averaged_converter</code> for backend averaged plant runs:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">averaged_converter</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">    </span><span class="nt">topology</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">buck</span>
-<span class="w">    </span><span class="nt">operating_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span>
-<span class="w">    </span><span class="nt">envelope_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span>
-<span class="w">    </span><span class="nt">vin_source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vin</span>
-<span class="w">    </span><span class="nt">inductor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L1</span>
-<span class="w">    </span><span class="nt">capacitor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">C1</span>
-<span class="w">    </span><span class="nt">load_resistor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Rload</span>
-<span class="w">    </span><span class="nt">output_node</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">out</span>
-<span class="w">    </span><span class="nt">duty</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.4</span>
-<span class="w">    </span><span class="nt">duty_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">duty_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">switching_frequency_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000.0</span>
-<span class="w">    </span><span class="nt">initial_inductor_current</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">initial_output_voltage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">ccm_current_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-</code></pre></div>
-<p>Supported values:</p>
-<ul>
-<li><code>topology</code>: <code>buck</code> | <code>boost</code> | <code>buck_boost</code></li>
-<li><code>operating_mode</code>: <code>ccm</code> | <code>dcm</code> | <code>auto</code></li>
-<li><code>envelope_policy</code>: <code>strict</code> | <code>warn</code></li>
-</ul>
-<p>Deterministic checks:</p>
-<ul>
-<li>required mapping fields when <code>enabled=true</code></li>
-<li>valid duty bounds (<code>0 &lt;= duty_min &lt;= duty &lt;= duty_max &lt;= 1</code>)</li>
-<li>finite <code>ccm_current_threshold &gt;= 0</code></li>
-<li>finite <code>switching_frequency_hz &gt; 0</code></li>
-<li>mapped component types (<code>vin_source</code> voltage source, <code>inductor</code> inductor, <code>capacitor</code> capacitor, <code>load_resistor</code> resistor)</li>
-</ul>
-<p>For full runtime/result/frontend contract and migration guidance, see
-<a href="../averaged-converter-modeling/">Averaged Converter Modeling</a>.</p>
-<h3 id="control-blocks-for-closed-loop-converters">Control Blocks for Closed-Loop Converters<a class="headerlink" href="#control-blocks-for-closed-loop-converters" title="Permanent link">&para;</a></h3>
-<p>Common blocks for converter control loops:</p>
-<ul>
-<li><code>pi_controller</code>: <code>kp</code>, <code>ki</code>, <code>output_min</code>, <code>output_max</code>, <code>anti_windup</code></li>
-<li><code>pid_controller</code>: <code>kp</code>, <code>ki</code>, <code>kd</code>, <code>output_min</code>, <code>output_max</code>, <code>anti_windup</code></li>
-<li><code>pwm_generator</code>: <code>frequency</code>, <code>duty</code>, <code>duty_min</code>, <code>duty_max</code>, <code>duty_from_input</code>, <code>duty_from_channel</code>, <code>duty_gain</code>, <code>duty_offset</code>, <code>target_component</code></li>
-<li><code>sample_hold</code>: <code>sample_period</code></li>
-</ul>
-<p>Typical closed-loop pattern:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pi_controller</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vref</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.08</span>
-<span class="w">    </span><span class="nt">ki</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span>
-<span class="w">    </span><span class="nt">output_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">output_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">anti_windup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
-
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pwm_generator</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PWM1</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10000.0</span>
-<span class="w">    </span><span class="nt">duty_from_channel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PI1</span>
-<span class="w">    </span><span class="nt">duty_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">    </span><span class="nt">duty_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
-<span class="w">    </span><span class="nt">target_component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
-</code></pre></div>
-<p><code>target_component</code> links the PWM output to a switch-like power device (<code>mosfet</code>,
-<code>igbt</code>, <code>switch</code>, <code>vcswitch</code>), enabling mixed-domain control + electrical stamping.</p>
-<h3 id="thermal-ports-and-supported-types">Thermal Ports and Supported Types<a class="headerlink" href="#thermal-ports-and-supported-types" title="Permanent link">&para;</a></h3>
-<p>Per-component thermal block:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">components</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resistor</span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Rload</span>
-<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8.0</span>
-<span class="w">    </span><span class="nt">thermal</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">      </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3.0</span>
-<span class="w">      </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
-</code></pre></div>
-<p>Thermal-port enablement is supported for:</p>
-<ul>
-<li><code>resistor</code></li>
-<li><code>diode</code></li>
-<li><code>mosfet</code></li>
-<li><code>igbt</code></li>
-<li><code>bjt_npn</code></li>
-<li><code>bjt_pnp</code></li>
-</ul>
 <p>For thermal-port rules, strict/non-strict behavior, and complete electrothermal examples, see
 <a href="../electrothermal-workflow/">Electrothermal Workflow</a>.</p>
 <h3 id="solver-configuration">Solver Configuration<a class="headerlink" href="#solver-configuration" title="Permanent link">&para;</a></h3>
@@ -2402,7 +1963,7 @@ For full backend contract and Python result usage, see
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../backend-cpp-contributor-guide/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend C++ Contributor Guide">
+          <a href="../user-guide/" class="md-footer__link md-footer__link--prev" aria-label="Previous: User Guide">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2412,20 +1973,20 @@ For full backend contract and Python result usage, see
                 Previous
               </span>
               <div class="md-ellipsis">
-                Backend C++ Contributor Guide
+                User Guide
               </div>
             </div>
           </a>
         
         
           
-          <a href="../magnetic-core-backend-frontend-contract/" class="md-footer__link md-footer__link--next" aria-label="Next: Magnetic Core Backend/Frontend Contract">
+          <a href="../electrothermal-workflow/" class="md-footer__link md-footer__link--next" aria-label="Next: Electrothermal Workflow">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Magnetic Core Backend/Frontend Contract
+                Electrothermal Workflow
               </div>
             </div>
             <div class="md-footer__button md-icon">

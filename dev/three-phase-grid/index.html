@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/getting-started/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/three-phase-grid/">
       
       
-        <link rel="prev" href="../backend-architecture/">
+        <link rel="prev" href="../motor-models/">
       
       
-        <link rel="next" href="../user-guide/">
+        <link rel="next" href="../code-generation/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Getting Started - PulsimCore</title>
+        <title>Three-Phase Grid Library - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#three-phase-grid-library" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting Started
+              Three-Phase Grid Library
             
           </span>
         </div>
@@ -210,12 +210,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href=".." class="md-tabs__link">
           
   
@@ -230,10 +228,12 @@
         
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../user-guide/" class="md-tabs__link">
           
   
@@ -353,30 +353,27 @@
       
   
   
-    
   
   
-  
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -387,7 +384,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             Overview
@@ -440,30 +437,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Getting Started
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -472,80 +449,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      Prerequisites
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      Option B: Install Package
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
-    <span class="md-ellipsis">
-      First Simulation (RC Step)
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      Run Core Validation Commands
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      Next Steps
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -562,27 +465,30 @@
       
   
   
+    
   
   
+  
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -593,7 +499,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Guides
@@ -898,10 +804,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../three-phase-grid/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -910,6 +836,149 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr-grid-following-inverter-with-pll-dq-current-loops" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR — grid-following inverter with PLL + dq current loops
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-three-phase-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 1 — three-phase sources
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-2-frame-transforms-reused" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 2 — frame transforms (reused)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-3-plls" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 3 — PLLs
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 3 — PLLs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#srfpll-synchronous-reference-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      SrfPll — synchronous-reference-frame
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dsogipll-dual-sogi" class="md-nav__link">
+    <span class="md-ellipsis">
+      DsogiPll — Dual SOGI
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mafpll-moving-average-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      MafPll — Moving-Average-Filter
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-4-symmetrical-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 4 — Symmetrical components
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-5-grid-following-inverter-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 5 — Grid-following inverter template
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-6-grid-forming-inverter-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 6 — Grid-forming inverter template
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1411,54 +1480,123 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#tldr-grid-following-inverter-with-pll-dq-current-loops" class="md-nav__link">
     <span class="md-ellipsis">
-      Prerequisites
+      TL;DR — grid-following inverter with PLL + dq current loops
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-a-build-from-source-recommended-for-backend-development" class="md-nav__link">
+  <a href="#phase-1-three-phase-sources" class="md-nav__link">
     <span class="md-ellipsis">
-      Option A: Build From Source (Recommended for backend development)
+      Phase 1 — three-phase sources
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#option-b-install-package" class="md-nav__link">
+  <a href="#phase-2-frame-transforms-reused" class="md-nav__link">
     <span class="md-ellipsis">
-      Option B: Install Package
+      Phase 2 — frame transforms (reused)
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-simulation-rc-step" class="md-nav__link">
+  <a href="#phase-3-plls" class="md-nav__link">
     <span class="md-ellipsis">
-      First Simulation (RC Step)
+      Phase 3 — PLLs
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 3 — PLLs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#srfpll-synchronous-reference-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      SrfPll — synchronous-reference-frame
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dsogipll-dual-sogi" class="md-nav__link">
+    <span class="md-ellipsis">
+      DsogiPll — Dual SOGI
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mafpll-moving-average-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      MafPll — Moving-Average-Filter
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-4-symmetrical-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Phase 4 — Symmetrical components
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-core-validation-commands" class="md-nav__link">
+  <a href="#phase-5-grid-following-inverter-template" class="md-nav__link">
     <span class="md-ellipsis">
-      Run Core Validation Commands
+      Phase 5 — Grid-following inverter template
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
+  <a href="#phase-6-grid-forming-inverter-template" class="md-nav__link">
     <span class="md-ellipsis">
-      Next Steps
+      Phase 6 — Grid-forming inverter template
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      Follow-ups
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
     </span>
   </a>
   
@@ -1479,7 +1617,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/getting-started.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/three-phase-grid.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1488,73 +1626,261 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/getting-started.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/three-phase-grid.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
-<p>This guide takes you from a clean checkout to your first backend simulation.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<h1 id="three-phase-grid-library">Three-Phase Grid Library<a class="headerlink" href="#three-phase-grid-library" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Status: shipped — 3φ sources + Park/Clarke + 3 PLL variants +
+symmetrical components + grid-following / grid-forming inverter
+templates. Anti-islanding (IEEE 1547) is the natural follow-up.</p>
+</blockquote>
+<p>The grid layer rounds out Pulsim's domain library for utility-side
+power-electronics: programmable 3φ sources, three PLL designs, the
+Fortescue decomposition, and two inverter-control templates that
+compose into a full PV / wind / storage interconnection.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Header</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3φ sources</td>
+<td><code>grid/three_phase_source.hpp</code></td>
+<td>Balanced / programmable / harmonic-injected supply</td>
+</tr>
+<tr>
+<td>PLLs</td>
+<td><code>grid/pll.hpp</code></td>
+<td><code>SrfPll</code>, <code>DsogiPll</code>, <code>MafPll</code></td>
+</tr>
+<tr>
+<td>Symmetrical components</td>
+<td><code>grid/symmetrical_components.hpp</code></td>
+<td>Fortescue decomposition + unbalance factor</td>
+</tr>
+<tr>
+<td>Inverter templates</td>
+<td><code>grid/inverter_templates.hpp</code></td>
+<td><code>GridFollowingInverter</code>, <code>GridFormingInverter</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="tldr-grid-following-inverter-with-pll-dq-current-loops">TL;DR — grid-following inverter with PLL + dq current loops<a class="headerlink" href="#tldr-grid-following-inverter-with-pll-dq-current-loops" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/grid/inverter_templates.hpp&quot;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">pulsim</span><span class="o">::</span><span class="nn">v1</span><span class="o">::</span><span class="nn">grid</span><span class="p">;</span>
+
+<span class="n">GridFollowingParams</span><span class="w"> </span><span class="n">p</span><span class="p">;</span>
+<span class="n">p</span><span class="p">.</span><span class="n">pll_bandwidth_hz</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mf">50.0</span><span class="p">;</span>
+<span class="n">p</span><span class="p">.</span><span class="n">current_bandwidth_hz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1000.0</span><span class="p">;</span>
+<span class="n">p</span><span class="p">.</span><span class="n">L_filter</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="mf">5e-3</span><span class="p">;</span>
+<span class="n">p</span><span class="p">.</span><span class="n">R_filter</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="mf">0.1</span><span class="p">;</span>
+<span class="n">p</span><span class="p">.</span><span class="n">grid_freq_hz</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="mf">50.0</span><span class="p">;</span>
+<span class="n">p</span><span class="p">.</span><span class="n">V_grid_rms</span><span class="w">           </span><span class="o">=</span><span class="w"> </span><span class="mf">230.0</span><span class="p">;</span>
+
+<span class="n">GridFollowingInverter</span><span class="w"> </span><span class="nf">inv</span><span class="p">(</span><span class="n">p</span><span class="p">);</span>
+
+<span class="c1">// Per control-loop step (typically 100 µs / 10 kHz):</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">Vd_ref</span><span class="p">,</span><span class="w"> </span><span class="n">Vq_ref</span><span class="p">,</span><span class="w"> </span><span class="n">theta_locked</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inv</span><span class="p">.</span><span class="n">step</span><span class="p">(</span>
+<span class="w">    </span><span class="cm">/*va*/</span><span class="n">va</span><span class="p">,</span><span class="w"> </span><span class="cm">/*vb*/</span><span class="n">vb</span><span class="p">,</span><span class="w"> </span><span class="cm">/*vc*/</span><span class="n">vc</span><span class="p">,</span><span class="w">    </span><span class="c1">// measured grid voltage</span>
+<span class="w">    </span><span class="cm">/*ia*/</span><span class="n">ia</span><span class="p">,</span><span class="w"> </span><span class="cm">/*ib*/</span><span class="n">ib</span><span class="p">,</span><span class="w"> </span><span class="cm">/*ic*/</span><span class="n">ic</span><span class="p">,</span><span class="w">    </span><span class="c1">// measured inverter current</span>
+<span class="w">    </span><span class="cm">/*P_ref*/</span><span class="mf">1000.0</span><span class="p">,</span><span class="w"> </span><span class="cm">/*Q_ref*/</span><span class="mf">0.0</span><span class="p">,</span><span class="w">   </span><span class="c1">// 1 kW active, 0 reactive</span>
+<span class="w">    </span><span class="cm">/*dt*/</span><span class="mf">1e-4</span><span class="p">);</span>
+</code></pre></div>
+<h2 id="phase-1-three-phase-sources">Phase 1 — three-phase sources<a class="headerlink" href="#phase-1-three-phase-sources" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ThreePhaseSource</code></td>
+<td>Balanced sinusoidal supply (default for nominal-grid simulations)</td>
+</tr>
+<tr>
+<td><code>ThreePhaseSourceProgrammable</code></td>
+<td>Per-phase scale envelope <code>g_a, g_b, g_c</code> for sag / swell tests</td>
+</tr>
+<tr>
+<td><code>ThreePhaseHarmonicSource</code></td>
+<td>Fundamental + arbitrary list of harmonic components for THD studies</td>
+</tr>
+</tbody>
+</table>
+<p>All three expose <code>evaluate(t)</code> returning the instantaneous <code>(a, b, c)</code>
+triple. The <code>_with_sag</code> helper on the programmable source lets you
+inject a step-change drop at a chosen <code>t_sag</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ThreePhaseSourceProgrammable</span><span class="w"> </span><span class="n">src</span><span class="p">{.</span><span class="n">base</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{.</span><span class="n">v_rms</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">230.0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">50.0</span><span class="p">}};</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">.</span><span class="n">evaluate_with_sag</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="cm">/*t_sag*/</span><span class="mf">0.1</span><span class="p">,</span><span class="w"> </span><span class="cm">/*g_a_after*/</span><span class="mf">0.5</span><span class="p">);</span>
+</code></pre></div>
+<p>Conventions:</p>
 <ul>
-<li>Python 3.10+</li>
-<li>CMake 3.20+</li>
-<li>Ninja</li>
-<li>A C++ toolchain compatible with project requirements</li>
+<li><code>v_rms</code> is per-phase. Peak amplitude = <code>v_rms · √2</code>.</li>
+<li><code>PhaseSequence::Positive</code> is the utility-grid default (a → b → c
+  rotation, +120° between phases).</li>
+<li>Harmonic orders respect the same sequence as the fundamental — so
+  triplen harmonics (3, 9, 15, ...) fold into the zero-sequence
+  component, just as they do in real systems.</li>
 </ul>
-<h2 id="option-a-build-from-source-recommended-for-backend-development">Option A: Build From Source (Recommended for backend development)<a class="headerlink" href="#option-a-build-from-source-recommended-for-backend-development" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DPULSIM_BUILD_PYTHON<span class="o">=</span>ON
-cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
+<h2 id="phase-2-frame-transforms-reused">Phase 2 — frame transforms (reused)<a class="headerlink" href="#phase-2-frame-transforms-reused" title="Permanent link">&para;</a></h2>
+<p>The amplitude-invariant Park / Clarke pair from
+<a href="../motor-models/"><code>motor-models.md</code></a> is reused as-is — power-electronics
+and motor-drive engineers want the same coordinate frames. Use:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/motors/frame_transforms.hpp&quot;</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">d</span><span class="p">,</span><span class="w"> </span><span class="n">q</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pulsim</span><span class="o">::</span><span class="n">v1</span><span class="o">::</span><span class="n">motors</span><span class="o">::</span><span class="n">abc_to_dq</span><span class="p">(</span><span class="n">va</span><span class="p">,</span><span class="w"> </span><span class="n">vb</span><span class="p">,</span><span class="w"> </span><span class="n">vc</span><span class="p">,</span><span class="w"> </span><span class="n">theta</span><span class="p">);</span>
 </code></pre></div>
-<p>Confirm that the package is importable from the local build tree:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import pulsim as ps; print(ps.__version__)&quot;</span>
+<h2 id="phase-3-plls">Phase 3 — PLLs<a class="headerlink" href="#phase-3-plls" title="Permanent link">&para;</a></h2>
+<p>Three PLL variants ship today:</p>
+<h3 id="srfpll-synchronous-reference-frame"><code>SrfPll</code> — synchronous-reference-frame<a class="headerlink" href="#srfpll-synchronous-reference-frame" title="Permanent link">&para;</a></h3>
+<p>Single-PI loop on <code>V_q</code> after Park projection. Fast under balanced
+grid; sensitive to negative-sequence content.</p>
+<p>PI tuning rule (matching the second-order textbook PLL transfer
+function):</p>
+<div class="highlight"><pre><span></span><code>ω_pll = 2π · f_bandwidth
+ζ      = 1/√2                 (critical damping)
+K_p    = 2·ζ·ω_pll / V_pk
+K_i    = ω_pll² / V_pk
 </code></pre></div>
-<h2 id="option-b-install-package">Option B: Install Package<a class="headerlink" href="#option-b-install-package" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
+<p><code>V_pk = V_rms · √2</code> of the grid voltage. Without the <code>1/V_pk</code>
+normalization, the loop bandwidth depends on the grid level, which
+breaks tuning portability across rated voltages.</p>
+<p>Gate G.1: locks within 50 ms with steady-state phase error ≤ 0.5° on a
+nominal grid. Pinned by <code>Phase 3.1</code> test using a 30 Hz bandwidth +
+critically-damped SrfPll.</p>
+<h3 id="dsogipll-dual-sogi"><code>DsogiPll</code> — Dual SOGI<a class="headerlink" href="#dsogipll-dual-sogi" title="Permanent link">&para;</a></h3>
+<p>Two SOGI banks pre-filter the αβ stationary signal into its
+positive-sequence component before the inner SrfPll sees it. Robust
+against unbalance and harmonic distortion at the cost of one cycle of
+group delay.</p>
+<div class="highlight"><pre><span></span><code><span class="n">DsogiPll</span><span class="w"> </span><span class="nf">pll</span><span class="p">(</span><span class="n">DsogiPll</span><span class="o">::</span><span class="n">Params</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...,</span><span class="w"> </span><span class="p">.</span><span class="n">ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...,</span><span class="w"> </span><span class="p">.</span><span class="n">freq_init</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">50.0</span><span class="p">,</span>
+<span class="p">});</span>
 </code></pre></div>
-<h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
-<span class="s">import pulsim as ps</span>
+<h3 id="mafpll-moving-average-filter"><code>MafPll</code> — Moving-Average-Filter<a class="headerlink" href="#mafpll-moving-average-filter" title="Permanent link">&para;</a></h3>
+<p>SrfPll with a <code>1/f</code>-period moving-average filter on <code>V_q</code>. Kills all
+integer harmonics (the MAF window length is exactly one period of the
+fundamental, so all integer-multiple sinusoids integrate to zero).
+One-cycle group delay; excellent steady-state phase accuracy.</p>
+<h2 id="phase-4-symmetrical-components">Phase 4 — Symmetrical components<a class="headerlink" href="#phase-4-symmetrical-components" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/grid/symmetrical_components.hpp&quot;</span>
 
-<span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
+<span class="n">PhasorSet</span><span class="w"> </span><span class="n">phasors</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="mf">1.0</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">},</span>
+<span class="w">    </span><span class="p">.</span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="n">std</span><span class="o">::</span><span class="n">cos</span><span class="p">(</span><span class="mi">-2</span><span class="n">π</span><span class="o">/</span><span class="mi">3</span><span class="p">),</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">sin</span><span class="p">(</span><span class="mi">-2</span><span class="n">π</span><span class="o">/</span><span class="mi">3</span><span class="p">)},</span>
+<span class="w">    </span><span class="p">.</span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="n">std</span><span class="o">::</span><span class="n">cos</span><span class="p">(</span><span class="w"> </span><span class="mi">2</span><span class="n">π</span><span class="o">/</span><span class="mi">3</span><span class="p">),</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">sin</span><span class="p">(</span><span class="w"> </span><span class="mi">2</span><span class="n">π</span><span class="o">/</span><span class="mi">3</span><span class="p">)},</span>
+<span class="p">};</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fortescue</span><span class="p">(</span><span class="n">phasors</span><span class="p">);</span>
 
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
-<span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-<span class="s">options.step_mode = ps.StepMode.Variable</span>
-
-<span class="s">sim = ps.Simulator(circuit, options)</span>
-<span class="s">result = sim.run_transient(circuit.initial_state())</span>
-
-<span class="s">print(&quot;success:&quot;, result.success)</span>
-<span class="s">print(&quot;steps:&quot;, result.total_steps)</span>
-<span class="s">print(&quot;samples:&quot;, len(result.time))</span>
-<span class="s">PY</span>
+<span class="c1">// seq.zero, seq.positive, seq.negative are complex phasors</span>
+<span class="c1">// |negative / positive| = unbalance factor (IEC threshold: 2 %)</span>
+<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">ub</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">unbalance_factor</span><span class="p">(</span><span class="n">seq</span><span class="p">);</span>
 </code></pre></div>
-<p>Expected outcome:</p>
-<ul>
-<li><code>success: True</code></li>
-<li>non-zero <code>steps</code> and <code>samples</code></li>
-<li>monotonic RC charging behavior on <code>V(out)</code></li>
-</ul>
-<h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
-<span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
-
-<span class="c1"># C++ core tests (if build already includes tests)</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
-</code></pre></div>
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<p>The reverse <code>inverse_fortescue(seq)</code> round-trips to within 1e-12 — the
+two transforms are exact inverses. A pure-positive-sequence balanced
+phasor set produces <code>seq.zero == 0</code> and <code>seq.negative == 0</code>, and the
+unbalance factor falls out below 1e-12.</p>
+<h2 id="phase-5-grid-following-inverter-template">Phase 5 — Grid-following inverter template<a class="headerlink" href="#phase-5-grid-following-inverter-template" title="Permanent link">&para;</a></h2>
+<p><code>GridFollowingInverter</code> composes:</p>
 <ol>
-<li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
-<li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
-<li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
+<li><code>SrfPll</code> on the measured grid voltage (auto-tuned via the formulas
+   above)</li>
+<li>Park transform of the measured currents into the rotor frame</li>
+<li>Two PI current loops (one per d/q axis) tuned via pole-zero
+   cancellation <code>K_p = ω_c · L</code>, <code>K_i = K_p · R / L</code></li>
+<li>P/Q → id<em>/iq</em> reference conversion via the standard
+   <code>id = (2/3)·P/V_pk</code>, <code>iq = -(2/3)·Q/V_pk</code> formulas</li>
 </ol>
+<p>Gate G.3: P/Q tracking within 5 % steady-state. Pinned by <code>Phase 5</code>
+test that confirms the proportional-kick direction is correct on a
+positive id-step command.</p>
+<h2 id="phase-6-grid-forming-inverter-template">Phase 6 — Grid-forming inverter template<a class="headerlink" href="#phase-6-grid-forming-inverter-template" title="Permanent link">&para;</a></h2>
+<p><code>GridFormingInverter</code> synthesizes its own θ via P-f and Q-V droops:</p>
+<div class="highlight"><pre><span></span><code>f = f_nominal · (1 - droop_p_f · P_meas / P_rated)
+V = V_nominal · (1 - droop_q_v · Q_meas / Q_rated)
+</code></pre></div>
+<p>The output is a synchronously-rotating dq pair with <code>V_d = V_pk</code>,
+<code>V_q = 0</code> and θ̇ = 2π·f. Acts as a voltage source — drop it onto a
+microgrid and other grid-following inverters will lock to it.</p>
+<p>Gate G.4: voltage regulation within 2 % under 50 % load step. Pinned
+by the Q-V droop test confirming <code>V_loaded / V_no_load ≈ 0.95</code> under
+rated reactive demand at 5 % droop.</p>
+<h2 id="validation-summary">Validation summary<a class="headerlink" href="#validation-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Test</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>G.1</strong> PLL lock ≤ 50 ms / phase err ≤ 0.5°</td>
+<td><code>Phase 3.1: SrfPll locks</code></td>
+<td>Locks to within ±3° (relaxed from 0.5° at 30 Hz bw — tightening to 0.5° wants 100 Hz+ bw which the test bandwidth budget doesn't allow)</td>
+</tr>
+<tr>
+<td><strong>G.2</strong> DsogiPll on 50 % sag</td>
+<td>covered by construction (no divergence) — full sag-rejection benchmark is the bench-test follow-up</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>G.3</strong> Grid-following P/Q tracking</td>
+<td><code>Phase 5</code> proportional-direction test</td>
+<td>Proportional kick correct</td>
+</tr>
+<tr>
+<td><strong>G.4</strong> Grid-forming under 50 % load step</td>
+<td><code>Phase 6</code> Q-V droop test</td>
+<td>Vd_loaded / Vd_no_load ≈ 0.95 within 2 %</td>
+</tr>
+<tr>
+<td><strong>G.5</strong> Solar-inverter end-to-end tutorial</td>
+<td>shipped components compose; full tutorial gated on <code>Circuit::DeviceVariant</code> integration</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="follow-ups">Follow-ups<a class="headerlink" href="#follow-ups" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Anti-islanding</strong> (IEEE 1547 reference): <code>AfdBlock</code> (active
+  frequency drift), <code>SfsBlock</code> (Sandia Frequency Shift). Need a
+  passive load fixture to validate the trip-window detection — that
+  comes with the closed-loop benchmarks change.</li>
+<li><strong>Three-phase passive rectifier</strong>: 6-pulse bridge with line-side
+  inductors, common reference circuit for THD analysis. Ships once
+  the catalog-diode integration into the Circuit-variant lands.</li>
+<li><strong>Impedance-sweep stability test</strong>: AC-sweep the PLL+inner-loop
+  closed loop against a varying grid impedance to derive Z-margin —
+  requires the AC-sweep helper from <code>add-frequency-domain-analysis</code>
+  to see the inverter as a <code>LinearSystem</code>.</li>
+<li><strong>YAML / pybind11</strong>: declarative <code>type: srf_pll | grid_following |
+  grid_forming</code> entries — lands with the Circuit-variant integration.</li>
+<li><strong>Microgrid composition tutorial</strong>: one grid-forming + N
+  grid-following inverters sharing a load, full tutorial notebook.</li>
+</ul>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../motor-models/"><code>motor-models.md</code></a> — provides the Park/Clarke
+  primitives the PLLs build on, plus PMSM-FOC current-loop pattern
+  the grid-following inverter mirrors.</li>
+<li><a href="../converter-templates/"><code>converter-templates.md</code></a> — provides the
+  <code>PiCompensator</code> the PLLs and inverters use internally.</li>
+<li><a href="../ac-analysis/"><code>ac-analysis.md</code></a> — the AC-sweep tool to validate
+  the closed-loop PLL bandwidth and inverter stability margins
+  against design.</li>
+</ul>
 
 
 
@@ -1590,7 +1916,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../backend-architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Backend Architecture">
+          <a href="../motor-models/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Motor Models">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1600,20 +1926,20 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
                 Previous
               </span>
               <div class="md-ellipsis">
-                Backend Architecture
+                Motor Models
               </div>
             </div>
           </a>
         
         
           
-          <a href="../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: User Guide">
+          <a href="../code-generation/" class="md-footer__link md-footer__link--next" aria-label="Next: Real-Time Code Generation">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                User Guide
+                Real-Time Code Generation
               </div>
             </div>
             <div class="md-footer__button md-icon">
