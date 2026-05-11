@@ -1,0 +1,97 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: synchronous_boost
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/synchronous_boost.csv
+simulation:
+  tstart: 0.0
+  tstop: 5e-3
+  dt: 0.2e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: true
+  switching_mode: ideal
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  # Boost converter with SYNCHRONOUS rectifier (high-side vcswitch
+  # instead of a freewheel diode). With duty = 0.4 → V_out ≈
+  # V_in/(1-duty) = 20 V. Heavy load (R = 5 Ω) and DCR damping
+  # (0.1 Ω) keep the inductor in CCM so the sync rectifier
+  # doesn't reverse-conduct. Complementary PWM with dead-time of
+  # 200 ns to avoid shoot-through.
+  - type: voltage_source
+    name: Vin
+    nodes: [vin, 0]
+    waveform: {type: dc, value: 12.0}
+  - type: voltage_source
+    name: Vg_l
+    nodes: [g_l, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.4
+  - type: voltage_source
+    name: Vg_h
+    nodes: [g_h, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.4
+  - type: resistor
+    name: R_dcr
+    nodes: [vin, n_l]
+    value: 0.1
+  - type: inductor
+    name: L1
+    nodes: [n_l, sw_node]
+    value: 220e-6
+    ic: 0.0
+  - type: vcswitch
+    name: S_low
+    nodes: [g_l, sw_node, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_high
+    nodes: [g_h, sw_node, out]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 470e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 5.0

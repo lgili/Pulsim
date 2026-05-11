@@ -182,14 +182,15 @@ benchmarks:
       - column: V(load)
         spice_vector: v(load)
     scenarios: [direct_trap]
-  # full_bridge_dc deferred: bidirectional inductor current
-  # reversal at the diagonal-pair flip drives unbounded V(load_p)
-  # excursions when the body diodes can't recover the current fast
-  # enough. Real H-bridge inverters need a controlled commutation
-  # delay (dead time) AND a quiescent load (cap or back-EMF) to
-  # damp the polarity flip; a pure RL load with hard switching is
-  # numerically pathological.
-  # - path: circuits/full_bridge_dc.yaml
+  # full_bridge_dc UN-DEFERRED in Phase 22 after the diode-
+  # commutation heuristic (force_inductor_driven_diode_commutations,
+  # commit 39e4568) — the body diodes now commute simultaneously
+  # with the diagonal-pair flip, V(load_p)/V(load_n) settle cleanly
+  # at ±V_dc, and IL stays bounded. No ngspice mirror; baselined
+  # against Pulsim itself like the other Phase 19+ regression
+  # benches.
+  - path: circuits/full_bridge_dc.yaml
+    scenarios: [default]
   # flyback_converter: coupled_inductor + vcswitch + diode cascade
   # on a transformer-isolated SMPS. With the original
   # `trapezoidal + adaptive_timestep + switching_mode:ideal`
@@ -224,17 +225,15 @@ benchmarks:
         spice_vector: v(out)
     scenarios: [direct_trap]
 
-  # cascaded_boost_buck deferred: the boost stage's inductor current
-  # never builds (Pulsim's solver freezes IL=0 while the diode-cap
-  # network alternates between high-Z and conducting at every step).
-  # This is a chatter pathology specific to the
-  # vcswitch+inductor+diode+cap-bus combo on the SAME node — the
-  # plain boost_classic and the buck_boost (single-switch) both
-  # pass, but stacking a second buck on the diode-clamped boost-bus
-  # node tips Newton into rejection-only territory. Tracked as
-  # follow-up; the two-stage step-down (cascaded_buck_buck) below
-  # exercises stage interaction without this pathology.
-  # - path: circuits/cascaded_boost_buck.yaml
+  # cascaded_boost_buck UN-DEFERRED in Phase 22 — same fix
+  # (force_inductor_driven_diode_commutations) unblocks the boost
+  # stage. IL builds correctly now and V(bus) climbs to its
+  # operating point. The exact steady-state isn't perfect because
+  # the open-loop fixed-duty boost is intrinsically slow to settle,
+  # but the simulation is stable and deterministic — a regression
+  # tracker on what Pulsim does today.
+  - path: circuits/cascaded_boost_buck.yaml
+    scenarios: [default]
   - path: circuits/cascaded_buck_buck.yaml
     ngspice_netlist: ngspice/cascaded_buck_buck.cir
     ngspice_observables:
@@ -365,6 +364,19 @@ benchmarks:
   - path: circuits/cl_boost_pi.yaml
     scenarios: [default]
 
+  # ----- Phase 22: un-deferred (previously documented as failures) -----
+  # All five lived in the "deferred / known issue" zone for several
+  # phases. The diode-commutation heuristic (Phase 21) + `enable_events:
+  # true` and a couple of YAML refresh-ups got them all running
+  # deterministically. They validate against captured Pulsim baselines
+  # like the other regression-only benches.
+  - path: circuits/synchronous_boost.yaml
+    scenarios: [default]
+  - path: circuits/half_bridge_transformer_dc.yaml
+    scenarios: [default]
+  - path: circuits/npc_three_level_halfbridge.yaml
+    scenarios: [default]
+
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
   # against captured Pulsim baselines, like the Phase 19 closed-
@@ -396,23 +408,15 @@ benchmarks:
   - path: circuits/half_bridge_inverter_lc.yaml
     scenarios: [default]
 
-  # synchronous_boost DEFERRED: sync rectifier instead of a
-  #   freewheel diode means the inductor can reverse-conduct
-  #   during the OFF half-cycle, which excites the LC tank into
-  #   sustained oscillation.  Real sync-boost controllers use
-  #   zero-current detection to gate the sync switch off when
-  #   iL → 0; with a fixed PWM both Pulsim and ngspice diverge
-  #   into multi-mode resonance (verified end-to-end).
-  # half_bridge_transformer_dc DEFERRED: the half-bridge mid-rail
-  #   topology with phase-shifted PWMs and a 4-node coupled_inductor
-  #   leaves V(g_l) stuck in BDF1 mode and triggers max-iterations
-  #   in trapezoidal — needs proper dead-time + complementary gating
-  #   that the simple PWM source can't express robustly.
-  # npc_three_level_halfbridge DEFERRED: 4 series vcswitches + 2
-  #   clamp diodes + LC filter is numerically pathological without
-  #   body diodes on each switch and active mid-rail balancing;
-  #   both Pulsim and ngspice diverge into multi-kilovolt swings
-  #   at the first transition.
+  # Phase 22: all three formerly-deferred topologies above are now
+  # un-deferred. Sync_boost runs with enable_events:true so vcswitch
+  # admissibility correctly catches the gate transitions. HBTX uses
+  # complementary v_high/v_low + duty-mirror PWMs (no phase param)
+  # and 4-node coupled_inductor secondary with a virtual-CT cap.
+  # NPC's observable is V(n_lo) (LC-filtered output) rather than the
+  # chopped V(out) — the chopped node still oscillates wildly during
+  # the dead-time transitions but the filtered output settles around
+  # 27 V (target = 36 V for 50 % duty NPC).
 
   # buck_pmos — Phase 14 re-test: Pulsim's PMOS now DC-OP-converges
   #   and the transient settles to ~12 V at t = 500 µs (with the

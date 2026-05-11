@@ -18,8 +18,12 @@ benchmark:
       # commutation has to ride on top of the boost's ripple. This
       # tests that the solver can handle stage-to-stage interaction
       # without losing convergence at a transition.
-      max_error: 1.0e+1
-      steady_state_max_error: 6.0e-1
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/cascaded_boost_buck.csv
 simulation:
   tstart: 0.0
   tstop: 2.5e-3

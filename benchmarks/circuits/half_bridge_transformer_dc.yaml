@@ -1,0 +1,127 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: half_bridge_transformer_dc
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/half_bridge_transformer_dc.csv
+simulation:
+  tstart: 0.0
+  tstop: 1.5e-3
+  dt: 0.1e-6
+  dt_max: 1e-6
+  adaptive_timestep: false
+  integrator: bdf1
+  enable_events: false
+  switching_mode: ideal
+  uic: true
+  max_step_retries: 8
+  newton:
+    max_iterations: 240
+    initial_damping: 0.5
+    min_damping: 1e-4
+    auto_damping: true
+  fallback:
+    trace_retries: true
+    enable_transient_gmin: true
+    gmin_retry_threshold: 1
+    gmin_initial: 1e-8
+    gmin_max: 1e-4
+    gmin_growth: 10
+components:
+  # Isolated half-bridge DC-DC: two primary switches drive a
+  # transformer (1:1 K=0.95) via a mid-rail capacitor divider; the
+  # secondary is full-wave rectified by two diodes into an output
+  # filter. The PWM voltage sources here use COMPLEMENTARY
+  # waveforms (v_high vs v_low inverted) so they switch on
+  # opposite halves of the cycle without needing a phase
+  # parameter.
+  - type: voltage_source
+    name: Vin
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 48.0}
+  # Top primary gate: ON 0..9 µs of 20 µs period (duty 0.45)
+  - type: voltage_source
+    name: VgH
+    nodes: [g_h, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.45
+  # Bottom primary gate: ON 11..20 µs (complementary by INVERTING
+  # v_high/v_low and using duty = 0.55 — gives the same on-time
+  # window but in the second half of the cycle).
+  - type: voltage_source
+    name: VgL
+    nodes: [g_l, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.55
+  # Half-bridge mid-rail divider — both caps charged to V_in/2
+  - type: capacitor
+    name: Cdiv1
+    nodes: [vcc, mid]
+    value: 100e-6
+    ic: 24.0
+  - type: capacitor
+    name: Cdiv2
+    nodes: [mid, 0]
+    value: 100e-6
+    ic: 24.0
+  - type: vcswitch
+    name: S_h
+    nodes: [g_h, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S_l
+    nodes: [g_l, sw, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  # Transformer (1:1, K=0.95): primary sw→mid sees ±24 V swing
+  - type: coupled_inductor
+    name: T1
+    nodes: [sw, mid, sec_p, sec_n]
+    l1: 200e-6
+    l2: 200e-6
+    coupling: 0.95
+  # Secondary mid-point reference cap (virtual center-tap emulation)
+  - type: capacitor
+    name: C_st
+    nodes: [sec_n, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: diode
+    name: D1
+    nodes: [sec_p, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: D2
+    nodes: [sec_n, out]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: capacitor
+    name: Cout
+    nodes: [out, 0]
+    value: 220e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 20.0

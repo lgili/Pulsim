@@ -1,0 +1,135 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: npc_three_level_halfbridge
+  category: nonlinear
+  observables:
+    - column: V(n_lo)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(n_lo)
+    baseline: baselines/npc_three_level_halfbridge.csv
+simulation:
+  tstart: 0.0
+  tstop: 600e-6
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  enable_events: true
+  uic: true
+components:
+  # NPC (Neutral-Point-Clamped) 3-level half-bridge.
+  #
+  #   vcc ──S1── A ──S2── out ──S3── B ──S4── 0
+  #              │              │
+  #              Dc1 (mid→A)    Dc2 (B→mid)
+  #
+  # The cap divider holds the mid-rail at V_in/2. Switching
+  # pattern (S2 always ON, S4 always OFF, S1 and S3 complementary
+  # at 50 % duty): output alternates between vcc and mid →
+  # average = (vcc + mid)/2 = 3·V_in/4. With V_in = 48 V →
+  # average V(out) ≈ 36 V.  LC filter recovers the average.
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 48.0}
+  - type: capacitor
+    name: Cdiv1
+    nodes: [vcc, mid]
+    value: 470e-6
+    ic: 24.0
+  - type: capacitor
+    name: Cdiv2
+    nodes: [mid, 0]
+    value: 470e-6
+    ic: 24.0
+  # S1: chopper between vcc and node_a
+  - type: voltage_source
+    name: Vg_S1
+    nodes: [g_1, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  # S2 always ON (DC source above threshold)
+  - type: voltage_source
+    name: Vg_S2_on
+    nodes: [g_2, 0]
+    waveform: {type: dc, value: 10.0}
+  # S3 complementary to S1
+  - type: voltage_source
+    name: Vg_S3
+    nodes: [g_3, 0]
+    waveform:
+      type: pwm
+      v_high: 0.0
+      v_low: 10.0
+      frequency: 50000
+      duty: 0.5
+  # S4 always OFF
+  - type: voltage_source
+    name: Vg_S4_off
+    nodes: [g_4, 0]
+    waveform: {type: dc, value: 0.0}
+
+  - type: vcswitch
+    name: S1
+    nodes: [g_1, vcc, node_a]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2
+    nodes: [g_2, node_a, out]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S3
+    nodes: [g_3, out, node_b]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S4
+    nodes: [g_4, node_b, 0]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+
+  # Clamp diodes pin the floating outer node to mid during the OFF
+  # phase of S1 (when node_a needs to be clamped to mid) and S4
+  # (node_b to mid).
+  - type: diode
+    name: Dc1
+    nodes: [mid, node_a]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dc2
+    nodes: [node_b, mid]
+    g_on: 200.0
+    g_off: 1e-6
+
+  # Output LC filter + resistive load
+  - type: inductor
+    name: L_o
+    nodes: [out, n_lo]
+    value: 100e-6
+    ic: 0.0
+  - type: capacitor
+    name: C_o
+    nodes: [n_lo, 0]
+    value: 100e-6
+    ic: 36.0
+  - type: resistor
+    name: Rload
+    nodes: [n_lo, 0]
+    value: 10.0

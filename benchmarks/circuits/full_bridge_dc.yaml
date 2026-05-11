@@ -12,8 +12,12 @@ benchmark:
       # diagonal-pair alternating excitation. The diodes carry the
       # inductor current during the switch-state transition where
       # the FETs are OFF for both diagonals briefly.
-      max_error: 2.0e+0
-      steady_state_max_error: 1.0e+0
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(load_p)
+    baseline: baselines/full_bridge_dc.csv
 simulation:
   tstart: 0.0
   tstop: 500e-6
