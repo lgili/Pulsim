@@ -20,6 +20,11 @@ benchmark:
       # validates the converter (≤ 0.5 V on a 14 V rail).
       max_error: 5.0e+1
       steady_state_max_error: 1.0e+0
+  kpi:
+    - metric: ripple_pkpk
+      observable: V(out)
+      steady_state_fraction: 0.2
+      label: vout
 simulation:
   tstart: 0.0
   tstop: 2e-3

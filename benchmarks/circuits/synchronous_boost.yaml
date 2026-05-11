@@ -13,6 +13,11 @@ benchmark:
     type: reference
     observable: V(out)
     baseline: baselines/synchronous_boost.csv
+  kpi:
+    - metric: ripple_pkpk
+      observable: V(out)
+      steady_state_fraction: 0.2
+      label: vout
 simulation:
   tstart: 0.0
   tstop: 5e-3

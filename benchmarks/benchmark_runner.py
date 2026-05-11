@@ -8,7 +8,7 @@ import csv
 import json
 import math
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -46,6 +46,11 @@ class ScenarioResult:
     rms_error: Optional[float]
     message: str
     telemetry: Dict[str, Optional[float]]
+    # Phase 23: KPIs (THD, PF, η, ripple, transient response, loss
+    # breakdown) — populated when the YAML declares a `kpi:` block.
+    # Key naming: `kpi__<metric>__<observable_or_label>` so multiple
+    # columns can coexist in results.csv without name collisions.
+    kpis: Dict[str, float] = field(default_factory=dict)
 
 
 def can_use_pulsim_python_backend() -> bool:
@@ -541,6 +546,91 @@ def run_benchmarks(
                                 status = "failed"
                                 message = f"Unsupported validation type: {validation_type}"
 
+                # Phase 23: KPI extraction. If the YAML declares
+                # benchmark.kpi: [...], run each requested metric and
+                # surface the results in the per-scenario record.
+                kpis: Dict[str, float] = {}
+                kpi_block = bench_meta.get("kpi") or []
+                if kpi_block and output_path.exists():
+                    try:
+                        from kpi import (
+                            compute_efficiency,
+                            compute_loss_breakdown,
+                            compute_power_factor,
+                            compute_ripple_pkpk,
+                            compute_thd,
+                            compute_transient_response,
+                        )
+                    except ImportError:
+                        # Try relative import (depends on how the runner is invoked)
+                        from .kpi import (
+                            compute_efficiency,
+                            compute_loss_breakdown,
+                            compute_power_factor,
+                            compute_ripple_pkpk,
+                            compute_thd,
+                            compute_transient_response,
+                        )
+
+                    times, series = load_csv_series(output_path)
+                    sample_rate = (1.0 / (times[1] - times[0])) if len(times) > 1 else 0.0
+
+                    for kpi_entry in kpi_block:
+                        if not isinstance(kpi_entry, dict):
+                            continue
+                        metric = kpi_entry.get("metric")
+                        obs = kpi_entry.get("observable")
+                        label = kpi_entry.get("label", metric or "kpi")
+                        if metric is None or obs not in series:
+                            continue
+                        samples = series[obs]
+                        try:
+                            if metric == "thd":
+                                f0 = float(kpi_entry.get("fundamental_hz", 60.0))
+                                n_harm = int(kpi_entry.get("num_harmonics", 20))
+                                kpis[f"kpi__thd_pct__{label}"] = compute_thd(samples, sample_rate, f0, n_harm)
+                            elif metric == "power_factor":
+                                i_obs = kpi_entry.get("current_observable")
+                                if isinstance(i_obs, str) and i_obs in series:
+                                    kpis[f"kpi__pf__{label}"] = compute_power_factor(samples, series[i_obs])
+                            elif metric == "efficiency":
+                                in_obs = kpi_entry.get("p_in_observable")
+                                out_obs = kpi_entry.get("p_out_observable")
+                                if (isinstance(in_obs, str) and isinstance(out_obs, str)
+                                        and in_obs in series and out_obs in series):
+                                    ss_frac = float(kpi_entry.get("steady_state_fraction", 0.2))
+                                    kpis[f"kpi__efficiency_pct__{label}"] = compute_efficiency(
+                                        series[in_obs], series[out_obs], ss_frac
+                                    )
+                            elif metric == "transient_response":
+                                target = float(kpi_entry.get("target", 0.0))
+                                tol = float(kpi_entry.get("tolerance_pct", 2.0))
+                                rsp = compute_transient_response(times, samples, target, tol)
+                                for k, v in rsp.items():
+                                    if v is not None:
+                                        kpis[f"kpi__{k}__{label}"] = float(v)
+                            elif metric == "ripple_pkpk":
+                                ss_frac = float(kpi_entry.get("steady_state_fraction", 0.2))
+                                kpis[f"kpi__ripple_pkpk__{label}"] = compute_ripple_pkpk(samples, ss_frac)
+                            elif metric == "loss_breakdown":
+                                sw_obs = kpi_entry.get("switch_observable")
+                                i_obs = kpi_entry.get("current_observable")
+                                v_obs = kpi_entry.get("voltage_observable")
+                                r_on = float(kpi_entry.get("r_on", 5e-3))
+                                if (isinstance(sw_obs, str) and isinstance(i_obs, str)
+                                        and isinstance(v_obs, str)
+                                        and sw_obs in series and i_obs in series and v_obs in series):
+                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                    loss = compute_loss_breakdown(
+                                        sw_states, series[i_obs], series[v_obs], r_on, times
+                                    )
+                                    for k, v in loss.items():
+                                        kpis[f"kpi__{k}__{label}"] = v
+                        except Exception:
+                            # KPI extraction errors must not break the run;
+                            # leave the metric out of the output.
+                            continue
+
                 results.append(
                     ScenarioResult(
                         benchmark_id=benchmark_id,
@@ -552,6 +642,7 @@ def run_benchmarks(
                         rms_error=rms_error,
                         message=message,
                         telemetry=telemetry,
+                        kpis=kpis,
                     )
                 )
 
@@ -564,6 +655,10 @@ def write_results(output_dir: Path, results: List[ScenarioResult]) -> None:
     results_json = output_dir / "results.json"
     summary_json = output_dir / "summary.json"
 
+    # Compute the union of KPI keys across all results so the CSV has
+    # consistent columns (rows that don't have a given KPI get empty cells).
+    kpi_keys = sorted({k for item in results for k in item.kpis.keys()})
+
     with open(results_csv, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([
@@ -575,6 +670,7 @@ def write_results(output_dir: Path, results: List[ScenarioResult]) -> None:
             "max_error",
             "rms_error",
             "message",
+            *kpi_keys,
         ])
         for item in results:
             writer.writerow([
@@ -586,6 +682,7 @@ def write_results(output_dir: Path, results: List[ScenarioResult]) -> None:
                 "" if item.max_error is None else f"{item.max_error:.6e}",
                 "" if item.rms_error is None else f"{item.rms_error:.6e}",
                 item.message,
+                *[f"{item.kpis[k]:.6e}" if k in item.kpis else "" for k in kpi_keys],
             ])
 
     payload = {

@@ -167,7 +167,32 @@ def _fmt_ms(value: Optional[float]) -> str:
         return "—"
 
 
-def _print_plain(items: List[Dict[str, Any]], summary: Dict[str, Any], title: str) -> None:
+def _collect_kpi_keys(items: List[Dict[str, Any]]) -> List[str]:
+    """Return the union of KPI keys present in any item's `kpis` dict,
+    sorted for stable column ordering."""
+    keys = set()
+    for it in items:
+        kpis = it.get("kpis") or {}
+        if isinstance(kpis, dict):
+            keys.update(kpis.keys())
+    return sorted(keys)
+
+
+def _short_kpi_label(key: str) -> str:
+    """Trim the long internal `kpi__<metric>__<label>` form into something
+    that fits in a terminal column."""
+    if key.startswith("kpi__"):
+        rest = key[len("kpi__"):]
+        parts = rest.split("__", 1)
+        # `metric__label` → "label.metric" (more readable in a header)
+        if len(parts) == 2:
+            metric, label = parts
+            return f"{label}/{metric}"[:18]
+        return rest[:18]
+    return key[:18]
+
+
+def _print_plain(items: List[Dict[str, Any]], summary: Dict[str, Any], title: str, show_kpis: bool = True) -> None:
     print()
     print("=" * 110)
     print(title)
@@ -186,6 +211,17 @@ def _print_plain(items: List[Dict[str, Any]], summary: Dict[str, Any], title: st
         ms = _fmt_ms(it.get("runtime_s"))
         msg = (str(it.get("message", "")) or "")[:30]
         print(f"{icon} {bench:30s} {status:10s} {max_err:>12s} {thr_max:>10s} {ss_err:>12s} {thr_ss:>10s} {ms:>9s} {msg}")
+
+        # KPIs (Phase 23): if this row carries any KPIs, render them on a
+        # continuation line under the benchmark name.
+        if show_kpis:
+            kpis = it.get("kpis") or {}
+            if isinstance(kpis, dict) and kpis:
+                kpi_str = "  ".join(
+                    f"{_short_kpi_label(k)}={v:.3g}"
+                    for k, v in sorted(kpis.items())
+                )
+                print(f"    └─ KPIs: {kpi_str}")
     print("-" * 110)
     total = summary.get("passed", 0) + summary.get("failed", 0) + summary.get("skipped", 0) + summary.get("baseline", 0)
     rate = (100.0 * summary.get("passed", 0) / total) if total else 0.0
@@ -197,7 +233,7 @@ def _print_plain(items: List[Dict[str, Any]], summary: Dict[str, Any], title: st
     print()
 
 
-def _print_rich(items: List[Dict[str, Any]], summary: Dict[str, Any], title: str) -> None:
+def _print_rich(items: List[Dict[str, Any]], summary: Dict[str, Any], title: str, show_kpis: bool = True) -> None:
     try:
         from rich.console import Console  # type: ignore[import-not-found]
         from rich.table import Table       # type: ignore[import-not-found]
@@ -216,11 +252,16 @@ def _print_rich(items: List[Dict[str, Any]], summary: Dict[str, Any], title: str
     table.add_column("runtime (ms)", justify="right")
     table.add_column("note", style="dim")
 
+    # KPI columns (Phase 23) — only added when at least one row carries a KPI
+    kpi_keys = _collect_kpi_keys(items) if show_kpis else []
+    for k in kpi_keys:
+        table.add_column(_short_kpi_label(k), justify="right", style="green")
+
     for it in items:
         bench = str(it.get("benchmark_id", ""))
         status = str(it.get("status", "?"))
         icon, color = _STATUS_ICONS.get(status, ("?", "white"))
-        table.add_row(
+        row = [
             bench,
             f"[{color}]{icon} {status}[/{color}]",
             _fmt_sci(it.get("max_error")),
@@ -229,7 +270,12 @@ def _print_rich(items: List[Dict[str, Any]], summary: Dict[str, Any], title: str
             _fmt_sci(it.get("steady_state_max_error_threshold")),
             _fmt_ms(it.get("runtime_s")),
             (str(it.get("message", "")) or "")[:40],
-        )
+        ]
+        kpis = it.get("kpis") or {}
+        for k in kpi_keys:
+            v = kpis.get(k) if isinstance(kpis, dict) else None
+            row.append("—" if v is None else f"{float(v):.3g}")
+        table.add_row(*row)
     console.print(table)
 
     total = summary.get("passed", 0) + summary.get("failed", 0) + summary.get("skipped", 0) + summary.get("baseline", 0)

@@ -13,6 +13,12 @@ benchmark:
     type: reference
     observable: V(out)
     baseline: baselines/lcc_resonant_inverter.csv
+  kpi:
+    - metric: thd
+      observable: V(out)
+      fundamental_hz: 100000.0
+      num_harmonics: 10
+      label: vout
 simulation:
   tstart: 0.0
   tstop: 200e-6

@@ -16,6 +16,15 @@ benchmark:
       # stage's output ripple.
       max_error: 8.0e-1
       steady_state_max_error: 4.0e-1
+  kpi:
+    - metric: ripple_pkpk
+      observable: V(out)
+      steady_state_fraction: 0.2
+      label: vout
+    - metric: ripple_pkpk
+      observable: V(bus)
+      steady_state_fraction: 0.2
+      label: vbus
 simulation:
   tstart: 0.0
   tstop: 800e-6
