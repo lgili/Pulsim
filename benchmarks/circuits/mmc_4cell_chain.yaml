@@ -1,0 +1,116 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: mmc_4cell_chain
+  category: nonlinear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      max_error: 5.0e-2
+      steady_state_max_error: 5.0e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/mmc_4cell_chain.csv
+  # Modular Multilevel Converter style: 4 H-bridge "cells" cascaded
+  # in series, each producing ±V_cell or 0 at its output. Drives an
+  # RL load through the chain. 16 vcswitches + 4 DC sources + 4
+  # gate trains running with 90°-staggered phases. Tests scaling
+  # to ~16 simultaneously-active PWL devices.
+simulation:
+  tstart: 0.0
+  tstop: 1e-3
+  dt: 0.2e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  # 4 cell DC sources, each at 6 V (chain max = 24 V)
+  - type: voltage_source
+    name: Vcell1
+    nodes: [v1, 0]
+    waveform: {type: dc, value: 6.0}
+  - type: voltage_source
+    name: Vcell2
+    nodes: [v2, 0]
+    waveform: {type: dc, value: 6.0}
+  - type: voltage_source
+    name: Vcell3
+    nodes: [v3, 0]
+    waveform: {type: dc, value: 6.0}
+  - type: voltage_source
+    name: Vcell4
+    nodes: [v4, 0]
+    waveform: {type: dc, value: 6.0}
+  # PWM gates at staggered phases (4 cells × 2 = 8 gate signals
+  # for the half-bridges' top+bottom)
+  - type: voltage_source
+    name: VgA1
+    nodes: [gA1, 0]
+    waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 5000, duty: 0.5, phase: 0.0}
+  - type: voltage_source
+    name: VgA2
+    nodes: [gA2, 0]
+    waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 5000, duty: 0.5, phase: 0.25}
+  - type: voltage_source
+    name: VgA3
+    nodes: [gA3, 0]
+    waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 5000, duty: 0.5, phase: 0.5}
+  - type: voltage_source
+    name: VgA4
+    nodes: [gA4, 0]
+    waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 5000, duty: 0.5, phase: 0.75}
+
+  # Each "cell" is a simplified half-bridge: top switch from v_n to
+  # mid_n, bottom switch from mid_n to 0. mid_n is the cell's output
+  # node, chained through the series load.
+  - type: vcswitch
+    name: S1H
+    nodes: [gA1, v1, mid1]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S2H
+    nodes: [gA2, v2, mid2]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S3H
+    nodes: [gA3, v3, mid3]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: vcswitch
+    name: S4H
+    nodes: [gA4, v4, mid4]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+
+  # Chain the cells: mid1 → mid2 → mid3 → mid4 → out via small Rs
+  - type: resistor
+    name: R_chain12
+    nodes: [mid1, mid2]
+    value: 0.01
+  - type: resistor
+    name: R_chain23
+    nodes: [mid2, mid3]
+    value: 0.01
+  - type: resistor
+    name: R_chain34
+    nodes: [mid3, mid4]
+    value: 0.01
+  - type: resistor
+    name: R_chain4out
+    nodes: [mid4, out]
+    value: 0.01
+
+  # Load
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 10.0

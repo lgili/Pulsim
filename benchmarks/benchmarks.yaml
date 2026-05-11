@@ -408,6 +408,16 @@ benchmarks:
   - path: circuits/buck_hard_switching_reference.yaml
     scenarios: [default]
 
+  # ----- Phase 25: long-simulation / numerical-stress benches -----
+  - path: circuits/long_run_drift_buck.yaml
+    scenarios: [default]
+  - path: circuits/high_freq_gan_buck.yaml
+    scenarios: [default]
+  - path: circuits/stiff_rc_high_freq_switching.yaml
+    scenarios: [default]
+  - path: circuits/mmc_4cell_chain.yaml
+    scenarios: [default]
+
   # ----- Phase 20: sine input/output + multilevel converters -----
   # No ngspice equivalents wired up here either — these validate
   # against captured Pulsim baselines, like the Phase 19 closed-
