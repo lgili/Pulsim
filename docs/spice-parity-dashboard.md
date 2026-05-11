@@ -730,20 +730,77 @@ convergence issue. This is a SPICE-side numerical tuning task,
 not a Pulsim correctness gap. The benchmark stays skipped with
 that note in the manifest.
 
-### Final outcome (after Phase 15)
+### Phase-15 mid-state
+
+* **C++ tests**: all 4021 + 1090 assertions pass.
+* **SPICE parity**: 18 / 20.
+* **Python validation suite**: 404 / 404.
+
+## Phase 16 — coupled inductor / real transformer model
+
+The Phase-15 matrix marked the algebraic-ideal `transformer`
+primitive as deferred (paradigm mismatch with ngspice's K-coupled
+syntax). Phase 16 closes that gap with a SPICE-equivalent model
+based on the existing `coupled_inductor` YAML primitive plus a
+runtime fix that wires the mutual stamp into the active code path.
+
+### `b2f0301` — runtime wiring: `pwl_state_space_supports_all_devices`
+
+`coupled_inductor` already expanded to two physical inductors plus
+a virtual mutual wrapper, and `stamp_coupled_inductor_terms`
+correctly added `M·dI/dt` to each branch equation. But the runtime's
+SegmentStepper path (default for admissible PWL state-space
+topologies) routes through `assemble_state_space`, which does NOT
+invoke `stamp_coupled_inductor_terms`. Result: the mutual term was
+silently dropped — V_secondary stayed at 0 regardless of primary
+excitation.
+
+Fix: have `pwl_state_space_supports_all_devices()` also return
+false for any `coupled_inductor` virtual component, forcing the
+DAE fallback path (which DOES call `stamp_coupled_inductor_terms`).
+Mirrors the existing `Transformer` admissibility carve-out.
+
+### Two new parity benchmarks (b2f0301)
+
+```
+coupled_inductor_step   1:1 K=0.99 pulse-driven primary, R load
+                        max_err 4.07e-02 vs ngspice K1
+transformer_leakage     2:1 step-down, K=0.95 (10% leakage),
+                        50 kHz sine, max_err 4.47e-02
+```
+
+ngspice equivalent uses the canonical
+`L1 ... ; L2 ... ; K1 L1 L2 <coupling>` syntax. Pulsim's
+`coupled_inductor` produces the same circuit physics.
+
+### Six Python unit tests (5e5caca)
+
+`python/tests/validation/level1_components/test_coupled_inductor.py`
+gives the model a unit-level regression net:
+
+* `test_signal_actually_transfers` — regression guard for the
+  pre-fix bug (V_sec stayed at 0).
+* `test_turn_ratio_scaling [1:1, 2:1, 1:2]` — verifies
+  `V_prim / V_sec ≈ √(L1/L2)` at K → 1.
+* `test_perfect_coupling_no_leakage` — K = 0.999 1:1 → V_prim and
+  V_sec match within 10 % RMS.
+* `test_kcl_secondary` — KCL at the secondary node balances within
+  Pulsim's branch-current sign convention.
+
+### Final outcome (after Phase 16)
 
 * **C++ tests**: all 4021 + 1090 assertions pass (273 + 138 cases).
-* **SPICE parity dashboard**: **18 / 20 passing**, 0 failing,
-  2 skipped (`transformer_step_up` — paradigm mismatch with
-  ngspice's coupled-inductor model; `buck_pmos` — ngspice baseline
-  diverges).
-* **Python validation suite**: 404 / 404 passing, 0 failing.
+* **SPICE parity dashboard**: **20 / 22 passing**, 0 failing,
+  2 skipped (`transformer_step_up` — algebraic-ideal primitive,
+  not directly comparable to ngspice's K-coupled model; this is
+  superseded by `coupled_inductor_step` / `transformer_leakage`;
+  `buck_pmos` — ngspice baseline diverges, not a Pulsim issue).
+* **Python validation suite**: **410 / 410 passing**, 0 failing.
 * Every supported Pulsim primitive (R, C, L, V-DC, V-pulse,
   V-sine, V-pwm, I-source, diode, switch, vcswitch, mosfet-N
-  including PMOS-internal, igbt, snubber) has at least one
-  SPICE-parity check with sub-1% error vs ngspice. The matrix is
-  the runnable proof that the simulator is reliable at the
-  component level.
+  including PMOS-internal, igbt, snubber, coupled_inductor
+  including real transformer with finite leakage / magnetizing L)
+  has SPICE-parity and / or analytical-physics validation.
 
 ## See also
 
