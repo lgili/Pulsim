@@ -1,0 +1,4083 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/components-reference/">
+      
+      
+        <link rel="prev" href="../user-guide/">
+      
+      
+        <link rel="next" href="../control-blocks-reference/">
+      
+      
+      <link rel="icon" href="../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>Components Reference - PulsimCore</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#components-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PulsimCore
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Components Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+  Overview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples-and-results/" class="md-tabs__link">
+          
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../magnetic-models/" class="md-tabs__link">
+          
+  
+  Domain Libraries
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../benchmarks-and-parity/" class="md-tabs__link">
+          
+  
+  Quality Gates
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../gui-component-parity/" class="md-tabs__link">
+          
+  
+  Compatibility
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    PulsimCore
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Overview
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Documentation Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backend Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Components Reference
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Components Reference
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conventions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick index
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-passive-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Passive components
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Passive components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resistor" class="md-nav__link">
+    <span class="md-ellipsis">
+      resistor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#capacitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      capacitor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      inductor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snubber_rc" class="md-nav__link">
+    <span class="md-ellipsis">
+      snubber_rc
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transformer" class="md-nav__link">
+    <span class="md-ellipsis">
+      transformer
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coupled_inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      coupled_inductor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saturable_inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      saturable_inductor
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Sources
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Sources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#voltage_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      voltage_source
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="voltage_source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc-default-if-no-waveform-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC (default if no waveform block)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveformtype-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      waveform.type: pwm
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveformtype-sine" class="md-nav__link">
+    <span class="md-ellipsis">
+      waveform.type: sine
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveformtype-pulse" class="md-nav__link">
+    <span class="md-ellipsis">
+      waveform.type: pulse
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#driving-a-switch-from-a-pulse-pwm-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Driving a switch from a pulse / PWM source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveforms-not-yet-exposed-in-yaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      Waveforms not yet exposed in YAML
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      current_source
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-switching-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Switching devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Switching devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#diode" class="md-nav__link">
+    <span class="md-ellipsis">
+      diode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      switch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vcswitch" class="md-nav__link">
+    <span class="md-ellipsis">
+      vcswitch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mosfet-incl-nmos-pmos" class="md-nav__link">
+    <span class="md-ellipsis">
+      mosfet (incl. nmos, pmos)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      igbt
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bjt_npn-bjt_pnp" class="md-nav__link">
+    <span class="md-ellipsis">
+      bjt_npn / bjt_pnp ⚠
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#thyristor-scr-triac" class="md-nav__link">
+    <span class="md-ellipsis">
+      thyristor (SCR) / triac ⚠
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-protection-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Protection devices ⚠
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Protection devices ⚠">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      fuse ⚠
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#circuit_breaker" class="md-nav__link">
+    <span class="md-ellipsis">
+      circuit_breaker ⚠
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#relay" class="md-nav__link">
+    <span class="md-ellipsis">
+      relay ⚠
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-probes-scopes-no-stamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Probes &amp; scopes (no stamp)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Probes & scopes (no stamp)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#voltage_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      voltage_probe
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      current_probe
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#power_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      power_probe
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#electrical_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      electrical_scope
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#thermal_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      thermal_scope
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-c-params-structs-python-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. C++ Params structs (Python API)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-stamp-domain-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Stamp-domain summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-blocks-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Control Blocks Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kpi-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    KPI Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../netlist-format/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Netlist YAML Format
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Python API (Legacy Notes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Guides
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples-and-results/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Examples and Results
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ac-analysis/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AC Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fra/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Response Analysis (FRA)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../electrothermal-workflow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Electrothermal Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-generation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Real-Time Code Generation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../automatic-differentiation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Automatic Differentiation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-tuning-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../linear-solver-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Linear-Solver Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../robustness-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Robustness Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Domain Libraries
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Domain Libraries
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motor-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../three-phase-grid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-devices/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog Devices
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converter-templates/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Converter Templates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Quality Gates
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Quality Gates
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks-and-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Benchmarks and Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spice-parity-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../property-based-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Compatibility
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Compatibility
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui-component-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    GUI Backend Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conventions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick index
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-passive-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Passive components
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Passive components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resistor" class="md-nav__link">
+    <span class="md-ellipsis">
+      resistor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#capacitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      capacitor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      inductor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snubber_rc" class="md-nav__link">
+    <span class="md-ellipsis">
+      snubber_rc
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transformer" class="md-nav__link">
+    <span class="md-ellipsis">
+      transformer
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coupled_inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      coupled_inductor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saturable_inductor" class="md-nav__link">
+    <span class="md-ellipsis">
+      saturable_inductor
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Sources
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Sources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#voltage_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      voltage_source
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="voltage_source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc-default-if-no-waveform-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC (default if no waveform block)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveformtype-pwm" class="md-nav__link">
+    <span class="md-ellipsis">
+      waveform.type: pwm
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveformtype-sine" class="md-nav__link">
+    <span class="md-ellipsis">
+      waveform.type: sine
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveformtype-pulse" class="md-nav__link">
+    <span class="md-ellipsis">
+      waveform.type: pulse
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#driving-a-switch-from-a-pulse-pwm-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Driving a switch from a pulse / PWM source
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#waveforms-not-yet-exposed-in-yaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      Waveforms not yet exposed in YAML
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      current_source
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-switching-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Switching devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Switching devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#diode" class="md-nav__link">
+    <span class="md-ellipsis">
+      diode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      switch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vcswitch" class="md-nav__link">
+    <span class="md-ellipsis">
+      vcswitch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mosfet-incl-nmos-pmos" class="md-nav__link">
+    <span class="md-ellipsis">
+      mosfet (incl. nmos, pmos)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#igbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      igbt
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bjt_npn-bjt_pnp" class="md-nav__link">
+    <span class="md-ellipsis">
+      bjt_npn / bjt_pnp ⚠
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#thyristor-scr-triac" class="md-nav__link">
+    <span class="md-ellipsis">
+      thyristor (SCR) / triac ⚠
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-protection-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Protection devices ⚠
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Protection devices ⚠">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      fuse ⚠
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#circuit_breaker" class="md-nav__link">
+    <span class="md-ellipsis">
+      circuit_breaker ⚠
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#relay" class="md-nav__link">
+    <span class="md-ellipsis">
+      relay ⚠
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-probes-scopes-no-stamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Probes &amp; scopes (no stamp)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Probes & scopes (no stamp)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#voltage_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      voltage_probe
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      current_probe
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#power_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      power_probe
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#electrical_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      electrical_scope
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#thermal_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      thermal_scope
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-c-params-structs-python-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. C++ Params structs (Python API)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-stamp-domain-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. Stamp-domain summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/components-reference.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/components-reference.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="components-reference">Components Reference<a class="headerlink" href="#components-reference" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Status:</strong> authoritative — covers every YAML <code>type:</code> value the parser
+recognizes, every parameter it reads, and every default it applies.
+Source: <code>core/src/v1/yaml_parser.cpp</code> and the <code>add_*</code> methods on
+<code>pulsim.v1.Circuit</code>. Updated through Phase 28.</p>
+</blockquote>
+<p>This page is the master catalog of every <strong>electrical-stamping</strong> component
+Pulsim knows about — the things that contribute rows or columns to the MNA
+matrix. For control-domain blocks (PWM generators, PI controllers, Clarke /
+Park transforms, PLLs, etc.) see <a href="../control-blocks-reference/">Control Blocks Reference</a>.</p>
+<h2 id="conventions">Conventions<a class="headerlink" href="#conventions" title="Permanent link">&para;</a></h2>
+<p>Every component is a YAML map with at least <code>type</code>, <code>name</code>, and <code>nodes</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;component-type&gt;</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;unique-identifier&gt;</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">&lt;node-a&gt;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">&lt;node-b&gt;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">...</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="c1"># parameters either at top level...</span>
+<span class="w">  </span><span class="nt">resistance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">  </span><span class="c1"># ...or nested under params:</span>
+<span class="w">  </span><span class="nt">params</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">ic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</code></pre></div>
+<ul>
+<li>Numeric scalars accept SI multiplier suffixes (<code>220u</code>, <code>47n</code>, <code>1.5k</code>,
+  <code>2.2Meg</code>, <code>47e-6</code>). Lowercase <code>m = 1e-3</code>, capital <code>M = 1e6</code> only when
+  written <code>M</code> (use <code>meg</code>/<code>Meg</code> to disambiguate). Suffixes come from
+  <code>parse_real_string</code> in the parser.</li>
+<li>The node <code>0</code> is ground. Any other unique string becomes a numbered node.</li>
+<li>Aliases listed below all resolve to the same canonical type (e.g. <code>r</code>,
+  <code>R</code>, and <code>resistor</code> are interchangeable).</li>
+<li>Surrogate components (marked ⚠ below) stamp a simpler primitive and
+  emit a <code>PULSIM_YAML_W_COMPONENT_SURROGATE</code> warning at load time so you
+  know the model is a first-parity slice, not a full physical model.</li>
+</ul>
+<h2 id="quick-index">Quick index<a class="headerlink" href="#quick-index" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Types</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Passives</td>
+<td><code>resistor</code>, <code>capacitor</code>, <code>inductor</code>, <code>snubber_rc</code>, <code>transformer</code>, <code>coupled_inductor</code>, <code>saturable_inductor</code></td>
+</tr>
+<tr>
+<td>Sources</td>
+<td><code>voltage_source</code> (DC / PWM / sine / pulse), <code>current_source</code></td>
+</tr>
+<tr>
+<td>Switching</td>
+<td><code>diode</code>, <code>switch</code>, <code>vcswitch</code>, <code>mosfet</code> (<code>nmos</code> / <code>pmos</code>), <code>igbt</code>, <code>bjt_npn</code> ⚠, <code>bjt_pnp</code> ⚠, <code>thyristor</code> ⚠, <code>triac</code> ⚠</td>
+</tr>
+<tr>
+<td>Protection</td>
+<td><code>fuse</code> ⚠, <code>circuit_breaker</code> ⚠, <code>relay</code> ⚠</td>
+</tr>
+<tr>
+<td>Probes (no stamp)</td>
+<td><code>voltage_probe</code>, <code>current_probe</code>, <code>power_probe</code>, <code>electrical_scope</code>, <code>thermal_scope</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1-passive-components">1. Passive components<a class="headerlink" href="#1-passive-components" title="Permanent link">&para;</a></h2>
+<h3 id="resistor"><code>resistor</code><a class="headerlink" href="#resistor" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+<th>Linear</th>
+<th>Dynamic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>r</code></td>
+<td><code>[n1, n2]</code></td>
+<td>yes</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resistor</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">R1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span><span class="w">          </span><span class="c1"># alias: resistance</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>value</code> / <code>resistance</code></td>
+<td>—</td>
+<td>yes</td>
+<td>Ohms (Ω).</td>
+</tr>
+</tbody>
+</table>
+<p>C++ struct: <code>Resistor::Params { resistance = 1000 }</code>.</p>
+<h3 id="capacitor"><code>capacitor</code><a class="headerlink" href="#capacitor" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+<th>Linear</th>
+<th>Dynamic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>c</code></td>
+<td><code>[n1, n2]</code></td>
+<td>yes</td>
+<td>yes (trapezoidal companion)</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">capacitor</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cout</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">47u</span><span class="w">           </span><span class="c1"># alias: capacitance</span>
+<span class="w">  </span><span class="nt">ic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">              </span><span class="c1"># initial V(n1) − V(n2), volts</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>value</code> / <code>capacitance</code></td>
+<td>—</td>
+<td>Farads (F), required.</td>
+</tr>
+<tr>
+<td><code>ic</code></td>
+<td><code>0.0</code></td>
+<td>Initial capacitor voltage at t = tstart (V). Only honored when <code>simulation.uic: true</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Companion conductance is <code>G_eq = 2C/Δt</code> (trapezoidal) or <code>C/Δt</code> (BDF1).</p>
+<h3 id="inductor"><code>inductor</code><a class="headerlink" href="#inductor" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+<th>Linear</th>
+<th>Dynamic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>l</code></td>
+<td><code>[n1, n2]</code></td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">inductor</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">220u</span><span class="w">           </span><span class="c1"># alias: inductance</span>
+<span class="w">  </span><span class="nt">ic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">               </span><span class="c1"># initial current, A</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>value</code> / <code>inductance</code></td>
+<td>—</td>
+<td>Henries (H), required. Must be &gt; 0.</td>
+</tr>
+<tr>
+<td><code>ic</code></td>
+<td><code>0.0</code></td>
+<td>Initial branch current from <code>n1</code> to <code>n2</code> (A).</td>
+</tr>
+</tbody>
+</table>
+<p>Adds a branch-current row to MNA. Companion <code>G_eq = Δt/(2L)</code>.</p>
+<h3 id="snubber_rc"><code>snubber_rc</code><a class="headerlink" href="#snubber_rc" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snubber</code>, <code>snubberrc</code></td>
+<td><code>[n1, n2]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">snubber_rc</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RC_clamp</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">resistance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4.7</span><span class="w">       </span><span class="c1"># alias: value</span>
+<span class="w">  </span><span class="nt">capacitance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10n</span>
+<span class="w">  </span><span class="nt">ic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>resistance</code> / <code>value</code></td>
+<td>—</td>
+<td>Ω, required.</td>
+</tr>
+<tr>
+<td><code>capacitance</code></td>
+<td>—</td>
+<td>F, required.</td>
+</tr>
+<tr>
+<td><code>ic</code></td>
+<td><code>0.0</code></td>
+<td>Initial capacitor voltage (V).</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Topology note:</strong> Despite the “series RC” naming, the runtime stamps R and C
+in <em>parallel</em> between <code>n1</code> and <code>n2</code>, named <code>&lt;name&gt;__R</code> and <code>&lt;name&gt;__C</code>. Use
+two discrete <code>resistor</code> + <code>capacitor</code> if you need a true series RC.</p>
+<h3 id="transformer"><code>transformer</code><a class="headerlink" href="#transformer" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>t</code></td>
+<td><code>[p1, p2, s1, s2]</code> (primary +/−, secondary +/−)</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transformer</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TX</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pa</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pb</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sa</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sb</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">turns_ratio</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span><span class="w">     </span><span class="c1"># alias: ratio</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>turns_ratio</code> / <code>ratio</code></td>
+<td>—</td>
+<td><code>N_p:N_s</code>. <code>2.0</code> = 2:1 step-down, <code>0.5</code> = step-up by 2.</td>
+</tr>
+<tr>
+<td><code>magnetizing_inductance</code> / <code>lm</code></td>
+<td>—</td>
+<td>Whitelisted by the schema validator, <strong>not currently wired to the device.</strong> Use <code>coupled_inductor</code> for magnetizing dynamics.</td>
+</tr>
+</tbody>
+</table>
+<p>Ideal transformer: <code>V_p = n·V_s</code>, <code>I_p + n·I_s = 0</code>. Adds two branch rows.</p>
+<h3 id="coupled_inductor"><code>coupled_inductor</code><a class="headerlink" href="#coupled_inductor" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>coupledinductor</code></td>
+<td><code>[p1, p2, s1, s2]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">coupled_inductor</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">LK</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pa</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pb</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sa</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sb</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">l1</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100u</span>
+<span class="w">  </span><span class="nt">l2</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100u</span>
+<span class="w">  </span><span class="nt">coupling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.98</span><span class="w">       </span><span class="c1"># aliases: k, mutual_inductance</span>
+<span class="w">  </span><span class="nt">ic1</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">             </span><span class="c1"># primary initial current</span>
+<span class="w">  </span><span class="nt">ic2</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">             </span><span class="c1"># secondary initial current</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>l1</code></td>
+<td><code>1e-3</code></td>
+<td>Primary L (H), must be &gt; 0.</td>
+</tr>
+<tr>
+<td><code>l2</code></td>
+<td><code>l1</code></td>
+<td>Secondary L (H).</td>
+</tr>
+<tr>
+<td><code>coupling</code> / <code>k</code></td>
+<td><code>0.98</code></td>
+<td>Coupling coefficient <code>k = M/√(L1·L2)</code>, clamped to <code>\|k\| ≤ 0.999</code>.</td>
+</tr>
+<tr>
+<td><code>mutual_inductance</code></td>
+<td>derived</td>
+<td>Alternative to <code>k</code>: gives M directly; the parser back-solves k.</td>
+</tr>
+<tr>
+<td><code>ic1</code> / <code>ic_primary</code></td>
+<td><code>0.0</code></td>
+<td>Primary initial current (A).</td>
+</tr>
+<tr>
+<td><code>ic2</code> / <code>ic_secondary</code></td>
+<td><code>0.0</code></td>
+<td>Secondary initial current (A).</td>
+</tr>
+</tbody>
+</table>
+<p>Stamps two underlying inductors <code>&lt;name&gt;__L1</code>, <code>&lt;name&gt;__L2</code> plus the mutual
+term <code>M·dI/dt</code>. SPICE-style.</p>
+<h3 id="saturable_inductor"><code>saturable_inductor</code><a class="headerlink" href="#saturable_inductor" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>saturableinductor</code>, <code>sat_inductor</code></td>
+<td><code>[n1, n2]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">saturable_inductor</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L_core</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">inductance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500u</span><span class="w">           </span><span class="c1"># unsaturated L₀</span>
+<span class="w">  </span><span class="nt">saturation_current</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8.0</span>
+<span class="w">  </span><span class="nt">saturation_inductance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50u</span>
+<span class="w">  </span><span class="nt">saturation_exponent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.5</span>
+<span class="w">  </span><span class="nt">ic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inductance</code> / <code>value</code></td>
+<td>—</td>
+<td>Small-signal L₀ (H), required, &gt; 0.</td>
+</tr>
+<tr>
+<td><code>saturation_current</code></td>
+<td><code>1.0</code></td>
+<td>Knee current (A), &gt; 0.</td>
+</tr>
+<tr>
+<td><code>saturation_inductance</code></td>
+<td><code>0.2 · L₀</code></td>
+<td>Asymptotic L at deep saturation (H). Must satisfy <code>0 &lt; L_sat ≤ L₀</code>.</td>
+</tr>
+<tr>
+<td><code>saturation_exponent</code></td>
+<td><code>2.0</code></td>
+<td>Softness of the L(I) transition. Clamped to <code>[1, 6]</code> by the regularizer.</td>
+</tr>
+<tr>
+<td><code>ic</code></td>
+<td><code>0.0</code></td>
+<td>Initial inductor current (A).</td>
+</tr>
+</tbody>
+</table>
+<p>Effective inductance:
+<code>L_eff(I) = L_sat + (L₀ − L_sat) / (1 + (|I|/I_sat)^exponent)</code>.</p>
+<p>Stamps a regular <code>inductor</code> then registers a virtual block that perturbs
+its effective L every Newton iteration through the
+<code>effective_inductance_for</code> callback.</p>
+<hr />
+<h2 id="2-sources">2. Sources<a class="headerlink" href="#2-sources" title="Permanent link">&para;</a></h2>
+<h3 id="voltage_source"><code>voltage_source</code><a class="headerlink" href="#voltage_source" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>v</code>, <code>voltagesource</code>, <code>vsource</code>, <code>source_v</code></td>
+<td><code>[npos, nneg]</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>voltage_source</code> is a dispatcher — the <code>waveform.type</code> key picks the
+backing source object. Four waveform families are supported.</p>
+<h4 id="dc-default-if-no-waveform-block">DC (default if no waveform block)<a class="headerlink" href="#dc-default-if-no-waveform-block" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_source</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vin</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12.0</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>value</code></td>
+<td><code>0.0</code></td>
+<td>DC level (V).</td>
+</tr>
+</tbody>
+</table>
+<h4 id="waveformtype-pwm"><code>waveform.type: pwm</code><a class="headerlink" href="#waveformtype-pwm" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_source</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vgate</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">waveform</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pwm</span>
+<span class="w">    </span><span class="nt">v_high</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span>
+<span class="w">    </span><span class="nt">v_low</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100e3</span>
+<span class="w">    </span><span class="nt">duty</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.45</span>
+<span class="w">    </span><span class="nt">phase</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">dead_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100n</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>v_high</code></td>
+<td><code>1.0</code></td>
+<td>High level (V).</td>
+</tr>
+<tr>
+<td><code>v_low</code></td>
+<td><code>0.0</code></td>
+<td>Low level (V).</td>
+</tr>
+<tr>
+<td><code>frequency</code></td>
+<td><code>10e3</code></td>
+<td>Carrier frequency (Hz).</td>
+</tr>
+<tr>
+<td><code>duty</code></td>
+<td><code>0.5</code></td>
+<td>Duty cycle, clamped to <code>[0, 1]</code>.</td>
+</tr>
+<tr>
+<td><code>phase</code></td>
+<td><code>0.0</code></td>
+<td>Initial phase (rad).</td>
+</tr>
+<tr>
+<td><code>dead_time</code></td>
+<td><code>0.0</code></td>
+<td>Dead time subtracted from on-time (s).</td>
+</tr>
+<tr>
+<td><code>rise_time</code> / <code>fall_time</code></td>
+<td>n/a</td>
+<td>Defined in <code>PWMParams</code> but not forwarded by the YAML parser.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="waveformtype-sine"><code>waveform.type: sine</code><a class="headerlink" href="#waveformtype-sine" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_source</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vgrid</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">grid</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">waveform</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sine</span>
+<span class="w">    </span><span class="nt">amplitude</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span>
+<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60.0</span>
+<span class="w">    </span><span class="nt">offset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">phase</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>amplitude</code></td>
+<td><code>1.0</code></td>
+<td>Peak amplitude (V).</td>
+</tr>
+<tr>
+<td><code>frequency</code></td>
+<td><code>50.0</code></td>
+<td>Hz.</td>
+</tr>
+<tr>
+<td><code>offset</code></td>
+<td><code>0.0</code></td>
+<td>DC offset (V).</td>
+</tr>
+<tr>
+<td><code>phase</code></td>
+<td><code>0.0</code></td>
+<td>Initial phase (rad).</td>
+</tr>
+</tbody>
+</table>
+<p>Output: <code>v(t) = offset + amplitude·sin(2π·frequency·t + phase)</code>.</p>
+<h4 id="waveformtype-pulse"><code>waveform.type: pulse</code><a class="headerlink" href="#waveformtype-pulse" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_source</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vstep</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">waveform</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pulse</span>
+<span class="w">    </span><span class="nt">v_initial</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">    </span><span class="nt">v_pulse</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span>
+<span class="w">    </span><span class="nt">t_delay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1u</span>
+<span class="w">    </span><span class="nt">t_rise</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10n</span>
+<span class="w">    </span><span class="nt">t_fall</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10n</span>
+<span class="w">    </span><span class="nt">t_width</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5u</span>
+<span class="w">    </span><span class="nt">period</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10u</span><span class="w">           </span><span class="c1"># 0 = single shot</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>v_initial</code></td>
+<td><code>0.0</code></td>
+<td>Idle level (V).</td>
+</tr>
+<tr>
+<td><code>v_pulse</code></td>
+<td><code>1.0</code></td>
+<td>Pulse-high level (V).</td>
+</tr>
+<tr>
+<td><code>t_delay</code></td>
+<td><code>0.0</code></td>
+<td>Delay before first edge (s).</td>
+</tr>
+<tr>
+<td><code>t_rise</code></td>
+<td><code>1e-9</code></td>
+<td>Linear rise time (s).</td>
+</tr>
+<tr>
+<td><code>t_fall</code></td>
+<td><code>1e-9</code></td>
+<td>Linear fall time (s).</td>
+</tr>
+<tr>
+<td><code>t_width</code></td>
+<td><code>1e-6</code></td>
+<td>Pulse-high duration between rise/fall (s).</td>
+</tr>
+<tr>
+<td><code>period</code></td>
+<td><code>0.0</code></td>
+<td><code>0</code> = single pulse; <code>&gt;0</code> = periodic.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="driving-a-switch-from-a-pulse-pwm-source">Driving a switch from a pulse / PWM source<a class="headerlink" href="#driving-a-switch-from-a-pulse-pwm-source" title="Permanent link">&para;</a></h4>
+<p>If you set <code>target_component:</code> (or <code>target_device:</code> / <code>target:</code>) on a
+pulse or PWM voltage source, the parser additionally calls
+<code>Circuit::bind_switch_driver(&lt;source&gt;, &lt;target&gt;)</code> so the high level of
+the waveform forces the named switch closed:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_source</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vgate</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">target_component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SW1</span><span class="w">       </span><span class="c1"># closes/opens SW1 from this waveform</span>
+<span class="w">  </span><span class="nt">waveform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">pwm</span><span class="p p-Indicator">,</span><span class="nt"> frequency</span><span class="p">:</span><span class="w"> </span><span class="nv">100e3</span><span class="p p-Indicator">,</span><span class="nt"> duty</span><span class="p">:</span><span class="w"> </span><span class="nv">0.45</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<h4 id="waveforms-not-yet-exposed-in-yaml">Waveforms not yet exposed in YAML<a class="headerlink" href="#waveforms-not-yet-exposed-in-yaml" title="Permanent link">&para;</a></h4>
+<p><code>PWL</code>, <code>EXP</code>, <code>SFFM</code>, <code>RAMP</code>, <code>TRIANGLE</code> are present in the C++ tree but
+not wired into the YAML dispatcher today. Use the Python API (e.g.
+<code>Circuit.add_pwm_voltage_source(...)</code>) or a <code>transfer_function</code> /
+<code>lookup_table</code> virtual block to synthesise them.</p>
+<h3 id="current_source"><code>current_source</code><a class="headerlink" href="#current_source" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>i</code>, <code>currentsource</code>, <code>isource</code></td>
+<td><code>[npos, nneg]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">current_source</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Iload</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.5</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>value</code></td>
+<td>—</td>
+<td>DC current (A), flows from <code>npos</code> to <code>nneg</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>DC only</strong> — <code>waveform:</code> is not parsed for current sources.</p>
+<hr />
+<h2 id="3-switching-devices">3. Switching devices<a class="headerlink" href="#3-switching-devices" title="Permanent link">&para;</a></h2>
+<h3 id="diode"><code>diode</code><a class="headerlink" href="#diode" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>d</code></td>
+<td><code>[anode, cathode]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">diode</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">D1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vo</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">g_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e3</span><span class="w">            </span><span class="c1"># alias: ron (Pulsim auto-inverts if you pass ron)</span>
+<span class="w">  </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-9</span><span class="w">          </span><span class="c1"># alias: roff</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>g_on</code> / <code>ron</code></td>
+<td><code>1e3</code></td>
+<td>On conductance (S). Pass <code>ron</code> and Pulsim takes <code>1/ron</code>.</td>
+</tr>
+<tr>
+<td><code>g_off</code> / <code>roff</code></td>
+<td><code>1e-9</code></td>
+<td>Leakage conductance (S).</td>
+</tr>
+</tbody>
+</table>
+<p>Internal-only knobs (Python/C++ API): <code>v_threshold = 0.0 V</code> and
+<code>v_smooth = 0.1 V</code> (the tanh width in Behavioral mode). Adjust through
+<code>IdealDiode::set_smoothing</code>. Commute hysteresis (<code>event_hysteresis_</code>) is
+<code>1e-9 V</code> and is not exposed.</p>
+<h3 id="switch"><code>switch</code><a class="headerlink" href="#switch" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>s</code></td>
+<td><code>[n1, n2]</code></td>
+</tr>
+</tbody>
+</table>
+<p>Externally commanded switch (does not auto-commute). Drive it from a
+PWM/pulse source via <code>bind_switch_driver</code> or from
+<code>circuit.set_switch_state(name, closed)</code> in Python.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">switch</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SW1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">out</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">g_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e6</span><span class="w">            </span><span class="c1"># alias: ron</span>
+<span class="w">  </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-12</span><span class="w">         </span><span class="c1"># alias: roff</span>
+<span class="w">  </span><span class="nt">initial_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>g_on</code> / <code>ron</code></td>
+<td><code>1e6</code></td>
+<td>On conductance (S).</td>
+</tr>
+<tr>
+<td><code>g_off</code> / <code>roff</code></td>
+<td><code>1e-12</code></td>
+<td>Off conductance (S).</td>
+</tr>
+<tr>
+<td><code>initial_state</code></td>
+<td><code>false</code></td>
+<td><code>true</code> = closed at t = 0. Accepts <code>"closed"</code>, <code>"on"</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="vcswitch"><code>vcswitch</code><a class="headerlink" href="#vcswitch" title="Permanent link">&para;</a></h3>
+<p>Voltage-controlled switch. tanh-smoothed in Behavioral mode, PWL in Ideal.</p>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>voltagecontrolledswitch</code></td>
+<td><code>[ctrl, t1, t2]</code> (control node first)</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vcswitch</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SW</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">v_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.5</span>
+<span class="w">  </span><span class="nt">g_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e3</span>
+<span class="w">  </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-9</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>v_threshold</code></td>
+<td><code>2.5</code></td>
+<td>Threshold on <code>V(ctrl) − 0</code> (V).</td>
+</tr>
+<tr>
+<td><code>g_on</code></td>
+<td><code>1e3</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>g_off</code></td>
+<td><code>1e-9</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>hysteresis</code></td>
+<td>n/a</td>
+<td><strong>YAML-only quirk</strong>: whitelisted but not forwarded. The device's internal tanh width stays at <code>0.5 V</code>. Build via the Python <code>Params</code> to override.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mosfet-incl-nmos-pmos"><code>mosfet</code> (incl. <code>nmos</code>, <code>pmos</code>)<a class="headerlink" href="#mosfet-incl-nmos-pmos" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>m</code>, <code>nmos</code></td>
+<td><code>[gate, drain, source]</code></td>
+</tr>
+<tr>
+<td><code>pmos</code></td>
+<td><code>[gate, drain, source]</code> (sets <code>is_nmos = false</code>)</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mosfet</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">d</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">s</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">vth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+<span class="w">  </span><span class="nt">kp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
+<span class="w">  </span><span class="nt">lambda</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.01</span><span class="w">         </span><span class="c1"># alias: lambda_</span>
+<span class="w">  </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-12</span>
+<span class="w">  </span><span class="nt">is_nmos</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">        </span><span class="c1"># auto-set to false when type = pmos</span>
+<span class="w">  </span><span class="nt">loss</span><span class="p">:</span><span class="w">                </span><span class="c1"># optional: switching-loss bookkeeping</span>
+<span class="w">    </span><span class="nt">eon</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50e-6</span>
+<span class="w">    </span><span class="nt">eoff</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30e-6</span>
+<span class="w">  </span><span class="nt">thermal</span><span class="p">:</span><span class="w">             </span><span class="c1"># optional: electrothermal port</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">rth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">    </span><span class="nt">cth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.01</span>
+<span class="w">    </span><span class="nt">temp_init</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
+<span class="w">    </span><span class="nt">temp_ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
+<span class="w">    </span><span class="nt">alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vth</code></td>
+<td><code>2.0</code></td>
+<td>Threshold voltage (V).</td>
+</tr>
+<tr>
+<td><code>kp</code></td>
+<td><code>0.1</code></td>
+<td>Transconductance <code>Kp·(W/L)</code> (A/V²).</td>
+</tr>
+<tr>
+<td><code>lambda</code> / <code>lambda_</code></td>
+<td><code>0.01</code></td>
+<td>Channel-length modulation (1/V).</td>
+</tr>
+<tr>
+<td><code>g_off</code></td>
+<td><code>1e-12</code></td>
+<td>Cutoff leakage (S).</td>
+</tr>
+<tr>
+<td><code>g_on</code></td>
+<td><code>1e3</code></td>
+<td>Ideal-mode on conductance (S). Not exposed via YAML — set through the Python <code>MOSFET::Params</code>.</td>
+</tr>
+<tr>
+<td><code>is_nmos</code></td>
+<td><code>true</code></td>
+<td>Set to <code>false</code> for PMOS or use the <code>pmos</code> alias.</td>
+</tr>
+</tbody>
+</table>
+<p>Behavioral path uses a smooth Shichman-Hodges blend (sigmoid <code>κ = 50/V</code>)
+so Newton has gradient through the threshold. Ideal path is pure
+two-state. See <a href="../device-models/">Device Models</a> for the equations.</p>
+<h3 id="igbt"><code>igbt</code><a class="headerlink" href="#igbt" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>q</code></td>
+<td><code>[gate, collector, emitter]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">igbt</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Q1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">c</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">e</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">vth</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span>
+<span class="w">  </span><span class="nt">g_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e4</span>
+<span class="w">  </span><span class="nt">g_off</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-12</span>
+<span class="w">  </span><span class="nt">v_ce_sat</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.5</span>
+<span class="w">  </span><span class="nt">loss</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> eon</span><span class="p">:</span><span class="w"> </span><span class="nv">200e-6</span><span class="p p-Indicator">,</span><span class="nt"> eoff</span><span class="p">:</span><span class="w"> </span><span class="nv">150e-6</span><span class="p p-Indicator">,</span><span class="nt"> err</span><span class="p">:</span><span class="w"> </span><span class="nv">80e-6</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">thermal</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> enabled</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> rth</span><span class="p">:</span><span class="w"> </span><span class="nv">0.5</span><span class="p p-Indicator">,</span><span class="nt"> cth</span><span class="p">:</span><span class="w"> </span><span class="nv">0.05</span><span class="p p-Indicator">,</span><span class="nt"> temp_init</span><span class="p">:</span><span class="w"> </span><span class="nv">25.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vth</code></td>
+<td><code>5.0</code></td>
+<td>Gate threshold (V).</td>
+</tr>
+<tr>
+<td><code>g_on</code></td>
+<td><code>1e4</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>g_off</code></td>
+<td><code>1e-12</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>v_ce_sat</code></td>
+<td><code>1.5</code></td>
+<td>C-E saturation voltage (V). Defined in <code>Params</code> and parsed; current stamps use <code>g_on</code>·<code>vce</code> only — <code>v_ce_sat</code> lives in the loss model.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="bjt_npn-bjt_pnp"><code>bjt_npn</code> / <code>bjt_pnp</code> ⚠<a class="headerlink" href="#bjt_npn-bjt_pnp" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bjtnpn</code>, <code>bjt-npn</code> / <code>bjtpnp</code>, <code>bjt-pnp</code></td>
+<td><code>[base, collector, emitter]</code></td>
+</tr>
+</tbody>
+</table>
+<p>⚠ <strong>Surrogate</strong>: stamps a <code>mosfet</code> with <code>is_nmos = (type == "bjt_npn")</code>.
+Emits <code>PULSIM_YAML_W_COMPONENT_SURROGATE</code> at load time. This is a
+first-parity slice, not a calibrated BJT model.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vbe_on</code></td>
+<td><code>2.0</code></td>
+<td>Mapped to MOSFET <code>vth</code>.</td>
+</tr>
+<tr>
+<td><code>beta</code></td>
+<td><code>100</code></td>
+<td>Validated <code>&gt; 0</code>; maps to MOSFET <code>kp = max(1e-6, beta·1e-3)</code>.</td>
+</tr>
+<tr>
+<td><code>g_off</code></td>
+<td><code>1e-12</code></td>
+<td>Off conductance (S).</td>
+</tr>
+</tbody>
+</table>
+<p>Supports <code>thermal:</code> block.</p>
+<h3 id="thyristor-scr-triac"><code>thyristor</code> (SCR) / <code>triac</code> ⚠<a class="headerlink" href="#thyristor-scr-triac" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scr</code> (for thyristor)</td>
+<td><code>[gate, anode, cathode]</code></td>
+</tr>
+<tr>
+<td><code>triac</code></td>
+<td><code>[gate, mt1, mt2]</code></td>
+</tr>
+</tbody>
+</table>
+<p>⚠ Stamps a 2-terminal <code>IdealSwitch</code> between pins 1/2 and registers a
+virtual block carrying the gate-trigger logic.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gate_threshold</code></td>
+<td><code>1.0</code></td>
+<td>(V)</td>
+</tr>
+<tr>
+<td><code>holding_current</code></td>
+<td><code>0.05</code></td>
+<td>(A) — released when forward current drops below this.</td>
+</tr>
+<tr>
+<td><code>latch_current</code></td>
+<td><code>1.2 · holding_current</code></td>
+<td>(A) — minimum forward current to latch on.</td>
+</tr>
+<tr>
+<td><code>g_on</code></td>
+<td><code>1e4</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>g_off</code></td>
+<td><code>1e-9</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>initial_state</code></td>
+<td><code>false</code></td>
+<td><code>false</code>/<code>"open"</code> = blocking.</td>
+</tr>
+</tbody>
+</table>
+<p>Thyristor: forward-only. Triac: bidirectional (gate active when
+<code>|V_gate| ≥ gate_threshold</code>).</p>
+<p>Output channels (in <code>result.channel_values</code>):
+<code>&lt;name&gt;.trigger</code>, <code>&lt;name&gt;.i_est</code>, <code>&lt;name&gt;.state</code>.</p>
+<hr />
+<h2 id="4-protection-devices">4. Protection devices ⚠<a class="headerlink" href="#4-protection-devices" title="Permanent link">&para;</a></h2>
+<p>All three are surrogates over <code>IdealSwitch</code> + a virtual event controller.</p>
+<h3 id="fuse"><code>fuse</code> ⚠<a class="headerlink" href="#fuse" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fuse</code></td>
+<td><code>[n1, n2]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fuse</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">F1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">src</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">load</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">rating</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span>
+<span class="w">  </span><span class="nt">blow_i2t</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25e-3</span>
+<span class="w">  </span><span class="nt">initial_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">closed</span><span class="w">   </span><span class="c1"># or &quot;blown&quot; / false</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rating</code></td>
+<td><code>1.0</code></td>
+<td>Nominal current rating (A). Documentation only.</td>
+</tr>
+<tr>
+<td><code>blow_i2t</code> / <code>i2t</code></td>
+<td><code>rating² · 1e-3</code></td>
+<td>I²·t threshold to blow (A²·s).</td>
+</tr>
+<tr>
+<td><code>g_on</code></td>
+<td><code>1e4</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>g_off</code></td>
+<td><code>1e-9</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>initial_state</code></td>
+<td><code>true</code>/<code>closed</code></td>
+<td>Accepts <code>"open"</code>, <code>"blown"</code>, <code>"tripped"</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Output channels: <code>&lt;name&gt;.i2t</code> (cumulative stress), <code>&lt;name&gt;.state</code> (1/0).</p>
+<h3 id="circuit_breaker"><code>circuit_breaker</code> ⚠<a class="headerlink" href="#circuit_breaker" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>breaker</code>, <code>circuitbreaker</code></td>
+<td><code>[n1, n2]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">circuit_breaker</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CB1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">bus</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">load</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">trip_current</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30.0</span>
+<span class="w">  </span><span class="nt">trip_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50e-3</span>
+<span class="w">  </span><span class="nt">initial_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">closed</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>trip_current</code> / <code>trip</code></td>
+<td><code>1.0</code></td>
+<td>Overcurrent threshold (A).</td>
+</tr>
+<tr>
+<td><code>trip_time</code></td>
+<td><code>0.0</code></td>
+<td>Inverse-time delay (s). <code>0</code> = instantaneous.</td>
+</tr>
+<tr>
+<td><code>g_on</code></td>
+<td><code>1e4</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>g_off</code></td>
+<td><code>1e-9</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>initial_state</code></td>
+<td><code>true</code></td>
+<td>Accepts boolean or <code>"open"</code> / <code>"tripped"</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Output channels: <code>&lt;name&gt;.trip_timer</code>, <code>&lt;name&gt;.state</code>.</p>
+<h3 id="relay"><code>relay</code> ⚠<a class="headerlink" href="#relay" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>relay</code></td>
+<td><code>[coil+, coil−, com, NO, NC]</code></td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">relay</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">K1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">cp</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">cn</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">com</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">no</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">nc</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">pickup_voltage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span>
+<span class="w">  </span><span class="nt">dropout_voltage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">  </span><span class="nt">initial_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pickup_current</code> / <code>pickup_voltage</code></td>
+<td><code>1.0</code></td>
+<td>Coil energize threshold. Whichever you specify takes precedence.</td>
+</tr>
+<tr>
+<td><code>dropout_current</code> / <code>dropout_voltage</code></td>
+<td><code>0.8 · pickup</code></td>
+<td>Release threshold.</td>
+</tr>
+<tr>
+<td><code>g_on</code> / <code>contact_resistance</code> / <code>ron</code></td>
+<td><code>1e4</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>g_off</code> / <code>off_resistance</code> / <code>roff</code></td>
+<td><code>1e-9</code></td>
+<td>(S)</td>
+</tr>
+<tr>
+<td><code>initial_state</code></td>
+<td><code>false</code></td>
+<td>Accepts <code>"closed"</code>, <code>"energized"</code>, <code>"on"</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Stamps two switches <code>&lt;name&gt;__no</code> (between <code>com</code> and <code>NO</code>) and
+<code>&lt;name&gt;__nc</code> (between <code>com</code> and <code>NC</code>) with opposite initial states.</p>
+<p>Output channels: <code>&lt;name&gt;.state</code> (coil energized), <code>&lt;name&gt;.no_state</code>,
+<code>&lt;name&gt;.nc_state</code>.</p>
+<hr />
+<h2 id="5-probes-scopes-no-stamp">5. Probes &amp; scopes (no stamp)<a class="headerlink" href="#5-probes-scopes-no-stamp" title="Permanent link">&para;</a></h2>
+<p>Probes don't contribute to the MNA — they're observation-only blocks
+that emit channels in the trace CSV alongside electrical state.</p>
+<h3 id="voltage_probe"><code>voltage_probe</code><a class="headerlink" href="#voltage_probe" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">voltage_probe</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Vout_meas</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Outputs <code>&lt;name&gt;</code> = <code>V(out) − V(0)</code>.</p>
+<h3 id="current_probe"><code>current_probe</code><a class="headerlink" href="#current_probe" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">current_probe</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">I_L1</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">a</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">b</span><span class="p p-Indicator">]</span><span class="w">                </span><span class="c1"># nominal — actual current comes from target</span>
+<span class="w">  </span><span class="nt">target_component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L1</span>
+</code></pre></div>
+<p>Reads the branch current of the named device (must be a branch-carrying
+element: voltage source, inductor, transformer secondary).</p>
+<h3 id="power_probe"><code>power_probe</code><a class="headerlink" href="#power_probe" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">power_probe</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">P_load</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">out</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">target_component</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Rload</span>
+</code></pre></div>
+<p>Outputs <code>&lt;name&gt;</code> = <code>V(out) − V(0)</code> × <code>branch_current(target)</code>.</p>
+<h3 id="electrical_scope"><code>electrical_scope</code><a class="headerlink" href="#electrical_scope" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Alias</th>
+<th>Nodes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scope</code></td>
+<td>1 to N</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">electrical_scope</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">probe_bus</span>
+<span class="w">  </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">v_in</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">v_out</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">v_sw</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Outputs the <strong>mean</strong> of <code>V(nodes[i])</code> across all listed pins. Useful as a
+multi-pin DC voltmeter or sanity-check tap.</p>
+<h3 id="thermal_scope"><code>thermal_scope</code><a class="headerlink" href="#thermal_scope" title="Permanent link">&para;</a></h3>
+<p>Same as <code>electrical_scope</code> but tagged as <code>thermal</code> in the channel
+metadata — for reading thermal sub-network nodes when you run with the
+electrothermal port.</p>
+<hr />
+<h2 id="6-c-params-structs-python-api">6. C++ <code>Params</code> structs (Python API)<a class="headerlink" href="#6-c-params-structs-python-api" title="Permanent link">&para;</a></h2>
+<p>These are the canonical defaults applied by the C++ device constructors.
+When you build a circuit directly from Python (skipping YAML), pass these
+structs to the <code>add_*</code> methods.</p>
+<table>
+<thead>
+<tr>
+<th>Struct</th>
+<th>Defaults</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Resistor::Params</code></td>
+<td><code>resistance = 1000</code></td>
+</tr>
+<tr>
+<td><code>Capacitor::Params</code></td>
+<td><code>capacitance = 1e-6</code>, <code>initial_voltage = 0</code></td>
+</tr>
+<tr>
+<td><code>Inductor::Params</code></td>
+<td><code>inductance = 1e-3</code>, <code>initial_current = 0</code></td>
+</tr>
+<tr>
+<td><code>VoltageSource::Params</code></td>
+<td><code>voltage = 0</code></td>
+</tr>
+<tr>
+<td><code>CurrentSource::Params</code></td>
+<td><code>current = 0</code></td>
+</tr>
+<tr>
+<td><code>IdealDiode::Params</code></td>
+<td><code>g_on = 1e3</code>, <code>g_off = 1e-9</code>, <code>v_threshold = 0</code>, <code>v_smooth = 0.1</code></td>
+</tr>
+<tr>
+<td><code>IdealSwitch::Params</code></td>
+<td><code>g_on = 1e6</code>, <code>g_off = 1e-12</code>, <code>initial_state = false</code></td>
+</tr>
+<tr>
+<td><code>VoltageControlledSwitch::Params</code></td>
+<td><code>v_threshold = 2.5</code>, <code>g_on = 1e3</code>, <code>g_off = 1e-9</code>, <code>hysteresis = 0.1</code></td>
+</tr>
+<tr>
+<td><code>MOSFET::Params</code></td>
+<td><code>vth = 2</code>, <code>kp = 0.1</code>, <code>lambda = 0.01</code>, <code>g_off = 1e-12</code>, <code>is_nmos = true</code>, <code>g_on = 1e3</code></td>
+</tr>
+<tr>
+<td><code>IGBT::Params</code></td>
+<td><code>vth = 5</code>, <code>g_on = 1e4</code>, <code>g_off = 1e-12</code>, <code>v_ce_sat = 1.5</code></td>
+</tr>
+<tr>
+<td><code>Transformer::Params</code></td>
+<td><code>turns_ratio = 1</code>, <code>magnetizing_inductance = 1e-3</code></td>
+</tr>
+<tr>
+<td><code>PWMParams</code></td>
+<td><code>v_high=1, v_low=0, frequency=10e3, duty=0.5, phase=0, dead_time=0, rise_time=0, fall_time=0</code></td>
+</tr>
+<tr>
+<td><code>SineParams</code></td>
+<td><code>amplitude=1, offset=0, frequency=50, phase=0</code></td>
+</tr>
+<tr>
+<td><code>PulseParams</code></td>
+<td><code>v_initial=0, v_pulse=1, t_delay=0, t_rise=1e-9, t_fall=1e-9, t_width=1e-6, period=0</code></td>
+</tr>
+<tr>
+<td><code>RampParams</code> <em>(C++ only — no YAML path)</em></td>
+<td><code>v_min=0, v_max=1, frequency=10e3, phase=0, triangle=false</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="7-stamp-domain-summary">7. Stamp-domain summary<a class="headerlink" href="#7-stamp-domain-summary" title="Permanent link">&para;</a></h2>
+<p>The fourteen YAML types that contribute directly to MNA (G and b):</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>YAML type</th>
+<th>Pins</th>
+<th>Linear</th>
+<th>Dynamic</th>
+<th>PWL-capable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>resistor</code></td>
+<td>2</td>
+<td>yes</td>
+<td>no</td>
+<td>—</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>capacitor</code></td>
+<td>2</td>
+<td>yes</td>
+<td>yes</td>
+<td>—</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>inductor</code></td>
+<td>2</td>
+<td>yes</td>
+<td>yes</td>
+<td>—</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>voltage_source</code> (DC)</td>
+<td>2</td>
+<td>yes</td>
+<td>no</td>
+<td>—</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>voltage_source</code> (pwm/sine/pulse)</td>
+<td>2</td>
+<td>yes</td>
+<td>time-varying</td>
+<td>—</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>current_source</code></td>
+<td>2</td>
+<td>yes</td>
+<td>no</td>
+<td>—</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>diode</code></td>
+<td>2</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>switch</code></td>
+<td>2</td>
+<td>yes (PWL)</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>vcswitch</code></td>
+<td>3</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>mosfet</code> (incl. <code>nmos</code>/<code>pmos</code>)</td>
+<td>3</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>igbt</code></td>
+<td>3</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>transformer</code></td>
+<td>4</td>
+<td>yes</td>
+<td>no</td>
+<td>—</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>snubber_rc</code></td>
+<td>2</td>
+<td>yes</td>
+<td>yes</td>
+<td>—</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>bjt_npn</code>/<code>bjt_pnp</code> ⚠</td>
+<td>3</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<p>Virtual electrical-domain wrappers (no extra stamps; they perturb a base
+device):</p>
+<table>
+<thead>
+<tr>
+<th>YAML type</th>
+<th>Backs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>saturable_inductor</code></td>
+<td><code>inductor</code> + state-dependent L(I)</td>
+</tr>
+<tr>
+<td><code>coupled_inductor</code></td>
+<td>two <code>inductor</code>s + mutual M</td>
+</tr>
+<tr>
+<td><code>thyristor</code> / <code>triac</code></td>
+<td><code>switch</code> + latching event logic</td>
+</tr>
+<tr>
+<td><code>fuse</code> / <code>circuit_breaker</code></td>
+<td><code>switch</code> + trip event logic</td>
+</tr>
+<tr>
+<td><code>relay</code></td>
+<td>two <code>switch</code>es + coil event logic</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../control-blocks-reference/">Control Blocks Reference</a> — every virtual
+  control block (PWM, PI, Clarke, Park, PLL, SVM, …).</li>
+<li><a href="../netlist-format/">Netlist YAML Format</a> — schema for the top-level
+  <code>simulation:</code> block and the <code>components:</code> list.</li>
+<li><a href="../device-models/">Device Models</a> — equations behind MOSFET / IGBT /
+  diode and how switching modes pick between PWL and Behavioral paths.</li>
+<li><a href="../catalog-devices/">Catalog Devices</a> — vendor MOSFET / IGBT presets
+  callable from Python.</li>
+<li><a href="../magnetic-models/">Magnetic Models</a> — saturating-inductor BH curve,
+  transformer details, Steinmetz core-loss.</li>
+<li><a href="../electrothermal-workflow/">Electrothermal Workflow</a> — how the
+  <code>thermal:</code> block on MOSFET/IGBT works end-to-end.</li>
+<li><a href="../gui-component-parity/">GUI Backend Parity</a> — table mapping every
+  PulsimGui block to its YAML counterpart.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../user-guide/" class="md-footer__link md-footer__link--prev" aria-label="Previous: User Guide">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                User Guide
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../control-blocks-reference/" class="md-footer__link md-footer__link--next" aria-label="Next: Control Blocks Reference">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Control Blocks Reference
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+    
+  </body>
+</html>
