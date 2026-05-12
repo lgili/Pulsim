@@ -164,3 +164,50 @@ Threshold files:
 
 - `benchmarks/kpi_thresholds.yaml` (optional in general gate)
 - `benchmarks/kpi_thresholds_electrothermal.yaml` (required in electrothermal gate)
+
+## Junction-temperature KPI (Phase 27)
+
+Phase 27 added a Python-side Foster-network estimator that turns an
+observed V (across a dissipating element) into a junction temperature
+trajectory `T_j(t)`. It's exposed as a `junction_temperature` metric in
+the YAML KPI block:
+
+```yaml
+benchmark:
+  id: electrothermal_resistor_self_heating
+  kpi:
+    - metric: junction_temperature
+      observable: V(r_diss)           # voltage across the dissipating element
+      r_resistor: 1.0                 # to derive P(t) = V²/R
+      r_th_jc: 5.0                    # junction-to-case (K/W)
+      c_th_jc: 0.1                    # junction-to-case (J/K)
+      t_ambient_c: 25.0
+      r_th_ca: 0.0                    # case-to-ambient (K/W), optional
+      label: r_diss
+```
+
+Output columns: `kpi__t_j_max_c__r_diss`, `kpi__t_j_final_c__r_diss`,
+`kpi__delta_t_j_c__r_diss`.
+
+Behind the scenes the runner calls
+`compute_power_dissipation_resistor` then
+`compute_junction_temperature` (a forward-Euler integration of
+`C_th · dT_j/dt + (T_j − T_amb)/R_th = P(t)`). The helpers are pure
+Python and importable directly — chain multiple calls for
+Cauer/Foster networks `J → C → HS → A`.
+
+See [KPI Reference → Junction temperature](kpi-reference.md#11-junction-temperature-junction_temperature)
+for the full parameter table and Python signature.
+
+The shipped reference benchmark is
+`benchmarks/circuits/electrothermal_resistor_self_heating.yaml` —
+a 5 V across 1 Ω resistor (P = 25 W constant), R_th = 5 K/W,
+C_th = 0.1 J/K, T_amb = 25 °C. Analytical steady state: T_j = 150 °C.
+After 2 s (= 4 τ) the simulation reports `T_j_final = 147.76 °C`.
+
+## See also
+
+- [`components-reference.md`](components-reference.md#3-switching-devices) —
+  full `thermal:` block schema on MOSFET / IGBT / BJT components.
+- [`kpi-reference.md`](kpi-reference.md) — every KPI, including the
+  full Foster-network signature.

@@ -107,37 +107,43 @@ nav:
       - Documentation Home: index.md
       - Backend Architecture: backend-architecture.md
       - Getting Started: getting-started.md
-  - Guides:
       - User Guide: user-guide.md
+  - Reference:
+      - Components Reference: components-reference.md
+      - Control Blocks Reference: control-blocks-reference.md
+      - KPI Reference: kpi-reference.md
       - Netlist YAML Format: netlist-format.md
-      - Electrothermal Workflow: electrothermal-workflow.md
-      - Examples and Results: examples-and-results.md
-      - Benchmarks and Parity: benchmarks-and-parity.md
-      - Notebooks: notebooks.md
-      - Convergence Tuning: convergence-tuning-guide.md
-      - Linear-Solver Cache: linear-solver-cache.md
-      - AC Analysis: ac-analysis.md
-      - Frequency Response Analysis (FRA): fra.md
-      - Magnetic Models: magnetic-models.md
-      - Catalog Devices: catalog-devices.md
-      - Converter Templates: converter-templates.md
-      - Motor Models: motor-models.md
-      - Three-Phase Grid Library: three-phase-grid.md
-      - Real-Time Code Generation: code-generation.md
-      - Parameter Sweep: parameter-sweep.md
-      - Property-Based Testing: property-based-testing.md
-      - FMI Export: fmi-export.md
-      - Robustness Policy: robustness-policy.md
-      - Build System: build-system.md
-      - SPICE Parity Dashboard: spice-parity-dashboard.md
-      - Troubleshooting: troubleshooting.md
-  - API:
+      - Device Models: device-models.md
       - API Reference: api-reference.md
       - Python API (Legacy Notes): python-api.md
+  - Guides:
+      - Examples and Results: examples-and-results.md
+      - Notebooks: notebooks.md
+      - AC Analysis: ac-analysis.md
+      - Frequency Response Analysis (FRA): fra.md
+      - Electrothermal Workflow: electrothermal-workflow.md
+      - Parameter Sweep: parameter-sweep.md
+      - Real-Time Code Generation: code-generation.md
+      - FMI Export: fmi-export.md
+      - Automatic Differentiation: automatic-differentiation.md
+      - Convergence Tuning: convergence-tuning-guide.md
+      - Linear-Solver Cache: linear-solver-cache.md
+      - Robustness Policy: robustness-policy.md
+      - Troubleshooting: troubleshooting.md
+  - Domain Libraries:
+      - Magnetic Models: magnetic-models.md
+      - Motor Models: motor-models.md
+      - Three-Phase Grid Library: three-phase-grid.md
+      - Catalog Devices: catalog-devices.md
+      - Converter Templates: converter-templates.md
+  - Quality Gates:
+      - Benchmarks and Parity: benchmarks-and-parity.md
+      - SPICE Parity Dashboard: spice-parity-dashboard.md
+      - Property-Based Testing: property-based-testing.md
+      - Build System: build-system.md
   - Compatibility:
       - GUI Backend Parity: gui-component-parity.md
       - Migration Guide: migration-guide.md
-      - Device Models: device-models.md
   - Operations:
       - Configuration: configuration.md
       - Docs Versioning and Release: versioning-and-release.md

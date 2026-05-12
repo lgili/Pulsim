@@ -207,6 +207,118 @@ rated reactive demand at 5 % droop.
 - **Microgrid composition tutorial**: one grid-forming + N
   grid-following inverters sharing a load, full tutorial notebook.
 
+## YAML control blocks (Phase 28)
+
+> Status: **shipped** — Phase 28 added six declarative virtual control
+> blocks that mirror the C++ Park/Clarke/PLL primitives above. With
+> these in place, a balanced three-phase drive can be sketched in
+> ~10 lines of YAML instead of hand-wiring trigonometry through
+> `math_block` + `gain` chains.
+
+The C++ layer documented in the preceding sections is the high-fidelity
+implementation used by Python factories like `GridFollowingInverter`.
+Phase 28 exposes the same conceptual primitives as **YAML-callable
+virtual blocks** so they compose with all the other Pulsim block types:
+
+| YAML type | Aliases | Outputs |
+|---|---|---|
+| `clarke_transform` | `clarke`, `abc_to_alpha_beta` | `<name>.alpha`, `<name>.beta`, `<name>.gamma` |
+| `inverse_clarke_transform` | `inverse_clarke`, `alpha_beta_to_abc` | `<name>.a`, `<name>.b`, `<name>.c` |
+| `park_transform` | `park`, `alpha_beta_to_dq` | `<name>.d`, `<name>.q`, `<name>.zero` |
+| `inverse_park_transform` | `inverse_park`, `dq_to_alpha_beta` | `<name>.alpha`, `<name>.beta`, `<name>.gamma` |
+| `pll` | `phase_locked_loop` | `<name>.theta`, `<name>.omega`, `<name>.lock_error` |
+| `svm` | `space_vector_modulation`, `svpwm` | `<name>.d_a`, `<name>.d_b`, `<name>.d_c` |
+
+Cross-block wiring uses the same `*_from_channel` metadata pattern
+shared with `pwm_generator` — so chaining `Clarke → Park → InversePark
+→ SVM` requires zero electrical-domain plumbing.
+
+### Open-loop vector-control example
+
+```yaml
+schema: pulsim-v1
+version: 1
+simulation:
+  tstart: 0.0
+  tstop: 100e-3
+  dt: 50e-6
+  integrator: trapezoidal
+components:
+  # Three balanced 60 Hz sources, 120° apart
+  - type: voltage_source
+    name: Va
+    nodes: [a, 0]
+    waveform: { type: sine, amplitude: 100.0, frequency: 60.0, phase: 0.0 }
+  - type: voltage_source
+    name: Vb
+    nodes: [b, 0]
+    waveform: { type: sine, amplitude: 100.0, frequency: 60.0, phase: -2.0943951 }
+  - type: voltage_source
+    name: Vc
+    nodes: [c, 0]
+    waveform: { type: sine, amplitude: 100.0, frequency: 60.0, phase: -4.1887902 }
+  # PLL on phase A → θ̂ for the Park transforms
+  - type: pll
+    name: PLL
+    nodes: [a]
+    kp: 200.0
+    ki: 2000.0
+    f_nominal_hz: 60.0
+  # abc → αβγ
+  - type: clarke_transform
+    name: CLK
+    nodes: [a, b, c]
+  # αβ → dq with θ from PLL (identity controller / open loop)
+  - type: park_transform
+    name: PARK
+    nodes: [a, b]
+    alpha_from_channel: CLK.alpha
+    beta_from_channel:  CLK.beta
+    theta_from_channel: PLL.theta
+  # dq → αβ (identity passthrough back)
+  - type: inverse_park_transform
+    name: IPARK
+    nodes: [a, b]
+    d_from_channel: PARK.d
+    q_from_channel: PARK.q
+    theta_from_channel: PLL.theta
+  # αβ → three half-bridge duties (zero-sequence injection)
+  - type: svm
+    name: SVM
+    nodes: [a]
+    v_dc: 200.0
+    alpha_from_channel: IPARK.alpha
+    beta_from_channel:  IPARK.beta
+```
+
+The trace CSV will contain `chan:CLK.alpha`, `chan:PLL.theta`,
+`chan:PARK.d`, `chan:SVM.d_a`, etc. as first-class observable columns.
+
+### PLL convention
+
+The single-phase PLL discriminator is `v_q = −sin(θ̂)·v_in`. With a
+pure-sine input `v_in = V·sin(ωt)`, the loop locks θ̂ at the
+**quadrature offset** (`θ̂ = ωt − π/2`) rather than in-phase, because
+the average of `−sin(ωt)·sin(ωt)` is `−V/2` (not zero). To use the
+in-phase convention, drive the PLL from a cosine source or post-process
+θ̂ by adding π/2.
+
+In a closed-loop drive this rarely matters — what matters is that θ̂
+tracks the input frequency deterministically, which it does.
+
+### Benchmarks
+
+Three closed-loop benchmarks exercise the full chain (all in
+`benchmarks/circuits/`):
+
+- `three_phase_dq_decoupling.yaml` — 3-φ sources → PLL → Clarke → Park.
+- `pll_grid_sync.yaml` — single-phase PLL locks to a grid sine; emits
+  θ, ω, lock_error as channels.
+- `vector_control_open_loop.yaml` — full chain: grid → Clarke → PLL →
+  Park → identity → InvPark → SVM → three duties.
+
+All three pass the regression dashboard (50/50 closed-loop benches).
+
 ## See also
 
 - [`motor-models.md`](motor-models.md) — provides the Park/Clarke
@@ -217,3 +329,8 @@ rated reactive demand at 5 % droop.
 - [`ac-analysis.md`](ac-analysis.md) — the AC-sweep tool to validate
   the closed-loop PLL bandwidth and inverter stability margins
   against design.
+- [`control-blocks-reference.md`](control-blocks-reference.md) — full
+  per-block parameter / metadata / channel reference for Phase 28
+  blocks above.
+- [`components-reference.md`](components-reference.md) — every
+  electrical component you'd combine with these control blocks.

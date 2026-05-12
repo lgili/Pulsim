@@ -188,6 +188,41 @@ Three end-to-end checks pin the gates from `add-magnetic-core-models`:
   Steinmetz loss but not hysteresis loop area. Tracked alongside
   Jiles-Atherton parameter fitting.
 
+## Steinmetz core-loss KPI (Phase 26)
+
+Phase 26 added a Steinmetz core-loss helper to the benchmark KPI module
+so you can score a core's loss without writing a custom analyzer:
+
+```yaml
+benchmark:
+  id: core_loss_steinmetz_sine
+  kpi:
+    - metric: core_loss_steinmetz
+      observable: I(L_core)         # inductor current → B via L·I / (N·A)
+      label: ferrite
+      inductance_h: 500e-6
+      turns: 60
+      area_m2: 1.5e-4
+      fundamental_hz: 60.0
+      k:     16.0                   # Steinmetz coefficients
+      alpha:  1.45
+      beta:   2.7
+```
+
+The runner emits `kpi__core_loss_w_per_kg__ferrite` and
+`kpi__b_peak_tesla__ferrite` columns in `results.csv`. Two benchmarks
+exercise this end-to-end:
+
+- `benchmarks/circuits/core_loss_steinmetz_sine.yaml` — sinusoidal
+  excitation at known frequency / amplitude.
+- `benchmarks/circuits/saturating_inductor_step.yaml` — current step
+  into a saturating inductor; exercises the L_eff(I) curve plus loss
+  scaling.
+
+See [KPI Reference → Steinmetz core loss](kpi-reference.md#10-steinmetz-core-loss-core_loss_steinmetz)
+for the per-parameter reference and the underlying Python helper
+`compute_core_loss_steinmetz`.
+
 ## See also
 
 - [`automatic-differentiation.md`](automatic-differentiation.md) — the
@@ -196,3 +231,8 @@ Three end-to-end checks pin the gates from `add-magnetic-core-models`:
 - [`linear-solver-cache.md`](linear-solver-cache.md) — the per-key LRU
   that benefits when transformer cycling produces the same `(topology,
   dt)` matrix across PWM cycles.
+- [`components-reference.md`](components-reference.md#saturable_inductor) —
+  full YAML parameter reference for `saturable_inductor` and
+  `coupled_inductor`.
+- [`kpi-reference.md`](kpi-reference.md) — every available metric, the
+  YAML wiring, and the underlying Python helper signatures.

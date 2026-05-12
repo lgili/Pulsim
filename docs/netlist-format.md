@@ -235,3 +235,23 @@ simulation:
 Values support SI prefixes: `f`, `p`, `n`, `u`, `m`, `k`, `meg`, `g`, `t`.
 
 Examples: `1k` = 1000, `100n` = 100e-9, `4.7u` = 4.7e-6.
+
+## Where to go next
+
+This page covers the **schema** of a netlist. For exhaustive per-type
+parameter tables, defaults, and aliases see:
+
+- [Components Reference](components-reference.md) — every electrical
+  device (`resistor`, `mosfet`, `transformer`, `saturable_inductor`,
+  `fuse`, `relay`, `thyristor`, …) with parameters, defaults, units, and
+  notes on surrogates and YAML-vs-Python quirks.
+- [Control Blocks Reference](control-blocks-reference.md) — every
+  virtual block (`pwm_generator`, `pi_controller`, `lookup_table`,
+  `clarke_transform`, `park_transform`, `pll`, `svm`, …) with channels
+  and cross-block metadata wiring patterns.
+- [KPI Reference](kpi-reference.md) — declarative `benchmark.kpi:`
+  entries that score the captured trace (THD, ripple, ZVS%, T_j, etc.).
+- [Three-Phase Grid Library](three-phase-grid.md) — vector-control
+  pipelines built from Clarke / Park / PLL / SVM blocks.
+- [Electrothermal Workflow](electrothermal-workflow.md) — the `thermal:`
+  block on MOSFET / IGBT / BJT components.
