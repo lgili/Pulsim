@@ -741,7 +741,11 @@ public:
             "pwm_generator", "integrator", "differentiator",
             "limiter", "rate_limiter", "hysteresis", "lookup_table",
             "transfer_function", "delay_block", "sample_hold",
-            "state_machine", "signal_mux", "signal_demux"
+            "state_machine", "signal_mux", "signal_demux",
+            // Three-phase control blocks (Phase 28)
+            "clarke_transform", "inverse_clarke_transform",
+            "park_transform", "inverse_park_transform",
+            "pll", "svm"
         };
 
         // Phase 2: control update
@@ -1029,6 +1033,201 @@ public:
                 output = selected < component.nodes.size() ? node_voltage(component.nodes[selected]) : in0;
             } else if (component.type == "signal_demux") {
                 output = in0;
+            } else if (component.type == "clarke_transform") {
+                // Clarke (amplitude-invariant). nodes: [a, b, c]
+                // α = (2/3)·(va − ½·vb − ½·vc)
+                // β = (2/3)·(√3/2)·(vb − vc) = (vb − vc)/√3
+                // γ = (1/3)·(va + vb + vc)
+                const Real va = component.nodes.size() > 0 ? node_voltage(component.nodes[0]) : 0.0;
+                const Real vb = component.nodes.size() > 1 ? node_voltage(component.nodes[1]) : 0.0;
+                const Real vc = component.nodes.size() > 2 ? node_voltage(component.nodes[2]) : 0.0;
+                const Real alpha = (2.0/3.0) * (va - 0.5*vb - 0.5*vc);
+                const Real beta  = (vb - vc) / std::sqrt(3.0);
+                const Real gamma = (1.0/3.0) * (va + vb + vc);
+                output = alpha;  // primary channel for downstream `_from_channel` patterns
+                virtual_signal_state_[component.name + ".alpha"] = alpha;
+                virtual_signal_state_[component.name + ".beta"]  = beta;
+                virtual_signal_state_[component.name + ".gamma"] = gamma;
+                result.channel_values[component.name + ".alpha"] = alpha;
+                result.channel_values[component.name + ".beta"]  = beta;
+                result.channel_values[component.name + ".gamma"] = gamma;
+            } else if (component.type == "inverse_clarke_transform") {
+                // α β γ → a b c (amplitude-invariant inverse)
+                // a = α + γ
+                // b = −½·α + (√3/2)·β + γ
+                // c = −½·α − (√3/2)·β + γ
+                const Real alpha = component.nodes.size() > 0 ? node_voltage(component.nodes[0]) : 0.0;
+                const Real beta  = component.nodes.size() > 1 ? node_voltage(component.nodes[1]) : 0.0;
+                const Real gamma = component.nodes.size() > 2 ? node_voltage(component.nodes[2]) : 0.0;
+                const Real a = alpha + gamma;
+                const Real b = -0.5*alpha + (std::sqrt(3.0)/2.0)*beta + gamma;
+                const Real c = -0.5*alpha - (std::sqrt(3.0)/2.0)*beta + gamma;
+                output = a;
+                virtual_signal_state_[component.name + ".a"] = a;
+                virtual_signal_state_[component.name + ".b"] = b;
+                virtual_signal_state_[component.name + ".c"] = c;
+                result.channel_values[component.name + ".a"] = a;
+                result.channel_values[component.name + ".b"] = b;
+                result.channel_values[component.name + ".c"] = c;
+            } else if (component.type == "park_transform") {
+                // α β → d q. θ from metadata `theta_from_channel: <name>`
+                // d =  cos(θ)·α + sin(θ)·β
+                // q = −sin(θ)·α + cos(θ)·β
+                // 0 = γ (passthrough)
+                // α/β can come from electrical nodes (positional) or
+                // from a virtual channel via `alpha_from_channel` /
+                // `beta_from_channel` (e.g. a Clarke block's output).
+                Real alpha = component.nodes.size() > 0 ? node_voltage(component.nodes[0]) : 0.0;
+                Real beta  = component.nodes.size() > 1 ? node_voltage(component.nodes[1]) : 0.0;
+                const Real gamma = component.nodes.size() > 2 ? node_voltage(component.nodes[2]) : 0.0;
+                if (const auto it = component.metadata.find("alpha_from_channel");
+                    it != component.metadata.end() && !it->second.empty()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) alpha = sig_it->second;
+                }
+                if (const auto it = component.metadata.find("beta_from_channel");
+                    it != component.metadata.end() && !it->second.empty()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) beta = sig_it->second;
+                }
+                Real theta = 0.0;
+                if (const auto it = component.metadata.find("theta_from_channel");
+                    it != component.metadata.end() && !it->second.empty()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) {
+                        theta = sig_it->second;
+                    }
+                }
+                const Real cos_t = std::cos(theta);
+                const Real sin_t = std::sin(theta);
+                const Real d =  cos_t*alpha + sin_t*beta;
+                const Real q = -sin_t*alpha + cos_t*beta;
+                output = d;
+                virtual_signal_state_[component.name + ".d"] = d;
+                virtual_signal_state_[component.name + ".q"] = q;
+                virtual_signal_state_[component.name + ".zero"] = gamma;
+                result.channel_values[component.name + ".d"] = d;
+                result.channel_values[component.name + ".q"] = q;
+                result.channel_values[component.name + ".zero"] = gamma;
+            } else if (component.type == "inverse_park_transform") {
+                // d q → α β. θ from metadata.
+                // α = cos(θ)·d − sin(θ)·q
+                // β = sin(θ)·d + cos(θ)·q
+                // d/q can come from electrical nodes (positional) or
+                // from `d_from_channel` / `q_from_channel` metadata.
+                Real d = component.nodes.size() > 0 ? node_voltage(component.nodes[0]) : 0.0;
+                Real q = component.nodes.size() > 1 ? node_voltage(component.nodes[1]) : 0.0;
+                const Real zero = component.nodes.size() > 2 ? node_voltage(component.nodes[2]) : 0.0;
+                if (const auto it = component.metadata.find("d_from_channel");
+                    it != component.metadata.end() && !it->second.empty()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) d = sig_it->second;
+                }
+                if (const auto it = component.metadata.find("q_from_channel");
+                    it != component.metadata.end() && !it->second.empty()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) q = sig_it->second;
+                }
+                Real theta = 0.0;
+                if (const auto it = component.metadata.find("theta_from_channel");
+                    it != component.metadata.end() && !it->second.empty()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) {
+                        theta = sig_it->second;
+                    }
+                }
+                const Real cos_t = std::cos(theta);
+                const Real sin_t = std::sin(theta);
+                const Real alpha = cos_t*d - sin_t*q;
+                const Real beta  = sin_t*d + cos_t*q;
+                output = alpha;
+                virtual_signal_state_[component.name + ".alpha"] = alpha;
+                virtual_signal_state_[component.name + ".beta"]  = beta;
+                virtual_signal_state_[component.name + ".gamma"] = zero;
+                result.channel_values[component.name + ".alpha"] = alpha;
+                result.channel_values[component.name + ".beta"]  = beta;
+                result.channel_values[component.name + ".gamma"] = zero;
+            } else if (component.type == "pll") {
+                // Single-phase PLL: locks to the input node's signal via a PI
+                // loop on the q-axis projection of the input.
+                //   d/dt[θ] = ω
+                //   ω = ω_nom + Kp·v_q + Ki·∫v_q
+                // where v_q = −sin(θ)·v_in is the q-axis component of a
+                // single-phase Park transform.
+                const Real v_in = in0;
+                const Real kp = get_numeric(component, "kp", 100.0);
+                const Real ki = get_numeric(component, "ki", 1000.0);
+                const Real f_nom = get_numeric(component, "f_nominal_hz", 60.0);
+                const Real omega_nom = 2.0 * std::numbers::pi_v<Real> * f_nom;
+                Real phase = virtual_signal_state_[component.name + ".phase"];
+                Real omega_int = virtual_signal_state_[component.name + ".omega_int"];
+                if (dt > 0.0) {
+                    const Real vq = -std::sin(phase) * v_in;
+                    omega_int += vq * dt;
+                    const Real omega = omega_nom + kp * vq + ki * omega_int;
+                    phase += omega * dt;
+                    // Wrap [0, 2π)
+                    constexpr Real TWO_PI = 2.0 * std::numbers::pi_v<Real>;
+                    while (phase >= TWO_PI) phase -= TWO_PI;
+                    while (phase < 0.0)     phase += TWO_PI;
+                    output = phase;
+                    virtual_signal_state_[component.name + ".phase"] = phase;
+                    virtual_signal_state_[component.name + ".omega_int"] = omega_int;
+                    virtual_signal_state_[component.name + ".theta"] = phase;
+                    virtual_signal_state_[component.name + ".omega"] = omega;
+                    virtual_signal_state_[component.name + ".lock_error"] = vq;
+                    result.channel_values[component.name + ".theta"] = phase;
+                    result.channel_values[component.name + ".omega"] = omega;
+                    result.channel_values[component.name + ".lock_error"] = vq;
+                } else {
+                    output = phase;
+                    result.channel_values[component.name + ".theta"] = phase;
+                }
+            } else if (component.type == "svm") {
+                // Space-Vector Modulation: takes (α, β) reference + V_dc,
+                // emits three half-bridge duties in [0, 1] (top switches).
+                // Reads α, β from `alpha_from_channel` / `beta_from_channel`
+                // and V_dc from numeric param `v_dc` (default 1.0).
+                Real alpha = 0.0, beta = 0.0;
+                if (const auto it = component.metadata.find("alpha_from_channel");
+                    it != component.metadata.end()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) alpha = sig_it->second;
+                }
+                if (const auto it = component.metadata.find("beta_from_channel");
+                    it != component.metadata.end()) {
+                    const auto sig_it = virtual_signal_state_.find(it->second);
+                    if (sig_it != virtual_signal_state_.end()) beta = sig_it->second;
+                }
+                const Real v_dc = get_numeric(component, "v_dc", 1.0);
+                // Standard "min-max" SVPWM modulator: scale to phase
+                // voltages with zero-sequence injection. Output duties in
+                // [0, 1] suitable for driving complementary half-bridges.
+                //   v_a* = α
+                //   v_b* = −½·α + (√3/2)·β
+                //   v_c* = −½·α − (√3/2)·β
+                const Real va = alpha;
+                const Real vb = -0.5*alpha + (std::sqrt(3.0)/2.0)*beta;
+                const Real vc = -0.5*alpha - (std::sqrt(3.0)/2.0)*beta;
+                // Common-mode (zero-sequence) injection: shift so
+                // max+min = V_dc, maximizing modulation index.
+                const Real v_max = std::max({va, vb, vc});
+                const Real v_min = std::min({va, vb, vc});
+                const Real cm = -0.5 * (v_max + v_min);
+                Real da = (va + cm + v_dc/2.0) / v_dc;
+                Real db = (vb + cm + v_dc/2.0) / v_dc;
+                Real dc = (vc + cm + v_dc/2.0) / v_dc;
+                // Clamp to [0, 1]
+                da = std::clamp(da, Real{0.0}, Real{1.0});
+                db = std::clamp(db, Real{0.0}, Real{1.0});
+                dc = std::clamp(dc, Real{0.0}, Real{1.0});
+                output = da;
+                virtual_signal_state_[component.name + ".d_a"] = da;
+                virtual_signal_state_[component.name + ".d_b"] = db;
+                virtual_signal_state_[component.name + ".d_c"] = dc;
+                result.channel_values[component.name + ".d_a"] = da;
+                result.channel_values[component.name + ".d_b"] = db;
+                result.channel_values[component.name + ".d_c"] = dc;
             }
 
             virtual_signal_state_[component.name] = output;

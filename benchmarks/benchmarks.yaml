@@ -481,6 +481,18 @@ benchmarks:
   #   Kept here as a future "needs ngspice .cir tuning" item.
   - path: circuits/buck_pmos.yaml
     scenarios: [direct_trap, trbdf2]
+
+  # Phase 28: three-phase control primitives — Clarke / Park / PLL / SVM.
+  # Each bench just runs the chain on a synthetic grid; channels feed
+  # through `<name>.alpha`, `<name>.theta`, etc. and are dumped to
+  # the CSV as `chan:<name>` columns. Baselines were captured with the
+  # default direct_trap scenario.
+  - path: circuits/three_phase_dq_decoupling.yaml
+    scenarios: [direct_trap]
+  - path: circuits/pll_grid_sync.yaml
+    scenarios: [direct_trap]
+  - path: circuits/vector_control_open_loop.yaml
+    scenarios: [direct_trap]
 scenarios:
   direct_trap:
     simulation:

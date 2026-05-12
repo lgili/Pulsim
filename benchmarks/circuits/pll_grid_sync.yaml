@@ -1,0 +1,38 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: pll_grid_sync
+  category: closed_loop
+  observables:
+    - column: chan:PLL.theta
+    - column: chan:PLL.omega
+    - column: chan:PLL.lock_error
+  expectations:
+    metrics:
+      max_error: 5.0e-1
+      steady_state_max_error: 5.0e-1
+  validation:
+    type: reference
+    observable: chan:PLL.theta
+    baseline: baselines/pll_grid_sync.csv
+  # Single-phase PLL locking to a 60 Hz grid sine source.
+  # θ ramps from 0 → 2π every 16.67 ms once locked. ω → 2π·60.
+  # lock_error → 0 (= sin(θ̂ − θ_grid)·V_pk component).
+simulation:
+  tstart: 0.0
+  tstop: 200e-3
+  dt: 50e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vgrid
+    nodes: [grid, 0]
+    waveform: {type: sine, amplitude: 100.0, frequency: 60.0, offset: 0.0, phase: 0.0}
+  - type: pll
+    name: PLL
+    nodes: [grid]
+    kp: 200.0
+    ki: 2000.0
+    f_nominal_hz: 60.0

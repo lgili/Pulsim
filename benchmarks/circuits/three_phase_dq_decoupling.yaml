@@ -1,0 +1,62 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: three_phase_dq_decoupling
+  category: closed_loop
+  observables:
+    - column: chan:PARK.d
+    - column: chan:PARK.q
+    - column: chan:CLK.alpha
+    - column: chan:CLK.beta
+    - column: chan:PLL.theta
+  expectations:
+    metrics:
+      max_error: 5.0e-1
+      steady_state_max_error: 5.0e-1
+  validation:
+    type: reference
+    observable: chan:PARK.d
+    baseline: baselines/three_phase_dq_decoupling.csv
+  # Three balanced sine sources (60 Hz, 120° apart). The PLL block
+  # locks onto phase A; its θ output drives the Park transform.
+  # Pipeline: abc → Clarke (α β γ) → Park (with θ from PLL) → d q.
+  # In steady state, d/q should settle to DC values (no 60-Hz ripple)
+  # — the canonical "Park rotates away the line frequency" outcome.
+simulation:
+  tstart: 0.0
+  tstop: 100e-3
+  dt: 50e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  - type: voltage_source
+    name: Va
+    nodes: [a, 0]
+    waveform: {type: sine, amplitude: 100.0, frequency: 60.0, offset: 0.0, phase: 0.0}
+  - type: voltage_source
+    name: Vb
+    nodes: [b, 0]
+    waveform: {type: sine, amplitude: 100.0, frequency: 60.0, offset: 0.0, phase: -2.0943951}
+  - type: voltage_source
+    name: Vc
+    nodes: [c, 0]
+    waveform: {type: sine, amplitude: 100.0, frequency: 60.0, offset: 0.0, phase: -4.1887902}
+  # PLL synthesises θ tracking the source phase.
+  - type: pll
+    name: PLL
+    nodes: [a]
+    kp: 200.0
+    ki: 2000.0
+    f_nominal_hz: 60.0
+  # Clarke (abc → α β γ)
+  - type: clarke_transform
+    name: CLK
+    nodes: [a, b, c]
+  # Park (αβ → dq). α/β come from the Clarke block's channels; θ from PLL.
+  - type: park_transform
+    name: PARK
+    nodes: [a, b]
+    theta_from_channel: PLL.theta
+    alpha_from_channel: CLK.alpha
+    beta_from_channel: CLK.beta

@@ -281,6 +281,13 @@ const std::unordered_map<std::string, std::string>& component_alias_map() {
         add_aliases("thermal_scope", {"thermalscope"});
         add_aliases("signal_mux", {"signalmux", "mux"});
         add_aliases("signal_demux", {"signaldemux", "demux"});
+        // Three-phase control blocks (Phase 28)
+        add_aliases("clarke_transform", {"clarke", "abc_to_alpha_beta"});
+        add_aliases("inverse_clarke_transform", {"inverse_clarke", "alpha_beta_to_abc"});
+        add_aliases("park_transform", {"park", "alpha_beta_to_dq"});
+        add_aliases("inverse_park_transform", {"inverse_park", "dq_to_alpha_beta"});
+        add_aliases("pll", {"phase_locked_loop"});
+        add_aliases("svm", {"space_vector_modulation", "svpwm"});
 
         return map;
     }();
@@ -335,7 +342,14 @@ const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>>& comp
         {"electrical_scope", {1, std::numeric_limits<std::size_t>::max()}},
         {"thermal_scope", {1, std::numeric_limits<std::size_t>::max()}},
         {"signal_mux", {2, std::numeric_limits<std::size_t>::max()}},
-        {"signal_demux", {2, std::numeric_limits<std::size_t>::max()}}
+        {"signal_demux", {2, std::numeric_limits<std::size_t>::max()}},
+        // Three-phase control blocks (Phase 28)
+        {"clarke_transform", {3, 3}},
+        {"inverse_clarke_transform", {3, 3}},
+        {"park_transform", {2, 3}},          // alpha/beta required; gamma optional
+        {"inverse_park_transform", {2, 3}},  // d/q required; zero optional
+        {"pll", {1, 1}},
+        {"svm", {1, 2}}                       // accepts a "trigger" input or grounded
     };
     return arity;
 }
@@ -368,7 +382,14 @@ const std::unordered_set<std::string>& virtual_component_types() {
         "electrical_scope",
         "thermal_scope",
         "signal_mux",
-        "signal_demux"
+        "signal_demux",
+        // Three-phase control blocks (Phase 28)
+        "clarke_transform",
+        "inverse_clarke_transform",
+        "park_transform",
+        "inverse_park_transform",
+        "pll",
+        "svm"
     };
     return types;
 }

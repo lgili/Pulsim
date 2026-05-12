@@ -115,20 +115,38 @@ def _write_state_csv(
     times: Sequence[float],
     states: Sequence[Sequence[float]],
     signal_names: Sequence[str],
+    virtual_channels: Optional[Dict[str, Sequence[float]]] = None,
 ) -> int:
     if len(times) != len(states):
         raise RuntimeError("Simulation result time/state length mismatch")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Phase 28: include virtual-block channel outputs (e.g. PLL.theta,
+    # CLK.alpha, PARK.d, SVM.d_a) as additional CSV columns whenever the
+    # transient result has produced them. Channels are written as
+    # `chan:<name>` so they're easy to distinguish from electrical
+    # signal names and impossible to collide with state-vector entries.
+    chan_names: List[str] = []
+    chan_series: List[Sequence[float]] = []
+    if virtual_channels:
+        for name in sorted(virtual_channels.keys()):
+            chan_names.append(f"chan:{name}")
+            chan_series.append(virtual_channels[name])
+
     with open(output_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["time", *signal_names])
-        for t, state in zip(times, states):
+        writer.writerow(["time", *signal_names, *chan_names])
+        for idx, (t, state) in enumerate(zip(times, states)):
             if len(state) != len(signal_names):
                 raise RuntimeError("Simulation state size mismatch with circuit signals")
             row = [f"{float(t):.9e}"]
             row.extend(f"{float(value):.9e}" for value in state)
+            for series in chan_series:
+                if idx < len(series):
+                    row.append(f"{float(series[idx]):.9e}")
+                else:
+                    row.append("nan")
             writer.writerow(row)
 
     return max(0, len(times) - 1)
@@ -511,7 +529,11 @@ def run_from_yaml(
             raise RuntimeError(shooting_result.message or "Periodic shooting failed")
 
         cycle = shooting_result.last_cycle
-        steps = _write_state_csv(output_path, cycle.time, cycle.states, signal_names)
+        cycle_vc = dict(getattr(cycle, "virtual_channels", {}) or {})
+        steps = _write_state_csv(
+            output_path, cycle.time, cycle.states, signal_names,
+            virtual_channels=cycle_vc,
+        )
         telemetry = _transient_telemetry(cycle, elapsed)
         telemetry["periodic_iterations"] = float(shooting_result.iterations)
         telemetry["periodic_residual_norm"] = float(shooting_result.residual_norm)
@@ -541,7 +563,11 @@ def run_from_yaml(
         if len(times) != len(states):
             raise RuntimeError("Harmonic balance output time/state length mismatch")
 
-        steps = _write_state_csv(output_path, times, states, signal_names)
+        hb_vc = dict(getattr(hb_result, "virtual_channels", {}) or {})
+        steps = _write_state_csv(
+            output_path, times, states, signal_names,
+            virtual_channels=hb_vc,
+        )
         telemetry = _hb_telemetry(hb_result, elapsed, steps)
 
         return BackendRunResult(
@@ -575,7 +601,11 @@ def run_from_yaml(
     if not transient_result.success:
         raise RuntimeError(transient_result.message or "Transient simulation failed")
 
-    steps = _write_state_csv(output_path, transient_result.time, transient_result.states, signal_names)
+    transient_vc = dict(getattr(transient_result, "virtual_channels", {}) or {})
+    steps = _write_state_csv(
+        output_path, transient_result.time, transient_result.states, signal_names,
+        virtual_channels=transient_vc,
+    )
     telemetry = _transient_telemetry(transient_result, elapsed)
     telemetry["steps"] = float(steps)
     telemetry["integrator_fallback_to_rosenbrockw"] = 1.0 if used_integrator_fallback else 0.0

@@ -1,0 +1,86 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: vector_control_open_loop
+  category: closed_loop
+  observables:
+    - column: chan:CLK.alpha
+    - column: chan:CLK.beta
+    - column: chan:PARK.d
+    - column: chan:PARK.q
+    - column: chan:IPARK.alpha
+    - column: chan:IPARK.beta
+    - column: chan:SVM.d_a
+    - column: chan:SVM.d_b
+    - column: chan:SVM.d_c
+  expectations:
+    metrics:
+      max_error: 5.0e-1
+      steady_state_max_error: 5.0e-1
+  validation:
+    type: reference
+    observable: chan:SVM.d_a
+    baseline: baselines/vector_control_open_loop.csv
+  # Full vector-control pipeline (open loop, identity controller):
+  #
+  #   3-phase grid → Clarke (abc → αβγ) → PLL (sin → θ)
+  #                       │
+  #                       └→ Park (αβ → dq, with θ)
+  #                                  │
+  #                                  └→ identity (dq passthrough)
+  #                                       │
+  #                                       └→ Inverse Park (dq → αβ, with θ)
+  #                                              │
+  #                                              └→ SVM (αβ → d_a, d_b, d_c)
+  #
+  # In a real drive the (d, q) channel would carry the current
+  # references from an outer PI loop; here we just pass them through
+  # so the round-trip Clarke → Park → InvPark → SVM produces three
+  # sinusoidal duty cycles that match the grid phase.
+simulation:
+  tstart: 0.0
+  tstop: 100e-3
+  dt: 50e-6
+  adaptive_timestep: false
+  integrator: trapezoidal
+  uic: true
+components:
+  - type: voltage_source
+    name: Va
+    nodes: [a, 0]
+    waveform: {type: sine, amplitude: 100.0, frequency: 60.0, offset: 0.0, phase: 0.0}
+  - type: voltage_source
+    name: Vb
+    nodes: [b, 0]
+    waveform: {type: sine, amplitude: 100.0, frequency: 60.0, offset: 0.0, phase: -2.0943951}
+  - type: voltage_source
+    name: Vc
+    nodes: [c, 0]
+    waveform: {type: sine, amplitude: 100.0, frequency: 60.0, offset: 0.0, phase: -4.1887902}
+  - type: pll
+    name: PLL
+    nodes: [a]
+    kp: 200.0
+    ki: 2000.0
+    f_nominal_hz: 60.0
+  - type: clarke_transform
+    name: CLK
+    nodes: [a, b, c]
+  - type: park_transform
+    name: PARK
+    nodes: [a, b]
+    theta_from_channel: PLL.theta
+    alpha_from_channel: CLK.alpha
+    beta_from_channel: CLK.beta
+  - type: inverse_park_transform
+    name: IPARK
+    nodes: [a, b]
+    theta_from_channel: PLL.theta
+    d_from_channel: PARK.d
+    q_from_channel: PARK.q
+  - type: svm
+    name: SVM
+    nodes: [a]
+    v_dc: 200.0
+    alpha_from_channel: IPARK.alpha
+    beta_from_channel: IPARK.beta
