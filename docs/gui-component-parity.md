@@ -3,9 +3,11 @@
 Esta página documenta a paridade entre componentes do catálogo do PulsimGui e
 o backend unificado v1 usado por YAML + Python.
 
-- Snapshot de inventário: `2026-02-22`
-- Escopo desta matriz: 34 componentes que antes eram ausentes no backend
-- Resultado atual: 34/34 cobertos no backend (modelo físico, surrogate ou virtual)
+- Snapshot de inventário: `2026-05-11`
+- Escopo desta matriz: 40 componentes (34 originais + 6 da Fase 28 trifásica)
+- Resultado atual: 40/40 cobertos no backend (modelo físico, surrogate ou virtual)
+- PulsimGui ≥ 0.8.0 expõe os blocos da Fase 28 (Clarke / Park / PLL / SVM)
+  no palette sob a categoria *Three-Phase / Vector Control*.
 
 ## Status por componente
 
@@ -45,6 +47,12 @@ o backend unificado v1 usado por YAML + Python.
 | `THERMAL_SCOPE` | `thermal_scope` | instrumento virtual/canais térmicos | supported |
 | `SIGNAL_MUX` | `signal_mux` | roteamento virtual | supported |
 | `SIGNAL_DEMUX` | `signal_demux` | roteamento virtual | supported |
+| `CLARKE_TRANSFORM` | `clarke_transform` | bloco virtual de controle (Fase 28) | supported |
+| `INVERSE_CLARKE_TRANSFORM` | `inverse_clarke_transform` | bloco virtual de controle (Fase 28) | supported |
+| `PARK_TRANSFORM` | `park_transform` | bloco virtual de controle (Fase 28) | supported |
+| `INVERSE_PARK_TRANSFORM` | `inverse_park_transform` | bloco virtual de controle (Fase 28) | supported |
+| `PLL` | `pll` | bloco virtual de controle (Fase 28) | supported |
+| `SVM` | `svm` | bloco virtual de controle, SVPWM (Fase 28) | supported |
 
 ## Notas de execução
 
