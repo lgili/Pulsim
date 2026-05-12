@@ -1,0 +1,2490 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/kpi-reference/">
+      
+      
+        <link rel="prev" href="../control-blocks-reference/">
+      
+      
+        <link rel="next" href="../netlist-format/">
+      
+      
+      <link rel="icon" href="../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>KPI Reference - PulsimCore</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#kpi-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PulsimCore
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              KPI Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+  Overview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../components-reference/" class="md-tabs__link">
+          
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples-and-results/" class="md-tabs__link">
+          
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../magnetic-models/" class="md-tabs__link">
+          
+  
+  Domain Libraries
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../benchmarks-and-parity/" class="md-tabs__link">
+          
+  
+  Quality Gates
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../gui-component-parity/" class="md-tabs__link">
+          
+  
+  Compatibility
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    PulsimCore
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Overview
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Documentation Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backend Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../components-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Components Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-blocks-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Control Blocks Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    KPI Reference
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    KPI Reference
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-kpis-land-in-benchmark-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      How KPIs land in benchmark results
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick index
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-total-harmonic-distortion-thd" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Total Harmonic Distortion — thd
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-power-factor-power_factor" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Power factor — power_factor
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-efficiency-efficiency" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Efficiency — efficiency
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-transient-response-transient_response" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Transient response — transient_response
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-peak-to-peak-ripple-ripple_pkpk" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Peak-to-peak ripple — ripple_pkpk
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-conduction-switching-loss-loss_breakdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Conduction + switching loss — loss_breakdown
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-zvs-fraction-zvs_fraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. ZVS fraction — zvs_fraction
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-zcs-fraction-zcs_fraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. ZCS fraction — zcs_fraction
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-per-event-switching-loss-switching_loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Per-event switching loss — switching_loss
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-steinmetz-core-loss-core_loss_steinmetz" class="md-nav__link">
+    <span class="md-ellipsis">
+      10. Steinmetz core loss — core_loss_steinmetz
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-junction-temperature-junction_temperature" class="md-nav__link">
+    <span class="md-ellipsis">
+      11. Junction temperature — junction_temperature
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#calling-the-helpers-directly-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      Calling the helpers directly (Python)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kpi-gating" class="md-nav__link">
+    <span class="md-ellipsis">
+      KPI gating
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../netlist-format/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Netlist YAML Format
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Python API (Legacy Notes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Guides
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples-and-results/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Examples and Results
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ac-analysis/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AC Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fra/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Response Analysis (FRA)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../electrothermal-workflow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Electrothermal Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-generation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Real-Time Code Generation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../automatic-differentiation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Automatic Differentiation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-tuning-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../linear-solver-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Linear-Solver Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../robustness-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Robustness Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Domain Libraries
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Domain Libraries
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motor-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../three-phase-grid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-devices/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog Devices
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converter-templates/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Converter Templates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Quality Gates
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Quality Gates
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks-and-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Benchmarks and Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spice-parity-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../property-based-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Compatibility
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Compatibility
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui-component-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    GUI Backend Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-kpis-land-in-benchmark-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      How KPIs land in benchmark results
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick index
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-total-harmonic-distortion-thd" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Total Harmonic Distortion — thd
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-power-factor-power_factor" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Power factor — power_factor
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-efficiency-efficiency" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Efficiency — efficiency
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-transient-response-transient_response" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Transient response — transient_response
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-peak-to-peak-ripple-ripple_pkpk" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Peak-to-peak ripple — ripple_pkpk
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-conduction-switching-loss-loss_breakdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Conduction + switching loss — loss_breakdown
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-zvs-fraction-zvs_fraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. ZVS fraction — zvs_fraction
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-zcs-fraction-zcs_fraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      8. ZCS fraction — zcs_fraction
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-per-event-switching-loss-switching_loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Per-event switching loss — switching_loss
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-steinmetz-core-loss-core_loss_steinmetz" class="md-nav__link">
+    <span class="md-ellipsis">
+      10. Steinmetz core loss — core_loss_steinmetz
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-junction-temperature-junction_temperature" class="md-nav__link">
+    <span class="md-ellipsis">
+      11. Junction temperature — junction_temperature
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#calling-the-helpers-directly-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      Calling the helpers directly (Python)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kpi-gating" class="md-nav__link">
+    <span class="md-ellipsis">
+      KPI gating
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/kpi-reference.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/kpi-reference.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="kpi-reference">KPI Reference<a class="headerlink" href="#kpi-reference" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Status:</strong> authoritative — every metric <code>benchmark_runner.py</code> can
+compute against a captured trace. Source: <code>benchmarks/kpi/__init__.py</code>
+(computation) and <code>benchmarks/benchmark_runner.py</code> (YAML wiring).
+Updated through Phase 27.</p>
+</blockquote>
+<p>Pulsim ships a trace-scoring layer that runs <em>after</em> the simulation and
+turns a captured CSV into engineering KPIs — THD, ripple, efficiency,
+ZVS/ZCS fractions, core loss, junction temperature, etc. The functions
+are pure Python with no Pulsim runtime dependency, so the same module
+can score Pulsim traces, PSIM / PLECS exports, or an oscilloscope CSV.</p>
+<h2 id="how-kpis-land-in-benchmark-results">How KPIs land in benchmark results<a class="headerlink" href="#how-kpis-land-in-benchmark-results" title="Permanent link">&para;</a></h2>
+<p>Each <code>circuits/&lt;bench&gt;.yaml</code> may declare a <code>benchmark.kpi:</code> list. The
+runner evaluates every entry against the trace and writes them as
+<code>kpi__&lt;metric&gt;__&lt;label&gt;</code> columns in <code>benchmarks/.../results.csv</code>. KPI
+thresholds (gate values used by <code>kpi_gate.py</code>) live in
+<code>benchmarks/kpi_thresholds.yaml</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">benchmark</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_buck</span>
+<span class="w">  </span><span class="nt">category</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">closed_loop</span>
+<span class="w">  </span><span class="nt">kpi</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ripple_pkpk</span>
+<span class="w">      </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(out)</span>
+<span class="w">      </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vout</span>
+<span class="w">      </span><span class="nt">steady_state_fraction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transient_response</span>
+<span class="w">      </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(out)</span>
+<span class="w">      </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vout</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12.0</span>
+<span class="w">      </span><span class="nt">tolerance_pct</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">thd</span>
+<span class="w">      </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">I(L1)</span>
+<span class="w">      </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">iL</span>
+<span class="w">      </span><span class="nt">fundamental_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60.0</span>
+<span class="w">      </span><span class="nt">num_harmonics</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+</code></pre></div>
+<p>The <code>label</code> becomes the suffix on the CSV column — <code>kpi__ripple_pkpk__vout</code>,
+<code>kpi__rise_time__vout</code>, etc.</p>
+<h2 id="quick-index">Quick index<a class="headerlink" href="#quick-index" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>YAML keyword</th>
+<th>Returns</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Total harmonic distortion</td>
+<td><code>thd</code></td>
+<td><code>thd_pct</code></td>
+<td>Sine quality, EMI compliance</td>
+</tr>
+<tr>
+<td>Power factor</td>
+<td><code>power_factor</code></td>
+<td><code>pf</code></td>
+<td>AC source loading</td>
+</tr>
+<tr>
+<td>Efficiency</td>
+<td><code>efficiency</code></td>
+<td><code>efficiency_pct</code></td>
+<td>Converter η</td>
+</tr>
+<tr>
+<td>Transient response</td>
+<td><code>transient_response</code></td>
+<td><code>rise_time</code>, <code>settling_time</code>, <code>overshoot_pct</code>, <code>undershoot_pct</code></td>
+<td>Step response analysis</td>
+</tr>
+<tr>
+<td>Peak-to-peak ripple</td>
+<td><code>ripple_pkpk</code></td>
+<td><code>ripple_pkpk</code></td>
+<td>Output filter sizing</td>
+</tr>
+<tr>
+<td>Conduction + switching loss</td>
+<td><code>loss_breakdown</code></td>
+<td><code>conduction_w_avg</code>, <code>switching_w_avg</code></td>
+<td>Loss budgeting</td>
+</tr>
+<tr>
+<td>ZVS fraction</td>
+<td><code>zvs_fraction</code></td>
+<td><code>zvs_fraction</code>, <code>total_turn_on_events</code></td>
+<td>Soft-switching validation</td>
+</tr>
+<tr>
+<td>ZCS fraction</td>
+<td><code>zcs_fraction</code></td>
+<td><code>zcs_fraction</code>, <code>total_turn_off_events</code></td>
+<td>Soft-switching validation</td>
+</tr>
+<tr>
+<td>Per-event switching loss</td>
+<td><code>switching_loss</code></td>
+<td><code>switching_loss_w_avg</code>, <code>switching_event_count</code></td>
+<td>High-frequency loss</td>
+</tr>
+<tr>
+<td>Steinmetz core loss</td>
+<td><code>core_loss_steinmetz</code></td>
+<td><code>core_loss_w_per_kg</code>, <code>b_peak_tesla</code></td>
+<td>Magnetic sizing</td>
+</tr>
+<tr>
+<td>Junction temperature</td>
+<td><code>junction_temperature</code></td>
+<td><code>t_j_max_c</code>, <code>t_j_final_c</code>, <code>delta_t_j_c</code></td>
+<td>Thermal margin</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1-total-harmonic-distortion-thd">1. Total Harmonic Distortion — <code>thd</code><a class="headerlink" href="#1-total-harmonic-distortion-thd" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_thd(samples, sample_rate_hz, fundamental_hz, num_harmonics=20)</code>
+→ percentage.</p>
+<p><code>THD% = 100 · √(Σ_{k=2..N} A_k²) / A_1</code> where <code>A_k</code> is the magnitude of
+the k-th harmonic recovered via Goertzel. The window should cover an
+integer number of fundamental periods for a clean reading.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">thd</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(out)</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vout</span>
+<span class="w">  </span><span class="nt">fundamental_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60.0</span>
+<span class="w">  </span><span class="nt">num_harmonics</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>YAML key</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observable</code></td>
+<td>—</td>
+<td>CSV column to FFT.</td>
+</tr>
+<tr>
+<td><code>fundamental_hz</code></td>
+<td><code>60.0</code></td>
+<td>Hz of the fundamental.</td>
+</tr>
+<tr>
+<td><code>num_harmonics</code></td>
+<td><code>20</code></td>
+<td>Harmonics to sum (k = 2..N).</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td><code>metric</code></td>
+<td>Suffix in the result column.</td>
+</tr>
+</tbody>
+</table>
+<p>Outputs: <code>kpi__thd_pct__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="2-power-factor-power_factor">2. Power factor — <code>power_factor</code><a class="headerlink" href="#2-power-factor-power_factor" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_power_factor(v_samples, i_samples)</code> → <code>[-1, 1]</code>.</p>
+<p><code>PF = ⟨v·i⟩ / (RMS(v)·RMS(i))</code>. Sign tracks real-power direction.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">power_factor</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(grid)</span>
+<span class="w">  </span><span class="nt">current_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">I(grid)</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grid</span>
+</code></pre></div>
+<p>Outputs: <code>kpi__pf__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="3-efficiency-efficiency">3. Efficiency — <code>efficiency</code><a class="headerlink" href="#3-efficiency-efficiency" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_efficiency(p_in, p_out, steady_state_fraction=0.2)</code>
+→ percent.</p>
+<p><code>η = 100 · ⟨P_out⟩ / ⟨P_in⟩</code> averaged over the <strong>last fraction</strong> of the
+trace, so transient warm-up doesn't pull the number down.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">efficiency</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">P_in</span>
+<span class="w">  </span><span class="nt">p_in_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">P_in</span>
+<span class="w">  </span><span class="nt">p_out_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">P_out</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">converter</span>
+<span class="w">  </span><span class="nt">steady_state_fraction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>YAML key</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>p_in_observable</code></td>
+<td>—</td>
+<td>Column for input power (W).</td>
+</tr>
+<tr>
+<td><code>p_out_observable</code></td>
+<td>—</td>
+<td>Column for output power (W).</td>
+</tr>
+<tr>
+<td><code>steady_state_fraction</code></td>
+<td><code>0.2</code></td>
+<td>Window for the average (last fraction).</td>
+</tr>
+</tbody>
+</table>
+<p>Outputs: <code>kpi__efficiency_pct__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="4-transient-response-transient_response">4. Transient response — <code>transient_response</code><a class="headerlink" href="#4-transient-response-transient_response" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_transient_response(times, samples, target, tolerance_pct=2, rise_low_pct=10, rise_high_pct=90)</code>
+→ dict.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transient_response</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(out)</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vout</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12.0</span>
+<span class="w">  </span><span class="nt">tolerance_pct</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>YAML key</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>target</code></td>
+<td><code>0.0</code></td>
+<td>Steady-state target value.</td>
+</tr>
+<tr>
+<td><code>tolerance_pct</code></td>
+<td><code>2.0</code></td>
+<td>Settling band (±%).</td>
+</tr>
+</tbody>
+</table>
+<p>Outputs (each populated when measurable):
+- <code>kpi__rise_time__&lt;label&gt;</code> — <code>rise_low_pct%</code> → <code>rise_high_pct%</code> (default 10–90%).
+- <code>kpi__settling_time__&lt;label&gt;</code> — time after which the trace stays inside the band.
+- <code>kpi__overshoot_pct__&lt;label&gt;</code> — <code>100 · (peak − target) / |target|</code>.
+- <code>kpi__undershoot_pct__&lt;label&gt;</code> — <code>100 · (target − trough) / |target|</code>.</p>
+<hr />
+<h2 id="5-peak-to-peak-ripple-ripple_pkpk">5. Peak-to-peak ripple — <code>ripple_pkpk</code><a class="headerlink" href="#5-peak-to-peak-ripple-ripple_pkpk" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_ripple_pkpk(samples, steady_state_fraction=0.2)</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ripple_pkpk</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(out)</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vout</span>
+<span class="w">  </span><span class="nt">steady_state_fraction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
+</code></pre></div>
+<p>Outputs: <code>kpi__ripple_pkpk__&lt;label&gt;</code> in the units of the observable.</p>
+<hr />
+<h2 id="6-conduction-switching-loss-loss_breakdown">6. Conduction + switching loss — <code>loss_breakdown</code><a class="headerlink" href="#6-conduction-switching-loss-loss_breakdown" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_loss_breakdown(switch_states, branch_currents, branch_voltages, r_on, times)</code>
+→ <code>{conduction_w_avg, switching_w_avg}</code>.</p>
+<p>Conduction = <code>R_on · I²</code> integrated while ON. Switching = <code>½ · |V·I|</code>
+at every state transition. Both divided by total simulated time.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">loss_breakdown</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SW1.state</span><span class="w">            </span><span class="c1"># ignored; uses switch_observable</span>
+<span class="w">  </span><span class="nt">switch_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SW1.state</span>
+<span class="w">  </span><span class="nt">current_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">I(SW1)</span>
+<span class="w">  </span><span class="nt">voltage_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(sw)</span>
+<span class="w">  </span><span class="nt">r_on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5e-3</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SW1</span>
+</code></pre></div>
+<p>Outputs: <code>kpi__conduction_w_avg__&lt;label&gt;</code>, <code>kpi__switching_w_avg__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="7-zvs-fraction-zvs_fraction">7. ZVS fraction — <code>zvs_fraction</code><a class="headerlink" href="#7-zvs-fraction-zvs_fraction" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_zvs_fraction(switch_states, v_ds_samples, threshold_v=1.0, lookback_samples=1)</code>.</p>
+<p>For every <code>False → True</code> (turn-ON) transition, looks <code>lookback_samples</code>
+back at V_DS. If <code>|V_DS| &lt; threshold_v</code>, the event counts as ZVS.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zvs_fraction</span>
+<span class="w">  </span><span class="nt">switch_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SH.state</span>
+<span class="w">  </span><span class="nt">voltage_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(sh)</span>
+<span class="w">  </span><span class="nt">threshold_v</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">  </span><span class="nt">lookback_samples</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SH</span>
+</code></pre></div>
+<p>Outputs: <code>kpi__zvs_fraction__&lt;label&gt;</code> (0..1), <code>kpi__total_turn_on_events__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="8-zcs-fraction-zcs_fraction">8. ZCS fraction — <code>zcs_fraction</code><a class="headerlink" href="#8-zcs-fraction-zcs_fraction" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_zcs_fraction(switch_states, i_d_samples, threshold_a=0.1, lookback_samples=1)</code>.</p>
+<p>Mirror of ZVS but at turn-OFF and on drain current.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zcs_fraction</span>
+<span class="w">  </span><span class="nt">switch_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SH.state</span>
+<span class="w">  </span><span class="nt">current_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">I(L1)</span>
+<span class="w">  </span><span class="nt">threshold_a</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
+<span class="w">  </span><span class="nt">lookback_samples</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SH</span>
+</code></pre></div>
+<p>Outputs: <code>kpi__zcs_fraction__&lt;label&gt;</code>, <code>kpi__total_turn_off_events__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="9-per-event-switching-loss-switching_loss">9. Per-event switching loss — <code>switching_loss</code><a class="headerlink" href="#9-per-event-switching-loss-switching_loss" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_switching_loss_per_event(switch_states, v_ds, i_d, times)</code>.</p>
+<p>Sums <code>½·|V_DS·I_D|</code> at every state transition and divides by total time.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">switching_loss</span>
+<span class="w">  </span><span class="nt">switch_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SH.state</span>
+<span class="w">  </span><span class="nt">voltage_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(sh)</span>
+<span class="w">  </span><span class="nt">current_observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">I(L1)</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SH</span>
+</code></pre></div>
+<p>Outputs: <code>kpi__switching_loss_w_avg__&lt;label&gt;</code>, <code>kpi__switching_event_count__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="10-steinmetz-core-loss-core_loss_steinmetz">10. Steinmetz core loss — <code>core_loss_steinmetz</code><a class="headerlink" href="#10-steinmetz-core-loss-core_loss_steinmetz" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_core_loss_steinmetz(B_samples, sample_rate_hz, fundamental_hz, k, alpha, beta)</code>.</p>
+<p>Recovers B_peak via Goertzel, then <code>P = k · f^α · B^β</code>. Pulsim ships a
+companion helper <code>compute_inductor_flux_density(I_samples, L, turns, area_m²)</code>
+to convert an inductor current trace into B(t).</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">core_loss_steinmetz</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">I(L1)</span><span class="w">               </span><span class="c1"># inductor current → B via L·I / (N·A)</span>
+<span class="w">  </span><span class="nt">inductance_h</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500e-6</span>
+<span class="w">  </span><span class="nt">turns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span>
+<span class="w">  </span><span class="nt">area_m2</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.5e-4</span>
+<span class="w">  </span><span class="nt">fundamental_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60.0</span>
+<span class="w">  </span><span class="nt">k</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16.0</span>
+<span class="w">  </span><span class="nt">alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.45</span>
+<span class="w">  </span><span class="nt">beta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.7</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ferrite</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>YAML key</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inductance_h</code></td>
+<td><code>1e-3</code></td>
+<td>Inductance for the L·I conversion (H).</td>
+</tr>
+<tr>
+<td><code>turns</code></td>
+<td><code>50</code></td>
+<td>Number of turns.</td>
+</tr>
+<tr>
+<td><code>area_m2</code></td>
+<td><code>1e-4</code></td>
+<td>Effective core cross-section (m²).</td>
+</tr>
+<tr>
+<td><code>fundamental_hz</code></td>
+<td><code>60.0</code></td>
+<td>Operating frequency (Hz).</td>
+</tr>
+<tr>
+<td><code>k</code>, <code>alpha</code>, <code>beta</code></td>
+<td><code>16, 1.45, 2.7</code></td>
+<td>Steinmetz coefficients for the material.</td>
+</tr>
+</tbody>
+</table>
+<p>Outputs: <code>kpi__core_loss_w_per_kg__&lt;label&gt;</code>, <code>kpi__b_peak_tesla__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="11-junction-temperature-junction_temperature">11. Junction temperature — <code>junction_temperature</code><a class="headerlink" href="#11-junction-temperature-junction_temperature" title="Permanent link">&para;</a></h2>
+<p><strong>Function:</strong> <code>compute_junction_temperature(P_samples, times, r_th_jc, c_th_jc, t_ambient_c=25, r_th_ca=0)</code>.</p>
+<p>Integrates <code>C_th · dT_j/dt + (T_j − T_amb)/R_th = P(t)</code> forward in time
+(Foster network, one or many stages chained).</p>
+<p>The YAML wiring derives P(t) from an observed voltage trace through a
+resistance — useful for self-heating studies:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">junction_temperature</span>
+<span class="w">  </span><span class="nt">observable</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V(r_diss)</span><span class="w">            </span><span class="c1"># voltage across the dissipating element</span>
+<span class="w">  </span><span class="nt">r_resistor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span><span class="w">                  </span><span class="c1"># to derive P(t) = V²/R</span>
+<span class="w">  </span><span class="nt">r_th_jc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span><span class="w">                     </span><span class="c1"># K/W</span>
+<span class="w">  </span><span class="nt">c_th_jc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span><span class="w">                     </span><span class="c1"># J/K  (use 0 for steady-state-only)</span>
+<span class="w">  </span><span class="nt">t_ambient_c</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">25.0</span>
+<span class="w">  </span><span class="nt">r_th_ca</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">                     </span><span class="c1"># heatsink-to-ambient (K/W), optional</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">r_diss</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>YAML key</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>r_resistor</code></td>
+<td><code>1.0</code></td>
+<td>Resistance used to convert V² → P (Ω).</td>
+</tr>
+<tr>
+<td><code>r_th_jc</code></td>
+<td><code>5.0</code></td>
+<td>Junction-to-case thermal resistance (K/W).</td>
+</tr>
+<tr>
+<td><code>c_th_jc</code></td>
+<td><code>0.1</code></td>
+<td>Junction-to-case thermal capacitance (J/K).</td>
+</tr>
+<tr>
+<td><code>t_ambient_c</code></td>
+<td><code>25.0</code></td>
+<td>Ambient temperature (°C).</td>
+</tr>
+<tr>
+<td><code>r_th_ca</code></td>
+<td><code>0.0</code></td>
+<td>Case-to-ambient thermal resistance (K/W).</td>
+</tr>
+</tbody>
+</table>
+<p>Outputs: <code>kpi__t_j_max_c__&lt;label&gt;</code>, <code>kpi__t_j_final_c__&lt;label&gt;</code>,
+<code>kpi__delta_t_j_c__&lt;label&gt;</code>.</p>
+<hr />
+<h2 id="calling-the-helpers-directly-python">Calling the helpers directly (Python)<a class="headerlink" href="#calling-the-helpers-directly-python" title="Permanent link">&para;</a></h2>
+<p>The same functions are importable from Python without going through the
+runner — useful for one-off scoring of an oscilloscope CSV or a PSIM
+export:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">benchmarks.kpi</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">compute_thd</span><span class="p">,</span>
+    <span class="n">compute_ripple_pkpk</span><span class="p">,</span>
+    <span class="n">compute_transient_response</span><span class="p">,</span>
+    <span class="n">compute_zvs_fraction</span><span class="p">,</span>
+    <span class="n">compute_junction_temperature</span><span class="p">,</span>
+    <span class="n">compute_inductor_flux_density</span><span class="p">,</span>
+    <span class="n">compute_core_loss_steinmetz</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># THD on a captured current trace</span>
+<span class="n">thd_pct</span> <span class="o">=</span> <span class="n">compute_thd</span><span class="p">(</span><span class="n">i_load</span><span class="p">,</span> <span class="n">sample_rate_hz</span><span class="o">=</span><span class="mf">1e5</span><span class="p">,</span> <span class="n">fundamental_hz</span><span class="o">=</span><span class="mf">60.0</span><span class="p">)</span>
+
+<span class="c1"># Junction temperature from a resistor&#39;s V trace</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">benchmarks.kpi</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">kpi</span>
+<span class="n">P</span> <span class="o">=</span> <span class="n">kpi</span><span class="o">.</span><span class="n">compute_power_dissipation_resistor</span><span class="p">(</span><span class="n">v_a</span><span class="p">,</span> <span class="n">v_b</span><span class="p">,</span> <span class="n">resistance</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">compute_junction_temperature</span><span class="p">(</span>
+    <span class="n">P</span><span class="p">,</span> <span class="n">times</span><span class="p">,</span> <span class="n">r_th_jc</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">c_th_jc</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">t_ambient_c</span><span class="o">=</span><span class="mf">25.0</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;t_j_max_c&quot;</span><span class="p">],</span> <span class="s2">&quot;°C peak&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Every helper is pure Python (no Pulsim runtime) — they can be vendored
+into a separate tool.</p>
+<hr />
+<h2 id="kpi-gating">KPI gating<a class="headerlink" href="#kpi-gating" title="Permanent link">&para;</a></h2>
+<p>The <code>benchmarks/kpi_gate.py</code> script reads <code>benchmarks/kpi_thresholds.yaml</code>
+and fails a CI run if any KPI exceeds (or falls below) its threshold. The
+threshold file follows the same <code>kpi__&lt;metric&gt;__&lt;label&gt;</code> naming as the
+results CSV:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># kpi_thresholds.yaml</span>
+<span class="nt">gates</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">kpi__ripple_pkpk__vout</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+<span class="w">  </span><span class="nt">kpi__rise_time__vout</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5e-3</span>
+<span class="w">  </span><span class="nt">kpi__zvs_fraction__SH</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
+<span class="w">  </span><span class="nt">kpi__t_j_max_c__r_diss</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">150.0</span>
+</code></pre></div>
+<p>Run it after <code>benchmark_runner.py</code>:</p>
+<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>benchmarks/benchmark_runner.py<span class="w"> </span>--benchmarks<span class="w"> </span>benchmarks/benchmarks.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">                                       </span>--output-dir<span class="w"> </span>benchmarks/out
+python3<span class="w"> </span>benchmarks/kpi_gate.py<span class="w">        </span>--results<span class="w"> </span>benchmarks/out/results.csv<span class="w"> </span><span class="se">\</span>
+<span class="w">                                       </span>--thresholds<span class="w"> </span>benchmarks/kpi_thresholds.yaml
+</code></pre></div>
+<p>The companion file <code>benchmarks/kpi_thresholds_electrothermal.yaml</code>
+holds the dedicated thermal-margin gates used by the Phase 27
+electrothermal benches.</p>
+<hr />
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../components-reference/">Components Reference</a> — for the components
+  that produce the signals your KPIs read.</li>
+<li><a href="../control-blocks-reference/">Control Blocks Reference</a> — for the
+  channels (<code>chan:PLL.theta</code>, <code>chan:SVM.d_a</code>, etc.) you can score.</li>
+<li><a href="../magnetic-models/">Magnetic Models</a> — Steinmetz coefficients and
+  flux-density definitions.</li>
+<li><a href="../electrothermal-workflow/">Electrothermal Workflow</a> — the full thermal
+  port and how to wire its outputs into <code>junction_temperature</code>.</li>
+<li><a href="../benchmarks-and-parity/">Benchmarks and Parity</a> — runner CLI flags,
+  baseline regeneration, dashboard outputs.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../control-blocks-reference/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Control Blocks Reference">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Control Blocks Reference
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../netlist-format/" class="md-footer__link md-footer__link--next" aria-label="Next: Netlist YAML Format">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Netlist YAML Format
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+    
+  </body>
+</html>
