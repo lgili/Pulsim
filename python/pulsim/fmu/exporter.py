@@ -305,10 +305,16 @@ def _emit_model_description(
     n_outputs = len(outputs)
     output_indices = " ".join(
         str(len(inputs) + i + 1) for i in range(n_outputs))
+    # Build the <Unknown ...> tags outside the outer f-string so the nested
+    # double-quoted f-string + `\"` escape (which Python 3.10/3.11 rejects
+    # under PEP 701) is avoided.
+    unknown_tags = " ".join(
+        f'<Unknown index="{len(inputs) + i + 1}"/>'
+        for i in range(n_outputs)
+    )
     output_block = (
-        f"<Outputs>\n      "
-        f"{' '.join(f'<Unknown index=\"{len(inputs) + i + 1}\"/>' for i in range(n_outputs))}\n    "
-        f"</Outputs>" if n_outputs > 0 else "<Outputs/>"
+        f"<Outputs>\n      {unknown_tags}\n    </Outputs>"
+        if n_outputs > 0 else "<Outputs/>"
     )
     # Avoid textwrap.dedent's leading-newline pitfall — FMI parsers
     # reject anything before `<?xml ?>`.
