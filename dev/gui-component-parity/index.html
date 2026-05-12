@@ -1681,9 +1681,11 @@
 <p>Esta página documenta a paridade entre componentes do catálogo do PulsimGui e
 o backend unificado v1 usado por YAML + Python.</p>
 <ul>
-<li>Snapshot de inventário: <code>2026-02-22</code></li>
-<li>Escopo desta matriz: 34 componentes que antes eram ausentes no backend</li>
-<li>Resultado atual: 34/34 cobertos no backend (modelo físico, surrogate ou virtual)</li>
+<li>Snapshot de inventário: <code>2026-05-11</code></li>
+<li>Escopo desta matriz: 40 componentes (34 originais + 6 da Fase 28 trifásica)</li>
+<li>Resultado atual: 40/40 cobertos no backend (modelo físico, surrogate ou virtual)</li>
+<li>PulsimGui ≥ 0.8.0 expõe os blocos da Fase 28 (Clarke / Park / PLL / SVM)
+  no palette sob a categoria <em>Three-Phase / Vector Control</em>.</li>
 </ul>
 <h2 id="status-por-componente">Status por componente<a class="headerlink" href="#status-por-componente" title="Permanent link">&para;</a></h2>
 <table>
@@ -1898,6 +1900,42 @@ o backend unificado v1 usado por YAML + Python.</p>
 <td><code>SIGNAL_DEMUX</code></td>
 <td><code>signal_demux</code></td>
 <td>roteamento virtual</td>
+<td>supported</td>
+</tr>
+<tr>
+<td><code>CLARKE_TRANSFORM</code></td>
+<td><code>clarke_transform</code></td>
+<td>bloco virtual de controle (Fase 28)</td>
+<td>supported</td>
+</tr>
+<tr>
+<td><code>INVERSE_CLARKE_TRANSFORM</code></td>
+<td><code>inverse_clarke_transform</code></td>
+<td>bloco virtual de controle (Fase 28)</td>
+<td>supported</td>
+</tr>
+<tr>
+<td><code>PARK_TRANSFORM</code></td>
+<td><code>park_transform</code></td>
+<td>bloco virtual de controle (Fase 28)</td>
+<td>supported</td>
+</tr>
+<tr>
+<td><code>INVERSE_PARK_TRANSFORM</code></td>
+<td><code>inverse_park_transform</code></td>
+<td>bloco virtual de controle (Fase 28)</td>
+<td>supported</td>
+</tr>
+<tr>
+<td><code>PLL</code></td>
+<td><code>pll</code></td>
+<td>bloco virtual de controle (Fase 28)</td>
+<td>supported</td>
+</tr>
+<tr>
+<td><code>SVM</code></td>
+<td><code>svm</code></td>
+<td>bloco virtual de controle, SVPWM (Fase 28)</td>
 <td>supported</td>
 </tr>
 </tbody>
