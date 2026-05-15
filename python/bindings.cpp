@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <string_view>
 
 #include "pulsim/v1/core.hpp"
 #include "pulsim/v1/control.hpp"
@@ -376,6 +377,26 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("frequency", &SineParams::frequency, "Frequency (Hz)")
         .def_readwrite("phase", &SineParams::phase, "Initial phase (rad)");
 
+    py::class_<Circuit::ThreePhaseSourceParams>(
+            v2, "ThreePhaseSourceParams",
+            "Three-phase voltage source parameters (Phase-28 follow-up).")
+        .def(py::init<>())
+        .def_readwrite("line_to_line_voltage_rms",
+                       &Circuit::ThreePhaseSourceParams::line_to_line_voltage_rms,
+                       "Line-to-line RMS voltage (V)")
+        .def_readwrite("frequency_hz",
+                       &Circuit::ThreePhaseSourceParams::frequency_hz,
+                       "Fundamental frequency (Hz)")
+        .def_readwrite("phase_a_deg",
+                       &Circuit::ThreePhaseSourceParams::phase_a_deg,
+                       "Phase A reference angle (deg)")
+        .def_readwrite("positive_sequence",
+                       &Circuit::ThreePhaseSourceParams::positive_sequence,
+                       "True = positive (abc) sequence, False = negative (acb)")
+        .def_readwrite("unbalance_factor",
+                       &Circuit::ThreePhaseSourceParams::unbalance_factor,
+                       "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u");
+
     py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
         .def(py::init<>())
         .def_readwrite("v_min", &RampParams::v_min, "Minimum voltage")
@@ -680,6 +701,21 @@ void init_v2_module(py::module_& v2) {
         .def("add_pulse_voltage_source", &Circuit::add_pulse_voltage_source,
              py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
              "Add pulse voltage source")
+        // Three-phase source — decomposes into 3 SineVoltageSource branches.
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index,
+                               const Circuit::ThreePhaseSourceParams&>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"), py::arg("params"),
+             "Add a three-phase voltage source with full parameter control.")
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index, Real, Real>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"),
+             py::arg("v_line_to_line_rms"), py::arg("frequency_hz"),
+             "Add a balanced 3-phase voltage source (positive sequence, 0% unbalance).")
         // PWM control
         .def("set_pwm_duty", &Circuit::set_pwm_duty,
              py::arg("name"), py::arg("duty"),

@@ -48,6 +48,9 @@ from ._pulsim import (
     PulseParams,
     PulseVoltageSource,
 
+    # Three-Phase Voltage Source (Phase-28 follow-up)
+    ThreePhaseSourceParams,
+
     # Control Blocks
     PIController,
     PIDController,
@@ -1059,6 +1062,7 @@ __all__ = [
     "PWMParams",
     "PWMVoltageSource",
     "SineParams",
+    "ThreePhaseSourceParams",
     "SineVoltageSource",
     "RampParams",
     "RampGenerator",
