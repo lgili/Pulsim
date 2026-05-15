@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.9.0"
+__version__ = "0.10.0a1"
 
 import weakref
 
