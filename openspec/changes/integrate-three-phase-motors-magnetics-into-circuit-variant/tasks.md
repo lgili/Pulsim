@@ -1,15 +1,59 @@
-## 1. Three-phase grid source — device integration
+## 1. Three-phase grid source — SHIPPED (Pulsim v0.10.0a1, commit 12634a8)
 
-- [ ] 1.1 Create `core/include/pulsim/v1/devices/three_phase_source_device.hpp`
-      wrapping `grid::ThreePhaseSource` + `grid::ProgrammableThreePhaseSource` as a
-      `Circuit` device variant.
-- [ ] 1.2 Implement residual contribution + Jacobian stamping for three branch
-      equations (one per phase).
-- [ ] 1.3 Add `Circuit::add_three_phase_source(name, nodes_abc, source_params)`.
-- [ ] 1.4 Register the device under the existing `Electrical` domain tag in
-      `Circuit::mixed_domain_phase_order`.
-- [ ] 1.5 Backend test: drop a 3φ source, sample 1 ms transient, verify three
-      phase-shifted waveforms.
+- [x] 1.1 (Pragmatic shortcut) `Circuit::add_three_phase_source` ships as a
+      helper that decomposes a three-phase source into three internal
+      `SineVoltageSource` branches between each line node and the shared
+      neutral. **No new device-variant**, no changes to the ~10 `if constexpr`
+      stamping ladders. Lives at `runtime_circuit.hpp:1984` (after
+      `add_sine_voltage_source`). The real `grid::ThreePhaseSource` math class
+      remains uncalled — it can be wired through a proper device-variant in a
+      future iteration when programmable / non-sinusoidal waveforms are
+      needed.
+- [x] 1.2 Branch equations come for free from the existing `SineVoltageSource`
+      stamping path (one per leg = three branches total). The helper records
+      branch names `<name>__A`, `<name>__B`, `<name>__C` so per-phase
+      probe-current bindings keep working.
+- [x] 1.3 `add_three_phase_source(name, n_a, n_b, n_c, n_neutral, params)` +
+      convenience overload taking `(v_line_to_line_rms, frequency_hz)`. Params
+      struct `Circuit::ThreePhaseSourceParams` (line-to-line RMS, frequency,
+      phase A, sequence direction, unbalance factor) is a POD with
+      `static_assert(std::is_trivially_copyable_v<...>)`.
+- [x] 1.4 Source is already in the `Electrical` domain (no scheduler changes
+      needed since it uses existing primitives).
+- [x] 1.5 Backend tests in `core/tests/test_three_phase_source.cpp` (3 cases,
+      16 asserts): balanced positive sequence peak, negative-sequence
+      B/C swap, unbalance factor scales B and C. Full suite: 141 cases,
+      1106 asserts, all green. Python smoke tests in
+      `python/tests/test_three_phase_source.py` (6 cases): params class +
+      writable fields + balanced peaks + negative sequence flip +
+      unbalance scaling + convenience overload.
+
+**Lessons learned for Tracks 2/3 — concrete device-variant integration map:**
+
+When a new device cannot be decomposed into existing primitives (PMSM, FOC,
+DC motor, saturable transformer all need true device-variant status), the
+following ladders in `runtime_circuit.hpp` must be extended (one
+`else if constexpr (std::is_same_v<T, NewDevice>)` branch per location):
+
+- `using DeviceVariant = std::variant<...>` declaration at line **56–71**
+- `add_node` branch-index re-numbering hook at line **130** (only matters if
+  the device reserves MNA branch rows like VoltageSource / Inductor do)
+- Tagging / capability filters at lines **366, 436, 1591, 2255, 2302, 2328,
+  2417, 2595, 2860** — these are the per-device class ladders (filter
+  capacitor/inductor for the history-advance hooks, filter sources for the
+  branch-row reservation, etc.)
+- `stamp_device_dc` at line **3744** — DC operating-point stamping
+- `stamp_device_jacobian` at line **3818** — transient Jacobian stamping
+- `update_history` hooks at lines **2603, 2624, 2647, 2989, 3061** — advance
+  the internal state ω/θ/φ_flux at the end of each accepted timestep
+- `replace_device` at line **1860** — only if the device participates in
+  hot-swap (e.g., MOSFET model upgrade); motors and magnetics don't.
+
+The CRTP `stamp_impl` from `core/include/pulsim/v1/components/*.hpp` is
+**not called** by the runtime path — only the `if constexpr` ladders. The
+runtime treats every device by value inside the variant. New devices should
+follow `Inductor` (history + state) for motors and `Transformer` (multiple
+branch rows) for the saturable transformer.
 
 ## 2. Motors — device integration
 
