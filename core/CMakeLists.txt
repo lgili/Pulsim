@@ -134,6 +134,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_frequency_analysis_phase9_perf.cpp
         tests/test_converter_templates.cpp
         tests/test_three_phase_source.cpp
+        tests/test_dc_motor_device.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests
