@@ -12,6 +12,7 @@
 #include "pulsim/v1/solver.hpp"
 #include "pulsim/v1/sources.hpp"
 #include "pulsim/v1/integration.hpp"
+#include "pulsim/v1/components/dc_motor_device.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cassert>
@@ -69,7 +70,8 @@ using DeviceVariant = std::variant<
     PWMVoltageSource,
     SineVoltageSource,
     PulseVoltageSource,
-    Transformer
+    Transformer,
+    DcMotorDevice
 >;
 
 // =============================================================================
@@ -2076,6 +2078,76 @@ public:
         num_branches_++;
     }
 
+    // ----- DC motor (full device-variant integration, Track 2) ----------------
+    //
+    // Reserves one MNA branch row for the armature current and stamps the
+    // R_a + L_a series + K_e·ω back-EMF as a 2-terminal device. Mechanical
+    // state (ω, θ) is advanced internally by the `update_history` ladder
+    // after each accepted timestep. See ``components/dc_motor_device.hpp``
+    // for the full math derivation.
+    //
+    // Example:
+    //   motors::DcMotorParams p{};
+    //   p.R_a = 0.5; p.L_a = 1e-2; p.K_e = 0.05; p.K_t = 0.05;
+    //   p.J = 1e-4; p.b = 1e-5;
+    //   circuit.add_dc_motor("M1", n_arm_plus, n_arm_minus, p);
+    void add_dc_motor(const std::string& name,
+                      Index n_a_plus,
+                      Index n_a_minus,
+                      const motors::DcMotorParams& params) {
+        assert(params.R_a > 0.0);
+        assert(params.L_a > 0.0);
+        assert(params.J   > 0.0);
+
+        Index br = num_nodes() + num_branches_;
+        DcMotorDevice motor(params, name);
+        motor.set_branch_index(br);
+        devices_.emplace_back(std::move(motor));
+        connections_.push_back({name, {n_a_plus, n_a_minus}, br});
+        register_connection_name(connections_.size() - 1);
+        num_branches_++;
+    }
+
+    // Convenience overload — quick constructor without a params struct.
+    void add_dc_motor(const std::string& name,
+                      Index n_a_plus,
+                      Index n_a_minus,
+                      Real R_a, Real L_a, Real K_e, Real K_t,
+                      Real J, Real b) {
+        motors::DcMotorParams params{};
+        params.name = name;
+        params.R_a = R_a;
+        params.L_a = L_a;
+        params.K_e = K_e;
+        params.K_t = K_t;
+        params.J   = J;
+        params.b   = b;
+        add_dc_motor(name, n_a_plus, n_a_minus, params);
+    }
+
+    /// Update the external load torque applied to a motor by name.
+    void set_motor_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<DcMotorDevice>(name)) {
+            m->set_tau_load(tau);
+        }
+    }
+
+    /// Read motor state by name. Returns NaN if not found.
+    [[nodiscard]] Real motor_omega(std::string_view name) const {
+        const auto* m = find_device<DcMotorDevice>(name);
+        return m ? m->omega() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    [[nodiscard]] Real motor_theta(std::string_view name) const {
+        const auto* m = find_device<DcMotorDevice>(name);
+        return m ? m->theta() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    [[nodiscard]] Real motor_i_a(std::string_view name) const {
+        const auto* m = find_device<DcMotorDevice>(name);
+        return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     // =========================================================================
     // PWM Duty Control
     // =========================================================================
@@ -2432,6 +2504,26 @@ public:
                     // Set current state and update history
                     dev.set_current_state(v, i);
                     dev.update_history();
+                }
+                else if constexpr (std::is_same_v<T, DcMotorDevice>) {
+                    // Read the new armature current and terminal voltage from the
+                    // MNA solution, advance the mechanical state by forward-Euler.
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    Index br = conn.branch_index;
+                    Real v1 = (n1 >= 0) ? x[n1] : 0.0;
+                    Real v2 = (n2 >= 0) ? x[n2] : 0.0;
+                    Real v_terminal = v1 - v2;
+                    Real i_branch = (br >= 0) ? x[br] : 0.0;
+
+                    if (initialize) {
+                        // After the DC OP: seed armature history from the OP
+                        // solution but reset V_L_prev to 0 so the trapezoidal
+                        // companion model starts cleanly.
+                        dev.reset_history_for_transient_start(v_terminal, i_branch);
+                    } else {
+                        dev.advance_state(v_terminal, i_branch, timestep_);
+                    }
                 }
             }, devices_[i]);
         }
@@ -3896,6 +3988,30 @@ private:
             stamp_transformer(dev.turns_ratio(), conn.nodes, conn.branch_index,
                               conn.branch_index_2, triplets, b);
         }
+        else if constexpr (std::is_same_v<T, DcMotorDevice>) {
+            // DC: armature inductor is a short, so the steady-state equation is
+            //   v_a+ − v_a− = R_a · i_a + K_e · ω_init
+            // Stamp as a voltage source with V = K_e · ω_init and R_a in series.
+            const auto& p = dev.params();
+            const Real v_back_emf = p.K_e * dev.omega();
+            const Index npos = conn.nodes[0];
+            const Index nneg = conn.nodes[1];
+            const Index br = conn.branch_index;
+            // KCL: current i_a flows from + → −
+            if (npos >= 0 && br >= 0) {
+                triplets.emplace_back(npos, br, 1.0);
+            }
+            if (nneg >= 0 && br >= 0) {
+                triplets.emplace_back(nneg, br, -1.0);
+            }
+            // Branch eq: v_a+ − v_a− − R_a · i_a − K_e · ω_init = 0
+            if (br >= 0) {
+                if (npos >= 0) triplets.emplace_back(br, npos, 1.0);
+                if (nneg >= 0) triplets.emplace_back(br, nneg, -1.0);
+                triplets.emplace_back(br, br, -p.R_a);
+                b[br] += v_back_emf;
+            }
+        }
     }
 
     template<typename Device, typename Triplets>
@@ -4115,6 +4231,43 @@ private:
             // Ideal transformer Jacobian
             stamp_transformer_jacobian(dev.turns_ratio(), conn.nodes, conn.branch_index,
                                        conn.branch_index_2, triplets, f, x);
+        }
+        else if constexpr (std::is_same_v<T, DcMotorDevice>) {
+            // Transient Jacobian for armature (R_a + L_a series + back-EMF).
+            // Trapezoidal companion (mirrors Inductor pattern):
+            //
+            //   f_br = (v_a+ − v_a−) − (R_a + 2L_a/dt) · i_a
+            //        + (2L_a/dt) · i_a_prev + V_L_prev − K_e · ω_prev
+            //
+            // ω_prev is the mechanical speed at the previous accepted step,
+            // making the back-EMF a semi-implicit source (i_a is fully
+            // implicit, ω lags by one step).
+            const auto& p = dev.params();
+            const Index npos = conn.nodes[0];
+            const Index nneg = conn.nodes[1];
+            const Index br = conn.branch_index;
+
+            const Real two_L_over_dt = 2.0 * p.L_a / std::max<Real>(timestep_, 1e-30);
+            const Real r_eq = p.R_a + two_L_over_dt;
+            const Real v_back_emf = p.K_e * dev.omega();
+            const Real v_hist = two_L_over_dt * dev.i_a_prev() + dev.v_L_prev();
+
+            // KCL: armature current flows from + → −
+            Real i_br = (br >= 0) ? x[br] : 0.0;
+            if (npos >= 0) f[npos] += i_br;
+            if (nneg >= 0) f[nneg] -= i_br;
+            if (br >= 0) {
+                if (npos >= 0) triplets.emplace_back(npos, br, 1.0);
+                if (nneg >= 0) triplets.emplace_back(nneg, br, -1.0);
+
+                Real vpos = (npos >= 0) ? x[npos] : 0.0;
+                Real vneg = (nneg >= 0) ? x[nneg] : 0.0;
+                f[br] += (vpos - vneg) - r_eq * i_br + v_hist - v_back_emf;
+
+                if (npos >= 0) triplets.emplace_back(br, npos, 1.0);
+                if (nneg >= 0) triplets.emplace_back(br, nneg, -1.0);
+                triplets.emplace_back(br, br, -r_eq);
+            }
         }
     }
 

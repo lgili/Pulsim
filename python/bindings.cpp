@@ -397,6 +397,31 @@ void init_v2_module(py::module_& v2) {
                        &Circuit::ThreePhaseSourceParams::unbalance_factor,
                        "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u");
 
+    py::class_<motors::DcMotorParams>(
+            v2, "DcMotorParams",
+            "Separately-excited DC motor parameters (Track 2 integration).")
+        .def(py::init<>())
+        .def_readwrite("name", &motors::DcMotorParams::name,
+                       "Motor name (optional, used for telemetry).")
+        .def_readwrite("R_a", &motors::DcMotorParams::R_a,
+                       "Armature resistance (Ω).")
+        .def_readwrite("L_a", &motors::DcMotorParams::L_a,
+                       "Armature inductance (H).")
+        .def_readwrite("K_e", &motors::DcMotorParams::K_e,
+                       "Back-EMF constant (V·s/rad).")
+        .def_readwrite("K_t", &motors::DcMotorParams::K_t,
+                       "Torque constant (N·m/A). Equal to K_e in SI.")
+        .def_readwrite("J",   &motors::DcMotorParams::J,
+                       "Rotor inertia (kg·m²).")
+        .def_readwrite("b",   &motors::DcMotorParams::b,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("i_a_init",   &motors::DcMotorParams::i_a_init,
+                       "Initial armature current (A).")
+        .def_readwrite("omega_init", &motors::DcMotorParams::omega_init,
+                       "Initial mechanical angular velocity (rad/s).")
+        .def_readwrite("theta_init", &motors::DcMotorParams::theta_init,
+                       "Initial rotor angle (rad).");
+
     py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
         .def(py::init<>())
         .def_readwrite("v_min", &RampParams::v_min, "Minimum voltage")
@@ -716,6 +741,37 @@ void init_v2_module(py::module_& v2) {
              py::arg("node_c"), py::arg("node_neutral"),
              py::arg("v_line_to_line_rms"), py::arg("frequency_hz"),
              "Add a balanced 3-phase voltage source (positive sequence, 0% unbalance).")
+        // DC motor — Track 2 of three-phase / motors / magnetics integration.
+        .def("add_dc_motor",
+             py::overload_cast<const std::string&, Index, Index,
+                               const motors::DcMotorParams&>(
+                 &Circuit::add_dc_motor),
+             py::arg("name"), py::arg("n_a_plus"), py::arg("n_a_minus"),
+             py::arg("params"),
+             "Add a separately-excited DC motor as a runtime device. Reserves one "
+             "MNA branch row for the armature current; advances rotor speed (ω) "
+             "and angle (θ) internally each accepted timestep.")
+        .def("add_dc_motor",
+             py::overload_cast<const std::string&, Index, Index,
+                               Real, Real, Real, Real, Real, Real>(
+                 &Circuit::add_dc_motor),
+             py::arg("name"), py::arg("n_a_plus"), py::arg("n_a_minus"),
+             py::arg("R_a"), py::arg("L_a"), py::arg("K_e"),
+             py::arg("K_t"), py::arg("J"), py::arg("b"),
+             "Add a DC motor with explicit (R_a, L_a, K_e, K_t, J, b) parameters.")
+        .def("set_motor_tau_load", &Circuit::set_motor_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Update the external shaft load torque applied to a DC motor (N·m).")
+        .def("motor_omega", &Circuit::motor_omega,
+             py::arg("name"),
+             "Read the current mechanical angular velocity of a DC motor (rad/s). "
+             "Returns NaN if the motor name is not registered.")
+        .def("motor_theta", &Circuit::motor_theta,
+             py::arg("name"),
+             "Read the current rotor angle of a DC motor (rad).")
+        .def("motor_i_a", &Circuit::motor_i_a,
+             py::arg("name"),
+             "Read the current armature current of a DC motor (A).")
         // PWM control
         .def("set_pwm_duty", &Circuit::set_pwm_duty,
              py::arg("name"), py::arg("duty"),
