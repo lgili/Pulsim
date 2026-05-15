@@ -133,6 +133,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_frequency_analysis_phase8_validation.cpp
         tests/test_frequency_analysis_phase9_perf.cpp
         tests/test_converter_templates.cpp
+        tests/test_three_phase_source.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

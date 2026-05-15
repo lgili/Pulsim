@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.9.0"
+__version__ = "0.10.0a1"
 
 import weakref
 
@@ -47,6 +47,9 @@ from ._pulsim import (
     RampGenerator,
     PulseParams,
     PulseVoltageSource,
+
+    # Three-Phase Voltage Source (Phase-28 follow-up)
+    ThreePhaseSourceParams,
 
     # Control Blocks
     PIController,
@@ -1059,6 +1062,7 @@ __all__ = [
     "PWMParams",
     "PWMVoltageSource",
     "SineParams",
+    "ThreePhaseSourceParams",
     "SineVoltageSource",
     "RampParams",
     "RampGenerator",

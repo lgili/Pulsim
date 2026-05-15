@@ -14,8 +14,10 @@
 #include "pulsim/v1/integration.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cmath>
+#include <type_traits>
 #include <deque>
 #include <functional>
 #include <limits>
@@ -1979,6 +1981,88 @@ public:
         params.frequency = frequency;
         params.offset = offset;
         add_sine_voltage_source(name, npos, nneg, params);
+    }
+
+    // ----- Three-phase voltage source helper (Phase 28 follow-up) ------------
+    //
+    // Decomposes into three internal SineVoltageSource branches between each
+    // line node and the shared neutral. The math objects already exist in
+    // ``pulsim/v1/grid/three_phase_source.hpp``; this helper is the runtime
+    // entry-point the GUI uses until the full device-variant integration
+    // lands. Internal branch names are ``<name>__A``, ``<name>__B``, and
+    // ``<name>__C`` so per-phase probe currents stay addressable.
+    //
+    // Convention: balanced positive sequence is
+    //   V_a(t) = V_peak * sin(2π·f·t + phase_a)
+    //   V_b(t) = V_peak * sin(2π·f·t + phase_a − 2π/3)
+    //   V_c(t) = V_peak * sin(2π·f·t + phase_a − 4π/3)
+    // Set ``positive_sequence=false`` to swap phases B and C (negative seq).
+    // ``unbalance_factor=u`` keeps V_a at nominal, scales V_b by (1 − u)
+    // and V_c by (1 + u); this is a coarse 0..1 asymmetry knob suitable
+    // for sanity sweeps. THD injection is reserved for a future release.
+    struct ThreePhaseSourceParams {
+        Real line_to_line_voltage_rms = 400.0;  // V_LL_RMS [V]
+        Real frequency_hz = 50.0;               // Fundamental [Hz]
+        Real phase_a_deg = 0.0;                 // Phase A reference angle
+        bool positive_sequence = true;          // false flips B/C
+        Real unbalance_factor = 0.0;            // 0 = balanced, [0, 1)
+    };
+    static_assert(std::is_trivially_copyable_v<ThreePhaseSourceParams>,
+                  "ThreePhaseSourceParams must stay a POD aggregate so callers "
+                  "can value-init it without ceremony.");
+
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const ThreePhaseSourceParams& params) {
+        // Preconditions — match existing Circuit style (asserts, no throws
+        // in the hot path; callers above this layer translate to error UI).
+        assert(params.frequency_hz > 0.0);
+        assert(params.unbalance_factor >= 0.0 && params.unbalance_factor < 1.0);
+
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        // V_LL_RMS → per-phase peak: V_ph_peak = V_LL_RMS · √2 / √3
+        constexpr Real kSqrt2OverSqrt3 = static_cast<Real>(0.8164965809277261);
+        const Real v_peak_nominal = params.line_to_line_voltage_rms * kSqrt2OverSqrt3;
+        const Real phase_a_rad = params.phase_a_deg * static_cast<Real>(0.017453292519943295);
+
+        const Real shift_b = params.positive_sequence ? -kTwoPiOverThree :  kTwoPiOverThree;
+        const Real shift_c = params.positive_sequence ? -2.0 * kTwoPiOverThree : 2.0 * kTwoPiOverThree;
+
+        const Real scale_b = 1.0 - params.unbalance_factor;
+        const Real scale_c = 1.0 + params.unbalance_factor;
+
+        const std::string base{name};
+
+        SineParams leg{};
+        leg.frequency = params.frequency_hz;
+        leg.offset = 0.0;
+
+        // Leg A — reference
+        leg.amplitude = v_peak_nominal;
+        leg.phase = phase_a_rad;
+        add_sine_voltage_source(base + "__A", node_a, node_neutral, leg);
+
+        // Leg B — shifted by ±120°
+        leg.amplitude = v_peak_nominal * scale_b;
+        leg.phase = phase_a_rad + shift_b;
+        add_sine_voltage_source(base + "__B", node_b, node_neutral, leg);
+
+        // Leg C — shifted by ±240°
+        leg.amplitude = v_peak_nominal * scale_c;
+        leg.phase = phase_a_rad + shift_c;
+        add_sine_voltage_source(base + "__C", node_c, node_neutral, leg);
+    }
+
+    // Convenience overload — explicit V_LL_RMS + frequency, no params struct.
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                Real v_line_to_line_rms, Real frequency_hz) {
+        ThreePhaseSourceParams params{};
+        params.line_to_line_voltage_rms = v_line_to_line_rms;
+        params.frequency_hz = frequency_hz;
+        add_three_phase_source(name, node_a, node_b, node_c, node_neutral, params);
     }
 
     void add_pulse_voltage_source(const std::string& name, Index npos, Index nneg,
