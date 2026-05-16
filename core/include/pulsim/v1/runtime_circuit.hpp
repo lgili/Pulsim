@@ -13,6 +13,7 @@
 #include "pulsim/v1/sources.hpp"
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/components/dc_motor_device.hpp"
+#include "pulsim/v1/components/pmsm_device.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cassert>
@@ -71,7 +72,8 @@ using DeviceVariant = std::variant<
     SineVoltageSource,
     PulseVoltageSource,
     Transformer,
-    DcMotorDevice
+    DcMotorDevice,
+    PmsmDevice
 >;
 
 // =============================================================================
@@ -2321,6 +2323,99 @@ public:
         return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- PMSM (full device-variant integration, Track 2.2) -----------------
+    //
+    // Reserves THREE MNA branch rows (one per phase line current) and stamps
+    // R_s + L_s series + per-phase back-EMF as a 4-terminal device (A, B, C,
+    // N). Mechanical state (ω_m, θ_m) and the cached dq currents (i_d, i_q)
+    // are advanced internally by the `update_history` ladder after each
+    // accepted timestep. See ``components/pmsm_device.hpp`` for the math.
+    //
+    // Example:
+    //   motors::PmsmParams p{};
+    //   p.Rs = 0.5; p.Ld = p.Lq = 2e-3; p.psi_pm = 0.1;
+    //   p.pole_pairs = 2; p.J = 1e-3; p.b_friction = 1e-4;
+    //   circuit.add_pmsm("M1", n_a, n_b, n_c, n_neutral, p);
+    void add_pmsm(const std::string& name,
+                  Index n_a, Index n_b, Index n_c, Index n_neutral,
+                  const motors::PmsmParams& params) {
+        assert(params.Rs > 0.0);
+        assert(params.Ld > 0.0 && params.Lq > 0.0);
+        assert(params.J  > 0.0);
+        assert(params.pole_pairs > 0);
+
+        const Index br_a = num_nodes() + num_branches_;
+        const Index br_b = br_a + 1;
+        const Index br_c = br_a + 2;
+        PmsmDevice motor(params, name);
+        motor.set_branch_indices(br_a, br_b, br_c);
+        devices_.emplace_back(std::move(motor));
+        // Convention: branch_index = i_a's row; branch_index_2 = i_b's row.
+        // The third (i_c) is computed as branch_index + 2 inside the ladder.
+        connections_.push_back(
+            {name, {n_a, n_b, n_c, n_neutral}, br_a, br_b});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 3;
+    }
+
+    /// Convenience overload — quick constructor without a params struct.
+    void add_pmsm(const std::string& name,
+                  Index n_a, Index n_b, Index n_c, Index n_neutral,
+                  Real Rs, Real Ld, Real Lq, Real psi_pm, int pole_pairs,
+                  Real J, Real b_friction) {
+        motors::PmsmParams params{};
+        params.name = name;
+        params.Rs = Rs;
+        params.Ld = Ld;
+        params.Lq = Lq;
+        params.psi_pm = psi_pm;
+        params.pole_pairs = pole_pairs;
+        params.J = J;
+        params.b_friction = b_friction;
+        add_pmsm(name, n_a, n_b, n_c, n_neutral, params);
+    }
+
+    /// Update the external load torque applied to a PMSM by name.
+    void set_pmsm_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<PmsmDevice>(name)) {
+            m->set_tau_load(tau);
+        }
+    }
+
+    /// Read PMSM mechanical / dq state by name. Returns NaN if not found.
+    [[nodiscard]] Real pmsm_omega(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_theta(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_d(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_d() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_q(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_q() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_tau_em(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->tau_em() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_a(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_b(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_b() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_c(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     // =========================================================================
     // PWM Duty Control
     // =========================================================================
@@ -2696,6 +2791,32 @@ public:
                         dev.reset_history_for_transient_start(v_terminal, i_branch);
                     } else {
                         dev.advance_state(v_terminal, i_branch, timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, PmsmDevice>) {
+                    // Read 3 line currents + 3 terminal voltages (relative to
+                    // the neutral node) and advance ω, θ via forward-Euler.
+                    const Index n_a = conn.nodes[0];
+                    const Index n_b = conn.nodes[1];
+                    const Index n_c = conn.nodes[2];
+                    const Index n_n = conn.nodes[3];
+                    const Index br_a = conn.branch_index;
+                    const Index br_b = conn.branch_index_2;
+                    const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+                    const Real v_n = (n_n >= 0) ? x[n_n] : 0.0;
+                    const Real v_a = ((n_a >= 0) ? x[n_a] : 0.0) - v_n;
+                    const Real v_b = ((n_b >= 0) ? x[n_b] : 0.0) - v_n;
+                    const Real v_c = ((n_c >= 0) ? x[n_c] : 0.0) - v_n;
+                    const Real i_a = (br_a >= 0) ? x[br_a] : 0.0;
+                    const Real i_b = (br_b >= 0) ? x[br_b] : 0.0;
+                    const Real i_c = (br_c >= 0) ? x[br_c] : 0.0;
+
+                    if (initialize) {
+                        dev.reset_history_for_transient_start(i_a, i_b, i_c);
+                    } else {
+                        dev.advance_state(v_a, v_b, v_c, i_a, i_b, i_c,
+                                          timestep_);
                     }
                 }
             }, devices_[i]);
@@ -4185,6 +4306,39 @@ private:
                 b[br] += v_back_emf;
             }
         }
+        else if constexpr (std::is_same_v<T, PmsmDevice>) {
+            // DC: each phase inductor is a short, so per-phase
+            //   v_k − v_N − R_s · i_k − e_k(θ_e_init) = 0
+            // Stamp as 3 voltage sources with V = e_k(θ_e_init) and R_s in
+            // series, one per phase.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real e_a = dev.back_emf_a();
+            const Real e_b = dev.back_emf_b();
+            const Real e_c = dev.back_emf_c();
+
+            auto stamp_phase = [&](Index n_line, Index br, Real e_k) {
+                if (br < 0) return;
+                // KCL at line + neutral nodes
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+                // Branch eq: v_line − v_N − R_s · i_k − e_k = 0
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -p.Rs);
+                b[br] += e_k;
+            };
+            stamp_phase(n_a, br_a, e_a);
+            stamp_phase(n_b, br_b, e_b);
+            stamp_phase(n_c, br_c, e_c);
+        }
     }
 
     template<typename Device, typename Triplets>
@@ -4441,6 +4595,55 @@ private:
                 if (nneg >= 0) triplets.emplace_back(br, nneg, -1.0);
                 triplets.emplace_back(br, br, -r_eq);
             }
+        }
+        else if constexpr (std::is_same_v<T, PmsmDevice>) {
+            // Transient Jacobian for the 3-phase PMSM (R_s + L_s series +
+            // back-EMF per phase). Trapezoidal companion (mirrors Inductor
+            // / DcMotor pattern) applied per-phase:
+            //
+            //   f_brk = (v_k − v_N) − (R_s + 2L_s/dt) · i_k
+            //         + (2L_s/dt) · i_k_prev + V_Lk_prev − e_k(θ_e_prev)
+            //
+            // θ_e_prev is the electrical angle at the previous accepted
+            // step, so the back-EMF is a semi-implicit source. The dq
+            // currents are computed in `advance_state()` after the solve.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real l_s = Real{0.5} * (p.Ld + p.Lq);
+            const Real two_L_over_dt = 2.0 * l_s / std::max<Real>(timestep_, 1e-30);
+            const Real r_eq = p.Rs + two_L_over_dt;
+
+            auto stamp_phase = [&](Index n_line, Index br, Real i_prev,
+                                   Real v_L_prev, Real e_k) {
+                if (br < 0) return;
+                const Real v_hist = two_L_over_dt * i_prev + v_L_prev;
+                const Real i_br = x[br];
+
+                // KCL at line / neutral nodes
+                if (n_line >= 0) f[n_line] += i_br;
+                if (n_n    >= 0) f[n_n]    -= i_br;
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+
+                const Real v_line = (n_line >= 0) ? x[n_line] : 0.0;
+                const Real v_neut = (n_n    >= 0) ? x[n_n]    : 0.0;
+                f[br] += (v_line - v_neut) - r_eq * i_br + v_hist - e_k;
+
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -r_eq);
+            };
+
+            stamp_phase(n_a, br_a, dev.i_a_prev(), dev.v_La_prev(), dev.back_emf_a());
+            stamp_phase(n_b, br_b, dev.i_b_prev(), dev.v_Lb_prev(), dev.back_emf_b());
+            stamp_phase(n_c, br_c, dev.i_c_prev(), dev.v_Lc_prev(), dev.back_emf_c());
         }
     }
 
