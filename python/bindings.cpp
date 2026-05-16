@@ -470,6 +470,41 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("theta_init", &motors::DcMotorParams::theta_init,
                        "Initial rotor angle (rad).");
 
+    // PMSM (dynamic device-variant, Track 2.2 of the three-phase motors and
+    // magnetics integration). Reuses the same parameter struct as the math
+    // class in core/include/pulsim/v1/motors/pmsm.hpp.
+    py::class_<motors::PmsmParams>(
+            v2, "PmsmParams",
+            "Dynamic PMSM parameters (Track 2.2). Used by Circuit::add_pmsm.")
+        .def(py::init<>())
+        .def_readwrite("name", &motors::PmsmParams::name,
+                       "Motor name (optional, used for telemetry).")
+        .def_readwrite("Rs", &motors::PmsmParams::Rs,
+                       "Stator phase resistance (Ω).")
+        .def_readwrite("Ld", &motors::PmsmParams::Ld,
+                       "d-axis stator inductance (H).")
+        .def_readwrite("Lq", &motors::PmsmParams::Lq,
+                       "q-axis stator inductance (H). Lq > Ld → IPM (saliency).")
+        .def_readwrite("psi_pm", &motors::PmsmParams::psi_pm,
+                       "Rotor flux linkage from permanent magnet (V·s/rad).")
+        .def_readwrite("pole_pairs", &motors::PmsmParams::pole_pairs,
+                       "Number of pole pairs (poles / 2).")
+        .def_readwrite("J", &motors::PmsmParams::J,
+                       "Rotor inertia (kg·m²).")
+        .def_readwrite("b_friction", &motors::PmsmParams::b_friction,
+                       "Viscous friction coefficient (N·m·s) — linear in ω.")
+        .def_readwrite("friction_coulomb",
+                       &motors::PmsmParams::friction_coulomb,
+                       "Coulomb friction torque (N·m) — sign(ω)·τ_C.")
+        .def_readwrite("i_d_init", &motors::PmsmParams::i_d_init,
+                       "Initial d-axis current (A).")
+        .def_readwrite("i_q_init", &motors::PmsmParams::i_q_init,
+                       "Initial q-axis current (A).")
+        .def_readwrite("omega_init", &motors::PmsmParams::omega_init,
+                       "Initial mechanical angular velocity (rad/s).")
+        .def_readwrite("theta_init", &motors::PmsmParams::theta_init,
+                       "Initial rotor angle (rad).");
+
     py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
         .def(py::init<>())
         .def_readwrite("v_min", &RampParams::v_min, "Minimum voltage")
@@ -861,6 +896,49 @@ void init_v2_module(py::module_& v2) {
         .def("motor_i_a", &Circuit::motor_i_a,
              py::arg("name"),
              "Read the current armature current of a DC motor (A).")
+        // PMSM (dynamic) — Track 2.2 of the three-phase motors and
+        // magnetics integration. Full device-variant with 4 internal
+        // states (i_d, i_q, ω_m, θ_m) and 3 reserved MNA branch rows.
+        .def("add_pmsm",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               const motors::PmsmParams&>(
+                 &Circuit::add_pmsm),
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"),
+             py::arg("n_c"), py::arg("n_neutral"), py::arg("params"),
+             "Add a dynamic Permanent-Magnet Synchronous Motor as a runtime "
+             "device. Reserves 3 MNA branch rows (one per phase line current) "
+             "and advances rotor speed (ω_m), angle (θ_m), and the cached "
+             "dq currents internally each accepted timestep.")
+        .def("add_pmsm",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               Real, Real, Real, Real, int, Real, Real>(
+                 &Circuit::add_pmsm),
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"),
+             py::arg("n_c"), py::arg("n_neutral"),
+             py::arg("Rs"), py::arg("Ld"), py::arg("Lq"),
+             py::arg("psi_pm"), py::arg("pole_pairs"),
+             py::arg("J"), py::arg("b_friction"),
+             "Add a dynamic PMSM with explicit electrical and mechanical "
+             "parameters.")
+        .def("set_pmsm_tau_load", &Circuit::set_pmsm_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Update the external shaft load torque applied to a PMSM (N·m).")
+        .def("pmsm_omega", &Circuit::pmsm_omega, py::arg("name"),
+             "Read the mechanical angular velocity of a PMSM (rad/s).")
+        .def("pmsm_theta", &Circuit::pmsm_theta, py::arg("name"),
+             "Read the rotor mechanical angle of a PMSM (rad).")
+        .def("pmsm_i_d", &Circuit::pmsm_i_d, py::arg("name"),
+             "Read the cached d-axis stator current of a PMSM (A).")
+        .def("pmsm_i_q", &Circuit::pmsm_i_q, py::arg("name"),
+             "Read the cached q-axis stator current of a PMSM (A).")
+        .def("pmsm_tau_em", &Circuit::pmsm_tau_em, py::arg("name"),
+             "Read the latest electromagnetic torque of a PMSM (N·m).")
+        .def("pmsm_i_a", &Circuit::pmsm_i_a, py::arg("name"),
+             "Read the phase A line current of a PMSM (A).")
+        .def("pmsm_i_b", &Circuit::pmsm_i_b, py::arg("name"),
+             "Read the phase B line current of a PMSM (A).")
+        .def("pmsm_i_c", &Circuit::pmsm_i_c, py::arg("name"),
+             "Read the phase C line current of a PMSM (A).")
         // PWM control
         .def("set_pwm_duty", &Circuit::set_pwm_duty,
              py::arg("name"), py::arg("duty"),
