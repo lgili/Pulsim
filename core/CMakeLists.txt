@@ -135,6 +135,8 @@ if(PULSIM_BUILD_TESTS)
         tests/test_converter_templates.cpp
         tests/test_three_phase_source.cpp
         tests/test_dc_motor_device.cpp
+        tests/test_three_phase_rl_load.cpp
+        tests/test_pmsm_steady_state.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

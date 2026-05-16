@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.10.0a2"
+__version__ = "0.10.0a3"
 
 import weakref
 
@@ -53,6 +53,13 @@ from ._pulsim import (
 
     # DC Motor (Track 2 of three-phase / motors / magnetics integration)
     DcMotorParams,
+
+    # Three-Phase RL Load (Phase 28 follow-up)
+    ThreePhaseLoadTopology,
+    ThreePhaseRLLoadParams,
+
+    # PMSM steady-state (Phase 28 follow-up)
+    PmsmSteadyStateParams,
 
     # Control Blocks
     PIController,
@@ -1067,6 +1074,9 @@ __all__ = [
     "SineParams",
     "ThreePhaseSourceParams",
     "DcMotorParams",
+    "ThreePhaseLoadTopology",
+    "ThreePhaseRLLoadParams",
+    "PmsmSteadyStateParams",
     "SineVoltageSource",
     "RampParams",
     "RampGenerator",

@@ -29,7 +29,14 @@ struct DcMotorParams {
     Real K_e   = 0.05;       ///< V·s/rad — back-EMF constant
     Real K_t   = 0.05;       ///< N·m/A — torque constant
     Real J     = 1e-4;       ///< kg·m² — rotor inertia
-    Real b     = 1e-5;       ///< N·m·s — viscous friction
+    Real b     = 1e-5;       ///< N·m·s — viscous friction (linear in ω)
+
+    /// Optional load profile (added on top of the externally-set
+    /// ``tau_load`` and the viscous ``b·ω`` term):
+    ///   τ_load_total = τ_load_ext + b·ω + tau_load_quad_coeff · ω²
+    /// Quadratic term models fan / centrifugal-pump / aerodynamic loads
+    /// where torque scales with square of speed.
+    Real tau_load_quad_coeff = 0.0;   ///< N·m·s² — quadratic load coefficient
 
     Real i_a_init   = 0.0;
     Real omega_init = 0.0;
