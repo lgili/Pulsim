@@ -2069,6 +2069,167 @@ public:
         add_three_phase_source(name, node_a, node_b, node_c, node_neutral, params);
     }
 
+    // ----- Three-phase 2-level VSI helper (Track 4 follow-up) -----------------
+    //
+    // Builds a complete 3-leg 6-switch 2-level voltage-source inverter from a
+    // DC bus (vdc+, vdc−) to three phase outputs (a, b, c). Internally creates
+    // six NMOS switches arranged as three half-bridges and drives them with
+    // sinusoidal PWM (SPWM). Each leg's high-side gate is referenced to its
+    // own source node — i.e., the leg's output — so the device model behaves
+    // like a real bootstrapped gate driver (V_GS is the gate-source delta,
+    // independent of leg-output voltage).
+    //
+    // Modulation: per-phase reference m_k(t) = m · sin(2π·f_mod·t + φ_k),
+    // compared against an implicit triangular carrier at f_sw. Each high-
+    // side switch sees duty(t) = 0.5 + 0.5·m_k(t), clamped to [0, 1]. The
+    // low-side switch is naturally complementary: same duty callback, but
+    // with v_high/v_low swapped so it inverts the output. No dead-time
+    // window — the v1 ship is ideal switching; users who need dead-time can
+    // drop down to manual wiring.
+    //
+    // Internal naming convention (all reserved on the Circuit namespace):
+    //   <name>__G_aH, <name>__G_aL, <name>__G_bH, ..., <name>__G_cL
+    //                                 internal gate nodes (6 total)
+    //   <name>__QaH, <name>__QaL, ..., <name>__QcL
+    //                                 6 MOSFETs
+    //   <name>__PWM_aH, <name>__PWM_aL, ..., <name>__PWM_cL
+    //                                 6 PWM gate drivers
+    //
+    // Analytical reference for tests:
+    //   In the SPWM linear range (m ≤ 1), the average phase-to-midpoint
+    //   voltage is (V_dc/2) · m · sin(ωt + φ_k). The peak line-to-line
+    //   voltage is therefore (√3/2)·m·V_dc and the line-to-line RMS is
+    //   (√3/(2·√2))·m·V_dc ≈ 0.612 · m · V_dc.
+
+    struct ThreePhaseVsiParams {
+        Real v_gate_on = 12.0;                ///< Gate ON drive voltage [V]
+        Real v_gate_off = 0.0;                ///< Gate OFF drive voltage [V]
+        Real switching_frequency_hz = 20e3;   ///< PWM carrier frequency [Hz]
+        Real modulation_index = 0.8;          ///< SPWM index (0..1 linear)
+        Real modulation_frequency_hz = 50.0;  ///< Output fundamental [Hz]
+        Real phase_a_deg = 0.0;               ///< Phase A reference angle
+        bool positive_sequence = true;        ///< false flips B/C
+        Real mosfet_r_on_ohm = 0.01;          ///< MOSFET R_ds(on) [Ω]
+        Real mosfet_vth = 1.0;                ///< MOSFET gate threshold [V]
+    };
+    static_assert(std::is_trivially_copyable_v<ThreePhaseVsiParams>,
+                  "ThreePhaseVsiParams must stay a POD aggregate.");
+
+    void add_three_phase_vsi(std::string_view name,
+                              Index node_vdc_pos, Index node_vdc_neg,
+                              Index node_a, Index node_b, Index node_c,
+                              const ThreePhaseVsiParams& params) {
+        assert(params.switching_frequency_hz > 0.0);
+        assert(params.modulation_frequency_hz > 0.0);
+        assert(params.modulation_index >= 0.0 && params.modulation_index <= 1.5);
+        assert(params.mosfet_r_on_ohm > 0.0);
+
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        constexpr Real kDegToRad = static_cast<Real>(0.017453292519943295);
+
+        const Real omega_mod = 2.0 * 3.14159265358979323846 *
+                               params.modulation_frequency_hz;
+        const Real phase_a_rad = params.phase_a_deg * kDegToRad;
+        const Real shift_b = params.positive_sequence
+                             ? -kTwoPiOverThree :  kTwoPiOverThree;
+        const Real shift_c = params.positive_sequence
+                             ? -2.0 * kTwoPiOverThree
+                             :  2.0 * kTwoPiOverThree;
+
+        const std::string base{name};
+
+        MOSFET::Params mp{};
+        mp.vth = params.mosfet_vth;
+        mp.kp  = 1.0;        // Large kp → quick saturation once VGS exceeds vth.
+        mp.g_off = 1e-12;
+        mp.g_on  = 1.0 / std::max<Real>(params.mosfet_r_on_ohm, 1e-9);
+        mp.is_nmos = true;
+
+        PWMParams ph_h{};
+        ph_h.v_high = params.v_gate_on;
+        ph_h.v_low  = params.v_gate_off;
+        ph_h.frequency = params.switching_frequency_hz;
+        ph_h.duty = 0.5;
+        ph_h.phase = 0.0;
+
+        PWMParams ph_l{};
+        ph_l.v_high = params.v_gate_off;     // swapped — produces the
+        ph_l.v_low  = params.v_gate_on;      // complementary waveform.
+        ph_l.frequency = params.switching_frequency_hz;
+        ph_l.duty = 0.5;
+        ph_l.phase = 0.0;
+
+        auto stamp_leg = [&](const char* suffix, Index n_phase, Real phi_k) {
+            const Index g_h = add_node(base + "__G_" + suffix + "H");
+            const Index g_l = add_node(base + "__G_" + suffix + "L");
+
+            // High-side MOSFET: drain on vdc+, source on the leg output.
+            add_mosfet(base + "__Q" + suffix + "H",
+                       g_h, node_vdc_pos, n_phase, mp);
+
+            // Low-side MOSFET: drain on the leg output, source on vdc−.
+            add_mosfet(base + "__Q" + suffix + "L",
+                       g_l, n_phase, node_vdc_neg, mp);
+
+            // Force the MOSFETs into the Ideal (PWL) switching mode so the
+            // state-space engine handles the 6×f_sw switching events
+            // without running Newton at every commutation. Without this,
+            // the default Behavioral mode would force smooth-nonlinear
+            // stamping at every step, which is ~100× slower for VSI loads.
+            if (auto* qh = find_device<MOSFET>(base + "__Q" + suffix + "H")) {
+                qh->set_switching_mode(SwitchingMode::Ideal);
+            }
+            if (auto* ql = find_device<MOSFET>(base + "__Q" + suffix + "L")) {
+                ql->set_switching_mode(SwitchingMode::Ideal);
+            }
+
+            // High-side gate driver: PWM between G_kH and the leg output
+            // so V_GS = v_gate_on when the duty is HIGH.
+            add_pwm_voltage_source(
+                base + "__PWM_" + suffix + "H", g_h, n_phase, ph_h);
+
+            // Low-side gate driver: PWM between G_kL and vdc−. Uses the
+            // swapped high/low levels so it produces the complementary
+            // waveform with the SAME duty callback.
+            add_pwm_voltage_source(
+                base + "__PWM_" + suffix + "L", g_l, node_vdc_neg, ph_l);
+
+            // Capture the modulator parameters by value into the duty
+            // callback so the lambda has no lifetime dependency.
+            const Real m_idx = params.modulation_index;
+            const Real omega = omega_mod;
+            auto duty_cb = [m_idx, omega, phi_k](Real t) -> Real {
+                Real d = 0.5 + 0.5 * m_idx * std::sin(omega * t + phi_k);
+                if (d < 0.0) d = 0.0;
+                if (d > 1.0) d = 1.0;
+                return d;
+            };
+            set_pwm_duty_callback(
+                base + "__PWM_" + suffix + "H", duty_cb);
+            set_pwm_duty_callback(
+                base + "__PWM_" + suffix + "L", duty_cb);
+        };
+
+        stamp_leg("a", node_a, phase_a_rad);
+        stamp_leg("b", node_b, phase_a_rad + shift_b);
+        stamp_leg("c", node_c, phase_a_rad + shift_c);
+    }
+
+    // Convenience overload — explicit (V_dc, f_sw, m, f_mod) without struct.
+    void add_three_phase_vsi(std::string_view name,
+                              Index node_vdc_pos, Index node_vdc_neg,
+                              Index node_a, Index node_b, Index node_c,
+                              Real switching_frequency_hz,
+                              Real modulation_index,
+                              Real modulation_frequency_hz) {
+        ThreePhaseVsiParams params{};
+        params.switching_frequency_hz = switching_frequency_hz;
+        params.modulation_index = modulation_index;
+        params.modulation_frequency_hz = modulation_frequency_hz;
+        add_three_phase_vsi(name, node_vdc_pos, node_vdc_neg,
+                            node_a, node_b, node_c, params);
+    }
+
     // ----- Three-phase RL load helper (Phase 28 follow-up) -------------------
     //
     // Decomposes into three internal R + L series branches. Supports two

@@ -397,6 +397,39 @@ void init_v2_module(py::module_& v2) {
                        &Circuit::ThreePhaseSourceParams::unbalance_factor,
                        "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u");
 
+    py::class_<Circuit::ThreePhaseVsiParams>(
+            v2, "ThreePhaseVsiParams",
+            "Three-phase 2-level VSI helper parameters (Track 4 follow-up).")
+        .def(py::init<>())
+        .def_readwrite("v_gate_on",
+                       &Circuit::ThreePhaseVsiParams::v_gate_on,
+                       "Gate ON drive voltage (V).")
+        .def_readwrite("v_gate_off",
+                       &Circuit::ThreePhaseVsiParams::v_gate_off,
+                       "Gate OFF drive voltage (V).")
+        .def_readwrite("switching_frequency_hz",
+                       &Circuit::ThreePhaseVsiParams::switching_frequency_hz,
+                       "PWM carrier (switching) frequency (Hz).")
+        .def_readwrite("modulation_index",
+                       &Circuit::ThreePhaseVsiParams::modulation_index,
+                       "SPWM modulation index (0..1 linear range; 1.0 = "
+                       "full-rail SPWM, ~0.866·V_dc line-to-line peak).")
+        .def_readwrite("modulation_frequency_hz",
+                       &Circuit::ThreePhaseVsiParams::modulation_frequency_hz,
+                       "Output fundamental frequency (Hz).")
+        .def_readwrite("phase_a_deg",
+                       &Circuit::ThreePhaseVsiParams::phase_a_deg,
+                       "Phase A reference angle (degrees).")
+        .def_readwrite("positive_sequence",
+                       &Circuit::ThreePhaseVsiParams::positive_sequence,
+                       "True = positive (abc) sequence; False = (acb).")
+        .def_readwrite("mosfet_r_on_ohm",
+                       &Circuit::ThreePhaseVsiParams::mosfet_r_on_ohm,
+                       "MOSFET R_ds(on) (Ω). Default 10 mΩ.")
+        .def_readwrite("mosfet_vth",
+                       &Circuit::ThreePhaseVsiParams::mosfet_vth,
+                       "MOSFET gate threshold voltage (V). Default 1 V.");
+
     py::enum_<Circuit::ThreePhaseLoadTopology>(
             v2, "ThreePhaseLoadTopology",
             "Three-phase RL load connection topology.")
@@ -824,6 +857,28 @@ void init_v2_module(py::module_& v2) {
              py::arg("node_c"), py::arg("node_neutral"),
              py::arg("v_line_to_line_rms"), py::arg("frequency_hz"),
              "Add a balanced 3-phase voltage source (positive sequence, 0% unbalance).")
+        // Three-phase 2-level VSI (Track 4 follow-up). Decomposes into 6
+        // NMOS switches + 6 SPWM gate drivers internally.
+        .def("add_three_phase_vsi",
+             py::overload_cast<std::string_view, Index, Index, Index, Index, Index,
+                               const Circuit::ThreePhaseVsiParams&>(
+                 &Circuit::add_three_phase_vsi),
+             py::arg("name"), py::arg("node_vdc_pos"), py::arg("node_vdc_neg"),
+             py::arg("node_a"), py::arg("node_b"), py::arg("node_c"),
+             py::arg("params"),
+             "Add a 3-phase 2-level voltage-source inverter from a DC bus to "
+             "three phase outputs. Internally builds 6 NMOS switches (in 3 "
+             "half-bridges) driven by 6 SPWM gate sources. MOSFETs default "
+             "to Ideal (PWL) switching mode for speed.")
+        .def("add_three_phase_vsi",
+             py::overload_cast<std::string_view, Index, Index, Index, Index, Index,
+                               Real, Real, Real>(
+                 &Circuit::add_three_phase_vsi),
+             py::arg("name"), py::arg("node_vdc_pos"), py::arg("node_vdc_neg"),
+             py::arg("node_a"), py::arg("node_b"), py::arg("node_c"),
+             py::arg("switching_frequency_hz"), py::arg("modulation_index"),
+             py::arg("modulation_frequency_hz"),
+             "Add a 3-phase VSI with explicit (f_sw, m, f_mod) values.")
         // Three-phase RL load — Track follow-up (Phase 28).
         .def("add_three_phase_rl_load",
              py::overload_cast<std::string_view, Index, Index, Index, Index,
