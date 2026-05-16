@@ -123,9 +123,16 @@ public:
         const Real v_L_new = v_terminal - params_.R_a * i_branch - v_back_emf;
 
         // Forward-Euler mechanical step using the *new* armature current.
+        // Quadratic load (fan / pump) adds on top of the external τ_load
+        // and the linear viscous friction b·ω.
         const Real tau_em = params_.K_t * i_branch;
+        const Real omega_speed = omega_;
+        const Real tau_load_quad =
+            params_.tau_load_quad_coeff * omega_speed * std::abs(omega_speed);
+        const Real tau_load_total =
+            tau_load_ + params_.b * omega_speed + tau_load_quad;
         const Real omega_new =
-            omega_ + dt * (tau_em - tau_load_ - params_.b * omega_) / params_.J;
+            omega_ + dt * (tau_em - tau_load_total) / params_.J;
         const Real theta_new = theta_ + dt * omega_;
 
         i_a_prev_ = i_branch;

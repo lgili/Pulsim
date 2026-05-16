@@ -2067,6 +2067,179 @@ public:
         add_three_phase_source(name, node_a, node_b, node_c, node_neutral, params);
     }
 
+    // ----- Three-phase RL load helper (Phase 28 follow-up) -------------------
+    //
+    // Decomposes into three internal R + L series branches. Supports two
+    // connection topologies:
+    //   - Star (Y, "wye"):  each branch goes from one line node to the
+    //     shared neutral. Three internal nets are reserved (a_mid, b_mid,
+    //     c_mid) between the R and L of each leg so per-phase inductor
+    //     currents stay addressable as ``<name>__L_A``, ``<name>__L_B``,
+    //     ``<name>__L_C``.
+    //   - Delta (Δ, "delta"): each branch goes line-to-line (a→b, b→c,
+    //     c→a). No neutral node needed; the caller passes ``ground()`` or
+    //     any unused node for ``node_neutral`` — it's ignored in delta
+    //     mode.
+    //
+    // The math is identical to dropping three R+L pairs by hand; the
+    // helper just removes ceremony for the most common VSI test load. For
+    // line-frequency steady-state, the load draws line current
+    //   I_line_rms = V_LL_rms / Z_eq
+    // where Z_eq = sqrt(R² + (2π·f·L)²) for star,
+    // or = sqrt(R² + (2π·f·L)²) / sqrt(3) for delta.
+    //
+    // ``unbalance_factor`` scales |Z_b| by (1 − u) and |Z_c| by (1 + u)
+    // — same convention as ``add_three_phase_source``. Set to 0 for the
+    // common balanced case.
+    enum class ThreePhaseLoadTopology { Star, Delta };
+
+    struct ThreePhaseRLLoadParams {
+        Real resistance_per_phase = 10.0;    // Ω — phase resistance
+        Real inductance_per_phase = 1e-3;    // H — phase inductance
+        ThreePhaseLoadTopology topology = ThreePhaseLoadTopology::Star;
+        Real unbalance_factor = 0.0;         // 0 = balanced; [0, 1) asymmetry
+    };
+    static_assert(std::is_trivially_copyable_v<ThreePhaseRLLoadParams>,
+                  "ThreePhaseRLLoadParams must stay a POD aggregate.");
+
+    void add_three_phase_rl_load(std::string_view name,
+                                 Index node_a, Index node_b, Index node_c,
+                                 Index node_neutral,
+                                 const ThreePhaseRLLoadParams& params) {
+        assert(params.resistance_per_phase > 0.0);
+        assert(params.inductance_per_phase >= 0.0);
+        assert(params.unbalance_factor >= 0.0 && params.unbalance_factor < 1.0);
+
+        const Real scale_b = 1.0 - params.unbalance_factor;
+        const Real scale_c = 1.0 + params.unbalance_factor;
+        const Real R = params.resistance_per_phase;
+        const Real L = params.inductance_per_phase;
+        const std::string base{name};
+
+        auto emit_rl_leg = [&](const std::string& suffix,
+                               Index left, Index right,
+                               Real r_scale, Real l_scale) {
+            // Intermediate node between R and L.
+            const std::string mid_name = base + "__mid_" + suffix;
+            const Index mid = add_node(mid_name);
+            add_resistor(base + "__R_" + suffix, left, mid, R * r_scale);
+            // Inductor reserves a branch row so the per-leg current can be
+            // probed by signal-domain blocks if the user wires a Goto label
+            // at the inductor terminal.
+            add_inductor(base + "__L_" + suffix, mid, right, L * l_scale);
+        };
+
+        if (params.topology == ThreePhaseLoadTopology::Star) {
+            // Y connection — each phase between its line and shared neutral.
+            emit_rl_leg("A", node_a, node_neutral, 1.0, 1.0);
+            emit_rl_leg("B", node_b, node_neutral, scale_b, scale_b);
+            emit_rl_leg("C", node_c, node_neutral, scale_c, scale_c);
+        } else {
+            // Δ connection — each phase line-to-line.
+            emit_rl_leg("AB", node_a, node_b, 1.0, 1.0);
+            emit_rl_leg("BC", node_b, node_c, scale_b, scale_b);
+            emit_rl_leg("CA", node_c, node_a, scale_c, scale_c);
+        }
+    }
+
+    // Convenience: explicit (R, L) values without a params struct, star by default.
+    void add_three_phase_rl_load(std::string_view name,
+                                 Index node_a, Index node_b, Index node_c,
+                                 Index node_neutral,
+                                 Real resistance_per_phase,
+                                 Real inductance_per_phase) {
+        ThreePhaseRLLoadParams params{};
+        params.resistance_per_phase = resistance_per_phase;
+        params.inductance_per_phase = inductance_per_phase;
+        add_three_phase_rl_load(name, node_a, node_b, node_c, node_neutral, params);
+    }
+
+    // ----- PMSM steady-state (constant rotor speed) helper -------------------
+    //
+    // Adds a 3-phase Permanent-Magnet Synchronous Motor at a FIXED rotor
+    // speed — the rotor is treated as a hard mechanical reference. Each
+    // phase appears electrically as R_s in series with L_s in series with
+    // a sinusoidal back-EMF source whose amplitude is ω_e·λ_pm and whose
+    // frequency is ω_e/(2π). Per-phase back-EMFs are 120° apart.
+    //
+    // This is the same model used by ``benchmarks/circuits/
+    // motor_pmsm_dq_open_loop.yaml`` but generalised to the abc-frame so
+    // you can connect a VSI on the line side and study harmonics / losses
+    // without modelling the rotor dynamics. Use ``add_pmsm()`` (future
+    // device-variant) when rotor inertia + spin-up transients matter.
+    //
+    // Note on saliency: this helper assumes a non-salient (L_d = L_q)
+    // machine. Salient-pole PMSMs would need different per-axis modelling
+    // which only matters once rotor angle interacts with the impedance —
+    // i.e., once the dynamic device-variant integration lands.
+
+    struct PmsmSteadyStateParams {
+        Real R_s = 0.5;              ///< Ω — stator phase resistance
+        Real L_s = 2e-3;             ///< H — stator phase inductance (non-salient)
+        Real lambda_pm = 0.1;        ///< V·s/rad — rotor flux linkage
+        Real omega_electrical = 314.159265358979;  ///< rad/s — fixed ω_e (50 Hz default)
+        Real phase_a_offset_deg = 0.0;  ///< rotor angle offset for phase A
+        bool positive_sequence = true;  ///< false flips B/C order
+    };
+    static_assert(std::is_trivially_copyable_v<PmsmSteadyStateParams>,
+                  "PmsmSteadyStateParams must stay a POD aggregate.");
+
+    void add_pmsm_steady_state(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const PmsmSteadyStateParams& params) {
+        assert(params.R_s > 0.0);
+        assert(params.L_s >= 0.0);
+        assert(params.omega_electrical > 0.0);
+
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        constexpr Real kDegToRad = static_cast<Real>(0.017453292519943295);
+
+        const Real omega_e = params.omega_electrical;
+        const Real freq_hz = omega_e / (2.0 * 3.14159265358979323846);
+        const Real e_peak = omega_e * params.lambda_pm;
+        const Real phase_a_rad = params.phase_a_offset_deg * kDegToRad;
+        const Real shift_b = params.positive_sequence ? -kTwoPiOverThree :  kTwoPiOverThree;
+        const Real shift_c = params.positive_sequence ? -2.0 * kTwoPiOverThree : 2.0 * kTwoPiOverThree;
+
+        const std::string base{name};
+
+        auto emit_phase = [&](const std::string& suffix,
+                              Index line, Real phase_rad) {
+            // Intermediate nodes inside each phase: line ─[R_s]─ m1 ─[L_s]─ m2 ─[V_emf]─ neutral
+            const Index n_m1 = add_node(base + "__m1_" + suffix);
+            const Index n_m2 = add_node(base + "__m2_" + suffix);
+            add_resistor(base + "__R_" + suffix, line, n_m1, params.R_s);
+            add_inductor(base + "__L_" + suffix, n_m1, n_m2, params.L_s);
+
+            // Back-EMF as sinusoidal voltage source: V_emf = e_peak · sin(ω_e·t + φ)
+            SineParams emf{};
+            emf.amplitude = e_peak;
+            emf.frequency = freq_hz;
+            emf.offset = 0.0;
+            emf.phase = phase_rad;
+            add_sine_voltage_source(base + "__E_" + suffix, n_m2, node_neutral, emf);
+        };
+
+        emit_phase("A", node_a, phase_a_rad);
+        emit_phase("B", node_b, phase_a_rad + shift_b);
+        emit_phase("C", node_c, phase_a_rad + shift_c);
+    }
+
+    // Convenience overload — explicit (R_s, L_s, λ_pm, ω_e) without a params struct.
+    void add_pmsm_steady_state(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                Real R_s, Real L_s, Real lambda_pm,
+                                Real omega_electrical) {
+        PmsmSteadyStateParams params{};
+        params.R_s = R_s;
+        params.L_s = L_s;
+        params.lambda_pm = lambda_pm;
+        params.omega_electrical = omega_electrical;
+        add_pmsm_steady_state(name, node_a, node_b, node_c, node_neutral, params);
+    }
+
     void add_pulse_voltage_source(const std::string& name, Index npos, Index nneg,
                                    const PulseParams& params) {
         Index br = num_nodes() + num_branches_;
