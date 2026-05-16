@@ -138,6 +138,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_three_phase_rl_load.cpp
         tests/test_pmsm_steady_state.cpp
         tests/test_pmsm_dynamic.cpp
+        tests/test_three_phase_vsi.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests
