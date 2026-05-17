@@ -97,6 +97,11 @@ from ._pulsim import (
     PmsmFocCurrentLoopParams,
     PmsmFocDeviceParams,
 
+    # compressor-models: refrigeration compressor torque profile.
+    CompressorTopology,
+    CompressorParams,
+    CompressorLoad,
+
     # consolidate-motors-and-three-phase Phase B.1: programmable + harmonic
     # three-phase source math objects.
     ThreePhaseSourceProgrammable,
@@ -1197,6 +1202,9 @@ __all__ = [
     "InductionMotorParams",
     "PmsmFocCurrentLoopParams",
     "PmsmFocDeviceParams",
+    "CompressorTopology",
+    "CompressorParams",
+    "CompressorLoad",
     "ThreePhaseSourceProgrammable",
     "ThreePhaseHarmonicSource",
     "HarmonicComponent",

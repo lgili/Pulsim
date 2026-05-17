@@ -770,7 +770,18 @@ void init_v2_module(py::module_& v2) {
                        "MOSFET R_ds(on) (Ω). Default 10 mΩ.")
         .def_readwrite("mosfet_vth",
                        &Circuit::ThreePhaseVsiParams::mosfet_vth,
-                       "MOSFET gate threshold voltage (V). Default 1 V.");
+                       "MOSFET gate threshold voltage (V). Default 1 V.")
+        .def_readwrite("dead_time_s",
+                       &Circuit::ThreePhaseVsiParams::dead_time_s,
+                       "Dead-time (s) inserted between H/L commutations in "
+                       "every leg. Default 0 = legacy instant-complementary "
+                       "behaviour. Set this to 0.5-2 microseconds when "
+                       "driving inductive loads with Behavioral-mode MOSFETs "
+                       "to prevent the simultaneous H/L commutation that "
+                       "breaks Newton convergence. The helper switches to "
+                       "a 'phase-shifted + dead_time' gate-drive pattern "
+                       "where both gates are OFF for `dead_time_s` at "
+                       "every transition.");
 
     py::enum_<Circuit::ThreePhaseLoadTopology>(
             v2, "ThreePhaseLoadTopology",
@@ -928,6 +939,63 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("tau_load_quad_coeff",
                        &motors::BldcMotorParams::tau_load_quad_coeff,
                        "Quadratic load coefficient.");
+
+    // compressor-models: refrigeration-compressor mechanical load.
+    py::enum_<loads::CompressorTopology>(v2, "CompressorTopology",
+            "Refrigeration compressor mechanical topology.")
+        .value("Reciprocating", loads::CompressorTopology::Reciprocating)
+        .value("Rotary",        loads::CompressorTopology::Rotary)
+        .value("Scroll",        loads::CompressorTopology::Scroll);
+
+    py::class_<loads::CompressorParams>(v2, "CompressorParams",
+            "Refrigeration-compressor load profile (reciprocating, rotary, "
+            "or scroll). Drives a motor's tau_load via polytropic compression "
+            "physics (P_suction → P_discharge with polytropic exponent n) "
+            "plus topology-specific torque ripple and Newton friction.")
+        .def(py::init<>())
+        .def_readwrite("topology", &loads::CompressorParams::topology,
+                       "Mechanical topology — Reciprocating, Rotary, Scroll.")
+        .def_readwrite("num_cylinders", &loads::CompressorParams::num_cylinders,
+                       "Number of cylinders / chambers per revolution.")
+        .def_readwrite("displacement_m3",
+                       &loads::CompressorParams::displacement_m3,
+                       "Cylinder swept volume per revolution (m³).")
+        .def_readwrite("P_suction_Pa",
+                       &loads::CompressorParams::P_suction_Pa,
+                       "Suction (low-side) pressure in Pa absolute.")
+        .def_readwrite("P_discharge_Pa",
+                       &loads::CompressorParams::P_discharge_Pa,
+                       "Discharge (high-side) pressure in Pa absolute.")
+        .def_readwrite("polytropic_n",
+                       &loads::CompressorParams::polytropic_n,
+                       "Polytropic compression exponent (refrigerant-dependent).")
+        .def_readwrite("b_friction",
+                       &loads::CompressorParams::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("tau_coulomb",
+                       &loads::CompressorParams::tau_coulomb,
+                       "Coulomb (static) friction torque (N·m).")
+        .def_readwrite("ripple_amplitude",
+                       &loads::CompressorParams::ripple_amplitude,
+                       "Torque ripple amplitude as a fraction of T_mean (0..1).");
+
+    py::class_<loads::CompressorLoad>(v2, "CompressorLoad",
+            "Standalone compressor torque-profile evaluator. Use directly to "
+            "compute load_torque(theta, omega), or attach to a motor via "
+            "Circuit.attach_compressor_load(motor_name, params).")
+        .def(py::init<>())
+        .def(py::init<loads::CompressorParams>(), py::arg("params"))
+        .def("load_torque", &loads::CompressorLoad::load_torque,
+             py::arg("theta_m"), py::arg("omega_m"),
+             "Instantaneous shaft torque demand at given rotor state.")
+        .def("mean_torque", &loads::CompressorLoad::mean_torque,
+             "Mean compression torque per revolution (N·m).")
+        .def("indicated_work_per_cycle",
+             &loads::CompressorLoad::indicated_work_per_cycle,
+             "Indicated work per cycle per cylinder (J).")
+        .def("set_params", &loads::CompressorLoad::set_params,
+             py::arg("params"), "Online retune of the compressor parameters.")
+        .def_property_readonly("params", &loads::CompressorLoad::params);
 
     // consolidate-motors-and-three-phase, Phase B.2b: PMSM-FOC controller.
     py::class_<motors::PmsmFocCurrentLoopParams>(v2, "PmsmFocCurrentLoopParams",
@@ -1847,6 +1915,39 @@ void init_v2_module(py::module_& v2) {
              "Read induction motor phase B line current (A).")
         .def("induction_i_c", &Circuit::induction_i_c, py::arg("name"),
              "Read induction motor phase C line current (A).")
+        // compressor-models: attach a refrigeration compressor load
+        // profile to a registered motor (BLDC, PMSM, DC, Induction).
+        .def("attach_compressor_load", &Circuit::attach_compressor_load,
+             py::arg("motor_name"), py::arg("params"),
+             "Attach a refrigeration compressor mechanical load profile "
+             "to a motor by name. The motor's tau_load is pushed each "
+             "step from the compressor's polytropic torque profile.")
+        .def("detach_compressor_load",
+             [](Circuit& self, std::string_view motor_name) {
+                 self.detach_compressor_load(motor_name);
+             },
+             py::arg("motor_name"),
+             "Remove the compressor load from a motor.")
+        .def("compressor_mean_torque",
+             [](const Circuit& self, std::string_view motor_name) {
+                 return self.compressor_mean_torque(motor_name);
+             },
+             py::arg("motor_name"),
+             "Mean compression torque (N·m). NaN if no compressor attached.")
+        .def("compressor_indicated_work",
+             [](const Circuit& self, std::string_view motor_name) {
+                 return self.compressor_indicated_work(motor_name);
+             },
+             py::arg("motor_name"),
+             "Indicated work per cycle (J).")
+        .def("compressor_load_torque",
+             [](const Circuit& self, std::string_view motor_name,
+                Real theta_m, Real omega_m) {
+                 return self.compressor_load_torque(motor_name,
+                                                     theta_m, omega_m);
+             },
+             py::arg("motor_name"), py::arg("theta_m"), py::arg("omega_m"),
+             "Evaluate compressor torque at a given rotor state.")
         // PWM control
         .def("set_pwm_duty", &Circuit::set_pwm_duty,
              py::arg("name"), py::arg("duty"),
