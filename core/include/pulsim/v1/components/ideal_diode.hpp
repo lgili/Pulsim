@@ -71,6 +71,24 @@ public:
         // wired into the runtime ladder yet).
         Scalar R_th_ja    = 25.0;    ///< Junction-to-ambient (K/W)
         Scalar T_amb      = 25.0;    ///< Ambient temperature (°C)
+
+        // -------- Reverse-recovery loss (Phase 4 of
+        //          inverter-bridge-losses, Pulsim 0.10.0a10) ----------
+        // When the diode is forced from conducting → blocking by an
+        // external dV/dt (e.g. a freewheeling diode in a hard-switched
+        // inverter leg), it stores `Qrr` Coulombs that must be swept
+        // out as the cathode voltage rises. The textbook approximation
+        // gives:
+        //
+        //     E_rec ≈ Qrr · V_r · (1 − s_rec / (1 + s_rec))
+        //
+        // We simplify to `E_rec = Qrr · V_r · k_shape` with k_shape = 0.5
+        // (symmetric triangular recovery — soft-recovery diodes set
+        // k_shape ≈ 0.33, hard-recovery ≈ 0.67). Per ON→OFF transition.
+        //
+        // Default Qrr = 0 → no reverse-recovery loss recorded (legacy).
+        Scalar Qrr        = 0.0;     ///< Reverse-recovery charge (C)
+        Scalar Erec_shape = 0.5;     ///< Shape factor (0..1; 0.5 = symmetric)
     };
 
     explicit IdealDiode(Scalar g_on = 1e3,
@@ -95,7 +113,9 @@ public:
         , T_ref_(params.T_ref)
         , R_th_ja_(params.R_th_ja)
         , T_amb_(params.T_amb)
-        , T_j_(params.T_amb) {}
+        , T_j_(params.T_amb)
+        , Qrr_(params.Qrr)
+        , Erec_shape_(params.Erec_shape) {}
 
     // --- Smoothing controls (Behavioral mode only) -----------------------------
     void set_smoothing(Scalar v_smooth) { v_smooth_ = v_smooth; }
@@ -143,7 +163,12 @@ public:
     }
 
     // --- Loss-accumulator accessors -----------------------------------------
-    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar total_energy()      const noexcept { return e_cond_ + e_sw_; }
+    [[nodiscard]] Scalar conduction_energy() const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar switching_energy()  const noexcept { return e_sw_; }
+    [[nodiscard]] std::size_t switching_events() const noexcept {
+        return ev_count_;
+    }
     [[nodiscard]] Scalar conduction_time() const noexcept { return t_sim_; }
     [[nodiscard]] Scalar peak_power()     const noexcept { return p_peak_; }
     [[nodiscard]] Scalar last_power()     const noexcept { return p_last_; }
@@ -162,22 +187,31 @@ public:
         return T_amb_ + average_power() * R_th_ja_;
     }
     [[nodiscard]] Scalar average_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? (e_cond_ + e_sw_) / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_conduction_power() const noexcept {
         return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_switching_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_sw_ / t_sim_ : Scalar{0};
     }
 
     /// Reset the loss accumulator. Called at simulation start (initialize=true
     /// path of update_history).
-    /// Zero the loss accumulator. Does NOT touch T_j — the stamping
-    /// uses whatever T_j was last set (via `set_T_j_init` or T_amb at
-    /// construction). Separates loss-state from stamping-state cleanly,
-    /// matching the same convention used by MOSFET and IGBT.
+    /// Zero the loss accumulator (conduction + reverse-recovery). Does
+    /// NOT touch T_j. Resets the was_conducting_ snapshot too so the
+    /// first call after reset doesn't count a spurious transition.
     void reset_loss() noexcept {
         e_cond_ = 0.0;
+        e_sw_ = 0.0;
+        ev_count_ = 0;
         p_peak_ = 0.0;
         p_last_ = 0.0;
         t_sim_ = 0.0;
         i_last_ = 0.0;
         v_last_ = 0.0;
+        was_conducting_ = false;
+        was_conducting_initialized_ = false;
     }
 
     /// Sample the instantaneous power V·I over the past `dt` seconds.
@@ -203,6 +237,23 @@ public:
         const Scalar I0 = conducting ? i_f0_offset()   : Scalar{0};
         const Scalar i_diode = g * v_diode - I0;
         const Scalar p = v_diode * i_diode;
+
+        // ----- Reverse-recovery event (Phase 4) ---------------------
+        // E_rec ≈ Qrr · V_r · shape, charged on every ON → OFF
+        // transition. V_r at the moment of transition is the reverse
+        // voltage the diode will block (current v_diode, now negative —
+        // we use |v_diode|).
+        if (was_conducting_initialized_ &&
+            was_conducting_ && !conducting && Qrr_ > Scalar{0}) {
+            const Scalar V_r = (v_diode < Scalar{0}) ? -v_diode : v_diode;
+            const Scalar e_event = Qrr_ * V_r * Erec_shape_;
+            if (e_event > Scalar{0}) {
+                e_sw_ += e_event;
+                ++ev_count_;
+            }
+        }
+        was_conducting_ = conducting;
+        was_conducting_initialized_ = true;
 
         v_last_ = v_diode;
         i_last_ = i_diode;
@@ -543,12 +594,20 @@ private:
     // V·I·dt over the simulation; `T_j_` is the steady-state junction
     // temperature derived from the running average power.
     Scalar e_cond_ = Scalar{0.0};
+    Scalar e_sw_   = Scalar{0.0};   // reverse-recovery energy (Phase 4)
+    std::size_t ev_count_ = 0;       // # of recovery events
     Scalar p_peak_ = Scalar{0.0};
     Scalar p_last_ = Scalar{0.0};
     Scalar t_sim_  = Scalar{0.0};
     Scalar i_last_ = Scalar{0.0};
     Scalar v_last_ = Scalar{0.0};
     Scalar T_j_    = Scalar{25.0};
+
+    // Reverse-recovery params (Phase 4 — defaults = 0 = disabled).
+    Scalar Qrr_         = Scalar{0.0};
+    Scalar Erec_shape_  = Scalar{0.5};
+    bool   was_conducting_ = false;
+    bool   was_conducting_initialized_ = false;
 };
 
 template<>

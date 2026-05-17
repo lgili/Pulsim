@@ -452,7 +452,14 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("R_th_ja",    &IdealDiode::Params::R_th_ja,
                        "Junction-to-ambient thermal resistance (K/W).")
         .def_readwrite("T_amb",      &IdealDiode::Params::T_amb,
-                       "Ambient temperature (°C).");
+                       "Ambient temperature (°C).")
+        // Reverse-recovery loss (Phase 4 of inverter-bridge-losses).
+        .def_readwrite("Qrr",        &IdealDiode::Params::Qrr,
+                       "Reverse-recovery charge per ON→OFF event (C). "
+                       "0 disables E_rec accumulation.")
+        .def_readwrite("Erec_shape", &IdealDiode::Params::Erec_shape,
+                       "Recovery waveform shape (0..1; 0.5 = symmetric "
+                       "triangular, 0.33 = soft-recovery, 0.67 = hard).");
 
     py::class_<IdealSwitch>(v2, "IdealSwitch", "Controllable ideal switch")
         .def(py::init<Real, Real, bool, std::string>(),
@@ -483,7 +490,18 @@ void init_v2_module(py::module_& v2) {
                        "Junction-to-ambient thermal resistance (K/W). "
                        "0 disables the loss accumulator (backward-compat).")
         .def_readwrite("T_amb",     &MOSFET::Params::T_amb,
-                       "Ambient temperature (°C).");
+                       "Ambient temperature (°C).")
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def_readwrite("Eon_25",    &MOSFET::Params::Eon_25,
+                       "Turn-on energy per event at T_ref (J).")
+        .def_readwrite("Eoff_25",   &MOSFET::Params::Eoff_25,
+                       "Turn-off energy per event at T_ref (J).")
+        .def_readwrite("I_ref",     &MOSFET::Params::I_ref,
+                       "Reference current for E_sw scaling (A).")
+        .def_readwrite("V_ref",     &MOSFET::Params::V_ref,
+                       "Reference voltage for E_sw scaling (V).")
+        .def_readwrite("Esw_tc",    &MOSFET::Params::Esw_tc,
+                       "Switching-energy temperature coefficient (1/K).");
 
     py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -514,7 +532,18 @@ void init_v2_module(py::module_& v2) {
                        "Junction-to-ambient thermal resistance (K/W). "
                        "0 disables the loss accumulator (backward-compat).")
         .def_readwrite("T_amb",     &IGBT::Params::T_amb,
-                       "Ambient temperature (°C).");
+                       "Ambient temperature (°C).")
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def_readwrite("Eon_25",    &IGBT::Params::Eon_25,
+                       "Turn-on energy per event at T_ref (J).")
+        .def_readwrite("Eoff_25",   &IGBT::Params::Eoff_25,
+                       "Turn-off energy per event at T_ref (J).")
+        .def_readwrite("I_ref",     &IGBT::Params::I_ref,
+                       "Reference current for E_sw scaling (A).")
+        .def_readwrite("V_ref",     &IGBT::Params::V_ref,
+                       "Reference voltage for E_sw scaling (V).")
+        .def_readwrite("Esw_tc",    &IGBT::Params::Esw_tc,
+                       "Switching-energy temperature coefficient (1/K).");
 
     py::class_<IGBT>(v2, "IGBT", "Simplified IGBT power device model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -567,6 +596,41 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("unbalance_factor",
                        &Circuit::ThreePhaseSourceParams::unbalance_factor,
                        "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u");
+
+    py::enum_<Circuit::PwmModulation>(
+            v2, "PwmModulation",
+            "Modulation type for the sinusoidal-modulated PWM source.")
+        .value("Sine", Circuit::PwmModulation::Sine)
+        .value("SVM",  Circuit::PwmModulation::SVM);
+
+    py::class_<Circuit::ModulatedPwmParams>(
+            v2, "ModulatedPwmParams",
+            "Sinusoidal-modulated PWM source parameters (Pulsim 0.10.0a10). "
+            "The duty cycle of a PWMVoltageSource is modulated by a sine "
+            "(SPWM) or SVPWM reference at `modulation_frequency_hz`. Use the "
+            "3-phase VSI helper instead when you need 3 such sources with "
+            "120° offsets and a full 6-MOSFET inverter.")
+        .def(py::init<>())
+        .def_readwrite("v_high", &Circuit::ModulatedPwmParams::v_high,
+                       "PWM ON-state output (V).")
+        .def_readwrite("v_low",  &Circuit::ModulatedPwmParams::v_low,
+                       "PWM OFF-state output (V).")
+        .def_readwrite("switching_frequency_hz",
+                       &Circuit::ModulatedPwmParams::switching_frequency_hz,
+                       "PWM carrier frequency (Hz).")
+        .def_readwrite("modulation_index",
+                       &Circuit::ModulatedPwmParams::modulation_index,
+                       "0..1 for Sine (SPWM linear range), 0..1.155 for SVM.")
+        .def_readwrite("modulation_frequency_hz",
+                       &Circuit::ModulatedPwmParams::modulation_frequency_hz,
+                       "Fundamental output frequency (Hz).")
+        .def_readwrite("phase_deg",
+                       &Circuit::ModulatedPwmParams::phase_deg,
+                       "Reference phase (degrees).")
+        .def_readwrite("modulation",
+                       &Circuit::ModulatedPwmParams::modulation,
+                       "PwmModulation.Sine (SPWM) or PwmModulation.SVM "
+                       "(3rd-harmonic injection).");
 
     py::class_<Circuit::ThreePhaseVsiParams>(
             v2, "ThreePhaseVsiParams",
@@ -1042,6 +1106,20 @@ void init_v2_module(py::module_& v2) {
              py::arg("name"))
         .def("diode_conduction_time", &Circuit::diode_conduction_time,
              py::arg("name"))
+        // Phase 4 of inverter-bridge-losses: reverse-recovery loss.
+        .def("diode_switching_energy",
+             &Circuit::diode_switching_energy, py::arg("name"),
+             "Reverse-recovery energy accumulated over the simulation (J). "
+             "Zero unless params.Qrr > 0.")
+        .def("diode_average_switching_power",
+             &Circuit::diode_average_switching_power, py::arg("name"),
+             "Time-averaged reverse-recovery dissipation (W).")
+        .def("diode_switching_events",
+             &Circuit::diode_switching_events, py::arg("name"),
+             "Number of ON→OFF transitions recorded.")
+        .def("diode_conduction_energy",
+             &Circuit::diode_conduction_energy, py::arg("name"),
+             "Conduction-only energy (J), excluding reverse-recovery.")
         .def("set_diode_T_j",        &Circuit::set_diode_T_j,
              py::arg("name"), py::arg("t_j"),
              "Override the device's stamping T_j (for the next sim pass).")
@@ -1063,6 +1141,19 @@ void init_v2_module(py::module_& v2) {
         .def("set_mosfet_T_j",       &Circuit::set_mosfet_T_j,
              py::arg("name"), py::arg("t_j"))
         .def("reset_mosfet_loss",    &Circuit::reset_mosfet_loss, py::arg("name"))
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def("mosfet_switching_energy",
+             &Circuit::mosfet_switching_energy, py::arg("name"),
+             "E_on + E_off energy accumulated over the simulation (J).")
+        .def("mosfet_average_switching_power",
+             &Circuit::mosfet_average_switching_power, py::arg("name"),
+             "Time-averaged switching dissipation (W).")
+        .def("mosfet_average_conduction_power",
+             &Circuit::mosfet_average_conduction_power, py::arg("name"),
+             "Time-averaged conduction-only dissipation (W).")
+        .def("mosfet_switching_events",
+             &Circuit::mosfet_switching_events, py::arg("name"),
+             "Number of state transitions recorded.")
         .def("igbt_average_power",   &Circuit::igbt_average_power, py::arg("name"))
         .def("igbt_peak_power",      &Circuit::igbt_peak_power, py::arg("name"))
         .def("igbt_total_energy",    &Circuit::igbt_total_energy, py::arg("name"))
@@ -1075,6 +1166,15 @@ void init_v2_module(py::module_& v2) {
         .def("set_igbt_T_j",         &Circuit::set_igbt_T_j,
              py::arg("name"), py::arg("t_j"))
         .def("reset_igbt_loss",      &Circuit::reset_igbt_loss, py::arg("name"))
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def("igbt_switching_energy",
+             &Circuit::igbt_switching_energy, py::arg("name"))
+        .def("igbt_average_switching_power",
+             &Circuit::igbt_average_switching_power, py::arg("name"))
+        .def("igbt_average_conduction_power",
+             &Circuit::igbt_average_conduction_power, py::arg("name"))
+        .def("igbt_switching_events",
+             &Circuit::igbt_switching_events, py::arg("name"))
         // ----- Passive loss + thermal accessors (Phase 3,
         //       Pulsim 0.10.0a9 / a10 / a11).
         .def("capacitor_average_power",
@@ -1165,6 +1265,30 @@ void init_v2_module(py::module_& v2) {
              py::arg("name"), py::arg("npos"), py::arg("nneg"),
              py::arg("v_high"), py::arg("v_low"), py::arg("frequency"), py::arg("duty"),
              "Add PWM voltage source with simple parameters")
+        // Sinusoidal-modulated PWM source (SPWM + SVM) — Pulsim 0.10.0a10.
+        .def("add_modulated_pwm_source",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Circuit::ModulatedPwmParams&>(
+                 &Circuit::add_modulated_pwm_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add a PWM voltage source whose duty is modulated by a "
+             "sinusoidal reference (SPWM) or by an SVM (3rd-harmonic "
+             "injection) reference. Wraps a single PWMVoltageSource with "
+             "a duty_callback set internally.")
+        .def("add_modulated_pwm_source",
+             py::overload_cast<const std::string&, Index, Index,
+                               Real, Real, Real, Real, Real, Real,
+                               Circuit::PwmModulation>(
+                 &Circuit::add_modulated_pwm_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"),
+             py::arg("v_high"), py::arg("v_low"),
+             py::arg("switching_frequency_hz"),
+             py::arg("modulation_index"),
+             py::arg("modulation_frequency_hz"),
+             py::arg("phase_deg") = 0.0,
+             py::arg("modulation") = Circuit::PwmModulation::Sine,
+             "Convenience overload of add_modulated_pwm_source without a "
+             "params struct.")
         .def("add_sine_voltage_source",
              py::overload_cast<const std::string&, Index, Index, const SineParams&>(
                  &Circuit::add_sine_voltage_source),

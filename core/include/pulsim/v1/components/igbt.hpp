@@ -47,6 +47,17 @@ public:
         Scalar T_ref     = 25.0;       // °C
         Scalar R_th_ja   = 0.0;        // K/W (0 = disabled)
         Scalar T_amb     = 25.0;       // °C
+
+        // -------- Switching-loss model (Phase 4 of inverter-bridge-losses,
+        //          Pulsim 0.10.0a10) — mirrors the MOSFET pattern -------
+        // E_on(I, V, T_j) = Eon_25 · (I/I_ref) · (V/V_ref)
+        //                          · (1 + Esw_tc · (T_j − T_ref))
+        // E_off — same shape with Eoff_25.
+        Scalar Eon_25    = 0.0;        // J at I_ref, V_ref, T_ref
+        Scalar Eoff_25   = 0.0;
+        Scalar I_ref     = 50.0;       // A — reference current (typical IGBT)
+        Scalar V_ref     = 600.0;      // V — reference voltage
+        Scalar Esw_tc    = 3.0e-3;     // 1/K
     };
 
     explicit IGBT(std::string name = "")
@@ -67,30 +78,46 @@ public:
         return params_.Rce * (Scalar{1} + params_.Rce_tc * (T_j_ - params_.T_ref));
     }
 
-    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_ + e_sw_; }
+    [[nodiscard]] Scalar conduction_energy() const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar switching_energy() const noexcept { return e_sw_; }
+    [[nodiscard]] std::size_t switching_events() const noexcept {
+        return ev_count_;
+    }
     [[nodiscard]] Scalar conduction_time() const noexcept { return t_sim_; }
     [[nodiscard]] Scalar peak_power()     const noexcept { return p_peak_; }
     [[nodiscard]] Scalar last_power()     const noexcept { return p_last_; }
     [[nodiscard]] Scalar last_current()   const noexcept { return i_last_; }
     [[nodiscard]] Scalar last_voltage()   const noexcept { return v_last_; }
     [[nodiscard]] Scalar junction_temperature() const noexcept { return T_j_; }
+    [[nodiscard]] Scalar average_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? (e_cond_ + e_sw_) / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_conduction_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_switching_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_sw_ / t_sim_ : Scalar{0};
+    }
     [[nodiscard]] Scalar steady_state_junction_temperature() const noexcept {
         return params_.T_amb + average_power() * params_.R_th_ja;
     }
-    [[nodiscard]] Scalar average_power() const noexcept {
-        return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
-    }
 
-    /// Zero the loss accumulator. Does NOT touch T_j — the stamping
-    /// uses whatever T_j was last set (via `set_T_j_init` or T_amb at
-    /// construction). Separates loss-state from stamping-state cleanly.
+    /// Zero the loss accumulator (conduction + switching). Does NOT
+    /// touch T_j. Resets the was_on_ snapshot so the first call after
+    /// reset re-establishes the baseline without counting a spurious
+    /// transition.
     void reset_loss() noexcept {
         e_cond_ = 0.0;
+        e_sw_ = 0.0;
+        ev_count_ = 0;
         p_peak_ = 0.0;
         p_last_ = 0.0;
         t_sim_ = 0.0;
         i_last_ = 0.0;
         v_last_ = 0.0;
+        was_on_ = false;
+        was_on_initialized_ = false;
     }
 
     void set_T_j_init(Scalar t_j) noexcept { T_j_ = t_j; }
@@ -102,6 +129,48 @@ public:
     /// OFF state is pure g_off leakage.
     void accumulate_loss(Scalar v_ce, Scalar dt, bool is_on) noexcept {
         if (dt < Scalar{0}) return;
+
+        // ----- Switching-event detection (E_on / E_off, Phase 4) ------
+        if (was_on_initialized_ && (was_on_ != is_on) &&
+            params_.R_th_ja > Scalar{0}) {
+            const Scalar T_delta = T_j_ - params_.T_ref;
+            const Scalar tc_factor = Scalar{1} + params_.Esw_tc * T_delta;
+            const Scalar i_ref = (params_.I_ref > Scalar{0}) ?
+                params_.I_ref : Scalar{1};
+            const Scalar v_ref = (params_.V_ref > Scalar{0}) ?
+                params_.V_ref : Scalar{1};
+            if (is_on && !was_on_) {
+                // OFF → ON. Use v_last_ (blocking V) and post-state i.
+                const Scalar V_ce_sat_T = V_ce_sat_at_Tj();
+                const Scalar R_ce_T     = Rce_at_Tj();
+                const Scalar i_post = (v_ce - V_ce_sat_T) /
+                    std::max<Scalar>(R_ce_T, Scalar{1e-9});
+                const Scalar I_post = (i_post > Scalar{0}) ? i_post : Scalar{0};
+                const Scalar V_block = (v_last_ > Scalar{0}) ?
+                    v_last_ : v_ce;
+                const Scalar e_event = params_.Eon_25 *
+                    (I_post / i_ref) * (V_block / v_ref) * tc_factor;
+                if (e_event > Scalar{0}) {
+                    e_sw_ += e_event;
+                    ++ev_count_;
+                }
+            } else if (!is_on && was_on_) {
+                // ON → OFF. Use i_last_ (pre-state I) and v_ce (now blocking).
+                const Scalar I_pre = (i_last_ > Scalar{0}) ?
+                    i_last_ : Scalar{0};
+                const Scalar V_block = (v_ce > Scalar{0}) ? v_ce : Scalar{0};
+                const Scalar e_event = params_.Eoff_25 *
+                    (I_pre / i_ref) * (V_block / v_ref) * tc_factor;
+                if (e_event > Scalar{0}) {
+                    e_sw_ += e_event;
+                    ++ev_count_;
+                }
+            }
+        }
+        was_on_ = is_on;
+        was_on_initialized_ = true;
+
+        // ----- Conduction loss (existing) ---------------------------
         if (params_.R_th_ja <= Scalar{0}) {
             const Scalar g = is_on ? params_.g_on : params_.g_off;
             v_last_ = v_ce; i_last_ = g * v_ce; p_last_ = v_ce * i_last_;
@@ -415,12 +484,16 @@ private:
 
     // Loss + thermal accumulator (Phase 2 of inverter-bridge-losses).
     Scalar e_cond_ = Scalar{0.0};
+    Scalar e_sw_   = Scalar{0.0};
+    std::size_t ev_count_ = 0;
     Scalar p_peak_ = Scalar{0.0};
     Scalar p_last_ = Scalar{0.0};
     Scalar t_sim_  = Scalar{0.0};
     Scalar i_last_ = Scalar{0.0};
     Scalar v_last_ = Scalar{0.0};
     Scalar T_j_    = Scalar{25.0};
+    bool   was_on_             = false;
+    bool   was_on_initialized_ = false;
 };
 
 template<>
