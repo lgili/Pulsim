@@ -126,6 +126,7 @@ nav:
       - Real-Time Code Generation: code-generation.md
       - FMI Export: fmi-export.md
       - Automatic Differentiation: automatic-differentiation.md
+      - PWL Switching Engine: pwl-switching-migration.md
       - Convergence Tuning: convergence-tuning-guide.md
       - Linear-Solver Cache: linear-solver-cache.md
       - Robustness Policy: robustness-policy.md
