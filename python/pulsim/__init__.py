@@ -93,6 +93,10 @@ from ._pulsim import (
     BldcMotorParams,
     InductionMotorParams,
 
+    # consolidate-motors-and-three-phase Phase B.2b: PMSM-FOC current loop.
+    PmsmFocCurrentLoopParams,
+    PmsmFocDeviceParams,
+
     # Control Blocks
     PIController,
     PIDController,
@@ -1174,6 +1178,8 @@ __all__ = [
     "MechanicalDeviceParams",
     "BldcMotorParams",
     "InductionMotorParams",
+    "PmsmFocCurrentLoopParams",
+    "PmsmFocDeviceParams",
     "SineVoltageSource",
     "RampParams",
     "RampGenerator",

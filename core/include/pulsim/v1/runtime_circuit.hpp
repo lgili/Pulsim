@@ -14,6 +14,7 @@
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/components/dc_motor_device.hpp"
 #include "pulsim/v1/components/pmsm_device.hpp"
+#include "pulsim/v1/components/pmsm_foc_device.hpp"
 #include "pulsim/v1/components/mechanical_device.hpp"
 #include "pulsim/v1/components/bldc_motor_device.hpp"
 #include "pulsim/v1/components/induction_motor_device.hpp"
@@ -79,6 +80,7 @@ using DeviceVariant = std::variant<
     Transformer,
     DcMotorDevice,
     PmsmDevice,
+    PmsmFocDevice,
     MechanicalDevice,
     BldcMotorDevice,
     InductionMotorDevice
@@ -667,22 +669,21 @@ public:
     ///
     /// Topology  (R in series with C, both between switch terminals)
     ///
-    ///       drain --- R --- (internal) --- C --- source
+    ///       drain ─── R ── (internal) ── C ── source
     ///
     /// The internal node is auto-created and named `<device>__snub_int`.
     /// The series R damps the LC tank the inductor + switch + diode form
-    /// in a hard-switched converter -- the parallel-only C_oss / C_j cap
-    /// (PSIM-style) leaves Q ~ infinity which Tustin can't damp at
-    /// typical converter dt. Adding R critically damps it: a good first
-    /// guess is `R ~ sqrt(L / C)` (e.g. for L = 100 uH and C = 100 nF,
-    /// R ~ 32 Omega).
-    /// Per-cycle dissipated energy: 0.5 * C * V_sw^2 (transferred from
+    /// in a hard-switched converter — the parallel-only C_oss / C_j cap
+    /// (PSIM-style) leaves Q ≈ ∞ which Tustin can't damp at typical
+    /// converter dt. Adding R critically damps it: a good first guess
+    /// is `R ≈ √(L / C)` (e.g. for L = 100 µH and C = 100 nF, R ≈ 32 Ω).
+    /// Per-cycle dissipated energy: 0.5 · C · V_sw² (transferred from
     /// the cap to R every commutation; bounded and predictable).
     ///
     /// Returns true if the device was found and the snubber installed.
     /// The named device must already exist (MOSFET/IGBT/IdealDiode);
-    /// the snubber connects to the *power* terminals (drain<->source,
-    /// collector<->emitter, or anode<->cathode), not the gate.
+    /// the snubber connects to the *power* terminals (drain↔source,
+    /// collector↔emitter, or anode↔cathode), not the gate.
     bool add_rc_snubber(const std::string& device_name,
                         Real R, Real C,
                         Real initial_v_cap = 0.0) {
@@ -3203,6 +3204,68 @@ public:
         return m ? m->reaction_torque() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- PMSM-FOC current loop (consolidate-motors-and-three-phase, B.2b) ----
+    //
+    // Signal-domain current-loop controller (id + iq PI). Wraps
+    // motors::PmsmFocCurrentLoop. Takes (id_ref, iq_ref, id_meas, iq_meas, dt)
+    // and outputs (Vd_ref, Vq_ref) for the inverter modulator. No electrical
+    // pins, no MNA contribution; user wires measurements / references each
+    // step and reads back the voltage references.
+
+    void add_pmsm_foc(const std::string& name,
+                      const PmsmFocDevice::Params& params) {
+        assert(params.motor.Ld > 0.0 && params.motor.Lq > 0.0);
+        assert(params.foc.bandwidth_hz > 0.0);
+        PmsmFocDevice dev(params, name);
+        devices_.emplace_back(std::move(dev));
+        connections_.push_back({name, {}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    /// Convenience overload — auto-derives FOC params from motor + bandwidth.
+    void add_pmsm_foc(const std::string& name,
+                      const motors::PmsmParams& motor,
+                      Real bandwidth_hz = 1000.0) {
+        PmsmFocDevice::Params p{};
+        p.motor = motor;
+        p.foc.bandwidth_hz = bandwidth_hz;
+        add_pmsm_foc(name, p);
+    }
+
+    void set_pmsm_foc_references(std::string_view name,
+                                  Real id_ref, Real iq_ref) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->set_references(id_ref, iq_ref);
+        }
+    }
+    void set_pmsm_foc_measurements(std::string_view name,
+                                    Real id_meas, Real iq_meas) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->set_measurements(id_meas, iq_meas);
+        }
+    }
+    void retune_pmsm_foc(std::string_view name,
+                         const motors::PmsmParams& motor,
+                         const motors::PmsmFocCurrentLoopParams& foc) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->retune(motor, foc);
+        }
+    }
+    void reset_pmsm_foc(std::string_view name) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->reset();
+        }
+    }
+
+    [[nodiscard]] Real pmsm_foc_vd_ref(std::string_view name) const {
+        const auto* d = find_device<PmsmFocDevice>(name);
+        return d ? d->vd_ref() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_foc_vq_ref(std::string_view name) const {
+        const auto* d = find_device<PmsmFocDevice>(name);
+        return d ? d->vq_ref() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     // ----- BLDC motor (consolidate-motors-and-three-phase, Phase C.1) ---------
     //
     // Three-phase BLDC with trapezoidal back-EMF (120° flat-top). Stamps 3
@@ -3301,18 +3364,19 @@ public:
         const auto* m = find_device<InductionMotorDevice>(name);
         return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
     }
-    /// Read the induction motor slip s = (omega_sync - omega_e) / omega_sync.
+    /// Read the induction motor slip s = (ω_sync − ω_e) / ω_sync.
     /// The synchronous frequency must be supplied because the Circuit
     /// itself doesn't know which stator source (V/f drive, grid, etc.)
-    /// is exciting the motor. For a 50 Hz grid: omega_sync = 2*pi*50 ~ 314 rad/s.
-    /// See `induction_slip_from_hz(name, f_sync_hz)` for the Hz overload.
+    /// is exciting the motor. For a 50 Hz grid with any pole count,
+    /// ω_sync_electrical = 2·π·50 ≈ 314 rad/s. See
+    /// `induction_slip_from_hz(name, f_sync_hz)` for the Hz overload.
     [[nodiscard]] Real induction_slip(std::string_view name,
                                        Real omega_sync_electrical) const {
         const auto* m = find_device<InductionMotorDevice>(name);
         return m ? m->slip(omega_sync_electrical)
                  : std::numeric_limits<Real>::quiet_NaN();
     }
-    /// Slip overload that takes f_sync in Hz instead of rad/s.
+    /// Slip overload that takes f_sync in Hz instead of ω_sync in rad/s.
     [[nodiscard]] Real induction_slip_from_hz(std::string_view name,
                                                Real f_sync_hz) const {
         const auto* m = find_device<InductionMotorDevice>(name);
@@ -3795,14 +3859,16 @@ public:
                                           timestep_);
                     }
                 }
-                else if constexpr (std::is_same_v<T, MechanicalDevice>) {
-                    // consolidate-motors-and-three-phase, Phase B.2a: signal-
-                    // domain advance. No electrical state to read from x —
-                    // we just call `update_history()` on the device, which
-                    // forward-Euler-advances ω and θ under the user-supplied
-                    // `tau_input` minus the configured load + friction.
+                else if constexpr (std::is_same_v<T, MechanicalDevice> ||
+                                   std::is_same_v<T, PmsmFocDevice>) {
+                    // consolidate-motors-and-three-phase, Phase B.2a + B.2b:
+                    // signal-domain devices (no electrical state to read from
+                    // x). For MechanicalDevice: forward-Euler advances ω, θ
+                    // under user-supplied tau_input minus load + friction.
+                    // For PmsmFocDevice: runs the (id, iq) PI loop step and
+                    // caches Vd_ref / Vq_ref for the next inverter command.
                     if (initialize) {
-                        // DC OP: hold mechanical state at the initial value.
+                        // DC OP: hold internal state at initial values.
                     } else {
                         dev.set_timestep(timestep_);
                         dev.update_history();
@@ -4386,13 +4452,11 @@ public:
                     if (nodes.size() >= 3) {
                         const Real g = dev.pwl_state() ? dev.params().g_on
                                                        : dev.params().g_off;
-                        // Drain-source conductance.
                         stamp_g(g, nodes[1], nodes[2]);
-                        // PSIM-style auto-snubber: parasitic output cap C_oss
-                        // gives the inductor commutation a finite-dt charge
-                        // path so V_sw doesn't ring across PWM edges. Stamp
-                        // it between drain and source. When C_oss == 0
-                        // (legacy / Behavioral-only) this is a no-op.
+                        // Opt-in parasitic output cap C_oss — only when
+                        // the user (or Eon_25 > 0 auto-default) asked
+                        // for it. No blanket fallback: see the diode
+                        // branch above for rationale.
                         if (dev.C_oss() > Real{0}) {
                             stamp_capacitance(dev.C_oss(), nodes[1], nodes[2]);
                         }
@@ -4402,7 +4466,6 @@ public:
                         const Real g = dev.pwl_state() ? dev.params().g_on
                                                        : dev.params().g_off;
                         stamp_g(g, nodes[1], nodes[2]);
-                        // Mirror the MOSFET auto-snubber for IGBTs.
                         if (dev.C_oss() > Real{0}) {
                             stamp_capacitance(dev.C_oss(), nodes[1], nodes[2]);
                         }

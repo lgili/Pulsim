@@ -138,6 +138,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_mechanical_device.cpp
         tests/test_bldc_motor_device.cpp
         tests/test_induction_motor_device.cpp
+        tests/test_pmsm_foc_device.cpp
         tests/test_three_phase_rl_load.cpp
         tests/test_pmsm_dynamic.cpp
         tests/test_three_phase_vsi.cpp

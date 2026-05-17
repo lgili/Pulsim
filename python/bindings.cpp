@@ -509,10 +509,10 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("C_oss",     &MOSFET::Params::C_oss,
                        "Parasitic output capacitance drain-source (F). "
                        "Opt-in PSIM-style auto-snubber for the PWL Ideal "
-                       "path - gives the inductor commutation a finite-dt "
+                       "path — gives the inductor commutation a finite-dt "
                        "charge path. Default 0 (no parasitic stamped). "
-                       "Typical values: 10-100 nF (tune so the inductor "
-                       "current charges C_oss to V_bus in 5-10 timesteps).");
+                       "Typical values: 1 nF–50 nF; tune so the inductor "
+                       "current charges C_oss to V_bus in 5–10 timesteps.");
 
     py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -872,6 +872,37 @@ void init_v2_module(py::module_& v2) {
                        &motors::BldcMotorParams::tau_load_quad_coeff,
                        "Quadratic load coefficient.");
 
+    // consolidate-motors-and-three-phase, Phase B.2b: PMSM-FOC controller.
+    py::class_<motors::PmsmFocCurrentLoopParams>(v2, "PmsmFocCurrentLoopParams",
+            "PMSM-FOC current-loop tuning parameters (bandwidth + V_d/V_q "
+            "clamps). Embedded in PmsmFocDeviceParams.")
+        .def(py::init<>())
+        .def_readwrite("bandwidth_hz",
+                       &motors::PmsmFocCurrentLoopParams::bandwidth_hz,
+                       "Target current-loop crossover frequency (Hz).")
+        .def_readwrite("Vd_min",
+                       &motors::PmsmFocCurrentLoopParams::Vd_min,
+                       "Lower clamp on V_d output (V).")
+        .def_readwrite("Vd_max",
+                       &motors::PmsmFocCurrentLoopParams::Vd_max,
+                       "Upper clamp on V_d output (V).")
+        .def_readwrite("Vq_min",
+                       &motors::PmsmFocCurrentLoopParams::Vq_min,
+                       "Lower clamp on V_q output (V).")
+        .def_readwrite("Vq_max",
+                       &motors::PmsmFocCurrentLoopParams::Vq_max,
+                       "Upper clamp on V_q output (V).");
+
+    py::class_<PmsmFocDevice::Params>(v2, "PmsmFocDeviceParams",
+            "Composite parameters for the PMSM-FOC current-loop device — "
+            "the PMSM motor parameters (used to derive PI gains via pole-zero "
+            "cancellation) plus the FOC tuning struct.")
+        .def(py::init<>())
+        .def_readwrite("motor", &PmsmFocDevice::Params::motor,
+                       "PMSM electrical/mechanical parameters used for tuning.")
+        .def_readwrite("foc", &PmsmFocDevice::Params::foc,
+                       "FOC bandwidth + clamps.");
+
     // consolidate-motors-and-three-phase, Phase C.2: Induction motor params.
     py::class_<motors::InductionMotorParams>(v2, "InductionMotorParams",
             "Squirrel-cage induction motor parameters (stationary αβ frame). "
@@ -1219,11 +1250,11 @@ void init_v2_module(py::module_& v2) {
              "Add a damped RC snubber across an existing MOSFET / IGBT "
              "/ IdealDiode. Creates an internal node "
              "(<device>__snub_int) and installs R + C in series between "
-             "the device's power terminals (drain<->source for MOSFET/"
-             "IGBT, anode<->cathode for diode). The series R critically "
+             "the device's power terminals (drain↔source for MOSFET/"
+             "IGBT, anode↔cathode for diode). The series R critically "
              "damps the inductor-side LC tank that the PWL-only "
              "parallel C_oss / C_j cannot. A good first guess: "
-             "R ~ sqrt(L/C). Returns True if the device was found.")
+             "R ≈ sqrt(L/C). Returns True if the device was found.")
         // Diode loss + thermal accessors.
         .def("diode_average_power",  &Circuit::diode_average_power,
              py::arg("name"),
@@ -1593,6 +1624,39 @@ void init_v2_module(py::module_& v2) {
              "Read the phase B line current of a PMSM (A).")
         .def("pmsm_i_c", &Circuit::pmsm_i_c, py::arg("name"),
              "Read the phase C line current of a PMSM (A).")
+        // consolidate-motors-and-three-phase, Phase B.2b: PMSM-FOC current
+        // loop. Signal-domain controller wrapping motors::PmsmFocCurrentLoop.
+        .def("add_pmsm_foc",
+             py::overload_cast<const std::string&, const PmsmFocDevice::Params&>(
+                 &Circuit::add_pmsm_foc),
+             py::arg("name"), py::arg("params"),
+             "Add a PMSM-FOC current-loop controller (no electrical pins). "
+             "Tuned from PMSM (R_s, L_d, L_q) and target bandwidth_hz via "
+             "pole-zero cancellation.")
+        .def("add_pmsm_foc",
+             py::overload_cast<const std::string&,
+                               const motors::PmsmParams&, Real>(
+                 &Circuit::add_pmsm_foc),
+             py::arg("name"), py::arg("motor"),
+             py::arg("bandwidth_hz") = 1000.0,
+             "Convenience overload — auto-derives FOC params from motor + "
+             "target bandwidth (default 1 kHz).")
+        .def("set_pmsm_foc_references", &Circuit::set_pmsm_foc_references,
+             py::arg("name"), py::arg("id_ref"), py::arg("iq_ref"),
+             "Push d/q current references into the PMSM-FOC loop.")
+        .def("set_pmsm_foc_measurements", &Circuit::set_pmsm_foc_measurements,
+             py::arg("name"), py::arg("id_meas"), py::arg("iq_meas"),
+             "Push d/q current measurements (typically pmsm_i_d/_q on the "
+             "coupled PMSM) into the PMSM-FOC loop.")
+        .def("retune_pmsm_foc", &Circuit::retune_pmsm_foc,
+             py::arg("name"), py::arg("motor"), py::arg("foc"),
+             "Online retune of the PMSM-FOC PI gains.")
+        .def("reset_pmsm_foc", &Circuit::reset_pmsm_foc, py::arg("name"),
+             "Reset PMSM-FOC integrator state.")
+        .def("pmsm_foc_vd_ref", &Circuit::pmsm_foc_vd_ref, py::arg("name"),
+             "Read the last V_d reference output (V).")
+        .def("pmsm_foc_vq_ref", &Circuit::pmsm_foc_vq_ref, py::arg("name"),
+             "Read the last V_q reference output (V).")
         // consolidate-motors-and-three-phase, Phase B.2a: signal-domain
         // Mechanical device for multi-shaft topologies.
         .def("add_mechanical", &Circuit::add_mechanical,
@@ -1647,10 +1711,10 @@ void init_v2_module(py::module_& v2) {
              "Read induction motor rotor angle (rad).")
         .def("induction_slip", &Circuit::induction_slip,
              py::arg("name"), py::arg("omega_sync_electrical"),
-             "Read induction motor slip s = (omega_sync - omega_e) / omega_sync. "
+             "Read induction motor slip s = (ω_sync − ω_e) / ω_sync. "
              "`omega_sync_electrical` (rad/s) is supplied by the caller "
              "because the Circuit doesn't know which stator source is "
-             "exciting the motor. For a 50 Hz grid: 2*pi*50 ~ 314 rad/s.")
+             "exciting the motor. For a 50 Hz grid: 2·π·50 ≈ 314 rad/s.")
         .def("induction_slip_from_hz", &Circuit::induction_slip_from_hz,
              py::arg("name"), py::arg("f_sync_hz"),
              "Slip overload that takes f_sync in Hz instead of rad/s.")
