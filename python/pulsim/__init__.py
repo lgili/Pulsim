@@ -5,6 +5,8 @@ This is the API with C++23 features and SIMD optimization.
 
 __version__ = "0.10.0a11"
 
+import os
+import warnings
 import weakref
 
 import numpy as np
@@ -198,12 +200,9 @@ from ._pulsim import (
     create_from_datasheet_4param,
     create_simple_thermal_model,
 
-    # Power Loss Calculation
-    MOSFETLossParams,
-    IGBTLossParams,
-    DiodeLossParams,
-    ConductionLoss,
-    SwitchingLoss,
+    # System-level loss aggregation (per-device params live on each device's
+    # own Params struct — MOSFETParams, IGBTParams, RealisticDiodeParams,
+    # ResistorParams, CapacitorParams, InductorParams).
     LossBreakdown,
     LossAccumulator,
     EfficiencyCalculator,
@@ -979,6 +978,39 @@ def _apply_nonlinear_regularization(circuit):
         return 0
 
 
+# refactor-pwl-switching-engine, Phase 7.4: opt-out of the retry / auto-
+# bleeder wrapper layer. Set PULSIM_LEGACY_RETRY_FALLBACK=0 to bypass it
+# entirely (single transient pass, no `_apply_auto_bleeders`, no
+# `_tune_*_for_robust` mutation of user options). Default ("1" or unset)
+# keeps existing behavior so adopters move on their own schedule. The
+# wrapper is removed in `refactor-unify-robustness-policy` once the
+# PWL Ideal mode is the resolved default for switching circuits.
+_LEGACY_RETRY_DEPRECATION_WARNED = False
+
+
+def _legacy_retry_fallback_enabled() -> bool:
+    return os.environ.get("PULSIM_LEGACY_RETRY_FALLBACK", "1") != "0"
+
+
+def _emit_legacy_retry_deprecation_warning() -> None:
+    global _LEGACY_RETRY_DEPRECATION_WARNED
+    if _LEGACY_RETRY_DEPRECATION_WARNED:
+        return
+    _LEGACY_RETRY_DEPRECATION_WARNED = True
+    warnings.warn(
+        "pulsim.run_transient is retrying with a reduced dt / auto-installing "
+        "bleeder resistors / re-tuning Newton options to coax the circuit "
+        "through convergence. This Python-side retry layer is deprecated and "
+        "will be removed once PWL `SwitchingMode.Ideal` is the resolved "
+        "default for switching circuits. To bypass it now, set "
+        "`SimulationOptions.switching_mode = SwitchingMode.Ideal` (and "
+        "`Integrator.BDF1`) on the converter, or export "
+        "`PULSIM_LEGACY_RETRY_FALLBACK=0`. See docs/pwl-switching-migration.md.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
 def run_transient(
     circuit,
     t_start,
@@ -994,15 +1026,36 @@ def run_transient(
     retry profiles for difficult switching steps. If convergence still fails,
     it can inject tiny high-value bleeder resistors (once per circuit) to
     regularize floating-node situations common with idealized converter models.
+
+    The retry / auto-bleeder layer is deprecated (refactor-pwl-switching-engine
+    Phase 7.4): set environment variable ``PULSIM_LEGACY_RETRY_FALLBACK=0`` to
+    bypass it entirely and run a single transient pass with the user-supplied
+    options. The full removal lands in ``refactor-unify-robustness-policy``
+    once PWL ``SwitchingMode.Ideal`` is the resolved default.
     """
     x0, user_newton, user_linear = _parse_run_transient_args(args)
 
     base_newton = _copy_newton_options(user_newton)
     linear_solver = user_linear if user_linear is not None else LinearSolverStackConfig.defaults()
 
-    if robust:
+    legacy_fallback = _legacy_retry_fallback_enabled()
+
+    if robust and legacy_fallback:
         _tune_newton_for_robust(base_newton)
         _tune_linear_solver_for_robust(linear_solver)
+
+    if not legacy_fallback:
+        # Opted out of the wrapper: single pass, user options intact, no
+        # auto-bleeders, no retry. Caller is responsible for convergence.
+        return _run_transient_once(
+            circuit,
+            t_start,
+            t_stop,
+            float(dt),
+            _clone_state_vector(x0),
+            base_newton,
+            linear_solver,
+        )
 
     attempts = [
         (1.00, max(80, int(base_newton.max_iterations)), False),
@@ -1016,6 +1069,9 @@ def run_transient(
     for idx, (dt_scale, max_iter, apply_regularization) in enumerate(attempts):
         if idx > 0 and not robust:
             break
+
+        if idx > 0:
+            _emit_legacy_retry_deprecation_warning()
 
         if apply_regularization:
             nonlinear_updates = _apply_nonlinear_regularization(circuit)
@@ -1228,12 +1284,7 @@ __all__ = [
     "create_from_datasheet_4param",
     "create_simple_thermal_model",
 
-    # Power Loss Calculation
-    "MOSFETLossParams",
-    "IGBTLossParams",
-    "DiodeLossParams",
-    "ConductionLoss",
-    "SwitchingLoss",
+    # System-level loss aggregation
     "LossBreakdown",
     "LossAccumulator",
     "EfficiencyCalculator",
