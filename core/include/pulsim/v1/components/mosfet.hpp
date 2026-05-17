@@ -79,6 +79,14 @@ public:
         Scalar I_ref     = 10.0;      // A — reference current for scaling
         Scalar V_ref     = 400.0;     // V — reference voltage for scaling
         Scalar Esw_tc    = 3.0e-3;    // 1/K — switching-energy TC
+
+        // PSIM-style parasitic output capacitance C_oss. Opt-in: when
+        // > 0 the runtime stamps it as a virtual cap between drain and
+        // source in the PWL state-space (assemble_state_space), giving
+        // the inductor commutation a finite-dt charge path so V_sw
+        // doesn't ring at PWM edges. Default 0 keeps legacy circuits
+        // unchanged. Typical values: 10 nF–100 nF for boost/buck dt~1µs.
+        Scalar C_oss     = 0.0;       // F
     };
 
     explicit MOSFET(std::string name = "")
@@ -178,6 +186,9 @@ public:
 
     [[nodiscard]] const Params& params() const { return params_; }
     [[nodiscard]] bool is_conducting() const noexcept { return pwl_state_; }
+
+    /// Parasitic output capacitance (F) — see Params::C_oss.
+    [[nodiscard]] Scalar C_oss() const noexcept { return params_.C_oss; }
 
     // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
     /// R_ds(on) at the device's current T_j (linear coefficient).

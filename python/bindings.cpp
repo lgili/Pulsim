@@ -459,7 +459,11 @@ void init_v2_module(py::module_& v2) {
                        "0 disables E_rec accumulation.")
         .def_readwrite("Erec_shape", &IdealDiode::Params::Erec_shape,
                        "Recovery waveform shape (0..1; 0.5 = symmetric "
-                       "triangular, 0.33 = soft-recovery, 0.67 = hard).");
+                       "triangular, 0.33 = soft-recovery, 0.67 = hard).")
+        .def_readwrite("C_j",        &IdealDiode::Params::C_j,
+                       "Parasitic junction capacitance (F) anode-to-cathode. "
+                       "Opt-in PSIM-style auto-snubber for the PWL Ideal "
+                       "path. Default 0; see MOSFETParams.C_oss for tuning.");
 
     py::class_<IdealSwitch>(v2, "IdealSwitch", "Controllable ideal switch")
         .def(py::init<Real, Real, bool, std::string>(),
@@ -501,7 +505,14 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("V_ref",     &MOSFET::Params::V_ref,
                        "Reference voltage for E_sw scaling (V).")
         .def_readwrite("Esw_tc",    &MOSFET::Params::Esw_tc,
-                       "Switching-energy temperature coefficient (1/K).");
+                       "Switching-energy temperature coefficient (1/K).")
+        .def_readwrite("C_oss",     &MOSFET::Params::C_oss,
+                       "Parasitic output capacitance drain-source (F). "
+                       "Opt-in PSIM-style auto-snubber for the PWL Ideal "
+                       "path - gives the inductor commutation a finite-dt "
+                       "charge path. Default 0 (no parasitic stamped). "
+                       "Typical values: 10-100 nF (tune so the inductor "
+                       "current charges C_oss to V_bus in 5-10 timesteps).");
 
     py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -543,7 +554,11 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("V_ref",     &IGBT::Params::V_ref,
                        "Reference voltage for E_sw scaling (V).")
         .def_readwrite("Esw_tc",    &IGBT::Params::Esw_tc,
-                       "Switching-energy temperature coefficient (1/K).");
+                       "Switching-energy temperature coefficient (1/K).")
+        .def_readwrite("C_oss",     &IGBT::Params::C_oss,
+                       "Parasitic C_oes (F) collector-to-emitter. Opt-in "
+                       "PSIM-style auto-snubber for PWL Ideal path. "
+                       "Default 0; see MOSFETParams.C_oss for tuning.");
 
     py::class_<IGBT>(v2, "IGBT", "Simplified IGBT power device model")
         .def(py::init<std::string>(), py::arg("name") = "")

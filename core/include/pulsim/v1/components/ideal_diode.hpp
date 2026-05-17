@@ -89,6 +89,10 @@ public:
         // Default Qrr = 0 → no reverse-recovery loss recorded (legacy).
         Scalar Qrr        = 0.0;     ///< Reverse-recovery charge (C)
         Scalar Erec_shape = 0.5;     ///< Shape factor (0..1; 0.5 = symmetric)
+
+        // PSIM-style parasitic junction capacitance (F) anode-to-cathode.
+        // Opt-in auto-snubber for PWL Ideal path. Default 0 = legacy.
+        Scalar C_j        = 0.0;
     };
 
     explicit IdealDiode(Scalar g_on = 1e3,
@@ -115,7 +119,11 @@ public:
         , T_amb_(params.T_amb)
         , T_j_(params.T_amb)
         , Qrr_(params.Qrr)
-        , Erec_shape_(params.Erec_shape) {}
+        , Erec_shape_(params.Erec_shape)
+        , C_j_(params.C_j) {}
+
+    /// Parasitic junction capacitance (F) — see Params::C_j.
+    [[nodiscard]] Scalar C_j() const noexcept { return C_j_; }
 
     // --- Smoothing controls (Behavioral mode only) -----------------------------
     void set_smoothing(Scalar v_smooth) { v_smooth_ = v_smooth; }
@@ -606,6 +614,7 @@ private:
     // Reverse-recovery params (Phase 4 — defaults = 0 = disabled).
     Scalar Qrr_         = Scalar{0.0};
     Scalar Erec_shape_  = Scalar{0.5};
+    Scalar C_j_         = Scalar{0.0};
     bool   was_conducting_ = false;
     bool   was_conducting_initialized_ = false;
 };

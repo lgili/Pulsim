@@ -58,6 +58,10 @@ public:
         Scalar I_ref     = 50.0;       // A — reference current (typical IGBT)
         Scalar V_ref     = 600.0;      // V — reference voltage
         Scalar Esw_tc    = 3.0e-3;     // 1/K
+
+        // PSIM-style parasitic C_ces (C-E auto-snubber). See
+        // components/mosfet.hpp::Params::C_oss for tuning notes.
+        Scalar C_oss     = 0.0;        // F
     };
 
     explicit IGBT(std::string name = "")
@@ -77,6 +81,9 @@ public:
     explicit IGBT(Scalar vth, Scalar g_on = 1e4, std::string name = "")
         : Base(std::move(name))
         , params_{vth, g_on, 1e-12, 1.5} {}
+
+    /// Parasitic C_ces between collector and emitter (F).
+    [[nodiscard]] Scalar C_oss() const noexcept { return params_.C_oss; }
 
     // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
     [[nodiscard]] Scalar V_ce_sat_at_Tj() const noexcept {

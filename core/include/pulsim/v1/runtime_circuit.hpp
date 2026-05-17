@@ -4286,6 +4286,13 @@ public:
                     if (nodes.size() >= 2) {
                         const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
                         stamp_g(g, nodes[0], nodes[1]);
+                        // PSIM-style parasitic junction capacitance C_j.
+                        // Same auto-snubber rationale as MOSFET / IGBT —
+                        // gives the diode commutation a finite-dt path so
+                        // the inductor current doesn't ring at PWM edges.
+                        if (dev.C_j() > Real{0}) {
+                            stamp_capacitance(dev.C_j(), nodes[0], nodes[1]);
+                        }
                     }
                 } else if constexpr (std::is_same_v<T, IdealSwitch>) {
                     if (nodes.size() >= 2) {
@@ -4302,15 +4309,26 @@ public:
                     if (nodes.size() >= 3) {
                         const Real g = dev.pwl_state() ? dev.params().g_on
                                                        : dev.params().g_off;
-                        // Drain–source path only (gate stamps deferred to the
-                        // catalog-tier change once Coss/Ciss are modeled).
+                        // Drain-source conductance.
                         stamp_g(g, nodes[1], nodes[2]);
+                        // PSIM-style auto-snubber: parasitic output cap C_oss
+                        // gives the inductor commutation a finite-dt charge
+                        // path so V_sw doesn't ring across PWM edges. Stamp
+                        // it between drain and source. When C_oss == 0
+                        // (legacy / Behavioral-only) this is a no-op.
+                        if (dev.C_oss() > Real{0}) {
+                            stamp_capacitance(dev.C_oss(), nodes[1], nodes[2]);
+                        }
                     }
                 } else if constexpr (std::is_same_v<T, IGBT>) {
                     if (nodes.size() >= 3) {
                         const Real g = dev.pwl_state() ? dev.params().g_on
                                                        : dev.params().g_off;
                         stamp_g(g, nodes[1], nodes[2]);
+                        // Mirror the MOSFET auto-snubber for IGBTs.
+                        if (dev.C_oss() > Real{0}) {
+                            stamp_capacitance(dev.C_oss(), nodes[1], nodes[2]);
+                        }
                     }
                 } else if constexpr (std::is_same_v<T, Transformer>) {
                     // Coupled inductor support uses a separate stamp pass
