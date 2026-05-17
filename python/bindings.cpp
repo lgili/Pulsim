@@ -3431,131 +3431,14 @@ void init_v2_module(py::module_& v2) {
            "Create simple single-stage thermal model");
 
     // =========================================================================
-    // Power Loss Calculation Module
+    // System-level loss aggregation
+    // -------------------------------------------------------------------------
+    // Per-device loss params (Rds_on(T_j), V_F0, Eon_25, Qrr, R_th_ja, ...)
+    // live on each device own Params struct (MOSFETParams, IGBTParams,
+    // RealisticDiodeParams, ResistorParams, CapacitorParams, InductorParams).
+    // These system-level types aggregate per-device readings into a
+    // converter-wide summary.
     // =========================================================================
-
-    py::class_<MOSFETLossParams>(v2, "MOSFETLossParams",
-        "MOSFET loss model parameters for conduction and switching losses")
-        .def(py::init<>())
-        .def_readwrite("Rds_on", &MOSFETLossParams::Rds_on,
-             "On-state resistance at 25C (Ω)")
-        .def_readwrite("Rds_on_tc", &MOSFETLossParams::Rds_on_tc,
-             "Temperature coefficient (Ω/K)")
-        .def_readwrite("Qg", &MOSFETLossParams::Qg,
-             "Total gate charge (C)")
-        .def_readwrite("Eon_25C", &MOSFETLossParams::Eon_25C,
-             "Turn-on energy at 25C (J)")
-        .def_readwrite("Eoff_25C", &MOSFETLossParams::Eoff_25C,
-             "Turn-off energy at 25C (J)")
-        .def_readwrite("I_ref", &MOSFETLossParams::I_ref,
-             "Reference current for Esw (A)")
-        .def_readwrite("V_ref", &MOSFETLossParams::V_ref,
-             "Reference voltage for Esw (V)")
-        .def_readwrite("T_ref", &MOSFETLossParams::T_ref,
-             "Reference temperature (C)")
-        .def_readwrite("Esw_tc", &MOSFETLossParams::Esw_tc,
-             "Switching energy temp coefficient (1/K)")
-        .def("Rds_on_at_T", &MOSFETLossParams::Rds_on_at_T, py::arg("T"),
-             "Calculate Rds_on at temperature T");
-
-    py::class_<IGBTLossParams>(v2, "IGBTLossParams",
-        "IGBT loss model parameters")
-        .def(py::init<>())
-        .def_readwrite("Vce_sat", &IGBTLossParams::Vce_sat,
-             "Collector-emitter saturation voltage (V)")
-        .def_readwrite("Rce", &IGBTLossParams::Rce,
-             "Collector-emitter resistance (Ω)")
-        .def_readwrite("Vce_tc", &IGBTLossParams::Vce_tc,
-             "Vce temperature coefficient (V/K)")
-        .def_readwrite("Eon_25C", &IGBTLossParams::Eon_25C,
-             "Turn-on energy at 25C (J)")
-        .def_readwrite("Eoff_25C", &IGBTLossParams::Eoff_25C,
-             "Turn-off energy at 25C (J)")
-        .def_readwrite("I_ref", &IGBTLossParams::I_ref,
-             "Reference current (A)")
-        .def_readwrite("V_ref", &IGBTLossParams::V_ref,
-             "Reference voltage (V)")
-        .def_readwrite("T_ref", &IGBTLossParams::T_ref,
-             "Reference temperature (C)")
-        .def_readwrite("Esw_tc", &IGBTLossParams::Esw_tc,
-             "Switching energy temp coefficient (1/K)")
-        .def("Vce_sat_at_T", &IGBTLossParams::Vce_sat_at_T, py::arg("T"),
-             "Calculate Vce_sat at temperature T");
-
-    py::class_<DiodeLossParams>(v2, "DiodeLossParams",
-        "Diode loss model parameters")
-        .def(py::init<>())
-        .def_readwrite("Vf", &DiodeLossParams::Vf,
-             "Forward voltage at 25C (V)")
-        .def_readwrite("Rd", &DiodeLossParams::Rd,
-             "Dynamic resistance (Ω)")
-        .def_readwrite("Vf_tc", &DiodeLossParams::Vf_tc,
-             "Vf temperature coefficient (V/K)")
-        .def_readwrite("Qrr", &DiodeLossParams::Qrr,
-             "Reverse recovery charge (C)")
-        .def_readwrite("trr", &DiodeLossParams::trr,
-             "Reverse recovery time (s)")
-        .def_readwrite("Irr_factor", &DiodeLossParams::Irr_factor,
-             "Irr as fraction of If")
-        .def_readwrite("Err_factor", &DiodeLossParams::Err_factor,
-             "Err factor")
-        .def_readwrite("T_ref", &DiodeLossParams::T_ref,
-             "Reference temperature (C)")
-        .def("Vf_at_T", &DiodeLossParams::Vf_at_T, py::arg("T"),
-             "Calculate Vf at temperature T")
-        .def("Err", &DiodeLossParams::Err,
-             py::arg("If"), py::arg("Vr"), py::arg("T"),
-             "Calculate reverse recovery energy");
-
-    // Conduction loss functions
-    py::class_<ConductionLoss>(v2, "ConductionLoss",
-        "Static methods for conduction loss calculation")
-        .def_static("resistor", &ConductionLoss::resistor,
-             py::arg("I"), py::arg("R"),
-             "Resistor conduction loss: P = I² * R")
-        .def_static("mosfet", &ConductionLoss::mosfet,
-             py::arg("I"), py::arg("params"), py::arg("T"),
-             "MOSFET conduction loss: P = I² * Rds_on(T)")
-        .def_static("igbt", &ConductionLoss::igbt,
-             py::arg("I"), py::arg("params"), py::arg("T"),
-             "IGBT conduction loss: P = Vce_sat * I + Rce * I²")
-        .def_static("diode", &ConductionLoss::diode,
-             py::arg("I"), py::arg("params"), py::arg("T"),
-             "Diode conduction loss: P = Vf * I + Rd * I²");
-
-    // Switching loss functions
-    py::class_<SwitchingLoss>(v2, "SwitchingLoss",
-        "Static methods for switching loss calculation")
-        .def_static("mosfet_Eon", &SwitchingLoss::mosfet_Eon,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "MOSFET turn-on energy")
-        .def_static("mosfet_Eoff", &SwitchingLoss::mosfet_Eoff,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "MOSFET turn-off energy")
-        .def_static("mosfet_total", &SwitchingLoss::mosfet_total,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "MOSFET total switching energy per cycle")
-        .def_static("mosfet_power", &SwitchingLoss::mosfet_power,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
-             "MOSFET switching power at frequency f_sw")
-        .def_static("igbt_Eon", &SwitchingLoss::igbt_Eon,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "IGBT turn-on energy")
-        .def_static("igbt_Eoff", &SwitchingLoss::igbt_Eoff,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "IGBT turn-off energy")
-        .def_static("igbt_total", &SwitchingLoss::igbt_total,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "IGBT total switching energy per cycle")
-        .def_static("igbt_power", &SwitchingLoss::igbt_power,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
-             "IGBT switching power at frequency f_sw")
-        .def_static("diode_Err", &SwitchingLoss::diode_Err,
-             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("params"),
-             "Diode reverse recovery energy")
-        .def_static("diode_power", &SwitchingLoss::diode_power,
-             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
-             "Diode reverse recovery power at frequency f_sw");
 
     py::class_<LossBreakdown>(v2, "LossBreakdown",
         "Breakdown of losses by type")

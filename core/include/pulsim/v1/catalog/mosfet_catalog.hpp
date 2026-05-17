@@ -32,7 +32,7 @@ namespace pulsim::v1::catalog {
 //     handled by `MosfetCatalog::body_diode()`.
 //   - **Switching energies**: `Eon(I_c, V_ds)`, `Eoff(I_c, V_ds)` as
 //     `LookupTable2D`. Per-switching-event accumulator hooks into the
-//     existing `losses.hpp` machinery via `switching_energy_at`.
+//     transient loss service via `switching_energy_at`.
 
 struct MosfetCatalogParams {
     // Identification
