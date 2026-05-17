@@ -4275,11 +4275,7 @@ public:
                                      std::is_same_v<T, SineVoltageSource> ||
                                      std::is_same_v<T, PulseVoltageSource>) {
                     if (nodes.size() >= 2) {
-                        const Real v_src = dev.voltage_at(time);
-                        // DEBUG: trace PWM stamping
-                        std::fprintf(stderr, "[stamp_state_space] dev=%s time=%.3fµs V_src=%.3f\n",
-                                     conn.name.c_str(), time * 1e6, v_src);
-                        stamp_voltage_source_eq(v_src, nodes[0], nodes[1],
+                        stamp_voltage_source_eq(dev.voltage_at(time), nodes[0], nodes[1],
                                                 conn.branch_index);
                     }
                 } else if constexpr (std::is_same_v<T, CurrentSource>) {
@@ -5674,8 +5670,6 @@ private:
             Index nneg = conn.nodes[1];
             Index br = conn.branch_index;
             Real v_src = dev.voltage_at(current_time_);
-            std::fprintf(stderr, "[stamp_jacobian PWM] dev=%s ct=%.3fus V=%.3f\n",
-                         conn.name.c_str(), current_time_ * 1e6, v_src);
 
             // Stamp MNA extension (same as regular voltage source)
             if (npos >= 0) {

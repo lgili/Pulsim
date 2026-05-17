@@ -208,6 +208,36 @@ void apply_auto_transient_profile(SimulationOptions& options, const Circuit& cir
         return std::abs(lhs - rhs) <= scale * Real{1e-12};
     };
 
+    // Backend fix (investigate-pfc-boost-convergence): when the user hasn't
+    // explicitly chosen a switching mode AND any device has opted into the
+    // PWL Ideal stamp (typically by setting MOSFET.Eon_25 > 0 or calling
+    // `set_switching_mode(name, Ideal)`), promote the circuit-wide default
+    // to Ideal so the segment-stepper picks the state-space path. Without
+    // this, a boost/buck topology (inductor + smooth MOSFET + PWM gate)
+    // falls back to the DAE/Newton path which can't honour the PWM step
+    // discontinuity — the gate stays frozen at the initial value and the
+    // converter never commutates. With Ideal promoted, the PWL event
+    // scanner sees the gate edges and commits real switch transitions.
+    if (options.switching_mode == SwitchingMode::Auto) {
+        bool any_device_in_ideal = false;
+        for (const auto& dev : circuit.devices()) {
+            std::visit([&](const auto& d) {
+                using DT = std::decay_t<decltype(d)>;
+                if constexpr (
+                    std::is_same_v<DT, MOSFET> ||
+                    std::is_same_v<DT, IGBT>) {
+                    if (d.switching_mode() == SwitchingMode::Ideal) {
+                        any_device_in_ideal = true;
+                    }
+                }
+            }, dev);
+            if (any_device_in_ideal) break;
+        }
+        if (any_device_in_ideal) {
+            options.switching_mode = SwitchingMode::Ideal;
+        }
+    }
+
     const bool fixed_step = resolve_step_mode(options) == TransientStepMode::Fixed;
     if (!fixed_step) {
         options.adaptive_timestep = true;

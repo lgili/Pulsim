@@ -371,3 +371,91 @@ TEST_CASE("Diode reverse-recovery: accumulates Qrr·V_r per ON→OFF",
     CHECK(e_sw > 0.0);
     CHECK(std::isfinite(e_sw));
 }
+
+// ===========================================================================
+// Backend convergence fix — boost-style L + MOSFET + PWM + diode + load
+// ===========================================================================
+//
+// Before the auto-promote fix in `apply_auto_transient_profile`:
+//   - User sets MOSFETParams.Eon_25 > 0 (triggers MOSFET auto-promote
+//     to SwitchingMode::Ideal on the device).
+//   - But circuit-wide default stays SwitchingMode::Auto → segment-model
+//     resolves Auto → Behavioral → segment_not_admissible → DAE/Newton
+//     path is taken.
+//   - DAE/Newton cannot honor PWM step discontinuity in an L + MOSFET
+//     topology — V_gate freezes at the initial value, no commutations
+//     happen, the simulated converter never operates.
+//
+// After the fix: detecting any device in Ideal mode auto-promotes the
+// circuit-wide default so the segment-model stays admissible and the
+// PWL event scanner sees real PWM edges. V_gate toggles, the boost
+// commutates, telemetry shows non-zero pwl_event_commutations.
+
+TEST_CASE("Auto-promote: MOSFET-in-Ideal lifts circuit default to Ideal",
+          "[switching_phase4][backend][regression]") {
+    Circuit c;
+    const Index n_in   = c.add_node("in");
+    const Index n_sw   = c.add_node("sw");
+    const Index n_bus  = c.add_node("bus");
+    const Index n_gate = c.add_node("gate");
+    const Index gnd    = Circuit::ground();
+
+    c.add_voltage_source("Vin", n_in, gnd, 100.0);
+
+    Inductor::Params ip{};
+    ip.inductance      = 500e-6;
+    ip.initial_current = 2.0;
+    ip.DCR             = 30e-3;
+    ip.R_th_ja         = 1.0;
+    c.add_inductor("L", n_in, n_sw, ip);
+
+    MOSFET::Params mp{};
+    mp.vth = 4.0; mp.kp = 50.0; mp.g_on = 50.0; mp.g_off = 1e-12;
+    mp.is_nmos = true;
+    mp.Eon_25  = 30e-6;       // triggers auto-promote to Ideal
+    mp.Eoff_25 = 60e-6;
+    mp.I_ref = 2.0; mp.V_ref = 200.0;
+    mp.R_th_ja = 1.0;
+    c.add_mosfet("M", n_gate, n_sw, gnd, mp);
+    c.add_pwm_voltage_source("Vg", n_gate, gnd, 12.0, 0.0, 65e3, 0.50);
+
+    IdealDiode::Params dp{};
+    dp.V_F0 = 0.7; dp.R_d = 25e-3; dp.R_th_ja = 1.0;
+    dp.g_on = 1.0 / dp.R_d;
+    c.add_diode("D", n_sw, n_bus, dp);
+
+    Capacitor::Params cp{};
+    cp.capacitance = 100e-6; cp.initial_voltage = 200.0;
+    cp.ESR = 50e-3; cp.R_th_ja = 1.0;
+    c.add_capacitor("C", n_bus, gnd, cp);
+
+    c.add_resistor("R_load", n_bus, gnd, 200.0);
+
+    auto opts = make_opts(100e-6, 0.5e-6);
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = true;
+    opts.enable_bdf_order_control = true;
+    opts.enable_events  = true;
+    opts.enable_losses  = true;
+    opts.newton_options.num_nodes    = c.num_nodes();
+    opts.newton_options.num_branches = c.num_branches();
+    // NOTE: opts.switching_mode left at Auto — the backend fix should
+    // auto-promote it to Ideal because the MOSFET opted in.
+
+    auto result = Simulator(c, opts).run_transient(c.initial_state());
+    REQUIRE(result.success);
+
+    // Pre-fix: 0 commutations (gate frozen). Post-fix: many.
+    INFO("pwl_event_commutations = " << result.backend_telemetry.pwl_event_commutations);
+    CHECK(result.backend_telemetry.pwl_event_commutations >= 4u);
+
+    // V_gate should actually toggle (states[i][gate] swings 0↔12V).
+    bool saw_high = false, saw_low = false;
+    for (const auto& state : result.states) {
+        if (state[n_gate] > 6.0) saw_high = true;
+        if (state[n_gate] < 6.0) saw_low  = true;
+    }
+    CHECK(saw_high);
+    CHECK(saw_low);
+}
+
