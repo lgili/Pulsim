@@ -1312,6 +1312,28 @@ void init_v2_module(py::module_& v2) {
              "damps the inductor-side LC tank that the PWL-only "
              "parallel C_oss / C_j cannot. A good first guess: "
              "R ≈ sqrt(L/C). Returns True if the device was found.")
+        .def("auto_configure_parasitics",
+             [](Circuit& c, py::object opts, bool dry_run) {
+                 // Use a lambda + py::object so the AutoParasiticsOptions
+                 // type doesn't need to be registered before Circuit's
+                 // py::class_ block in this translation unit.
+                 const AutoParasiticsOptions cpp_opts = opts.is_none()
+                     ? AutoParasiticsOptions{}
+                     : opts.cast<AutoParasiticsOptions>();
+                 return c.auto_configure_parasitics(cpp_opts, dry_run);
+             },
+             py::arg("opts") = py::none(),
+             py::arg("dry_run") = false,
+             "`boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): pre-flight "
+             "topology analysis. Walks the circuit for "
+             "Inductor→Switch adjacencies, predicts V_sw overshoot for "
+             "the current C_oss configuration, and (when "
+             "`dry_run=False`) auto-sizes parasitics so the simulation "
+             "stays bounded. Called automatically by Simulator.run_transient "
+             "when `options.auto_parasitics.enabled=True` (the default); "
+             "users can also invoke it explicitly for inspection. Returns "
+             "a TopologyReport listing every detected pair + the actions "
+             "applied. Idempotent.")
         // Diode loss + thermal accessors.
         .def("diode_average_power",  &Circuit::diode_average_power,
              py::arg("name"),
@@ -2579,7 +2601,86 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
         .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
         .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy)
-        .def_readwrite("model_regularization", &SimulationOptions::model_regularization);
+        .def_readwrite("model_regularization", &SimulationOptions::model_regularization)
+        .def_readwrite("auto_parasitics", &SimulationOptions::auto_parasitics,
+                        "`boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): "
+                        "pre-flight topology analysis + automatic C_oss / C_j "
+                        "sizing. Default ON so users hit convergent boost-class "
+                        "circuits out of the box. Set `enabled=False` to opt out.");
+
+    // -----------------------------------------------------------------------
+    // `boost-pfc-auto-parasitics` types
+    // -----------------------------------------------------------------------
+    py::class_<AutoParasiticsOptions>(v2, "AutoParasiticsOptions",
+            "Configuration for Circuit.auto_configure_parasitics + "
+            "automatic pre-flight in Simulator.run_transient.")
+        .def(py::init<>())
+        .def_readwrite("enabled", &AutoParasiticsOptions::enabled,
+                       "Master enable. Default True.")
+        .def_readwrite("max_overshoot_frac",
+                       &AutoParasiticsOptions::max_overshoot_frac,
+                       "Tolerated V_sw overshoot as fraction of V_bus. 0.5 = "
+                       "50 % over the clamp rail. Tighter values (< 0.5) "
+                       "produce C_oss that cannot charge within the OFF "
+                       "interval → analyzer falls back to Behavioral mode.")
+        .def_readwrite("verbose", &AutoParasiticsOptions::verbose,
+                       "Print the topology report to stderr after running. "
+                       "Default True.")
+        .def_readwrite("respect_user_overrides",
+                       &AutoParasiticsOptions::respect_user_overrides,
+                       "Skip devices that have user-set C_oss / C_j. "
+                       "Default True.")
+        .def_readwrite("fallback_I_peak",
+                       &AutoParasiticsOptions::fallback_I_peak,
+                       "Inductor peak current to assume when no initial "
+                       "current was set on the L (A).")
+        .def_readwrite("fallback_V_bus",
+                       &AutoParasiticsOptions::fallback_V_bus,
+                       "Output bus voltage to assume when no pre-charged "
+                       "cap was found (V).");
+
+    py::enum_<TopologyIssue::Severity>(v2, "TopologyIssueSeverity")
+        .value("Info",     TopologyIssue::Severity::Info)
+        .value("Warning",  TopologyIssue::Severity::Warning)
+        .value("Critical", TopologyIssue::Severity::Critical);
+
+    py::class_<TopologyIssue>(v2, "TopologyIssue",
+            "One Inductor→Switch adjacency detected by the auto-parasitics "
+            "pre-flight, plus the predicted V_sw overshoot for the current "
+            "C_oss configuration.")
+        .def_readwrite("switch_name", &TopologyIssue::switch_name)
+        .def_readwrite("inductor_name", &TopologyIssue::inductor_name)
+        .def_readwrite("L_henry", &TopologyIssue::L_henry)
+        .def_readwrite("I_peak_estimate", &TopologyIssue::I_peak_estimate)
+        .def_readwrite("V_bus_estimate", &TopologyIssue::V_bus_estimate)
+        .def_readwrite("predicted_overshoot", &TopologyIssue::predicted_overshoot)
+        .def_readwrite("current_C_oss", &TopologyIssue::current_C_oss)
+        .def_readwrite("severity", &TopologyIssue::severity);
+
+    py::enum_<ParasiticAction::Kind>(v2, "ParasiticActionKind")
+        .value("None_",            ParasiticAction::Kind::None)
+        .value("SetCoss",          ParasiticAction::Kind::SetCoss)
+        .value("DropToBehavioral", ParasiticAction::Kind::DropToBehavioral)
+        .value("AddRCSnubber",     ParasiticAction::Kind::AddRCSnubber);
+
+    py::class_<ParasiticAction>(v2, "ParasiticAction",
+            "One mutation applied by the auto-parasitics pre-flight.")
+        .def_readwrite("device_name", &ParasiticAction::device_name)
+        .def_readwrite("kind",        &ParasiticAction::kind)
+        .def_readwrite("new_C_oss",   &ParasiticAction::new_C_oss)
+        .def_readwrite("snub_R",      &ParasiticAction::snub_R)
+        .def_readwrite("snub_C",      &ParasiticAction::snub_C)
+        .def_readwrite("rationale",   &ParasiticAction::rationale);
+
+    py::class_<TopologyReport>(v2, "TopologyReport",
+            "Aggregate report from Circuit.auto_configure_parasitics.")
+        .def_readwrite("issues",  &TopologyReport::issues)
+        .def_readwrite("actions", &TopologyReport::actions)
+        .def_readwrite("ran_pre_simulation",
+                       &TopologyReport::ran_pre_simulation)
+        .def_readwrite("summary", &TopologyReport::summary)
+        .def("num_critical", &TopologyReport::num_critical)
+        .def("num_actions",  &TopologyReport::num_actions);
 
     py::class_<SimulationResult>(v2, "SimulationResult", "Transient simulation result")
         .def(py::init<>())
@@ -2603,6 +2704,10 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("loss_summary", &SimulationResult::loss_summary)
         .def_readwrite("thermal_summary", &SimulationResult::thermal_summary)
         .def_readwrite("component_electrothermal", &SimulationResult::component_electrothermal)
+        // `boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): the pre-flight
+        // topology report. Empty list when auto_parasitics.enabled = False
+        // or when no switch-inductor adjacency was detected.
+        .def_readwrite("topology_report", &SimulationResult::topology_report)
         // Compatibility alias used by legacy Python tests
         .def_property_readonly("data", [](const SimulationResult& result) {
             return result.states;

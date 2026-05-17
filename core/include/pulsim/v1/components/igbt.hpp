@@ -79,6 +79,9 @@ public:
             // 20 nF default tracks the larger C_ces typical of IGBTs.
             if (params_.C_oss <= Scalar{0}) {
                 params_.C_oss = Scalar{2e-8};
+                C_oss_user_set_ = false;
+            } else {
+                C_oss_user_set_ = true;
             }
         }
     }
@@ -89,6 +92,14 @@ public:
 
     /// Parasitic C_ces between collector and emitter (F).
     [[nodiscard]] Scalar C_oss() const noexcept { return params_.C_oss; }
+    /// True only when the user explicitly assigned `Params::C_oss > 0`
+    /// before constructing the device. See MOSFET::C_oss_user_set() for
+    /// rationale.
+    [[nodiscard]] bool C_oss_user_set() const noexcept { return C_oss_user_set_; }
+    /// Mutator used by the runtime's auto-parasitics pre-flight (see
+    /// `pulsim/v1/auto_parasitics.hpp`). Sets the stamped parasitic
+    /// capacitance the next assembly will use.
+    void set_C_oss(Scalar c) noexcept { params_.C_oss = c; }
 
     // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
     [[nodiscard]] Scalar V_ce_sat_at_Tj() const noexcept {
@@ -517,6 +528,9 @@ private:
     Scalar event_hysteresis_ = Scalar{1e-2};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
+    // `boost-pfc-auto-parasitics`: tracks whether C_oss was explicitly
+    // set by user (true) or auto-defaulted by ctor (false).
+    bool C_oss_user_set_ = false;
 
     // Loss + thermal accumulator (Phase 2 of inverter-bridge-losses).
     Scalar e_cond_ = Scalar{0.0};

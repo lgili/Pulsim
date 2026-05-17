@@ -115,6 +115,9 @@ public:
             // model the ideal-switch limit explicitly.
             if (params_.C_oss <= Scalar{0}) {
                 params_.C_oss = Scalar{1e-8};
+                C_oss_user_set_ = false;
+            } else {
+                C_oss_user_set_ = true;
             }
         }
     }
@@ -201,6 +204,17 @@ public:
 
     /// Parasitic output capacitance (F) — see Params::C_oss.
     [[nodiscard]] Scalar C_oss() const noexcept { return params_.C_oss; }
+    /// True only when the user explicitly assigned `Params::C_oss > 0`
+    /// before constructing the device. False when the in-ctor auto-default
+    /// (10 nF for `Eon_25 > 0`) fired. Used by `auto_configure_parasitics`
+    /// to distinguish "user knows what they want" from "we made a guess".
+    [[nodiscard]] bool C_oss_user_set() const noexcept { return C_oss_user_set_; }
+    /// Mutator used by the runtime's auto-parasitics pre-flight (see
+    /// `pulsim/v1/auto_parasitics.hpp`). Sets the C_oss the next assembly
+    /// will stamp without touching any other Params field. Safe to call
+    /// at any point before `assemble_state_space`. Does NOT mark the value
+    /// as "user-set" — that flag tracks only the original construction.
+    void set_C_oss(Scalar c) noexcept { params_.C_oss = c; }
 
     // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
     /// R_ds(on) at the device's current T_j (linear coefficient).
@@ -662,6 +676,12 @@ private:
     Scalar event_hysteresis_ = Scalar{1e-2};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
+
+    // `boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): tracks whether the
+    // current params_.C_oss came from explicit user assignment (true) or
+    // from the in-ctor auto-default placeholder (false). Auto-parasitics
+    // respects only the user-set path.
+    bool C_oss_user_set_ = false;
 
     // Loss + thermal accumulator (Phase 2 of inverter-bridge-losses).
     // All zero when R_th_ja == 0 (legacy mode).

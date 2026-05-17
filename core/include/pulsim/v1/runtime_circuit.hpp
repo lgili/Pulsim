@@ -19,6 +19,7 @@
 #include "pulsim/v1/components/bldc_motor_device.hpp"
 #include "pulsim/v1/components/induction_motor_device.hpp"
 #include "pulsim/v1/grid/three_phase_source.hpp"
+#include "pulsim/v1/auto_parasitics.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cassert>
@@ -723,6 +724,64 @@ public:
         cp.initial_voltage = initial_v_cap;
         add_capacitor(device_name + "__snub_C", n_mid, n_lo, cp);
         return true;
+    }
+
+    // =========================================================================
+    // Auto-parasitics: pre-flight topology analysis
+    // =========================================================================
+    //
+    // Detects "Inductor in series with switch" patterns (boost / buck-boost /
+    // flyback / half-bridge with motor load) and sizes the switch's parasitic
+    // output capacitance so the Tustin LC-tank overshoot stays bounded. When
+    // PWL Ideal is infeasible at the user's operating point (high f_sw + small
+    // OFF interval), drops the switch to Behavioral mode so the smooth
+    // Shichman-Hodges Newton path handles the LC dynamics instead.
+    //
+    // Hooked automatically by `Simulator::run_transient` when
+    // `SimulationOptions::auto_parasitics.enabled = true` (the default).
+    // Power users can also call this explicitly *before* `run_transient`,
+    // either to preview what the runtime would do (`dry_run = true`) or to
+    // get the same configuration without going through the Simulator.
+    //
+    // Returns a TopologyReport listing every detected switch-inductor pair,
+    // the predicted V_sw overshoot for the current C_oss, and what mutation
+    // (if any) was applied to make the simulation converge.
+
+    /// Run the topology walker + sizing math + mutation pass. Idempotent
+    /// when called twice with the same `opts` on the same circuit state.
+    /// `dry_run = true` returns the report without mutating any device.
+    TopologyReport auto_configure_parasitics(
+            const AutoParasiticsOptions& opts = {},
+            bool dry_run = false) {
+        TopologyReport report;
+        if (!opts.enabled) {
+            report.summary = "[pulsim] auto-parasitics: disabled.";
+            return report;
+        }
+
+        // For each switch device, find the inductor (if any) attached to its
+        // high-side power terminal and decide what to do.
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, MOSFET> ||
+                              std::is_same_v<T, IGBT> ||
+                              std::is_same_v<T, IdealDiode>) {
+                    analyze_switch_for_parasitics_(
+                        dev, conn, opts, dry_run, report);
+                }
+            }, devices_[i]);
+        }
+
+        report.summary = format_topology_report(report);
+        if (opts.verbose && !report.actions.empty()) {
+            // stderr by design — separate channel from the user's solver
+            // output (which often goes to stdout).
+            std::fputs(report.summary.c_str(), stderr);
+            std::fputc('\n', stderr);
+        }
+        return report;
     }
 
     // ----- Diode loss / thermal accessors -----------------------------------
@@ -2778,6 +2837,260 @@ public:
     }
 
 private:
+    // =========================================================================
+    // Auto-parasitics — internal helpers
+    // =========================================================================
+
+    /// Pick the "high-side" power node for a switching device. This is the
+    /// node where the parasitic C_oss / C_j is stamped against the
+    /// "low-side" rail in the assemble path, and (for boost-class topologies)
+    /// the node that the inductor terminates at.
+    template <typename T>
+    [[nodiscard]] Index high_side_node_of_(
+            const T& /*dev*/, const DeviceConnection& conn) const {
+        if constexpr (std::is_same_v<T, MOSFET> || std::is_same_v<T, IGBT>) {
+            // nodes = {gate, drain/collector, source/emitter}
+            return conn.nodes.size() >= 2 ? conn.nodes[1] : Index{-1};
+        } else if constexpr (std::is_same_v<T, IdealDiode>) {
+            // nodes = {anode, cathode}. The anode is the "high" side from
+            // the perspective of an inductor charging the diode (boost
+            // freewheel) — current flows into anode from L.
+            return conn.nodes.empty() ? Index{-1} : conn.nodes[0];
+        } else {
+            return Index{-1};
+        }
+    }
+
+    /// Pick the "low-side" rail (drain↔source / collector↔emitter / anode
+    /// ↔cathode) so the snubber's reference node is unambiguous.
+    template <typename T>
+    [[nodiscard]] Index low_side_node_of_(
+            const T& /*dev*/, const DeviceConnection& conn) const {
+        if constexpr (std::is_same_v<T, MOSFET> || std::is_same_v<T, IGBT>) {
+            return conn.nodes.size() >= 3 ? conn.nodes[2] : Index{-1};
+        } else if constexpr (std::is_same_v<T, IdealDiode>) {
+            return conn.nodes.size() >= 2 ? conn.nodes[1] : Index{-1};
+        } else {
+            return Index{-1};
+        }
+    }
+
+    /// Look up an Inductor with one terminal at `node`. Returns a pointer to
+    /// the device + the connection index, or {nullptr, 0} on miss.
+    /// Used by the auto-parasitics walk to find the L in series with a switch.
+    [[nodiscard]] std::pair<const Inductor*, std::size_t>
+    find_inductor_at_node_(Index node) const {
+        if (node < 0) return {nullptr, 0};
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            const Inductor* hit = nullptr;
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Inductor>) {
+                    if (conn.nodes.size() >= 2 &&
+                        (conn.nodes[0] == node || conn.nodes[1] == node)) {
+                        hit = &dev;
+                    }
+                }
+            }, devices_[i]);
+            if (hit) return {hit, i};
+        }
+        return {nullptr, 0};
+    }
+
+    /// Estimate V_bus by finding an output Capacitor on the "other side" of
+    /// the topology. Two heuristics, in order:
+    ///   1. Boost-style: there's an IdealDiode whose anode is at `switch_hi`;
+    ///      its cathode is the bus node. Find a Capacitor at that node.
+    ///   2. Buck/half-bridge: there's a Capacitor whose negative terminal is
+    ///      at ground and positive terminal connects (transitively) to the
+    ///      switch — we approximate by finding the cap with the highest
+    ///      `initial_voltage` in the circuit.
+    /// Returns the cap's initial_voltage, or 0 if no useful candidate.
+    [[nodiscard]] Real estimate_V_bus_for_switch_(Index switch_hi) const {
+        if (switch_hi < 0) return Real{0};
+
+        // Heuristic 1: boost-style. Walk diodes for one whose anode is at
+        // `switch_hi`; take its cathode as the candidate bus node.
+        Index bus_node = -1;
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                (void)dev;
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, IdealDiode>) {
+                    if (conn.nodes.size() >= 2 && conn.nodes[0] == switch_hi) {
+                        bus_node = conn.nodes[1];  // cathode
+                    }
+                }
+            }, devices_[i]);
+            if (bus_node >= 0) break;
+        }
+        if (bus_node >= 0) {
+            const auto v = find_cap_initial_voltage_at_(bus_node);
+            if (v > Real{0}) return v;
+        }
+
+        // Heuristic 2: pick the cap with the largest initial_voltage. Works
+        // for buck / half-bridge motor drive where the DC link sits on its
+        // own pre-charged cap.
+        Real best = Real{0};
+        for (const auto& dev : devices_) {
+            std::visit([&](const auto& d) {
+                using T = std::decay_t<decltype(d)>;
+                if constexpr (std::is_same_v<T, Capacitor>) {
+                    const Real v = d.voltage_prev();  // == initial_voltage at t=0
+                    if (v > best) best = v;
+                }
+            }, dev);
+        }
+        return best;
+    }
+
+    [[nodiscard]] Real find_cap_initial_voltage_at_(Index node) const {
+        if (node < 0) return Real{0};
+        Real result = Real{0};
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Capacitor>) {
+                    if (conn.nodes.size() >= 2 &&
+                        (conn.nodes[0] == node || conn.nodes[1] == node)) {
+                        const Real v = dev.voltage_prev();
+                        if (v > result) result = v;
+                    }
+                }
+            }, devices_[i]);
+        }
+        return result;
+    }
+
+    /// Core per-switch decision logic for `auto_configure_parasitics`. This
+    /// is the place where "topology pattern → action" mapping is decided.
+    /// Templated on the switch type so the same body covers MOSFET / IGBT /
+    /// IdealDiode without virtual dispatch.
+    template <typename T>
+    void analyze_switch_for_parasitics_(T& dev, const DeviceConnection& conn,
+                                         const AutoParasiticsOptions& opts,
+                                         bool dry_run,
+                                         TopologyReport& report) {
+        const Index n_hi = high_side_node_of_(dev, conn);
+        if (n_hi < 0) return;
+
+        // Find an inductor in series with the switch high-side. No L → no
+        // commutation discontinuity → nothing to fix.
+        const auto [ind, ind_idx] = find_inductor_at_node_(n_hi);
+        if (!ind) return;
+
+        // Op-point estimate: inductor's initial current with a 20 % safety
+        // margin, fallback to the conservative default otherwise.
+        const Real I_peak = (ind->current_prev() > Real{0})
+                                ? Real{1.2} * ind->current_prev()
+                                : opts.fallback_I_peak;
+
+        // V_bus estimate (see helper).
+        Real V_bus = estimate_V_bus_for_switch_(n_hi);
+        if (V_bus <= Real{0}) V_bus = opts.fallback_V_bus;
+
+        // Current C_oss (or C_j for diodes) on the device.
+        Real current_C = Real{0};
+        if constexpr (std::is_same_v<T, MOSFET> || std::is_same_v<T, IGBT>) {
+            current_C = dev.C_oss();
+        } else {
+            current_C = dev.C_j();
+        }
+
+        // Predict overshoot at the current C value (used by the report
+        // regardless of whether we mutate).
+        const Real L = ind->inductance();
+        const Real V_overshoot = (current_C > Real{0})
+                                   ? predict_overshoot(L, current_C, I_peak)
+                                   : std::numeric_limits<Real>::infinity();
+
+        TopologyIssue issue{};
+        issue.switch_name        = conn.name;
+        issue.inductor_name      = connections_[ind_idx].name;
+        issue.L_henry            = L;
+        issue.I_peak_estimate    = I_peak;
+        issue.V_bus_estimate     = V_bus;
+        issue.current_C_oss      = current_C;
+        issue.predicted_overshoot = std::isfinite(V_overshoot) ? V_overshoot
+                                                                 : Real{0};
+
+        // Severity bands (independent of action choice).
+        const Real ratio = (V_bus > Real{0}) ? V_overshoot / V_bus : Real{0};
+        if (!std::isfinite(V_overshoot) || ratio >= Real{1.0}) {
+            issue.severity = TopologyIssue::Severity::Critical;
+        } else if (ratio >= Real{0.2}) {
+            issue.severity = TopologyIssue::Severity::Warning;
+        } else {
+            issue.severity = TopologyIssue::Severity::Info;
+        }
+
+        ParasiticAction action{};
+        action.device_name = conn.name;
+
+        // Respect user override: if they explicitly assigned C_oss / C_j
+        // (i.e. the *_user_set() flag is true), we record the issue but
+        // take no action. This is what lets power users opt out per-device
+        // without a global flag. Distinguishes "user said 10 nF" from
+        // "in-ctor placeholder defaulted to 10 nF" — only the former
+        // counts as an override.
+        bool user_set = false;
+        if constexpr (std::is_same_v<T, MOSFET> || std::is_same_v<T, IGBT>) {
+            user_set = dev.C_oss_user_set();
+        } else {
+            user_set = dev.C_j_user_set();
+        }
+        if (opts.respect_user_overrides && user_set) {
+            action.kind = ParasiticAction::Kind::None;
+            action.rationale = "user-set C_oss respected";
+        } else {
+            // Compute the C that would hit the overshoot target.
+            const Real recommended_C = recommend_C_oss(
+                L, I_peak, V_bus, opts.max_overshoot_frac);
+
+            // Heuristic feasibility check at the assumed canonical f_sw,
+            // duty_off pair. We don't know f_sw from the topology alone,
+            // so we use a representative 100 kHz / 75 % off — this is what
+            // the boost example uses and what hurts the most. If the
+            // recommended C can't charge to V_bus in that window, drop to
+            // Behavioral mode.
+            constexpr Real kRefFsw     = Real{1e5};
+            constexpr Real kRefDutyOff = Real{0.75};
+            const bool feasible = coss_feasible_in_period(
+                recommended_C, V_bus, I_peak, kRefDutyOff, kRefFsw);
+
+            if (!feasible) {
+                action.kind = ParasiticAction::Kind::DropToBehavioral;
+                action.rationale = "PWL Ideal infeasible at canonical "
+                                   "100 kHz / D_on = 25 %";
+                if (!dry_run) {
+                    dev.set_switching_mode(SwitchingMode::Behavioral);
+                }
+            } else {
+                action.kind = ParasiticAction::Kind::SetCoss;
+                action.new_C_oss = recommended_C;
+                std::ostringstream r;
+                r << "predicted V_overshoot = "
+                  << static_cast<int>(opts.max_overshoot_frac * 100.0) << "% V_bus";
+                action.rationale = r.str();
+                if (!dry_run) {
+                    if constexpr (std::is_same_v<T, MOSFET> ||
+                                  std::is_same_v<T, IGBT>) {
+                        dev.set_C_oss(recommended_C);
+                    } else {
+                        dev.set_C_j(recommended_C);
+                    }
+                }
+            }
+        }
+
+        report.issues.push_back(std::move(issue));
+        report.actions.push_back(std::move(action));
+    }
+
     // Internal worker used by both the params-struct and the math-object
     // overloads. Decomposes the source into three sine legs against the
     // neutral node. The per-leg scale factors carry the optional

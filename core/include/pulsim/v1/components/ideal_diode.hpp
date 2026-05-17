@@ -140,10 +140,25 @@ public:
                ? params.C_j
                : (params.Qrr > Scalar{0}
                   ? Scalar{5e-9}
-                  : (params.V_F0 > Scalar{0} ? Scalar{5e-10} : Scalar{0}))) {}
+                  : (params.V_F0 > Scalar{0} ? Scalar{5e-10} : Scalar{0}))) {
+        // `boost-pfc-auto-parasitics`: track whether C_j came from the
+        // user's explicit assignment (true) or from the in-ctor tiered
+        // auto-default (false). Auto-parasitics overrides the auto-default
+        // path; user-set values stick.
+        C_j_user_set_ = (params.C_j > Scalar{0});
+    }
 
     /// Parasitic junction capacitance (F) — see Params::C_j.
     [[nodiscard]] Scalar C_j() const noexcept { return C_j_; }
+    /// True only when the user explicitly set `Params::C_j > 0` before
+    /// constructing the device. False when the in-ctor tiered auto-default
+    /// fired (5 nF for Qrr > 0, 500 pF for V_F0 > 0, 0 otherwise). Used by
+    /// `auto_configure_parasitics` to decide whether to override.
+    [[nodiscard]] bool C_j_user_set() const noexcept { return C_j_user_set_; }
+    /// Mutator used by the runtime's auto-parasitics pre-flight (see
+    /// `pulsim/v1/auto_parasitics.hpp`). Sets the stamped C_j the next
+    /// assembly will use. Does NOT mark the value as "user-set".
+    void set_C_j(Scalar c) noexcept { C_j_ = c; }
 
     // --- Smoothing controls (Behavioral mode only) -----------------------------
     void set_smoothing(Scalar v_smooth) { v_smooth_ = v_smooth; }
@@ -669,6 +684,9 @@ private:
     Scalar C_j_         = Scalar{0.0};
     bool   was_conducting_ = false;
     bool   was_conducting_initialized_ = false;
+    // `boost-pfc-auto-parasitics`: tracks whether C_j_ was explicitly set
+    // by user (true) or came from the in-ctor tiered auto-default (false).
+    bool   C_j_user_set_ = false;
 };
 
 template<>
