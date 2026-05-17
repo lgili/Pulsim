@@ -141,6 +141,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_pmsm_foc_device.cpp
         tests/test_three_phase_source_b1.cpp
         tests/test_yaml_motor_parser_b1.cpp
+        tests/test_bldc_benchmark_yaml.cpp
         tests/test_three_phase_rl_load.cpp
         tests/test_pmsm_dynamic.cpp
         tests/test_three_phase_vsi.cpp

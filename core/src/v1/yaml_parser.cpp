@@ -2100,6 +2100,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (get_param("friction_coulomb")) p.friction_coulomb = parse_real(get_param("friction_coulomb"), name + ".friction_coulomb", errors_);
             if (get_param("tau_load_const")) p.tau_load_const = parse_real(get_param("tau_load_const"), name + ".tau_load_const", errors_);
             if (get_param("tau_load_quad_coeff")) p.tau_load_quad_coeff = parse_real(get_param("tau_load_quad_coeff"), name + ".tau_load_quad_coeff", errors_);
+            if (get_param("omega_init")) p.omega_init = parse_real(get_param("omega_init"), name + ".omega_init", errors_);
+            if (get_param("theta_init")) p.theta_init = parse_real(get_param("theta_init"), name + ".theta_init", errors_);
             circuit.add_bldc_motor(name, node_at(0), node_at(1), node_at(2), node_at(3), p);
         }
         else if (type == "induction_motor") {
