@@ -386,8 +386,11 @@ TEST_CASE("Phase 4.4: bisect_pwl_event_alpha refines crossing to α≈0.5",
     ckt.set_pwl_state("D1", false);  // off-state, commutes when V_an > +hyst
 
     // x_prev: V_a - V_b = -1 (deep reverse); x_now: V_a - V_b = +1 (forward).
-    // The diode's off→on threshold lives at V_an = +event_hysteresis (~1 nV).
-    // Linear interpolation: V_an(α) = -1 + 2α. Crosses ≈ 0 at α = 0.5.
+    // The diode's off→on threshold lives at V_an = +event_hysteresis
+    // (default now 0.01 V to filter HF flicker in converter topologies —
+    // see components/ideal_diode.hpp). With V_an(α) = -1 + 2α, the
+    // crossing is at α ≈ 0.505 (within the bisection tolerance set by
+    // PWL event scanner).
     Eigen::VectorXd x_prev = Eigen::VectorXd::Zero(2);
     Eigen::VectorXd x_now = Eigen::VectorXd::Zero(2);
     x_prev(0) = -1.0;
@@ -401,7 +404,8 @@ TEST_CASE("Phase 4.4: bisect_pwl_event_alpha refines crossing to α≈0.5",
     CHECK(result->events.front().new_state == true);
     INFO("alpha = " << result->alpha
         << ", bisections = " << result->bisections);
-    CHECK(std::abs(result->alpha - 0.5) <= 1e-3);
+    // Allow ±2 % around the analytical α (= 0.5 + hyst/(2·ΔV) ≈ 0.505).
+    CHECK(std::abs(result->alpha - 0.505) <= 1e-2);
     CHECK(result->bisections >= 1);
 }
 

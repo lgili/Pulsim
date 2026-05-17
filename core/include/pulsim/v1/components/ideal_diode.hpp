@@ -594,7 +594,14 @@ private:
     Scalar g_on_;
     Scalar g_off_;
     Scalar v_smooth_ = Scalar{0.1};         ///< Behavioral smoothing voltage.
-    Scalar event_hysteresis_ = Scalar{1e-9};///< PWL event-hysteresis band.
+    // PWL event-hysteresis band. Sub-nV default would let the event
+    // scanner flicker the diode on tiny round-off-scale ringing at
+    // every accepted step in a boost-style topology (L next to the
+    // PWL state-space). 0.01 (10 mV for the voltage check, 10 mA for
+    // the current check) filters that without affecting real
+    // commutations in converter applications where the current /
+    // voltage swings are A / V (not µA / µV).
+    Scalar event_hysteresis_ = Scalar{1e-2};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;                ///< on/off state (true = conducting).
 

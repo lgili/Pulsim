@@ -4299,10 +4299,13 @@ public:
                     if (nodes.size() >= 2) {
                         const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
                         stamp_g(g, nodes[0], nodes[1]);
-                        // PSIM-style parasitic junction capacitance C_j.
-                        // Same auto-snubber rationale as MOSFET / IGBT —
-                        // gives the diode commutation a finite-dt path so
-                        // the inductor current doesn't ring at PWM edges.
+                        // Opt-in parasitic junction capacitance C_j —
+                        // only stamped when user (or Qrr > 0
+                        // auto-default in the constructor) requested
+                        // it. Avoid blanket fallback here: a small
+                        // cap on every Ideal-mode diode (e.g. line
+                        // rectifier bridge) perturbs subgraphs that
+                        // never needed snubbing.
                         if (dev.C_j() > Real{0}) {
                             stamp_capacitance(dev.C_j(), nodes[0], nodes[1]);
                         }
