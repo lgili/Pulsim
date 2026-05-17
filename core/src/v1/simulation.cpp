@@ -1060,7 +1060,6 @@ AcSweepResult Simulator::run_ac_sweep(const AcSweepOptions& options) {
     //    `analyzePattern` once and `factorize` per ω.
     using ComplexScalar = std::complex<Real>;
     using ComplexSparse = Eigen::SparseMatrix<ComplexScalar>;
-    using ComplexVector = Eigen::Matrix<ComplexScalar, Eigen::Dynamic, 1>;
 
     // Build the union sparsity pattern by overlaying M and N's complex casts.
     ComplexSparse K(n, n);

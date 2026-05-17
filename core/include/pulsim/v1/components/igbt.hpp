@@ -75,6 +75,11 @@ public:
         // preserved when Eon_25 == Eoff_25 == 0 (default).
         if (params.Eon_25 > Scalar{0} || params.Eoff_25 > Scalar{0}) {
             mode_ = SwitchingMode::Ideal;
+            // PSIM-style auto-snubber — see components/mosfet.hpp.
+            // 20 nF default tracks the larger C_ces typical of IGBTs.
+            if (params_.C_oss <= Scalar{0}) {
+                params_.C_oss = Scalar{2e-8};
+            }
         }
     }
 
@@ -167,8 +172,8 @@ public:
                     (I_post / i_ref) * (V_block / v_ref) * tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;   // count the edge regardless of energy magnitude
             } else if (!is_on && was_on_) {
                 // ON → OFF. Use i_last_ (pre-state I) and v_ce (now blocking).
                 const Scalar I_pre = (i_last_ > Scalar{0}) ?
@@ -178,8 +183,8 @@ public:
                     (I_pre / i_ref) * (V_block / v_ref) * tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;
             }
         }
         was_on_ = is_on;

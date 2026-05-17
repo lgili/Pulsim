@@ -104,6 +104,18 @@ public:
         // default Eon_25=Eoff_25=0 → mode stays at SwitchingMode::Auto.
         if (params.Eon_25 > Scalar{0} || params.Eoff_25 > Scalar{0}) {
             mode_ = SwitchingMode::Ideal;
+            // PSIM-style auto-snubber on by default for the PWL Ideal
+            // path. Sets a 10 nF parasitic C_oss across drain-source if
+            // the user didn't pick one explicitly. The default is
+            // large vs real datasheet values (~100 pF – 5 nF) so the
+            // snubber stays numerically stable at typical converter
+            // dt ~ 1 µs while keeping the artificial switching loss
+            // bounded (≈ 0.5·C·V²·f_sw — a few W on a 200 V / 100 kHz
+            // design). Set `params.C_oss = 0` *after* construction to
+            // model the ideal-switch limit explicitly.
+            if (params_.C_oss <= Scalar{0}) {
+                params_.C_oss = Scalar{1e-8};
+            }
         }
     }
 
@@ -267,8 +279,19 @@ public:
         // The very first call (was_on_initialized_ == false) just
         // establishes the baseline — no transition is counted. From
         // then on, every flip of `is_on` triggers an event.
-        if (was_on_initialized_ && (was_on_ != is_on) &&
-            params_.R_th_ja > Scalar{0}) {
+        //
+        // BUG FIX (investigate-pfc-boost): the event COUNT must
+        // increment whenever `was_on != is_on`, independently of
+        // whether the computed `e_event` happens to be positive.
+        // For ON→OFF transitions with realistic C_oss, V_DS hasn't
+        // risen to the blocking value yet at the sample right after
+        // the gate edge (RC charging through C_oss takes a few
+        // hundred ns vs dt ~ 5 µs); the V_block heuristic returns
+        // ≈ 0 and the energy term is 0 — but the event still
+        // happened, and the user expects `switching_events()` to
+        // reflect the physical edge count.
+        const bool event_fired = was_on_initialized_ && (was_on_ != is_on);
+        if (event_fired && params_.R_th_ja > Scalar{0}) {
             // Temperature-scaled per-event energy.
             const Scalar T_delta = T_j_ - params_.T_ref;
             const Scalar tc_factor = Scalar{1} + params_.Esw_tc * T_delta;
@@ -290,8 +313,8 @@ public:
                     tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;   // count the edge even if the energy term is 0
             } else if (!is_on && was_on_) {
                 // ON → OFF. Use the pre-transition current (i_last_)
                 // and the post-transition voltage (v_ds, now blocking).
@@ -301,8 +324,8 @@ public:
                     (I_pre / i_ref) * (V_block / v_ref) * tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;
             }
         }
         was_on_ = is_on;

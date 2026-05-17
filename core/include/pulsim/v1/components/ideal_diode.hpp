@@ -120,7 +120,13 @@ public:
         , T_j_(params.T_amb)
         , Qrr_(params.Qrr)
         , Erec_shape_(params.Erec_shape)
-        , C_j_(params.C_j) {}
+        // PSIM-style auto-snubber on by default when the user opts into
+        // reverse-recovery (Qrr > 0): 5 nF junction-cap gives the diode
+        // commutation a finite-dt path in PWL Ideal mode. Set
+        // `params.C_j = 0` explicitly to model the ideal-diode limit.
+        , C_j_(params.C_j > Scalar{0}
+               ? params.C_j
+               : (params.Qrr > Scalar{0} ? Scalar{5e-9} : Scalar{0})) {}
 
     /// Parasitic junction capacitance (F) — see Params::C_j.
     [[nodiscard]] Scalar C_j() const noexcept { return C_j_; }
@@ -257,8 +263,12 @@ public:
             const Scalar e_event = Qrr_ * V_r * Erec_shape_;
             if (e_event > Scalar{0}) {
                 e_sw_ += e_event;
-                ++ev_count_;
             }
+            // Count the recovery edge even when V_r is briefly 0 at the
+            // sample after commutation (the C_j charge ramp takes a few
+            // hundred ns to climb past zero — same root cause as the
+            // MOSFET/IGBT event-counter fix).
+            ++ev_count_;
         }
         was_conducting_ = conducting;
         was_conducting_initialized_ = true;
