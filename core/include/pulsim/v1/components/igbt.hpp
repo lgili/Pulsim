@@ -34,17 +34,98 @@ public:
         Scalar g_on = 1e4;          // On-state conductance (S)
         Scalar g_off = 1e-12;       // Off-state conductance (S)
         Scalar v_ce_sat = 1.5;      // Collector-emitter saturation voltage (V)
+
+        // -------- Thermal binding + loss accumulator (Phase 2 of
+        //          inverter-bridge-losses) ----------------------------------
+        // Loss model: P_cond = V_ce_sat · I_c + R_ce · I_c²
+        //   where R_ce(T_j) = R_ce_25 · (1 + R_ce_tc · (T_j − T_ref))
+        //         V_ce_sat(T_j) = V_ce_sat + V_ce_tc · (T_j − T_ref)
+        // Default R_th_ja=0 disables the thermal model (backward-compat).
+        Scalar Rce       = 0.02;       // Ω — bulk on-state resistance
+        Scalar Rce_tc    = 5.0e-3;     // 1/K — R_ce temperature coefficient
+        Scalar V_ce_tc   = 2.0e-3;     // V/K — V_ce_sat positive coefficient
+        Scalar T_ref     = 25.0;       // °C
+        Scalar R_th_ja   = 0.0;        // K/W (0 = disabled)
+        Scalar T_amb     = 25.0;       // °C
     };
 
     explicit IGBT(std::string name = "")
         : Base(std::move(name)), params_() {}
 
     explicit IGBT(Params params, std::string name)
-        : Base(std::move(name)), params_(params) {}
+        : Base(std::move(name)), params_(params), T_j_(params.T_amb) {}
 
     explicit IGBT(Scalar vth, Scalar g_on = 1e4, std::string name = "")
         : Base(std::move(name))
         , params_{vth, g_on, 1e-12, 1.5} {}
+
+    // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
+    [[nodiscard]] Scalar V_ce_sat_at_Tj() const noexcept {
+        return params_.v_ce_sat + params_.V_ce_tc * (T_j_ - params_.T_ref);
+    }
+    [[nodiscard]] Scalar Rce_at_Tj() const noexcept {
+        return params_.Rce * (Scalar{1} + params_.Rce_tc * (T_j_ - params_.T_ref));
+    }
+
+    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar conduction_time() const noexcept { return t_sim_; }
+    [[nodiscard]] Scalar peak_power()     const noexcept { return p_peak_; }
+    [[nodiscard]] Scalar last_power()     const noexcept { return p_last_; }
+    [[nodiscard]] Scalar last_current()   const noexcept { return i_last_; }
+    [[nodiscard]] Scalar last_voltage()   const noexcept { return v_last_; }
+    [[nodiscard]] Scalar junction_temperature() const noexcept { return T_j_; }
+    [[nodiscard]] Scalar steady_state_junction_temperature() const noexcept {
+        return params_.T_amb + average_power() * params_.R_th_ja;
+    }
+    [[nodiscard]] Scalar average_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
+    }
+
+    void reset_loss() noexcept {
+        e_cond_ = 0.0;
+        p_peak_ = 0.0;
+        p_last_ = 0.0;
+        t_sim_ = 0.0;
+        i_last_ = 0.0;
+        v_last_ = 0.0;
+        T_j_ = params_.T_amb;
+    }
+
+    void set_T_j_init(Scalar t_j) noexcept { T_j_ = t_j; }
+
+    /// Sample V_ce · I_c over the past `dt` seconds. `is_on` is
+    /// supplied by the runtime (captures both pwl_state_ and any
+    /// forced_switch_state override). When ON the model is
+    /// V_ce ≈ V_ce_sat(T_j) + R_ce(T_j)·I_c (Norton-shifted form);
+    /// OFF state is pure g_off leakage.
+    void accumulate_loss(Scalar v_ce, Scalar dt, bool is_on) noexcept {
+        if (dt < Scalar{0}) return;
+        if (params_.R_th_ja <= Scalar{0}) {
+            const Scalar g = is_on ? params_.g_on : params_.g_off;
+            v_last_ = v_ce; i_last_ = g * v_ce; p_last_ = v_ce * i_last_;
+            return;
+        }
+        const Scalar V_ce_sat_T = V_ce_sat_at_Tj();
+        const Scalar R_ce_T     = Rce_at_Tj();
+        Scalar i_c;
+        if (is_on) {
+            // V_ce = V_ce_sat + I_c · R_ce  →  I_c = (V_ce − V_ce_sat) / R_ce
+            i_c = (v_ce - V_ce_sat_T) / std::max<Scalar>(R_ce_T, Scalar{1e-9});
+            if (i_c < Scalar{0}) i_c = Scalar{0};   // IGBT doesn't conduct in reverse
+        } else {
+            i_c = params_.g_off * v_ce;
+        }
+        const Scalar p = v_ce * i_c;
+
+        v_last_ = v_ce;
+        i_last_ = i_c;
+        p_last_ = p;
+        if (p > Scalar{0}) {
+            e_cond_ += p * dt;
+            if (p > p_peak_) p_peak_ = p;
+        }
+        t_sim_ += dt;
+    }
 
     // --- SwitchingMode contract -----------------------------------------------
     [[nodiscard]] SwitchingMode switching_mode() const noexcept { return mode_; }
@@ -329,6 +410,15 @@ private:
     Scalar event_hysteresis_ = Scalar{1e-9};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
+
+    // Loss + thermal accumulator (Phase 2 of inverter-bridge-losses).
+    Scalar e_cond_ = Scalar{0.0};
+    Scalar p_peak_ = Scalar{0.0};
+    Scalar p_last_ = Scalar{0.0};
+    Scalar t_sim_  = Scalar{0.0};
+    Scalar i_last_ = Scalar{0.0};
+    Scalar v_last_ = Scalar{0.0};
+    Scalar T_j_    = Scalar{25.0};
 };
 
 template<>

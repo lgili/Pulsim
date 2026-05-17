@@ -689,6 +689,86 @@ public:
         return d ? d->conduction_time() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- MOSFET / IGBT loss + thermal accessors (Phase 2 of
+    //       inverter-bridge-losses). All return NaN when the named
+    //       device is missing. The MOSFET/IGBT thermal model is active
+    //       only when params.R_th_ja > 0; otherwise the accessors return
+    //       0 / T_amb (backward-compatible). --------------------------------
+
+    [[nodiscard]] Real mosfet_average_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_peak_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_total_energy(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_junction_temperature(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_last_current(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_last_voltage(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->last_voltage() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_mosfet_T_j(std::string_view name, Real t_j) {
+        if (auto* m = find_device<MOSFET>(name)) m->set_T_j_init(t_j);
+    }
+    void reset_mosfet_loss(std::string_view name) {
+        if (auto* m = find_device<MOSFET>(name)) m->reset_loss();
+    }
+
+    [[nodiscard]] Real igbt_average_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_peak_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_total_energy(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_junction_temperature(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_last_current(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_last_voltage(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->last_voltage() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_igbt_T_j(std::string_view name, Real t_j) {
+        if (auto* g = find_device<IGBT>(name)) g->set_T_j_init(t_j);
+    }
+    void reset_igbt_loss(std::string_view name) {
+        if (auto* g = find_device<IGBT>(name)) g->reset_loss();
+    }
+
     void add_switch(const std::string& name, Index n1, Index n2,
                     bool closed = false, Real g_on = 1e6, Real g_off = 1e-12) {
         devices_.emplace_back(IdealSwitch(g_on, g_off, closed, name));
@@ -3141,6 +3221,58 @@ public:
                         dev.accumulate_loss(v_diode, 0.0);
                     } else {
                         dev.accumulate_loss(v_diode, timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, MOSFET>) {
+                    const Index n_gate   = conn.nodes[0];
+                    const Index n_drain  = conn.nodes[1];
+                    const Index n_source = conn.nodes[2];
+                    const Real v_g = (n_gate   >= 0) ? x[n_gate]   : 0.0;
+                    const Real v_d = (n_drain  >= 0) ? x[n_drain]  : 0.0;
+                    const Real v_s = (n_source >= 0) ? x[n_source] : 0.0;
+                    const Real v_ds = v_d - v_s;
+                    const Real v_gs_signed = dev.params().is_nmos
+                        ? (v_g - v_s) : (v_s - v_g);
+                    bool is_on;
+                    const auto forced = forced_switch_state(i);
+                    if (forced.has_value()) {
+                        is_on = *forced;
+                    } else if (dev.pwl_state()) {
+                        is_on = true;
+                    } else {
+                        is_on = (v_gs_signed > dev.params().vth);
+                    }
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(v_ds, 0.0, is_on);
+                    } else {
+                        dev.accumulate_loss(v_ds, timestep_, is_on);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, IGBT>) {
+                    // Phase 2: accumulate V_ce · I_c(state, T_j) per step.
+                    const Index n_gate  = conn.nodes[0];
+                    const Index n_coll  = conn.nodes[1];
+                    const Index n_emit  = conn.nodes[2];
+                    const Real v_g = (n_gate >= 0) ? x[n_gate] : 0.0;
+                    const Real v_c_n = (n_coll >= 0) ? x[n_coll] : 0.0;
+                    const Real v_e   = (n_emit >= 0) ? x[n_emit] : 0.0;
+                    const Real v_ce  = v_c_n - v_e;
+                    const Real v_ge  = v_g - v_e;
+                    bool is_on;
+                    const auto forced = forced_switch_state(i);
+                    if (forced.has_value()) {
+                        is_on = *forced;
+                    } else if (dev.pwl_state()) {
+                        is_on = true;
+                    } else {
+                        is_on = (v_ge > dev.params().vth);
+                    }
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(v_ce, 0.0, is_on);
+                    } else {
+                        dev.accumulate_loss(v_ce, timestep_, is_on);
                     }
                 }
             }, devices_[i]);

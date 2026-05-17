@@ -373,7 +373,19 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("kp", &MOSFET::Params::kp, "Transconductance (A/V^2)")
         .def_readwrite("lambda_", &MOSFET::Params::lambda, "Channel-length modulation (1/V)")
         .def_readwrite("g_off", &MOSFET::Params::g_off, "Off-state conductance")
-        .def_readwrite("is_nmos", &MOSFET::Params::is_nmos, "True for NMOS, False for PMOS");
+        .def_readwrite("g_on",  &MOSFET::Params::g_on,
+                       "On-state conductance (1/R_ds(on)).")
+        .def_readwrite("is_nmos", &MOSFET::Params::is_nmos, "True for NMOS, False for PMOS")
+        // Loss + thermal (Phase 2 of inverter-bridge-losses).
+        .def_readwrite("Rds_on_tc", &MOSFET::Params::Rds_on_tc,
+                       "R_ds(on) temperature coefficient (1/K).")
+        .def_readwrite("T_ref",     &MOSFET::Params::T_ref,
+                       "Reference temperature for Rds_on_tc (°C).")
+        .def_readwrite("R_th_ja",   &MOSFET::Params::R_th_ja,
+                       "Junction-to-ambient thermal resistance (K/W). "
+                       "0 disables the loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",     &MOSFET::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -390,7 +402,21 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("vth", &IGBT::Params::vth, "Gate threshold voltage (V)")
         .def_readwrite("g_on", &IGBT::Params::g_on, "On-state conductance (S)")
         .def_readwrite("g_off", &IGBT::Params::g_off, "Off-state conductance (S)")
-        .def_readwrite("v_ce_sat", &IGBT::Params::v_ce_sat, "Collector-emitter saturation (V)");
+        .def_readwrite("v_ce_sat", &IGBT::Params::v_ce_sat, "Collector-emitter saturation (V)")
+        // Loss + thermal (Phase 2 of inverter-bridge-losses).
+        .def_readwrite("Rce",       &IGBT::Params::Rce,
+                       "Bulk on-state resistance R_CE (Ω).")
+        .def_readwrite("Rce_tc",    &IGBT::Params::Rce_tc,
+                       "R_CE temperature coefficient (1/K).")
+        .def_readwrite("V_ce_tc",   &IGBT::Params::V_ce_tc,
+                       "V_ce_sat temperature coefficient (V/K).")
+        .def_readwrite("T_ref",     &IGBT::Params::T_ref,
+                       "Reference temperature for the TCs (°C).")
+        .def_readwrite("R_th_ja",   &IGBT::Params::R_th_ja,
+                       "Junction-to-ambient thermal resistance (K/W). "
+                       "0 disables the loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",     &IGBT::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<IGBT>(v2, "IGBT", "Simplified IGBT power device model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -900,6 +926,33 @@ void init_v2_module(py::module_& v2) {
         .def("reset_diode_loss",     &Circuit::reset_diode_loss,
              py::arg("name"),
              "Zero out the loss accumulator on the named diode.")
+        // MOSFET / IGBT loss + thermal accessors (Phase 2 of
+        // inverter-bridge-losses). Active only when the device's
+        // params.R_th_ja > 0; otherwise return 0 / T_amb.
+        .def("mosfet_average_power", &Circuit::mosfet_average_power, py::arg("name"))
+        .def("mosfet_peak_power",    &Circuit::mosfet_peak_power, py::arg("name"))
+        .def("mosfet_total_energy",  &Circuit::mosfet_total_energy, py::arg("name"))
+        .def("mosfet_junction_temperature",
+             &Circuit::mosfet_junction_temperature, py::arg("name"))
+        .def("mosfet_steady_state_junction_temperature",
+             &Circuit::mosfet_steady_state_junction_temperature, py::arg("name"))
+        .def("mosfet_last_current",  &Circuit::mosfet_last_current, py::arg("name"))
+        .def("mosfet_last_voltage",  &Circuit::mosfet_last_voltage, py::arg("name"))
+        .def("set_mosfet_T_j",       &Circuit::set_mosfet_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_mosfet_loss",    &Circuit::reset_mosfet_loss, py::arg("name"))
+        .def("igbt_average_power",   &Circuit::igbt_average_power, py::arg("name"))
+        .def("igbt_peak_power",      &Circuit::igbt_peak_power, py::arg("name"))
+        .def("igbt_total_energy",    &Circuit::igbt_total_energy, py::arg("name"))
+        .def("igbt_junction_temperature",
+             &Circuit::igbt_junction_temperature, py::arg("name"))
+        .def("igbt_steady_state_junction_temperature",
+             &Circuit::igbt_steady_state_junction_temperature, py::arg("name"))
+        .def("igbt_last_current",    &Circuit::igbt_last_current, py::arg("name"))
+        .def("igbt_last_voltage",    &Circuit::igbt_last_voltage, py::arg("name"))
+        .def("set_igbt_T_j",         &Circuit::set_igbt_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_igbt_loss",      &Circuit::reset_igbt_loss, py::arg("name"))
         .def("add_switch", &Circuit::add_switch,
              py::arg("name"), py::arg("n1"), py::arg("n2"),
              py::arg("closed") = false, py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
