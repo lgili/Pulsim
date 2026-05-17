@@ -505,8 +505,29 @@ public:
         resistor_cache_.push_back({n1, n2, R == 0.0 ? 0.0 : 1.0 / R});
     }
 
+    /// Overload accepting a full `Resistor::Params` struct (Pulsim
+    /// 0.10.0a10: TCR + thermal binding for I²·R loss accumulator).
+    void add_resistor(const std::string& name, Index n1, Index n2,
+                      const Resistor::Params& params) {
+        devices_.emplace_back(Resistor(params, name));
+        connections_.push_back({name, {n1, n2}, -1});
+        register_connection_name(connections_.size() - 1);
+        resistor_cache_.push_back({n1, n2,
+            params.resistance == 0.0 ? 0.0 : 1.0 / params.resistance});
+    }
+
     void add_capacitor(const std::string& name, Index n1, Index n2, Real C, Real ic = 0.0) {
         devices_.emplace_back(Capacitor(C, ic, name));
+        connections_.push_back({name, {n1, n2}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    /// Overload accepting a full `Capacitor::Params` struct so callers
+    /// can configure ESR + thermal binding (Phase 3 of
+    /// inverter-bridge-losses).
+    void add_capacitor(const std::string& name, Index n1, Index n2,
+                       const Capacitor::Params& params) {
+        devices_.emplace_back(Capacitor(params, name));
         connections_.push_back({name, {n1, n2}, -1});
         register_connection_name(connections_.size() - 1);
     }
@@ -520,6 +541,17 @@ public:
     void add_inductor(const std::string& name, Index n1, Index n2, Real L, Real ic = 0.0) {
         Index br = num_nodes() + num_branches_;
         devices_.emplace_back(Inductor(L, ic, name));
+        connections_.push_back({name, {n1, n2}, br});
+        register_connection_name(connections_.size() - 1);
+        num_branches_++;
+    }
+
+    /// Overload accepting a full `Inductor::Params` struct (Pulsim
+    /// 0.10.0a11: DCR + thermal binding for copper loss accumulator).
+    void add_inductor(const std::string& name, Index n1, Index n2,
+                      const Inductor::Params& params) {
+        Index br = num_nodes() + num_branches_;
+        devices_.emplace_back(Inductor(params, name));
         connections_.push_back({name, {n1, n2}, br});
         register_connection_name(connections_.size() - 1);
         num_branches_++;
@@ -767,6 +799,110 @@ public:
     }
     void reset_igbt_loss(std::string_view name) {
         if (auto* g = find_device<IGBT>(name)) g->reset_loss();
+    }
+
+    // ----- Capacitor ESR loss + thermal accessors (Phase 3 of
+    //       inverter-bridge-losses, Pulsim 0.10.0a9). All NaN when the
+    //       named device is missing. Active only when params.R_th_ja > 0.
+    [[nodiscard]] Real capacitor_average_power(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_peak_power(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_total_energy(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_junction_temperature(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_last_current(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_capacitor_T_j(std::string_view name, Real t_j) {
+        if (auto* c = find_device<Capacitor>(name)) c->set_T_j_init(t_j);
+    }
+    void reset_capacitor_loss(std::string_view name) {
+        if (auto* c = find_device<Capacitor>(name)) c->reset_loss();
+    }
+
+    // ----- Resistor I²·R loss + thermal accessors (Pulsim 0.10.0a10) ----
+    [[nodiscard]] Real resistor_average_power(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_peak_power(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_total_energy(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_junction_temperature(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_last_current(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_resistor_T_j(std::string_view name, Real t_j) {
+        if (auto* r = find_device<Resistor>(name)) r->set_T_j_init(t_j);
+    }
+    void reset_resistor_loss(std::string_view name) {
+        if (auto* r = find_device<Resistor>(name)) r->reset_loss();
+    }
+
+    // ----- Inductor DCR loss + thermal accessors (Pulsim 0.10.0a11) ----
+    [[nodiscard]] Real inductor_average_power(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_peak_power(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_total_energy(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_junction_temperature(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_last_current(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_inductor_T_j(std::string_view name, Real t_j) {
+        if (auto* l = find_device<Inductor>(name)) l->set_T_j_init(t_j);
+    }
+    void reset_inductor_loss(std::string_view name) {
+        if (auto* l = find_device<Inductor>(name)) l->reset_loss();
     }
 
     void add_switch(const std::string& name, Index n1, Index n2,
@@ -3135,6 +3271,13 @@ public:
                     // Set current state and update history
                     dev.set_current_state(v, i);
                     dev.update_history();
+                    // Phase 3 of inverter-bridge-losses: ESR loss accumulator.
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(i, 0.0);
+                    } else {
+                        dev.accumulate_loss(i, timestep_);
+                    }
                 }
                 else if constexpr (std::is_same_v<T, Inductor>) {
                     Index n1 = conn.nodes[0];
@@ -3154,6 +3297,29 @@ public:
                     // Set current state and update history
                     dev.set_current_state(v, i);
                     dev.update_history();
+                    // Phase 3 of inverter-bridge-losses: DCR loss accumulator.
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(i, 0.0);
+                    } else {
+                        dev.accumulate_loss(i, timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, Resistor>) {
+                    // Phase 3 of inverter-bridge-losses: I²·R loss accumulator.
+                    // Resistor is purely linear, no existing update_history
+                    // branch — added here. No-op when R_th_ja == 0.
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    const Real v1 = (n1 >= 0) ? x[n1] : 0.0;
+                    const Real v2 = (n2 >= 0) ? x[n2] : 0.0;
+                    const Real v_res = v1 - v2;
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(v_res, 0.0);
+                    } else {
+                        dev.accumulate_loss(v_res, timestep_);
+                    }
                 }
                 else if constexpr (std::is_same_v<T, DcMotorDevice>) {
                     // Read the new armature current and terminal voltage from the

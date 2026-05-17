@@ -269,7 +269,38 @@ void init_v2_module(py::module_& v2) {
         .def(py::init<Real, const std::string&>(),
              py::arg("resistance"), py::arg("name") = "")
         .def("resistance", &Resistor::resistance)
-        .def("name", &Resistor::name);
+        .def("name", &Resistor::name)
+        // Loss + thermal (Phase 3, Pulsim 0.10.0a10).
+        .def("TCR",      &Resistor::TCR)
+        .def("R_th_ja",  &Resistor::R_th_ja)
+        .def("T_amb",    &Resistor::T_amb)
+        .def("R_at_Tj",  &Resistor::R_at_Tj)
+        .def("average_power",  &Resistor::average_power)
+        .def("peak_power",     &Resistor::peak_power)
+        .def("total_energy",   &Resistor::total_energy)
+        .def("last_current",   &Resistor::last_current)
+        .def("last_voltage",   &Resistor::last_voltage)
+        .def("junction_temperature", &Resistor::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &Resistor::steady_state_junction_temperature)
+        .def("set_T_j_init",   &Resistor::set_T_j_init)
+        .def("reset_loss",     &Resistor::reset_loss);
+
+    // Resistor::Params for the new (params)-overload of add_resistor.
+    py::class_<Resistor::Params>(v2, "ResistorParams",
+            "Resistor parameters incl. TCR + thermal binding (Pulsim 0.10.0a10).")
+        .def(py::init<>())
+        .def_readwrite("resistance", &Resistor::Params::resistance,
+                       "Ω at T_ref.")
+        .def_readwrite("TCR",        &Resistor::Params::TCR,
+                       "Temperature coefficient (1/K).")
+        .def_readwrite("T_ref",      &Resistor::Params::T_ref,
+                       "Reference temperature (°C).")
+        .def_readwrite("R_th_ja",    &Resistor::Params::R_th_ja,
+                       "Junction-to-ambient (K/W). 0 disables the "
+                       "loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",      &Resistor::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<Capacitor>(v2, "Capacitor", "CRTP Capacitor device")
         .def(py::init<Real, Real, const std::string&>(),
@@ -277,7 +308,40 @@ void init_v2_module(py::module_& v2) {
              py::arg("name") = "")
         .def("capacitance", &Capacitor::capacitance)
         .def("name", &Capacitor::name)
-        .def("set_timestep", &Capacitor::set_timestep);
+        .def("set_timestep", &Capacitor::set_timestep)
+        // Loss + thermal (Phase 3, Pulsim 0.10.0a9).
+        .def("ESR",      &Capacitor::ESR)
+        .def("R_th_ja",  &Capacitor::R_th_ja)
+        .def("T_amb",    &Capacitor::T_amb)
+        .def("ESR_at_Tj", &Capacitor::ESR_at_Tj)
+        .def("average_power",  &Capacitor::average_power)
+        .def("peak_power",     &Capacitor::peak_power)
+        .def("total_energy",   &Capacitor::total_energy)
+        .def("last_current",   &Capacitor::last_current)
+        .def("junction_temperature", &Capacitor::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &Capacitor::steady_state_junction_temperature)
+        .def("set_T_j_init",   &Capacitor::set_T_j_init)
+        .def("reset_loss",     &Capacitor::reset_loss);
+
+    py::class_<Capacitor::Params>(v2, "CapacitorParams",
+            "Capacitor parameters incl. ESR + thermal binding (Pulsim 0.10.0a9).")
+        .def(py::init<>())
+        .def_readwrite("capacitance",     &Capacitor::Params::capacitance,
+                       "F.")
+        .def_readwrite("initial_voltage", &Capacitor::Params::initial_voltage,
+                       "V.")
+        .def_readwrite("ESR",             &Capacitor::Params::ESR,
+                       "Equivalent series resistance at T_ref (Ω).")
+        .def_readwrite("ESR_tc",          &Capacitor::Params::ESR_tc,
+                       "ESR temperature coefficient (1/K).")
+        .def_readwrite("T_ref",           &Capacitor::Params::T_ref,
+                       "Reference temperature (°C).")
+        .def_readwrite("R_th_ja",         &Capacitor::Params::R_th_ja,
+                       "Junction-to-ambient (K/W). 0 disables the "
+                       "loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",           &Capacitor::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<Inductor>(v2, "Inductor", "CRTP Inductor device")
         .def(py::init<Real, Real, const std::string&>(),
@@ -285,7 +349,41 @@ void init_v2_module(py::module_& v2) {
              py::arg("name") = "")
         .def("inductance", &Inductor::inductance)
         .def("name", &Inductor::name)
-        .def("set_timestep", &Inductor::set_timestep);
+        .def("set_timestep", &Inductor::set_timestep)
+        // Loss + thermal (Phase 3, Pulsim 0.10.0a11).
+        .def("DCR",      &Inductor::DCR)
+        .def("R_th_ja",  &Inductor::R_th_ja)
+        .def("T_amb",    &Inductor::T_amb)
+        .def("DCR_at_Tj", &Inductor::DCR_at_Tj)
+        .def("average_power",  &Inductor::average_power)
+        .def("peak_power",     &Inductor::peak_power)
+        .def("total_energy",   &Inductor::total_energy)
+        .def("last_current",   &Inductor::last_current)
+        .def("junction_temperature", &Inductor::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &Inductor::steady_state_junction_temperature)
+        .def("set_T_j_init",   &Inductor::set_T_j_init)
+        .def("reset_loss",     &Inductor::reset_loss);
+
+    py::class_<Inductor::Params>(v2, "InductorParams",
+            "Inductor parameters incl. DCR + thermal binding (Pulsim 0.10.0a11).")
+        .def(py::init<>())
+        .def_readwrite("inductance",      &Inductor::Params::inductance,
+                       "H.")
+        .def_readwrite("initial_current", &Inductor::Params::initial_current,
+                       "A.")
+        .def_readwrite("DCR",             &Inductor::Params::DCR,
+                       "DC winding resistance at T_ref (Ω).")
+        .def_readwrite("DCR_tc",          &Inductor::Params::DCR_tc,
+                       "DCR temperature coefficient (1/K, copper "
+                       "default 3.9e-3).")
+        .def_readwrite("T_ref",           &Inductor::Params::T_ref,
+                       "Reference temperature (°C).")
+        .def_readwrite("R_th_ja",         &Inductor::Params::R_th_ja,
+                       "Junction-to-ambient (K/W). 0 disables the "
+                       "loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",           &Inductor::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<VoltageSource>(v2, "VoltageSource", "CRTP Voltage source")
         .def(py::init<Real, const std::string&>(),
@@ -839,21 +937,45 @@ void init_v2_module(py::module_& v2) {
         .def("initial_state", &Circuit::initial_state,
              "Build initial state vector from device initial conditions")
         // Device addition
-        .def("add_resistor", &Circuit::add_resistor,
+        .def("add_resistor",
+             py::overload_cast<const std::string&, Index, Index, Real>(
+                 &Circuit::add_resistor),
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
-             "Add resistor between nodes n1 and n2")
-        .def("add_capacitor", &Circuit::add_capacitor,
+             "Add resistor between nodes n1 and n2 (legacy: nominal R only).")
+        .def("add_resistor",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Resistor::Params&>(
+                 &Circuit::add_resistor),
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("params"),
+             "Add resistor with full Params (TCR + thermal binding).")
+        .def("add_capacitor",
+             py::overload_cast<const std::string&, Index, Index, Real, Real>(
+                 &Circuit::add_capacitor),
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("C"),
              py::arg("ic") = 0.0,
-             "Add capacitor between nodes n1 and n2")
+             "Add capacitor between nodes n1 and n2 (legacy: C + initial V only).")
+        .def("add_capacitor",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Capacitor::Params&>(
+                 &Circuit::add_capacitor),
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("params"),
+             "Add capacitor with full Params (ESR + thermal binding).")
         .def("add_snubber_rc", &Circuit::add_snubber_rc,
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
              py::arg("C"), py::arg("ic") = 0.0,
              "Add RC snubber (parallel R-C) between nodes n1 and n2")
-        .def("add_inductor", &Circuit::add_inductor,
+        .def("add_inductor",
+             py::overload_cast<const std::string&, Index, Index, Real, Real>(
+                 &Circuit::add_inductor),
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("L"),
              py::arg("ic") = 0.0,
-             "Add inductor between nodes n1 and n2")
+             "Add inductor between nodes n1 and n2 (legacy: L + initial I only).")
+        .def("add_inductor",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Inductor::Params&>(
+                 &Circuit::add_inductor),
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("params"),
+             "Add inductor with full Params (DCR + thermal binding).")
         .def("add_voltage_source", &Circuit::add_voltage_source,
              py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("V"),
              "Add voltage source from npos to nneg")
@@ -953,6 +1075,59 @@ void init_v2_module(py::module_& v2) {
         .def("set_igbt_T_j",         &Circuit::set_igbt_T_j,
              py::arg("name"), py::arg("t_j"))
         .def("reset_igbt_loss",      &Circuit::reset_igbt_loss, py::arg("name"))
+        // ----- Passive loss + thermal accessors (Phase 3,
+        //       Pulsim 0.10.0a9 / a10 / a11).
+        .def("capacitor_average_power",
+             &Circuit::capacitor_average_power, py::arg("name"))
+        .def("capacitor_peak_power",
+             &Circuit::capacitor_peak_power, py::arg("name"))
+        .def("capacitor_total_energy",
+             &Circuit::capacitor_total_energy, py::arg("name"))
+        .def("capacitor_junction_temperature",
+             &Circuit::capacitor_junction_temperature, py::arg("name"))
+        .def("capacitor_steady_state_junction_temperature",
+             &Circuit::capacitor_steady_state_junction_temperature,
+             py::arg("name"))
+        .def("capacitor_last_current",
+             &Circuit::capacitor_last_current, py::arg("name"))
+        .def("set_capacitor_T_j",  &Circuit::set_capacitor_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_capacitor_loss",
+             &Circuit::reset_capacitor_loss, py::arg("name"))
+        .def("resistor_average_power",
+             &Circuit::resistor_average_power, py::arg("name"))
+        .def("resistor_peak_power",
+             &Circuit::resistor_peak_power, py::arg("name"))
+        .def("resistor_total_energy",
+             &Circuit::resistor_total_energy, py::arg("name"))
+        .def("resistor_junction_temperature",
+             &Circuit::resistor_junction_temperature, py::arg("name"))
+        .def("resistor_steady_state_junction_temperature",
+             &Circuit::resistor_steady_state_junction_temperature,
+             py::arg("name"))
+        .def("resistor_last_current",
+             &Circuit::resistor_last_current, py::arg("name"))
+        .def("set_resistor_T_j",  &Circuit::set_resistor_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_resistor_loss",
+             &Circuit::reset_resistor_loss, py::arg("name"))
+        .def("inductor_average_power",
+             &Circuit::inductor_average_power, py::arg("name"))
+        .def("inductor_peak_power",
+             &Circuit::inductor_peak_power, py::arg("name"))
+        .def("inductor_total_energy",
+             &Circuit::inductor_total_energy, py::arg("name"))
+        .def("inductor_junction_temperature",
+             &Circuit::inductor_junction_temperature, py::arg("name"))
+        .def("inductor_steady_state_junction_temperature",
+             &Circuit::inductor_steady_state_junction_temperature,
+             py::arg("name"))
+        .def("inductor_last_current",
+             &Circuit::inductor_last_current, py::arg("name"))
+        .def("set_inductor_T_j",  &Circuit::set_inductor_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_inductor_loss",
+             &Circuit::reset_inductor_loss, py::arg("name"))
         .def("add_switch", &Circuit::add_switch,
              py::arg("name"), py::arg("n1"), py::arg("n2"),
              py::arg("closed") = false, py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
