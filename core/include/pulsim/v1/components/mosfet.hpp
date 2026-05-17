@@ -85,7 +85,19 @@ public:
         : Base(std::move(name)), params_() {}
 
     explicit MOSFET(Params params, std::string name)
-        : Base(std::move(name)), params_(params), T_j_(params.T_amb) {}
+        : Base(std::move(name)), params_(params), T_j_(params.T_amb) {
+        // Auto-promote to SwitchingMode::Ideal when the user opts into
+        // the switching-loss model (Eon_25 > 0 or Eoff_25 > 0). The
+        // smooth Shichman-Hodges (behavioral) stamp has known Newton-
+        // convergence issues with discontinuous PWM gate voltages (~140
+        // step rejections per 10 ms at 10 kHz); the PWL Ideal stamp
+        // avoids those Newton issues AND lets the accumulator's
+        // transition detection see real gate edges. Backward-compat:
+        // default Eon_25=Eoff_25=0 → mode stays at SwitchingMode::Auto.
+        if (params.Eon_25 > Scalar{0} || params.Eoff_25 > Scalar{0}) {
+            mode_ = SwitchingMode::Ideal;
+        }
+    }
 
     explicit MOSFET(Scalar vth, Scalar kp, bool is_nmos = true, std::string name = "")
         : Base(std::move(name))

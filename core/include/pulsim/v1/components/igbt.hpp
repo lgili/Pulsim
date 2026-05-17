@@ -64,7 +64,15 @@ public:
         : Base(std::move(name)), params_() {}
 
     explicit IGBT(Params params, std::string name)
-        : Base(std::move(name)), params_(params), T_j_(params.T_amb) {}
+        : Base(std::move(name)), params_(params), T_j_(params.T_amb) {
+        // Auto-promote to SwitchingMode::Ideal when the user opts into
+        // the switching-loss model. Same rationale as MOSFET — see the
+        // mirror constructor in `components/mosfet.hpp`. Backward-compat
+        // preserved when Eon_25 == Eoff_25 == 0 (default).
+        if (params.Eon_25 > Scalar{0} || params.Eoff_25 > Scalar{0}) {
+            mode_ = SwitchingMode::Ideal;
+        }
+    }
 
     explicit IGBT(Scalar vth, Scalar g_on = 1e4, std::string name = "")
         : Base(std::move(name))
