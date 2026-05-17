@@ -120,13 +120,27 @@ public:
         , T_j_(params.T_amb)
         , Qrr_(params.Qrr)
         , Erec_shape_(params.Erec_shape)
-        // PSIM-style auto-snubber on by default when the user opts into
-        // reverse-recovery (Qrr > 0): 5 nF junction-cap gives the diode
-        // commutation a finite-dt path in PWL Ideal mode. Set
-        // `params.C_j = 0` explicitly to model the ideal-diode limit.
+        // PSIM-style auto-snubber on by default whenever the user
+        // opts into a "realistic" diode (V_F0 > 0 indicates the
+        // Norton-shifted forward model is active; Qrr > 0 indicates
+        // reverse-recovery loss is being tracked). Either one means
+        // the device is being used in a power-electronics context
+        // where a finite-dt commutation path is wanted — without it,
+        // the PWL Ideal stamp presents an infinite-impedance jump at
+        // every commutation and a fast switch (boost diode) flickers
+        // off the bus ripple.
+        //   Qrr > 0   : 5 nF  (fast-recovery device, biggest cap)
+        //   V_F0 > 0  : 500 pF (line rectifier or general "realistic"
+        //                       diode — small cap, negligible at line
+        //                       frequency but enough to keep the
+        //                       commutation finite at switching dt)
+        //   both 0    : 0 F    (legacy ideal switch — backward compat)
+        // Set `params.C_j = 0` explicitly to opt out.
         , C_j_(params.C_j > Scalar{0}
                ? params.C_j
-               : (params.Qrr > Scalar{0} ? Scalar{5e-9} : Scalar{0})) {}
+               : (params.Qrr > Scalar{0}
+                  ? Scalar{5e-9}
+                  : (params.V_F0 > Scalar{0} ? Scalar{5e-10} : Scalar{0}))) {}
 
     /// Parasitic junction capacitance (F) — see Params::C_j.
     [[nodiscard]] Scalar C_j() const noexcept { return C_j_; }
@@ -318,9 +332,22 @@ public:
     ///    V_F0 == 0 (legacy model), this reduces to the original voltage>h
     ///    predicate.
     [[nodiscard]] bool should_commute(const PwlEventContext& ctx) const noexcept {
-        const Scalar h = std::max<Scalar>(ctx.event_hysteresis, event_hysteresis_);
+        // Voltage and current hysteresis are physically different scales —
+        // voltage in V (V_F0_at_Tj typically 0.5–1 V), current in A (forward
+        // current in a converter is typically A, not µA). A single shared
+        // band fits one or the other but not both. The event-scheduler can
+        // override per-call via `ctx.event_hysteresis`; locally we use the
+        // device defaults (`event_hysteresis_` for voltage,
+        // `event_hysteresis_current_` for current) so a boost diode doesn't
+        // flicker on round-off-scale current dips while still commutating
+        // cleanly at real zero-crossings.
+        const Scalar h_v = std::max<Scalar>(ctx.event_hysteresis, event_hysteresis_);
+        const Scalar h_i = std::max<Scalar>(ctx.event_hysteresis,
+                                             event_hysteresis_current_);
         const Scalar v_on_threshold = (V_F0_ > Scalar{0}) ? V_F0_at_Tj() : Scalar{0};
-        return pwl_state_ ? (ctx.current < -h) : (ctx.voltage > v_on_threshold + h);
+        return pwl_state_
+            ? (ctx.current < -h_i)
+            : (ctx.voltage > v_on_threshold + h_v);
     }
 
     /// Convenience: matches legacy `is_conducting()` semantics.
@@ -594,14 +621,15 @@ private:
     Scalar g_on_;
     Scalar g_off_;
     Scalar v_smooth_ = Scalar{0.1};         ///< Behavioral smoothing voltage.
-    // PWL event-hysteresis band. Sub-nV default would let the event
-    // scanner flicker the diode on tiny round-off-scale ringing at
-    // every accepted step in a boost-style topology (L next to the
-    // PWL state-space). 0.01 (10 mV for the voltage check, 10 mA for
-    // the current check) filters that without affecting real
-    // commutations in converter applications where the current /
-    // voltage swings are A / V (not µA / µV).
-    Scalar event_hysteresis_ = Scalar{1e-2};
+    // PWL event-hysteresis bands. Voltage and current use different
+    // scales (V_F0 ≈ 0.5–1 V, forward current ≈ A), so we keep
+    // separate defaults: 10 mV on the off→on voltage check (filters
+    // round-off bus ripple) and 100 mA on the on→off current check
+    // (filters di/dt overshoot through the diode during commutation
+    // — a real boost diode in CCM has 1–10 A of forward current, so
+    // a 100 mA band is < 10 % of nominal and never trips falsely).
+    Scalar event_hysteresis_         = Scalar{1e-2};
+    Scalar event_hysteresis_current_ = Scalar{1e-1};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;                ///< on/off state (true = conducting).
 
