@@ -86,6 +86,13 @@ from ._pulsim import (
     # dynamic device when only the steady-state operating point is needed.
     PmsmParams,
 
+    # consolidate-motors-and-three-phase Phase B.2a + C: signal-domain
+    # mechanical primitive + BLDC + Induction motor device-variants.
+    Shaft,
+    MechanicalDeviceParams,
+    BldcMotorParams,
+    InductionMotorParams,
+
     # Control Blocks
     PIController,
     PIDController,
@@ -1163,6 +1170,10 @@ __all__ = [
     "ThreePhaseLoadTopology",
     "ThreePhaseRLLoadParams",
     "PmsmParams",
+    "Shaft",
+    "MechanicalDeviceParams",
+    "BldcMotorParams",
+    "InductionMotorParams",
     "SineVoltageSource",
     "RampParams",
     "RampGenerator",

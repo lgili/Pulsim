@@ -794,6 +794,102 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("theta_init", &motors::PmsmParams::theta_init,
                        "Initial rotor angle (rad).");
 
+    // consolidate-motors-and-three-phase, Phase B.2a: signal-domain shaft +
+    // mechanical-device parameter binding. The Shaft is exposed standalone
+    // because MechanicalDevice::Params embeds it; users construct
+    // `Shaft(J=…, b_friction=…, …)` then attach it via
+    // `MechanicalDeviceParams(shaft=…)`.
+    py::class_<motors::Shaft>(v2, "Shaft",
+            "Rotating shaft primitive (J, friction, ω state). Building block "
+            "for MechanicalDeviceParams.")
+        .def(py::init<>())
+        .def_readwrite("J", &motors::Shaft::J,
+                       "Rotor + load inertia (kg·m²).")
+        .def_readwrite("b_friction", &motors::Shaft::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("friction_coulomb", &motors::Shaft::friction_coulomb,
+                       "Coulomb friction torque (N·m).")
+        .def_readwrite("omega", &motors::Shaft::omega,
+                       "Initial / current angular velocity (rad/s).");
+
+    py::class_<MechanicalDevice::Params>(v2, "MechanicalDeviceParams",
+            "Signal-domain mechanical device parameters (shaft + load + "
+            "optional gear ratio). Used by Circuit::add_mechanical.")
+        .def(py::init<>())
+        .def_readwrite("shaft", &MechanicalDevice::Params::shaft,
+                       "Embedded Shaft (inertia + friction + initial ω).")
+        .def_readwrite("theta_init", &MechanicalDevice::Params::theta_init,
+                       "Initial mechanical angle (rad).")
+        .def_readwrite("tau_load_const",
+                       &MechanicalDevice::Params::tau_load_const,
+                       "Constant load torque (N·m), opposes motion.")
+        .def_readwrite("tau_load_quad_coeff",
+                       &MechanicalDevice::Params::tau_load_quad_coeff,
+                       "Quadratic load coefficient: τ_load_quad = k·ω·|ω|.")
+        .def_readwrite("gear_ratio",
+                       &MechanicalDevice::Params::gear_ratio,
+                       "Optional speed ratio for gearbox downstream.");
+
+    // consolidate-motors-and-three-phase, Phase C.1: BLDC motor parameters.
+    py::class_<motors::BldcMotorParams>(v2, "BldcMotorParams",
+            "BLDC (trapezoidal back-EMF) motor parameters. Used by "
+            "Circuit::add_bldc_motor.")
+        .def(py::init<>())
+        .def_readwrite("R_s", &motors::BldcMotorParams::R_s,
+                       "Stator phase resistance (Ω).")
+        .def_readwrite("L_s", &motors::BldcMotorParams::L_s,
+                       "Stator phase inductance (H, non-salient).")
+        .def_readwrite("K_e_peak", &motors::BldcMotorParams::K_e_peak,
+                       "Peak back-EMF constant per phase (V·s/rad).")
+        .def_readwrite("pole_pairs", &motors::BldcMotorParams::pole_pairs,
+                       "Number of pole pairs.")
+        .def_readwrite("J", &motors::BldcMotorParams::J,
+                       "Rotor inertia (kg·m²).")
+        .def_readwrite("b_friction", &motors::BldcMotorParams::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("friction_coulomb",
+                       &motors::BldcMotorParams::friction_coulomb,
+                       "Coulomb friction torque (N·m).")
+        .def_readwrite("tau_load_const",
+                       &motors::BldcMotorParams::tau_load_const,
+                       "Constant load torque (N·m).")
+        .def_readwrite("tau_load_quad_coeff",
+                       &motors::BldcMotorParams::tau_load_quad_coeff,
+                       "Quadratic load coefficient.");
+
+    // consolidate-motors-and-three-phase, Phase C.2: Induction motor params.
+    py::class_<motors::InductionMotorParams>(v2, "InductionMotorParams",
+            "Squirrel-cage induction motor parameters (stationary αβ frame). "
+            "Used by Circuit::add_induction_motor.")
+        .def(py::init<>())
+        .def_readwrite("R_s", &motors::InductionMotorParams::R_s,
+                       "Stator phase resistance (Ω).")
+        .def_readwrite("R_r", &motors::InductionMotorParams::R_r,
+                       "Rotor resistance referred to stator (Ω).")
+        .def_readwrite("L_s", &motors::InductionMotorParams::L_s,
+                       "Stator self-inductance (H).")
+        .def_readwrite("L_r", &motors::InductionMotorParams::L_r,
+                       "Rotor self-inductance (H).")
+        .def_readwrite("L_m", &motors::InductionMotorParams::L_m,
+                       "Mutual inductance (H, < L_s and < L_r typically).")
+        .def_readwrite("pole_pairs",
+                       &motors::InductionMotorParams::pole_pairs,
+                       "Number of pole pairs.")
+        .def_readwrite("J", &motors::InductionMotorParams::J,
+                       "Rotor inertia (kg·m²).")
+        .def_readwrite("b_friction",
+                       &motors::InductionMotorParams::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("friction_coulomb",
+                       &motors::InductionMotorParams::friction_coulomb,
+                       "Coulomb friction torque (N·m).")
+        .def_readwrite("tau_load_const",
+                       &motors::InductionMotorParams::tau_load_const,
+                       "Constant load torque (N·m).")
+        .def_readwrite("tau_load_quad_coeff",
+                       &motors::InductionMotorParams::tau_load_quad_coeff,
+                       "Quadratic load coefficient.");
+
     py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
         .def(py::init<>())
         .def_readwrite("v_min", &RampParams::v_min, "Minimum voltage")
@@ -1471,6 +1567,66 @@ void init_v2_module(py::module_& v2) {
              "Read the phase B line current of a PMSM (A).")
         .def("pmsm_i_c", &Circuit::pmsm_i_c, py::arg("name"),
              "Read the phase C line current of a PMSM (A).")
+        // consolidate-motors-and-three-phase, Phase B.2a: signal-domain
+        // Mechanical device for multi-shaft topologies.
+        .def("add_mechanical", &Circuit::add_mechanical,
+             py::arg("name"), py::arg("params"),
+             "Add a signal-domain mechanical device (shaft + load) with no "
+             "electrical pins. Couples to motors via set_tau_input / "
+             "set_tau_load wiring done by the user.")
+        .def("set_mechanical_tau_input",
+             &Circuit::set_mechanical_tau_input,
+             py::arg("name"), py::arg("tau"),
+             "Push torque input to a MechanicalDevice (typically a motor's "
+             "electromagnetic torque).")
+        .def("mechanical_omega", &Circuit::mechanical_omega, py::arg("name"),
+             "Read mechanical angular velocity (rad/s).")
+        .def("mechanical_theta", &Circuit::mechanical_theta, py::arg("name"),
+             "Read mechanical angle (rad).")
+        .def("mechanical_reaction_torque",
+             &Circuit::mechanical_reaction_torque, py::arg("name"),
+             "Read reaction torque exposed back upstream (N·m).")
+        // consolidate-motors-and-three-phase, Phase C.1: BLDC motor.
+        .def("add_bldc_motor", &Circuit::add_bldc_motor,
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"), py::arg("n_c"),
+             py::arg("n_neutral"), py::arg("params"),
+             "Add a three-phase BLDC motor (trapezoidal back-EMF, 4 pins, 3 "
+             "reserved branch rows). Closes motor-models spec gap.")
+        .def("set_bldc_tau_load", &Circuit::set_bldc_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Set external shaft load torque on a BLDC motor (N·m).")
+        .def("bldc_omega", &Circuit::bldc_omega, py::arg("name"),
+             "Read BLDC mechanical angular velocity (rad/s).")
+        .def("bldc_theta", &Circuit::bldc_theta, py::arg("name"),
+             "Read BLDC rotor angle (rad).")
+        .def("bldc_i_a", &Circuit::bldc_i_a, py::arg("name"),
+             "Read BLDC phase A line current (A).")
+        .def("bldc_i_b", &Circuit::bldc_i_b, py::arg("name"),
+             "Read BLDC phase B line current (A).")
+        .def("bldc_i_c", &Circuit::bldc_i_c, py::arg("name"),
+             "Read BLDC phase C line current (A).")
+        // consolidate-motors-and-three-phase, Phase C.2: Induction motor.
+        .def("add_induction_motor", &Circuit::add_induction_motor,
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"), py::arg("n_c"),
+             py::arg("n_neutral"), py::arg("params"),
+             "Add a three-phase squirrel-cage induction motor (αβ frame with "
+             "rotor flux state, 4 pins, 3 reserved branch rows). Closes "
+             "motor-models spec gap.")
+        .def("set_induction_tau_load", &Circuit::set_induction_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Set external shaft load torque on an induction motor (N·m).")
+        .def("induction_omega", &Circuit::induction_omega, py::arg("name"),
+             "Read induction motor mechanical angular velocity (rad/s).")
+        .def("induction_theta", &Circuit::induction_theta, py::arg("name"),
+             "Read induction motor rotor angle (rad).")
+        .def("induction_slip", &Circuit::induction_slip, py::arg("name"),
+             "Read induction motor slip (dimensionless, against synchronous).")
+        .def("induction_i_a", &Circuit::induction_i_a, py::arg("name"),
+             "Read induction motor phase A line current (A).")
+        .def("induction_i_b", &Circuit::induction_i_b, py::arg("name"),
+             "Read induction motor phase B line current (A).")
+        .def("induction_i_c", &Circuit::induction_i_c, py::arg("name"),
+             "Read induction motor phase C line current (A).")
         // PWM control
         .def("set_pwm_duty", &Circuit::set_pwm_duty,
              py::arg("name"), py::arg("duty"),
