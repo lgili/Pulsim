@@ -5285,11 +5285,21 @@ private:
 
         const auto forced = forced_switch_state(device_index);
         if (forced.has_value()) {
-            // Forced PWL state: stamp as a pure conductance (g_on or
-            // g_off) without the smooth-model overhead. This matches
-            // the legacy behavior when the kernel pins the device.
-            const Real g = *forced ? p.g_on : g_off_eff;
-            const Real id = g * vds;
+            // Forced PWL state: stamp as a pure conductance (Rds_on or
+            // g_off) — matches Newton-Raphson convention used by the
+            // smooth path below (`f[drain] += id` for current leaving).
+            //
+            // Phase 2 of inverter-bridge-losses upgrade: when params has
+            // R_th_ja > 0, use the T_j-corrected R_ds(on) so loss
+            // accumulator's V·I·dt matches the analytical I²·R_ds(on).
+            const Real Rds_T = dev.Rds_on_at_Tj();   // honors T_j feedback
+            const Real g_on_eff = (Rds_T > 0.0)
+                ? 1.0 / Rds_T
+                : p.g_on;
+            const Real g = *forced ? g_on_eff : g_off_eff;
+            const Real id_internal = g * vds;
+            const Real id = sign * id_internal;
+            // ∂id/∂vd = +g, ∂id/∂vs = −g (mirror of smooth-path signs).
             if (n_drain >= 0) {
                 triplets.emplace_back(n_drain, n_drain, g);
                 if (n_source >= 0) triplets.emplace_back(n_drain, n_source, -g);
@@ -5298,9 +5308,10 @@ private:
                 triplets.emplace_back(n_source, n_source, g);
                 if (n_drain >= 0) triplets.emplace_back(n_source, n_drain, -g);
             }
-            const Real i_eq_forced = id * sign - g * vds;  // = 0
-            if (n_drain >= 0) f[n_drain] -= sign * id - i_eq_forced;
-            if (n_source >= 0) f[n_source] += sign * id - i_eq_forced;
+            // Physical residual: +id leaves drain, −id arrives at source
+            // (same convention as the smooth-path Newton stamp below).
+            if (n_drain >= 0)  f[n_drain]  += id;
+            if (n_source >= 0) f[n_source] -= id;
             return;
         }
 

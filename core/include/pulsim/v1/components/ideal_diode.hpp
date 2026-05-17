@@ -167,6 +167,10 @@ public:
 
     /// Reset the loss accumulator. Called at simulation start (initialize=true
     /// path of update_history).
+    /// Zero the loss accumulator. Does NOT touch T_j — the stamping
+    /// uses whatever T_j was last set (via `set_T_j_init` or T_amb at
+    /// construction). Separates loss-state from stamping-state cleanly,
+    /// matching the same convention used by MOSFET and IGBT.
     void reset_loss() noexcept {
         e_cond_ = 0.0;
         p_peak_ = 0.0;
@@ -174,7 +178,6 @@ public:
         t_sim_ = 0.0;
         i_last_ = 0.0;
         v_last_ = 0.0;
-        T_j_ = T_amb_;
     }
 
     /// Sample the instantaneous power V·I over the past `dt` seconds.

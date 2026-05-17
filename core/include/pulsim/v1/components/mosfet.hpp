@@ -174,6 +174,11 @@ public:
         return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
     }
 
+    /// Zero the loss accumulator. Does NOT touch T_j — the stamping
+    /// uses whatever T_j was last set (via `set_T_j_init` or the
+    /// initial T_amb at construction). This separation lets the user
+    /// run the fixed-point thermal iteration cleanly: set_T_j_init →
+    /// reset_loss → re-simulate.
     void reset_loss() noexcept {
         e_cond_ = 0.0;
         p_peak_ = 0.0;
@@ -181,7 +186,6 @@ public:
         t_sim_ = 0.0;
         i_last_ = 0.0;
         v_last_ = 0.0;
-        T_j_ = params_.T_amb;
     }
 
     /// Push T_j back into the stamping path (for the fixed-point

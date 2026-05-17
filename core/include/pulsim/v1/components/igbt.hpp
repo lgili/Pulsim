@@ -81,6 +81,9 @@ public:
         return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
     }
 
+    /// Zero the loss accumulator. Does NOT touch T_j — the stamping
+    /// uses whatever T_j was last set (via `set_T_j_init` or T_amb at
+    /// construction). Separates loss-state from stamping-state cleanly.
     void reset_loss() noexcept {
         e_cond_ = 0.0;
         p_peak_ = 0.0;
@@ -88,7 +91,6 @@ public:
         t_sim_ = 0.0;
         i_last_ = 0.0;
         v_last_ = 0.0;
-        T_j_ = params_.T_amb;
     }
 
     void set_T_j_init(Scalar t_j) noexcept { T_j_ = t_j; }
