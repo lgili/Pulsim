@@ -595,7 +595,42 @@ void init_v2_module(py::module_& v2) {
                        "True = positive (abc) sequence, False = negative (acb)")
         .def_readwrite("unbalance_factor",
                        &Circuit::ThreePhaseSourceParams::unbalance_factor,
-                       "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u");
+                       "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u")
+        .def("to_grid_source",
+             &Circuit::ThreePhaseSourceParams::to_grid_source,
+             "Convert the Circuit-side params struct to the canonical "
+             "`grid::ThreePhaseSource` math object (loses unbalance_factor — "
+             "the math object is canonically balanced).")
+        .def_static("from_grid_source",
+                    &Circuit::ThreePhaseSourceParams::from_grid_source,
+                    py::arg("source"),
+                    "Build a ThreePhaseSourceParams from a grid::ThreePhaseSource "
+                    "math object (unbalance_factor defaults to 0).");
+
+    // consolidate-motors-and-three-phase, Phase A.1: expose the canonical
+    // three-phase source math object so Python users can prefer it over the
+    // Circuit-side params struct when working in the grid math surface.
+    py::enum_<grid::PhaseSequence>(v2, "PhaseSequence",
+            "Three-phase rotation sequence (positive = abc, negative = acb).")
+        .value("Positive", grid::PhaseSequence::Positive)
+        .value("Negative", grid::PhaseSequence::Negative);
+
+    py::class_<grid::ThreePhaseSource>(v2, "ThreePhaseSourceModel",
+            "Canonical balanced sinusoidal three-phase source (math object "
+            "from `pulsim::v1::grid::ThreePhaseSource`). Composes into "
+            "ThreePhaseSourceParams; usable directly via the matching "
+            "Circuit.add_three_phase_source overload.")
+        .def(py::init<>())
+        .def_readwrite("v_rms", &grid::ThreePhaseSource::v_rms,
+                       "Per-phase RMS voltage (V)")
+        .def_readwrite("frequency", &grid::ThreePhaseSource::frequency,
+                       "Fundamental frequency (Hz)")
+        .def_readwrite("phase_rad", &grid::ThreePhaseSource::phase_rad,
+                       "Initial phase angle (rad)")
+        .def_readwrite("sequence", &grid::ThreePhaseSource::sequence,
+                       "Phase rotation sequence (Positive/Negative)")
+        .def("evaluate", &grid::ThreePhaseSource::evaluate, py::arg("t"),
+             "Return the instantaneous (v_a, v_b, v_c) triple at time t.");
 
     py::enum_<Circuit::PwmModulation>(
             v2, "PwmModulation",
@@ -1318,6 +1353,19 @@ void init_v2_module(py::module_& v2) {
              py::arg("node_c"), py::arg("node_neutral"),
              py::arg("v_line_to_line_rms"), py::arg("frequency_hz"),
              "Add a balanced 3-phase voltage source (positive sequence, 0% unbalance).")
+        // consolidate-motors-and-three-phase, Phase A.1: math-object overload.
+        // Pass `pulsim.ThreePhaseSourceModel` directly when the caller is
+        // already working in the grid math-object surface.
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index,
+                               const grid::ThreePhaseSource&>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"), py::arg("source"),
+             "Add a balanced 3-phase voltage source from the grid::ThreePhaseSource "
+             "math object (consolidate-motors-and-three-phase Phase A.1). The math "
+             "object is the canonical signal representation; the params-struct "
+             "overload converts to this form internally.")
         // Three-phase 2-level VSI (Track 4 follow-up). Decomposes into 6
         // NMOS switches + 6 SPWM gate drivers internally.
         .def("add_three_phase_vsi",

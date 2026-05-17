@@ -14,11 +14,13 @@
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/components/dc_motor_device.hpp"
 #include "pulsim/v1/components/pmsm_device.hpp"
+#include "pulsim/v1/grid/three_phase_source.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <cmath>
+#include <numbers>
 #include <type_traits>
 #include <deque>
 #include <functional>
@@ -2528,6 +2530,43 @@ public:
         Real phase_a_deg = 0.0;                 // Phase A reference angle
         bool positive_sequence = true;          // false flips B/C
         Real unbalance_factor = 0.0;            // 0 = balanced, [0, 1)
+
+        // consolidate-motors-and-three-phase, Phase A.1: convert this Circuit-
+        // side params struct into the canonical math object
+        // `grid::ThreePhaseSource`. Note that the math object captures only
+        // the balanced sinusoidal portion — `unbalance_factor` is a Circuit-
+        // specific knob and survives outside the math object.
+        [[nodiscard]] grid::ThreePhaseSource to_grid_source() const {
+            grid::ThreePhaseSource src;
+            // V_LL_RMS → per-phase RMS: V_ph_RMS = V_LL_RMS / √3
+            static constexpr Real kOneOverSqrt3 = static_cast<Real>(0.5773502691896258);
+            src.v_rms = line_to_line_voltage_rms * kOneOverSqrt3;
+            src.frequency = frequency_hz;
+            // deg → rad
+            src.phase_rad = phase_a_deg * static_cast<Real>(0.017453292519943295);
+            src.sequence = positive_sequence ? grid::PhaseSequence::Positive
+                                             : grid::PhaseSequence::Negative;
+            return src;
+        }
+
+        // Inverse: build the Circuit-side params from a math-object source.
+        // The resulting struct has `unbalance_factor = 0` (the math object
+        // does not carry an asymmetry knob); callers wanting an unbalanced
+        // grid set the field separately after construction.
+        [[nodiscard]] static ThreePhaseSourceParams from_grid_source(
+            const grid::ThreePhaseSource& src) {
+            ThreePhaseSourceParams params;
+            // per-phase RMS → V_LL_RMS: V_LL_RMS = V_ph_RMS · √3
+            static constexpr Real kSqrt3 = static_cast<Real>(1.7320508075688772);
+            params.line_to_line_voltage_rms = src.v_rms * kSqrt3;
+            params.frequency_hz = src.frequency;
+            // rad → deg
+            params.phase_a_deg = src.phase_rad * static_cast<Real>(57.29577951308232);
+            params.positive_sequence =
+                (src.sequence == grid::PhaseSequence::Positive);
+            params.unbalance_factor = 0.0;
+            return params;
+        }
     };
     static_assert(std::is_trivially_copyable_v<ThreePhaseSourceParams>,
                   "ThreePhaseSourceParams must stay a POD aggregate so callers "
@@ -2542,38 +2581,16 @@ public:
         assert(params.frequency_hz > 0.0);
         assert(params.unbalance_factor >= 0.0 && params.unbalance_factor < 1.0);
 
-        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
-        // V_LL_RMS → per-phase peak: V_ph_peak = V_LL_RMS · √2 / √3
-        constexpr Real kSqrt2OverSqrt3 = static_cast<Real>(0.8164965809277261);
-        const Real v_peak_nominal = params.line_to_line_voltage_rms * kSqrt2OverSqrt3;
-        const Real phase_a_rad = params.phase_a_deg * static_cast<Real>(0.017453292519943295);
-
-        const Real shift_b = params.positive_sequence ? -kTwoPiOverThree :  kTwoPiOverThree;
-        const Real shift_c = params.positive_sequence ? -2.0 * kTwoPiOverThree : 2.0 * kTwoPiOverThree;
-
+        // consolidate-motors-and-three-phase, Phase A.1: math/signal
+        // computation goes through `grid::ThreePhaseSource` (single source
+        // of truth) — only the `unbalance_factor` per-leg scaling stays
+        // Circuit-side because the math object is canonically balanced.
+        const auto grid_src = params.to_grid_source();
         const Real scale_b = 1.0 - params.unbalance_factor;
         const Real scale_c = 1.0 + params.unbalance_factor;
-
-        const std::string base{name};
-
-        SineParams leg{};
-        leg.frequency = params.frequency_hz;
-        leg.offset = 0.0;
-
-        // Leg A — reference
-        leg.amplitude = v_peak_nominal;
-        leg.phase = phase_a_rad;
-        add_sine_voltage_source(base + "__A", node_a, node_neutral, leg);
-
-        // Leg B — shifted by ±120°
-        leg.amplitude = v_peak_nominal * scale_b;
-        leg.phase = phase_a_rad + shift_b;
-        add_sine_voltage_source(base + "__B", node_b, node_neutral, leg);
-
-        // Leg C — shifted by ±240°
-        leg.amplitude = v_peak_nominal * scale_c;
-        leg.phase = phase_a_rad + shift_c;
-        add_sine_voltage_source(base + "__C", node_c, node_neutral, leg);
+        add_three_phase_source_impl_(name, node_a, node_b, node_c,
+                                     node_neutral, grid_src,
+                                     /*scale_a=*/1.0, scale_b, scale_c);
     }
 
     // Convenience overload — explicit V_LL_RMS + frequency, no params struct.
@@ -2586,6 +2603,63 @@ public:
         params.frequency_hz = frequency_hz;
         add_three_phase_source(name, node_a, node_b, node_c, node_neutral, params);
     }
+
+    // consolidate-motors-and-three-phase, Phase A.1: math-object overload.
+    // Accepts a `grid::ThreePhaseSource` directly so callers that already
+    // hold the canonical math form can wire the source into Circuit without
+    // re-projecting through the Circuit-side params struct. Per-leg scale
+    // is balanced (unbalance_factor = 0); callers wanting an unbalanced
+    // grid use the params overload.
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const grid::ThreePhaseSource& source) {
+        assert(source.frequency > 0.0);
+        add_three_phase_source_impl_(name, node_a, node_b, node_c,
+                                     node_neutral, source,
+                                     /*scale_a=*/1.0, /*scale_b=*/1.0,
+                                     /*scale_c=*/1.0);
+    }
+
+private:
+    // Internal worker used by both the params-struct and the math-object
+    // overloads. Decomposes the source into three sine legs against the
+    // neutral node. The per-leg scale factors carry the optional
+    // `unbalance_factor` asymmetry from the Circuit-side params struct.
+    void add_three_phase_source_impl_(std::string_view name,
+                                      Index node_a, Index node_b, Index node_c,
+                                      Index node_neutral,
+                                      const grid::ThreePhaseSource& source,
+                                      Real scale_a, Real scale_b, Real scale_c) {
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        // per-phase RMS → per-phase peak (the math object stores RMS).
+        const Real v_peak = source.v_rms * std::numbers::sqrt2_v<Real>;
+        const Real shift_b = (source.sequence == grid::PhaseSequence::Positive)
+            ? -kTwoPiOverThree
+            : kTwoPiOverThree;
+        const Real shift_c = (source.sequence == grid::PhaseSequence::Positive)
+            ? -2.0 * kTwoPiOverThree
+            : 2.0 * kTwoPiOverThree;
+
+        const std::string base{name};
+        SineParams leg{};
+        leg.frequency = source.frequency;
+        leg.offset = 0.0;
+
+        leg.amplitude = v_peak * scale_a;
+        leg.phase = source.phase_rad;
+        add_sine_voltage_source(base + "__A", node_a, node_neutral, leg);
+
+        leg.amplitude = v_peak * scale_b;
+        leg.phase = source.phase_rad + shift_b;
+        add_sine_voltage_source(base + "__B", node_b, node_neutral, leg);
+
+        leg.amplitude = v_peak * scale_c;
+        leg.phase = source.phase_rad + shift_c;
+        add_sine_voltage_source(base + "__C", node_c, node_neutral, leg);
+    }
+
+public:
 
     // ----- Three-phase 2-level VSI helper (Track 4 follow-up) -----------------
     //
