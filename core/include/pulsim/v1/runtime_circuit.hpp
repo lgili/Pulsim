@@ -548,6 +548,147 @@ public:
         register_connection_name(connections_.size() - 1);
     }
 
+    /// Overload accepting a fully-specified `IdealDiode::Params` so callers
+    /// can configure V_F0, R_d, thermal coupling, etc. (Phase 1 of
+    /// inverter-bridge-losses). Backward-compatible with the legacy
+    /// (g_on, g_off) constructor when V_F0 == 0.
+    void add_diode(const std::string& name, Index anode, Index cathode,
+                   const IdealDiode::Params& params) {
+        devices_.emplace_back(IdealDiode(params, name));
+        connections_.push_back({name, {anode, cathode}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    // ----- Bridge rectifier helper (Phase 1 of inverter-bridge-losses) ------
+    //
+    // Drop-in 4-diode full-wave bridge between two AC nodes (ac_a, ac_b) and
+    // a DC output (dc_pos, dc_neg). All four diodes share the same Params
+    // (V_F0, R_d, R_th_ja, T_amb …) so per-diode losses can be read back via
+    // `diode_average_power(<name>__D{1..4})` after the transient.
+    //
+    // Topology (using D1..D4 with anode/cathode labels):
+    //
+    //         ac_a  ----+--[D1]--+----  dc_pos
+    //                   |        |
+    //                   +--[D4]--+----  dc_neg
+    //         ac_b  ----+        |
+    //                   |        |
+    //                   +--[D2]--+----  dc_pos
+    //                   |        |
+    //                   +--[D3]--+----  dc_neg
+    //
+    // D1 anode = ac_a, cathode = dc_pos
+    // D2 anode = ac_b, cathode = dc_pos
+    // D3 anode = dc_neg, cathode = ac_b
+    // D4 anode = dc_neg, cathode = ac_a
+    //
+    // Conduction pairs:
+    //   - When ac_a > ac_b: D1 and D3 conduct (current ac_a → dc_pos →
+    //     load → dc_neg → ac_b).
+    //   - When ac_b > ac_a: D2 and D4 conduct.
+    //
+    // Each accepted timestep records V·I·dt into the corresponding diode's
+    // loss accumulator. At end-of-sim each diode reports:
+    //   - average_power()  : P_avg [W]
+    //   - peak_power()     : peak instantaneous P [W]
+    //   - total_energy()   : ∫P·dt [J]
+    //   - junction_temperature() : T_j = T_amb + P_avg · R_th_ja [°C]
+
+    void add_bridge_rectifier(const std::string& name,
+                              Index ac_a, Index ac_b,
+                              Index dc_pos, Index dc_neg,
+                              const IdealDiode::Params& diode_params) {
+        const std::string base{name};
+        add_diode(base + "__D1", ac_a,    dc_pos,  diode_params);
+        add_diode(base + "__D2", ac_b,    dc_pos,  diode_params);
+        add_diode(base + "__D3", dc_neg,  ac_b,    diode_params);
+        add_diode(base + "__D4", dc_neg,  ac_a,    diode_params);
+    }
+
+    /// Convenience overload taking just (V_F0, R_d, R_th_ja, T_amb).
+    void add_bridge_rectifier(const std::string& name,
+                              Index ac_a, Index ac_b,
+                              Index dc_pos, Index dc_neg,
+                              Real V_F0, Real R_d,
+                              Real R_th_ja = 25.0, Real T_amb = 25.0) {
+        IdealDiode::Params p{};
+        p.V_F0     = V_F0;
+        p.R_d      = R_d;
+        p.R_th_ja  = R_th_ja;
+        p.T_amb    = T_amb;
+        // Pick a conducting-state g_on consistent with R_d so the realistic
+        // model stays self-consistent regardless of which stamping path
+        // hits first.
+        if (R_d > 0.0) p.g_on = 1.0 / R_d;
+        add_bridge_rectifier(name, ac_a, ac_b, dc_pos, dc_neg, p);
+    }
+
+    // ----- Diode loss / thermal accessors -----------------------------------
+    [[nodiscard]] Real diode_average_power(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_peak_power(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_total_energy(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    /// Junction temperature CURRENTLY ASSUMED by the device's stamping
+    /// (T_amb at init, or whatever was last set via `set_diode_T_j`).
+    /// Use `diode_steady_state_junction_temperature` for the value derived
+    /// from the running P_avg + R_th_ja.
+    [[nodiscard]] Real diode_junction_temperature(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    /// Steady-state junction temperature DERIVED from the accumulated
+    /// P_avg over the simulation:
+    ///     T_j = T_amb + P_avg · R_th_ja
+    /// To converge a true electrothermal solution, iterate: simulate →
+    /// read T_j → call `set_diode_T_j(name, T_j)` → re-simulate. Typically
+    /// converges in 2–3 passes for bridge-rectifier loads.
+    [[nodiscard]] Real diode_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    /// Update the T_j the device's stamping assumes (for fixed-point
+    /// electrothermal iteration). Does not affect already-accumulated
+    /// loss; only the next simulation pass sees the change via
+    /// `V_F0_at_Tj()` in the stamping path.
+    void set_diode_T_j(std::string_view name, Real t_j) {
+        if (auto* d = find_device<IdealDiode>(name)) {
+            d->set_T_j_init(t_j);
+        }
+    }
+
+    /// Reset the loss accumulator on a named diode (zero out accumulated
+    /// energy, peak, conduction time). Useful for multi-pass thermal
+    /// fixed-point iteration where you want a clean accumulator each pass.
+    void reset_diode_loss(std::string_view name) {
+        if (auto* d = find_device<IdealDiode>(name)) {
+            d->reset_loss();
+        }
+    }
+    [[nodiscard]] Real diode_last_current(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_last_voltage(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->last_voltage() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_conduction_time(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->conduction_time() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     void add_switch(const std::string& name, Index n1, Index n2,
                     bool closed = false, Real g_on = 1e6, Real g_off = 1e-12) {
         devices_.emplace_back(IdealSwitch(g_on, g_off, closed, name));
@@ -2980,6 +3121,28 @@ public:
                                           timestep_);
                     }
                 }
+                else if constexpr (std::is_same_v<T, IdealDiode>) {
+                    // Phase 1 of inverter-bridge-losses: integrate V·I·dt
+                    // per accepted timestep so the device exposes
+                    //   average_power() / peak_power() / junction_temperature()
+                    // at the end of the simulation. Off-state leakage is
+                    // ignored by `accumulate_loss` (only positive P counts).
+                    const Index n_anode   = conn.nodes[0];
+                    const Index n_cathode = conn.nodes[1];
+                    const Real v_a = (n_anode   >= 0) ? x[n_anode]   : 0.0;
+                    const Real v_c = (n_cathode >= 0) ? x[n_cathode] : 0.0;
+                    const Real v_diode = v_a - v_c;
+
+                    if (initialize) {
+                        dev.reset_loss();
+                        // Still record the initial operating-point sample so
+                        // last_voltage()/last_current() are sane before any
+                        // step has been taken.
+                        dev.accumulate_loss(v_diode, 0.0);
+                    } else {
+                        dev.accumulate_loss(v_diode, timestep_);
+                    }
+                }
             }, devices_[i]);
         }
     }
@@ -4396,9 +4559,20 @@ private:
             stamp_current_source(dev.current(), conn.nodes, b);
         }
         else if constexpr (std::is_same_v<T, IdealDiode>) {
-            // Initial guess: use off-state conductance for DC stamping
-            Real g = dev.is_conducting() ? 1e3 : 1e-9;
-            stamp_resistor(1.0 / g, conn.nodes, triplets);
+            // Initial guess for DC OP: use the device's own g_on / g_off
+            // (honors realistic forward model when V_F0 > 0). The Norton
+            // shift V_F0/R_d is added to `b` so the bias point converges
+            // toward I=0 at V_diode=V_F0 rather than V_diode=0.
+            const bool conducting = dev.is_conducting();
+            const Real g = conducting ? dev.effective_g_on() : dev.g_off();
+            stamp_resistor(1.0 / std::max<Real>(g, 1e-30), conn.nodes, triplets);
+            if (conducting) {
+                const Real I0 = dev.i_f0_offset();
+                const Index n_anode = conn.nodes[0];
+                const Index n_cathode = conn.nodes[1];
+                if (n_anode >= 0)   b[n_anode]   -= I0;
+                if (n_cathode >= 0) b[n_cathode] += I0;
+            }
         }
         else if constexpr (std::is_same_v<T, IdealSwitch>) {
             Real g = dev.is_closed() ? 1e6 : 1e-12;
@@ -4857,9 +5031,15 @@ private:
     }
 
     template<typename Triplets>
-    void stamp_diode_jacobian(const IdealDiode& /*dev*/, const std::vector<Index>& nodes,
+    void stamp_diode_jacobian(const IdealDiode& dev, const std::vector<Index>& nodes,
                               Triplets& triplets,
                               Vector& f, const Vector& x) const {
+        // Reads the device's own (g_on, g_off, V_F0, R_d) instead of the
+        // hardcoded `1e3 / 1e-9` stub that lived here pre-Phase-1. Honors
+        // the realistic forward model:
+        //
+        //   I_diode = effective_g_on · (V_diode − V_F0(T_j))   when conducting
+        //   I_diode = g_off · V_diode                         when off
         Index n_anode = nodes[0];
         Index n_cathode = nodes[1];
 
@@ -4867,13 +5047,15 @@ private:
         Real v_cathode = (n_cathode >= 0) ? x[n_cathode] : 0.0;
         Real v_diode = v_anode - v_cathode;
 
-        // Determine state (simple ideal model)
-        Real g = (v_diode > 0.0) ? 1e3 : 1e-9;
-        Real i = g * v_diode;
+        const Real v_thresh = (dev.V_F0() > 0.0) ? dev.V_F0_at_Tj() : 0.0;
+        const bool conducting = v_diode > v_thresh;
+        const Real g_on_eff = dev.effective_g_on();
+        const Real g = conducting ? g_on_eff : dev.g_off();
+        const Real i_diode = g * (v_diode - (conducting ? v_thresh : 0.0));
 
         stamp_conductance(g, n_anode, n_cathode, triplets);
-        if (n_anode >= 0) f[n_anode] += i;
-        if (n_cathode >= 0) f[n_cathode] -= i;
+        if (n_anode >= 0)   f[n_anode]   += i_diode;
+        if (n_cathode >= 0) f[n_cathode] -= i_diode;
     }
 
     template<typename Triplets>
