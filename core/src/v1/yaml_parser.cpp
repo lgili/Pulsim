@@ -330,6 +330,11 @@ const std::unordered_map<std::string, std::string>& component_alias_map() {
         add_aliases("induction_motor", {
             "inductionmotor", "induction", "im", "asyncmotor"});
 
+        // consolidate-motors-and-three-phase Item 3: zero-pin signal-
+        // domain devices. `nodes:` is optional in YAML for these types.
+        add_aliases("mechanical", {"mechanical_device", "shaft_device"});
+        add_aliases("pmsm_foc", {"pmsmfoc", "pmsm-foc", "foc_current_loop"});
+
         return map;
     }();
     return aliases;
@@ -389,6 +394,9 @@ const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>>& comp
         {"pmsm", {4, 4}},
         {"bldc_motor", {4, 4}},
         {"induction_motor", {4, 4}},
+        // consolidate-motors-and-three-phase Item 3: zero-pin signal-domain.
+        {"mechanical", {0, 0}},
+        {"pmsm_foc", {0, 0}},
         // Three-phase control blocks (Phase 28)
         {"clarke_transform", {3, 3}},
         {"inverse_clarke_transform", {3, 3}},
@@ -1728,7 +1736,9 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              // Generic mechanical fields (J = inertia, b = viscous
              // friction) used by every motor family — the same keys
              // would otherwise collide with the BJT `beta` block above.
-             "J", "b"},
+             "J", "b",
+             // Item 3: pmsm_foc current-loop tuning fields.
+             "bandwidth_hz", "Vd_min", "Vd_max", "Vq_min", "Vq_max"},
             "component", errors_, options_.strict);
 
         if (!comp["type"] || !comp["name"]) {
@@ -1746,14 +1756,29 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         }
 
         std::string name = comp["name"].as<std::string>();
-        if (!comp["nodes"]) {
-            push_error(errors_, kDiagInvalidPinCount, "Component missing nodes: " + name);
-            continue;
+        // consolidate-motors-and-three-phase Phase D / Item 3: zero-pin
+        // signal-domain devices (`mechanical`, `pmsm_foc`) skip the
+        // mandatory `nodes:` field — they have no electrical pins and no
+        // MNA contribution.
+        const bool is_signal_domain =
+            (type == "mechanical" || type == "pmsm_foc");
+        std::vector<std::string> nodes;
+        if (is_signal_domain) {
+            // Honor `nodes: []` if the user supplied it, but accept absence.
+            if (comp["nodes"]) {
+                nodes = parse_nodes(comp["nodes"], name, errors_);
+            }
+            // Don't validate empty — these types' arity is (0, 0).
+        } else {
+            if (!comp["nodes"]) {
+                push_error(errors_, kDiagInvalidPinCount,
+                           "Component missing nodes: " + name);
+                continue;
+            }
+            nodes = parse_nodes(comp["nodes"], name, errors_);
+            if (nodes.empty()) continue;
+            if (!validate_node_count(type, nodes, errors_, name)) continue;
         }
-
-        std::vector<std::string> nodes = parse_nodes(comp["nodes"], name, errors_);
-        if (nodes.empty()) continue;
-        if (!validate_node_count(type, nodes, errors_, name)) continue;
 
         const YAML::Node comp_view = comp;
         const YAML::Node params = comp_view["params"];
@@ -2118,6 +2143,39 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (get_param("tau_load_const")) p.tau_load_const = parse_real(get_param("tau_load_const"), name + ".tau_load_const", errors_);
             if (get_param("tau_load_quad_coeff")) p.tau_load_quad_coeff = parse_real(get_param("tau_load_quad_coeff"), name + ".tau_load_quad_coeff", errors_);
             circuit.add_induction_motor(name, node_at(0), node_at(1), node_at(2), node_at(3), p);
+        }
+        // consolidate-motors-and-three-phase Item 3: zero-pin signal-domain
+        // dispatch. Both devices accept the flat field set at the component
+        // level; the parser maps them onto the embedded Shaft / PmsmParams /
+        // PmsmFocCurrentLoopParams structures.
+        else if (type == "mechanical") {
+            MechanicalDevice::Params p{};
+            if (get_param("J")) p.shaft.J = parse_real(get_param("J"), name + ".J", errors_);
+            if (get_param("b_friction")) p.shaft.b_friction = parse_real(get_param("b_friction"), name + ".b_friction", errors_);
+            if (get_param("friction_coulomb")) p.shaft.friction_coulomb = parse_real(get_param("friction_coulomb"), name + ".friction_coulomb", errors_);
+            if (get_param("omega_init")) p.shaft.omega = parse_real(get_param("omega_init"), name + ".omega_init", errors_);
+            if (get_param("theta_init")) p.theta_init = parse_real(get_param("theta_init"), name + ".theta_init", errors_);
+            if (get_param("tau_load_const")) p.tau_load_const = parse_real(get_param("tau_load_const"), name + ".tau_load_const", errors_);
+            if (get_param("tau_load_quad_coeff")) p.tau_load_quad_coeff = parse_real(get_param("tau_load_quad_coeff"), name + ".tau_load_quad_coeff", errors_);
+            circuit.add_mechanical(name, p);
+        }
+        else if (type == "pmsm_foc") {
+            PmsmFocDevice::Params p{};
+            // Motor sub-block: same fields as the `pmsm` dispatch above.
+            if (get_param("Rs")) p.motor.Rs = parse_real(get_param("Rs"), name + ".Rs", errors_);
+            if (get_param("Ld")) p.motor.Ld = parse_real(get_param("Ld"), name + ".Ld", errors_);
+            if (get_param("Lq")) p.motor.Lq = parse_real(get_param("Lq"), name + ".Lq", errors_);
+            if (get_param("psi_pm")) p.motor.psi_pm = parse_real(get_param("psi_pm"), name + ".psi_pm", errors_);
+            if (get_param("pole_pairs")) p.motor.pole_pairs = static_cast<int>(parse_real(get_param("pole_pairs"), name + ".pole_pairs", errors_));
+            if (get_param("J")) p.motor.J = parse_real(get_param("J"), name + ".J", errors_);
+            if (get_param("b_friction")) p.motor.b_friction = parse_real(get_param("b_friction"), name + ".b_friction", errors_);
+            // FOC sub-block: bandwidth + clamps.
+            if (get_param("bandwidth_hz")) p.foc.bandwidth_hz = parse_real(get_param("bandwidth_hz"), name + ".bandwidth_hz", errors_);
+            if (get_param("Vd_min")) p.foc.Vd_min = parse_real(get_param("Vd_min"), name + ".Vd_min", errors_);
+            if (get_param("Vd_max")) p.foc.Vd_max = parse_real(get_param("Vd_max"), name + ".Vd_max", errors_);
+            if (get_param("Vq_min")) p.foc.Vq_min = parse_real(get_param("Vq_min"), name + ".Vq_min", errors_);
+            if (get_param("Vq_max")) p.foc.Vq_max = parse_real(get_param("Vq_max"), name + ".Vq_max", errors_);
+            circuit.add_pmsm_foc(name, p);
         }
         else if (type == "snubber_rc") {
             YAML::Node r_node = get_param("resistance");
