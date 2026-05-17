@@ -1523,22 +1523,52 @@ void Simulator::process_accepted_step_events(Real t, Real dt_used,
 
     // refactor-pwl-switching-engine, Phase 4: detect PWL device commutations
     // (diode sign flip, gate threshold crossing, vcswitch threshold) using
-    // each device's `should_commute()` predicate. First-order: commit at the
-    // end of the accepted step; bisection-to-event is a follow-up (4.4).
+    // each device's `should_commute()` predicate. Phase 4.4 wires the
+    // linear-interpolation bisection on top of the end-of-step scan: when
+    // a commutation is detected at x_now, the helper bisects α ∈ [0, 1]
+    // between x_prev and x_now to refine the event time within
+    // `event_tolerance`. The earliest-event subset becomes the committed
+    // set; later-firing devices defer to the next step's scan.
+    //
     // The circuit_default reflects `SimulationOptions.switching_mode`
     // (Phase 5 plumbing).
-    const auto pwl_events = circuit_.scan_pwl_commutations(
+    const auto end_of_step_events = circuit_.scan_pwl_commutations(
         step_result.solution, circuit_.default_switching_mode());
-    if (!pwl_events.empty()) {
-        circuit_.commit_pwl_commutations(pwl_events);
+    if (!end_of_step_events.empty()) {
+        // Phase 4.4: bisect to find the earliest commutation α. Fall back
+        // to end-of-step commit when the bisection helper returns nullopt
+        // (no event in the [x_prev, x_now] linear interpolant — race
+        // condition: a device flipped between scan and bisection, or the
+        // initial scan caught a numerical false positive at α=1.0).
+        Real event_time = t + dt_used;
+        std::vector<Circuit::PwlCommutation> committed_events =
+            end_of_step_events;
+
+        // Default α-domain tolerance 1e-9 → event time resolved to
+        // 1e-9 × dt_used (≤ 1 fs for dt = 1 µs, well past Real precision
+        // for any realistic step size). A SimulationOptions knob can be
+        // exposed later if a use case demands tighter / looser bisection.
+        auto bisected = circuit_.bisect_pwl_event_alpha(
+            x_prev,
+            step_result.solution,
+            circuit_.default_switching_mode());
+        if (bisected.has_value()) {
+            event_time = t + bisected->alpha * dt_used;
+            committed_events = std::move(bisected->events);
+            // Phase 4.4 telemetry: count the bisection, not the
+            // commutations (those land in pwl_event_commutations below).
+            result.backend_telemetry.pwl_event_bisections += 1;
+        }
+
+        circuit_.commit_pwl_commutations(committed_events);
         // Phase 6 telemetry: a transition is "≥1 commutation in this step";
         // commutations counts individual device flips.
         result.backend_telemetry.pwl_topology_transitions += 1;
         result.backend_telemetry.pwl_event_commutations +=
-            static_cast<int>(pwl_events.size());
-        for (const auto& evt : pwl_events) {
+            static_cast<int>(committed_events.size());
+        for (const auto& evt : committed_events) {
             SimulationEvent sim_event;
-            sim_event.time = t + dt_used;
+            sim_event.time = event_time;
             sim_event.type = evt.new_state ? SimulationEventType::SwitchOn
                                             : SimulationEventType::SwitchOff;
             sim_event.component = evt.device_name;
@@ -1547,7 +1577,7 @@ void Simulator::process_accepted_step_events(Real t, Real dt_used,
             if (event_callback) {
                 SwitchEvent cb;
                 cb.switch_name = evt.device_name;
-                cb.time = t + dt_used;
+                cb.time = event_time;
                 cb.new_state = evt.new_state;
                 event_callback(cb);
             }

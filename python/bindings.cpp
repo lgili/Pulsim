@@ -269,7 +269,38 @@ void init_v2_module(py::module_& v2) {
         .def(py::init<Real, const std::string&>(),
              py::arg("resistance"), py::arg("name") = "")
         .def("resistance", &Resistor::resistance)
-        .def("name", &Resistor::name);
+        .def("name", &Resistor::name)
+        // Loss + thermal (Phase 3, Pulsim 0.10.0a10).
+        .def("TCR",      &Resistor::TCR)
+        .def("R_th_ja",  &Resistor::R_th_ja)
+        .def("T_amb",    &Resistor::T_amb)
+        .def("R_at_Tj",  &Resistor::R_at_Tj)
+        .def("average_power",  &Resistor::average_power)
+        .def("peak_power",     &Resistor::peak_power)
+        .def("total_energy",   &Resistor::total_energy)
+        .def("last_current",   &Resistor::last_current)
+        .def("last_voltage",   &Resistor::last_voltage)
+        .def("junction_temperature", &Resistor::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &Resistor::steady_state_junction_temperature)
+        .def("set_T_j_init",   &Resistor::set_T_j_init)
+        .def("reset_loss",     &Resistor::reset_loss);
+
+    // Resistor::Params for the new (params)-overload of add_resistor.
+    py::class_<Resistor::Params>(v2, "ResistorParams",
+            "Resistor parameters incl. TCR + thermal binding (Pulsim 0.10.0a10).")
+        .def(py::init<>())
+        .def_readwrite("resistance", &Resistor::Params::resistance,
+                       "Ω at T_ref.")
+        .def_readwrite("TCR",        &Resistor::Params::TCR,
+                       "Temperature coefficient (1/K).")
+        .def_readwrite("T_ref",      &Resistor::Params::T_ref,
+                       "Reference temperature (°C).")
+        .def_readwrite("R_th_ja",    &Resistor::Params::R_th_ja,
+                       "Junction-to-ambient (K/W). 0 disables the "
+                       "loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",      &Resistor::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<Capacitor>(v2, "Capacitor", "CRTP Capacitor device")
         .def(py::init<Real, Real, const std::string&>(),
@@ -277,7 +308,40 @@ void init_v2_module(py::module_& v2) {
              py::arg("name") = "")
         .def("capacitance", &Capacitor::capacitance)
         .def("name", &Capacitor::name)
-        .def("set_timestep", &Capacitor::set_timestep);
+        .def("set_timestep", &Capacitor::set_timestep)
+        // Loss + thermal (Phase 3, Pulsim 0.10.0a9).
+        .def("ESR",      &Capacitor::ESR)
+        .def("R_th_ja",  &Capacitor::R_th_ja)
+        .def("T_amb",    &Capacitor::T_amb)
+        .def("ESR_at_Tj", &Capacitor::ESR_at_Tj)
+        .def("average_power",  &Capacitor::average_power)
+        .def("peak_power",     &Capacitor::peak_power)
+        .def("total_energy",   &Capacitor::total_energy)
+        .def("last_current",   &Capacitor::last_current)
+        .def("junction_temperature", &Capacitor::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &Capacitor::steady_state_junction_temperature)
+        .def("set_T_j_init",   &Capacitor::set_T_j_init)
+        .def("reset_loss",     &Capacitor::reset_loss);
+
+    py::class_<Capacitor::Params>(v2, "CapacitorParams",
+            "Capacitor parameters incl. ESR + thermal binding (Pulsim 0.10.0a9).")
+        .def(py::init<>())
+        .def_readwrite("capacitance",     &Capacitor::Params::capacitance,
+                       "F.")
+        .def_readwrite("initial_voltage", &Capacitor::Params::initial_voltage,
+                       "V.")
+        .def_readwrite("ESR",             &Capacitor::Params::ESR,
+                       "Equivalent series resistance at T_ref (Ω).")
+        .def_readwrite("ESR_tc",          &Capacitor::Params::ESR_tc,
+                       "ESR temperature coefficient (1/K).")
+        .def_readwrite("T_ref",           &Capacitor::Params::T_ref,
+                       "Reference temperature (°C).")
+        .def_readwrite("R_th_ja",         &Capacitor::Params::R_th_ja,
+                       "Junction-to-ambient (K/W). 0 disables the "
+                       "loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",           &Capacitor::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<Inductor>(v2, "Inductor", "CRTP Inductor device")
         .def(py::init<Real, Real, const std::string&>(),
@@ -285,7 +349,41 @@ void init_v2_module(py::module_& v2) {
              py::arg("name") = "")
         .def("inductance", &Inductor::inductance)
         .def("name", &Inductor::name)
-        .def("set_timestep", &Inductor::set_timestep);
+        .def("set_timestep", &Inductor::set_timestep)
+        // Loss + thermal (Phase 3, Pulsim 0.10.0a11).
+        .def("DCR",      &Inductor::DCR)
+        .def("R_th_ja",  &Inductor::R_th_ja)
+        .def("T_amb",    &Inductor::T_amb)
+        .def("DCR_at_Tj", &Inductor::DCR_at_Tj)
+        .def("average_power",  &Inductor::average_power)
+        .def("peak_power",     &Inductor::peak_power)
+        .def("total_energy",   &Inductor::total_energy)
+        .def("last_current",   &Inductor::last_current)
+        .def("junction_temperature", &Inductor::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &Inductor::steady_state_junction_temperature)
+        .def("set_T_j_init",   &Inductor::set_T_j_init)
+        .def("reset_loss",     &Inductor::reset_loss);
+
+    py::class_<Inductor::Params>(v2, "InductorParams",
+            "Inductor parameters incl. DCR + thermal binding (Pulsim 0.10.0a11).")
+        .def(py::init<>())
+        .def_readwrite("inductance",      &Inductor::Params::inductance,
+                       "H.")
+        .def_readwrite("initial_current", &Inductor::Params::initial_current,
+                       "A.")
+        .def_readwrite("DCR",             &Inductor::Params::DCR,
+                       "DC winding resistance at T_ref (Ω).")
+        .def_readwrite("DCR_tc",          &Inductor::Params::DCR_tc,
+                       "DCR temperature coefficient (1/K, copper "
+                       "default 3.9e-3).")
+        .def_readwrite("T_ref",           &Inductor::Params::T_ref,
+                       "Reference temperature (°C).")
+        .def_readwrite("R_th_ja",         &Inductor::Params::R_th_ja,
+                       "Junction-to-ambient (K/W). 0 disables the "
+                       "loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",           &Inductor::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<VoltageSource>(v2, "VoltageSource", "CRTP Voltage source")
         .def(py::init<Real, const std::string&>(),
@@ -307,7 +405,61 @@ void init_v2_module(py::module_& v2) {
         .def(py::init<Real, Real, std::string>(),
              py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9, py::arg("name") = "")
         .def("is_conducting", &IdealDiode::is_conducting)
-        .def("name", &IdealDiode::name);
+        .def("name", &IdealDiode::name)
+        // Realistic-loss + thermal accessors (Phase 1 of inverter-bridge-losses).
+        .def("V_F0", &IdealDiode::V_F0)
+        .def("R_d",  &IdealDiode::R_d)
+        .def("V_F0_at_Tj", &IdealDiode::V_F0_at_Tj)
+        .def("average_power", &IdealDiode::average_power)
+        .def("peak_power",    &IdealDiode::peak_power)
+        .def("total_energy",  &IdealDiode::total_energy)
+        .def("last_current",  &IdealDiode::last_current)
+        .def("last_voltage",  &IdealDiode::last_voltage)
+        .def("junction_temperature", &IdealDiode::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &IdealDiode::steady_state_junction_temperature)
+        .def("reset_loss", &IdealDiode::reset_loss)
+        .def("set_T_j_init", &IdealDiode::set_T_j_init);
+
+    // Realistic diode params struct exposed for `add_diode(..., params)`
+    // and for the bridge-rectifier helper. Named `RealisticDiodeParams`
+    // to avoid collision with the Python-side legacy `DiodeParams`
+    // wrapper that carries (g_on, g_off, ideal, is_, n).
+    py::class_<IdealDiode::Params>(
+            v2, "RealisticDiodeParams",
+            "Realistic diode parameters (V_F0 + R_d linear fit, optional "
+            "T_j feedback, R_th_ja thermal binding). Defaults preserve the "
+            "legacy IdealDiode behaviour when V_F0 == 0.")
+        .def(py::init<>())
+        .def_readwrite("g_on",       &IdealDiode::Params::g_on,
+                       "On-state conductance (1/R_on) when V_F0 == 0.")
+        .def_readwrite("g_off",      &IdealDiode::Params::g_off,
+                       "Off-state leakage conductance.")
+        .def_readwrite("v_threshold",&IdealDiode::Params::v_threshold,
+                       "Legacy threshold (0 for ideal).")
+        .def_readwrite("v_smooth",   &IdealDiode::Params::v_smooth,
+                       "Smoothing voltage for the Behavioral path.")
+        .def_readwrite("V_F0",       &IdealDiode::Params::V_F0,
+                       "Forward-voltage offset at T_ref (V). 0 disables the "
+                       "realistic linear-fit model.")
+        .def_readwrite("R_d",        &IdealDiode::Params::R_d,
+                       "Differential on-resistance (Ω). Overrides 1/g_on "
+                       "when V_F0 > 0.")
+        .def_readwrite("V_F0_tc",    &IdealDiode::Params::V_F0_tc,
+                       "V_F0 temperature coefficient (V/K, typically -2 mV/K).")
+        .def_readwrite("T_ref",      &IdealDiode::Params::T_ref,
+                       "Reference temperature for V_F0_tc (°C).")
+        .def_readwrite("R_th_ja",    &IdealDiode::Params::R_th_ja,
+                       "Junction-to-ambient thermal resistance (K/W).")
+        .def_readwrite("T_amb",      &IdealDiode::Params::T_amb,
+                       "Ambient temperature (°C).")
+        // Reverse-recovery loss (Phase 4 of inverter-bridge-losses).
+        .def_readwrite("Qrr",        &IdealDiode::Params::Qrr,
+                       "Reverse-recovery charge per ON→OFF event (C). "
+                       "0 disables E_rec accumulation.")
+        .def_readwrite("Erec_shape", &IdealDiode::Params::Erec_shape,
+                       "Recovery waveform shape (0..1; 0.5 = symmetric "
+                       "triangular, 0.33 = soft-recovery, 0.67 = hard).");
 
     py::class_<IdealSwitch>(v2, "IdealSwitch", "Controllable ideal switch")
         .def(py::init<Real, Real, bool, std::string>(),
@@ -326,7 +478,30 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("kp", &MOSFET::Params::kp, "Transconductance (A/V^2)")
         .def_readwrite("lambda_", &MOSFET::Params::lambda, "Channel-length modulation (1/V)")
         .def_readwrite("g_off", &MOSFET::Params::g_off, "Off-state conductance")
-        .def_readwrite("is_nmos", &MOSFET::Params::is_nmos, "True for NMOS, False for PMOS");
+        .def_readwrite("g_on",  &MOSFET::Params::g_on,
+                       "On-state conductance (1/R_ds(on)).")
+        .def_readwrite("is_nmos", &MOSFET::Params::is_nmos, "True for NMOS, False for PMOS")
+        // Loss + thermal (Phase 2 of inverter-bridge-losses).
+        .def_readwrite("Rds_on_tc", &MOSFET::Params::Rds_on_tc,
+                       "R_ds(on) temperature coefficient (1/K).")
+        .def_readwrite("T_ref",     &MOSFET::Params::T_ref,
+                       "Reference temperature for Rds_on_tc (°C).")
+        .def_readwrite("R_th_ja",   &MOSFET::Params::R_th_ja,
+                       "Junction-to-ambient thermal resistance (K/W). "
+                       "0 disables the loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",     &MOSFET::Params::T_amb,
+                       "Ambient temperature (°C).")
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def_readwrite("Eon_25",    &MOSFET::Params::Eon_25,
+                       "Turn-on energy per event at T_ref (J).")
+        .def_readwrite("Eoff_25",   &MOSFET::Params::Eoff_25,
+                       "Turn-off energy per event at T_ref (J).")
+        .def_readwrite("I_ref",     &MOSFET::Params::I_ref,
+                       "Reference current for E_sw scaling (A).")
+        .def_readwrite("V_ref",     &MOSFET::Params::V_ref,
+                       "Reference voltage for E_sw scaling (V).")
+        .def_readwrite("Esw_tc",    &MOSFET::Params::Esw_tc,
+                       "Switching-energy temperature coefficient (1/K).");
 
     py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -343,7 +518,32 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("vth", &IGBT::Params::vth, "Gate threshold voltage (V)")
         .def_readwrite("g_on", &IGBT::Params::g_on, "On-state conductance (S)")
         .def_readwrite("g_off", &IGBT::Params::g_off, "Off-state conductance (S)")
-        .def_readwrite("v_ce_sat", &IGBT::Params::v_ce_sat, "Collector-emitter saturation (V)");
+        .def_readwrite("v_ce_sat", &IGBT::Params::v_ce_sat, "Collector-emitter saturation (V)")
+        // Loss + thermal (Phase 2 of inverter-bridge-losses).
+        .def_readwrite("Rce",       &IGBT::Params::Rce,
+                       "Bulk on-state resistance R_CE (Ω).")
+        .def_readwrite("Rce_tc",    &IGBT::Params::Rce_tc,
+                       "R_CE temperature coefficient (1/K).")
+        .def_readwrite("V_ce_tc",   &IGBT::Params::V_ce_tc,
+                       "V_ce_sat temperature coefficient (V/K).")
+        .def_readwrite("T_ref",     &IGBT::Params::T_ref,
+                       "Reference temperature for the TCs (°C).")
+        .def_readwrite("R_th_ja",   &IGBT::Params::R_th_ja,
+                       "Junction-to-ambient thermal resistance (K/W). "
+                       "0 disables the loss accumulator (backward-compat).")
+        .def_readwrite("T_amb",     &IGBT::Params::T_amb,
+                       "Ambient temperature (°C).")
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def_readwrite("Eon_25",    &IGBT::Params::Eon_25,
+                       "Turn-on energy per event at T_ref (J).")
+        .def_readwrite("Eoff_25",   &IGBT::Params::Eoff_25,
+                       "Turn-off energy per event at T_ref (J).")
+        .def_readwrite("I_ref",     &IGBT::Params::I_ref,
+                       "Reference current for E_sw scaling (A).")
+        .def_readwrite("V_ref",     &IGBT::Params::V_ref,
+                       "Reference voltage for E_sw scaling (V).")
+        .def_readwrite("Esw_tc",    &IGBT::Params::Esw_tc,
+                       "Switching-energy temperature coefficient (1/K).");
 
     py::class_<IGBT>(v2, "IGBT", "Simplified IGBT power device model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -396,6 +596,74 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("unbalance_factor",
                        &Circuit::ThreePhaseSourceParams::unbalance_factor,
                        "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u");
+
+    py::enum_<Circuit::PwmModulation>(
+            v2, "PwmModulation",
+            "Modulation type for the sinusoidal-modulated PWM source.")
+        .value("Sine", Circuit::PwmModulation::Sine)
+        .value("SVM",  Circuit::PwmModulation::SVM);
+
+    py::class_<Circuit::ModulatedPwmParams>(
+            v2, "ModulatedPwmParams",
+            "Sinusoidal-modulated PWM source parameters (Pulsim 0.10.0a10). "
+            "The duty cycle of a PWMVoltageSource is modulated by a sine "
+            "(SPWM) or SVPWM reference at `modulation_frequency_hz`. Use the "
+            "3-phase VSI helper instead when you need 3 such sources with "
+            "120° offsets and a full 6-MOSFET inverter.")
+        .def(py::init<>())
+        .def_readwrite("v_high", &Circuit::ModulatedPwmParams::v_high,
+                       "PWM ON-state output (V).")
+        .def_readwrite("v_low",  &Circuit::ModulatedPwmParams::v_low,
+                       "PWM OFF-state output (V).")
+        .def_readwrite("switching_frequency_hz",
+                       &Circuit::ModulatedPwmParams::switching_frequency_hz,
+                       "PWM carrier frequency (Hz).")
+        .def_readwrite("modulation_index",
+                       &Circuit::ModulatedPwmParams::modulation_index,
+                       "0..1 for Sine (SPWM linear range), 0..1.155 for SVM.")
+        .def_readwrite("modulation_frequency_hz",
+                       &Circuit::ModulatedPwmParams::modulation_frequency_hz,
+                       "Fundamental output frequency (Hz).")
+        .def_readwrite("phase_deg",
+                       &Circuit::ModulatedPwmParams::phase_deg,
+                       "Reference phase (degrees).")
+        .def_readwrite("modulation",
+                       &Circuit::ModulatedPwmParams::modulation,
+                       "PwmModulation.Sine (SPWM) or PwmModulation.SVM "
+                       "(3rd-harmonic injection).");
+
+    py::class_<Circuit::ThreePhaseVsiParams>(
+            v2, "ThreePhaseVsiParams",
+            "Three-phase 2-level VSI helper parameters (Track 4 follow-up).")
+        .def(py::init<>())
+        .def_readwrite("v_gate_on",
+                       &Circuit::ThreePhaseVsiParams::v_gate_on,
+                       "Gate ON drive voltage (V).")
+        .def_readwrite("v_gate_off",
+                       &Circuit::ThreePhaseVsiParams::v_gate_off,
+                       "Gate OFF drive voltage (V).")
+        .def_readwrite("switching_frequency_hz",
+                       &Circuit::ThreePhaseVsiParams::switching_frequency_hz,
+                       "PWM carrier (switching) frequency (Hz).")
+        .def_readwrite("modulation_index",
+                       &Circuit::ThreePhaseVsiParams::modulation_index,
+                       "SPWM modulation index (0..1 linear range; 1.0 = "
+                       "full-rail SPWM, ~0.866·V_dc line-to-line peak).")
+        .def_readwrite("modulation_frequency_hz",
+                       &Circuit::ThreePhaseVsiParams::modulation_frequency_hz,
+                       "Output fundamental frequency (Hz).")
+        .def_readwrite("phase_a_deg",
+                       &Circuit::ThreePhaseVsiParams::phase_a_deg,
+                       "Phase A reference angle (degrees).")
+        .def_readwrite("positive_sequence",
+                       &Circuit::ThreePhaseVsiParams::positive_sequence,
+                       "True = positive (abc) sequence; False = (acb).")
+        .def_readwrite("mosfet_r_on_ohm",
+                       &Circuit::ThreePhaseVsiParams::mosfet_r_on_ohm,
+                       "MOSFET R_ds(on) (Ω). Default 10 mΩ.")
+        .def_readwrite("mosfet_vth",
+                       &Circuit::ThreePhaseVsiParams::mosfet_vth,
+                       "MOSFET gate threshold voltage (V). Default 1 V.");
 
     py::enum_<Circuit::ThreePhaseLoadTopology>(
             v2, "ThreePhaseLoadTopology",
@@ -468,6 +736,41 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("omega_init", &motors::DcMotorParams::omega_init,
                        "Initial mechanical angular velocity (rad/s).")
         .def_readwrite("theta_init", &motors::DcMotorParams::theta_init,
+                       "Initial rotor angle (rad).");
+
+    // PMSM (dynamic device-variant, Track 2.2 of the three-phase motors and
+    // magnetics integration). Reuses the same parameter struct as the math
+    // class in core/include/pulsim/v1/motors/pmsm.hpp.
+    py::class_<motors::PmsmParams>(
+            v2, "PmsmParams",
+            "Dynamic PMSM parameters (Track 2.2). Used by Circuit::add_pmsm.")
+        .def(py::init<>())
+        .def_readwrite("name", &motors::PmsmParams::name,
+                       "Motor name (optional, used for telemetry).")
+        .def_readwrite("Rs", &motors::PmsmParams::Rs,
+                       "Stator phase resistance (Ω).")
+        .def_readwrite("Ld", &motors::PmsmParams::Ld,
+                       "d-axis stator inductance (H).")
+        .def_readwrite("Lq", &motors::PmsmParams::Lq,
+                       "q-axis stator inductance (H). Lq > Ld → IPM (saliency).")
+        .def_readwrite("psi_pm", &motors::PmsmParams::psi_pm,
+                       "Rotor flux linkage from permanent magnet (V·s/rad).")
+        .def_readwrite("pole_pairs", &motors::PmsmParams::pole_pairs,
+                       "Number of pole pairs (poles / 2).")
+        .def_readwrite("J", &motors::PmsmParams::J,
+                       "Rotor inertia (kg·m²).")
+        .def_readwrite("b_friction", &motors::PmsmParams::b_friction,
+                       "Viscous friction coefficient (N·m·s) — linear in ω.")
+        .def_readwrite("friction_coulomb",
+                       &motors::PmsmParams::friction_coulomb,
+                       "Coulomb friction torque (N·m) — sign(ω)·τ_C.")
+        .def_readwrite("i_d_init", &motors::PmsmParams::i_d_init,
+                       "Initial d-axis current (A).")
+        .def_readwrite("i_q_init", &motors::PmsmParams::i_q_init,
+                       "Initial q-axis current (A).")
+        .def_readwrite("omega_init", &motors::PmsmParams::omega_init,
+                       "Initial mechanical angular velocity (rad/s).")
+        .def_readwrite("theta_init", &motors::PmsmParams::theta_init,
                        "Initial rotor angle (rad).");
 
     py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
@@ -698,31 +1001,233 @@ void init_v2_module(py::module_& v2) {
         .def("initial_state", &Circuit::initial_state,
              "Build initial state vector from device initial conditions")
         // Device addition
-        .def("add_resistor", &Circuit::add_resistor,
+        .def("add_resistor",
+             py::overload_cast<const std::string&, Index, Index, Real>(
+                 &Circuit::add_resistor),
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
-             "Add resistor between nodes n1 and n2")
-        .def("add_capacitor", &Circuit::add_capacitor,
+             "Add resistor between nodes n1 and n2 (legacy: nominal R only).")
+        .def("add_resistor",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Resistor::Params&>(
+                 &Circuit::add_resistor),
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("params"),
+             "Add resistor with full Params (TCR + thermal binding).")
+        .def("add_capacitor",
+             py::overload_cast<const std::string&, Index, Index, Real, Real>(
+                 &Circuit::add_capacitor),
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("C"),
              py::arg("ic") = 0.0,
-             "Add capacitor between nodes n1 and n2")
+             "Add capacitor between nodes n1 and n2 (legacy: C + initial V only).")
+        .def("add_capacitor",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Capacitor::Params&>(
+                 &Circuit::add_capacitor),
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("params"),
+             "Add capacitor with full Params (ESR + thermal binding).")
         .def("add_snubber_rc", &Circuit::add_snubber_rc,
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("R"),
              py::arg("C"), py::arg("ic") = 0.0,
              "Add RC snubber (parallel R-C) between nodes n1 and n2")
-        .def("add_inductor", &Circuit::add_inductor,
+        .def("add_inductor",
+             py::overload_cast<const std::string&, Index, Index, Real, Real>(
+                 &Circuit::add_inductor),
              py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("L"),
              py::arg("ic") = 0.0,
-             "Add inductor between nodes n1 and n2")
+             "Add inductor between nodes n1 and n2 (legacy: L + initial I only).")
+        .def("add_inductor",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Inductor::Params&>(
+                 &Circuit::add_inductor),
+             py::arg("name"), py::arg("n1"), py::arg("n2"), py::arg("params"),
+             "Add inductor with full Params (DCR + thermal binding).")
         .def("add_voltage_source", &Circuit::add_voltage_source,
              py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("V"),
              "Add voltage source from npos to nneg")
         .def("add_current_source", &Circuit::add_current_source,
              py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("I"),
              "Add current source from npos to nneg")
-        .def("add_diode", &Circuit::add_diode,
+        .def("add_diode",
+             py::overload_cast<const std::string&, Index, Index, Real, Real>(
+                 &Circuit::add_diode),
              py::arg("name"), py::arg("anode"), py::arg("cathode"),
              py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9,
-             "Add ideal diode from anode to cathode")
+             "Add ideal diode from anode to cathode (legacy 2-conductance form).")
+        .def("add_diode",
+             py::overload_cast<const std::string&, Index, Index,
+                               const IdealDiode::Params&>(
+                 &Circuit::add_diode),
+             py::arg("name"), py::arg("anode"), py::arg("cathode"),
+             py::arg("params"),
+             "Add a diode with full parameter control (V_F0, R_d, thermal "
+             "binding). Set params.V_F0 > 0 to enable the realistic "
+             "linear-fit forward model used by powerStage-style validation.")
+        // Bridge rectifier helper — Phase 1 of inverter-bridge-losses.
+        .def("add_bridge_rectifier",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               const IdealDiode::Params&>(
+                 &Circuit::add_bridge_rectifier),
+             py::arg("name"), py::arg("ac_a"), py::arg("ac_b"),
+             py::arg("dc_pos"), py::arg("dc_neg"), py::arg("params"),
+             "Add a full-wave 4-diode bridge rectifier. Each of the 4 "
+             "internal diodes is named '<name>__D1' .. '<name>__D4' and "
+             "exposes its own per-diode loss + T_j after the transient.")
+        .def("add_bridge_rectifier",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               Real, Real, Real, Real>(
+                 &Circuit::add_bridge_rectifier),
+             py::arg("name"), py::arg("ac_a"), py::arg("ac_b"),
+             py::arg("dc_pos"), py::arg("dc_neg"),
+             py::arg("V_F0"), py::arg("R_d"),
+             py::arg("R_th_ja") = 25.0, py::arg("T_amb") = 25.0,
+             "Convenience overload: bridge rectifier with explicit "
+             "(V_F0, R_d, R_th_ja, T_amb) numbers (no params struct).")
+        // Diode loss + thermal accessors.
+        .def("diode_average_power",  &Circuit::diode_average_power,
+             py::arg("name"),
+             "Time-averaged conduction power dissipated in the named diode "
+             "over the simulation (W). NaN if the device does not exist.")
+        .def("diode_peak_power",     &Circuit::diode_peak_power,
+             py::arg("name"))
+        .def("diode_total_energy",   &Circuit::diode_total_energy,
+             py::arg("name"))
+        .def("diode_junction_temperature",
+             &Circuit::diode_junction_temperature, py::arg("name"),
+             "T_j currently assumed by the device's stamping (set at init "
+             "from params.T_amb, or via set_diode_T_j during fixed-point "
+             "electrothermal iteration).")
+        .def("diode_steady_state_junction_temperature",
+             &Circuit::diode_steady_state_junction_temperature, py::arg("name"),
+             "Steady-state T_j derived from running P_avg + R_th_ja. Use "
+             "this output, push it back via set_diode_T_j, and re-run to "
+             "iterate toward an electrothermally-consistent operating point.")
+        .def("diode_last_current",   &Circuit::diode_last_current,
+             py::arg("name"))
+        .def("diode_last_voltage",   &Circuit::diode_last_voltage,
+             py::arg("name"))
+        .def("diode_conduction_time", &Circuit::diode_conduction_time,
+             py::arg("name"))
+        // Phase 4 of inverter-bridge-losses: reverse-recovery loss.
+        .def("diode_switching_energy",
+             &Circuit::diode_switching_energy, py::arg("name"),
+             "Reverse-recovery energy accumulated over the simulation (J). "
+             "Zero unless params.Qrr > 0.")
+        .def("diode_average_switching_power",
+             &Circuit::diode_average_switching_power, py::arg("name"),
+             "Time-averaged reverse-recovery dissipation (W).")
+        .def("diode_switching_events",
+             &Circuit::diode_switching_events, py::arg("name"),
+             "Number of ON→OFF transitions recorded.")
+        .def("diode_conduction_energy",
+             &Circuit::diode_conduction_energy, py::arg("name"),
+             "Conduction-only energy (J), excluding reverse-recovery.")
+        .def("set_diode_T_j",        &Circuit::set_diode_T_j,
+             py::arg("name"), py::arg("t_j"),
+             "Override the device's stamping T_j (for the next sim pass).")
+        .def("reset_diode_loss",     &Circuit::reset_diode_loss,
+             py::arg("name"),
+             "Zero out the loss accumulator on the named diode.")
+        // MOSFET / IGBT loss + thermal accessors (Phase 2 of
+        // inverter-bridge-losses). Active only when the device's
+        // params.R_th_ja > 0; otherwise return 0 / T_amb.
+        .def("mosfet_average_power", &Circuit::mosfet_average_power, py::arg("name"))
+        .def("mosfet_peak_power",    &Circuit::mosfet_peak_power, py::arg("name"))
+        .def("mosfet_total_energy",  &Circuit::mosfet_total_energy, py::arg("name"))
+        .def("mosfet_junction_temperature",
+             &Circuit::mosfet_junction_temperature, py::arg("name"))
+        .def("mosfet_steady_state_junction_temperature",
+             &Circuit::mosfet_steady_state_junction_temperature, py::arg("name"))
+        .def("mosfet_last_current",  &Circuit::mosfet_last_current, py::arg("name"))
+        .def("mosfet_last_voltage",  &Circuit::mosfet_last_voltage, py::arg("name"))
+        .def("set_mosfet_T_j",       &Circuit::set_mosfet_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_mosfet_loss",    &Circuit::reset_mosfet_loss, py::arg("name"))
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def("mosfet_switching_energy",
+             &Circuit::mosfet_switching_energy, py::arg("name"),
+             "E_on + E_off energy accumulated over the simulation (J).")
+        .def("mosfet_average_switching_power",
+             &Circuit::mosfet_average_switching_power, py::arg("name"),
+             "Time-averaged switching dissipation (W).")
+        .def("mosfet_average_conduction_power",
+             &Circuit::mosfet_average_conduction_power, py::arg("name"),
+             "Time-averaged conduction-only dissipation (W).")
+        .def("mosfet_switching_events",
+             &Circuit::mosfet_switching_events, py::arg("name"),
+             "Number of state transitions recorded.")
+        .def("igbt_average_power",   &Circuit::igbt_average_power, py::arg("name"))
+        .def("igbt_peak_power",      &Circuit::igbt_peak_power, py::arg("name"))
+        .def("igbt_total_energy",    &Circuit::igbt_total_energy, py::arg("name"))
+        .def("igbt_junction_temperature",
+             &Circuit::igbt_junction_temperature, py::arg("name"))
+        .def("igbt_steady_state_junction_temperature",
+             &Circuit::igbt_steady_state_junction_temperature, py::arg("name"))
+        .def("igbt_last_current",    &Circuit::igbt_last_current, py::arg("name"))
+        .def("igbt_last_voltage",    &Circuit::igbt_last_voltage, py::arg("name"))
+        .def("set_igbt_T_j",         &Circuit::set_igbt_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_igbt_loss",      &Circuit::reset_igbt_loss, py::arg("name"))
+        // Switching loss (Phase 4 of inverter-bridge-losses).
+        .def("igbt_switching_energy",
+             &Circuit::igbt_switching_energy, py::arg("name"))
+        .def("igbt_average_switching_power",
+             &Circuit::igbt_average_switching_power, py::arg("name"))
+        .def("igbt_average_conduction_power",
+             &Circuit::igbt_average_conduction_power, py::arg("name"))
+        .def("igbt_switching_events",
+             &Circuit::igbt_switching_events, py::arg("name"))
+        // ----- Passive loss + thermal accessors (Phase 3,
+        //       Pulsim 0.10.0a9 / a10 / a11).
+        .def("capacitor_average_power",
+             &Circuit::capacitor_average_power, py::arg("name"))
+        .def("capacitor_peak_power",
+             &Circuit::capacitor_peak_power, py::arg("name"))
+        .def("capacitor_total_energy",
+             &Circuit::capacitor_total_energy, py::arg("name"))
+        .def("capacitor_junction_temperature",
+             &Circuit::capacitor_junction_temperature, py::arg("name"))
+        .def("capacitor_steady_state_junction_temperature",
+             &Circuit::capacitor_steady_state_junction_temperature,
+             py::arg("name"))
+        .def("capacitor_last_current",
+             &Circuit::capacitor_last_current, py::arg("name"))
+        .def("set_capacitor_T_j",  &Circuit::set_capacitor_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_capacitor_loss",
+             &Circuit::reset_capacitor_loss, py::arg("name"))
+        .def("resistor_average_power",
+             &Circuit::resistor_average_power, py::arg("name"))
+        .def("resistor_peak_power",
+             &Circuit::resistor_peak_power, py::arg("name"))
+        .def("resistor_total_energy",
+             &Circuit::resistor_total_energy, py::arg("name"))
+        .def("resistor_junction_temperature",
+             &Circuit::resistor_junction_temperature, py::arg("name"))
+        .def("resistor_steady_state_junction_temperature",
+             &Circuit::resistor_steady_state_junction_temperature,
+             py::arg("name"))
+        .def("resistor_last_current",
+             &Circuit::resistor_last_current, py::arg("name"))
+        .def("set_resistor_T_j",  &Circuit::set_resistor_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_resistor_loss",
+             &Circuit::reset_resistor_loss, py::arg("name"))
+        .def("inductor_average_power",
+             &Circuit::inductor_average_power, py::arg("name"))
+        .def("inductor_peak_power",
+             &Circuit::inductor_peak_power, py::arg("name"))
+        .def("inductor_total_energy",
+             &Circuit::inductor_total_energy, py::arg("name"))
+        .def("inductor_junction_temperature",
+             &Circuit::inductor_junction_temperature, py::arg("name"))
+        .def("inductor_steady_state_junction_temperature",
+             &Circuit::inductor_steady_state_junction_temperature,
+             py::arg("name"))
+        .def("inductor_last_current",
+             &Circuit::inductor_last_current, py::arg("name"))
+        .def("set_inductor_T_j",  &Circuit::set_inductor_T_j,
+             py::arg("name"), py::arg("t_j"))
+        .def("reset_inductor_loss",
+             &Circuit::reset_inductor_loss, py::arg("name"))
         .def("add_switch", &Circuit::add_switch,
              py::arg("name"), py::arg("n1"), py::arg("n2"),
              py::arg("closed") = false, py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
@@ -760,6 +1265,30 @@ void init_v2_module(py::module_& v2) {
              py::arg("name"), py::arg("npos"), py::arg("nneg"),
              py::arg("v_high"), py::arg("v_low"), py::arg("frequency"), py::arg("duty"),
              "Add PWM voltage source with simple parameters")
+        // Sinusoidal-modulated PWM source (SPWM + SVM) — Pulsim 0.10.0a10.
+        .def("add_modulated_pwm_source",
+             py::overload_cast<const std::string&, Index, Index,
+                               const Circuit::ModulatedPwmParams&>(
+                 &Circuit::add_modulated_pwm_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("params"),
+             "Add a PWM voltage source whose duty is modulated by a "
+             "sinusoidal reference (SPWM) or by an SVM (3rd-harmonic "
+             "injection) reference. Wraps a single PWMVoltageSource with "
+             "a duty_callback set internally.")
+        .def("add_modulated_pwm_source",
+             py::overload_cast<const std::string&, Index, Index,
+                               Real, Real, Real, Real, Real, Real,
+                               Circuit::PwmModulation>(
+                 &Circuit::add_modulated_pwm_source),
+             py::arg("name"), py::arg("npos"), py::arg("nneg"),
+             py::arg("v_high"), py::arg("v_low"),
+             py::arg("switching_frequency_hz"),
+             py::arg("modulation_index"),
+             py::arg("modulation_frequency_hz"),
+             py::arg("phase_deg") = 0.0,
+             py::arg("modulation") = Circuit::PwmModulation::Sine,
+             "Convenience overload of add_modulated_pwm_source without a "
+             "params struct.")
         .def("add_sine_voltage_source",
              py::overload_cast<const std::string&, Index, Index, const SineParams&>(
                  &Circuit::add_sine_voltage_source),
@@ -789,6 +1318,28 @@ void init_v2_module(py::module_& v2) {
              py::arg("node_c"), py::arg("node_neutral"),
              py::arg("v_line_to_line_rms"), py::arg("frequency_hz"),
              "Add a balanced 3-phase voltage source (positive sequence, 0% unbalance).")
+        // Three-phase 2-level VSI (Track 4 follow-up). Decomposes into 6
+        // NMOS switches + 6 SPWM gate drivers internally.
+        .def("add_three_phase_vsi",
+             py::overload_cast<std::string_view, Index, Index, Index, Index, Index,
+                               const Circuit::ThreePhaseVsiParams&>(
+                 &Circuit::add_three_phase_vsi),
+             py::arg("name"), py::arg("node_vdc_pos"), py::arg("node_vdc_neg"),
+             py::arg("node_a"), py::arg("node_b"), py::arg("node_c"),
+             py::arg("params"),
+             "Add a 3-phase 2-level voltage-source inverter from a DC bus to "
+             "three phase outputs. Internally builds 6 NMOS switches (in 3 "
+             "half-bridges) driven by 6 SPWM gate sources. MOSFETs default "
+             "to Ideal (PWL) switching mode for speed.")
+        .def("add_three_phase_vsi",
+             py::overload_cast<std::string_view, Index, Index, Index, Index, Index,
+                               Real, Real, Real>(
+                 &Circuit::add_three_phase_vsi),
+             py::arg("name"), py::arg("node_vdc_pos"), py::arg("node_vdc_neg"),
+             py::arg("node_a"), py::arg("node_b"), py::arg("node_c"),
+             py::arg("switching_frequency_hz"), py::arg("modulation_index"),
+             py::arg("modulation_frequency_hz"),
+             "Add a 3-phase VSI with explicit (f_sw, m, f_mod) values.")
         // Three-phase RL load — Track follow-up (Phase 28).
         .def("add_three_phase_rl_load",
              py::overload_cast<std::string_view, Index, Index, Index, Index,
@@ -861,6 +1412,49 @@ void init_v2_module(py::module_& v2) {
         .def("motor_i_a", &Circuit::motor_i_a,
              py::arg("name"),
              "Read the current armature current of a DC motor (A).")
+        // PMSM (dynamic) — Track 2.2 of the three-phase motors and
+        // magnetics integration. Full device-variant with 4 internal
+        // states (i_d, i_q, ω_m, θ_m) and 3 reserved MNA branch rows.
+        .def("add_pmsm",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               const motors::PmsmParams&>(
+                 &Circuit::add_pmsm),
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"),
+             py::arg("n_c"), py::arg("n_neutral"), py::arg("params"),
+             "Add a dynamic Permanent-Magnet Synchronous Motor as a runtime "
+             "device. Reserves 3 MNA branch rows (one per phase line current) "
+             "and advances rotor speed (ω_m), angle (θ_m), and the cached "
+             "dq currents internally each accepted timestep.")
+        .def("add_pmsm",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               Real, Real, Real, Real, int, Real, Real>(
+                 &Circuit::add_pmsm),
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"),
+             py::arg("n_c"), py::arg("n_neutral"),
+             py::arg("Rs"), py::arg("Ld"), py::arg("Lq"),
+             py::arg("psi_pm"), py::arg("pole_pairs"),
+             py::arg("J"), py::arg("b_friction"),
+             "Add a dynamic PMSM with explicit electrical and mechanical "
+             "parameters.")
+        .def("set_pmsm_tau_load", &Circuit::set_pmsm_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Update the external shaft load torque applied to a PMSM (N·m).")
+        .def("pmsm_omega", &Circuit::pmsm_omega, py::arg("name"),
+             "Read the mechanical angular velocity of a PMSM (rad/s).")
+        .def("pmsm_theta", &Circuit::pmsm_theta, py::arg("name"),
+             "Read the rotor mechanical angle of a PMSM (rad).")
+        .def("pmsm_i_d", &Circuit::pmsm_i_d, py::arg("name"),
+             "Read the cached d-axis stator current of a PMSM (A).")
+        .def("pmsm_i_q", &Circuit::pmsm_i_q, py::arg("name"),
+             "Read the cached q-axis stator current of a PMSM (A).")
+        .def("pmsm_tau_em", &Circuit::pmsm_tau_em, py::arg("name"),
+             "Read the latest electromagnetic torque of a PMSM (N·m).")
+        .def("pmsm_i_a", &Circuit::pmsm_i_a, py::arg("name"),
+             "Read the phase A line current of a PMSM (A).")
+        .def("pmsm_i_b", &Circuit::pmsm_i_b, py::arg("name"),
+             "Read the phase B line current of a PMSM (A).")
+        .def("pmsm_i_c", &Circuit::pmsm_i_c, py::arg("name"),
+             "Read the phase C line current of a PMSM (A).")
         // PWM control
         .def("set_pwm_duty", &Circuit::set_pwm_duty,
              py::arg("name"), py::arg("duty"),
@@ -931,6 +1525,11 @@ void init_v2_module(py::module_& v2) {
         .def("set_switching_mode_for_all", &Circuit::set_switching_mode_for_all,
              py::arg("mode"),
              "Set SwitchingMode on every PWL-eligible device (passives skipped).")
+        .def("set_switching_mode", &Circuit::set_switching_mode,
+             py::arg("name"), py::arg("mode"),
+             "Set SwitchingMode on a single switching device by name "
+             "(refactor-pwl-switching-engine Phase 5.2). Mirrors the "
+             "components[].switching_mode YAML override for the C++/Python API.")
         .def("set_default_switching_mode", &Circuit::set_default_switching_mode,
              py::arg("mode"),
              "Circuit-level default switching mode used when devices are in Auto.")
@@ -1488,6 +2087,11 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("pwl_event_commutations", &BackendTelemetry::pwl_event_commutations,
                         "Phase 6 telemetry: total number of individual PWL device "
                         "commutations committed during the run.")
+        .def_readwrite("pwl_event_bisections", &BackendTelemetry::pwl_event_bisections,
+                        "Phase 4.4 telemetry: count of accepted steps that ran the "
+                        "linear-interpolation bisection on x_prev→x_now to refine "
+                        "the PWL commutation time within `event_tolerance`. "
+                        "Reads zero when no step contained a commutation.")
         .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
         .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
         .def_readwrite("linear_factor_cache_hits", &BackendTelemetry::linear_factor_cache_hits)

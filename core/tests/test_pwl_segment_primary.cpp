@@ -278,6 +278,133 @@ TEST_CASE("PWL event scheduler flips VCSwitch when control crosses threshold",
     CHECK(run.backend_telemetry.pwl_event_commutations == 1);
 }
 
+TEST_CASE("Phase 4.4: PWL event time is bisected within the accepted step",
+          "[v1][pwl][phase4][events][bisection]") {
+    // Build the same pulse-driven VCSwitch as the Phase 4 baseline but with
+    // a deliberately coarse dt = 1 µs that brackets the pulse edge at
+    // t = 0.5 µs squarely inside one accepted step (step [0, 1 µs]).
+    // Without bisection, the recorded event would land at t = 1 µs (end of
+    // step). With bisection, the linear-interpolation helper resolves the
+    // control-voltage crossing inside the step and records the event at
+    // ≈ 0.5 µs.
+    Circuit ckt;
+    auto ctrl = ckt.add_node("ctrl");
+    auto vin = ckt.add_node("vin");
+    auto out = ckt.add_node("out");
+
+    ckt.add_voltage_source("Vdc", vin, Circuit::ground(), 12.0);
+    ckt.add_vcswitch("S1", ctrl, vin, out, /*v_threshold=*/2.5,
+                     /*g_on=*/1e3, /*g_off=*/1e-9);
+    ckt.add_resistor("R1", out, Circuit::ground(), 100.0);
+    ckt.add_capacitor("C1", out, Circuit::ground(), 1e-6, 0.0);
+
+    PulseParams pulse;
+    pulse.v_initial = 0.0;
+    pulse.v_pulse = 5.0;
+    pulse.t_delay = 0.5e-6;
+    pulse.t_rise = 1e-9;
+    pulse.t_fall = 1e-9;
+    pulse.t_width = 5e-6;
+    pulse.period = 20e-6;
+    ckt.add_pulse_voltage_source("Vctrl", ctrl, Circuit::ground(), pulse);
+
+    ckt.set_switching_mode_for_all(SwitchingMode::Ideal);
+    ckt.set_pwl_state("S1", false);
+
+    SimulationOptions opts;
+    opts.tstart = 0.0;
+    opts.tstop = 2e-6;
+    opts.dt = 1e-6;          // coarse: pulse edge lands mid-step
+    opts.dt_min = 1e-12;
+    opts.dt_max = 1e-6;
+    opts.adaptive_timestep = false;
+    opts.enable_bdf_order_control = false;
+    opts.integrator = Integrator::BDF1;
+    opts.enable_events = true;
+    opts.newton_options.num_nodes = ckt.num_nodes();
+    opts.newton_options.num_branches = ckt.num_branches();
+
+    Simulator sim(ckt, opts);
+    const auto dc = sim.dc_operating_point();
+    REQUIRE(dc.success);
+    const auto run = sim.run_transient(dc.newton_result.solution);
+    REQUIRE(run.success);
+
+    // Expect exactly one event from the threshold crossing.
+    REQUIRE_FALSE(run.events.empty());
+    REQUIRE(run.backend_telemetry.pwl_topology_transitions == 1);
+    REQUIRE(run.backend_telemetry.pwl_event_commutations == 1);
+    // Phase 4.4 gate: the bisection helper must have run at least once.
+    REQUIRE(run.backend_telemetry.pwl_event_bisections >= 1);
+
+    const auto& evt = run.events.front();
+    CHECK(evt.component == "S1");
+    CHECK(evt.type == SimulationEventType::SwitchOn);
+
+    // The linear interpolation between x_prev (control = 0 V at t = 0) and
+    // x_now (control = 5 V at t = 1 µs) crosses 2.5 V at α = 0.5, i.e.,
+    // event_time = 0.5 µs. Allow a ±5 ns slop to absorb any second-order
+    // effects from the source-vector linearization.
+    const Real expected = pulse.t_delay;  // 0.5 µs
+    const Real tolerance = 5e-9;          // 5 ns
+    INFO("event time = " << evt.time
+        << ", expected = " << expected
+        << ", bisections = " << run.backend_telemetry.pwl_event_bisections);
+    CHECK(std::abs(evt.time - expected) <= tolerance);
+    // And — critically — it must NOT land at the end of the step (1 µs).
+    CHECK(evt.time < opts.dt - 1e-9);
+}
+
+TEST_CASE("Phase 4.4: bisect_pwl_event_alpha returns nullopt when no event in span",
+          "[v1][pwl][phase4][events][bisection]") {
+    Circuit ckt;
+    auto a = ckt.add_node("a");
+    auto b = ckt.add_node("b");
+    ckt.add_diode("D1", a, b);
+    ckt.set_switching_mode_for_all(SwitchingMode::Ideal);
+    ckt.set_pwl_state("D1", false);
+
+    // Two state vectors that both leave the diode reverse-biased
+    // (V_a - V_b = -1 V → no commutation eligible from off-state).
+    Eigen::VectorXd x_prev = Eigen::VectorXd::Zero(2);
+    Eigen::VectorXd x_now = Eigen::VectorXd::Zero(2);
+    x_prev(0) = -0.5;  x_prev(1) = 0.0;   // V_a - V_b = -0.5
+    x_now(0)  = -1.0;  x_now(1)  = 0.0;   // V_a - V_b = -1.0
+
+    const auto result = ckt.bisect_pwl_event_alpha(x_prev, x_now,
+                                                    SwitchingMode::Ideal);
+    CHECK_FALSE(result.has_value());
+}
+
+TEST_CASE("Phase 4.4: bisect_pwl_event_alpha refines crossing to α≈0.5",
+          "[v1][pwl][phase4][events][bisection]") {
+    Circuit ckt;
+    auto a = ckt.add_node("a");
+    auto b = ckt.add_node("b");
+    ckt.add_diode("D1", a, b);
+    ckt.set_switching_mode_for_all(SwitchingMode::Ideal);
+    ckt.set_pwl_state("D1", false);  // off-state, commutes when V_an > +hyst
+
+    // x_prev: V_a - V_b = -1 (deep reverse); x_now: V_a - V_b = +1 (forward).
+    // The diode's off→on threshold lives at V_an = +event_hysteresis (~1 nV).
+    // Linear interpolation: V_an(α) = -1 + 2α. Crosses ≈ 0 at α = 0.5.
+    Eigen::VectorXd x_prev = Eigen::VectorXd::Zero(2);
+    Eigen::VectorXd x_now = Eigen::VectorXd::Zero(2);
+    x_prev(0) = -1.0;
+    x_now(0)  = +1.0;
+
+    const auto result = ckt.bisect_pwl_event_alpha(x_prev, x_now,
+                                                    SwitchingMode::Ideal);
+    REQUIRE(result.has_value());
+    CHECK(result->events.size() == 1);
+    CHECK(result->events.front().device_name == "D1");
+    CHECK(result->events.front().new_state == true);
+    INFO("alpha = " << result->alpha
+        << ", bisections = " << result->bisections);
+    CHECK(std::abs(result->alpha - 0.5) <= 1e-3);
+    CHECK(result->bisections >= 1);
+}
+
 TEST_CASE("PWL segment-primary preserves LTE adaptive timestep behavior",
           "[v1][pwl][phase3][adaptive_lte]") {
     Circuit circuit = make_rc_circuit(/*V_src=*/5.0, /*R=*/1e3, /*C=*/1e-6);
@@ -425,6 +552,161 @@ TEST_CASE("Phase 5: YAML parser rejects unknown switching_mode in strict mode",
         }
     }
     CHECK(found_diagnostic);
+}
+
+// -----------------------------------------------------------------------------
+// Phase 5.2: per-device YAML override and Circuit::set_switching_mode by name
+// -----------------------------------------------------------------------------
+
+namespace {
+template <typename Fn>
+auto device_switching_mode_by_name(const Circuit& circuit,
+                                   std::string_view name,
+                                   Fn&& on_unsupported) -> SwitchingMode {
+    const auto& conns = circuit.connections();
+    const auto& devs = circuit.devices();
+    for (std::size_t i = 0; i < conns.size(); ++i) {
+        if (conns[i].name == name) {
+            return std::visit(
+                [&](const auto& d) -> SwitchingMode {
+                    using T = std::decay_t<decltype(d)>;
+                    if constexpr (std::is_same_v<T, IdealDiode> ||
+                                  std::is_same_v<T, IdealSwitch> ||
+                                  std::is_same_v<T, VoltageControlledSwitch> ||
+                                  std::is_same_v<T, MOSFET> ||
+                                  std::is_same_v<T, IGBT>) {
+                        return d.switching_mode();
+                    }
+                    return on_unsupported();
+                },
+                devs[i]);
+        }
+    }
+    throw std::runtime_error("device not found: " + std::string{name});
+}
+}  // namespace
+
+TEST_CASE("Phase 5.2: YAML per-device switching_mode override propagates",
+          "[v1][pwl][phase5][yaml][per-device]") {
+    // Simulation-level mode defaults to Auto; per-device override sets the
+    // device's own `mode_` field via Circuit::set_switching_mode. The five
+    // PWL-eligible device types all honor the override through the same
+    // parser code path (apply_switching_mode_override lambda).
+    const std::string content =
+        "schema: pulsim-v1\n"
+        "version: 1\n"
+        "simulation:\n"
+        "  tstop: 1e-6\n"
+        "  dt: 1e-7\n"
+        "components:\n"
+        "  - { type: voltage_source, name: V1, nodes: [vin, 0], value: 12.0 }\n"
+        "  - { type: diode,    name: D1,  nodes: [a, b],     switching_mode: ideal }\n"
+        "  - { type: switch,   name: SW1, nodes: [c, d],     switching_mode: behavioral }\n"
+        "  - { type: vcswitch, name: VCS1,nodes: [ctrl,e,f], switching_mode: pwl }\n"
+        "  - { type: mosfet,   name: M1,  nodes: [g, dr, s], switching_mode: ideal }\n"
+        "  - { type: igbt,     name: Q1,  nodes: [ge,cl,em], switching_mode: smooth }\n";
+    pulsim::v1::parser::YamlParser parser;
+    const auto [circuit, options] = parser.load_string(content);
+    REQUIRE(parser.errors().empty());
+
+    auto unsupported = []() -> SwitchingMode {
+        FAIL("device should support switching_mode");
+        return SwitchingMode::Auto;
+    };
+
+    REQUIRE(device_switching_mode_by_name(circuit, "D1",  unsupported) == SwitchingMode::Ideal);
+    REQUIRE(device_switching_mode_by_name(circuit, "SW1", unsupported) == SwitchingMode::Behavioral);
+    REQUIRE(device_switching_mode_by_name(circuit, "VCS1",unsupported) == SwitchingMode::Ideal);  // pwl alias
+    REQUIRE(device_switching_mode_by_name(circuit, "M1",  unsupported) == SwitchingMode::Ideal);
+    REQUIRE(device_switching_mode_by_name(circuit, "Q1",  unsupported) == SwitchingMode::Behavioral);  // smooth alias
+}
+
+TEST_CASE("Phase 5.2: YAML per-device switching_mode beats simulation-level",
+          "[v1][pwl][phase5][yaml][per-device]") {
+    // Per-device override is applied AFTER the device is registered and
+    // BEFORE the Simulator pushes the simulation-level mode into
+    // Circuit::default_switching_mode_. Therefore the device's own `mode_`
+    // takes precedence — `resolve_switching_mode(device, default)` returns
+    // the device's mode whenever it is not Auto.
+    const std::string content =
+        "schema: pulsim-v1\n"
+        "version: 1\n"
+        "simulation:\n"
+        "  tstop: 1e-6\n"
+        "  dt: 1e-7\n"
+        "  switching_mode: ideal\n"
+        "components:\n"
+        "  - { type: diode, name: D_auto,        nodes: [a, b] }\n"
+        "  - { type: diode, name: D_behavioral,  nodes: [c, d], switching_mode: behavioral }\n";
+    pulsim::v1::parser::YamlParser parser;
+    auto [circuit, options] = parser.load_string(content);
+    REQUIRE(parser.errors().empty());
+    REQUIRE(options.switching_mode == SwitchingMode::Ideal);
+
+    auto unsupported = []() -> SwitchingMode {
+        FAIL("device should support switching_mode");
+        return SwitchingMode::Auto;
+    };
+
+    // D_auto: no override → stays Auto on the device; will resolve to Ideal
+    // under the simulation-level default at Simulator construction time.
+    REQUIRE(device_switching_mode_by_name(circuit, "D_auto", unsupported) == SwitchingMode::Auto);
+
+    // D_behavioral: explicit override → stays Behavioral regardless of the
+    // simulation-level Ideal default.
+    REQUIRE(device_switching_mode_by_name(circuit, "D_behavioral", unsupported) == SwitchingMode::Behavioral);
+}
+
+TEST_CASE("Phase 5.2: strict-mode YAML rejects unknown per-device switching_mode",
+          "[v1][pwl][phase5][yaml][per-device][strict]") {
+    const std::string content =
+        "schema: pulsim-v1\n"
+        "version: 1\n"
+        "simulation:\n"
+        "  tstop: 1e-6\n"
+        "  dt: 1e-7\n"
+        "components:\n"
+        "  - { type: diode, name: D1, nodes: [a, b], switching_mode: nonsense }\n";
+    pulsim::v1::parser::YamlParserOptions parser_opts;
+    parser_opts.strict = true;
+    pulsim::v1::parser::YamlParser parser(parser_opts);
+    parser.load_string(content);
+    const auto& errors = parser.errors();
+    REQUIRE_FALSE(errors.empty());
+    bool found = false;
+    for (const auto& err : errors) {
+        if (err.find("D1.switching_mode") != std::string::npos &&
+            err.find("nonsense") != std::string::npos) {
+            found = true;
+            break;
+        }
+    }
+    CHECK(found);
+}
+
+TEST_CASE("Phase 5.2: Circuit::set_switching_mode by name applies and rejects unknowns",
+          "[v1][pwl][phase5][api][per-device]") {
+    Circuit ckt;
+    auto n_a = ckt.add_node("a");
+    auto n_b = ckt.add_node("b");
+    ckt.add_diode("D1", n_a, n_b);
+
+    auto unsupported = []() -> SwitchingMode {
+        FAIL("diode should support switching_mode");
+        return SwitchingMode::Auto;
+    };
+
+    REQUIRE(device_switching_mode_by_name(ckt, "D1", unsupported) == SwitchingMode::Auto);
+
+    ckt.set_switching_mode("D1", SwitchingMode::Ideal);
+    REQUIRE(device_switching_mode_by_name(ckt, "D1", unsupported) == SwitchingMode::Ideal);
+
+    ckt.set_switching_mode("D1", SwitchingMode::Behavioral);
+    REQUIRE(device_switching_mode_by_name(ckt, "D1", unsupported) == SwitchingMode::Behavioral);
+
+    REQUIRE_THROWS_AS(
+        ckt.set_switching_mode("does_not_exist", SwitchingMode::Ideal),
+        std::runtime_error);
 }
 
 // -----------------------------------------------------------------------------

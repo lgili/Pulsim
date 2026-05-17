@@ -13,6 +13,7 @@
 #include "pulsim/v1/sources.hpp"
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/components/dc_motor_device.hpp"
+#include "pulsim/v1/components/pmsm_device.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cassert>
@@ -71,7 +72,8 @@ using DeviceVariant = std::variant<
     SineVoltageSource,
     PulseVoltageSource,
     Transformer,
-    DcMotorDevice
+    DcMotorDevice,
+    PmsmDevice
 >;
 
 // =============================================================================
@@ -503,8 +505,29 @@ public:
         resistor_cache_.push_back({n1, n2, R == 0.0 ? 0.0 : 1.0 / R});
     }
 
+    /// Overload accepting a full `Resistor::Params` struct (Pulsim
+    /// 0.10.0a10: TCR + thermal binding for I²·R loss accumulator).
+    void add_resistor(const std::string& name, Index n1, Index n2,
+                      const Resistor::Params& params) {
+        devices_.emplace_back(Resistor(params, name));
+        connections_.push_back({name, {n1, n2}, -1});
+        register_connection_name(connections_.size() - 1);
+        resistor_cache_.push_back({n1, n2,
+            params.resistance == 0.0 ? 0.0 : 1.0 / params.resistance});
+    }
+
     void add_capacitor(const std::string& name, Index n1, Index n2, Real C, Real ic = 0.0) {
         devices_.emplace_back(Capacitor(C, ic, name));
+        connections_.push_back({name, {n1, n2}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    /// Overload accepting a full `Capacitor::Params` struct so callers
+    /// can configure ESR + thermal binding (Phase 3 of
+    /// inverter-bridge-losses).
+    void add_capacitor(const std::string& name, Index n1, Index n2,
+                       const Capacitor::Params& params) {
+        devices_.emplace_back(Capacitor(params, name));
         connections_.push_back({name, {n1, n2}, -1});
         register_connection_name(connections_.size() - 1);
     }
@@ -518,6 +541,17 @@ public:
     void add_inductor(const std::string& name, Index n1, Index n2, Real L, Real ic = 0.0) {
         Index br = num_nodes() + num_branches_;
         devices_.emplace_back(Inductor(L, ic, name));
+        connections_.push_back({name, {n1, n2}, br});
+        register_connection_name(connections_.size() - 1);
+        num_branches_++;
+    }
+
+    /// Overload accepting a full `Inductor::Params` struct (Pulsim
+    /// 0.10.0a11: DCR + thermal binding for copper loss accumulator).
+    void add_inductor(const std::string& name, Index n1, Index n2,
+                      const Inductor::Params& params) {
+        Index br = num_nodes() + num_branches_;
+        devices_.emplace_back(Inductor(params, name));
         connections_.push_back({name, {n1, n2}, br});
         register_connection_name(connections_.size() - 1);
         num_branches_++;
@@ -544,6 +578,391 @@ public:
         devices_.emplace_back(IdealDiode(g_on, g_off, name));
         connections_.push_back({name, {anode, cathode}, -1});
         register_connection_name(connections_.size() - 1);
+    }
+
+    /// Overload accepting a fully-specified `IdealDiode::Params` so callers
+    /// can configure V_F0, R_d, thermal coupling, etc. (Phase 1 of
+    /// inverter-bridge-losses). Backward-compatible with the legacy
+    /// (g_on, g_off) constructor when V_F0 == 0.
+    void add_diode(const std::string& name, Index anode, Index cathode,
+                   const IdealDiode::Params& params) {
+        devices_.emplace_back(IdealDiode(params, name));
+        connections_.push_back({name, {anode, cathode}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    // ----- Bridge rectifier helper (Phase 1 of inverter-bridge-losses) ------
+    //
+    // Drop-in 4-diode full-wave bridge between two AC nodes (ac_a, ac_b) and
+    // a DC output (dc_pos, dc_neg). All four diodes share the same Params
+    // (V_F0, R_d, R_th_ja, T_amb …) so per-diode losses can be read back via
+    // `diode_average_power(<name>__D{1..4})` after the transient.
+    //
+    // Topology (using D1..D4 with anode/cathode labels):
+    //
+    //         ac_a  ----+--[D1]--+----  dc_pos
+    //                   |        |
+    //                   +--[D4]--+----  dc_neg
+    //         ac_b  ----+        |
+    //                   |        |
+    //                   +--[D2]--+----  dc_pos
+    //                   |        |
+    //                   +--[D3]--+----  dc_neg
+    //
+    // D1 anode = ac_a, cathode = dc_pos
+    // D2 anode = ac_b, cathode = dc_pos
+    // D3 anode = dc_neg, cathode = ac_b
+    // D4 anode = dc_neg, cathode = ac_a
+    //
+    // Conduction pairs:
+    //   - When ac_a > ac_b: D1 and D3 conduct (current ac_a → dc_pos →
+    //     load → dc_neg → ac_b).
+    //   - When ac_b > ac_a: D2 and D4 conduct.
+    //
+    // Each accepted timestep records V·I·dt into the corresponding diode's
+    // loss accumulator. At end-of-sim each diode reports:
+    //   - average_power()  : P_avg [W]
+    //   - peak_power()     : peak instantaneous P [W]
+    //   - total_energy()   : ∫P·dt [J]
+    //   - junction_temperature() : T_j = T_amb + P_avg · R_th_ja [°C]
+
+    void add_bridge_rectifier(const std::string& name,
+                              Index ac_a, Index ac_b,
+                              Index dc_pos, Index dc_neg,
+                              const IdealDiode::Params& diode_params) {
+        const std::string base{name};
+        add_diode(base + "__D1", ac_a,    dc_pos,  diode_params);
+        add_diode(base + "__D2", ac_b,    dc_pos,  diode_params);
+        add_diode(base + "__D3", dc_neg,  ac_b,    diode_params);
+        add_diode(base + "__D4", dc_neg,  ac_a,    diode_params);
+    }
+
+    /// Convenience overload taking just (V_F0, R_d, R_th_ja, T_amb).
+    void add_bridge_rectifier(const std::string& name,
+                              Index ac_a, Index ac_b,
+                              Index dc_pos, Index dc_neg,
+                              Real V_F0, Real R_d,
+                              Real R_th_ja = 25.0, Real T_amb = 25.0) {
+        IdealDiode::Params p{};
+        p.V_F0     = V_F0;
+        p.R_d      = R_d;
+        p.R_th_ja  = R_th_ja;
+        p.T_amb    = T_amb;
+        // Pick a conducting-state g_on consistent with R_d so the realistic
+        // model stays self-consistent regardless of which stamping path
+        // hits first.
+        if (R_d > 0.0) p.g_on = 1.0 / R_d;
+        add_bridge_rectifier(name, ac_a, ac_b, dc_pos, dc_neg, p);
+    }
+
+    // ----- Diode loss / thermal accessors -----------------------------------
+    [[nodiscard]] Real diode_average_power(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_peak_power(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_total_energy(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    /// Junction temperature CURRENTLY ASSUMED by the device's stamping
+    /// (T_amb at init, or whatever was last set via `set_diode_T_j`).
+    /// Use `diode_steady_state_junction_temperature` for the value derived
+    /// from the running P_avg + R_th_ja.
+    [[nodiscard]] Real diode_junction_temperature(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    /// Steady-state junction temperature DERIVED from the accumulated
+    /// P_avg over the simulation:
+    ///     T_j = T_amb + P_avg · R_th_ja
+    /// To converge a true electrothermal solution, iterate: simulate →
+    /// read T_j → call `set_diode_T_j(name, T_j)` → re-simulate. Typically
+    /// converges in 2–3 passes for bridge-rectifier loads.
+    [[nodiscard]] Real diode_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    /// Update the T_j the device's stamping assumes (for fixed-point
+    /// electrothermal iteration). Does not affect already-accumulated
+    /// loss; only the next simulation pass sees the change via
+    /// `V_F0_at_Tj()` in the stamping path.
+    void set_diode_T_j(std::string_view name, Real t_j) {
+        if (auto* d = find_device<IdealDiode>(name)) {
+            d->set_T_j_init(t_j);
+        }
+    }
+
+    /// Reset the loss accumulator on a named diode (zero out accumulated
+    /// energy, peak, conduction time). Useful for multi-pass thermal
+    /// fixed-point iteration where you want a clean accumulator each pass.
+    void reset_diode_loss(std::string_view name) {
+        if (auto* d = find_device<IdealDiode>(name)) {
+            d->reset_loss();
+        }
+    }
+    [[nodiscard]] Real diode_last_current(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_last_voltage(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->last_voltage() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_conduction_time(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->conduction_time() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- Switching-loss accessors (Phase 4 of inverter-bridge-losses,
+    //       Pulsim 0.10.0a10) ---------------------------------------------
+    [[nodiscard]] Real diode_switching_energy(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->switching_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_average_switching_power(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->average_switching_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] std::size_t diode_switching_events(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->switching_events() : 0;
+    }
+    [[nodiscard]] Real diode_conduction_energy(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->conduction_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- MOSFET / IGBT loss + thermal accessors (Phase 2 of
+    //       inverter-bridge-losses). All return NaN when the named
+    //       device is missing. The MOSFET/IGBT thermal model is active
+    //       only when params.R_th_ja > 0; otherwise the accessors return
+    //       0 / T_amb (backward-compatible). --------------------------------
+
+    [[nodiscard]] Real mosfet_average_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_peak_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_total_energy(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_junction_temperature(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_last_current(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_last_voltage(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->last_voltage() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_mosfet_T_j(std::string_view name, Real t_j) {
+        if (auto* m = find_device<MOSFET>(name)) m->set_T_j_init(t_j);
+    }
+    void reset_mosfet_loss(std::string_view name) {
+        if (auto* m = find_device<MOSFET>(name)) m->reset_loss();
+    }
+    [[nodiscard]] Real mosfet_switching_energy(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->switching_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_average_switching_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->average_switching_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_average_conduction_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->average_conduction_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] std::size_t mosfet_switching_events(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->switching_events() : 0;
+    }
+
+    [[nodiscard]] Real igbt_average_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_peak_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_total_energy(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_junction_temperature(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_last_current(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_last_voltage(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->last_voltage() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_igbt_T_j(std::string_view name, Real t_j) {
+        if (auto* g = find_device<IGBT>(name)) g->set_T_j_init(t_j);
+    }
+    void reset_igbt_loss(std::string_view name) {
+        if (auto* g = find_device<IGBT>(name)) g->reset_loss();
+    }
+    [[nodiscard]] Real igbt_switching_energy(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->switching_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_average_switching_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->average_switching_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_average_conduction_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->average_conduction_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] std::size_t igbt_switching_events(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->switching_events() : 0;
+    }
+
+    // ----- Capacitor ESR loss + thermal accessors (Phase 3 of
+    //       inverter-bridge-losses, Pulsim 0.10.0a9). All NaN when the
+    //       named device is missing. Active only when params.R_th_ja > 0.
+    [[nodiscard]] Real capacitor_average_power(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_peak_power(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_total_energy(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_junction_temperature(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real capacitor_last_current(std::string_view name) const {
+        const auto* c = find_device<Capacitor>(name);
+        return c ? c->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_capacitor_T_j(std::string_view name, Real t_j) {
+        if (auto* c = find_device<Capacitor>(name)) c->set_T_j_init(t_j);
+    }
+    void reset_capacitor_loss(std::string_view name) {
+        if (auto* c = find_device<Capacitor>(name)) c->reset_loss();
+    }
+
+    // ----- Resistor I²·R loss + thermal accessors (Pulsim 0.10.0a10) ----
+    [[nodiscard]] Real resistor_average_power(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_peak_power(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_total_energy(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_junction_temperature(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real resistor_last_current(std::string_view name) const {
+        const auto* r = find_device<Resistor>(name);
+        return r ? r->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_resistor_T_j(std::string_view name, Real t_j) {
+        if (auto* r = find_device<Resistor>(name)) r->set_T_j_init(t_j);
+    }
+    void reset_resistor_loss(std::string_view name) {
+        if (auto* r = find_device<Resistor>(name)) r->reset_loss();
+    }
+
+    // ----- Inductor DCR loss + thermal accessors (Pulsim 0.10.0a11) ----
+    [[nodiscard]] Real inductor_average_power(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->average_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_peak_power(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->peak_power() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_total_energy(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->total_energy() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_junction_temperature(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->junction_temperature() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_steady_state_junction_temperature(
+        std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->steady_state_junction_temperature()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real inductor_last_current(std::string_view name) const {
+        const auto* l = find_device<Inductor>(name);
+        return l ? l->last_current() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    void set_inductor_T_j(std::string_view name, Real t_j) {
+        if (auto* l = find_device<Inductor>(name)) l->set_T_j_init(t_j);
+    }
+    void reset_inductor_loss(std::string_view name) {
+        if (auto* l = find_device<Inductor>(name)) l->reset_loss();
     }
 
     void add_switch(const std::string& name, Index n1, Index n2,
@@ -1965,6 +2384,107 @@ public:
         add_pwm_voltage_source(name, npos, nneg, params);
     }
 
+    // ----- Sinusoidal-modulated PWM source helper (Phase 4 of
+    //       inverter-bridge-losses, Pulsim 0.10.0a10) -------------------
+    //
+    // Creates a single PWMVoltageSource whose duty cycle is modulated by
+    // a sinusoidal reference at `modulation_frequency_hz`, with optional
+    // 3rd-harmonic injection for SVPWM-style higher bus-utilisation.
+    //
+    // Modulation modes:
+    //   - Sine (SPWM): duty(t) = 0.5 + (m/2)·sin(ω_mod·t + φ)
+    //     Linear range m ∈ [0, 1]. Peak phase-to-DC-midpoint = m·V_dc/2.
+    //   - SVM (3rd-harmonic injection): duty(t) = 0.5 + (m/√3)·
+    //       [sin(ω_mod·t + φ) + (1/6)·sin(3·(ω_mod·t + φ))]
+    //     Allows m up to 1.155 in the linear range, giving 15.5 % more
+    //     bus utilisation than pure SPWM. Same total harmonic distortion
+    //     as a sine carrier — the 3rd harmonic cancels in line-to-line.
+    //
+    // This wraps a single `PWMVoltageSource` and installs the duty
+    // callback. For a complete 3-phase modulator, use this 3 times with
+    // 120° phase offsets (or use ``add_three_phase_vsi`` which packages
+    // 6 of them with the gate drivers).
+
+    enum class PwmModulation : std::uint8_t {
+        Sine = 0,        ///< SPWM: linear range m ≤ 1.0.
+        SVM  = 1,        ///< SVPWM (3rd-harmonic injection): m ≤ 1.155.
+    };
+
+    struct ModulatedPwmParams {
+        Real v_high = 12.0;                       ///< ON-state output (V).
+        Real v_low  = 0.0;                        ///< OFF-state output (V).
+        Real switching_frequency_hz = 20e3;       ///< PWM carrier (Hz).
+        Real modulation_index = 0.8;              ///< 0..1 (Sine), 0..1.155 (SVM).
+        Real modulation_frequency_hz = 50.0;      ///< Reference fundamental (Hz).
+        Real phase_deg = 0.0;                     ///< Reference phase (degrees).
+        PwmModulation modulation = PwmModulation::Sine;
+    };
+    static_assert(std::is_trivially_copyable_v<ModulatedPwmParams>,
+                  "ModulatedPwmParams must stay POD.");
+
+    void add_modulated_pwm_source(const std::string& name,
+                                  Index npos, Index nneg,
+                                  const ModulatedPwmParams& params) {
+        assert(params.switching_frequency_hz > 0.0);
+        assert(params.modulation_frequency_hz > 0.0);
+        assert(params.modulation_index >= 0.0 && params.modulation_index <= 1.5);
+
+        PWMParams pwm{};
+        pwm.v_high = params.v_high;
+        pwm.v_low  = params.v_low;
+        pwm.frequency = params.switching_frequency_hz;
+        pwm.duty = 0.5;
+        pwm.phase = 0.0;
+        add_pwm_voltage_source(name, npos, nneg, pwm);
+
+        constexpr Real kDegToRad = static_cast<Real>(0.017453292519943295);
+        const Real omega = 2.0 * 3.14159265358979323846 *
+                           params.modulation_frequency_hz;
+        const Real phi = params.phase_deg * kDegToRad;
+        const Real m   = params.modulation_index;
+        const PwmModulation mode = params.modulation;
+        constexpr Real one_over_sqrt3 = static_cast<Real>(0.5773502691896258);
+        constexpr Real one_sixth      = static_cast<Real>(1.0 / 6.0);
+
+        auto duty_cb = [m, omega, phi, mode](Real t) -> Real {
+            const Real theta = omega * t + phi;
+            Real d;
+            if (mode == PwmModulation::SVM) {
+                // 3rd-harmonic injection: duty = 0.5 +
+                //   (m/√3) · [sin(θ) + (1/6)·sin(3θ)]
+                d = 0.5 + m * one_over_sqrt3 *
+                    (std::sin(theta) + one_sixth * std::sin(3.0 * theta));
+            } else {
+                // Sine: duty = 0.5 + (m/2) · sin(θ)
+                d = 0.5 + 0.5 * m * std::sin(theta);
+            }
+            if (d < 0.0) d = 0.0;
+            if (d > 1.0) d = 1.0;
+            return d;
+        };
+        set_pwm_duty_callback(name, duty_cb);
+    }
+
+    /// Convenience overload taking the bare numbers (no params struct).
+    void add_modulated_pwm_source(const std::string& name,
+                                  Index npos, Index nneg,
+                                  Real v_high, Real v_low,
+                                  Real switching_frequency_hz,
+                                  Real modulation_index,
+                                  Real modulation_frequency_hz,
+                                  Real phase_deg = 0.0,
+                                  PwmModulation modulation = PwmModulation::Sine) {
+        ModulatedPwmParams params{};
+        params.v_high = v_high;
+        params.v_low = v_low;
+        params.switching_frequency_hz = switching_frequency_hz;
+        params.modulation_index = modulation_index;
+        params.modulation_frequency_hz = modulation_frequency_hz;
+        params.phase_deg = phase_deg;
+        params.modulation = modulation;
+        add_modulated_pwm_source(name, npos, nneg, params);
+    }
+
     void add_sine_voltage_source(const std::string& name, Index npos, Index nneg,
                                   const SineParams& params) {
         Index br = num_nodes() + num_branches_;
@@ -2065,6 +2585,167 @@ public:
         params.line_to_line_voltage_rms = v_line_to_line_rms;
         params.frequency_hz = frequency_hz;
         add_three_phase_source(name, node_a, node_b, node_c, node_neutral, params);
+    }
+
+    // ----- Three-phase 2-level VSI helper (Track 4 follow-up) -----------------
+    //
+    // Builds a complete 3-leg 6-switch 2-level voltage-source inverter from a
+    // DC bus (vdc+, vdc−) to three phase outputs (a, b, c). Internally creates
+    // six NMOS switches arranged as three half-bridges and drives them with
+    // sinusoidal PWM (SPWM). Each leg's high-side gate is referenced to its
+    // own source node — i.e., the leg's output — so the device model behaves
+    // like a real bootstrapped gate driver (V_GS is the gate-source delta,
+    // independent of leg-output voltage).
+    //
+    // Modulation: per-phase reference m_k(t) = m · sin(2π·f_mod·t + φ_k),
+    // compared against an implicit triangular carrier at f_sw. Each high-
+    // side switch sees duty(t) = 0.5 + 0.5·m_k(t), clamped to [0, 1]. The
+    // low-side switch is naturally complementary: same duty callback, but
+    // with v_high/v_low swapped so it inverts the output. No dead-time
+    // window — the v1 ship is ideal switching; users who need dead-time can
+    // drop down to manual wiring.
+    //
+    // Internal naming convention (all reserved on the Circuit namespace):
+    //   <name>__G_aH, <name>__G_aL, <name>__G_bH, ..., <name>__G_cL
+    //                                 internal gate nodes (6 total)
+    //   <name>__QaH, <name>__QaL, ..., <name>__QcL
+    //                                 6 MOSFETs
+    //   <name>__PWM_aH, <name>__PWM_aL, ..., <name>__PWM_cL
+    //                                 6 PWM gate drivers
+    //
+    // Analytical reference for tests:
+    //   In the SPWM linear range (m ≤ 1), the average phase-to-midpoint
+    //   voltage is (V_dc/2) · m · sin(ωt + φ_k). The peak line-to-line
+    //   voltage is therefore (√3/2)·m·V_dc and the line-to-line RMS is
+    //   (√3/(2·√2))·m·V_dc ≈ 0.612 · m · V_dc.
+
+    struct ThreePhaseVsiParams {
+        Real v_gate_on = 12.0;                ///< Gate ON drive voltage [V]
+        Real v_gate_off = 0.0;                ///< Gate OFF drive voltage [V]
+        Real switching_frequency_hz = 20e3;   ///< PWM carrier frequency [Hz]
+        Real modulation_index = 0.8;          ///< SPWM index (0..1 linear)
+        Real modulation_frequency_hz = 50.0;  ///< Output fundamental [Hz]
+        Real phase_a_deg = 0.0;               ///< Phase A reference angle
+        bool positive_sequence = true;        ///< false flips B/C
+        Real mosfet_r_on_ohm = 0.01;          ///< MOSFET R_ds(on) [Ω]
+        Real mosfet_vth = 1.0;                ///< MOSFET gate threshold [V]
+    };
+    static_assert(std::is_trivially_copyable_v<ThreePhaseVsiParams>,
+                  "ThreePhaseVsiParams must stay a POD aggregate.");
+
+    void add_three_phase_vsi(std::string_view name,
+                              Index node_vdc_pos, Index node_vdc_neg,
+                              Index node_a, Index node_b, Index node_c,
+                              const ThreePhaseVsiParams& params) {
+        assert(params.switching_frequency_hz > 0.0);
+        assert(params.modulation_frequency_hz > 0.0);
+        assert(params.modulation_index >= 0.0 && params.modulation_index <= 1.5);
+        assert(params.mosfet_r_on_ohm > 0.0);
+
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        constexpr Real kDegToRad = static_cast<Real>(0.017453292519943295);
+
+        const Real omega_mod = 2.0 * 3.14159265358979323846 *
+                               params.modulation_frequency_hz;
+        const Real phase_a_rad = params.phase_a_deg * kDegToRad;
+        const Real shift_b = params.positive_sequence
+                             ? -kTwoPiOverThree :  kTwoPiOverThree;
+        const Real shift_c = params.positive_sequence
+                             ? -2.0 * kTwoPiOverThree
+                             :  2.0 * kTwoPiOverThree;
+
+        const std::string base{name};
+
+        MOSFET::Params mp{};
+        mp.vth = params.mosfet_vth;
+        mp.kp  = 1.0;        // Large kp → quick saturation once VGS exceeds vth.
+        mp.g_off = 1e-12;
+        mp.g_on  = 1.0 / std::max<Real>(params.mosfet_r_on_ohm, 1e-9);
+        mp.is_nmos = true;
+
+        PWMParams ph_h{};
+        ph_h.v_high = params.v_gate_on;
+        ph_h.v_low  = params.v_gate_off;
+        ph_h.frequency = params.switching_frequency_hz;
+        ph_h.duty = 0.5;
+        ph_h.phase = 0.0;
+
+        PWMParams ph_l{};
+        ph_l.v_high = params.v_gate_off;     // swapped — produces the
+        ph_l.v_low  = params.v_gate_on;      // complementary waveform.
+        ph_l.frequency = params.switching_frequency_hz;
+        ph_l.duty = 0.5;
+        ph_l.phase = 0.0;
+
+        auto stamp_leg = [&](const char* suffix, Index n_phase, Real phi_k) {
+            const Index g_h = add_node(base + "__G_" + suffix + "H");
+            const Index g_l = add_node(base + "__G_" + suffix + "L");
+
+            // High-side MOSFET: drain on vdc+, source on the leg output.
+            add_mosfet(base + "__Q" + suffix + "H",
+                       g_h, node_vdc_pos, n_phase, mp);
+
+            // Low-side MOSFET: drain on the leg output, source on vdc−.
+            add_mosfet(base + "__Q" + suffix + "L",
+                       g_l, n_phase, node_vdc_neg, mp);
+
+            // Force the MOSFETs into the Ideal (PWL) switching mode so the
+            // state-space engine handles the 6×f_sw switching events
+            // without running Newton at every commutation. Without this,
+            // the default Behavioral mode would force smooth-nonlinear
+            // stamping at every step, which is ~100× slower for VSI loads.
+            if (auto* qh = find_device<MOSFET>(base + "__Q" + suffix + "H")) {
+                qh->set_switching_mode(SwitchingMode::Ideal);
+            }
+            if (auto* ql = find_device<MOSFET>(base + "__Q" + suffix + "L")) {
+                ql->set_switching_mode(SwitchingMode::Ideal);
+            }
+
+            // High-side gate driver: PWM between G_kH and the leg output
+            // so V_GS = v_gate_on when the duty is HIGH.
+            add_pwm_voltage_source(
+                base + "__PWM_" + suffix + "H", g_h, n_phase, ph_h);
+
+            // Low-side gate driver: PWM between G_kL and vdc−. Uses the
+            // swapped high/low levels so it produces the complementary
+            // waveform with the SAME duty callback.
+            add_pwm_voltage_source(
+                base + "__PWM_" + suffix + "L", g_l, node_vdc_neg, ph_l);
+
+            // Capture the modulator parameters by value into the duty
+            // callback so the lambda has no lifetime dependency.
+            const Real m_idx = params.modulation_index;
+            const Real omega = omega_mod;
+            auto duty_cb = [m_idx, omega, phi_k](Real t) -> Real {
+                Real d = 0.5 + 0.5 * m_idx * std::sin(omega * t + phi_k);
+                if (d < 0.0) d = 0.0;
+                if (d > 1.0) d = 1.0;
+                return d;
+            };
+            set_pwm_duty_callback(
+                base + "__PWM_" + suffix + "H", duty_cb);
+            set_pwm_duty_callback(
+                base + "__PWM_" + suffix + "L", duty_cb);
+        };
+
+        stamp_leg("a", node_a, phase_a_rad);
+        stamp_leg("b", node_b, phase_a_rad + shift_b);
+        stamp_leg("c", node_c, phase_a_rad + shift_c);
+    }
+
+    // Convenience overload — explicit (V_dc, f_sw, m, f_mod) without struct.
+    void add_three_phase_vsi(std::string_view name,
+                              Index node_vdc_pos, Index node_vdc_neg,
+                              Index node_a, Index node_b, Index node_c,
+                              Real switching_frequency_hz,
+                              Real modulation_index,
+                              Real modulation_frequency_hz) {
+        ThreePhaseVsiParams params{};
+        params.switching_frequency_hz = switching_frequency_hz;
+        params.modulation_index = modulation_index;
+        params.modulation_frequency_hz = modulation_frequency_hz;
+        add_three_phase_vsi(name, node_vdc_pos, node_vdc_neg,
+                            node_a, node_b, node_c, params);
     }
 
     // ----- Three-phase RL load helper (Phase 28 follow-up) -------------------
@@ -2321,6 +3002,99 @@ public:
         return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- PMSM (full device-variant integration, Track 2.2) -----------------
+    //
+    // Reserves THREE MNA branch rows (one per phase line current) and stamps
+    // R_s + L_s series + per-phase back-EMF as a 4-terminal device (A, B, C,
+    // N). Mechanical state (ω_m, θ_m) and the cached dq currents (i_d, i_q)
+    // are advanced internally by the `update_history` ladder after each
+    // accepted timestep. See ``components/pmsm_device.hpp`` for the math.
+    //
+    // Example:
+    //   motors::PmsmParams p{};
+    //   p.Rs = 0.5; p.Ld = p.Lq = 2e-3; p.psi_pm = 0.1;
+    //   p.pole_pairs = 2; p.J = 1e-3; p.b_friction = 1e-4;
+    //   circuit.add_pmsm("M1", n_a, n_b, n_c, n_neutral, p);
+    void add_pmsm(const std::string& name,
+                  Index n_a, Index n_b, Index n_c, Index n_neutral,
+                  const motors::PmsmParams& params) {
+        assert(params.Rs > 0.0);
+        assert(params.Ld > 0.0 && params.Lq > 0.0);
+        assert(params.J  > 0.0);
+        assert(params.pole_pairs > 0);
+
+        const Index br_a = num_nodes() + num_branches_;
+        const Index br_b = br_a + 1;
+        const Index br_c = br_a + 2;
+        PmsmDevice motor(params, name);
+        motor.set_branch_indices(br_a, br_b, br_c);
+        devices_.emplace_back(std::move(motor));
+        // Convention: branch_index = i_a's row; branch_index_2 = i_b's row.
+        // The third (i_c) is computed as branch_index + 2 inside the ladder.
+        connections_.push_back(
+            {name, {n_a, n_b, n_c, n_neutral}, br_a, br_b});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 3;
+    }
+
+    /// Convenience overload — quick constructor without a params struct.
+    void add_pmsm(const std::string& name,
+                  Index n_a, Index n_b, Index n_c, Index n_neutral,
+                  Real Rs, Real Ld, Real Lq, Real psi_pm, int pole_pairs,
+                  Real J, Real b_friction) {
+        motors::PmsmParams params{};
+        params.name = name;
+        params.Rs = Rs;
+        params.Ld = Ld;
+        params.Lq = Lq;
+        params.psi_pm = psi_pm;
+        params.pole_pairs = pole_pairs;
+        params.J = J;
+        params.b_friction = b_friction;
+        add_pmsm(name, n_a, n_b, n_c, n_neutral, params);
+    }
+
+    /// Update the external load torque applied to a PMSM by name.
+    void set_pmsm_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<PmsmDevice>(name)) {
+            m->set_tau_load(tau);
+        }
+    }
+
+    /// Read PMSM mechanical / dq state by name. Returns NaN if not found.
+    [[nodiscard]] Real pmsm_omega(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_theta(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_d(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_d() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_q(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_q() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_tau_em(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->tau_em() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_a(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_b(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_b() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_i_c(std::string_view name) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     // =========================================================================
     // PWM Duty Control
     // =========================================================================
@@ -2482,6 +3256,36 @@ public:
         if (!committed) {
             throw std::runtime_error(
                 "Device does not support PWL state: " + std::string{name});
+        }
+    }
+
+    /// Set the `SwitchingMode` on a single switching device by name. Mirrors
+    /// `set_pwl_state` but targets the device's `mode_` field instead of its
+    /// `pwl_state_`. Backs the YAML parser's per-device
+    /// `components[].switching_mode` override path (refactor-pwl-switching-
+    /// engine, Phase 5.2) and is also useful from Python when the simulation-
+    /// level switching mode needs to be overridden for a specific device.
+    void set_switching_mode(std::string_view name, SwitchingMode mode) {
+        const auto index = find_connection_index(name);
+        if (!index.has_value()) {
+            throw std::runtime_error("PWL device not found: " + std::string{name});
+        }
+        auto& device = devices_[*index];
+        bool applied = false;
+        std::visit([&](auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, IdealDiode> ||
+                          std::is_same_v<T, IdealSwitch> ||
+                          std::is_same_v<T, VoltageControlledSwitch> ||
+                          std::is_same_v<T, MOSFET> ||
+                          std::is_same_v<T, IGBT>) {
+                dev.set_switching_mode(mode);
+                applied = true;
+            }
+        }, device);
+        if (!applied) {
+            throw std::runtime_error(
+                "Device does not support switching_mode: " + std::string{name});
         }
     }
 
@@ -2658,6 +3462,13 @@ public:
                     // Set current state and update history
                     dev.set_current_state(v, i);
                     dev.update_history();
+                    // Phase 3 of inverter-bridge-losses: ESR loss accumulator.
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(i, 0.0);
+                    } else {
+                        dev.accumulate_loss(i, timestep_);
+                    }
                 }
                 else if constexpr (std::is_same_v<T, Inductor>) {
                     Index n1 = conn.nodes[0];
@@ -2677,6 +3488,29 @@ public:
                     // Set current state and update history
                     dev.set_current_state(v, i);
                     dev.update_history();
+                    // Phase 3 of inverter-bridge-losses: DCR loss accumulator.
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(i, 0.0);
+                    } else {
+                        dev.accumulate_loss(i, timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, Resistor>) {
+                    // Phase 3 of inverter-bridge-losses: I²·R loss accumulator.
+                    // Resistor is purely linear, no existing update_history
+                    // branch — added here. No-op when R_th_ja == 0.
+                    Index n1 = conn.nodes[0];
+                    Index n2 = conn.nodes[1];
+                    const Real v1 = (n1 >= 0) ? x[n1] : 0.0;
+                    const Real v2 = (n2 >= 0) ? x[n2] : 0.0;
+                    const Real v_res = v1 - v2;
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(v_res, 0.0);
+                    } else {
+                        dev.accumulate_loss(v_res, timestep_);
+                    }
                 }
                 else if constexpr (std::is_same_v<T, DcMotorDevice>) {
                     // Read the new armature current and terminal voltage from the
@@ -2696,6 +3530,102 @@ public:
                         dev.reset_history_for_transient_start(v_terminal, i_branch);
                     } else {
                         dev.advance_state(v_terminal, i_branch, timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, PmsmDevice>) {
+                    // Read 3 line currents + 3 terminal voltages (relative to
+                    // the neutral node) and advance ω, θ via forward-Euler.
+                    const Index n_a = conn.nodes[0];
+                    const Index n_b = conn.nodes[1];
+                    const Index n_c = conn.nodes[2];
+                    const Index n_n = conn.nodes[3];
+                    const Index br_a = conn.branch_index;
+                    const Index br_b = conn.branch_index_2;
+                    const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+                    const Real v_n = (n_n >= 0) ? x[n_n] : 0.0;
+                    const Real v_a = ((n_a >= 0) ? x[n_a] : 0.0) - v_n;
+                    const Real v_b = ((n_b >= 0) ? x[n_b] : 0.0) - v_n;
+                    const Real v_c = ((n_c >= 0) ? x[n_c] : 0.0) - v_n;
+                    const Real i_a = (br_a >= 0) ? x[br_a] : 0.0;
+                    const Real i_b = (br_b >= 0) ? x[br_b] : 0.0;
+                    const Real i_c = (br_c >= 0) ? x[br_c] : 0.0;
+
+                    if (initialize) {
+                        dev.reset_history_for_transient_start(i_a, i_b, i_c);
+                    } else {
+                        dev.advance_state(v_a, v_b, v_c, i_a, i_b, i_c,
+                                          timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, IdealDiode>) {
+                    // Phase 1 of inverter-bridge-losses: integrate V·I·dt
+                    // per accepted timestep so the device exposes
+                    //   average_power() / peak_power() / junction_temperature()
+                    // at the end of the simulation. Off-state leakage is
+                    // ignored by `accumulate_loss` (only positive P counts).
+                    const Index n_anode   = conn.nodes[0];
+                    const Index n_cathode = conn.nodes[1];
+                    const Real v_a = (n_anode   >= 0) ? x[n_anode]   : 0.0;
+                    const Real v_c = (n_cathode >= 0) ? x[n_cathode] : 0.0;
+                    const Real v_diode = v_a - v_c;
+
+                    if (initialize) {
+                        dev.reset_loss();
+                        // Still record the initial operating-point sample so
+                        // last_voltage()/last_current() are sane before any
+                        // step has been taken.
+                        dev.accumulate_loss(v_diode, 0.0);
+                    } else {
+                        dev.accumulate_loss(v_diode, timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, MOSFET>) {
+                    const Index n_gate   = conn.nodes[0];
+                    const Index n_drain  = conn.nodes[1];
+                    const Index n_source = conn.nodes[2];
+                    const Real v_g = (n_gate   >= 0) ? x[n_gate]   : 0.0;
+                    const Real v_d = (n_drain  >= 0) ? x[n_drain]  : 0.0;
+                    const Real v_s = (n_source >= 0) ? x[n_source] : 0.0;
+                    const Real v_ds = v_d - v_s;
+                    const Real v_gs_signed = dev.params().is_nmos
+                        ? (v_g - v_s) : (v_s - v_g);
+                    bool is_on;
+                    const auto forced = forced_switch_state(i);
+                    if (forced.has_value()) {
+                        is_on = *forced;
+                    } else {
+                        is_on = (v_gs_signed > dev.params().vth);
+                    }
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(v_ds, 0.0, is_on);
+                    } else {
+                        dev.accumulate_loss(v_ds, timestep_, is_on);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, IGBT>) {
+                    // Phase 2: accumulate V_ce · I_c(state, T_j) per step.
+                    const Index n_gate  = conn.nodes[0];
+                    const Index n_coll  = conn.nodes[1];
+                    const Index n_emit  = conn.nodes[2];
+                    const Real v_g = (n_gate >= 0) ? x[n_gate] : 0.0;
+                    const Real v_c_n = (n_coll >= 0) ? x[n_coll] : 0.0;
+                    const Real v_e   = (n_emit >= 0) ? x[n_emit] : 0.0;
+                    const Real v_ce  = v_c_n - v_e;
+                    const Real v_ge  = v_g - v_e;
+                    bool is_on;
+                    const auto forced = forced_switch_state(i);
+                    if (forced.has_value()) {
+                        is_on = *forced;
+                    } else {
+                        is_on = (v_ge > dev.params().vth);
+                    }
+                    if (initialize) {
+                        dev.reset_loss();
+                        dev.accumulate_loss(v_ce, 0.0, is_on);
+                    } else {
+                        dev.accumulate_loss(v_ce, timestep_, is_on);
                     }
                 }
             }, devices_[i]);
@@ -3394,6 +4324,79 @@ public:
             }, devices_[i]);
         }
         return events;
+    }
+
+    /// Result of `bisect_pwl_event_alpha`: the bisected fractional step
+    /// `alpha ∈ [0, 1]` at which the earliest PWL commutation fires, the
+    /// set of devices that commute at that point (typically one — multiple
+    /// may co-fire within `tolerance`), and the count of bisection
+    /// iterations consumed.
+    struct PwlEventBisection {
+        Real alpha = 1.0;
+        std::vector<PwlCommutation> events;
+        int bisections = 0;
+    };
+
+    /// Linearly bisect on `alpha ∈ [0, 1]` between `x_prev` and `x_now` to
+    /// find the earliest fraction of the accepted step at which any
+    /// PWL-eligible device's `should_commute()` predicate triggers. This is
+    /// the cheap analogue of `find_switch_event_time` for the PWL segment
+    /// engine — no re-solve of the underlying linear system; the state at
+    /// the midpoint is the convex combination of the segment's endpoints,
+    /// which is exact for the Tustin step within a single linear topology.
+    ///
+    /// Returns `nullopt` when no device commutes anywhere in the interval
+    /// (caller should treat the step as event-free). Returns `alpha = 0`
+    /// when the start of the step already wants to commute (the previous
+    /// step missed a transition — caller should commit immediately).
+    ///
+    /// Cost is O(D · log2(1/tolerance)) where D = switching device count;
+    /// for D = 12 and `tolerance = 1e-9` the bisection runs ~30 iterations
+    /// × 12 device evaluations = 360 cheap should_commute() calls. Cheap
+    /// next to a Newton step or a Tustin re-solve.
+    [[nodiscard]] std::optional<PwlEventBisection> bisect_pwl_event_alpha(
+        const Vector& x_prev,
+        const Vector& x_now,
+        SwitchingMode circuit_default = SwitchingMode::Behavioral,
+        Real tolerance = 1e-9,
+        int max_iter = 40) const {
+        // Sanity: at α=0 no events should be pending — the previous step's
+        // post-accept scan would have committed them. If something is
+        // pending, hand it back immediately (rare; corresponds to a
+        // missed-event scenario where the user manually set state between
+        // steps).
+        auto events_at = [&](const Vector& x) {
+            return scan_pwl_commutations(x, circuit_default);
+        };
+
+        auto interp = [&](Real alpha) -> Vector {
+            return (Real{1.0} - alpha) * x_prev + alpha * x_now;
+        };
+
+        auto events_lo = events_at(x_prev);
+        if (!events_lo.empty()) {
+            return PwlEventBisection{Real{0.0}, std::move(events_lo), 0};
+        }
+
+        auto events_hi = events_at(x_now);
+        if (events_hi.empty()) {
+            return std::nullopt;
+        }
+
+        Real alpha_lo = Real{0.0};
+        Real alpha_hi = Real{1.0};
+        int iter = 0;
+        for (; iter < max_iter && (alpha_hi - alpha_lo) > tolerance; ++iter) {
+            const Real alpha_mid = Real{0.5} * (alpha_lo + alpha_hi);
+            auto events_mid = events_at(interp(alpha_mid));
+            if (events_mid.empty()) {
+                alpha_lo = alpha_mid;
+            } else {
+                alpha_hi = alpha_mid;
+                events_hi = std::move(events_mid);
+            }
+        }
+        return PwlEventBisection{alpha_hi, std::move(events_hi), iter};
     }
 
     /// Apply a list of pending commutations (typically from
@@ -4114,9 +5117,20 @@ private:
             stamp_current_source(dev.current(), conn.nodes, b);
         }
         else if constexpr (std::is_same_v<T, IdealDiode>) {
-            // Initial guess: use off-state conductance for DC stamping
-            Real g = dev.is_conducting() ? 1e3 : 1e-9;
-            stamp_resistor(1.0 / g, conn.nodes, triplets);
+            // Initial guess for DC OP: use the device's own g_on / g_off
+            // (honors realistic forward model when V_F0 > 0). The Norton
+            // shift V_F0/R_d is added to `b` so the bias point converges
+            // toward I=0 at V_diode=V_F0 rather than V_diode=0.
+            const bool conducting = dev.is_conducting();
+            const Real g = conducting ? dev.effective_g_on() : dev.g_off();
+            stamp_resistor(1.0 / std::max<Real>(g, 1e-30), conn.nodes, triplets);
+            if (conducting) {
+                const Real I0 = dev.i_f0_offset();
+                const Index n_anode = conn.nodes[0];
+                const Index n_cathode = conn.nodes[1];
+                if (n_anode >= 0)   b[n_anode]   -= I0;
+                if (n_cathode >= 0) b[n_cathode] += I0;
+            }
         }
         else if constexpr (std::is_same_v<T, IdealSwitch>) {
             Real g = dev.is_closed() ? 1e6 : 1e-12;
@@ -4184,6 +5198,39 @@ private:
                 triplets.emplace_back(br, br, -p.R_a);
                 b[br] += v_back_emf;
             }
+        }
+        else if constexpr (std::is_same_v<T, PmsmDevice>) {
+            // DC: each phase inductor is a short, so per-phase
+            //   v_k − v_N − R_s · i_k − e_k(θ_e_init) = 0
+            // Stamp as 3 voltage sources with V = e_k(θ_e_init) and R_s in
+            // series, one per phase.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real e_a = dev.back_emf_a();
+            const Real e_b = dev.back_emf_b();
+            const Real e_c = dev.back_emf_c();
+
+            auto stamp_phase = [&](Index n_line, Index br, Real e_k) {
+                if (br < 0) return;
+                // KCL at line + neutral nodes
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+                // Branch eq: v_line − v_N − R_s · i_k − e_k = 0
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -p.Rs);
+                b[br] += e_k;
+            };
+            stamp_phase(n_a, br_a, e_a);
+            stamp_phase(n_b, br_b, e_b);
+            stamp_phase(n_c, br_c, e_c);
         }
     }
 
@@ -4442,6 +5489,55 @@ private:
                 triplets.emplace_back(br, br, -r_eq);
             }
         }
+        else if constexpr (std::is_same_v<T, PmsmDevice>) {
+            // Transient Jacobian for the 3-phase PMSM (R_s + L_s series +
+            // back-EMF per phase). Trapezoidal companion (mirrors Inductor
+            // / DcMotor pattern) applied per-phase:
+            //
+            //   f_brk = (v_k − v_N) − (R_s + 2L_s/dt) · i_k
+            //         + (2L_s/dt) · i_k_prev + V_Lk_prev − e_k(θ_e_prev)
+            //
+            // θ_e_prev is the electrical angle at the previous accepted
+            // step, so the back-EMF is a semi-implicit source. The dq
+            // currents are computed in `advance_state()` after the solve.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real l_s = Real{0.5} * (p.Ld + p.Lq);
+            const Real two_L_over_dt = 2.0 * l_s / std::max<Real>(timestep_, 1e-30);
+            const Real r_eq = p.Rs + two_L_over_dt;
+
+            auto stamp_phase = [&](Index n_line, Index br, Real i_prev,
+                                   Real v_L_prev, Real e_k) {
+                if (br < 0) return;
+                const Real v_hist = two_L_over_dt * i_prev + v_L_prev;
+                const Real i_br = x[br];
+
+                // KCL at line / neutral nodes
+                if (n_line >= 0) f[n_line] += i_br;
+                if (n_n    >= 0) f[n_n]    -= i_br;
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+
+                const Real v_line = (n_line >= 0) ? x[n_line] : 0.0;
+                const Real v_neut = (n_n    >= 0) ? x[n_n]    : 0.0;
+                f[br] += (v_line - v_neut) - r_eq * i_br + v_hist - e_k;
+
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -r_eq);
+            };
+
+            stamp_phase(n_a, br_a, dev.i_a_prev(), dev.v_La_prev(), dev.back_emf_a());
+            stamp_phase(n_b, br_b, dev.i_b_prev(), dev.v_Lb_prev(), dev.back_emf_b());
+            stamp_phase(n_c, br_c, dev.i_c_prev(), dev.v_Lc_prev(), dev.back_emf_c());
+        }
     }
 
     // =========================================================================
@@ -4493,9 +5589,15 @@ private:
     }
 
     template<typename Triplets>
-    void stamp_diode_jacobian(const IdealDiode& /*dev*/, const std::vector<Index>& nodes,
+    void stamp_diode_jacobian(const IdealDiode& dev, const std::vector<Index>& nodes,
                               Triplets& triplets,
                               Vector& f, const Vector& x) const {
+        // Reads the device's own (g_on, g_off, V_F0, R_d) instead of the
+        // hardcoded `1e3 / 1e-9` stub that lived here pre-Phase-1. Honors
+        // the realistic forward model:
+        //
+        //   I_diode = effective_g_on · (V_diode − V_F0(T_j))   when conducting
+        //   I_diode = g_off · V_diode                         when off
         Index n_anode = nodes[0];
         Index n_cathode = nodes[1];
 
@@ -4503,13 +5605,15 @@ private:
         Real v_cathode = (n_cathode >= 0) ? x[n_cathode] : 0.0;
         Real v_diode = v_anode - v_cathode;
 
-        // Determine state (simple ideal model)
-        Real g = (v_diode > 0.0) ? 1e3 : 1e-9;
-        Real i = g * v_diode;
+        const Real v_thresh = (dev.V_F0() > 0.0) ? dev.V_F0_at_Tj() : 0.0;
+        const bool conducting = v_diode > v_thresh;
+        const Real g_on_eff = dev.effective_g_on();
+        const Real g = conducting ? g_on_eff : dev.g_off();
+        const Real i_diode = g * (v_diode - (conducting ? v_thresh : 0.0));
 
         stamp_conductance(g, n_anode, n_cathode, triplets);
-        if (n_anode >= 0) f[n_anode] += i;
-        if (n_cathode >= 0) f[n_cathode] -= i;
+        if (n_anode >= 0)   f[n_anode]   += i_diode;
+        if (n_cathode >= 0) f[n_cathode] -= i_diode;
     }
 
     template<typename Triplets>
@@ -4607,11 +5711,21 @@ private:
 
         const auto forced = forced_switch_state(device_index);
         if (forced.has_value()) {
-            // Forced PWL state: stamp as a pure conductance (g_on or
-            // g_off) without the smooth-model overhead. This matches
-            // the legacy behavior when the kernel pins the device.
-            const Real g = *forced ? p.g_on : g_off_eff;
-            const Real id = g * vds;
+            // Forced PWL state: stamp as a pure conductance (Rds_on or
+            // g_off) — matches Newton-Raphson convention used by the
+            // smooth path below (`f[drain] += id` for current leaving).
+            //
+            // Phase 2 of inverter-bridge-losses upgrade: when params has
+            // R_th_ja > 0, use the T_j-corrected R_ds(on) so loss
+            // accumulator's V·I·dt matches the analytical I²·R_ds(on).
+            const Real Rds_T = dev.Rds_on_at_Tj();   // honors T_j feedback
+            const Real g_on_eff = (Rds_T > 0.0)
+                ? 1.0 / Rds_T
+                : p.g_on;
+            const Real g = *forced ? g_on_eff : g_off_eff;
+            const Real id_internal = g * vds;
+            const Real id = sign * id_internal;
+            // ∂id/∂vd = +g, ∂id/∂vs = −g (mirror of smooth-path signs).
             if (n_drain >= 0) {
                 triplets.emplace_back(n_drain, n_drain, g);
                 if (n_source >= 0) triplets.emplace_back(n_drain, n_source, -g);
@@ -4620,9 +5734,10 @@ private:
                 triplets.emplace_back(n_source, n_source, g);
                 if (n_drain >= 0) triplets.emplace_back(n_source, n_drain, -g);
             }
-            const Real i_eq_forced = id * sign - g * vds;  // = 0
-            if (n_drain >= 0) f[n_drain] -= sign * id - i_eq_forced;
-            if (n_source >= 0) f[n_source] += sign * id - i_eq_forced;
+            // Physical residual: +id leaves drain, −id arrives at source
+            // (same convention as the smooth-path Newton stamp below).
+            if (n_drain >= 0)  f[n_drain]  += id;
+            if (n_source >= 0) f[n_source] -= id;
             return;
         }
 

@@ -37,15 +37,67 @@ public:
         Scalar kp = 0.1;            // Transconductance parameter (A/V^2)
         Scalar lambda = 0.01;       // Channel-length modulation (1/V)
         Scalar g_off = 1e-12;       // Off-state conductance
-        bool is_nmos = true;      // NMOS if true, PMOS if false
+        bool is_nmos = true;        // NMOS if true, PMOS if false
         Scalar g_on = 1e3;          // On-state conductance for Ideal mode (1/Rds_on)
+
+        // -------- Thermal binding + loss accumulator (Phase 2 of
+        //          inverter-bridge-losses) ----------------------------------
+        // Conduction loss model: P_cond = I_ds² · R_ds(on)(T_j).
+        // Switching loss is left for a future iteration — Eon/Eoff would
+        // need a hook into the kernel's commute event handler.
+        //
+        //   Rds_on_tc : R_ds(on) temperature coefficient (1/K). Default 5e-3
+        //               is silicon-typical (R doubles between 25 °C and 125 °C).
+        //   T_ref     : reference temperature for Rds_on_tc (°C).
+        //   R_th_ja   : junction-to-ambient thermal resistance (K/W).
+        //   T_amb     : ambient temperature (°C).
+        //
+        // When R_th_ja = 0 the device runs in legacy mode (no loss
+        // accumulation, no T_j-dependent Rds_on). When R_th_ja > 0 the
+        // runtime integrates V_ds·I_ds·dt per accepted timestep and the
+        // device exposes `average_power()`, `peak_power()`,
+        // `junction_temperature()`, etc.
+        Scalar Rds_on_tc = 5.0e-3;
+        Scalar T_ref     = 25.0;
+        Scalar R_th_ja   = 0.0;       // 0 = disabled (backward-compat)
+        Scalar T_amb     = 25.0;
+
+        // -------- Switching-loss model (Phase 4 of inverter-bridge-losses,
+        //          Pulsim 0.10.0a10) -------------------------------------
+        // Per-event energies are scaled from a 25 °C reference using the
+        // textbook linear-in-I, linear-in-V approximation:
+        //
+        //   E_on(I, V, T_j) = Eon_25 · (I / I_ref) · (V / V_ref)
+        //                            · (1 + Esw_tc · (T_j − T_ref))
+        //   E_off(I, V, T_j) — same shape with Eoff_25.
+        //
+        // The accumulator detects pwl_state_ transitions inside
+        // `accumulate_loss` and adds the appropriate energy. Default
+        // Eon_25 = Eoff_25 = 0 → no switching loss recorded (legacy).
+        Scalar Eon_25    = 0.0;       // J at I_ref, V_ref, T_ref
+        Scalar Eoff_25   = 0.0;
+        Scalar I_ref     = 10.0;      // A — reference current for scaling
+        Scalar V_ref     = 400.0;     // V — reference voltage for scaling
+        Scalar Esw_tc    = 3.0e-3;    // 1/K — switching-energy TC
     };
 
     explicit MOSFET(std::string name = "")
         : Base(std::move(name)), params_() {}
 
     explicit MOSFET(Params params, std::string name)
-        : Base(std::move(name)), params_(params) {}
+        : Base(std::move(name)), params_(params), T_j_(params.T_amb) {
+        // Auto-promote to SwitchingMode::Ideal when the user opts into
+        // the switching-loss model (Eon_25 > 0 or Eoff_25 > 0). The
+        // smooth Shichman-Hodges (behavioral) stamp has known Newton-
+        // convergence issues with discontinuous PWM gate voltages (~140
+        // step rejections per 10 ms at 10 kHz); the PWL Ideal stamp
+        // avoids those Newton issues AND lets the accumulator's
+        // transition detection see real gate edges. Backward-compat:
+        // default Eon_25=Eoff_25=0 → mode stays at SwitchingMode::Auto.
+        if (params.Eon_25 > Scalar{0} || params.Eoff_25 > Scalar{0}) {
+            mode_ = SwitchingMode::Ideal;
+        }
+    }
 
     explicit MOSFET(Scalar vth, Scalar kp, bool is_nmos = true, std::string name = "")
         : Base(std::move(name))
@@ -126,6 +178,154 @@ public:
 
     [[nodiscard]] const Params& params() const { return params_; }
     [[nodiscard]] bool is_conducting() const noexcept { return pwl_state_; }
+
+    // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
+    /// R_ds(on) at the device's current T_j (linear coefficient).
+    /// Falls back to nominal `g_on` when the thermal model is disabled
+    /// (`params.R_th_ja == 0`) so existing tests don't see any drift.
+    [[nodiscard]] Scalar Rds_on_at_Tj() const noexcept {
+        const Scalar R_nom = (params_.g_on > Scalar{0})
+            ? Scalar{1} / params_.g_on : Scalar{1};
+        if (params_.R_th_ja <= Scalar{0}) return R_nom;
+        return R_nom * (Scalar{1} + params_.Rds_on_tc * (T_j_ - params_.T_ref));
+    }
+
+    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_ + e_sw_; }
+    [[nodiscard]] Scalar conduction_energy() const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar switching_energy() const noexcept { return e_sw_; }
+    [[nodiscard]] std::size_t switching_events() const noexcept {
+        return ev_count_;
+    }
+    [[nodiscard]] Scalar conduction_time() const noexcept { return t_sim_; }
+    [[nodiscard]] Scalar peak_power()     const noexcept { return p_peak_; }
+    [[nodiscard]] Scalar last_power()     const noexcept { return p_last_; }
+    [[nodiscard]] Scalar last_current()   const noexcept { return i_last_; }
+    [[nodiscard]] Scalar last_voltage()   const noexcept { return v_last_; }
+    [[nodiscard]] Scalar junction_temperature() const noexcept { return T_j_; }
+    /// Total average power = conduction + switching, both per accepted-step.
+    [[nodiscard]] Scalar average_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? (e_cond_ + e_sw_) / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_conduction_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_switching_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_sw_ / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar steady_state_junction_temperature() const noexcept {
+        return params_.T_amb + average_power() * params_.R_th_ja;
+    }
+
+    /// Zero the loss accumulator (conduction + switching). Does NOT
+    /// touch T_j — the stamping uses whatever T_j was last set (via
+    /// `set_T_j_init` or T_amb at construction). The was_on_ state
+    /// snapshot is also cleared so the first call to accumulate_loss
+    /// after reset re-establishes the baseline without counting a
+    /// spurious transition.
+    void reset_loss() noexcept {
+        e_cond_ = 0.0;
+        e_sw_ = 0.0;
+        ev_count_ = 0;
+        p_peak_ = 0.0;
+        p_last_ = 0.0;
+        t_sim_ = 0.0;
+        i_last_ = 0.0;
+        v_last_ = 0.0;
+        was_on_ = false;
+        was_on_initialized_ = false;
+    }
+
+    /// Push T_j back into the stamping path (for the fixed-point
+    /// electrothermal iteration). When R_th_ja > 0 the next stamp will
+    /// use Rds_on(T_j) and accumulate_loss will treat this as the
+    /// nominal junction temperature.
+    void set_T_j_init(Scalar t_j) noexcept { T_j_ = t_j; }
+
+    /// Sample V_ds · I_ds over the past `dt` seconds.
+    ///
+    /// `is_on` is supplied by the runtime — it captures both the
+    /// kernel-committed `pwl_state_` AND any `forced_switch_state`
+    /// override applied via `Circuit::set_switch_state`. When ON the
+    /// channel resistance is `Rds_on_at_Tj()`; when OFF the device is
+    /// modelled as `g_off` (sub-threshold).
+    void accumulate_loss(Scalar v_ds, Scalar dt, bool is_on) noexcept {
+        if (dt < Scalar{0}) return;
+
+        // ----- Switching-event detection (E_on / E_off, Phase 4) ------
+        // Compare current state to the snapshot from the prior call.
+        // The very first call (was_on_initialized_ == false) just
+        // establishes the baseline — no transition is counted. From
+        // then on, every flip of `is_on` triggers an event.
+        if (was_on_initialized_ && (was_on_ != is_on) &&
+            params_.R_th_ja > Scalar{0}) {
+            // Temperature-scaled per-event energy.
+            const Scalar T_delta = T_j_ - params_.T_ref;
+            const Scalar tc_factor = Scalar{1} + params_.Esw_tc * T_delta;
+            const Scalar i_ref = (params_.I_ref > Scalar{0}) ?
+                params_.I_ref : Scalar{1};
+            const Scalar v_ref = (params_.V_ref > Scalar{0}) ?
+                params_.V_ref : Scalar{1};
+            if (is_on && !was_on_) {
+                // OFF → ON. Use v_last_ (blocking voltage just before
+                // the transition) and the post-transition current i.
+                const Scalar Rds = Rds_on_at_Tj();
+                const Scalar g_on_eff = (Rds > Scalar{0}) ?
+                    Scalar{1}/Rds : params_.g_on;
+                const Scalar i_post = g_on_eff * v_ds;
+                const Scalar V_block = (v_last_ > Scalar{0}) ?
+                    v_last_ : v_ds;
+                const Scalar e_event = params_.Eon_25 *
+                    (std::abs(i_post) / i_ref) * (V_block / v_ref) *
+                    tc_factor;
+                if (e_event > Scalar{0}) {
+                    e_sw_ += e_event;
+                    ++ev_count_;
+                }
+            } else if (!is_on && was_on_) {
+                // ON → OFF. Use the pre-transition current (i_last_)
+                // and the post-transition voltage (v_ds, now blocking).
+                const Scalar I_pre = std::abs(i_last_);
+                const Scalar V_block = (v_ds > Scalar{0}) ? v_ds : Scalar{0};
+                const Scalar e_event = params_.Eoff_25 *
+                    (I_pre / i_ref) * (V_block / v_ref) * tc_factor;
+                if (e_event > Scalar{0}) {
+                    e_sw_ += e_event;
+                    ++ev_count_;
+                }
+            }
+        }
+        was_on_ = is_on;
+        was_on_initialized_ = true;
+
+        // ----- Conduction loss (existing accumulator) ----------------
+        if (params_.R_th_ja <= Scalar{0}) {
+            // Thermal model disabled — still record last V/I for
+            // diagnostic but skip the integration.
+            const Scalar g  = is_on ? params_.g_on : params_.g_off;
+            v_last_ = v_ds;
+            i_last_ = g * v_ds;
+            p_last_ = v_ds * i_last_;
+            return;
+        }
+        const Scalar Rds = Rds_on_at_Tj();
+        const Scalar g  = is_on
+            ? (Rds > Scalar{0} ? Scalar{1}/Rds : params_.g_on)
+            : params_.g_off;
+        const Scalar i_ds = g * v_ds;
+        const Scalar p = v_ds * i_ds;
+
+        v_last_ = v_ds;
+        i_last_ = i_ds;
+        p_last_ = p;
+        // Both forward and reverse conduction loss (P = V·I always
+        // positive in resistive operation, no body-diode model yet).
+        const Scalar p_abs = (p > Scalar{0}) ? p : -p;
+        if (p_abs > Scalar{0}) {
+            e_cond_ += p_abs * dt;
+            if (p_abs > p_peak_) p_peak_ = p_abs;
+        }
+        t_sim_ += dt;
+    }
 
     /// Sigmoid sharpness for the smooth Shichman-Hodges region blend
     /// (1/V). Phase-8 PMOS Newton-region fix: the previous hard-branch
@@ -414,6 +614,23 @@ private:
     Scalar event_hysteresis_ = Scalar{1e-9};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
+
+    // Loss + thermal accumulator (Phase 2 of inverter-bridge-losses).
+    // All zero when R_th_ja == 0 (legacy mode).
+    Scalar e_cond_ = Scalar{0.0};
+    Scalar e_sw_   = Scalar{0.0};   // switching energy (Phase 4)
+    std::size_t ev_count_ = 0;       // # of switching events recorded
+    Scalar p_peak_ = Scalar{0.0};
+    Scalar p_last_ = Scalar{0.0};
+    Scalar t_sim_  = Scalar{0.0};
+    Scalar i_last_ = Scalar{0.0};
+    Scalar v_last_ = Scalar{0.0};
+    Scalar T_j_    = Scalar{25.0};
+    // Switching transition tracker — true iff the device was ON at the
+    // PREVIOUS accumulate_loss() call. The `was_on_initialized_` flag
+    // suppresses a spurious event on the very first call.
+    bool   was_on_             = false;
+    bool   was_on_initialized_ = false;
 };
 
 template<>
