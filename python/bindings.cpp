@@ -1391,6 +1391,29 @@ void init_v2_module(py::module_& v2) {
              &Circuit::mosfet_steady_state_junction_temperature, py::arg("name"))
         .def("mosfet_last_current",  &Circuit::mosfet_last_current, py::arg("name"))
         .def("mosfet_last_voltage",  &Circuit::mosfet_last_voltage, py::arg("name"))
+        .def("set_mosfet_C_oss",       &Circuit::set_mosfet_C_oss,
+             py::arg("name"), py::arg("c_oss"),
+             "Override a named MOSFET's parasitic output capacitance (F). "
+             "Use this after the 3-phase VSI helper or any other composite "
+             "builder that forces PWL Ideal but leaves C_oss at 0 — adding "
+             "a small C_oss (10–100 nF) gives the switching event a finite "
+             "charge time and keeps the load current well-defined during "
+             "commutation. The auto-parasitics pre-flight writes to the "
+             "same field for boost-class topologies.")
+        .def("set_mosfet_switching_mode", &Circuit::set_mosfet_switching_mode,
+             py::arg("name"), py::arg("mode"),
+             "Set the switching mode (Auto/Ideal/Behavioral) on a named "
+             "MOSFET after construction.")
+        .def("set_igbt_C_oss",         &Circuit::set_igbt_C_oss,
+             py::arg("name"), py::arg("c_oss"),
+             "Mirror of set_mosfet_C_oss for IGBTs.")
+        .def("set_igbt_switching_mode", &Circuit::set_igbt_switching_mode,
+             py::arg("name"), py::arg("mode"))
+        .def("set_diode_C_j",          &Circuit::set_diode_C_j,
+             py::arg("name"), py::arg("c_j"),
+             "Mirror of set_mosfet_C_oss for IdealDiode (parasitic C_j).")
+        .def("set_diode_switching_mode", &Circuit::set_diode_switching_mode,
+             py::arg("name"), py::arg("mode"))
         .def("set_mosfet_T_j",       &Circuit::set_mosfet_T_j,
              py::arg("name"), py::arg("t_j"))
         .def("reset_mosfet_loss",    &Circuit::reset_mosfet_loss, py::arg("name"))
