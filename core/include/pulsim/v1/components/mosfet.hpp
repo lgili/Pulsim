@@ -297,19 +297,17 @@ public:
         was_on_ = is_on;
         was_on_initialized_ = true;
 
-        // ----- Conduction loss (existing accumulator) ----------------
-        if (params_.R_th_ja <= Scalar{0}) {
-            // Thermal model disabled — still record last V/I for
-            // diagnostic but skip the integration.
-            const Scalar g  = is_on ? params_.g_on : params_.g_off;
-            v_last_ = v_ds;
-            i_last_ = g * v_ds;
-            p_last_ = v_ds * i_last_;
-            return;
-        }
-        const Scalar Rds = Rds_on_at_Tj();
-        const Scalar g  = is_on
-            ? (Rds > Scalar{0} ? Scalar{1}/Rds : params_.g_on)
+        // ----- Conduction loss (always tracked) ----------------------
+        // R_th_ja > 0 enables T_j-corrected R_ds(on); when disabled
+        // (R_th_ja == 0) we fall back to the static `g_on`/`g_off` but
+        // still integrate the conduction energy so the device's loss
+        // accessors and the system-level `SystemLossSummary` report a
+        // consistent number regardless of which thermal path the user
+        // wires up (`MOSFETParams.R_th_ja` or `opts.thermal_devices`).
+        const bool tj_corrected = params_.R_th_ja > Scalar{0};
+        const Scalar Rds = tj_corrected ? Rds_on_at_Tj() : Scalar{0};
+        const Scalar g = is_on
+            ? (tj_corrected && Rds > Scalar{0} ? Scalar{1}/Rds : params_.g_on)
             : params_.g_off;
         const Scalar i_ds = g * v_ds;
         const Scalar p = v_ds * i_ds;

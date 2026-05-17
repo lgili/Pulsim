@@ -118,8 +118,13 @@ TEST_CASE("Capacitor: ESR loss for sinusoidal ripple current",
 // ---------------------------------------------------------------------------
 // Resistor I²R loss
 // ---------------------------------------------------------------------------
-TEST_CASE("Resistor: legacy mode (R_th_ja=0) leaves loss accumulator at 0",
+TEST_CASE("Resistor: loss tracked even without thermal feedback",
           "[passives_loss][resistor][regression]") {
+    // Unified pipeline: the resistor's per-device accumulator always
+    // integrates V²/R regardless of `R_th_ja`. R_th_ja > 0 only switches
+    // R(T_j) on; with the default R_th_ja == 0 the static resistance is
+    // used. Either way the loss number is reported consistently so the
+    // system summary (`SimulationResult.loss_summary`) is meaningful.
     Circuit circuit;
     const Index n_in = circuit.add_node("in");
     const Index gnd  = Circuit::ground();
@@ -131,8 +136,9 @@ TEST_CASE("Resistor: legacy mode (R_th_ja=0) leaves loss accumulator at 0",
     opts.newton_options.num_branches = circuit.num_branches();
     REQUIRE(Simulator(circuit, opts).run_transient().success);
 
-    CHECK(circuit.resistor_average_power("R1") == Approx(0.0));
-    CHECK(circuit.resistor_total_energy("R1") == Approx(0.0));
+    // 10 V across 100 Ω → P = 1 W (analytical, no thermal feedback).
+    CHECK(circuit.resistor_average_power("R1") == Approx(1.0).margin(0.05));
+    CHECK(circuit.resistor_total_energy("R1") == Approx(1e-3).margin(5e-5));
 }
 
 TEST_CASE("Resistor: P = V²/R for DC operation",

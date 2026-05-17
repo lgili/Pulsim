@@ -178,21 +178,26 @@ public:
         was_on_ = is_on;
         was_on_initialized_ = true;
 
-        // ----- Conduction loss (existing) ---------------------------
-        if (params_.R_th_ja <= Scalar{0}) {
-            const Scalar g = is_on ? params_.g_on : params_.g_off;
-            v_last_ = v_ce; i_last_ = g * v_ce; p_last_ = v_ce * i_last_;
-            return;
-        }
-        const Scalar V_ce_sat_T = V_ce_sat_at_Tj();
-        const Scalar R_ce_T     = Rce_at_Tj();
+        // ----- Conduction loss (always tracked) ---------------------
+        // R_th_ja > 0 enables T_j-corrected (V_ce_sat, R_ce); when
+        // disabled we fall back to the static `g_on`/`g_off` but still
+        // integrate the conduction energy so the device's loss
+        // accessors and `SystemLossSummary` stay consistent.
+        const bool tj_corrected = params_.R_th_ja > Scalar{0};
         Scalar i_c;
-        if (is_on) {
-            // V_ce = V_ce_sat + I_c · R_ce  →  I_c = (V_ce − V_ce_sat) / R_ce
-            i_c = (v_ce - V_ce_sat_T) / std::max<Scalar>(R_ce_T, Scalar{1e-9});
-            if (i_c < Scalar{0}) i_c = Scalar{0};   // IGBT doesn't conduct in reverse
+        if (tj_corrected) {
+            const Scalar V_ce_sat_T = V_ce_sat_at_Tj();
+            const Scalar R_ce_T     = Rce_at_Tj();
+            if (is_on) {
+                // V_ce = V_ce_sat + I_c · R_ce  →  I_c = (V_ce − V_ce_sat) / R_ce
+                i_c = (v_ce - V_ce_sat_T) / std::max<Scalar>(R_ce_T, Scalar{1e-9});
+                if (i_c < Scalar{0}) i_c = Scalar{0};   // IGBT doesn't conduct in reverse
+            } else {
+                i_c = params_.g_off * v_ce;
+            }
         } else {
-            i_c = params_.g_off * v_ce;
+            const Scalar g = is_on ? params_.g_on : params_.g_off;
+            i_c = g * v_ce;
         }
         const Scalar p = v_ce * i_c;
 

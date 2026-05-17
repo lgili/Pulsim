@@ -113,6 +113,3 @@ exclude_lines = [
 select = ["E", "F", "W"]
 ignore = ["E501"]
 
-[tool.ruff.lint.per-file-ignores]
-"python/pulsim/remote/*_pb2.py" = ["E402", "F401"]
-"python/pulsim/remote/*_pb2_grpc.py" = ["F401"]

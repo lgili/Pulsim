@@ -187,19 +187,15 @@ public:
         i_last_ = 0.0;
     }
 
-    /// Sample i_cap² · ESR(T_j) over the past `dt` seconds. Called by
-    /// the runtime's `update_history` ladder after each accepted step.
-    /// No-op when R_th_ja == 0 (legacy mode preserved).
+    /// Always tracks i_cap² · ESR(T_j) over the past `dt` seconds.
+    /// R_th_ja > 0 enables T_j-corrected ESR; otherwise the static
+    /// `ESR_` is used so the device's loss accessor and
+    /// `SystemLossSummary` stay consistent. With ESR == 0 (default)
+    /// the integral is identically zero (ideal cap, legacy behavior).
     void accumulate_loss(Scalar i_cap, Scalar dt) noexcept {
         if (dt < Scalar{0}) return;
         i_last_ = i_cap;
-        if (R_th_ja_ <= Scalar{0}) {
-            // Loss model disabled — keep dynamics intact, just track
-            // last current for diagnostic.
-            p_last_ = Scalar{0};
-            return;
-        }
-        const Scalar esr = ESR_at_Tj();
+        const Scalar esr = (R_th_ja_ > Scalar{0}) ? ESR_at_Tj() : ESR_;
         const Scalar p = i_cap * i_cap * esr;
         p_last_ = p;
         if (p > Scalar{0}) {

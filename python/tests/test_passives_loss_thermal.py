@@ -65,14 +65,18 @@ class TestPassivesBindings:
 class TestPassivesBehavior:
     """End-to-end Python validation of the loss accumulator."""
 
-    def test_resistor_legacy_mode_zero_loss(self):
+    def test_resistor_loss_tracked_without_thermal_feedback(self):
+        # Unified pipeline (Pulsim 0.10.0a12+): the per-device loss
+        # accumulator runs always. `R_th_ja == 0` only disables T_j
+        # feedback (the resistance is taken as the static value).
         c = ps.Circuit()
         n = c.add_node("n")
         c.add_voltage_source("Vs", n, ps.Circuit.ground(), 10.0)
-        c.add_resistor("R1", n, ps.Circuit.ground(), 100.0)   # legacy
+        c.add_resistor("R1", n, ps.Circuit.ground(), 100.0)
         r = _run(c)
         assert r.success
-        assert c.resistor_average_power("R1") == pytest.approx(0.0)
+        # P = V²/R = 100/100 = 1 W (no thermal feedback).
+        assert c.resistor_average_power("R1") == pytest.approx(1.0, rel=0.05)
 
     def test_resistor_with_thermal_dissipates_VV_over_R(self):
         c = ps.Circuit()

@@ -174,16 +174,15 @@ public:
         i_last_ = 0.0;
     }
 
-    /// Sample I² · DCR(T_j) over the past `dt` seconds. Same convention
-    /// as the cap/resistor — no-op when R_th_ja == 0 (legacy preserved).
+    /// Always tracks I² · DCR(T_j) over the past `dt` seconds.
+    /// R_th_ja > 0 enables T_j-corrected DCR; otherwise the static
+    /// `DCR_` is used so the device's loss accessor and
+    /// `SystemLossSummary` stay consistent. With DCR == 0 (default)
+    /// the integral is identically zero (ideal inductor).
     void accumulate_loss(Scalar i_branch, Scalar dt) noexcept {
         if (dt < Scalar{0}) return;
         i_last_ = i_branch;
-        if (R_th_ja_ <= Scalar{0}) {
-            p_last_ = Scalar{0};
-            return;
-        }
-        const Scalar DCR_eff = DCR_at_Tj();
+        const Scalar DCR_eff = (R_th_ja_ > Scalar{0}) ? DCR_at_Tj() : DCR_;
         const Scalar p = i_branch * i_branch * DCR_eff;
         p_last_ = p;
         if (p > Scalar{0}) {
