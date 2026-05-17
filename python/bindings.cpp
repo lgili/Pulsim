@@ -723,26 +723,12 @@ void init_v2_module(py::module_& v2) {
                        &Circuit::ThreePhaseRLLoadParams::unbalance_factor,
                        "0 = balanced; [0, 1) scales |Z_b|=1-u and |Z_c|=1+u.");
 
-    py::class_<Circuit::PmsmSteadyStateParams>(
-            v2, "PmsmSteadyStateParams",
-            "PMSM at fixed rotor speed — 3-phase R+L+back-EMF model.")
-        .def(py::init<>())
-        .def_readwrite("R_s", &Circuit::PmsmSteadyStateParams::R_s,
-                       "Stator phase resistance (Ω).")
-        .def_readwrite("L_s", &Circuit::PmsmSteadyStateParams::L_s,
-                       "Stator phase inductance (H). Non-salient (L_d=L_q).")
-        .def_readwrite("lambda_pm", &Circuit::PmsmSteadyStateParams::lambda_pm,
-                       "Rotor flux linkage (V·s/rad).")
-        .def_readwrite("omega_electrical",
-                       &Circuit::PmsmSteadyStateParams::omega_electrical,
-                       "Fixed electrical angular velocity (rad/s).")
-        .def_readwrite("phase_a_offset_deg",
-                       &Circuit::PmsmSteadyStateParams::phase_a_offset_deg,
-                       "Phase A back-EMF angle offset (degrees).")
-        .def_readwrite("positive_sequence",
-                       &Circuit::PmsmSteadyStateParams::positive_sequence,
-                       "True = abc sequence (B = −120°, C = −240°). "
-                       "False = acb (B = +120°, C = +240°).");
+    // consolidate-motors-and-three-phase, Phase A.2: PmsmSteadyStateParams
+    // removed in favor of the canonical `PmsmDevice` (DeviceVariant).
+    // Steady-state operating points are reachable by constructing a
+    // `Pmsm` via `Circuit.add_pmsm(...)` with the rotor mechanical speed
+    // held fixed at the desired ω_m. See `test_pmsm_dynamic.cpp` for the
+    // migrated regression cases.
 
     py::class_<motors::DcMotorParams>(
             v2, "DcMotorParams",
@@ -1408,27 +1394,9 @@ void init_v2_module(py::module_& v2) {
              py::arg("resistance_per_phase"), py::arg("inductance_per_phase"),
              "Add a balanced three-phase RL load in Star configuration "
              "(default topology) with explicit R and L values.")
-        // PMSM steady-state helper (constant rotor speed model).
-        .def("add_pmsm_steady_state",
-             py::overload_cast<std::string_view, Index, Index, Index, Index,
-                               const Circuit::PmsmSteadyStateParams&>(
-                 &Circuit::add_pmsm_steady_state),
-             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
-             py::arg("node_c"), py::arg("node_neutral"), py::arg("params"),
-             "Add a 3-phase PMSM at fixed rotor speed: R_s + L_s + sinusoidal "
-             "back-EMF per phase, 120° apart. Use this when rotor dynamics are "
-             "not part of the analysis; for spin-up transients, use the future "
-             "full device-variant ``add_pmsm()``.")
-        .def("add_pmsm_steady_state",
-             py::overload_cast<std::string_view, Index, Index, Index, Index,
-                               Real, Real, Real, Real>(
-                 &Circuit::add_pmsm_steady_state),
-             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
-             py::arg("node_c"), py::arg("node_neutral"),
-             py::arg("R_s"), py::arg("L_s"),
-             py::arg("lambda_pm"), py::arg("omega_electrical"),
-             "Add a 3-phase PMSM at fixed rotor speed with explicit "
-             "(R_s, L_s, λ_pm, ω_e) values.")
+        // consolidate-motors-and-three-phase, Phase A.2: `add_pmsm_steady_state`
+        // removed. Use `Circuit.add_pmsm(...)` with the rotor mechanical state
+        // held fixed at the desired ω_m to obtain the same operating point.
         // DC motor — Track 2 of three-phase / motors / magnetics integration.
         .def("add_dc_motor",
              py::overload_cast<const std::string&, Index, Index,

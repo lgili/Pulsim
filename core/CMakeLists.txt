@@ -136,7 +136,6 @@ if(PULSIM_BUILD_TESTS)
         tests/test_three_phase_source.cpp
         tests/test_dc_motor_device.cpp
         tests/test_three_phase_rl_load.cpp
-        tests/test_pmsm_steady_state.cpp
         tests/test_pmsm_dynamic.cpp
         tests/test_three_phase_vsi.cpp
         tests/test_diode_loss_thermal.cpp

@@ -80,11 +80,10 @@ from ._pulsim import (
     ThreePhaseLoadTopology,
     ThreePhaseRLLoadParams,
 
-    # PMSM steady-state (Phase 28 follow-up)
-    PmsmSteadyStateParams,
-
-    # PMSM dynamic device-variant (Track 2.2 of three-phase / motors /
-    # magnetics integration)
+    # PMSM dynamic device-variant — canonical PMSM stamping path.
+    # The earlier `PmsmSteadyStateParams` POD has been removed (Phase A.2
+    # of consolidate-motors-and-three-phase) in favor of pinning ω on the
+    # dynamic device when only the steady-state operating point is needed.
     PmsmParams,
 
     # Control Blocks
@@ -1163,7 +1162,6 @@ __all__ = [
     "DcMotorParams",
     "ThreePhaseLoadTopology",
     "ThreePhaseRLLoadParams",
-    "PmsmSteadyStateParams",
     "PmsmParams",
     "SineVoltageSource",
     "RampParams",

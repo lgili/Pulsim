@@ -5,7 +5,14 @@
 // (i_d, i_q, ω_m, θ_m), trapezoidal companion stamping per phase, and
 // forward-Euler mechanical advancement with Park-transformed torque.
 //
-// Tagged [pmsm_dyn] to keep separation from the steady-state helper tests.
+// consolidate-motors-and-three-phase, Phase A.2: the former PMSM
+// steady-state helper (`PmsmSteadyStateParams` / `add_pmsm_steady_state`)
+// has been removed. Its three operating-point regression cases are
+// already covered by this suite — see the existing `zero-magnet
+// degenerates to passive 3-phase RL load` (replaces zero-back-EMF case),
+// `open-circuit back-EMF amplitude = ω_e · ψ_PM` (replaces both the
+// open-circuit voltage check and the ω-scaling test), and `balanced
+// 3-phase drive produces non-trivial torque` cases.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
