@@ -503,7 +503,9 @@ private:
     }
 
     Params params_;
-    Scalar event_hysteresis_ = Scalar{1e-9};
+    // Match MOSFET / IdealDiode hysteresis default (see those headers
+    // for the rationale on why 1e-2 V/A is the right scale).
+    Scalar event_hysteresis_ = Scalar{1e-2};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
 

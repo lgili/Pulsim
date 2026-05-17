@@ -663,6 +663,67 @@ public:
         add_bridge_rectifier(name, ac_a, ac_b, dc_pos, dc_neg, p);
     }
 
+    /// Add an RC snubber across an existing MOSFET / IGBT / IdealDiode.
+    ///
+    /// Topology  (R in series with C, both between switch terminals)
+    ///
+    ///       drain --- R --- (internal) --- C --- source
+    ///
+    /// The internal node is auto-created and named `<device>__snub_int`.
+    /// The series R damps the LC tank the inductor + switch + diode form
+    /// in a hard-switched converter -- the parallel-only C_oss / C_j cap
+    /// (PSIM-style) leaves Q ~ infinity which Tustin can't damp at
+    /// typical converter dt. Adding R critically damps it: a good first
+    /// guess is `R ~ sqrt(L / C)` (e.g. for L = 100 uH and C = 100 nF,
+    /// R ~ 32 Omega).
+    /// Per-cycle dissipated energy: 0.5 * C * V_sw^2 (transferred from
+    /// the cap to R every commutation; bounded and predictable).
+    ///
+    /// Returns true if the device was found and the snubber installed.
+    /// The named device must already exist (MOSFET/IGBT/IdealDiode);
+    /// the snubber connects to the *power* terminals (drain<->source,
+    /// collector<->emitter, or anode<->cathode), not the gate.
+    bool add_rc_snubber(const std::string& device_name,
+                        Real R, Real C,
+                        Real initial_v_cap = 0.0) {
+        if (R <= Real{0} || C <= Real{0}) return false;
+        const auto idx = find_connection_index(device_name);
+        if (!idx.has_value()) return false;
+        const auto& conn = connections_[*idx];
+        if (conn.nodes.size() < 2) return false;
+
+        // Pick the power terminals (skip the gate for 3-terminal devices).
+        Index n_hi = -1, n_lo = -1;
+        std::visit([&](const auto& dev) {
+            (void)dev;
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, MOSFET> ||
+                          std::is_same_v<T, IGBT>) {
+                if (conn.nodes.size() >= 3) {
+                    n_hi = conn.nodes[1];   // drain / collector
+                    n_lo = conn.nodes[2];   // source / emitter
+                }
+            } else if constexpr (std::is_same_v<T, IdealDiode>) {
+                n_hi = conn.nodes[0];       // anode
+                n_lo = conn.nodes[1];       // cathode
+            }
+        }, devices_[*idx]);
+        if (n_hi < 0 && n_lo < 0) return false;
+
+        const std::string internal = device_name + "__snub_int";
+        const Index n_mid = add_node(internal);
+
+        // R from hi to mid
+        add_resistor(device_name + "__snub_R", n_hi, n_mid, R);
+
+        // C from mid to lo (pre-charge to V_sw_initial if user provided)
+        Capacitor::Params cp{};
+        cp.capacitance     = C;
+        cp.initial_voltage = initial_v_cap;
+        add_capacitor(device_name + "__snub_C", n_mid, n_lo, cp);
+        return true;
+    }
+
     // ----- Diode loss / thermal accessors -----------------------------------
     [[nodiscard]] Real diode_average_power(std::string_view name) const {
         const auto* d = find_device<IdealDiode>(name);

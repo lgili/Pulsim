@@ -1213,6 +1213,17 @@ void init_v2_module(py::module_& v2) {
              py::arg("R_th_ja") = 25.0, py::arg("T_amb") = 25.0,
              "Convenience overload: bridge rectifier with explicit "
              "(V_F0, R_d, R_th_ja, T_amb) numbers (no params struct).")
+        .def("add_rc_snubber", &Circuit::add_rc_snubber,
+             py::arg("device_name"), py::arg("R"), py::arg("C"),
+             py::arg("initial_v_cap") = 0.0,
+             "Add a damped RC snubber across an existing MOSFET / IGBT "
+             "/ IdealDiode. Creates an internal node "
+             "(<device>__snub_int) and installs R + C in series between "
+             "the device's power terminals (drain<->source for MOSFET/"
+             "IGBT, anode<->cathode for diode). The series R critically "
+             "damps the inductor-side LC tank that the PWL-only "
+             "parallel C_oss / C_j cannot. A good first guess: "
+             "R ~ sqrt(L/C). Returns True if the device was found.")
         // Diode loss + thermal accessors.
         .def("diode_average_power",  &Circuit::diode_average_power,
              py::arg("name"),

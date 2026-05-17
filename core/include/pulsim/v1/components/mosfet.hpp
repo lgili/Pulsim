@@ -643,7 +643,12 @@ private:
     }
 
     Params params_;
-    Scalar event_hysteresis_ = Scalar{1e-9};
+    // PWL gate-threshold hysteresis. Sub-nV default would flicker the
+    // MOSFET state on round-off V_GS noise; 10 mV matches the
+    // IdealDiode default. For typical 12-V PWM gate drives at
+    // V_th ≈ 4 V, this is < 0.1 % of the swing → never affects real
+    // commutations.
+    Scalar event_hysteresis_ = Scalar{1e-2};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
 
