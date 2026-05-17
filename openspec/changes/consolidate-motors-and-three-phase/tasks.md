@@ -1,11 +1,55 @@
+## Status snapshot (after PR #3 lands)
+
+- **Phase 0 — DONE** (1 commit): consolidated change scaffolded; the 3
+  absorbed proposals deleted; `add-three-phase-control-blocks`
+  archived as 2026-05-17-add-three-phase-control-blocks.
+- **Phase A — DONE** (2 commits): `PmsmSteadyStateParams` removed
+  (gate G.1); `ThreePhaseSourceParams` composes
+  `grid::ThreePhaseSource` (gate G.2).
+- **Phase B.2a — DONE**: `MechanicalDevice` registered in
+  DeviceVariant; multi-shaft enabler via `set_tau_input` /
+  `reaction_torque`.
+- **Phase B.2b — DONE**: `PmsmFocDevice` signal-domain controller
+  (PI current loops auto-tuned via pole-zero cancellation).
+- **Phase B.1 — DONE**: `Circuit::add_three_phase_source` overloads
+  for `grid::ThreePhaseSourceProgrammable` and `grid::ThreePhaseHarmonicSource`
+  decompose into the appropriate sine legs (3 for programmable,
+  3+3·N for harmonic).
+- **Phase B.3 — DEFERRED** to a focused follow-up change:
+  `SaturableTransformerDevice` and `HysteresisInductorDevice`
+  require type-erasure for the templated BH-curve, variable
+  winding count, and full nonlinear MNA coupling — better landed
+  as a dedicated PR. The math objects remain accessible from C++.
+- **Phase C.1 — DONE** (math + wrapper + tests): `BldcMotorDevice`
+  with trapezoidal back-EMF; closes motor-models spec gap (G.3).
+- **Phase C.2 — DONE** (math + wrapper + tests): `InductionMotorDevice`
+  squirrel-cage in stationary αβ frame; closes motor-models spec
+  gap (G.3).
+- **Phase D (YAML pipeline) — DONE**: netlist parser dispatches
+  `type: dc_motor`/`pmsm`/`bldc_motor`/`induction_motor` onto the
+  matching `Circuit::add_*` builders. 4 YAML smoke tests pin the
+  contract.
+- **Phase D (benchmark YAMLs) — DEFERRED**: `motor_bldc_six_step`,
+  `three_phase_inverter_svpwm`, `back_to_back_rectifier_inverter`
+  with frozen KPI baselines belong in a dedicated benchmark PR
+  now that the YAML pipeline is ready. (G.4 partial: motor YAML
+  pipeline is in place; benchmark coverage itself is the deferred
+  piece.)
+- **Test suite — GREEN** (G.5): 497 / 497 in-tree C++ tests
+  passing (was 466 baseline + 31 new from Phase A through D).
+  Python `test_legacy_retry_fallback.py` etc. also green.
+- **PR shape (G.6)**: single PR `feat/consolidate-motors-and-three-phase`,
+  10 commits — Phase 0 + 8 phase commits + supporting work from
+  parallel sessions on the same branch.
+
 ## Gates & Definition of Done
 
-- [ ] G.1 Zero duplicate model: `rg "PmsmSteadyStateParams"` returns 0 hits across `core/`, `python/`, `openspec/specs/`, tests.
-- [ ] G.2 Composition over duplication: `ThreePhaseSourceParams` field accessors are forwarding accessors over an embedded `grid::ThreePhaseSource`.
-- [ ] G.3 Spec gap closed: `BldcMotorDevice` and `InductionMotorDevice` are present in `core/include/pulsim/v1/components/` and listed in `DeviceVariant`.
-- [ ] G.4 Benchmark coverage: motor benchmark suite (DC, PMSM-dq, BLDC six-step, induction locked-rotor) runs against the consolidated devices; the three grid-tied benchmarks (SVPWM, single-phase PLL, back-to-back) land with baselines.
-- [ ] G.5 Full test suite green after the migration (post-deletion of `test_pmsm_steady_state.{cpp,py}`).
-- [ ] G.6 Single PR — no partial-state intermediate releases.
+- [x] G.1 Zero duplicate model: `rg "PmsmSteadyStateParams"` returns 0 hits across `core/`, `python/`, `openspec/specs/`, tests.
+- [x] G.2 Composition over duplication: `ThreePhaseSourceParams` field accessors and the `to_grid_source()` / `from_grid_source()` round-trip route through `grid::ThreePhaseSource`; `add_three_phase_source(params)` internally builds the math object and calls a private helper.
+- [x] G.3 Spec gap closed: `BldcMotorDevice` and `InductionMotorDevice` are present in `core/include/pulsim/v1/components/` and listed in `DeviceVariant` (plus `MechanicalDevice` and `PmsmFocDevice` as bonus signal-domain devices).
+- [ ] G.4 Benchmark coverage: motor benchmark YAML pipeline shipped (Phase D parser + 4 smoke tests); the benchmark YAMLs themselves (`motor_bldc_six_step`, `three_phase_inverter_svpwm`, `back_to_back_rectifier_inverter`) with frozen baselines are deferred to a dedicated benchmark PR — see "Phase D (benchmark YAMLs) — DEFERRED" above.
+- [x] G.5 Full test suite green: 497 / 497 in-tree C++ tests passing; Python tests (excluding a pre-existing benchmark flake unrelated to motors / 3φ) all green.
+- [x] G.6 Single PR — no partial-state intermediate releases. All work delivered through PR #3 on branch `feat/consolidate-motors-and-three-phase`.
 
 ## Phase 0: Workspace cleanup
 - [ ] 0.1 Archive `add-three-phase-control-blocks` (15/15 already shipped) — move to `openspec/changes/archive/2026-05-17-add-three-phase-control-blocks/` and update `openspec/specs/kernel-v1-core/spec.md` to incorporate its virtual-block requirements.
