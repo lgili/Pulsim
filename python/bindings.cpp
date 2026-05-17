@@ -307,7 +307,54 @@ void init_v2_module(py::module_& v2) {
         .def(py::init<Real, Real, std::string>(),
              py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9, py::arg("name") = "")
         .def("is_conducting", &IdealDiode::is_conducting)
-        .def("name", &IdealDiode::name);
+        .def("name", &IdealDiode::name)
+        // Realistic-loss + thermal accessors (Phase 1 of inverter-bridge-losses).
+        .def("V_F0", &IdealDiode::V_F0)
+        .def("R_d",  &IdealDiode::R_d)
+        .def("V_F0_at_Tj", &IdealDiode::V_F0_at_Tj)
+        .def("average_power", &IdealDiode::average_power)
+        .def("peak_power",    &IdealDiode::peak_power)
+        .def("total_energy",  &IdealDiode::total_energy)
+        .def("last_current",  &IdealDiode::last_current)
+        .def("last_voltage",  &IdealDiode::last_voltage)
+        .def("junction_temperature", &IdealDiode::junction_temperature)
+        .def("steady_state_junction_temperature",
+             &IdealDiode::steady_state_junction_temperature)
+        .def("reset_loss", &IdealDiode::reset_loss)
+        .def("set_T_j_init", &IdealDiode::set_T_j_init);
+
+    // Realistic diode params struct exposed for `add_diode(..., params)`
+    // and for the bridge-rectifier helper. Named `RealisticDiodeParams`
+    // to avoid collision with the Python-side legacy `DiodeParams`
+    // wrapper that carries (g_on, g_off, ideal, is_, n).
+    py::class_<IdealDiode::Params>(
+            v2, "RealisticDiodeParams",
+            "Realistic diode parameters (V_F0 + R_d linear fit, optional "
+            "T_j feedback, R_th_ja thermal binding). Defaults preserve the "
+            "legacy IdealDiode behaviour when V_F0 == 0.")
+        .def(py::init<>())
+        .def_readwrite("g_on",       &IdealDiode::Params::g_on,
+                       "On-state conductance (1/R_on) when V_F0 == 0.")
+        .def_readwrite("g_off",      &IdealDiode::Params::g_off,
+                       "Off-state leakage conductance.")
+        .def_readwrite("v_threshold",&IdealDiode::Params::v_threshold,
+                       "Legacy threshold (0 for ideal).")
+        .def_readwrite("v_smooth",   &IdealDiode::Params::v_smooth,
+                       "Smoothing voltage for the Behavioral path.")
+        .def_readwrite("V_F0",       &IdealDiode::Params::V_F0,
+                       "Forward-voltage offset at T_ref (V). 0 disables the "
+                       "realistic linear-fit model.")
+        .def_readwrite("R_d",        &IdealDiode::Params::R_d,
+                       "Differential on-resistance (Ω). Overrides 1/g_on "
+                       "when V_F0 > 0.")
+        .def_readwrite("V_F0_tc",    &IdealDiode::Params::V_F0_tc,
+                       "V_F0 temperature coefficient (V/K, typically -2 mV/K).")
+        .def_readwrite("T_ref",      &IdealDiode::Params::T_ref,
+                       "Reference temperature for V_F0_tc (°C).")
+        .def_readwrite("R_th_ja",    &IdealDiode::Params::R_th_ja,
+                       "Junction-to-ambient thermal resistance (K/W).")
+        .def_readwrite("T_amb",      &IdealDiode::Params::T_amb,
+                       "Ambient temperature (°C).");
 
     py::class_<IdealSwitch>(v2, "IdealSwitch", "Controllable ideal switch")
         .def(py::init<Real, Real, bool, std::string>(),
@@ -787,10 +834,72 @@ void init_v2_module(py::module_& v2) {
         .def("add_current_source", &Circuit::add_current_source,
              py::arg("name"), py::arg("npos"), py::arg("nneg"), py::arg("I"),
              "Add current source from npos to nneg")
-        .def("add_diode", &Circuit::add_diode,
+        .def("add_diode",
+             py::overload_cast<const std::string&, Index, Index, Real, Real>(
+                 &Circuit::add_diode),
              py::arg("name"), py::arg("anode"), py::arg("cathode"),
              py::arg("g_on") = 1e3, py::arg("g_off") = 1e-9,
-             "Add ideal diode from anode to cathode")
+             "Add ideal diode from anode to cathode (legacy 2-conductance form).")
+        .def("add_diode",
+             py::overload_cast<const std::string&, Index, Index,
+                               const IdealDiode::Params&>(
+                 &Circuit::add_diode),
+             py::arg("name"), py::arg("anode"), py::arg("cathode"),
+             py::arg("params"),
+             "Add a diode with full parameter control (V_F0, R_d, thermal "
+             "binding). Set params.V_F0 > 0 to enable the realistic "
+             "linear-fit forward model used by powerStage-style validation.")
+        // Bridge rectifier helper — Phase 1 of inverter-bridge-losses.
+        .def("add_bridge_rectifier",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               const IdealDiode::Params&>(
+                 &Circuit::add_bridge_rectifier),
+             py::arg("name"), py::arg("ac_a"), py::arg("ac_b"),
+             py::arg("dc_pos"), py::arg("dc_neg"), py::arg("params"),
+             "Add a full-wave 4-diode bridge rectifier. Each of the 4 "
+             "internal diodes is named '<name>__D1' .. '<name>__D4' and "
+             "exposes its own per-diode loss + T_j after the transient.")
+        .def("add_bridge_rectifier",
+             py::overload_cast<const std::string&, Index, Index, Index, Index,
+                               Real, Real, Real, Real>(
+                 &Circuit::add_bridge_rectifier),
+             py::arg("name"), py::arg("ac_a"), py::arg("ac_b"),
+             py::arg("dc_pos"), py::arg("dc_neg"),
+             py::arg("V_F0"), py::arg("R_d"),
+             py::arg("R_th_ja") = 25.0, py::arg("T_amb") = 25.0,
+             "Convenience overload: bridge rectifier with explicit "
+             "(V_F0, R_d, R_th_ja, T_amb) numbers (no params struct).")
+        // Diode loss + thermal accessors.
+        .def("diode_average_power",  &Circuit::diode_average_power,
+             py::arg("name"),
+             "Time-averaged conduction power dissipated in the named diode "
+             "over the simulation (W). NaN if the device does not exist.")
+        .def("diode_peak_power",     &Circuit::diode_peak_power,
+             py::arg("name"))
+        .def("diode_total_energy",   &Circuit::diode_total_energy,
+             py::arg("name"))
+        .def("diode_junction_temperature",
+             &Circuit::diode_junction_temperature, py::arg("name"),
+             "T_j currently assumed by the device's stamping (set at init "
+             "from params.T_amb, or via set_diode_T_j during fixed-point "
+             "electrothermal iteration).")
+        .def("diode_steady_state_junction_temperature",
+             &Circuit::diode_steady_state_junction_temperature, py::arg("name"),
+             "Steady-state T_j derived from running P_avg + R_th_ja. Use "
+             "this output, push it back via set_diode_T_j, and re-run to "
+             "iterate toward an electrothermally-consistent operating point.")
+        .def("diode_last_current",   &Circuit::diode_last_current,
+             py::arg("name"))
+        .def("diode_last_voltage",   &Circuit::diode_last_voltage,
+             py::arg("name"))
+        .def("diode_conduction_time", &Circuit::diode_conduction_time,
+             py::arg("name"))
+        .def("set_diode_T_j",        &Circuit::set_diode_T_j,
+             py::arg("name"), py::arg("t_j"),
+             "Override the device's stamping T_j (for the next sim pass).")
+        .def("reset_diode_loss",     &Circuit::reset_diode_loss,
+             py::arg("name"),
+             "Zero out the loss accumulator on the named diode.")
         .def("add_switch", &Circuit::add_switch,
              py::arg("name"), py::arg("n1"), py::arg("n2"),
              py::arg("closed") = false, py::arg("g_on") = 1e6, py::arg("g_off") = 1e-12,
