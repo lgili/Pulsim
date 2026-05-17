@@ -3,7 +3,7 @@
 This is the API with C++23 features and SIMD optimization.
 """
 
-__version__ = "0.10.0a8"
+__version__ = "0.10.0a9"
 
 import weakref
 
@@ -58,6 +58,14 @@ from ._pulsim import (
     # linear fit, R_th_ja thermal binding, fixed-point electrothermal
     # iteration support).
     RealisticDiodeParams,
+
+    # Passive loss + thermal binding (Pulsim 0.10.0a9+):
+    # ResistorParams (TCR + R_th_ja), CapacitorParams (ESR + R_th_ja),
+    # InductorParams (DCR + R_th_ja). Backward-compatible defaults
+    # (R_th_ja == 0 disables the loss accumulator).
+    ResistorParams,
+    CapacitorParams,
+    InductorParams,
 
     # DC Motor (Track 2 of three-phase / motors / magnetics integration)
     DcMotorParams,
@@ -1087,6 +1095,9 @@ __all__ = [
     "ThreePhaseSourceParams",
     "ThreePhaseVsiParams",
     "RealisticDiodeParams",
+    "ResistorParams",
+    "CapacitorParams",
+    "InductorParams",
     "DcMotorParams",
     "ThreePhaseLoadTopology",
     "ThreePhaseRLLoadParams",

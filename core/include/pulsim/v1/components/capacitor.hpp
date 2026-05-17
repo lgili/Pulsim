@@ -24,6 +24,27 @@ public:
     struct Params {
         Scalar capacitance = 1e-6;
         Scalar initial_voltage = 0.0;
+
+        // -------- ESR loss + thermal binding (Phase 3 of
+        //          inverter-bridge-losses, Pulsim 0.10.0a9) --------
+        // Equivalent-series resistance loss model:
+        //     P_loss(t) = I_cap(t)² · ESR(T_j)
+        //     ESR(T_j)  = ESR_25 · (1 + ESR_tc · (T_j − T_ref))
+        //
+        // ESR is NOT included in the trapezoidal stamping itself —
+        // the cap's electrical dynamics stay the same as the ideal
+        // model. ESR enters only through the loss accumulator (i_cap²·ESR
+        // integrated each accepted step). This matches what `powerStage`
+        // does and keeps the simulation lean — for moderately small
+        // ESR (~tens of mΩ) the impact on bus dynamics is negligible.
+        //
+        // Backward-compat: defaults R_th_ja = 0 → accumulator disabled,
+        // device behaves exactly as before the upgrade.
+        Scalar ESR       = 0.0;       // Ω at T_ref
+        Scalar ESR_tc    = 0.0;       // 1/K (typically positive for AlElCap)
+        Scalar T_ref     = 25.0;      // °C
+        Scalar R_th_ja   = 0.0;       // K/W (0 = disabled, legacy mode)
+        Scalar T_amb     = 25.0;      // °C
     };
 
     explicit Capacitor(Scalar capacitance, Scalar initial_voltage = 0.0, std::string name = "")
@@ -32,6 +53,22 @@ public:
         , v_prev_(initial_voltage)
         , i_prev_(0.0)
         , history_initialized_(false) {}
+
+    /// Construct from a fully-specified Params struct (Phase 3 entry-point
+    /// for realistic ESR + thermal models). Backward-compatible when
+    /// `params.R_th_ja == 0`.
+    explicit Capacitor(const Params& params, std::string name = "")
+        : Base(std::move(name))
+        , capacitance_(params.capacitance)
+        , v_prev_(params.initial_voltage)
+        , i_prev_(0.0)
+        , history_initialized_(false)
+        , ESR_(params.ESR)
+        , ESR_tc_(params.ESR_tc)
+        , T_ref_(params.T_ref)
+        , R_th_ja_(params.R_th_ja)
+        , T_amb_(params.T_amb)
+        , T_j_(params.T_amb) {}
 
     /// Stamp implementation using Trapezoidal companion model
     /// Correct formula: I_eq = (2C/dt) * V_n - (2C/dt) * V_{n-1} - I_{n-1}
@@ -109,6 +146,69 @@ public:
     [[nodiscard]] Scalar voltage_prev() const { return v_prev_; }
     [[nodiscard]] Scalar current_prev() const { return i_prev_; }
 
+    // -------- Realistic-loss + thermal accessors (Phase 3) --------
+    [[nodiscard]] Scalar ESR()       const noexcept { return ESR_; }
+    [[nodiscard]] Scalar ESR_tc()    const noexcept { return ESR_tc_; }
+    [[nodiscard]] Scalar T_ref()     const noexcept { return T_ref_; }
+    [[nodiscard]] Scalar R_th_ja()   const noexcept { return R_th_ja_; }
+    [[nodiscard]] Scalar T_amb()     const noexcept { return T_amb_; }
+    void set_ESR(Scalar r)        noexcept { ESR_ = r; }
+    void set_ESR_tc(Scalar tc)    noexcept { ESR_tc_ = tc; }
+    void set_R_th_ja(Scalar r)    noexcept { R_th_ja_ = r; }
+    void set_T_amb(Scalar t)      noexcept { T_amb_ = t; T_j_ = t; }
+    void set_T_j_init(Scalar t)   noexcept { T_j_ = t; }
+
+    /// Temperature-corrected ESR at the device's current T_j.
+    [[nodiscard]] Scalar ESR_at_Tj() const noexcept {
+        return ESR_ * (Scalar{1} + ESR_tc_ * (T_j_ - T_ref_));
+    }
+
+    // Loss accumulator accessors.
+    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar peak_power()     const noexcept { return p_peak_; }
+    [[nodiscard]] Scalar last_power()     const noexcept { return p_last_; }
+    [[nodiscard]] Scalar last_current()   const noexcept { return i_last_; }
+    [[nodiscard]] Scalar conduction_time() const noexcept { return t_sim_; }
+    [[nodiscard]] Scalar junction_temperature() const noexcept { return T_j_; }
+    [[nodiscard]] Scalar steady_state_junction_temperature() const noexcept {
+        return T_amb_ + average_power() * R_th_ja_;
+    }
+    [[nodiscard]] Scalar average_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
+    }
+
+    /// Zero the loss accumulator. Does NOT touch T_j — same convention
+    /// as the diode/MOSFET/IGBT reset_loss().
+    void reset_loss() noexcept {
+        e_cond_ = 0.0;
+        p_peak_ = 0.0;
+        p_last_ = 0.0;
+        t_sim_ = 0.0;
+        i_last_ = 0.0;
+    }
+
+    /// Sample i_cap² · ESR(T_j) over the past `dt` seconds. Called by
+    /// the runtime's `update_history` ladder after each accepted step.
+    /// No-op when R_th_ja == 0 (legacy mode preserved).
+    void accumulate_loss(Scalar i_cap, Scalar dt) noexcept {
+        if (dt < Scalar{0}) return;
+        i_last_ = i_cap;
+        if (R_th_ja_ <= Scalar{0}) {
+            // Loss model disabled — keep dynamics intact, just track
+            // last current for diagnostic.
+            p_last_ = Scalar{0};
+            return;
+        }
+        const Scalar esr = ESR_at_Tj();
+        const Scalar p = i_cap * i_cap * esr;
+        p_last_ = p;
+        if (p > Scalar{0}) {
+            e_cond_ += p * dt;
+            if (p > p_peak_) p_peak_ = p;
+        }
+        t_sim_ += dt;
+    }
+
 private:
     Scalar capacitance_;
     Scalar v_prev_;      // Voltage at previous timestep
@@ -118,6 +218,21 @@ private:
     bool history_initialized_ = false;  // True once the first accepted
                                          // step's current/voltage are
                                          // stored in i_prev_/v_prev_.
+
+    // ESR loss + thermal binding (Phase 3, default values disable
+    // the loss accumulator → legacy behaviour preserved).
+    Scalar ESR_      = 0.0;
+    Scalar ESR_tc_   = 0.0;
+    Scalar T_ref_    = 25.0;
+    Scalar R_th_ja_  = 0.0;
+    Scalar T_amb_    = 25.0;
+    // Loss accumulator state.
+    Scalar e_cond_ = 0.0;
+    Scalar p_peak_ = 0.0;
+    Scalar p_last_ = 0.0;
+    Scalar t_sim_  = 0.0;
+    Scalar i_last_ = 0.0;
+    Scalar T_j_    = 25.0;
 };
 
 template<>
