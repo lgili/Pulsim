@@ -18,6 +18,7 @@
 #include "pulsim/v1/components/mechanical_device.hpp"
 #include "pulsim/v1/components/bldc_motor_device.hpp"
 #include "pulsim/v1/components/induction_motor_device.hpp"
+#include "pulsim/v1/components/hysteresis_inductor_device.hpp"
 #include "pulsim/v1/grid/three_phase_source.hpp"
 #include "pulsim/v1/auto_parasitics.hpp"
 #include <yaml-cpp/yaml.h>
@@ -84,7 +85,8 @@ using DeviceVariant = std::variant<
     PmsmFocDevice,
     MechanicalDevice,
     BldcMotorDevice,
-    InductionMotorDevice
+    InductionMotorDevice,
+    HysteresisInductorDevice
 >;
 
 // =============================================================================
@@ -828,6 +830,14 @@ public:
             d->set_T_j_init(t_j);
         }
     }
+    /// Mirror of `set_mosfet_C_oss` for IdealDiode (parasitic junction
+    /// capacitance C_j across anode-cathode). See its rationale.
+    void set_diode_C_j(std::string_view name, Real c) {
+        if (auto* d = find_device<IdealDiode>(name)) d->set_C_j(c);
+    }
+    void set_diode_switching_mode(std::string_view name, SwitchingMode mode) {
+        if (auto* d = find_device<IdealDiode>(name)) d->set_switching_mode(mode);
+    }
 
     /// Reset the loss accumulator on a named diode (zero out accumulated
     /// energy, peak, conduction time). Useful for multi-pass thermal
@@ -911,6 +921,23 @@ public:
     void set_mosfet_T_j(std::string_view name, Real t_j) {
         if (auto* m = find_device<MOSFET>(name)) m->set_T_j_init(t_j);
     }
+    /// Force a parasitic output capacitance on a named MOSFET. Used to
+    /// retrofit C_oss onto devices added via composite helpers (e.g. the
+    /// 3-phase VSI builder, which forces PWL Ideal but leaves C_oss at
+    /// 0 — bad for bridge topologies where the load has an inductive
+    /// path through R). Same field the auto-parasitics pre-flight
+    /// writes to. `c > 0` is recommended; `c = 0` disables the parasitic.
+    void set_mosfet_C_oss(std::string_view name, Real c) {
+        if (auto* m = find_device<MOSFET>(name)) m->set_C_oss(c);
+    }
+    /// Set the switching mode (Auto / Ideal / Behavioral) on a named
+    /// MOSFET after construction. Symmetric to MOSFET::set_switching_mode
+    /// but reachable via the Circuit's named-device API (and through
+    /// Python bindings) so users can re-tune a single switch inside a
+    /// composite helper (VSI / inverter) without rebuilding.
+    void set_mosfet_switching_mode(std::string_view name, SwitchingMode mode) {
+        if (auto* m = find_device<MOSFET>(name)) m->set_switching_mode(mode);
+    }
     void reset_mosfet_loss(std::string_view name) {
         if (auto* m = find_device<MOSFET>(name)) m->reset_loss();
     }
@@ -966,6 +993,13 @@ public:
     }
     void set_igbt_T_j(std::string_view name, Real t_j) {
         if (auto* g = find_device<IGBT>(name)) g->set_T_j_init(t_j);
+    }
+    /// Mirror of `set_mosfet_C_oss` for IGBTs. See its rationale.
+    void set_igbt_C_oss(std::string_view name, Real c) {
+        if (auto* g = find_device<IGBT>(name)) g->set_C_oss(c);
+    }
+    void set_igbt_switching_mode(std::string_view name, SwitchingMode mode) {
+        if (auto* g = find_device<IGBT>(name)) g->set_switching_mode(mode);
     }
     void reset_igbt_loss(std::string_view name) {
         if (auto* g = find_device<IGBT>(name)) g->reset_loss();
@@ -3797,6 +3831,41 @@ public:
         return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- Hysteresis inductor (deferred-items Item 1) -----------------------
+    //
+    // 2-pin nonlinear inductor that stamps as a linear inductor (constant
+    // L_eff from geometry / user override) and advances Jiles-Atherton
+    // hysteresis state per accepted step. Hysteresis loop area, flux, and
+    // magnetization are exposed for telemetry. Full nonlinear coupling
+    // (Newton-iterated effective inductance from the i(λ) saturation
+    // curve) is a Phase-2 follow-up.
+
+    void add_hysteresis_inductor(const std::string& name,
+                                  Index n_pos, Index n_neg,
+                                  const HysteresisInductorDevice::Params& params) {
+        assert(params.geom.turns > 0.0);
+        const Index br = num_nodes() + num_branches_;
+        HysteresisInductorDevice dev(params, name);
+        dev.set_branch_index(br);
+        devices_.emplace_back(std::move(dev));
+        connections_.push_back({name, {n_pos, n_neg}, br});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 1;
+    }
+
+    [[nodiscard]] Real hysteresis_flux(std::string_view name) const {
+        const auto* d = find_device<HysteresisInductorDevice>(name);
+        return d ? d->flux() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real hysteresis_magnetization(std::string_view name) const {
+        const auto* d = find_device<HysteresisInductorDevice>(name);
+        return d ? d->magnetization() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real hysteresis_L_eff(std::string_view name) const {
+        const auto* d = find_device<HysteresisInductorDevice>(name);
+        return d ? d->L_eff() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     // =========================================================================
     // PWM Duty Control
     // =========================================================================
@@ -4307,6 +4376,20 @@ public:
                                           timestep_);
                     }
                 }
+                else if constexpr (std::is_same_v<T, HysteresisInductorDevice>) {
+                    // deferred-items Item 1: read the inductor branch current
+                    // from the latest MNA solve, derive λ = L_eff · i, and
+                    // advance the J-A hysteresis state. The stamping itself
+                    // happens in the assemble_state_space walker above.
+                    const Index br = conn.branch_index;
+                    const Real i_branch = (br >= 0) ? x[br] : 0.0;
+                    if (initialize) {
+                        dev.reset_history_for_transient_start(i_branch);
+                    } else {
+                        dev.set_timestep(timestep_);
+                        dev.advance_state(i_branch);
+                    }
+                }
                 else if constexpr (std::is_same_v<T, IdealDiode>) {
                     // Phase 1 of inverter-bridge-losses: integrate V·I·dt
                     // per accepted timestep so the device exposes
@@ -4806,6 +4889,17 @@ public:
                         const Real L_eff = effective_inductance_for(
                             conn.name, /*current=*/0.0, dev.inductance());
                         stamp_inductor_branch(L_eff, nodes[0], nodes[1], conn.branch_index);
+                    }
+                } else if constexpr (std::is_same_v<T, HysteresisInductorDevice>) {
+                    // deferred-items Item 1: HysteresisInductor stamps as a
+                    // linear inductor using its `L_eff` (constant per step).
+                    // The J-A hysteresis state advances per accepted step
+                    // via `dev.advance_state(i)` in the variant walker
+                    // below — it does not (yet) feed back into the stamp.
+                    if (nodes.size() >= 2 && conn.branch_index >= 0) {
+                        stamp_inductor_branch(dev.L_eff(),
+                                              nodes[0], nodes[1],
+                                              conn.branch_index);
                     }
                 } else if constexpr (std::is_same_v<T, VoltageSource>) {
                     if (nodes.size() >= 2) {
