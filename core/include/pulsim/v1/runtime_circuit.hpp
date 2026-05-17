@@ -3240,10 +3240,23 @@ public:
         const auto* m = find_device<InductionMotorDevice>(name);
         return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
     }
-    [[nodiscard]] Real induction_slip(std::string_view name) const {
+    /// Read the induction motor slip s = (omega_sync - omega_e) / omega_sync.
+    /// The synchronous frequency must be supplied because the Circuit
+    /// itself doesn't know which stator source (V/f drive, grid, etc.)
+    /// is exciting the motor. For a 50 Hz grid: omega_sync = 2*pi*50 ~ 314 rad/s.
+    /// See `induction_slip_from_hz(name, f_sync_hz)` for the Hz overload.
+    [[nodiscard]] Real induction_slip(std::string_view name,
+                                       Real omega_sync_electrical) const {
         const auto* m = find_device<InductionMotorDevice>(name);
-        // TODO(user): re-thread omega_sync from circuit context.
-        return m ? m->slip(0.0) : std::numeric_limits<Real>::quiet_NaN();
+        return m ? m->slip(omega_sync_electrical)
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    /// Slip overload that takes f_sync in Hz instead of rad/s.
+    [[nodiscard]] Real induction_slip_from_hz(std::string_view name,
+                                               Real f_sync_hz) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->slip_from_hz(f_sync_hz)
+                 : std::numeric_limits<Real>::quiet_NaN();
     }
     [[nodiscard]] Real induction_i_a(std::string_view name) const {
         const auto* m = find_device<InductionMotorDevice>(name);

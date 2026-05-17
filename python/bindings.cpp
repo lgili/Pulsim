@@ -1634,8 +1634,15 @@ void init_v2_module(py::module_& v2) {
              "Read induction motor mechanical angular velocity (rad/s).")
         .def("induction_theta", &Circuit::induction_theta, py::arg("name"),
              "Read induction motor rotor angle (rad).")
-        .def("induction_slip", &Circuit::induction_slip, py::arg("name"),
-             "Read induction motor slip (dimensionless, against synchronous).")
+        .def("induction_slip", &Circuit::induction_slip,
+             py::arg("name"), py::arg("omega_sync_electrical"),
+             "Read induction motor slip s = (omega_sync - omega_e) / omega_sync. "
+             "`omega_sync_electrical` (rad/s) is supplied by the caller "
+             "because the Circuit doesn't know which stator source is "
+             "exciting the motor. For a 50 Hz grid: 2*pi*50 ~ 314 rad/s.")
+        .def("induction_slip_from_hz", &Circuit::induction_slip_from_hz,
+             py::arg("name"), py::arg("f_sync_hz"),
+             "Slip overload that takes f_sync in Hz instead of rad/s.")
         .def("induction_i_a", &Circuit::induction_i_a, py::arg("name"),
              "Read induction motor phase A line current (A).")
         .def("induction_i_b", &Circuit::induction_i_b, py::arg("name"),
