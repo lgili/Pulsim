@@ -142,6 +142,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_diode_loss_thermal.cpp
         tests/test_switch_loss_thermal.cpp
         tests/test_passives_loss_thermal.cpp
+        tests/test_switching_phase4.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

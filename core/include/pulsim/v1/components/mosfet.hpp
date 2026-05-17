@@ -61,6 +61,24 @@ public:
         Scalar T_ref     = 25.0;
         Scalar R_th_ja   = 0.0;       // 0 = disabled (backward-compat)
         Scalar T_amb     = 25.0;
+
+        // -------- Switching-loss model (Phase 4 of inverter-bridge-losses,
+        //          Pulsim 0.10.0a10) -------------------------------------
+        // Per-event energies are scaled from a 25 °C reference using the
+        // textbook linear-in-I, linear-in-V approximation:
+        //
+        //   E_on(I, V, T_j) = Eon_25 · (I / I_ref) · (V / V_ref)
+        //                            · (1 + Esw_tc · (T_j − T_ref))
+        //   E_off(I, V, T_j) — same shape with Eoff_25.
+        //
+        // The accumulator detects pwl_state_ transitions inside
+        // `accumulate_loss` and adds the appropriate energy. Default
+        // Eon_25 = Eoff_25 = 0 → no switching loss recorded (legacy).
+        Scalar Eon_25    = 0.0;       // J at I_ref, V_ref, T_ref
+        Scalar Eoff_25   = 0.0;
+        Scalar I_ref     = 10.0;      // A — reference current for scaling
+        Scalar V_ref     = 400.0;     // V — reference voltage for scaling
+        Scalar Esw_tc    = 3.0e-3;    // 1/K — switching-energy TC
     };
 
     explicit MOSFET(std::string name = "")
@@ -160,32 +178,49 @@ public:
         return R_nom * (Scalar{1} + params_.Rds_on_tc * (T_j_ - params_.T_ref));
     }
 
-    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar total_energy()   const noexcept { return e_cond_ + e_sw_; }
+    [[nodiscard]] Scalar conduction_energy() const noexcept { return e_cond_; }
+    [[nodiscard]] Scalar switching_energy() const noexcept { return e_sw_; }
+    [[nodiscard]] std::size_t switching_events() const noexcept {
+        return ev_count_;
+    }
     [[nodiscard]] Scalar conduction_time() const noexcept { return t_sim_; }
     [[nodiscard]] Scalar peak_power()     const noexcept { return p_peak_; }
     [[nodiscard]] Scalar last_power()     const noexcept { return p_last_; }
     [[nodiscard]] Scalar last_current()   const noexcept { return i_last_; }
     [[nodiscard]] Scalar last_voltage()   const noexcept { return v_last_; }
     [[nodiscard]] Scalar junction_temperature() const noexcept { return T_j_; }
+    /// Total average power = conduction + switching, both per accepted-step.
+    [[nodiscard]] Scalar average_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? (e_cond_ + e_sw_) / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_conduction_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
+    }
+    [[nodiscard]] Scalar average_switching_power() const noexcept {
+        return (t_sim_ > Scalar{0}) ? e_sw_ / t_sim_ : Scalar{0};
+    }
     [[nodiscard]] Scalar steady_state_junction_temperature() const noexcept {
         return params_.T_amb + average_power() * params_.R_th_ja;
     }
-    [[nodiscard]] Scalar average_power() const noexcept {
-        return (t_sim_ > Scalar{0}) ? e_cond_ / t_sim_ : Scalar{0};
-    }
 
-    /// Zero the loss accumulator. Does NOT touch T_j — the stamping
-    /// uses whatever T_j was last set (via `set_T_j_init` or the
-    /// initial T_amb at construction). This separation lets the user
-    /// run the fixed-point thermal iteration cleanly: set_T_j_init →
-    /// reset_loss → re-simulate.
+    /// Zero the loss accumulator (conduction + switching). Does NOT
+    /// touch T_j — the stamping uses whatever T_j was last set (via
+    /// `set_T_j_init` or T_amb at construction). The was_on_ state
+    /// snapshot is also cleared so the first call to accumulate_loss
+    /// after reset re-establishes the baseline without counting a
+    /// spurious transition.
     void reset_loss() noexcept {
         e_cond_ = 0.0;
+        e_sw_ = 0.0;
+        ev_count_ = 0;
         p_peak_ = 0.0;
         p_last_ = 0.0;
         t_sim_ = 0.0;
         i_last_ = 0.0;
         v_last_ = 0.0;
+        was_on_ = false;
+        was_on_initialized_ = false;
     }
 
     /// Push T_j back into the stamping path (for the fixed-point
@@ -203,6 +238,54 @@ public:
     /// modelled as `g_off` (sub-threshold).
     void accumulate_loss(Scalar v_ds, Scalar dt, bool is_on) noexcept {
         if (dt < Scalar{0}) return;
+
+        // ----- Switching-event detection (E_on / E_off, Phase 4) ------
+        // Compare current state to the snapshot from the prior call.
+        // The very first call (was_on_initialized_ == false) just
+        // establishes the baseline — no transition is counted. From
+        // then on, every flip of `is_on` triggers an event.
+        if (was_on_initialized_ && (was_on_ != is_on) &&
+            params_.R_th_ja > Scalar{0}) {
+            // Temperature-scaled per-event energy.
+            const Scalar T_delta = T_j_ - params_.T_ref;
+            const Scalar tc_factor = Scalar{1} + params_.Esw_tc * T_delta;
+            const Scalar i_ref = (params_.I_ref > Scalar{0}) ?
+                params_.I_ref : Scalar{1};
+            const Scalar v_ref = (params_.V_ref > Scalar{0}) ?
+                params_.V_ref : Scalar{1};
+            if (is_on && !was_on_) {
+                // OFF → ON. Use v_last_ (blocking voltage just before
+                // the transition) and the post-transition current i.
+                const Scalar Rds = Rds_on_at_Tj();
+                const Scalar g_on_eff = (Rds > Scalar{0}) ?
+                    Scalar{1}/Rds : params_.g_on;
+                const Scalar i_post = g_on_eff * v_ds;
+                const Scalar V_block = (v_last_ > Scalar{0}) ?
+                    v_last_ : v_ds;
+                const Scalar e_event = params_.Eon_25 *
+                    (std::abs(i_post) / i_ref) * (V_block / v_ref) *
+                    tc_factor;
+                if (e_event > Scalar{0}) {
+                    e_sw_ += e_event;
+                    ++ev_count_;
+                }
+            } else if (!is_on && was_on_) {
+                // ON → OFF. Use the pre-transition current (i_last_)
+                // and the post-transition voltage (v_ds, now blocking).
+                const Scalar I_pre = std::abs(i_last_);
+                const Scalar V_block = (v_ds > Scalar{0}) ? v_ds : Scalar{0};
+                const Scalar e_event = params_.Eoff_25 *
+                    (I_pre / i_ref) * (V_block / v_ref) * tc_factor;
+                if (e_event > Scalar{0}) {
+                    e_sw_ += e_event;
+                    ++ev_count_;
+                }
+            }
+        }
+        was_on_ = is_on;
+        was_on_initialized_ = true;
+
+        // ----- Conduction loss (existing accumulator) ----------------
         if (params_.R_th_ja <= Scalar{0}) {
             // Thermal model disabled — still record last V/I for
             // diagnostic but skip the integration.
@@ -523,12 +606,19 @@ private:
     // Loss + thermal accumulator (Phase 2 of inverter-bridge-losses).
     // All zero when R_th_ja == 0 (legacy mode).
     Scalar e_cond_ = Scalar{0.0};
+    Scalar e_sw_   = Scalar{0.0};   // switching energy (Phase 4)
+    std::size_t ev_count_ = 0;       // # of switching events recorded
     Scalar p_peak_ = Scalar{0.0};
     Scalar p_last_ = Scalar{0.0};
     Scalar t_sim_  = Scalar{0.0};
     Scalar i_last_ = Scalar{0.0};
     Scalar v_last_ = Scalar{0.0};
     Scalar T_j_    = Scalar{25.0};
+    // Switching transition tracker — true iff the device was ON at the
+    // PREVIOUS accumulate_loss() call. The `was_on_initialized_` flag
+    // suppresses a spurious event on the very first call.
+    bool   was_on_             = false;
+    bool   was_on_initialized_ = false;
 };
 
 template<>

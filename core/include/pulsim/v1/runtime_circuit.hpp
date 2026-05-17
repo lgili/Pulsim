@@ -721,6 +721,28 @@ public:
         return d ? d->conduction_time() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- Switching-loss accessors (Phase 4 of inverter-bridge-losses,
+    //       Pulsim 0.10.0a10) ---------------------------------------------
+    [[nodiscard]] Real diode_switching_energy(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->switching_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real diode_average_switching_power(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->average_switching_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] std::size_t diode_switching_events(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->switching_events() : 0;
+    }
+    [[nodiscard]] Real diode_conduction_energy(std::string_view name) const {
+        const auto* d = find_device<IdealDiode>(name);
+        return d ? d->conduction_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     // ----- MOSFET / IGBT loss + thermal accessors (Phase 2 of
     //       inverter-bridge-losses). All return NaN when the named
     //       device is missing. The MOSFET/IGBT thermal model is active
@@ -763,6 +785,25 @@ public:
     void reset_mosfet_loss(std::string_view name) {
         if (auto* m = find_device<MOSFET>(name)) m->reset_loss();
     }
+    [[nodiscard]] Real mosfet_switching_energy(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->switching_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_average_switching_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->average_switching_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mosfet_average_conduction_power(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->average_conduction_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] std::size_t mosfet_switching_events(std::string_view name) const {
+        const auto* m = find_device<MOSFET>(name);
+        return m ? m->switching_events() : 0;
+    }
 
     [[nodiscard]] Real igbt_average_power(std::string_view name) const {
         const auto* g = find_device<IGBT>(name);
@@ -799,6 +840,25 @@ public:
     }
     void reset_igbt_loss(std::string_view name) {
         if (auto* g = find_device<IGBT>(name)) g->reset_loss();
+    }
+    [[nodiscard]] Real igbt_switching_energy(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->switching_energy()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_average_switching_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->average_switching_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real igbt_average_conduction_power(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->average_conduction_power()
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] std::size_t igbt_switching_events(std::string_view name) const {
+        const auto* g = find_device<IGBT>(name);
+        return g ? g->switching_events() : 0;
     }
 
     // ----- Capacitor ESR loss + thermal accessors (Phase 3 of
@@ -2324,6 +2384,107 @@ public:
         add_pwm_voltage_source(name, npos, nneg, params);
     }
 
+    // ----- Sinusoidal-modulated PWM source helper (Phase 4 of
+    //       inverter-bridge-losses, Pulsim 0.10.0a10) -------------------
+    //
+    // Creates a single PWMVoltageSource whose duty cycle is modulated by
+    // a sinusoidal reference at `modulation_frequency_hz`, with optional
+    // 3rd-harmonic injection for SVPWM-style higher bus-utilisation.
+    //
+    // Modulation modes:
+    //   - Sine (SPWM): duty(t) = 0.5 + (m/2)·sin(ω_mod·t + φ)
+    //     Linear range m ∈ [0, 1]. Peak phase-to-DC-midpoint = m·V_dc/2.
+    //   - SVM (3rd-harmonic injection): duty(t) = 0.5 + (m/√3)·
+    //       [sin(ω_mod·t + φ) + (1/6)·sin(3·(ω_mod·t + φ))]
+    //     Allows m up to 1.155 in the linear range, giving 15.5 % more
+    //     bus utilisation than pure SPWM. Same total harmonic distortion
+    //     as a sine carrier — the 3rd harmonic cancels in line-to-line.
+    //
+    // This wraps a single `PWMVoltageSource` and installs the duty
+    // callback. For a complete 3-phase modulator, use this 3 times with
+    // 120° phase offsets (or use ``add_three_phase_vsi`` which packages
+    // 6 of them with the gate drivers).
+
+    enum class PwmModulation : std::uint8_t {
+        Sine = 0,        ///< SPWM: linear range m ≤ 1.0.
+        SVM  = 1,        ///< SVPWM (3rd-harmonic injection): m ≤ 1.155.
+    };
+
+    struct ModulatedPwmParams {
+        Real v_high = 12.0;                       ///< ON-state output (V).
+        Real v_low  = 0.0;                        ///< OFF-state output (V).
+        Real switching_frequency_hz = 20e3;       ///< PWM carrier (Hz).
+        Real modulation_index = 0.8;              ///< 0..1 (Sine), 0..1.155 (SVM).
+        Real modulation_frequency_hz = 50.0;      ///< Reference fundamental (Hz).
+        Real phase_deg = 0.0;                     ///< Reference phase (degrees).
+        PwmModulation modulation = PwmModulation::Sine;
+    };
+    static_assert(std::is_trivially_copyable_v<ModulatedPwmParams>,
+                  "ModulatedPwmParams must stay POD.");
+
+    void add_modulated_pwm_source(const std::string& name,
+                                  Index npos, Index nneg,
+                                  const ModulatedPwmParams& params) {
+        assert(params.switching_frequency_hz > 0.0);
+        assert(params.modulation_frequency_hz > 0.0);
+        assert(params.modulation_index >= 0.0 && params.modulation_index <= 1.5);
+
+        PWMParams pwm{};
+        pwm.v_high = params.v_high;
+        pwm.v_low  = params.v_low;
+        pwm.frequency = params.switching_frequency_hz;
+        pwm.duty = 0.5;
+        pwm.phase = 0.0;
+        add_pwm_voltage_source(name, npos, nneg, pwm);
+
+        constexpr Real kDegToRad = static_cast<Real>(0.017453292519943295);
+        const Real omega = 2.0 * 3.14159265358979323846 *
+                           params.modulation_frequency_hz;
+        const Real phi = params.phase_deg * kDegToRad;
+        const Real m   = params.modulation_index;
+        const PwmModulation mode = params.modulation;
+        constexpr Real one_over_sqrt3 = static_cast<Real>(0.5773502691896258);
+        constexpr Real one_sixth      = static_cast<Real>(1.0 / 6.0);
+
+        auto duty_cb = [m, omega, phi, mode](Real t) -> Real {
+            const Real theta = omega * t + phi;
+            Real d;
+            if (mode == PwmModulation::SVM) {
+                // 3rd-harmonic injection: duty = 0.5 +
+                //   (m/√3) · [sin(θ) + (1/6)·sin(3θ)]
+                d = 0.5 + m * one_over_sqrt3 *
+                    (std::sin(theta) + one_sixth * std::sin(3.0 * theta));
+            } else {
+                // Sine: duty = 0.5 + (m/2) · sin(θ)
+                d = 0.5 + 0.5 * m * std::sin(theta);
+            }
+            if (d < 0.0) d = 0.0;
+            if (d > 1.0) d = 1.0;
+            return d;
+        };
+        set_pwm_duty_callback(name, duty_cb);
+    }
+
+    /// Convenience overload taking the bare numbers (no params struct).
+    void add_modulated_pwm_source(const std::string& name,
+                                  Index npos, Index nneg,
+                                  Real v_high, Real v_low,
+                                  Real switching_frequency_hz,
+                                  Real modulation_index,
+                                  Real modulation_frequency_hz,
+                                  Real phase_deg = 0.0,
+                                  PwmModulation modulation = PwmModulation::Sine) {
+        ModulatedPwmParams params{};
+        params.v_high = v_high;
+        params.v_low = v_low;
+        params.switching_frequency_hz = switching_frequency_hz;
+        params.modulation_index = modulation_index;
+        params.modulation_frequency_hz = modulation_frequency_hz;
+        params.phase_deg = phase_deg;
+        params.modulation = modulation;
+        add_modulated_pwm_source(name, npos, nneg, params);
+    }
+
     void add_sine_voltage_source(const std::string& name, Index npos, Index nneg,
                                   const SineParams& params) {
         Index br = num_nodes() + num_branches_;
@@ -3403,8 +3564,6 @@ public:
                     const auto forced = forced_switch_state(i);
                     if (forced.has_value()) {
                         is_on = *forced;
-                    } else if (dev.pwl_state()) {
-                        is_on = true;
                     } else {
                         is_on = (v_gs_signed > dev.params().vth);
                     }
@@ -3429,8 +3588,6 @@ public:
                     const auto forced = forced_switch_state(i);
                     if (forced.has_value()) {
                         is_on = *forced;
-                    } else if (dev.pwl_state()) {
-                        is_on = true;
                     } else {
                         is_on = (v_ge > dev.params().vth);
                     }
