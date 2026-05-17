@@ -197,9 +197,13 @@ public:
         i_last_ = i_cap;
         const Scalar esr = (R_th_ja_ > Scalar{0}) ? ESR_at_Tj() : ESR_;
         const Scalar p = i_cap * i_cap * esr;
+        // Trapezoidal time-averaging (see components/mosfet.hpp).
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_last_ + p)
+                           : p;
         p_last_ = p;
-        if (p > Scalar{0}) {
-            e_cond_ += p * dt;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
             if (p > p_peak_) p_peak_ = p;
         }
         t_sim_ += dt;

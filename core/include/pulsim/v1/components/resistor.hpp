@@ -145,9 +145,13 @@ public:
         i_last_ = i;
         const Scalar R_eff = (R_th_ja_ > Scalar{0}) ? R_at_Tj() : resistance_;
         const Scalar p = i * i * R_eff;
+        // Trapezoidal time-averaging (see components/mosfet.hpp).
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_last_ + p)
+                           : p;
         p_last_ = p;
-        if (p > Scalar{0}) {
-            e_cond_ += p * dt;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
             if (p > p_peak_) p_peak_ = p;
         }
         t_sim_ += dt;

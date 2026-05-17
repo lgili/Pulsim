@@ -213,12 +213,21 @@ public:
         }
         const Scalar p = v_ce * i_c;
 
+        // Trapezoidal time-averaging (see components/mosfet.hpp for the
+        // rationale — drops the over-count from rectangular-end-of-step
+        // integration on fast V_CE transients).
+        const Scalar p_prev = (p_last_ > Scalar{0}) ? p_last_ : Scalar{0};
+        const Scalar p_now  = (p > Scalar{0}) ? p : Scalar{0};
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_prev + p_now)
+                           : p_now;
+
         v_last_ = v_ce;
         i_last_ = i_c;
         p_last_ = p;
-        if (p > Scalar{0}) {
-            e_cond_ += p * dt;
-            if (p > p_peak_) p_peak_ = p;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
+            if (p_now > p_peak_) p_peak_ = p_now;
         }
         t_sim_ += dt;
     }

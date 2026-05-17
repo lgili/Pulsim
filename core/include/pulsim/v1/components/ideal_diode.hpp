@@ -287,16 +287,23 @@ public:
         was_conducting_ = conducting;
         was_conducting_initialized_ = true;
 
+        // Trapezoidal time-averaging — see components/mosfet.hpp for the
+        // rationale. For diode: only positive instantaneous power
+        // (forward conduction) contributes, matching the legacy
+        // rectangular-rule semantics.
+        const Scalar p_prev = (p_last_ > Scalar{0}) ? p_last_ : Scalar{0};
+        const Scalar p_now  = (p > Scalar{0}) ? p : Scalar{0};
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_prev + p_now)
+                           : p_now;
+
         v_last_ = v_diode;
         i_last_ = i_diode;
         p_last_ = p;
 
-        // Accumulate only the forward-conduction energy (positive instantaneous
-        // power). Off-state leakage (g_off · V²) is in the noise floor and
-        // ignored — matches the powerStage `LossAccumulator` convention.
-        if (p > Scalar{0}) {
-            e_cond_ += p * dt;
-            if (p > p_peak_) p_peak_ = p;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
+            if (p_now > p_peak_) p_peak_ = p_now;
         }
         t_sim_ += dt;
     }

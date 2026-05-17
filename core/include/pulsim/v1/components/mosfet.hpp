@@ -346,15 +346,26 @@ public:
         const Scalar i_ds = g * v_ds;
         const Scalar p = v_ds * i_ds;
 
+        // Trapezoidal time-averaging:
+        //   ∫_{t-dt}^{t} V·I dt ≈ 0.5 · dt · (|p_prev| + |p_now|)
+        // This is correct for slow signals and significantly reduces
+        // the over-count on fast transients (cap discharge into R_DS,
+        // PWM gate edges within dt) compared to the previous
+        // rectangular-end-of-step rule. The first call sees
+        // `t_sim_ == 0` so we use rectangular (no prior sample) to
+        // avoid a 0-init artifact.
+        const Scalar p_abs_prev = (p_last_ > Scalar{0}) ? p_last_ : -p_last_;
+        const Scalar p_abs_now  = (p > Scalar{0}) ? p : -p;
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_abs_prev + p_abs_now)
+                           : p_abs_now;
+
         v_last_ = v_ds;
         i_last_ = i_ds;
         p_last_ = p;
-        // Both forward and reverse conduction loss (P = V·I always
-        // positive in resistive operation, no body-diode model yet).
-        const Scalar p_abs = (p > Scalar{0}) ? p : -p;
-        if (p_abs > Scalar{0}) {
-            e_cond_ += p_abs * dt;
-            if (p_abs > p_peak_) p_peak_ = p_abs;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
+            if (p_abs_now > p_peak_) p_peak_ = p_abs_now;
         }
         t_sim_ += dt;
     }
