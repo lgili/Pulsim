@@ -2689,6 +2689,94 @@ public:
                                      /*scale_c=*/1.0);
     }
 
+    // consolidate-motors-and-three-phase, Phase B.1: programmable 3φ source.
+    // Decomposes into three sine legs with per-phase amplitude scaling from
+    // the math object's (g_a, g_b, g_c). The scaling is captured at
+    // construction time — runtime sag / swell updates require rebuilding
+    // the source (a true callback-driven path is a follow-up). The math
+    // object's `evaluate_with_sag` helper remains usable from Python /
+    // C++ code that drives the simulator manually without Circuit
+    // integration.
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const grid::ThreePhaseSourceProgrammable& source) {
+        assert(source.base.frequency > 0.0);
+        add_three_phase_source_impl_(name, node_a, node_b, node_c,
+                                     node_neutral, source.base,
+                                     source.g_a, source.g_b, source.g_c);
+    }
+
+    // consolidate-motors-and-three-phase, Phase B.1: harmonic 3φ source.
+    // Decomposes into 3 + 3·N sine legs (fundamental per phase + 3 sines
+    // per harmonic component). Each harmonic respects the fundamental's
+    // sequence (positive harmonics rotate the same direction; triplen
+    // harmonics naturally fold into the zero-sequence component).
+    //
+    // Naming convention for the spawned sine legs:
+    //   <name>__H0_A, <name>__H0_B, <name>__H0_C   (fundamental)
+    //   <name>__H1_A, ..., <name>__H1_C            (first harmonic in list)
+    //   <name>__H<k>_*                              (k-th harmonic, 1-indexed)
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const grid::ThreePhaseHarmonicSource& source) {
+        assert(source.fundamental.frequency > 0.0);
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        const Real v_peak =
+            source.fundamental.v_rms * std::numbers::sqrt2_v<Real>;
+        const Real shift_b =
+            (source.fundamental.sequence == grid::PhaseSequence::Positive)
+                ? -kTwoPiOverThree : kTwoPiOverThree;
+        const Real shift_c = -shift_b;
+
+        const std::string base_name{name};
+        SineParams leg{};
+        leg.offset = 0.0;
+
+        // ---- Fundamental (harmonic index 0) --------------------------------
+        {
+            leg.frequency = source.fundamental.frequency;
+            leg.amplitude = v_peak;
+            leg.phase = source.fundamental.phase_rad;
+            add_sine_voltage_source(base_name + "__H0_A",
+                                    node_a, node_neutral, leg);
+            leg.phase = source.fundamental.phase_rad + shift_b;
+            add_sine_voltage_source(base_name + "__H0_B",
+                                    node_b, node_neutral, leg);
+            leg.phase = source.fundamental.phase_rad + shift_c;
+            add_sine_voltage_source(base_name + "__H0_C",
+                                    node_c, node_neutral, leg);
+        }
+
+        // ---- Harmonic contributions ----------------------------------------
+        for (std::size_t k = 0; k < source.harmonics.size(); ++k) {
+            const auto& h = source.harmonics[k];
+            const Real V_n = v_peak * h.magnitude_pct;
+            const Real f_n =
+                static_cast<Real>(h.order) * source.fundamental.frequency;
+            const Real phi_n = source.fundamental.phase_rad + h.phase_rad;
+            const Real harm_shift_b =
+                static_cast<Real>(h.order) * shift_b;
+            const Real harm_shift_c =
+                static_cast<Real>(h.order) * shift_c;
+            const std::string tag =
+                "__H" + std::to_string(k + 1) + "_";
+
+            leg.frequency = f_n;
+            leg.amplitude = V_n;
+            leg.phase = phi_n;
+            add_sine_voltage_source(base_name + tag + "A",
+                                    node_a, node_neutral, leg);
+            leg.phase = phi_n + harm_shift_b;
+            add_sine_voltage_source(base_name + tag + "B",
+                                    node_b, node_neutral, leg);
+            leg.phase = phi_n + harm_shift_c;
+            add_sine_voltage_source(base_name + tag + "C",
+                                    node_c, node_neutral, leg);
+        }
+    }
+
 private:
     // Internal worker used by both the params-struct and the math-object
     // overloads. Decomposes the source into three sine legs against the

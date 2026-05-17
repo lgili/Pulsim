@@ -647,6 +647,63 @@ void init_v2_module(py::module_& v2) {
         .def("evaluate", &grid::ThreePhaseSource::evaluate, py::arg("t"),
              "Return the instantaneous (v_a, v_b, v_c) triple at time t.");
 
+    // consolidate-motors-and-three-phase, Phase B.1: programmable + harmonic
+    // 3φ source math objects, plus their `Circuit.add_three_phase_source`
+    // overloads. The programmable source wraps the base ThreePhaseSourceModel
+    // with per-phase scale envelopes (g_a / g_b / g_c) for sag / swell test
+    // fixtures. The harmonic source adds a list of (order, magnitude_pct,
+    // phase_rad) components on top of the fundamental.
+    py::class_<grid::ThreePhaseSourceProgrammable>(v2,
+            "ThreePhaseSourceProgrammable",
+            "Three-phase source with per-phase scale envelopes (sag/swell "
+            "fixtures). Wraps a base ThreePhaseSourceModel.")
+        .def(py::init<>())
+        .def_readwrite("base", &grid::ThreePhaseSourceProgrammable::base,
+                       "Base balanced source.")
+        .def_readwrite("g_a", &grid::ThreePhaseSourceProgrammable::g_a,
+                       "Phase A scale envelope (1.0 = nominal).")
+        .def_readwrite("g_b", &grid::ThreePhaseSourceProgrammable::g_b,
+                       "Phase B scale envelope (1.0 = nominal).")
+        .def_readwrite("g_c", &grid::ThreePhaseSourceProgrammable::g_c,
+                       "Phase C scale envelope (1.0 = nominal).")
+        .def("evaluate", &grid::ThreePhaseSourceProgrammable::evaluate,
+             py::arg("t"),
+             "Return the instantaneous scaled (v_a, v_b, v_c) triple.")
+        .def("evaluate_with_sag",
+             &grid::ThreePhaseSourceProgrammable::evaluate_with_sag,
+             py::arg("t"), py::arg("t_sag"), py::arg("g_a_after"),
+             "Stateless sag-on-A helper: drops g_a to `g_a_after` for "
+             "t >= t_sag; B and C stay at their stored gains.");
+
+    py::class_<grid::HarmonicComponent>(v2, "HarmonicComponent",
+            "Single harmonic component for ThreePhaseHarmonicSource.")
+        .def(py::init<>())
+        .def_readwrite("order", &grid::HarmonicComponent::order,
+                       "Harmonic order (e.g., 5 = 5th harmonic).")
+        .def_readwrite("magnitude_pct",
+                       &grid::HarmonicComponent::magnitude_pct,
+                       "Amplitude as fraction of fundamental peak.")
+        .def_readwrite("phase_rad",
+                       &grid::HarmonicComponent::phase_rad,
+                       "Extra phase offset relative to fundamental (rad).");
+
+    py::class_<grid::ThreePhaseHarmonicSource>(v2,
+            "ThreePhaseHarmonicSource",
+            "Three-phase source with arbitrary harmonic injection on top of "
+            "the fundamental.")
+        .def(py::init<>())
+        .def_readwrite("fundamental",
+                       &grid::ThreePhaseHarmonicSource::fundamental,
+                       "Fundamental sinusoidal three-phase source.")
+        .def_readwrite("harmonics",
+                       &grid::ThreePhaseHarmonicSource::harmonics,
+                       "List of HarmonicComponent triples (order, "
+                       "magnitude_pct, phase_rad).")
+        .def("evaluate", &grid::ThreePhaseHarmonicSource::evaluate,
+             py::arg("t"),
+             "Return the instantaneous (v_a, v_b, v_c) triple at time t — "
+             "fundamental + harmonic contributions summed per phase.");
+
     py::enum_<Circuit::PwmModulation>(
             v2, "PwmModulation",
             "Modulation type for the sinusoidal-modulated PWM source.")
@@ -1505,6 +1562,27 @@ void init_v2_module(py::module_& v2) {
              "math object (consolidate-motors-and-three-phase Phase A.1). The math "
              "object is the canonical signal representation; the params-struct "
              "overload converts to this form internally.")
+        // consolidate-motors-and-three-phase, Phase B.1: programmable + harmonic
+        // overloads. Both math objects decompose into independent sine legs at
+        // construction time (programmable: 3 legs with per-phase scale;
+        // harmonic: 3 + 3·N legs for fundamental + harmonics).
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index,
+                               const grid::ThreePhaseSourceProgrammable&>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"), py::arg("source"),
+             "Add a programmable 3-phase source (per-phase scale envelope). "
+             "Scaling is captured at construction; runtime sag/swell requires "
+             "rebuilding the source.")
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index,
+                               const grid::ThreePhaseHarmonicSource&>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"), py::arg("source"),
+             "Add a harmonic-injected 3-phase source. Decomposes into "
+             "3 + 3·N sine legs (one per harmonic per phase).")
         // Three-phase 2-level VSI (Track 4 follow-up). Decomposes into 6
         // NMOS switches + 6 SPWM gate drivers internally.
         .def("add_three_phase_vsi",

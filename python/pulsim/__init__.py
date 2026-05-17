@@ -97,6 +97,12 @@ from ._pulsim import (
     PmsmFocCurrentLoopParams,
     PmsmFocDeviceParams,
 
+    # consolidate-motors-and-three-phase Phase B.1: programmable + harmonic
+    # three-phase source math objects.
+    ThreePhaseSourceProgrammable,
+    ThreePhaseHarmonicSource,
+    HarmonicComponent,
+
     # Control Blocks
     PIController,
     PIDController,
@@ -1180,6 +1186,9 @@ __all__ = [
     "InductionMotorParams",
     "PmsmFocCurrentLoopParams",
     "PmsmFocDeviceParams",
+    "ThreePhaseSourceProgrammable",
+    "ThreePhaseHarmonicSource",
+    "HarmonicComponent",
     "SineVoltageSource",
     "RampParams",
     "RampGenerator",
