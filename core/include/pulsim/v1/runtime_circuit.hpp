@@ -3259,6 +3259,36 @@ public:
         }
     }
 
+    /// Set the `SwitchingMode` on a single switching device by name. Mirrors
+    /// `set_pwl_state` but targets the device's `mode_` field instead of its
+    /// `pwl_state_`. Backs the YAML parser's per-device
+    /// `components[].switching_mode` override path (refactor-pwl-switching-
+    /// engine, Phase 5.2) and is also useful from Python when the simulation-
+    /// level switching mode needs to be overridden for a specific device.
+    void set_switching_mode(std::string_view name, SwitchingMode mode) {
+        const auto index = find_connection_index(name);
+        if (!index.has_value()) {
+            throw std::runtime_error("PWL device not found: " + std::string{name});
+        }
+        auto& device = devices_[*index];
+        bool applied = false;
+        std::visit([&](auto& dev) {
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, IdealDiode> ||
+                          std::is_same_v<T, IdealSwitch> ||
+                          std::is_same_v<T, VoltageControlledSwitch> ||
+                          std::is_same_v<T, MOSFET> ||
+                          std::is_same_v<T, IGBT>) {
+                dev.set_switching_mode(mode);
+                applied = true;
+            }
+        }, device);
+        if (!applied) {
+            throw std::runtime_error(
+                "Device does not support switching_mode: " + std::string{name});
+        }
+    }
+
     // =========================================================================
     // Set Timestep for Dynamic Elements
     // =========================================================================
@@ -4294,6 +4324,79 @@ public:
             }, devices_[i]);
         }
         return events;
+    }
+
+    /// Result of `bisect_pwl_event_alpha`: the bisected fractional step
+    /// `alpha ∈ [0, 1]` at which the earliest PWL commutation fires, the
+    /// set of devices that commute at that point (typically one — multiple
+    /// may co-fire within `tolerance`), and the count of bisection
+    /// iterations consumed.
+    struct PwlEventBisection {
+        Real alpha = 1.0;
+        std::vector<PwlCommutation> events;
+        int bisections = 0;
+    };
+
+    /// Linearly bisect on `alpha ∈ [0, 1]` between `x_prev` and `x_now` to
+    /// find the earliest fraction of the accepted step at which any
+    /// PWL-eligible device's `should_commute()` predicate triggers. This is
+    /// the cheap analogue of `find_switch_event_time` for the PWL segment
+    /// engine — no re-solve of the underlying linear system; the state at
+    /// the midpoint is the convex combination of the segment's endpoints,
+    /// which is exact for the Tustin step within a single linear topology.
+    ///
+    /// Returns `nullopt` when no device commutes anywhere in the interval
+    /// (caller should treat the step as event-free). Returns `alpha = 0`
+    /// when the start of the step already wants to commute (the previous
+    /// step missed a transition — caller should commit immediately).
+    ///
+    /// Cost is O(D · log2(1/tolerance)) where D = switching device count;
+    /// for D = 12 and `tolerance = 1e-9` the bisection runs ~30 iterations
+    /// × 12 device evaluations = 360 cheap should_commute() calls. Cheap
+    /// next to a Newton step or a Tustin re-solve.
+    [[nodiscard]] std::optional<PwlEventBisection> bisect_pwl_event_alpha(
+        const Vector& x_prev,
+        const Vector& x_now,
+        SwitchingMode circuit_default = SwitchingMode::Behavioral,
+        Real tolerance = 1e-9,
+        int max_iter = 40) const {
+        // Sanity: at α=0 no events should be pending — the previous step's
+        // post-accept scan would have committed them. If something is
+        // pending, hand it back immediately (rare; corresponds to a
+        // missed-event scenario where the user manually set state between
+        // steps).
+        auto events_at = [&](const Vector& x) {
+            return scan_pwl_commutations(x, circuit_default);
+        };
+
+        auto interp = [&](Real alpha) -> Vector {
+            return (Real{1.0} - alpha) * x_prev + alpha * x_now;
+        };
+
+        auto events_lo = events_at(x_prev);
+        if (!events_lo.empty()) {
+            return PwlEventBisection{Real{0.0}, std::move(events_lo), 0};
+        }
+
+        auto events_hi = events_at(x_now);
+        if (events_hi.empty()) {
+            return std::nullopt;
+        }
+
+        Real alpha_lo = Real{0.0};
+        Real alpha_hi = Real{1.0};
+        int iter = 0;
+        for (; iter < max_iter && (alpha_hi - alpha_lo) > tolerance; ++iter) {
+            const Real alpha_mid = Real{0.5} * (alpha_lo + alpha_hi);
+            auto events_mid = events_at(interp(alpha_mid));
+            if (events_mid.empty()) {
+                alpha_lo = alpha_mid;
+            } else {
+                alpha_hi = alpha_mid;
+                events_hi = std::move(events_mid);
+            }
+        }
+        return PwlEventBisection{alpha_hi, std::move(events_hi), iter};
     }
 
     /// Apply a list of pending commutations (typically from

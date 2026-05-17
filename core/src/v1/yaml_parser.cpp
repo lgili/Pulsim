@@ -58,6 +58,33 @@ bool is_known_key(const std::string& key, const std::unordered_set<std::string>&
     return allowed.find(key) != allowed.end();
 }
 
+// refactor-pwl-switching-engine, Phase 5: shared parser for the
+// `switching_mode` enum string. Used by both the simulation-level field
+// (`simulation.switching_mode`) and the per-device override
+// (`components[].switching_mode`, Phase 5.2). Returns nullopt and pushes a
+// deterministic error into `errors` when the string is unrecognized;
+// returns nullopt without error when the node is absent.
+[[nodiscard]] std::optional<SwitchingMode>
+parse_switching_mode_node(const YAML::Node& node,
+                          const std::string& context,
+                          std::vector<std::string>& errors) {
+    if (!node || !node.IsDefined() || node.IsNull()) {
+        return std::nullopt;
+    }
+    const std::string raw = node.as<std::string>();
+    const std::string mode = normalize_key(raw);
+    if (mode == "auto") return SwitchingMode::Auto;
+    if (mode == "ideal" || mode == "pwl") return SwitchingMode::Ideal;
+    if (mode == "behavioral" || mode == "behaviour" ||
+        mode == "behaviorallegacy" || mode == "smooth") {
+        return SwitchingMode::Behavioral;
+    }
+    errors.push_back(
+        "Invalid " + context + ": '" + raw +
+        "'. Expected one of: auto, ideal, behavioral.");
+    return std::nullopt;
+}
+
 [[nodiscard]] bool component_type_supports_thermal(const std::string& canonical_type) {
     return canonical_type == "mosfet" ||
            canonical_type == "igbt" ||
@@ -1111,22 +1138,11 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         // string values: "auto" (default; resolves to behavioral),
         // "ideal" (opt-in to PWL fast path), "behavioral" (force the legacy
         // Newton-companion path). Strict validation rejects unknown values.
-        YAML::Node switching_mode_node = sim["switching_mode"];
-        if (switching_mode_node) {
-            const std::string raw = switching_mode_node.as<std::string>();
-            const std::string mode = normalize_key(raw);
-            if (mode == "auto") {
-                options.switching_mode = SwitchingMode::Auto;
-            } else if (mode == "ideal" || mode == "pwl") {
-                options.switching_mode = SwitchingMode::Ideal;
-            } else if (mode == "behavioral" || mode == "behaviour" ||
-                       mode == "behaviorallegacy" || mode == "smooth") {
-                options.switching_mode = SwitchingMode::Behavioral;
-            } else {
-                errors_.push_back(
-                    "Invalid simulation.switching_mode: '" + raw +
-                    "'. Expected one of: auto, ideal, behavioral.");
-            }
+        if (auto parsed = parse_switching_mode_node(
+                sim["switching_mode"],
+                "simulation.switching_mode",
+                errors_)) {
+            options.switching_mode = *parsed;
         }
 
         YAML::Node newton = expert_node("newton");
@@ -1670,7 +1686,11 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "frequency", "duty", "duty_min", "duty_max", "duty_from_input", "duty_gain", "duty_offset",
              "alpha", "anti_windup", "min", "max", "output_min", "output_max",
              "rising_rate", "falling_rate",
-             "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping"},
+             "rail_high", "rail_low", "hysteresis", "metadata", "table", "mapping",
+             // refactor-pwl-switching-engine, Phase 5.2: per-device override
+             // of the simulation-level switching_mode. Accepted on diode,
+             // switch, vcswitch, mosfet, igbt; ignored elsewhere.
+             "switching_mode"},
             "component", errors_, options_.strict);
 
         if (!comp["type"] || !comp["name"]) {
@@ -1737,6 +1757,20 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         };
         auto is_set = [](const YAML::Node& node) {
             return node.IsDefined() && !node.IsNull();
+        };
+
+        // refactor-pwl-switching-engine, Phase 5.2: applies the optional
+        // per-device `switching_mode` override after a switching device is
+        // registered. Honored on diode, switch, vcswitch, mosfet, igbt; the
+        // helper is a no-op when the field is absent. The override wins over
+        // the simulation-level `switching_mode` for that single device.
+        auto apply_switching_mode_override = [&](const std::string& device_name) {
+            if (auto parsed = parse_switching_mode_node(
+                    get_param("switching_mode"),
+                    device_name + ".switching_mode",
+                    errors_)) {
+                circuit.set_switching_mode(device_name, *parsed);
+            }
         };
 
         // Loss model (switching energy)
@@ -1924,6 +1958,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             Real g_on = g_on_node ? parse_real(g_on_node, name + ".g_on", errors_) : 1e3;
             Real g_off = g_off_node ? parse_real(g_off_node, name + ".g_off", errors_) : 1e-9;
             circuit.add_diode(name, node_at(0), node_at(1), g_on, g_off);
+            apply_switching_mode_override(name);
         }
         else if (type == "switch") {
             YAML::Node g_on_node = get_param("g_on");
@@ -1943,12 +1978,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 ? initial_state_node.as<bool>()
                 : false;
             circuit.add_switch(name, node_at(0), node_at(1), closed, g_on, g_off);
+            apply_switching_mode_override(name);
         }
         else if (type == "vcswitch") {
             Real v_threshold = get_param("v_threshold") ? parse_real(get_param("v_threshold"), name + ".v_threshold", errors_) : 2.5;
             Real g_on = get_param("g_on") ? parse_real(get_param("g_on"), name + ".g_on", errors_) : 1e3;
             Real g_off = get_param("g_off") ? parse_real(get_param("g_off"), name + ".g_off", errors_) : 1e-9;
             circuit.add_vcswitch(name, node_at(0), node_at(1), node_at(2), v_threshold, g_on, g_off);
+            apply_switching_mode_override(name);
         }
         else if (type == "mosfet") {
             MOSFET::Params p;
@@ -1960,6 +1997,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (is_nmos_node.IsDefined() && !is_nmos_node.IsNull()) p.is_nmos = is_nmos_node.as<bool>();
             if (normalized_raw_type == "pmos") p.is_nmos = false;
             circuit.add_mosfet(name, node_at(0), node_at(1), node_at(2), p);
+            apply_switching_mode_override(name);
         }
         else if (type == "igbt") {
             IGBT::Params p;
@@ -1968,6 +2006,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (get_param("g_off")) p.g_off = parse_real(get_param("g_off"), name + ".g_off", errors_);
             if (get_param("v_ce_sat")) p.v_ce_sat = parse_real(get_param("v_ce_sat"), name + ".v_ce_sat", errors_);
             circuit.add_igbt(name, node_at(0), node_at(1), node_at(2), p);
+            apply_switching_mode_override(name);
         }
         else if (type == "transformer") {
             YAML::Node ratio_node = get_param("turns_ratio");

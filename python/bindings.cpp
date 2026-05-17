@@ -1525,6 +1525,11 @@ void init_v2_module(py::module_& v2) {
         .def("set_switching_mode_for_all", &Circuit::set_switching_mode_for_all,
              py::arg("mode"),
              "Set SwitchingMode on every PWL-eligible device (passives skipped).")
+        .def("set_switching_mode", &Circuit::set_switching_mode,
+             py::arg("name"), py::arg("mode"),
+             "Set SwitchingMode on a single switching device by name "
+             "(refactor-pwl-switching-engine Phase 5.2). Mirrors the "
+             "components[].switching_mode YAML override for the C++/Python API.")
         .def("set_default_switching_mode", &Circuit::set_default_switching_mode,
              py::arg("mode"),
              "Circuit-level default switching mode used when devices are in Auto.")
@@ -2082,6 +2087,11 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("pwl_event_commutations", &BackendTelemetry::pwl_event_commutations,
                         "Phase 6 telemetry: total number of individual PWL device "
                         "commutations committed during the run.")
+        .def_readwrite("pwl_event_bisections", &BackendTelemetry::pwl_event_bisections,
+                        "Phase 4.4 telemetry: count of accepted steps that ran the "
+                        "linear-interpolation bisection on x_prev→x_now to refine "
+                        "the PWL commutation time within `event_tolerance`. "
+                        "Reads zero when no step contained a commutation.")
         .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
         .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
         .def_readwrite("linear_factor_cache_hits", &BackendTelemetry::linear_factor_cache_hits)

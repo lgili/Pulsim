@@ -144,6 +144,11 @@ struct BackendTelemetry {
     // two switches contributes 2 commutations and 1 transition).
     int pwl_topology_transitions = 0;
     int pwl_event_commutations = 0;
+    // refactor-pwl-switching-engine, Phase 4.4: count of accepted steps that
+    // ran the linear-interpolation bisection on x_prev→x_now to refine the
+    // PWL commutation time. Reads zero when the first-order scheduler is
+    // active or when no step contained a commutation.
+    int pwl_event_bisections = 0;
     int segment_model_cache_hits = 0;
     int segment_model_cache_misses = 0;
     int linear_factor_cache_hits = 0;
