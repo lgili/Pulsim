@@ -14,6 +14,9 @@
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/components/dc_motor_device.hpp"
 #include "pulsim/v1/components/pmsm_device.hpp"
+#include "pulsim/v1/components/mechanical_device.hpp"
+#include "pulsim/v1/components/bldc_motor_device.hpp"
+#include "pulsim/v1/components/induction_motor_device.hpp"
 #include "pulsim/v1/grid/three_phase_source.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
@@ -75,7 +78,10 @@ using DeviceVariant = std::variant<
     PulseVoltageSource,
     Transformer,
     DcMotorDevice,
-    PmsmDevice
+    PmsmDevice,
+    MechanicalDevice,
+    BldcMotorDevice,
+    InductionMotorDevice
 >;
 
 // =============================================================================
@@ -3094,6 +3100,164 @@ public:
         return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- Mechanical device (consolidate-motors-and-three-phase, B.2a) -------
+    //
+    // Adds a signal-domain mechanical primitive (shaft inertia + friction +
+    // optional constant / quadratic load) with NO electrical pins. Used to
+    // build multi-shaft topologies: a single MechanicalDevice can be the
+    // load seen by a motor's `set_tau_load`, while the motor's
+    // electromagnetic torque is pushed to the device via `set_tau_input`.
+    // The device's `update_history()` (driven by the variant walker on
+    // accepted steps) advances ω, θ via forward Euler.
+
+    void add_mechanical(const std::string& name,
+                        const MechanicalDevice::Params& params) {
+        assert(params.shaft.J > 0.0);
+        MechanicalDevice dev(params, name);
+        devices_.emplace_back(std::move(dev));
+        // No nodes, no branch — pure mechanical/signal device.
+        connections_.push_back({name, {}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    /// Push torque input to a mechanical device by name (typically called
+    /// from a mixed-domain block with the upstream motor's τ_em).
+    void set_mechanical_tau_input(std::string_view name, Real tau) {
+        if (auto* m = find_device<MechanicalDevice>(name)) {
+            m->set_tau_input(tau);
+        }
+    }
+
+    /// Read mechanical state by name. Returns NaN if not found.
+    [[nodiscard]] Real mechanical_omega(std::string_view name) const {
+        const auto* m = find_device<MechanicalDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mechanical_theta(std::string_view name) const {
+        const auto* m = find_device<MechanicalDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mechanical_reaction_torque(std::string_view name) const {
+        const auto* m = find_device<MechanicalDevice>(name);
+        return m ? m->reaction_torque() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- BLDC motor (consolidate-motors-and-three-phase, Phase C.1) ---------
+    //
+    // Three-phase BLDC with trapezoidal back-EMF (120° flat-top). Stamps 3
+    // reserved branch rows for line currents i_a / i_b / i_c into MNA. State
+    // (i_*, ω, θ) advances via forward-Euler on accepted timesteps. Matches
+    // the PMSM device API shape: 4 pins (A, B, C, N), `add_bldc_motor`
+    // builder, `set_bldc_*` torque-input setter, and `bldc_*` readout
+    // accessors. The motor-models spec requires BldcMotorDevice; this brings
+    // it online for benchmark + tutorial work.
+
+    void add_bldc_motor(const std::string& name,
+                        Index n_a, Index n_b, Index n_c, Index n_neutral,
+                        const motors::BldcMotorParams& params) {
+        assert(params.R_s > 0.0);
+        assert(params.L_s > 0.0);
+        assert(params.J   > 0.0);
+        assert(params.pole_pairs > 0);
+
+        const Index br_a = num_nodes() + num_branches_;
+        const Index br_b = br_a + 1;
+        const Index br_c = br_a + 2;
+        BldcMotorDevice motor(params, name);
+        motor.set_branch_indices(br_a, br_b, br_c);
+        devices_.emplace_back(std::move(motor));
+        connections_.push_back(
+            {name, {n_a, n_b, n_c, n_neutral}, br_a, br_b});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 3;
+    }
+
+    void set_bldc_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<BldcMotorDevice>(name)) {
+            m->set_load_torque(tau);
+        }
+    }
+
+    [[nodiscard]] Real bldc_omega(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_theta(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_i_a(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_i_b(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->i_b() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_i_c(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- Induction motor (consolidate-motors-and-three-phase, Phase C.2) ----
+    //
+    // Three-phase squirrel-cage induction motor in stationary αβ frame with
+    // rotor flux as state. 4 pins (A, B, C, N), 3 reserved branch rows.
+    // Slip-dependent torque per Krause/Bose formulation. Closes the
+    // motor-models spec gap.
+
+    void add_induction_motor(const std::string& name,
+                             Index n_a, Index n_b, Index n_c, Index n_neutral,
+                             const motors::InductionMotorParams& params) {
+        assert(params.R_s > 0.0);
+        assert(params.L_s > 0.0);
+        assert(params.J   > 0.0);
+        assert(params.pole_pairs > 0);
+
+        const Index br_a = num_nodes() + num_branches_;
+        const Index br_b = br_a + 1;
+        const Index br_c = br_a + 2;
+        InductionMotorDevice motor(params, name);
+        motor.set_branch_indices(br_a, br_b, br_c);
+        devices_.emplace_back(std::move(motor));
+        connections_.push_back(
+            {name, {n_a, n_b, n_c, n_neutral}, br_a, br_b});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 3;
+    }
+
+    void set_induction_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<InductionMotorDevice>(name)) {
+            m->set_load_torque(tau);
+        }
+    }
+
+    [[nodiscard]] Real induction_omega(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_theta(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_slip(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        // TODO(user): re-thread omega_sync from circuit context.
+        return m ? m->slip(0.0) : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_i_a(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_i_b(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->i_b() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_i_c(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
     // =========================================================================
     // PWM Duty Control
     // =========================================================================
@@ -3534,6 +3698,51 @@ public:
                 else if constexpr (std::is_same_v<T, PmsmDevice>) {
                     // Read 3 line currents + 3 terminal voltages (relative to
                     // the neutral node) and advance ω, θ via forward-Euler.
+                    const Index n_a = conn.nodes[0];
+                    const Index n_b = conn.nodes[1];
+                    const Index n_c = conn.nodes[2];
+                    const Index n_n = conn.nodes[3];
+                    const Index br_a = conn.branch_index;
+                    const Index br_b = conn.branch_index_2;
+                    const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+                    const Real v_n = (n_n >= 0) ? x[n_n] : 0.0;
+                    const Real v_a = ((n_a >= 0) ? x[n_a] : 0.0) - v_n;
+                    const Real v_b = ((n_b >= 0) ? x[n_b] : 0.0) - v_n;
+                    const Real v_c = ((n_c >= 0) ? x[n_c] : 0.0) - v_n;
+                    const Real i_a = (br_a >= 0) ? x[br_a] : 0.0;
+                    const Real i_b = (br_b >= 0) ? x[br_b] : 0.0;
+                    const Real i_c = (br_c >= 0) ? x[br_c] : 0.0;
+
+                    if (initialize) {
+                        dev.reset_history_for_transient_start(i_a, i_b, i_c);
+                    } else {
+                        dev.advance_state(v_a, v_b, v_c, i_a, i_b, i_c,
+                                          timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, MechanicalDevice>) {
+                    // consolidate-motors-and-three-phase, Phase B.2a: signal-
+                    // domain advance. No electrical state to read from x —
+                    // we just call `update_history()` on the device, which
+                    // forward-Euler-advances ω and θ under the user-supplied
+                    // `tau_input` minus the configured load + friction.
+                    if (initialize) {
+                        // DC OP: hold mechanical state at the initial value.
+                    } else {
+                        dev.set_timestep(timestep_);
+                        dev.update_history();
+                    }
+                }
+                else if constexpr (std::is_same_v<T, BldcMotorDevice> ||
+                                   std::is_same_v<T, InductionMotorDevice>) {
+                    // consolidate-motors-and-three-phase, Phase C: BLDC and
+                    // Induction motors share the PmsmDevice advance contract
+                    // (3 line currents + 3 phase-to-neutral voltages → forward-
+                    // Euler mechanical advance + state update). The math
+                    // diverges inside `advance_state`: BLDC uses trapezoidal
+                    // back-EMF and 6-step commutation awareness; induction
+                    // uses αβ rotor-flux state + slip-dependent torque.
                     const Index n_a = conn.nodes[0];
                     const Index n_b = conn.nodes[1];
                     const Index n_c = conn.nodes[2];
@@ -4066,7 +4275,11 @@ public:
                                      std::is_same_v<T, SineVoltageSource> ||
                                      std::is_same_v<T, PulseVoltageSource>) {
                     if (nodes.size() >= 2) {
-                        stamp_voltage_source_eq(dev.voltage_at(time), nodes[0], nodes[1],
+                        const Real v_src = dev.voltage_at(time);
+                        // DEBUG: trace PWM stamping
+                        std::fprintf(stderr, "[stamp_state_space] dev=%s time=%.3fµs V_src=%.3f\n",
+                                     conn.name.c_str(), time * 1e6, v_src);
+                        stamp_voltage_source_eq(v_src, nodes[0], nodes[1],
                                                 conn.branch_index);
                     }
                 } else if constexpr (std::is_same_v<T, CurrentSource>) {
@@ -5231,6 +5444,42 @@ private:
             stamp_phase(n_b, br_b, e_b);
             stamp_phase(n_c, br_c, e_c);
         }
+        else if constexpr (std::is_same_v<T, BldcMotorDevice> ||
+                           std::is_same_v<T, InductionMotorDevice>) {
+            // consolidate-motors-and-three-phase, Phase C DC OP stamp.
+            // Shares the PmsmDevice phase stamping pattern: each phase
+            // inductor is a short, so per-phase
+            //   v_k − v_N − R_s · i_k − e_k(θ_init) = 0
+            // For BLDC, e_k(θ_init) comes from the trapezoidal back-EMF
+            // table evaluated at the stored rotor angle. For Induction at
+            // DC OP, rotor flux is zero → e_k ≡ 0, so the device reduces
+            // to a per-phase R_s resistor in series with the line.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real e_a = dev.back_emf_a();
+            const Real e_b = dev.back_emf_b();
+            const Real e_c = dev.back_emf_c();
+
+            auto stamp_phase = [&](Index n_line, Index br, Real e_k) {
+                if (br < 0) return;
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -p.R_s);
+                b[br] += e_k;
+            };
+            stamp_phase(n_a, br_a, e_a);
+            stamp_phase(n_b, br_b, e_b);
+            stamp_phase(n_c, br_c, e_c);
+        }
     }
 
     template<typename Device, typename Triplets>
@@ -5425,6 +5674,8 @@ private:
             Index nneg = conn.nodes[1];
             Index br = conn.branch_index;
             Real v_src = dev.voltage_at(current_time_);
+            std::fprintf(stderr, "[stamp_jacobian PWM] dev=%s ct=%.3fus V=%.3f\n",
+                         conn.name.c_str(), current_time_ * 1e6, v_src);
 
             // Stamp MNA extension (same as regular voltage source)
             if (npos >= 0) {
@@ -5519,6 +5770,59 @@ private:
                 const Real i_br = x[br];
 
                 // KCL at line / neutral nodes
+                if (n_line >= 0) f[n_line] += i_br;
+                if (n_n    >= 0) f[n_n]    -= i_br;
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+
+                const Real v_line = (n_line >= 0) ? x[n_line] : 0.0;
+                const Real v_neut = (n_n    >= 0) ? x[n_n]    : 0.0;
+                f[br] += (v_line - v_neut) - r_eq * i_br + v_hist - e_k;
+
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -r_eq);
+            };
+
+            stamp_phase(n_a, br_a, dev.i_a_prev(), dev.v_La_prev(), dev.back_emf_a());
+            stamp_phase(n_b, br_b, dev.i_b_prev(), dev.v_Lb_prev(), dev.back_emf_b());
+            stamp_phase(n_c, br_c, dev.i_c_prev(), dev.v_Lc_prev(), dev.back_emf_c());
+        }
+        else if constexpr (std::is_same_v<T, BldcMotorDevice> ||
+                           std::is_same_v<T, InductionMotorDevice>) {
+            // consolidate-motors-and-three-phase, Phase C transient stamp.
+            // Same shape as PmsmDevice — per-phase trapezoidal companion
+            // (R_s + 2·L_eff/dt series) with back-EMF semi-implicit source.
+            // BLDC uses params().L_s directly; Induction uses
+            // l_s_effective() (σ·L_s in the αβ frame). Back-EMF: BLDC
+            // trapezoidal table; Induction (L_m/L_r)·dψ_r/dt projected to
+            // the abc frame.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real l_s = [&]() {
+                if constexpr (std::is_same_v<T, BldcMotorDevice>) {
+                    return p.L_s;
+                } else {
+                    return dev.l_s_effective();
+                }
+            }();
+            const Real two_L_over_dt =
+                2.0 * l_s / std::max<Real>(timestep_, 1e-30);
+            const Real r_eq = p.R_s + two_L_over_dt;
+
+            auto stamp_phase = [&](Index n_line, Index br, Real i_prev,
+                                   Real v_L_prev, Real e_k) {
+                if (br < 0) return;
+                const Real v_hist = two_L_over_dt * i_prev + v_L_prev;
+                const Real i_br = x[br];
+
                 if (n_line >= 0) f[n_line] += i_br;
                 if (n_n    >= 0) f[n_n]    -= i_br;
                 if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
