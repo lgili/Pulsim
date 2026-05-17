@@ -113,6 +113,38 @@ TEST_CASE("AD MOSFET stamp matches manual across Shichman-Hodges regions",
     }
 }
 
+TEST_CASE("AD MOSFET stamp matches manual across Shichman-Hodges regions (PMOS)",
+          "[ad][mosfet][stamp][cross_validation][pmos]") {
+    // PMOS cross-validation manual vs AD. The legacy concern documented in
+    // the prior PMOS section was a sign mismatch in the `i_eq` linearization
+    // terms; that has been resolved by the manual-stamp Phase-8 rework which
+    // applies the chain rule in actual coords (matching the AD path's
+    // Norton companion form). This test pins the agreement so the
+    // regression cannot return.
+    MOSFET::Params params{
+        .vth = 2.0,
+        .kp = 0.1,
+        .lambda = 0.01,
+        .g_off = 1e-12,
+        .is_nmos = false,
+        .g_on = 1e3,
+    };
+    MOSFET m(params, "M_pmos_xv");
+
+    SECTION("PMOS cutoff") {
+        cross_validate(m, /*v_g=*/-1.0, /*v_d=*/-5.0, /*v_s=*/0.0, "pmos_cutoff");
+    }
+    SECTION("PMOS saturation") {
+        cross_validate(m, /*v_g=*/-5.0, /*v_d=*/-10.0, /*v_s=*/0.0, "pmos_saturation");
+    }
+    SECTION("PMOS triode") {
+        cross_validate(m, /*v_g=*/-5.0, /*v_d=*/-1.0, /*v_s=*/0.0, "pmos_triode");
+    }
+    SECTION("PMOS asymmetric source") {
+        cross_validate(m, /*v_g=*/-8.0, /*v_d=*/-12.0, /*v_s=*/-3.0, "pmos_asymmetric");
+    }
+}
+
 TEST_CASE("AD MOSFET stamp matches manual for PMOS",
           "[ad][mosfet][stamp][pmos]") {
     MOSFET::Params params{
@@ -125,20 +157,16 @@ TEST_CASE("AD MOSFET stamp matches manual for PMOS",
     };
     MOSFET m(params, "M_pmos");
 
-    // PMOS note (pre-existing manual-stamp issue): legacy
-    // `stamp_jacobian_impl` computes `i_eq` from sign-flipped local
-    // `vgs/vds` without reflecting the chain-rule sign back into the
-    // linearization terms. For NMOS (sign = +1) this coincides with the
-    // correct Taylor offset; for PMOS (sign = −1) the linearization terms
-    // come out with reversed sign, so the manual `f` rows do not match
-    // the AD-derived `f` rows. The AD path computes
-    //   `i_eq = id − ∇id · x`
-    // directly in the actual coordinate basis (mathematically correct).
-    //
-    // Until the legacy stamp is fixed (separate concern), cross-validation
-    // against manual is restricted to NMOS. For PMOS we compare AD-derived
-    // partials against centered finite differences — the ground truth —
-    // to confirm AD is correct on its own.
+    // Independent ground-truth check: cross-validates the AD-derived
+    // partials against centered finite differences regardless of manual
+    // stamp behavior. A complementary case above
+    // (`AD MOSFET stamp matches manual across Shichman-Hodges regions
+    // (PMOS)`) pins the manual ↔ AD equivalence at 1e-12 — the legacy
+    // PMOS sign issue called out in earlier revisions of this comment
+    // was resolved by the Phase-8 smooth-region rework which applies
+    // the chain rule in actual coords, matching the AD Norton companion
+    // form. This test keeps the FD-based safety net so any future
+    // change to the residual template is checked against ground truth.
 
     auto i_at = [&](Real v_g, Real v_d, Real v_s) -> Real {
         return m.drain_current_behavioral<Real>(v_g, v_d, v_s);
