@@ -66,11 +66,42 @@
 
 ## 3. Phase 3 — `AdvancedOptions` namespace + deprecation aliases
 
-> **Status:** NOT YET SHIPPED. Deferred to a future PR. The new fields
-> (`armijo_sigma`, `homotopy_config`, etc.) added by Phases 4-7 land
-> on the existing flat namespace (`NewtonOptions::armijo_sigma`,
-> `DCConvergenceConfig::homotopy_config`) — they migrate to
-> `opts.advanced.*` when this phase ships.
+> **Status: SCOPE LARGER THAN ORIGINAL ESTIMATE — deferred to a
+> dedicated PR.**
+>
+> Phase 3 is essentially a god-class refactor: it moves 28 top-level
+> fields under `opts.advanced.*` while preserving back-compat aliases.
+> Honest scope assessment:
+>
+>   - **C++**: SimulationOptions itself has 28 fields to wrap. Each
+>     needs an `[[deprecated]]` getter+setter pair (or a `union`
+>     trick that's hard to make warning-clean). Internal callers
+>     (auto-parasitics, transient services, simulator construction,
+>     parser dispatch) touch most of these fields — ~30-50
+>     internal callsites need updating per field-class.
+>   - **Python bindings**: every `def_readwrite` for the 28 fields
+>     becomes a `@property` shim with `DeprecationWarning`. ~28
+>     bindings × ~3 lines each = ~100 LOC just for the shims, plus
+>     the AdvancedOptions class binding itself.
+>   - **YAML parser**: `validate_keys` allowlist for the new
+>     `advanced.*` sub-tree, dispatch rules that route either
+>     top-level or nested fields to the same internal targets,
+>     deprecation warnings on the top-level use.
+>   - **Tests + docs**: every example / notebook / spec test that
+>     touches these 28 fields needs updating. ~40-60 sites.
+>
+> Realistic implementation cost: 4-6 hours of focused work in a
+> dedicated PR that does nothing else. The new fields added by
+> Phases 4 / 6 / 7 (`armijo_line_search`, `homotopy_config`,
+> `strategy_override`, `linear_refinement_steps`) all sit on the
+> existing flat namespace today and will migrate cleanly when Phase
+> 3 lands.
+>
+> **In the meantime**, the user-facing entry point is the `Preset`
+> enum + `from_preset()` factory (Phase 2), so the 28-field surface
+> is not the first thing a new user sees. The `Preset` system means
+> Phase 3 is now a quality-of-life improvement for power users
+> rather than a usability blocker.
 
 - [ ] 3.1 Add `numerical/advanced_options.hpp` aggregating
       `NewtonOptions`, `AdvancedTimestepConfig`, `RichardsonLTEConfig`,
