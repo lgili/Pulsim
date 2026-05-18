@@ -294,6 +294,11 @@ from . import sweep as sweep  # noqa: E402
 # FMI 2.0 Co-Simulation export (add-fmi-export)
 from . import fmu as fmu  # noqa: E402
 
+# Schematic auto-layout and rendering (add-schematic-rendering)
+# Lazy-imports networkx / schemdraw inside compute_layout / render —
+# the import below always succeeds even without the [schematic] extra.
+from . import schematic as schematic  # noqa: E402
+
 
 # =============================================================================
 # Ergonomic API extension: string node names in Circuit.add_*

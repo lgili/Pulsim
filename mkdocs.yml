@@ -123,6 +123,7 @@ nav:
       - Frequency Response Analysis (FRA): fra.md
       - Electrothermal Workflow: electrothermal-workflow.md
       - Parameter Sweep: parameter-sweep.md
+      - Schematic Rendering: schematic-rendering.md
       - Real-Time Code Generation: code-generation.md
       - FMI Export: fmi-export.md
       - Automatic Differentiation: automatic-differentiation.md

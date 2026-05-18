@@ -80,42 +80,82 @@ set_target_properties(_pulsim PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/pulsim"
 )
 
+# =============================================================================
 # Copy Python wrapper module
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.py
-    ${CMAKE_BINARY_DIR}/python/pulsim/__init__.py
-    COPYONLY
-)
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/netlist.py
-    ${CMAKE_BINARY_DIR}/python/pulsim/netlist.py
-    COPYONLY
-)
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/signal_evaluator.py
-    ${CMAKE_BINARY_DIR}/python/pulsim/signal_evaluator.py
-    COPYONLY
-)
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/snubber.py
-    ${CMAKE_BINARY_DIR}/python/pulsim/snubber.py
-    COPYONLY
-)
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.pyi
-    ${CMAKE_BINARY_DIR}/python/pulsim/__init__.pyi
-    COPYONLY
-)
+# =============================================================================
+# The build tree at ${CMAKE_BINARY_DIR}/python/pulsim must mirror the source
+# tree at python/pulsim so that `PYTHONPATH=build/python python -c "import
+# pulsim"` finds a complete, importable package. Missing files manifest as
+# ModuleNotFoundError at import time (the source __init__.py imports
+# frequency_analysis, templates, codegen, fmu, sweep at module load).
+#
+# Top-level .py and .pyi files: enumerated explicitly so a missing copy is
+# obvious in the diff. Submodules (codegen, fmu, sweep): copied via a
+# glob+loop pattern; if you add a file to those directories, re-run cmake
+# to pick it up.
 
+set(_pulsim_top_level_files
+    pulsim/__init__.py
+    pulsim/__init__.pyi
+    pulsim/_pulsim.pyi
+    pulsim/netlist.py
+    pulsim/signal_evaluator.py
+    pulsim/frequency_analysis.py
+    pulsim/templates.py
+)
+foreach(_pulsim_file IN LISTS _pulsim_top_level_files)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/${_pulsim_file}
+        ${CMAKE_BINARY_DIR}/python/${_pulsim_file}
+        COPYONLY
+    )
+endforeach()
+
+# Submodules: copy every .py inside each directory. A new file requires
+# re-running cmake configure (CMAKE_CONFIGURE_DEPENDS would be heavier).
+# The `schematic` submodule also ships:
+#   - a Node.js bridge script (`elk_bridge.js`) for the ELK layout backend
+#   - SVG skin files (`skin/pulsim_analog.svg`) for the netlistsvg backend
+# Extend the glob to those extensions and to one level of sub-directory
+# (so `schematic/skin/*.svg` gets copied).
+set(_pulsim_submodules codegen fmu sweep schematic)
+foreach(_pulsim_sub IN LISTS _pulsim_submodules)
+    file(GLOB _pulsim_sub_files
+        RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_pulsim_sub}/*.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_pulsim_sub}/*.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_pulsim_sub}/*/*.svg
+    )
+    foreach(_pulsim_sub_file IN LISTS _pulsim_sub_files)
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/${_pulsim_sub_file}
+            ${CMAKE_BINARY_DIR}/python/${_pulsim_sub_file}
+            COPYONLY
+        )
+    endforeach()
+endforeach()
+
+# =============================================================================
 # Install targets
+# =============================================================================
 install(TARGETS _pulsim
     LIBRARY DESTINATION pulsim
 )
 
 install(FILES
     pulsim/__init__.py
+    pulsim/__init__.pyi
+    pulsim/_pulsim.pyi
     pulsim/netlist.py
     pulsim/signal_evaluator.py
-    pulsim/snubber.py
+    pulsim/frequency_analysis.py
+    pulsim/templates.py
     DESTINATION pulsim
 )
+
+foreach(_pulsim_sub IN LISTS _pulsim_submodules)
+    install(DIRECTORY pulsim/${_pulsim_sub}/
+        DESTINATION pulsim/${_pulsim_sub}
+        FILES_MATCHING PATTERN "*.py"
+    )
+endforeach()

@@ -56,6 +56,15 @@ docs = [
     "mkdocstrings[python]>=1.0",
     "griffe>=2.0",
 ]
+schematic = [
+    # add-schematic-rendering: layout engine + render to SVG/PNG.
+    # networkx powers compute_layout (Phase 2); schemdraw renders to
+    # SVG/PNG (Phase 3). Both are lazy-imported inside the call sites
+    # so `import pulsim.schematic` always succeeds without the extra
+    # installed — only render() / compute_layout() raise ImportError.
+    "networkx>=3.0",
+    "schemdraw>=0.18,<1.0",
+]
 all = [
     "pulsim[jupyter,data,dev]",
 ]
@@ -113,3 +122,6 @@ exclude_lines = [
 select = ["E", "F", "W"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+"python/pulsim/remote/*_pb2.py" = ["E402", "F401"]
+"python/pulsim/remote/*_pb2_grpc.py" = ["F401"]
