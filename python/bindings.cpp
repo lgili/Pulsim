@@ -3130,6 +3130,13 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("thermal", &SimulationOptions::thermal)
         .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
+        .def_readwrite("baseline_node_gmin", &SimulationOptions::baseline_node_gmin,
+                       "SPICE-equivalent baseline node conductance (S) applied to "
+                       "every MNA node diagonal on every transient step. Prevents "
+                       "the floating-node singularity that emerges in switching "
+                       "converters during dead-time (e.g. buck where both switch "
+                       "and freewheel diode are OFF). Default 1e-12 — matches "
+                       "NGSpice/LTspice. Set to 0.0 to opt out of the gmin floor.")
         .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
         .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy)
         .def_readwrite("model_regularization", &SimulationOptions::model_regularization)

@@ -380,6 +380,23 @@ struct SimulationOptions {
     FallbackPolicyOptions fallback_policy{};
     ModelRegularizationOptions model_regularization{};
 
+    /// SPICE-equivalent baseline node conductance ("gmin floor").
+    ///
+    /// Adds a tiny conductance to ground from every MNA node diagonal
+    /// on every transient step (NOT only as a retry fallback). Prevents
+    /// the floating-node MNA singularity that emerges in switching
+    /// converters during the dead-time interval (e.g. buck where both
+    /// the main switch and the freewheel diode are OFF simultaneously
+    /// — the sw_node has no DC path to ground for that micro-window,
+    /// and the un-regularized solve silently freezes time-dependent
+    /// sources at their t=0 value).
+    ///
+    /// Default `1e-12 S` matches NGSpice / LTspice / HSpice. At
+    /// V_bus = 12 V that leaks `12 pA` per node — orders of magnitude
+    /// below any measurable observable. Set to `0.0` to opt out
+    /// (legacy un-regularized behaviour).
+    Real baseline_node_gmin = 1e-12;
+
     /// Phase 7 of `add-frequency-domain-analysis`: declarative analyses
     /// loaded from the YAML `analysis:` array. The user runs them via the
     /// existing `Simulator::run_ac_sweep` / `Simulator::run_fra` methods,

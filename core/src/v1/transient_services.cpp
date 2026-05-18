@@ -223,7 +223,20 @@ class DefaultEquationAssemblerService final : public EquationAssemblerService {
 public:
     DefaultEquationAssemblerService(Circuit& circuit, const SimulationOptions& options)
         : circuit_(circuit)
-        , options_(options) {}
+        , options_(options) {
+        // simplify-and-harden-numerical-surface — gmin floor.
+        // SPICE-equivalent baseline conductance applied to every node
+        // diagonal on every transient step. Prevents the floating-node
+        // MNA singularity that emerges in switching converters during
+        // the dead-time interval (e.g. buck where both the main switch
+        // and the freewheel diode are OFF simultaneously). At 1e-12 S
+        // default the leakage current is 12 pA at 12 V — orders of
+        // magnitude below any measurable observable, but keeps the
+        // matrix well-conditioned.
+        if (options_.baseline_node_gmin > 0.0) {
+            transient_gmin_ = options_.baseline_node_gmin;
+        }
+    }
 
     void assemble_system(const Vector& x,
                          Real t_next,
@@ -260,7 +273,10 @@ public:
     }
 
     void set_transient_gmin(Real gmin) override {
-        transient_gmin_ = std::max<Real>(0.0, gmin);
+        // Honour the SPICE-equivalent baseline floor (default 1e-12).
+        // Retry / fallback paths can only escalate gmin above the floor.
+        const Real floor = std::max<Real>(0.0, options_.baseline_node_gmin);
+        transient_gmin_ = std::max<Real>(floor, gmin);
     }
 
     [[nodiscard]] Real transient_gmin() const override {
