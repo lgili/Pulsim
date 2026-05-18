@@ -20,6 +20,7 @@
 #include "pulsim/v1/components/induction_motor_device.hpp"
 #include "pulsim/v1/components/hysteresis_inductor_device.hpp"
 #include "pulsim/v1/grid/three_phase_source.hpp"
+#include "pulsim/v1/loads/compressor_load.hpp"
 #include "pulsim/v1/auto_parasitics.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
@@ -3206,6 +3207,17 @@ public:
         bool positive_sequence = true;        ///< false flips B/C
         Real mosfet_r_on_ohm = 0.01;          ///< MOSFET R_ds(on) [Ω]
         Real mosfet_vth = 1.0;                ///< MOSFET gate threshold [V]
+        /// Dead-time inserted between high-side OFF and low-side ON (and
+        /// vice versa) within each leg. Default 0 preserves the legacy
+        /// instant-complementary behaviour. For Behavioral-mode MOSFETs
+        /// driving inductive loads, a non-zero dead-time (typ. 0.5–2 µs)
+        /// prevents the "max-iterations" Newton failure that happens at
+        /// the simultaneous H/L commutation instant. When set, the helper
+        /// switches gate-drive pattern from the legacy "swapped v_high/
+        /// v_low" trick to "phase-shifted by π + `dead_time` field on
+        /// both PWMs" — at every transition, both switches stay OFF for
+        /// `dead_time_s` seconds.
+        Real dead_time_s = 0.0;
     };
     static_assert(std::is_trivially_copyable_v<ThreePhaseVsiParams>,
                   "ThreePhaseVsiParams must stay a POD aggregate.");
@@ -3240,19 +3252,52 @@ public:
         mp.g_on  = 1.0 / std::max<Real>(params.mosfet_r_on_ohm, 1e-9);
         mp.is_nmos = true;
 
+        // Pick gate-drive pattern based on dead_time_s. The two patterns
+        // produce identical results for dead_time_s = 0 (the default).
+        //
+        //   pattern A — "swap" (legacy, dead_time = 0 only):
+        //     HS PWM v_high=on  / v_low=off / phase=0
+        //     LS PWM v_high=off / v_low=on  / phase=0  (swapped → complementary)
+        //
+        //   pattern B — "phase + dead_time":
+        //     HS PWM v_high=on  / v_low=off / phase=0   / dead_time=δ
+        //     LS PWM v_high=on  / v_low=off / phase=π   / dead_time=δ
+        //     The π shift puts LS's HIGH portion in the second half of the
+        //     period, complementary to HS. The dead_time field on each
+        //     shortens its HIGH portion by δ at the trailing edge, leaving
+        //     a δ-wide window at every transition where both gates are LOW
+        //     and both switches are OFF — exactly the dead-time we want.
+        //     For asymmetric duty (SPWM), the same duty callback feeds
+        //     both legs and the pattern is approximate; for the d_mod << 1
+        //     case (typical inverter operation) the error is bounded by δ.
+        const bool use_dead_time = params.dead_time_s > Real{0};
+
         PWMParams ph_h{};
         ph_h.v_high = params.v_gate_on;
         ph_h.v_low  = params.v_gate_off;
         ph_h.frequency = params.switching_frequency_hz;
         ph_h.duty = 0.5;
         ph_h.phase = 0.0;
+        ph_h.dead_time = use_dead_time ? params.dead_time_s : Real{0};
 
         PWMParams ph_l{};
-        ph_l.v_high = params.v_gate_off;     // swapped — produces the
-        ph_l.v_low  = params.v_gate_on;      // complementary waveform.
-        ph_l.frequency = params.switching_frequency_hz;
-        ph_l.duty = 0.5;
-        ph_l.phase = 0.0;
+        if (use_dead_time) {
+            // Pattern B: same level polarity as HS, phase-shifted by π,
+            // both PWMs carry the dead-time field.
+            ph_l.v_high = params.v_gate_on;
+            ph_l.v_low  = params.v_gate_off;
+            ph_l.frequency = params.switching_frequency_hz;
+            ph_l.duty = 0.5;
+            ph_l.phase = std::numbers::pi_v<Real>;
+            ph_l.dead_time = params.dead_time_s;
+        } else {
+            // Pattern A: legacy "swapped v_high/v_low" complementary.
+            ph_l.v_high = params.v_gate_off;
+            ph_l.v_low  = params.v_gate_on;
+            ph_l.frequency = params.switching_frequency_hz;
+            ph_l.duty = 0.5;
+            ph_l.phase = 0.0;
+        }
 
         auto stamp_leg = [&](const char* suffix, Index n_phase, Real phi_k) {
             const Index g_h = add_node(base + "__G_" + suffix + "H");
@@ -3278,6 +3323,25 @@ public:
                 ql->set_switching_mode(SwitchingMode::Ideal);
             }
 
+            // When dead-time > 0, add antiparallel body diodes across each
+            // MOSFET so the inductor current has a freewheel path during
+            // the both-OFF window. Without these, the dead-time would leave
+            // the inductive load with nowhere to dump its energy.
+            // High-side body diode: anode at n_phase, cathode at vdc+
+            //   (i.e., reverse-direction across the HS MOSFET drain-source).
+            // Low-side  body diode: anode at vdc−, cathode at n_phase
+            //   (reverse-direction across the LS MOSFET drain-source).
+            if (use_dead_time) {
+                IdealDiode::Params dpar{};
+                dpar.V_F0 = Real{0.7};    // typical Si body diode V_F
+                dpar.R_d  = Real{0.025};   // 25 mΩ on-state slope
+                dpar.g_on = Real{1.0} / dpar.R_d;
+                add_diode(base + "__BD" + suffix + "H",
+                          n_phase, node_vdc_pos, dpar);
+                add_diode(base + "__BD" + suffix + "L",
+                          node_vdc_neg, n_phase, dpar);
+            }
+
             // High-side gate driver: PWM between G_kH and the leg output
             // so V_GS = v_gate_on when the duty is HIGH.
             add_pwm_voltage_source(
@@ -3293,16 +3357,36 @@ public:
             // callback so the lambda has no lifetime dependency.
             const Real m_idx = params.modulation_index;
             const Real omega = omega_mod;
-            auto duty_cb = [m_idx, omega, phi_k](Real t) -> Real {
+            auto duty_cb_h = [m_idx, omega, phi_k](Real t) -> Real {
                 Real d = 0.5 + 0.5 * m_idx * std::sin(omega * t + phi_k);
                 if (d < 0.0) d = 0.0;
                 if (d > 1.0) d = 1.0;
                 return d;
             };
             set_pwm_duty_callback(
-                base + "__PWM_" + suffix + "H", duty_cb);
-            set_pwm_duty_callback(
-                base + "__PWM_" + suffix + "L", duty_cb);
+                base + "__PWM_" + suffix + "H", duty_cb_h);
+            if (use_dead_time) {
+                // Pattern B: LS uses complementary duty (1 - d_h) so the
+                // pole average tracks the SPWM reference correctly. The
+                // phase=π shift in `ph_l` puts its HIGH portion in the
+                // second half of the period — combined with the
+                // complementary duty + dead_time, this gives a proper
+                // SPWM half-bridge waveform with both gates OFF for
+                // `dead_time_s` at every transition.
+                auto duty_cb_l = [m_idx, omega, phi_k](Real t) -> Real {
+                    Real d = 0.5 - 0.5 * m_idx * std::sin(omega * t + phi_k);
+                    if (d < 0.0) d = 0.0;
+                    if (d > 1.0) d = 1.0;
+                    return d;
+                };
+                set_pwm_duty_callback(
+                    base + "__PWM_" + suffix + "L", duty_cb_l);
+            } else {
+                // Pattern A: LS uses the SAME duty as HS, with the
+                // v_high/v_low swap producing the complementary output.
+                set_pwm_duty_callback(
+                    base + "__PWM_" + suffix + "L", duty_cb_h);
+            }
         };
 
         stamp_leg("a", node_a, phase_a_rad);
@@ -3829,6 +3913,72 @@ public:
     [[nodiscard]] Real induction_i_c(std::string_view name) const {
         const auto* m = find_device<InductionMotorDevice>(name);
         return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- Compressor load (compressor-models feature) -----------------------
+    //
+    // Attaches a refrigeration-compressor mechanical load profile to a
+    // previously-registered motor (BLDC, PMSM, DC, or Induction). The
+    // motor's `set_load_torque` setter is fed each accepted step with the
+    // compressor's angle / speed dependent torque demand. Supports
+    // Reciprocating, Rotary, and Scroll topologies with polytropic
+    // compression physics.
+    //
+    // Typical Embraco-style domestic refrigerator (R600a + 6 cm³ + 8 bar):
+    //   loads::CompressorParams p{};
+    //   p.topology = loads::CompressorTopology::Reciprocating;
+    //   p.displacement_m3 = 6.0e-6;
+    //   p.P_suction_Pa = 7.0e4;
+    //   p.P_discharge_Pa = 8.0e5;
+    //   p.polytropic_n = 1.13;          // R600a
+    //   circuit.attach_compressor_load("M_compressor", p);
+
+    /// Attach a compressor load profile to an already-registered motor
+    /// by name. Replaces any previously attached load on the same motor.
+    void attach_compressor_load(const std::string& motor_name,
+                                 const loads::CompressorParams& params) {
+        compressor_loads_.insert_or_assign(motor_name,
+                                            loads::CompressorLoad(params));
+    }
+
+    /// Remove the compressor load from a motor; the motor reverts to a
+    /// user-controlled `set_*_tau_load` interface (or no load).
+    void detach_compressor_load(std::string_view motor_name) {
+        const auto it = compressor_loads_.find(std::string{motor_name});
+        if (it != compressor_loads_.end()) {
+            compressor_loads_.erase(it);
+        }
+    }
+
+    /// Read the mean compression torque (N·m) of a motor's compressor load.
+    /// NaN when no compressor is attached.
+    [[nodiscard]] Real compressor_mean_torque(std::string_view motor_name) const {
+        const auto it = compressor_loads_.find(std::string{motor_name});
+        if (it == compressor_loads_.end()) {
+            return std::numeric_limits<Real>::quiet_NaN();
+        }
+        return it->second.mean_torque();
+    }
+
+    /// Read the indicated work per cycle (J) of a motor's compressor load.
+    [[nodiscard]] Real compressor_indicated_work(std::string_view motor_name) const {
+        const auto it = compressor_loads_.find(std::string{motor_name});
+        if (it == compressor_loads_.end()) {
+            return std::numeric_limits<Real>::quiet_NaN();
+        }
+        return it->second.indicated_work_per_cycle();
+    }
+
+    /// Evaluate the compressor's instantaneous torque demand at a given
+    /// rotor state. Returns NaN when no compressor is attached. Used by
+    /// the advance walkers and exposed for diagnostics.
+    [[nodiscard]] Real compressor_load_torque(std::string_view motor_name,
+                                                Real theta_m, Real omega_m) const {
+        const auto it = compressor_loads_.find(std::string{motor_name});
+        if (it == compressor_loads_.end()) {
+            return std::numeric_limits<Real>::quiet_NaN();
+        }
+        return it->second.load_torque(theta_m, omega_m);
     }
 
     // ----- Hysteresis inductor (deferred-items Item 1) -----------------------
@@ -4372,6 +4522,16 @@ public:
                     if (initialize) {
                         dev.reset_history_for_transient_start(i_a, i_b, i_c);
                     } else {
+                        // compressor-models: if a compressor load is
+                        // attached to this motor, push the angle/speed
+                        // dependent torque demand BEFORE the mechanical
+                        // advance so the motor sees the right load.
+                        const auto it = compressor_loads_.find(conn.name);
+                        if (it != compressor_loads_.end()) {
+                            dev.set_load_torque(
+                                it->second.load_torque(dev.theta_m(),
+                                                        dev.omega_m()));
+                        }
                         dev.advance_state(v_a, v_b, v_c, i_a, i_b, i_c,
                                           timestep_);
                     }
@@ -5902,6 +6062,12 @@ private:
     }
 
     std::vector<DeviceVariant> devices_;
+    /// Side table mapping motor name → CompressorLoad. Queried by the
+    /// motor advance walkers (BLDC, PMSM, DC, Induction) before each
+    /// `dev.advance_state(...)` call to set the motor's load torque
+    /// from the compressor's angle / speed dependent torque profile.
+    /// (compressor-models feature.)
+    std::unordered_map<std::string, loads::CompressorLoad> compressor_loads_;
     std::vector<VirtualComponent> virtual_components_;
     std::unordered_map<std::string, Real> virtual_signal_state_;
     std::unordered_map<std::string, Real> virtual_last_input_;
