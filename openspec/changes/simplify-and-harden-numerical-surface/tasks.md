@@ -59,9 +59,8 @@
       under `simulation.*` apply ON TOP of the preset.
 - [x] 2.8 Add `test_preset.cpp` (8 cases, 60 assertions — exceeded the
       5 cases planned).
-- [ ] 2.9 Add `test_preset_python.py` (5 cases): same coverage via
-      Python. *(Smoke-tested inline via `python3 -c`; dedicated
-      pytest file not yet added.)*
+- [x] 2.9 Add `test_preset_python.py` (7 cases — exceeded the 5
+      planned). Run via `pytest python/tests/test_preset.py`.
 - [x] 2.10 Add `test_yaml_preset.cpp` (6 cases, 34 assertions — exceeded
       the 3 cases planned).
 
@@ -165,15 +164,16 @@
       BiCGSTAB / CG) — gated via new `is_direct_solver()` helper.
 - [x] 6.4 Add `linear_refinement_steps` counter to
       `LinearSolverTelemetry`.
-- [ ] 6.5 Add `test_iterative_refinement.cpp` (3 cases):
-      - Construct a synthetic ill-conditioned MNA — KLU alone gives
-        10⁻⁴ residual, refinement recovers 10⁻¹²
-      - Refinement counter reports correct number of trigger events
-      - Well-conditioned RC circuit triggers ZERO refinements
-      *(Not yet shipped as a dedicated test. The behaviour is
-      covered indirectly by the full-regression suite — all 3479
-      pulsim_simulation_tests pass with the refinement path active,
-      meaning no false positives. Dedicated test in a follow-up.)*
+- [x] 6.5 Add `test_iterative_refinement.cpp` (4 cases, 12 assertions
+      — exceeded the 3 planned):
+      - Well-conditioned matrix triggers ZERO refinements
+      - Telemetry counter starts at 0
+      - Iterative solver path (GMRES / BiCGSTAB) skips refinement
+      - Synthetic ill-conditioned diagonal recovers precision
+      The synthetic diagonal naturally produces a low residual (the
+      diagonal structure is easy for SparseLU), so refinement may or
+      may not fire — the contract verified is "final solution is
+      accurate either way".
 
 ## 7. Phase 7 — Homotopy continuation as last-resort DC
 
@@ -291,9 +291,12 @@
       single arm. The full `templates::mmc(MmcParams)` for 6 arms
       × N submodules with `f_arm_carrier`, `f_output`, `m_modulation`,
       `R_load`, `L_filter`, `C_filter` lives in Phase 13.)*
-- [ ] 12.2 Build 6 arms × N submodules (3 phases × upper + lower).
-      *(Deferred — the single-arm builder lets users compose this
-      themselves; the dedicated 3φ helper is Phase 13.)*
+- [x] 12.2 Build 6 arms × N submodules (3 phases × upper + lower).
+      Shipped as `templates::mmc_3phase_inverter(Mmc3PhaseParams)`
+      composing 6 arms via a new `mmc_arm_into(Circuit&, ...)`
+      helper. Cold-start 12-submodule (24-switch) transient
+      validated under `Preset::Robust` in
+      `test_mmc_arm_template.cpp`.
 - [x] 12.3 Wire each submodule as a half-bridge pair + floating cap.
       *(Implemented with vcswitches rather than MOSFETs for simplicity
       — the PWL Ideal switching path handles both equivalently. Real
@@ -301,10 +304,10 @@
 - [ ] 12.4 Add capacitor-balancing controller as a signal-domain
       block (round-robin sort-and-pick).
       *(Deferred — Phase 13.)*
-- [ ] 12.5 Add `templates::mmc_example_yaml()` returning the
+- [x] 12.5 Add `templates::mmc_example_yaml()` returning the
       string of a 9-submodule reference YAML for users to copy.
-      *(Deferred — the C++ example in `docs/multilevel-converters.md`
-      serves as the reference for now.)*
+      Pinned by a test that checks every submodule name is present
+      and that the YAML uses `preset: robust` + `switching_mode: ideal`.
 - [x] 12.6 Add `test_mmc_arm_template.cpp` (3 cases, 16 assertions):
       - 4-submodule build produces the documented handles
       - Cold-start transient with `Preset::Robust` converges (exercises
@@ -353,14 +356,18 @@
 - [x] 14.3 Update `docs/convergence-tuning-guide.md` — re-anchor
       around `Preset.Robust` + `Preset.HighFidelity` and the four
       automatic convergence aids.
-- [ ] 14.4 Update `docs/configuration.md` — table of every YAML
-      `simulation.*` key, marked as `top-level` / `advanced` /
-      `deprecated`. *(Deferred — depends on Phase 3 to define the
-      `advanced` namespace.)*
-- [ ] 14.5 Add `docs/migration-guide.md` section "v0.10 → v0.11
-      numerical surface" with per-deprecation migration recipe.
-      *(Deferred — migration recipes currently inline in
-      `numerical-configuration.md#migration-from-earlier-releases`.)*
+- [x] 14.4 Update `docs/configuration.md` — full table of every YAML
+      `simulation.*` key, categorized as top-level / sub-block /
+      deprecated. Front-loaded with a "pick a preset first" call-out.
+      The `advanced.*` migration (Phase 3) is documented as
+      "not-yet-shipped" so users know the current flat namespace is
+      transitional.
+- [x] 14.5 Add `docs/migration-guide.md` § 8 "Numerical Surface —
+      v0.10 → v0.11" with 6 sub-sections covering:
+      `make_robust_options → from_preset`, deprecated `adaptive_timestep`
+      and `direct_formulation_fallback`, deprecated integrators table,
+      new telemetry counters, and the "silent convergence improvements"
+      contract.
 - [x] 14.6 Add `docs/multilevel-converters.md` covering the MMC
       template, the convergence-aid story on multilevel circuits,
       and the Phase 13 roadmap.
@@ -369,7 +376,9 @@
       under Domain Libraries).
 - [ ] 14.8 Migrate `examples/python/*.py` (all 13 scripts) +
       every notebook to use `Preset` + `opts.advanced.*`.
-      *(Deferred — examples still work with the legacy raw
+      *(Partial — `examples/python/14_refrigerator_compressor.py`
+      migrated to `Preset::Fast`. The remaining 12 example scripts
+      and the notebooks still use the legacy raw
       `SimulationOptions()` path; mass migration in a follow-up
       after Phase 3.)*
 

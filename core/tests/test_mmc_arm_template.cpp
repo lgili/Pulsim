@@ -112,6 +112,93 @@ TEST_CASE("mmc_arm: cold-start transient with all gates LOW converges",
     }
 }
 
+TEST_CASE("mmc_example_yaml: returns non-empty parseable YAML",
+          "[mmc][template][yaml]") {
+    const std::string yaml = templates::mmc_example_yaml();
+    REQUIRE_FALSE(yaml.empty());
+    // Sanity checks on the generated text.
+    CHECK(yaml.find("schema: pulsim-v1") != std::string::npos);
+    CHECK(yaml.find("preset: robust") != std::string::npos);
+    CHECK(yaml.find("switching_mode: ideal") != std::string::npos);
+    // Should mention all 9 submodules.
+    for (int k = 0; k < 9; ++k) {
+        const std::string tag = "arm_sm" + std::to_string(k) + "_C_sm";
+        INFO("looking for submodule cap: " << tag);
+        CHECK(yaml.find(tag) != std::string::npos);
+    }
+}
+
+TEST_CASE("mmc_3phase_inverter: builds 6 arms with handles populated",
+          "[mmc][template][3phase][build]") {
+    templates::Mmc3PhaseParams p{};
+    p.num_submodules_per_arm = 2;
+    p.V_dc = 400.0;
+    auto [ckt, h] = templates::mmc_3phase_inverter(p);
+
+    // Handle population.
+    CHECK(h.v_dc_pos != -1);
+    CHECK(h.v_dc_neg != -1);
+    CHECK(h.ac_a != -1);
+    CHECK(h.ac_b != -1);
+    CHECK(h.ac_c != -1);
+
+    // Each of the 6 arms has populated handles.
+    for (int i = 0; i < 6; ++i) {
+        CHECK(h.arms[i].v_top != -1);
+        CHECK(h.arms[i].v_bot != -1);
+        CHECK(h.arms[i].mid_nodes.size()     == 2);
+        CHECK(h.arms[i].gate_nodes.size()    == 2);
+        CHECK(h.arms[i].cap_top_nodes.size() == 2);
+    }
+
+    // Topology sanity: upper arms hang off V_dc+, lower arms hang
+    // off V_dc-, midpoints are the AC outputs.
+    CHECK(h.arms[0].v_top == h.v_dc_pos);   // upper A → V_dc+
+    CHECK(h.arms[0].v_bot == h.ac_a);
+    CHECK(h.arms[3].v_top == h.ac_a);       // lower A → AC_a
+    CHECK(h.arms[3].v_bot == h.v_dc_neg);
+}
+
+TEST_CASE("mmc_3phase_inverter: cold-start transient converges via Preset.Robust",
+          "[mmc][template][3phase][convergence]") {
+    templates::Mmc3PhaseParams p{};
+    p.num_submodules_per_arm = 2;     // 12 submodules total = 24 switches
+    p.V_dc = 200.0;                    // small DC to keep currents tame
+    auto [ckt, h] = templates::mmc_3phase_inverter(p);
+
+    // DC supply.
+    ckt.add_voltage_source("V_dc", h.v_dc_pos, h.v_dc_neg, 200.0);
+    ckt.add_resistor("R_gnd", h.v_dc_neg, Circuit::ground(), 1e-3);
+
+    // 3φ Y-connected resistive load to ground (passive, simple).
+    ckt.add_resistor("R_load_a", h.ac_a, Circuit::ground(), 10.0);
+    ckt.add_resistor("R_load_b", h.ac_b, Circuit::ground(), 10.0);
+    ckt.add_resistor("R_load_c", h.ac_c, Circuit::ground(), 10.0);
+
+    // All gates LOW (submodules bypassed via the cap-blocking S_low
+    // path which our template's threshold trick disables — caps just
+    // hold their initial voltage).
+    for (int arm = 0; arm < 6; ++arm) {
+        for (std::size_t k = 0; k < h.arms[arm].gate_nodes.size(); ++k) {
+            const std::string name = "VG_" + std::to_string(arm) +
+                                       "_" + std::to_string(k);
+            ckt.add_voltage_source(
+                name, h.arms[arm].gate_nodes[k],
+                Circuit::ground(), 0.0);
+        }
+    }
+
+    SimulationOptions opts =
+        SimulationOptions::from_preset(Preset::Robust, 1e-5, 1e-4);
+    opts.newton_options.num_nodes    = ckt.num_nodes();
+    opts.newton_options.num_branches = ckt.num_branches();
+
+    Simulator sim(ckt, opts);
+    auto result = sim.run_transient();
+    REQUIRE(result.success);
+    REQUIRE_FALSE(result.states.empty());
+}
+
 TEST_CASE("mmc_arm: synchronous gate edge coalesces events",
           "[mmc][template][simultaneous]") {
     // Drive ALL 4 gates with the same pulse source — at the rising
