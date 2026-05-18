@@ -265,7 +265,9 @@
       alongside `Auto` and the 5 concrete values. `Override`
       redirects to `DCConvergenceConfig::strategy_override`.
 - [x] 8.5 Update pybind11 — `pulsim.LinearSolverKind.{Auto, Direct,
-      Iterative}` and `pulsim.DCStrategy.Override` exposed.
+      Iterative}` and `pulsim.DCStrategy.Override` exposed. Pinned by
+      Python pytest `python/tests/test_homotopy_override.py` (7
+      cases) + `python/tests/test_solver_quality.py` (6 cases).
 - [ ] 8.6 Update every example / notebook / doc. *(Deferred —
       examples use concrete `KLU`/`GMRES` values which still work;
       documentation in `numerical-configuration.md` already leads
