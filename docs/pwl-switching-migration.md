@@ -1,9 +1,19 @@
 # PWL Switching Engine — Migration Guide
 
-> Status: PWL engine is **opt-in today**. Default builds keep `SwitchingMode::Auto`
-> resolving to **Behavioral** for backward compatibility. Flip a single field
-> (YAML or Python) to engage the state-space fast path on any switching
-> converter. The default flip to **Ideal** is the next stop on the road map.
+> **Status (v0.11):** PWL engine is now the **default**. As of
+> `simplify-and-harden-numerical-surface` Phase 11,
+> `SwitchingMode::Auto` resolves to **Ideal** automatically — the
+> state-space fast path engages out of the box on any switching
+> converter where every device declares `supports_pwl`. The previous
+> Behavioral semantics remain available by setting
+> `opts.switching_mode = SwitchingMode::Behavioral` explicitly.
+>
+> Known stability gaps on a small set of legacy buck-converter /
+> diode-loss circuits (vout overshoots, forward-bias diode spikes)
+> are tracked in the follow-up OpenSpec change
+> `openspec/changes/harden-pwl-ideal-buck-diode/`. The 16 affected
+> tests pin Behavioral explicitly with inline comments referencing
+> that follow-up.
 
 Pulsim's switching engine has two execution paths for diodes, MOSFETs,
 IGBTs, and voltage-controlled switches:

@@ -197,9 +197,14 @@ supported. The cache itself is policy-agnostic; pick the stack that
 matches your circuit size.
 
 ```python
-opts.linear_solver.order = [pulsim.LinearSolverKind.KLU,
-                            pulsim.LinearSolverKind.SparseLU]
-opts.linear_solver.allow_fallback = True
+# Canonical (post-Phase 3 namespace):
+opts.advanced().linear_solver.order = [pulsim.LinearSolverKind.KLU,
+                                       pulsim.LinearSolverKind.SparseLU]
+opts.advanced().linear_solver.allow_fallback = True
+
+# Flat-field aliases (back-compat; both forms mutate the same data):
+# opts.linear_solver.order          = [pulsim.LinearSolverKind.KLU, ...]
+# opts.linear_solver.allow_fallback = True
 ```
 
 ### Disabling the cache

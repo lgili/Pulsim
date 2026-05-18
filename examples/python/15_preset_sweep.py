@@ -7,9 +7,11 @@ buck converter. Verifies:
   2. Steady-state output voltage is consistent across presets
      within a 2 % envelope (proves the convergence aids don't
      change the *answer*, only the path).
-  3. `Robust` produces field-by-field identical defaults to the
-     legacy `make_robust_options(dt, tstop)` factory (regression
-     guard for the Phase 2 contract).
+  3. `Robust` materializes the same canonical defaults that the
+     legacy `make_robust_options(dt, tstop)` factory used to provide
+     before being retired in v0.11 (TRBDF2 integrator, stiffness
+     detection on, ≥ 12 retries, Auto DC ladder). Pinned by
+     `test_preset.cpp` field-by-field on the C++ side.
   4. `Fast` runs in strictly less wall-clock time than `Robust`
      on the same dt (Fast picks Trapezoidal + KLU + fixed-step;
      Robust picks TRBDF2 + adaptive + stiffness detection).
@@ -145,7 +147,9 @@ def main() -> int:
     print(f"PASS: contract 2 — all presets bounded by vin and agree "
           f"within {(spread / max(abs(vmean), 1e-9)) * 100:.2f} %.")
 
-    # Contract 3: Robust matches make_robust_options field-by-field.
+    # Contract 3: Robust preset materializes the canonical defaults
+    # (TRBDF2 + stiffness on) that the retired make_robust_options
+    # used to provide. Full field-by-field check is in test_preset.cpp.
     # (Spot check: re-construct Robust via from_preset and verify a few
     # canary fields. Full field-by-field check is in
     # `core/tests/test_preset.cpp` which exercises the C++ contract.)

@@ -150,8 +150,12 @@ def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
         return
 
     # Benchmark suite targets deterministic comparisons by default.
-    if "adaptive_timestep" not in simulation:
-        simulation["adaptive_timestep"] = False
+    # simplify-and-harden-numerical-surface §10: `adaptive_timestep`
+    # is deprecated in v0.11 in favour of the canonical `step_mode`.
+    # Set `step_mode` when neither field is present, preserving the
+    # legacy `adaptive_timestep` only when YAML pins it explicitly.
+    if "step_mode" not in simulation and "adaptive_timestep" not in simulation:
+        simulation["step_mode"] = "fixed"
 
 
 def run_pulsim(
@@ -382,10 +386,19 @@ def run_benchmarks(
                     sim_cfg = {}
                 scenario_netlist["simulation"] = deep_merge(sim_cfg, simulation_overrides)
             simulation_cfg = scenario_netlist.get("simulation", {})
+            # simplify-and-harden-numerical-surface §10: accept both the
+            # canonical `step_mode: variable` and the legacy
+            # `adaptive_timestep: true` (deprecated) for back-compat.
+            _is_variable = (
+                isinstance(simulation_cfg, dict)
+                and (
+                    str(simulation_cfg.get("step_mode", "")).lower() == "variable"
+                    or bool(simulation_cfg.get("adaptive_timestep", False))
+                )
+            )
             if (
                 adaptive_dt_max_factor is not None
-                and isinstance(simulation_cfg, dict)
-                and bool(simulation_cfg.get("adaptive_timestep", False))
+                and _is_variable
                 and simulation_cfg.get("dt") is not None
             ):
                 try:
@@ -882,7 +895,8 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", help="Benchmark ids to run")
     parser.add_argument("--matrix", action="store_true", help="Run full validation matrix")
     parser.add_argument("--generate-baselines", action="store_true", help="Generate missing reference baselines")
-    parser.add_argument("--force-adaptive", action="store_true", help="Force simulation.adaptive_timestep=true")
+    parser.add_argument("--force-adaptive", action="store_true",
+                        help="Force simulation.step_mode=variable (legacy alias: was --force-adaptive)")
     parser.add_argument("--scenario-filter", nargs="*", help="Run only selected scenarios")
     args = parser.parse_args()
 
@@ -909,7 +923,7 @@ def main() -> int:
         selected=args.only,
         matrix=args.matrix,
         generate_baselines=args.generate_baselines,
-        simulation_overrides={"adaptive_timestep": True} if args.force_adaptive else None,
+        simulation_overrides={"step_mode": "variable"} if args.force_adaptive else None,
         scenario_filter=args.scenario_filter,
     )
     write_results(args.output_dir, results)

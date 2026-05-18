@@ -13,8 +13,9 @@ auto-tuning, and exposes the new multilevel-convergence aids
 refinement, homotopy continuation) without any user-facing knobs.
 
 If you're looking for the historical audit that drove this design,
-see [`numerical-modes-audit.md`](numerical-modes-audit.md) (kept
-in-tree as the working document).
+see [`archive/numerical-modes-audit-2026-05.md`](archive/numerical-modes-audit-2026-05.md)
+(archived working document; the design decisions it recommends are
+now shipped via `simplify-and-harden-numerical-surface`).
 
 ## TL;DR — pick a preset
 
@@ -432,9 +433,9 @@ simulation:
 
 ## See also
 
-- [`numerical-modes-audit.md`](numerical-modes-audit.md) — the
-  historical audit that motivated this design (kept as the working
-  document)
+- [`archive/numerical-modes-audit-2026-05.md`](archive/numerical-modes-audit-2026-05.md) —
+  the historical audit that motivated this design (archived after
+  the recommendations shipped via `simplify-and-harden-numerical-surface`)
 - [`convergence-tuning-guide.md`](convergence-tuning-guide.md) —
   diagnosing and fixing convergence failures
 - [`multilevel-converters.md`](multilevel-converters.md) — the MMC

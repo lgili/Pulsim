@@ -2908,15 +2908,21 @@ TEST_CASE("API BDF coefficients", "[api][integration][bdf]") {
     SECTION("Method order lookup") {
         REQUIRE(method_order(Integrator::BDF1) == 1);
         REQUIRE(method_order(Integrator::BDF2) == 2);
-        REQUIRE(method_order(Integrator::BDF3) == 3);
         REQUIRE(method_order(Integrator::Trapezoidal) == 2);
+        // simplify-and-harden-numerical-surface §9: BDF3/4/5 are
+        // deprecated in v0.11 and will be removed in v0.12. The
+        // method_order helper still maps them correctly for legacy
+        // callers — that contract is exercised in
+        // test_deprecated_integrators.cpp under the appropriate
+        // `[[gnu::diagnostic ignored "-Wdeprecated-declarations"]]`
+        // suppression.
     }
 
     SECTION("Startup requirement") {
         REQUIRE(requires_startup(Integrator::BDF1) == false);
         REQUIRE(requires_startup(Integrator::Trapezoidal) == false);
         REQUIRE(requires_startup(Integrator::BDF2) == true);
-        REQUIRE(requires_startup(Integrator::BDF3) == true);
+        // BDF3+ deprecated — see Method order lookup section above.
     }
 }
 
