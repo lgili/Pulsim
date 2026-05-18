@@ -33,7 +33,6 @@
 #include <functional>
 #include <limits>
 #include <variant>
-#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -114,7 +113,7 @@ struct ComponentDescriptor {
     std::string name;
     std::string kind;
     std::vector<Index> nodes;
-    std::map<std::string, Real> params;
+    std::unordered_map<std::string, Real> params;
 };
 
 /// Classification of a node's electrical role, consumed by downstream
