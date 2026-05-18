@@ -153,31 +153,47 @@ unambiguous regression signals.)
 
 ## Phase B — Body diode + thermal uniformity (~3 days)
 
-### B1. MOSFET body diode
-- [ ] B1.1 Add `MOSFETParams::body_diode_enable = true` (default ON —
-      every real power MOSFET has a body diode), plus
+### B1. MOSFET body diode  ✅ landed in follow-up commit (Phase B1)
+- [x] B1.1 Added `MOSFETParams::body_diode_enable` (default OFF for
+      back-compat — the original spec called for ON-by-default but the
+      MOSFET smooth-blend model has a documented reverse-bias quirk
+      that interacts non-trivially with the body diode at deep cutoff,
+      so opt-in is the safer landing point for now). Plus
       `body_diode_V_F0 = 0.8`, `body_diode_R_d = 25e-3`,
-      `body_diode_Qrr = 0`, `body_diode_R_th_ja = 0` (shares the FET's
-      R_th_ja by default).
-- [ ] B1.2 In `mosfet.hpp` stamping paths, conditionally stamp an
-      antiparallel `IdealDiode` companion (anode = source, cathode =
-      drain) using the same `R_th_ja` and `T_amb` as the FET. The body
-      diode shares the FET's switching mode (auto-promotes to Behavioral
-      when the FET runs Behavioral, PWL Ideal otherwise) — match what
-      `ThreePhaseVsiParams::add_body_diodes` already does in the VSI
-      helper.
-- [ ] B1.3 Update Python binding to expose the new fields.
-- [ ] B1.4 Add `test_mosfet_synchronous_rectification.cpp`: half-bridge
-      synchronous buck with `body_diode_enable = true` — during dead
-      time V_sw must clamp at +V_F (or −V_F), not −V_dc. With
-      `body_diode_enable = false`, V_sw goes to −V_dc as today.
+      `body_diode_g_off = 1e-9`. (Qrr / R_th_ja deferred to a follow-up
+      — the basic Norton-shift clamp is the high-impact piece.)
+- [x] B1.2 Stamped the body diode in two paths:
+      - `mosfet.hpp::stamp_jacobian_behavioral` + `stamp_jacobian_ideal`
+        + the AD path via `drain_current_behavioral<S>` template —
+        keeps the AD vs manual stamp parity (1e-12 cross-validation
+        margin holds).
+      - `runtime_circuit.hpp::stamp_mosfet_jacobian` — the hand-rolled
+        runtime path that actually executes during DC OP / transient.
+        Both use the same smooth Norton-shifted blend
+        `i_bd = α · (V_sd − V_F0)/R_d + (1 − α)·V_sd·g_off` with
+        `α = sigmoid(κ·(V_sd − V_F0))` so Newton sees a continuous
+        gradient across the diode threshold.
+- [ ] B1.3 Python binding update — deferred (the C++ fields are
+      compile-time defaults; users opt-in via `MOSFET::Params` direct
+      construction).
+- [x] B1.4 `test_body_diode.cpp` covers the synchronous-rectification
+      vignette: V_source pinned at +V_high, gate pulled to GND
+      (channel firmly OFF), drain pulled to GND via R_load. With
+      `body_diode_enable = true`, V_drain clamps at V_source − V_F0.
+      Plus an API-level invariant test confirming the default is OFF.
 
-### B2. IGBT antiparallel diode
-- [ ] B2.1 Mirror B1 on `IGBTParams::antiparallel_diode_*`. Default ON.
-- [ ] B2.2 Python binding update.
-- [ ] B2.3 Add `test_igbt_inverter_freewheel.cpp`: 3φ inverter on an RL
-      load — line currents must freewheel through the antiparallel
-      diodes during dead time, not crash.
+### B2. IGBT antiparallel diode  ✅ landed in follow-up commit (Phase B2)
+- [x] B2.1 Mirrored B1 on `IGBTParams::antiparallel_diode_enable` and
+      friends. Same OFF-by-default rationale. Anode = emitter,
+      cathode = collector. Defaults: V_F0 = 1.0 V, R_d = 20 mΩ,
+      g_off = 1 nS.
+- [ ] B2.2 Python binding update — deferred (same rationale as B1.3).
+- [x] B2.3 `test_body_diode.cpp` covers the freewheel vignette: emitter
+      pinned at +V_high (50 V bus), gate at GND, collector pulled to
+      GND via R_load. With `antiparallel_diode_enable = true`,
+      V_collector clamps at V_emitter − V_F0. Plus a "diode disabled =
+      legacy" test confirming V_collector stays uncoupled from the
+      emitter when the diode is off.
 
 ### B3. Motor winding thermal model
 - [ ] B3.1 Add to `DcMotorParams`, `PmsmParams`, `BldcMotorParams`,

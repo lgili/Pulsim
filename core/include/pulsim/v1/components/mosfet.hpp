@@ -104,6 +104,32 @@ public:
         // testing — but doing so puts the burden of an external R_g on
         // the user.
         Scalar g_gate_leak = 1e-9;    // S
+
+        // Body diode (harden-component-models-vs-psim-plecs Phase B1).
+        // Every real power MOSFET has an intrinsic antiparallel diode
+        // between source (anode) and drain (cathode). When the device
+        // is reverse-biased on the channel (V_sd > V_F0), this diode
+        // conducts — the synchronous-rectification dead-time path that
+        // PSIM/PLECS model out of the box.
+        //
+        // Stamped in the smooth-blend / AD / Ideal Jacobian paths
+        // when `body_diode_enable = true`. The diode current is
+        //   i_bd = α_bd · (V_sd − V_F0) / R_d + (1 − α_bd) · V_sd · g_off
+        // with α_bd = sigmoid(κ · (V_sd − V_F0)), so the transition is
+        // smooth for Newton convergence. The diode current is SUBTRACTED
+        // from the channel current id (opposite reference direction).
+        //
+        // OFF by default for back-compat: existing tests that pin
+        // V_drain to negative values (e.g., −V_dc during a synchronous
+        // buck dead-time) currently expect the FET in pure cutoff with
+        // no clamp. Setting `body_diode_enable = true` clamps V_drain
+        // to V_source − V_F0 in those cases, which is the realistic
+        // behaviour — a future change can flip the default once the
+        // FET test fleet has been audited.
+        bool   body_diode_enable = false;
+        Scalar body_diode_V_F0   = 0.8;     // forward drop (V)
+        Scalar body_diode_R_d    = 25e-3;   // forward slope (Ω)
+        Scalar body_diode_g_off  = 1e-9;    // reverse leakage (S)
     };
 
     explicit MOSFET(std::string name = "")
@@ -474,7 +500,37 @@ public:
 
         // Plus cutoff leakage (small, applies in all regions).
         const S id = id_ch + params_.g_off * vds;
-        return sign * id;
+
+        // Body diode (harden-component-models-vs-psim-plecs Phase B1).
+        // Anode = source, cathode = drain. Forward-biased when V_sd > V_F0.
+        //
+        //   V_sd  = v_s − v_d         (UNSIGNED — independent of NMOS/PMOS)
+        //   α_bd  = sigmoid(κ · (V_sd − V_F0))
+        //   i_bd  = α_bd · (V_sd − V_F0) / R_d + (1 − α_bd) · V_sd · g_off
+        //
+        // Norton-shift form mirroring `ideal_diode.hpp`. Returned current
+        // is the drain-to-source channel current MINUS the body-diode
+        // current (the diode flows in the opposite reference direction,
+        // source → drain). The PMOS sign-fold is applied to the channel
+        // term only — the body diode is anchored to the physical
+        // (source, drain) pins and does not flip with NMOS/PMOS.
+        const S id_signed_channel = sign * id;
+        if (params_.body_diode_enable) {
+            const Real V_F0 = params_.body_diode_V_F0;
+            const Real R_d_safe =
+                (params_.body_diode_R_d > Real{1e-9})
+                ? params_.body_diode_R_d : Real{1e-9};
+            const Real g_on_bd = Real{1.0} / R_d_safe;
+            const Real g_off_bd = params_.body_diode_g_off;
+            const S v_sd = v_s - v_d;
+            const S alpha_bd =
+                Real{1.0} / (Real{1.0} + exp(-kappa * (v_sd - V_F0)));
+            const S i_bd =
+                alpha_bd * (v_sd - V_F0) * g_on_bd +
+                (Real{1.0} - alpha_bd) * v_sd * g_off_bd;
+            return id_signed_channel - i_bd;
+        }
+        return id_signed_channel;
     }
 
     /// AD-derived stamp of the Behavioral residual + Jacobian. Replicates
@@ -644,13 +700,43 @@ private:
         //   ∂id_actual/∂vd = sign · (sign · di/dvds) = di_internal_dvds
         //
         // (The two `sign` factors cancel in vg/vd partials, net negative on vs.)
-        const Scalar id = sign * id_internal;
-        const Scalar di_dvg = di_internal_dvgs;
-        const Scalar di_dvd = di_internal_dvds;
-        const Scalar di_dvs = -di_internal_dvgs - di_internal_dvds;
+        const Scalar id_channel = sign * id_internal;
+        Scalar di_dvg = di_internal_dvgs;
+        Scalar di_dvd = di_internal_dvds;
+        Scalar di_dvs = -di_internal_dvgs - di_internal_dvds;
 
         // Telemetry: pwl_state mirrors the channel-on bit (~ Vgs > Vth).
         pwl_state_ = (sigma_g > Scalar{0.5});
+
+        // Body diode contribution (Phase B1) — anode=source, cathode=drain,
+        // sign-agnostic w.r.t. NMOS/PMOS. The diode current flows in the
+        // OPPOSITE reference direction to the channel id, so it is
+        // subtracted from id_total.
+        Scalar id_total = id_channel;
+        if (params_.body_diode_enable) {
+            const Scalar V_F0 = params_.body_diode_V_F0;
+            const Scalar R_d_safe =
+                (params_.body_diode_R_d > Scalar{1e-9})
+                ? params_.body_diode_R_d : Scalar{1e-9};
+            const Scalar g_on_bd = Scalar{1.0} / R_d_safe;
+            const Scalar g_off_bd = params_.body_diode_g_off;
+            const Scalar v_sd = vs - vd;
+            const Scalar alpha_bd =
+                Scalar{1.0} / (Scalar{1.0} + std::exp(-kappa * (v_sd - V_F0)));
+            const Scalar dalpha_bd_dvsd =
+                kappa * alpha_bd * (Scalar{1.0} - alpha_bd);
+            const Scalar i_bd =
+                alpha_bd * (v_sd - V_F0) * g_on_bd +
+                (Scalar{1.0} - alpha_bd) * v_sd * g_off_bd;
+            const Scalar di_bd_dvsd =
+                dalpha_bd_dvsd * ((v_sd - V_F0) * g_on_bd - v_sd * g_off_bd) +
+                alpha_bd * g_on_bd + (Scalar{1.0} - alpha_bd) * g_off_bd;
+            // ∂V_sd/∂v_s = +1, ∂V_sd/∂v_d = −1, ∂V_sd/∂v_g = 0
+            id_total = id_channel - i_bd;
+            di_dvd += di_bd_dvsd;
+            di_dvs -= di_bd_dvsd;
+        }
+        const Scalar id = id_total;
 
         // Norton companion residual (Taylor-offset form, matches the AD path).
         const Scalar i_eq = id - di_dvg * vg - di_dvd * vd - di_dvs * vs;
@@ -696,20 +782,55 @@ private:
         const Scalar vds = vd - vs;
 
         const Scalar g = pwl_state_ ? params_.g_on : params_.g_off;
-        const Scalar id = g * vds;
+        // Channel current (drain → source positive convention).
+        Scalar id_total = g * vds;
+        // Channel partials w.r.t. vd, vs.
+        Scalar di_dvd = g;
+        Scalar di_dvs = -g;
 
-        // Pure drain-source resistive stamp; no gm contribution.
+        // Body diode (Phase B1) — independent of pwl_state_, Norton-
+        // shifted Vd-Vs form mirroring the Behavioral path. The diode
+        // flows source → drain, so its current SUBTRACTS from id_total.
+        if (params_.body_diode_enable) {
+            const Scalar V_F0 = params_.body_diode_V_F0;
+            const Scalar R_d_safe =
+                (params_.body_diode_R_d > Scalar{1e-9})
+                ? params_.body_diode_R_d : Scalar{1e-9};
+            const Scalar g_on_bd = Scalar{1.0} / R_d_safe;
+            const Scalar g_off_bd = params_.body_diode_g_off;
+            const Scalar v_sd = vs - vd;
+            const Scalar kappa = kSmoothRegionSharpness;
+            const Scalar alpha_bd =
+                Scalar{1.0} / (Scalar{1.0} + std::exp(-kappa * (v_sd - V_F0)));
+            const Scalar dalpha_bd_dvsd =
+                kappa * alpha_bd * (Scalar{1.0} - alpha_bd);
+            const Scalar i_bd =
+                alpha_bd * (v_sd - V_F0) * g_on_bd +
+                (Scalar{1.0} - alpha_bd) * v_sd * g_off_bd;
+            const Scalar di_bd_dvsd =
+                dalpha_bd_dvsd * ((v_sd - V_F0) * g_on_bd - v_sd * g_off_bd) +
+                alpha_bd * g_on_bd + (Scalar{1.0} - alpha_bd) * g_off_bd;
+            id_total -= i_bd;
+            // ∂V_sd/∂vd = -1, ∂V_sd/∂vs = +1, and id_total = id_ch - i_bd.
+            di_dvd += di_bd_dvsd;   // because -(-di_bd_dvsd)
+            di_dvs -= di_bd_dvsd;   // because -(+di_bd_dvsd)
+        }
+
+        // Norton companion offset (Taylor residual): i_eq = id - J·x.
+        const Scalar i_eq = id_total - di_dvd * vd - di_dvs * vs;
+
         if (n_drain >= 0) {
-            J.coeffRef(n_drain, n_drain) += g;
-            if (n_source >= 0) J.coeffRef(n_drain, n_source) -= g;
+            J.coeffRef(n_drain, n_drain) += di_dvd;
+            if (n_source >= 0) J.coeffRef(n_drain, n_source) += di_dvs;
         }
         if (n_source >= 0) {
-            J.coeffRef(n_source, n_source) += g;
-            if (n_drain >= 0) J.coeffRef(n_source, n_drain) -= g;
+            J.coeffRef(n_source, n_source) -= di_dvs;
+            if (n_drain >= 0) J.coeffRef(n_source, n_drain) -= di_dvd;
         }
 
-        if (n_drain >= 0) f[n_drain] -= id;
-        if (n_source >= 0) f[n_source] += id;
+        // Norton offset residual update.
+        if (n_drain >= 0) f[n_drain] -= i_eq;
+        if (n_source >= 0) f[n_source] += i_eq;
     }
 
     Params params_;

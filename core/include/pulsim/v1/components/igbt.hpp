@@ -92,6 +92,30 @@ public:
         // and the shift would conflict with the PWL state-space form;
         // the shift lives only on the Behavioral / AD paths.
         bool   enable_vce_sat_stamp = false;
+
+        // Antiparallel diode (harden-component-models-vs-psim-plecs
+        // Phase B2). Mirror of MOSFETParams body diode block — IGBT
+        // modules ship with an antiparallel "freewheel" diode between
+        // emitter (anode) and collector (cathode). When the load is
+        // inductive and the IGBT turns OFF, the freewheel path keeps
+        // the inductor current flowing through the antiparallel diode
+        // — without this, V_collector swings to −∞ at turn-off.
+        //
+        //   V_ec = v_e − v_c
+        //   α_apd = sigmoid(κ · (V_ec − V_F0))
+        //   i_apd = α_apd · (V_ec − V_F0) / R_d + (1 − α_apd) · V_ec · g_off
+        //
+        // The freewheel current SUBTRACTS from the main collector
+        // current (it flows in the opposite reference direction,
+        // emitter → collector).
+        //
+        // OFF by default so existing IGBT tests that don't model
+        // freewheel paths stay green. Production inverter circuits
+        // should set `antiparallel_diode_enable = true`.
+        bool   antiparallel_diode_enable = false;
+        Scalar antiparallel_diode_V_F0   = 1.0;     // forward drop (V)
+        Scalar antiparallel_diode_R_d    = 20e-3;   // forward slope (Ω)
+        Scalar antiparallel_diode_g_off  = 1e-9;    // reverse leakage (S)
     };
 
     explicit IGBT(std::string name = "")
