@@ -87,6 +87,23 @@ public:
         // doesn't ring at PWM edges. Default 0 keeps legacy circuits
         // unchanged. Typical values: 10 nF–100 nF for boost/buck dt~1µs.
         Scalar C_oss     = 0.0;       // F
+
+        // Gate-row Jacobian anchor (harden-component-models-vs-psim-plecs
+        // Phase A2). The MOSFET device only stamps the drain and source
+        // rows of the MNA matrix, so when the gate node has no other
+        // attached devices (floating gate during DC OP, ESD diode chain
+        // not yet stamped, simplified test rigs) the gate row is all-zero
+        // and the system is singular. `g_gate_leak` stamps a tiny
+        // resistive path from gate to ground on the Jacobian DIAGONAL
+        // only (the residual stays zero — the leak does not contribute
+        // any current term, just regularises the linear solve). At
+        // 1 nS the gate sits within a few microvolts of 0 for any real
+        // gate drive, so the device behaviour in normal use is unchanged;
+        // the value mirrors the SPICE GMIN default. Set to 0 to opt
+        // back into the old "singular row" behaviour for SPICE-parity
+        // testing — but doing so puts the burden of an external R_g on
+        // the user.
+        Scalar g_gate_leak = 1e-9;    // S
     };
 
     explicit MOSFET(std::string name = "")
@@ -473,6 +490,14 @@ public:
         const NodeIndex n_drain = nodes[1];
         const NodeIndex n_source = nodes[2];
 
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor — mirrors the manual stamp so the AD
+        // cross-validation (test_ad_mosfet_stamp) stays bit-for-bit
+        // with the behavioral path.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
+
         const Scalar v_g = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar v_d = (n_drain >= 0) ? x[n_drain] : Scalar{0.0};
         const Scalar v_s = (n_source >= 0) ? x[n_source] : Scalar{0.0};
@@ -534,6 +559,15 @@ private:
         const NodeIndex n_gate = nodes[0];
         const NodeIndex n_drain = nodes[1];
         const NodeIndex n_source = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor (see Params::g_gate_leak comment). Stamped
+        // before the channel-current contributions so the leak is
+        // present even on the very first Newton step. Residual is left
+        // untouched — the leak is a Jacobian-only regulariser.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar vg = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar vd = (n_drain >= 0) ? x[n_drain] : Scalar{0.0};
@@ -643,8 +677,19 @@ private:
     template<typename Matrix, typename Vec>
     void stamp_jacobian_ideal(Matrix& J, Vec& f, const Vec& x,
                               std::span<const NodeIndex> nodes) const {
+        const NodeIndex n_gate = nodes[0];
         const NodeIndex n_drain = nodes[1];
         const NodeIndex n_source = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor. Especially important in PWL Ideal mode
+        // because the resistive D-S stamp does NOT touch the gate row
+        // at all (Vgs is queried only via the commute event detector),
+        // so without this anchor the gate is genuinely floating in the
+        // linear solve.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar vd = (n_drain >= 0) ? x[n_drain] : Scalar{0.0};
         const Scalar vs = (n_source >= 0) ? x[n_source] : Scalar{0.0};

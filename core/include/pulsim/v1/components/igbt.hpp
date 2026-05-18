@@ -62,6 +62,15 @@ public:
         // PSIM-style parasitic C_ces (C-E auto-snubber). See
         // components/mosfet.hpp::Params::C_oss for tuning notes.
         Scalar C_oss     = 0.0;        // F
+
+        // Gate-row Jacobian anchor (harden-component-models-vs-psim-plecs
+        // Phase A2). Mirrors MOSFETParams::g_gate_leak — see that
+        // header for the rationale (gate row would otherwise be all-zero
+        // when the gate has no other attached devices, making the MNA
+        // matrix singular). 1 nS matches the SPICE GMIN default and
+        // sits 1e-3 below the lowest-realistic g_off, so the device's
+        // small-signal behaviour is unaffected.
+        Scalar g_gate_leak = 1e-9;     // S
     };
 
     explicit IGBT(std::string name = "")
@@ -368,6 +377,13 @@ public:
         const NodeIndex n_collector = nodes[1];
         const NodeIndex n_emitter = nodes[2];
 
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor (see Params::g_gate_leak comment + MOSFET
+        // mirror). Residual untouched.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
+
         const Scalar v_g = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar v_c = (n_collector >= 0) ? x[n_collector] : Scalar{0.0};
         const Scalar v_e = (n_emitter >= 0) ? x[n_emitter] : Scalar{0.0};
@@ -440,6 +456,12 @@ private:
         const NodeIndex n_collector = nodes[1];
         const NodeIndex n_emitter = nodes[2];
 
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor (see Params::g_gate_leak + MOSFET mirror).
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
+
         const Scalar vg = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar vc = (n_collector >= 0) ? x[n_collector] : Scalar{0.0};
         const Scalar ve = (n_emitter >= 0) ? x[n_emitter] : Scalar{0.0};
@@ -499,8 +521,18 @@ private:
     template<typename Matrix, typename Vec>
     void stamp_jacobian_ideal(Matrix& J, Vec& f, const Vec& x,
                               std::span<const NodeIndex> nodes) const {
+        const NodeIndex n_gate = nodes[0];
         const NodeIndex n_collector = nodes[1];
         const NodeIndex n_emitter = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor. The PWL Ideal C-E stamp does not touch the
+        // gate row at all (gate is queried only in the commute event
+        // detector), so this anchor is the only thing keeping the row
+        // non-singular when the gate is otherwise unconnected.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar vc = (n_collector >= 0) ? x[n_collector] : Scalar{0.0};
         const Scalar ve = (n_emitter >= 0) ? x[n_emitter] : Scalar{0.0};
