@@ -220,11 +220,16 @@ void init_v2_module(py::module_& v2) {
         .export_values();
 
     py::enum_<DCStrategy>(v2, "DCStrategy", "DC analysis convergence strategy")
-        .value("Direct", DCStrategy::Direct)
-        .value("GminStepping", DCStrategy::GminStepping)
-        .value("SourceStepping", DCStrategy::SourceStepping)
+        .value("Direct",          DCStrategy::Direct)
+        .value("GminStepping",    DCStrategy::GminStepping)
+        .value("SourceStepping",  DCStrategy::SourceStepping)
         .value("PseudoTransient", DCStrategy::PseudoTransient)
-        .value("Auto", DCStrategy::Auto)
+        .value("Homotopy",        DCStrategy::Homotopy,
+               "simplify-and-harden-numerical-surface — Phase 7. Lambda "
+               "continuation: smoothly turns nonlinear devices on from "
+               "g_off (linear MNA) to full nonlinear behavior. Last-resort "
+               "in the Auto ladder.")
+        .value("Auto",            DCStrategy::Auto)
         .export_values();
 
     py::enum_<RLCDamping>(v2, "RLCDamping", "RLC circuit damping type")
@@ -2292,7 +2297,16 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("max_current_step", &NewtonOptions::max_current_step,
             "Max current change per iteration [A] (default: 10.0)")
         .def_readwrite("enable_limiting", &NewtonOptions::enable_limiting,
-            "Enable voltage/current limiting (default: True)");
+            "Enable voltage/current limiting (default: True)")
+        // simplify-and-harden-numerical-surface — Phase 4: Armijo line search.
+        .def_readwrite("armijo_line_search", &NewtonOptions::armijo_line_search,
+            "Use Armijo descent condition ||f(x+α·dx)|| ≤ (1−σ·α)·||f(x)|| "
+            "in the inner backtracking line search (default: True). When "
+            "False, falls back to the legacy 'any reduction' criterion.")
+        .def_readwrite("armijo_sigma", &NewtonOptions::armijo_sigma,
+            "Armijo constant σ (default: 1e-4). Tighter values (smaller σ) "
+            "accept Newton steps more aggressively; larger values backtrack "
+            "more often. Standard textbook value is 1e-4.");
 
     py::enum_<LinearSolverKind>(v2, "LinearSolverKind", "Linear solver types")
         .value("SparseLU", LinearSolverKind::SparseLU)
@@ -2527,8 +2541,29 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("source_config", &DCConvergenceConfig::source_config)
         .def_readwrite("pseudo_config", &DCConvergenceConfig::pseudo_config)
         .def_readwrite("init_config", &DCConvergenceConfig::init_config)
+        // simplify-and-harden-numerical-surface — Phase 7: homotopy.
+        .def_readwrite("homotopy_config", &DCConvergenceConfig::homotopy_config,
+            "Homotopy continuation config. Enabled by default in the "
+            "Auto ladder; tune ladder_steps (default 5) and "
+            "max_newton_per_step (default 10).")
         .def_readwrite("enable_random_restart", &DCConvergenceConfig::enable_random_restart)
         .def_readwrite("max_strategy_attempts", &DCConvergenceConfig::max_strategy_attempts);
+
+    // simplify-and-harden-numerical-surface — Phase 7: HomotopyConfig.
+    py::class_<HomotopyConfig>(v2, "HomotopyConfig",
+            "Homotopy continuation configuration for DC operating point. "
+            "Lambda steps from 0 (linear MNA, all nonlinear devices "
+            "replaced by their g_off conductance) to 1 (full nonlinear "
+            "model). Each step solves Newton warm-started from the "
+            "previous step.")
+        .def(py::init<>())
+        .def_readwrite("enable", &HomotopyConfig::enable,
+            "Enable homotopy as the 5th strategy in the Auto ladder "
+            "(default True).")
+        .def_readwrite("ladder_steps", &HomotopyConfig::ladder_steps,
+            "Number of lambda increments (default 5; HighFidelity uses 10).")
+        .def_readwrite("max_newton_per_step", &HomotopyConfig::max_newton_per_step,
+            "Max Newton iterations at each lambda step (default 10).");
 
     py::class_<DCAnalysisResult>(v2, "DCAnalysisResult", "DC analysis result")
         .def(py::init<>())
@@ -2537,7 +2572,15 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("random_restarts", &DCAnalysisResult::random_restarts)
         .def_readonly("total_newton_iterations", &DCAnalysisResult::total_newton_iterations)
         .def_readonly("success", &DCAnalysisResult::success)
-        .def_readonly("message", &DCAnalysisResult::message);
+        .def_readonly("message", &DCAnalysisResult::message)
+        // simplify-and-harden-numerical-surface — Phase 7 telemetry.
+        .def_readonly("homotopy_steps", &DCAnalysisResult::homotopy_steps,
+            "Number of lambda increments executed (0 if homotopy was "
+            "not invoked).")
+        .def_readonly("homotopy_ladder_completed",
+                       &DCAnalysisResult::homotopy_ladder_completed,
+            "True if homotopy reached lambda=1 successfully; False if it "
+            "stalled partway.");
 
     // simplify-and-harden-numerical-surface — Phase 2: numerical preset.
     py::enum_<Preset>(v2, "Preset",
@@ -2674,7 +2717,14 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("last_factorize_time_seconds", &LinearSolverTelemetry::last_factorize_time_seconds)
         .def_readwrite("last_solve_time_seconds", &LinearSolverTelemetry::last_solve_time_seconds)
         .def_readwrite("last_solver", &LinearSolverTelemetry::last_solver)
-        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner);
+        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner)
+        // simplify-and-harden-numerical-surface — Phase 6 telemetry.
+        .def_readwrite("linear_refinement_steps",
+                       &LinearSolverTelemetry::linear_refinement_steps,
+            "Count of times the post-solve residual exceeded "
+            "10·epsilon_machine and one round of iterative refinement "
+            "was applied (Phase 6). Zero on well-conditioned MNA; fires "
+            "on multilevel converters with dense floating-cap loops.");
 
     py::enum_<SimulationEventType>(v2, "SimulationEventType", "Simulation event kind")
         .value("SwitchOn", SimulationEventType::SwitchOn)

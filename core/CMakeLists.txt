@@ -91,6 +91,8 @@ if(PULSIM_BUILD_TESTS)
         tests/test_grid_library.cpp
         tests/test_robustness_profile.cpp
         tests/test_preset.cpp
+        tests/test_armijo_line_search.cpp
+        tests/test_homotopy_dc.cpp
     )
 
     target_link_libraries(pulsim_tests

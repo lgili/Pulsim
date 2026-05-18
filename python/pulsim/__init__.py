@@ -206,6 +206,10 @@ from ._pulsim import (
     DCConvergenceConfig,
     DCAnalysisResult,
 
+    # simplify-and-harden-numerical-surface — Phase 7: homotopy
+    # continuation as 5th DC OP strategy.
+    HomotopyConfig,
+
     # Analytical Solutions (Validation)
     RCAnalytical,
     RLAnalytical,

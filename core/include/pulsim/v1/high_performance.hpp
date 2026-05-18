@@ -113,6 +113,24 @@ enum class LinearSolverKind {
     CG
 };
 
+/// `true` when the kind is a direct sparse-LU style solver, `false`
+/// when iterative. Used by Phase 6's iterative-refinement path to
+/// decide whether to run the post-solve residual check (iterative
+/// solvers apply equivalent refinement internally).
+[[nodiscard]] constexpr bool is_direct_solver(LinearSolverKind k) noexcept {
+    switch (k) {
+        case LinearSolverKind::SparseLU:
+        case LinearSolverKind::EnhancedSparseLU:
+        case LinearSolverKind::KLU:
+            return true;
+        case LinearSolverKind::GMRES:
+        case LinearSolverKind::BiCGSTAB:
+        case LinearSolverKind::CG:
+            return false;
+    }
+    return false;
+}
+
 struct LinearSolverTelemetry {
     int total_solve_calls = 0;
     int total_analyze_calls = 0;
@@ -129,6 +147,14 @@ struct LinearSolverTelemetry {
     double last_solve_time_seconds = 0.0;
     std::optional<LinearSolverKind> last_solver;
     std::optional<IterativeSolverConfig::PreconditionerKind> last_preconditioner;
+
+    // simplify-and-harden-numerical-surface — Phase 6. Counts every time
+    // the post-solve residual `||b - A·x|| / ||b||` exceeded the
+    // `10 · ε_machine` threshold and one round of iterative refinement
+    // was applied. Zero in the common case (well-conditioned MNA); fires
+    // on flying-cap, MMC, and other dense-floating-cap topologies where
+    // KLU's back-substitution accumulates round-off.
+    int linear_refinement_steps = 0;
 };
 
 struct LinearSolverStackConfig {
@@ -1424,6 +1450,35 @@ public:
         auto active_kind = *active_kind_;
         auto result = timed_solve_with(active_kind);
         update_telemetry(active_kind, result);
+
+        // simplify-and-harden-numerical-surface — Phase 6.
+        // Automatic iterative refinement on the direct-solve path when the
+        // post-solve residual exceeds `10 · ε_machine`. Triggers on
+        // ill-conditioned MNA matrices (flying-cap, MMC, dense-floating-cap
+        // networks) where the partial-pivoting back-substitution accumulates
+        // round-off. Skipped for iterative solvers (GMRES / BiCGSTAB / CG)
+        // because they apply equivalent refinement internally.
+        if (result.has_value() && last_matrix_ && is_direct_solver(active_kind)) {
+            const Real b_norm = b.norm();
+            if (b_norm > Real{0}) {
+                const Vector& x = result.value();
+                const Vector r = b - (*last_matrix_) * x;
+                const Real rel_res = r.norm() / b_norm;
+                constexpr Real refinement_threshold =
+                    Real{10} * std::numeric_limits<Real>::epsilon();
+                if (rel_res > refinement_threshold) {
+                    // One round: solve A·δ = r using the existing
+                    // factorization (re-use of factor is cheap; only the
+                    // back-substitution runs), then x ← x + δ.
+                    auto refine = solve_with(active_kind, r);
+                    if (refine.has_value()) {
+                        result.value() = x + refine.value();
+                        telemetry_.linear_refinement_steps += 1;
+                    }
+                }
+            }
+        }
+
         if (result || !config_.allow_fallback || !last_matrix_) {
             return result;
         }
