@@ -86,6 +86,10 @@ void cross_validate(IdealDiode& diode, Real v_anode, Real v_cathode) {
 TEST_CASE("AD diode stamp matches manual stamp across the operating range",
           "[ad][diode][stamp][cross_validation]") {
     IdealDiode d(/*g_on=*/1e3, /*g_off=*/1e-9);
+    // simplify-and-harden-numerical-surface §11: default SwitchingMode::Auto
+    // now resolves to Ideal. This AD cross-validation tests the smoothed
+    // Behavioral Jacobian, so we pin Behavioral explicitly.
+    d.set_switching_mode(SwitchingMode::Behavioral);
     d.set_smoothing(0.05);  // tanh-smoothed Behavioral mode
 
     SECTION("deep reverse bias") {
@@ -111,6 +115,9 @@ TEST_CASE("AD diode stamp matches manual stamp across the operating range",
 TEST_CASE("AD diode stamp matches manual stamp with sharp v_smooth = 0",
           "[ad][diode][stamp][sharp]") {
     IdealDiode d(/*g_on=*/1e3, /*g_off=*/1e-9);
+    // simplify-and-harden-numerical-surface §11: pin Behavioral
+    // (default Auto now resolves to Ideal in v0.11).
+    d.set_switching_mode(SwitchingMode::Behavioral);
     d.set_smoothing(0.0);  // sharp Behavioral fallback
 
     SECTION("forward bias → g_on") {

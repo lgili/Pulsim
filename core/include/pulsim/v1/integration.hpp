@@ -9,6 +9,15 @@
 // - 3.4: Local Truncation Error (LTE) estimation
 // - State history management for reactive elements
 // =============================================================================
+//
+// simplify-and-harden-numerical-surface — Phase 1.10: this header is the
+// LEGACY location for the `Integrator` enum and integration helpers. New
+// user code SHOULD prefer the canonical `numerical/integrator.hpp` path.
+// The legacy header continues to compile unchanged; opt into a
+// deprecation reminder with `-DPULSIM_WARN_DEPRECATED_HEADERS=1`.
+#if defined(PULSIM_WARN_DEPRECATED_HEADERS) && PULSIM_WARN_DEPRECATED_HEADERS
+#pragma message("pulsim/v1/integration.hpp is the legacy include path; prefer pulsim/v1/numerical/integrator.hpp (simplify-and-harden-numerical-surface §1.10)")
+#endif
 
 #include "pulsim/v1/numeric_types.hpp"
 #include <Eigen/Dense>

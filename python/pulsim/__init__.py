@@ -672,6 +672,109 @@ class _SimulationOptionsWrapper(SimulationOptions):
         self.integrator = value
 
 
+# -----------------------------------------------------------------------------
+# simplify-and-harden-numerical-surface — Phase 3.4
+#
+# Emit `DeprecationWarning` (once per attribute per process) on the 9 flat
+# sub-block fields. The canonical access path is `opts.advanced().<name>`;
+# the flat fields keep working for back-compat but the warning steers new
+# users to the namespaced surface.
+#
+# DeprecationWarning is silent by default in non-__main__ contexts (PEP
+# 565) so library callers are not spammed. `pytest`-driven test runs DO
+# surface these warnings — that's the intended migration signal.
+# -----------------------------------------------------------------------------
+
+_advanced_deprecation_warned: set[str] = set()
+
+
+def _make_advanced_alias_property(field_name: str, advanced_path: str):
+    """Build a `@property` that forwards `opts.<field_name>` to the C++
+    binding while emitting a one-shot `DeprecationWarning` per process.
+
+    The setter mirrors the getter — same warning, same forward.
+    """
+    def _getter(self):
+        if field_name not in _advanced_deprecation_warned:
+            _advanced_deprecation_warned.add(field_name)
+            warnings.warn(
+                f"SimulationOptions.{field_name} is deprecated; "
+                f"use opts.advanced().{advanced_path} instead. "
+                f"(simplify-and-harden-numerical-surface Phase 3.4)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        # Skip the wrapper subclass property descriptor; go straight to the
+        # pybind11-bound base attribute.
+        return SimulationOptions.__bases__[0].__dict__[field_name].__get__(
+            self, type(self))
+
+    def _setter(self, value):
+        if field_name not in _advanced_deprecation_warned:
+            _advanced_deprecation_warned.add(field_name)
+            warnings.warn(
+                f"SimulationOptions.{field_name} = ... is deprecated; "
+                f"use opts.advanced().{advanced_path} = ... instead. "
+                f"(simplify-and-harden-numerical-surface Phase 3.4)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        SimulationOptions.__bases__[0].__dict__[field_name].__set__(
+            self, value)
+
+    return property(_getter, _setter)
+
+
+# Map of (legacy flat field → canonical `opts.advanced().*` path).
+_ADVANCED_FIELD_ALIASES = {
+    "newton_options":    "newton",
+    "timestep_config":   "timestep",
+    "lte_config":        "lte",
+    "bdf_config":        "bdf_order",
+    "dc_config":         "dc",
+    "stiffness_config":  "stiffness",
+    "fallback_policy":   "fallback",
+    "formulation_mode":  "formulation",
+    "linear_solver":     "linear_solver",
+}
+
+# NOTE: we DO NOT install these deprecation properties yet. Doing so would
+# fire warnings in every test_* file and example_* script that hasn't been
+# migrated to `opts.advanced().<name>` (most of them). The 3.4 shim is
+# wired but gated by an opt-in:
+#
+#   import pulsim
+#   pulsim.enable_advanced_deprecation_warnings()
+#
+# Users who want the migration signal flip the switch; the rest of the
+# codebase stays silent during the deprecation window. Phase 3.6
+# (examples / docs migration) will flip the switch in the example
+# scripts once they're migrated.
+
+def enable_advanced_deprecation_warnings() -> None:
+    """Install Phase 3.4 deprecation aliases on `SimulationOptions`.
+
+    Once called, reads and writes to the 9 flat sub-block fields
+    (`newton_options`, `timestep_config`, `lte_config`, `bdf_config`,
+    `dc_config`, `stiffness_config`, `fallback_policy`,
+    `formulation_mode`, `linear_solver`) emit a `DeprecationWarning`
+    pointing users to the canonical `opts.advanced().<name>` access.
+
+    Warnings fire ONCE per attribute per process to avoid log spam.
+
+    Calling this function more than once is a no-op.
+    """
+    if getattr(_SimulationOptionsWrapper, "_advanced_aliases_installed", False):
+        return
+    for field_name, advanced_path in _ADVANCED_FIELD_ALIASES.items():
+        setattr(
+            _SimulationOptionsWrapper,
+            field_name,
+            _make_advanced_alias_property(field_name, advanced_path),
+        )
+    _SimulationOptionsWrapper._advanced_aliases_installed = True
+
+
 SimulationOptions = _SimulationOptionsWrapper
 
 
@@ -1291,6 +1394,9 @@ __all__ = [
     "SimulationOptions",
     "SimulationResult",
     "Simulator",
+
+    # simplify-and-harden-numerical-surface — Phase 3.4
+    "enable_advanced_deprecation_warnings",
     "PeriodicSteadyStateOptions",
     "PeriodicSteadyStateResult",
     "HarmonicBalanceOptions",

@@ -85,6 +85,9 @@ TEST_CASE("AD VCSwitch stamp matches manual across the transition curve",
           "[ad][vcswitch][stamp][cross_validation]") {
     VoltageControlledSwitch sw(/*v_th=*/2.5, /*g_on=*/1e3, /*g_off=*/1e-9,
                                "S_test");
+    // simplify-and-harden-numerical-surface §11: default Auto now resolves to
+    // Ideal in v0.11. Pin Behavioral for this smoothed-stamp cross-validation.
+    sw.set_switching_mode(SwitchingMode::Behavioral);
 
     SECTION("control well above threshold (saturated on)") {
         cross_validate(sw, /*v_ctrl=*/5.0, /*v_t1=*/1.0, /*v_t2=*/0.0,
@@ -124,6 +127,8 @@ TEST_CASE("AD VCSwitch stamp matches manual with custom hysteresis",
     p.g_off = 1e-7;
     p.hysteresis = 0.05;  // tighter transition than default
     VoltageControlledSwitch sw(p, "S_tight");
+    // simplify-and-harden-numerical-surface §11: pin Behavioral mode.
+    sw.set_switching_mode(SwitchingMode::Behavioral);
 
     SECTION("tight transition mid-band") {
         cross_validate(sw, /*v_ctrl=*/1.02, /*v_t1=*/3.0, /*v_t2=*/0.0,

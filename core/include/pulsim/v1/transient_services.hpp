@@ -1,5 +1,13 @@
 #pragma once
 
+// simplify-and-harden-numerical-surface — Phase 1.10: this header is the
+// LEGACY location for the timestep-control services. New user code SHOULD
+// prefer the canonical `numerical/timestep_control.hpp` path. Opt into a
+// deprecation reminder with `-DPULSIM_WARN_DEPRECATED_HEADERS=1`.
+#if defined(PULSIM_WARN_DEPRECATED_HEADERS) && PULSIM_WARN_DEPRECATED_HEADERS
+#pragma message("pulsim/v1/transient_services.hpp is the legacy include path; prefer pulsim/v1/numerical/timestep_control.hpp (simplify-and-harden-numerical-surface §1.10)")
+#endif
+
 #include "pulsim/v1/runtime_circuit.hpp"
 #include "pulsim/v1/solver.hpp"
 #include "pulsim/v1/high_performance.hpp"

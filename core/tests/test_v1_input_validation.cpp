@@ -189,6 +189,12 @@ TEST_CASE("v1 transient contains hard nonlinear failure with deterministic diagn
     opts.newton_options.num_branches = circuit.num_branches();
     opts.model_regularization.enable_auto = false;
     opts.linear_solver.allow_fallback = false;
+    // simplify-and-harden-numerical-surface §11: Auto now resolves to Ideal
+    // in v0.11. This test deliberately starves Newton (max_iterations = 0)
+    // to force a transient_step_failure on the Behavioral nonlinear stamp;
+    // the PWL Ideal path solves this circuit without Newton at all and
+    // would not produce the expected failure. Pin Behavioral.
+    opts.switching_mode = SwitchingMode::Behavioral;
 
     Simulator sim(circuit, opts);
     Vector x0 = Vector::Zero(static_cast<Index>(circuit.system_size()));

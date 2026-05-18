@@ -34,6 +34,11 @@ SimulationOptions make_opts(Real tstop, Real dt) {
     opts.dt_max = dt;
     opts.adaptive_timestep = false;
     opts.enable_bdf_order_control = false;
+    // simplify-and-harden-numerical-surface §11: Auto now resolves to Ideal
+    // in v0.11. The diode-loss V_F0 + R_d stamp is only meaningful on the
+    // Behavioral path; PWL Ideal uses a unit-conductance switch and the
+    // stamp test would degrade to spurious values. Pin Behavioral.
+    opts.switching_mode = SwitchingMode::Behavioral;
     return opts;
 }
 

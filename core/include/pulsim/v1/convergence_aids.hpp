@@ -9,6 +9,15 @@
 // - 5.3: Pseudo-Transient Continuation - implicit dynamics for DC
 // - 5.4: Robust Initialization - intelligent initial guesses
 // =============================================================================
+//
+// simplify-and-harden-numerical-surface — Phase 1.10: this header is the
+// LEGACY location for the Newton + DC-strategy machinery. New user code
+// SHOULD prefer the canonical `numerical/newton.hpp` and
+// `numerical/dc_strategy.hpp` paths. Opt into a deprecation reminder
+// with `-DPULSIM_WARN_DEPRECATED_HEADERS=1`.
+#if defined(PULSIM_WARN_DEPRECATED_HEADERS) && PULSIM_WARN_DEPRECATED_HEADERS
+#pragma message("pulsim/v1/convergence_aids.hpp is the legacy include path; prefer pulsim/v1/numerical/newton.hpp or pulsim/v1/numerical/dc_strategy.hpp (simplify-and-harden-numerical-surface §1.10)")
+#endif
 
 #include "pulsim/v1/numeric_types.hpp"
 #include "pulsim/v1/solver.hpp"

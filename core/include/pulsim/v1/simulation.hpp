@@ -342,12 +342,16 @@ struct SimulationOptions {
 
     // PWL switching mode default (refactor-pwl-switching-engine, Phase 5).
     // Threads through to Circuit::set_default_switching_mode() at simulator
-    // construction. `Auto` resolves to `Behavioral` for backward compat.
+    // construction. As of v0.11 (simplify-and-harden-numerical-surface,
+    // Phase 11) `Auto` resolves to `Ideal` — the PWL state-space engine
+    // is preferred whenever every switching device declares supports_pwl.
     //
-    // simplify-and-harden-numerical-surface — Phase 11 (BLOCKED): the
-    // flip to Ideal default exposed stability gaps in the PWL Ideal
-    // path on some legacy buck/diode-loss circuits. Phase 11 is on
-    // hold pending PWL hardening; tracked in OpenSpec tasks.md § 11.
+    // Users on legacy buck-converter / diode-loss circuits who relied on
+    // the prior Behavioral semantics must opt in:
+    //   opts.switching_mode = SwitchingMode::Behavioral;
+    //
+    // Known PWL Ideal stability gaps on those topologies are tracked in
+    // the follow-up OpenSpec change `harden-pwl-ideal-buck-diode`.
     SwitchingMode switching_mode = SwitchingMode::Auto;
 
     // BDF order control (currently supports order 1/2)

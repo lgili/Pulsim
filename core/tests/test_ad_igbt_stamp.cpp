@@ -88,6 +88,10 @@ TEST_CASE("AD IGBT stamp matches manual across operating regions",
         .v_ce_sat = 1.5,
     };
     IGBT q(params, "Q1");
+    // simplify-and-harden-numerical-surface §11: default Auto now resolves to
+    // Ideal in v0.11. The cross-validation tests Behavioral stamps, so pin
+    // Behavioral explicitly.
+    q.set_switching_mode(SwitchingMode::Behavioral);
 
     SECTION("cutoff (Vge < Vth)") {
         cross_validate(q, /*v_g=*/0.0, /*v_c=*/100.0, /*v_e=*/0.0, "cutoff");

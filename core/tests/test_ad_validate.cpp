@@ -56,6 +56,13 @@ namespace {
     ckt.add_igbt("Q1", gi, c, e, igbt_params);
 
     ckt.add_vcswitch("S1", ctrl, t1, t2, /*v_th=*/2.5);
+    // simplify-and-harden-numerical-surface §11: default Auto now resolves to
+    // Ideal in v0.11 — but the AD validator calls each device's
+    // `stamp_jacobian` directly, which uses the device's own `mode_` (Auto)
+    // and resolves it through `resolve_switching_mode(mode_)` with no
+    // circuit context. Pin every device to Behavioral so the validator
+    // inspects the smoothed closed-form stamp it was designed for.
+    ckt.set_switching_mode_for_all(SwitchingMode::Behavioral);
     return ckt;
 }
 

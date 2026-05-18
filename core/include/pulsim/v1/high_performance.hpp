@@ -10,6 +10,15 @@
 // - 4.4: SIMD detection and optimization helpers
 // - 4.5: Cache-friendly SoA data layouts
 // =============================================================================
+//
+// simplify-and-harden-numerical-surface — Phase 1.10: this header is the
+// LEGACY location for the linear-solver policy + iterative-solver knobs.
+// New user code SHOULD prefer the canonical `numerical/linear_solver.hpp`
+// path. Opt into a deprecation reminder with
+// `-DPULSIM_WARN_DEPRECATED_HEADERS=1`.
+#if defined(PULSIM_WARN_DEPRECATED_HEADERS) && PULSIM_WARN_DEPRECATED_HEADERS
+#pragma message("pulsim/v1/high_performance.hpp is the legacy include path; prefer pulsim/v1/numerical/linear_solver.hpp (simplify-and-harden-numerical-surface §1.10)")
+#endif
 
 #include "pulsim/v1/numeric_types.hpp"
 #include "pulsim/v1/solver.hpp"

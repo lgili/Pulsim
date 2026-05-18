@@ -133,9 +133,13 @@ on but Armijo converges to 0).
 **Tuning** (rarely needed):
 
 ```python
-opts.newton_options.armijo_line_search = True   # default
-opts.newton_options.armijo_sigma = 1e-4         # default
-opts.newton_options.min_damping = 0.01          # backtrack floor
+# Canonical (post-Phase 3 namespace):
+opts.advanced().newton.armijo_line_search = True   # default
+opts.advanced().newton.armijo_sigma = 1e-4         # default
+opts.advanced().newton.min_damping = 0.01          # backtrack floor
+
+# Flat-field aliases (back-compat; both forms mutate the same data):
+# opts.newton_options.armijo_line_search = True
 ```
 
 **Telemetry**: `result.newton_result.telemetry.line_search_backtracks`
@@ -203,9 +207,13 @@ local minima for the earlier strategies to escape.
 **Tuning** (rarely needed):
 
 ```python
-opts.dc_config.homotopy_config.enable = True       # default
-opts.dc_config.homotopy_config.ladder_steps = 5    # default (10 in HighFidelity)
-opts.dc_config.homotopy_config.max_newton_per_step = 10
+# Canonical (post-Phase 3 namespace):
+opts.advanced().dc.homotopy_config.enable = True       # default
+opts.advanced().dc.homotopy_config.ladder_steps = 5    # default (10 in HighFidelity)
+opts.advanced().dc.homotopy_config.max_newton_per_step = 10
+
+# Flat-field aliases (back-compat):
+# opts.dc_config.homotopy_config.enable = True
 ```
 
 **Telemetry**:

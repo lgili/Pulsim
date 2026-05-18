@@ -45,20 +45,22 @@ using Vector = Eigen::VectorXd;
 //                   collector-emitter). Newton-friendly; preserves the
 //                   pre-PWL behavior of the kernel.
 //
-//   - Auto        : kernel resolves the mode at simulation time. In this
-//                   release Auto resolves to Behavioral for backward
-//                   compatibility; future runtime work flips the default
-//                   to Ideal whenever every switching device declares
-//                   supports_pwl.
+//   - Auto        : kernel resolves the mode at simulation time. As of
+//                   v0.11 (simplify-and-harden-numerical-surface,
+//                   Phase 11) Auto resolves to **Ideal** by default —
+//                   the PWL state-space engine is preferred whenever
+//                   every switching device declares supports_pwl.
+//                   Users who depend on the prior Behavioral semantics
+//                   must opt in explicitly:
 //
-//                   simplify-and-harden-numerical-surface — Phase 11
-//                   attempted the flip and discovered the PWL Ideal
-//                   path has stability gaps on some legacy
-//                   buck-converter + diode-loss benchmarks (vout
-//                   overshoots, diode voltage spikes). Phase 11 is
-//                   BLOCKED on PWL Ideal hardening for those topologies;
-//                   tracked in OpenSpec tasks.md § 11 with the audit
-//                   summary.
+//                       opts.switching_mode = SwitchingMode::Behavioral;
+//
+//                   Known gaps in the PWL Ideal path on legacy buck-
+//                   converter + diode-loss benchmarks (vout overshoots,
+//                   forward-bias diode voltage spikes) are tracked in
+//                   the follow-up OpenSpec change
+//                   `harden-pwl-ideal-buck-diode`; affected tests pin
+//                   Behavioral explicitly until that work lands.
 //
 // Devices keep their own SwitchingMode field; users override globally via
 // SimulationOptions::switching_mode (separate proposal task) or per-device
@@ -80,17 +82,22 @@ enum class SwitchingMode : std::uint8_t {
 
 /// Resolve a (possibly Auto) device-level mode against a circuit-level default.
 /// Auto inherits from the circuit; explicit modes win over the circuit default.
-/// The fallback chain is: device explicit -> circuit explicit -> Behavioral.
+/// The fallback chain is: device explicit -> circuit explicit -> Ideal.
+/// As of v0.11 (Phase 11) Auto resolves to Ideal — flip from the previous
+/// Behavioral default. Users requiring the legacy Behavioral semantics must
+/// set `SimulationOptions::switching_mode = SwitchingMode::Behavioral`
+/// explicitly. See OpenSpec change `harden-pwl-ideal-buck-diode` for the
+/// list of known PWL Ideal stability gaps that motivate the opt-in.
 [[nodiscard]] constexpr SwitchingMode resolve_switching_mode(
     SwitchingMode device_mode,
-    SwitchingMode circuit_default = SwitchingMode::Behavioral) noexcept {
+    SwitchingMode circuit_default = SwitchingMode::Ideal) noexcept {
     if (device_mode != SwitchingMode::Auto) {
         return device_mode;
     }
     if (circuit_default != SwitchingMode::Auto) {
         return circuit_default;
     }
-    return SwitchingMode::Behavioral;
+    return SwitchingMode::Ideal;
 }
 
 /// Context handed to a PWL device when the kernel is deciding whether the

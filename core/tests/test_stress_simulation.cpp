@@ -211,6 +211,12 @@ TEST_CASE("Stress simulations (large circuits)", "[stress][performance]") {
         opts.linear_solver.order = {LinearSolverKind::KLU, LinearSolverKind::SparseLU};
         opts.linear_solver.auto_select = false;
         opts.linear_solver.allow_fallback = true;
+        // simplify-and-harden-numerical-surface §11: pin Behavioral. Default
+        // Auto now resolves to Ideal in v0.11; on this 2-phase buck stress
+        // circuit the PWL Ideal path produces ±85 MV switch-pole voltages
+        // (a known PWL stability gap tracked in the follow-up OpenSpec
+        // change `harden-pwl-ideal-buck-diode`).
+        opts.switching_mode = SwitchingMode::Behavioral;
         opts.newton_options.num_nodes = circuit.num_nodes();
         opts.newton_options.num_branches = circuit.num_branches();
         opts.newton_options.max_iterations = 80;

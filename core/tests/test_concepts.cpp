@@ -522,6 +522,11 @@ TEST_CASE("API CRTP IdealDiode", "[api][crtp][diode]") {
 
     SECTION("IdealDiode forward bias (conducting)") {
         IdealDiode d(1e3, 1e-9);  // g_on = 1kS, g_off = 1nS
+        // simplify-and-harden-numerical-surface §11: Auto now resolves to
+        // Ideal in v0.11. This concept-level stamp test pre-dates the PWL
+        // path and exercises the Behavioral closed-form stamp; pin
+        // Behavioral so the linearized companion matches the assertion.
+        d.set_switching_mode(SwitchingMode::Behavioral);
 
         SparseMatrix J(2, 2);
         J.setZero();
@@ -699,6 +704,9 @@ TEST_CASE("API CRTP MOSFET", "[api][crtp][mosfet]") {
     SECTION("MOSFET saturation region") {
         MOSFET::Params params{.vth = 2.0, .kp = 0.1, .lambda = 0.0, .g_off = 1e-12, .is_nmos = true};
         MOSFET m(params, "M1");
+        // simplify-and-harden-numerical-surface §11: Auto resolves to Ideal
+        // in v0.11. The Shichman-Hodges gm test requires Behavioral.
+        m.set_switching_mode(SwitchingMode::Behavioral);
 
         SparseMatrix J(3, 3);
         J.setZero();
@@ -771,6 +779,9 @@ TEST_CASE("API CRTP IGBT", "[api][crtp][igbt]") {
     SECTION("IGBT on state") {
         IGBT::Params params{.vth = 5.0, .g_on = 1e4, .g_off = 1e-12, .v_ce_sat = 1.5};
         IGBT ig(params, "Q1");
+        // simplify-and-harden-numerical-surface §11: pin Behavioral; default
+        // Auto now resolves to Ideal in v0.11.
+        ig.set_switching_mode(SwitchingMode::Behavioral);
 
         SparseMatrix J(3, 3);
         J.setZero();

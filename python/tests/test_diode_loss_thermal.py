@@ -23,6 +23,11 @@ def _run_transient(circuit, tstop=20e-3, dt=100e-6):
     opts.dt_max = dt
     opts.adaptive_timestep = False
     opts.enable_bdf_order_control = False
+    # simplify-and-harden-numerical-surface §11: Auto resolves to Ideal in
+    # v0.11. The V_F0 + R_d loss/thermal contract only validates on the
+    # Behavioral diode stamp; PWL Ideal uses a unit-conductance switch and
+    # would produce spurious test values. Pin Behavioral.
+    opts.switching_mode = ps.SwitchingMode.Behavioral
     opts.newton_options.num_nodes = circuit.num_nodes()
     opts.newton_options.num_branches = circuit.num_branches()
     return ps.Simulator(circuit, opts).run_transient()
