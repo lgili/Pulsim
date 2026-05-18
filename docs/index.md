@@ -159,19 +159,22 @@ If that prints a version string, you're set. Otherwise see
 ## Recommended learning path
 
 1. [Getting Started](getting-started.md) — install, run an RC step, see the output CSV.
-2. [User Guide](user-guide.md) — the canonical runtime flow.
-3. [Netlist YAML Format](netlist-format.md) — schema for your first real circuit.
-4. [Components Reference](components-reference.md) + [Control Blocks Reference](control-blocks-reference.md) — every block at your disposal.
-5. [Examples and Results](examples-and-results.md) — run shipped scripts end-to-end.
-6. [KPI Reference](kpi-reference.md) — score what you've built.
-7. [Benchmarks and Parity](benchmarks-and-parity.md) — wire it into CI.
-8. [API Reference](api-reference.md) — when you need to drop down past YAML.
+2. [Numerical Configuration](numerical-configuration.md) — the four presets (`Auto`/`Fast`/`Robust`/`HighFidelity`) that materialise a full tuning profile in one call.
+3. [User Guide](user-guide.md) — the canonical runtime flow.
+4. [Netlist YAML Format](netlist-format.md) — schema for your first real circuit.
+5. [Components Reference](components-reference.md) + [Control Blocks Reference](control-blocks-reference.md) — every block at your disposal.
+6. [Examples and Results](examples-and-results.md) — run shipped scripts end-to-end.
+7. [KPI Reference](kpi-reference.md) — score what you've built.
+8. [Benchmarks and Parity](benchmarks-and-parity.md) — wire it into CI.
+9. [API Reference](api-reference.md) — when you need to drop down past YAML.
 
 ## Topic shortcuts
 
 | If you're doing... | Read |
 |---|---|
+| First simulation — what numerical knobs to set | [Numerical Configuration](numerical-configuration.md) |
 | Buck / boost / LLC / FB converter | [Converter Templates](converter-templates.md), [Catalog Devices](catalog-devices.md) |
+| Multilevel (NPC, T-type, flying-cap, MMC) | [Multilevel Converters](multilevel-converters.md), [Numerical Configuration](numerical-configuration.md) |
 | Three-phase / motor drives / vector control | [Three-Phase Grid](three-phase-grid.md), [Motor Models](motor-models.md), [Control Blocks](control-blocks-reference.md) |
 | Refrigeration / fridge / freezer compressor (CC convencional or inverter VCC) | [Compressor + Refrigerant Load](compressor-and-refrigerant-load.md), [Motor Models](motor-models.md) |
 | Magnetics design (saturation, core loss) | [Magnetic Models](magnetic-models.md), [KPI Reference](kpi-reference.md) |

@@ -119,6 +119,7 @@ nav:
   - Guides:
       - Examples and Results: examples-and-results.md
       - Notebooks: notebooks.md
+      - Numerical Configuration: numerical-configuration.md
       - AC Analysis: ac-analysis.md
       - Frequency Response Analysis (FRA): fra.md
       - Electrothermal Workflow: electrothermal-workflow.md
@@ -136,6 +137,7 @@ nav:
       - Magnetic Models: magnetic-models.md
       - Motor Models: motor-models.md
       - Compressor + Refrigerant Load: compressor-and-refrigerant-load.md
+      - Multilevel Converters: multilevel-converters.md
       - Three-Phase Grid Library: three-phase-grid.md
       - Catalog Devices: catalog-devices.md
       - Converter Templates: converter-templates.md

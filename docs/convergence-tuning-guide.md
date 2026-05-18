@@ -2,6 +2,28 @@
 
 Este guia foca no runtime suportado: Python + YAML (`pulsim-v1`).
 
+## ⚠️ Primeiro passo — escolha um preset
+
+Antes de tunar campo a campo, **escolha um preset numérico** em
+[`numerical-configuration.md`](numerical-configuration.md). 95% dos
+casos de não-convergência se resolvem trocando `Preset.Auto` por
+`Preset.Robust` (que liga TRBDF2 + stiffness + 12 retries + Armijo
+line search + homotopy DC):
+
+```python
+opts = ps.SimulationOptions.from_preset(ps.Preset.Robust, 1e-6, 1e-3)
+```
+
+```yaml
+simulation:
+  preset: robust
+  tstop: 1e-3
+  dt: 1e-6
+```
+
+O resto deste guia é para os casos restantes que precisam de tuning
+fino. Se o preset resolver, **não passe daqui**.
+
 ## Sintomas comuns
 
 - Falha no ponto de operação DC (`dc_operating_point`).
@@ -9,13 +31,31 @@ Este guia foca no runtime suportado: Python + YAML (`pulsim-v1`).
 - Queda para fallback linear com frequência alta.
 - Passos muito pequenos e simulação lenta.
 
+## Convergence aids automáticas (ligadas por default)
+
+Pulsim ship com quatro aids automáticas que disparam em casos
+difíceis sem o usuário precisar configurar — todas chegaram com o
+release `simplify-and-harden-numerical-surface`:
+
+| Aid | Quando dispara | Sintoma de que ajudou |
+|---|---|---|
+| **Armijo line search** (Newton) | Sempre que o full step Newton aumenta o resíduo | `result.newton_result.telemetry.line_search_backtracks > 0` |
+| **Coalescência de eventos simultâneos** (PWL) | ≥ 2 switches comutam dentro da tolerância de bisection | `result.backend_telemetry.simultaneous_event_groups > 0` |
+| **Iterative refinement** (KLU/SparseLU) | Resíduo pós-back-solve > 10·ε_machine | `result.linear_solver_telemetry.linear_refinement_steps > 0` |
+| **Homotopy continuation** (DC OP) | Direct → Source → Gmin → PseudoTransient all fail | `result.dc_result.strategy_used == DCStrategy.Homotopy` |
+
+Veja [Numerical Configuration](numerical-configuration.md#convergence-aids)
+para detalhes e tuning de cada uma.
+
 ## Checklist rápido
 
-1. Garanta caminho DC para o terra (evite nós flutuantes).
-2. Use `simulation.solver.order` e `fallback_order` explícitos.
-3. Em circuitos stiff, prefira `integrator: trbdf2` ou `rosenbrockw`.
-4. Ative precondicionador ILUT para malhas grandes.
-5. Use `adaptive_timestep: false` quando quiser baseline determinístico.
+1. **Pegue o preset certo** (`Preset.Robust` é o ponto de partida).
+2. Garanta caminho DC para o terra (evite nós flutuantes).
+3. Use `simulation.solver.order` e `fallback_order` explícitos só se
+   precisar mais que o auto-selector.
+4. Em circuitos stiff, o preset Robust já escolhe `integrator: trbdf2`
+   automaticamente. Override para `rosenbrockw` só se TRBDF2 falhar.
+5. `Preset.Fast` quando o circuito é só switching.
 
 ## Verificar backends compilados
 
