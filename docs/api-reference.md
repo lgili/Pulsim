@@ -286,3 +286,31 @@ This page is generated from the `pulsim` package surface (stubs + public exports
 ::: pulsim.backend_capabilities
 
 ::: pulsim.solver_status_to_string
+
+## Schematic Rendering
+
+See the [Schematic Rendering user guide](schematic-rendering.md) for the workflow and backends.
+
+::: pulsim.schematic.render
+
+::: pulsim.schematic.render_layout
+
+::: pulsim.schematic.render_netlistsvg
+
+::: pulsim.schematic.compute_layout
+
+::: pulsim.schematic.SchematicLayout
+
+::: pulsim.schematic.ComponentPlacement
+
+::: pulsim.schematic.Wire
+
+::: pulsim.schematic.WireEndpoint
+
+::: pulsim.schematic.TerminalAnchor
+
+::: pulsim.schematic.BoundingBox
+
+::: pulsim.schematic.recognize_all
+
+::: pulsim.schematic.RecognizedTemplate

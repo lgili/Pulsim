@@ -1,0 +1,10 @@
+{
+  "name": "pulsim-schematic-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "elkjs bridge for pulsim.schematic ELK backend",
+  "dependencies": {
+    "elkjs": "^0.11.1",
+    "netlistsvg": "^1.0.2"
+  }
+}

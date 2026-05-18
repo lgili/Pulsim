@@ -289,3 +289,56 @@ The bindings refactor SHALL preserve the existing Python public API and ABI bit-
 - **THEN** results are bit-identical to pre-refactor
 - **AND** no user-facing import or call requires modification
 
+### Requirement: Component Introspection Binding
+Python bindings SHALL expose `Circuit.components()` and `Circuit.node_position_hint(node_id)` matching the kernel contract, with descriptor fields exposed as read-only Python attributes.
+
+#### Scenario: components() from Python
+- **WHEN** Python code calls `circuit.components()`
+- **THEN** the call returns a list of `ComponentDescriptor` objects
+- **AND** each object exposes read-only `name` (str), `kind` (str), `nodes` (list[int]), and `params` (dict[str, float]) properties
+
+#### Scenario: node_position_hint() from Python
+- **WHEN** Python code calls `circuit.node_position_hint(node_id)`
+- **THEN** the call returns `None` for an unclassified node, or a string in `{"ground", "source_pos", "source_neg", "load", "internal"}`
+
+### Requirement: Schematic Rendering Surface
+Python bindings SHALL provide a `pulsim.schematic` module that renders a Circuit to an image file and produces a JSON-serializable layout for GUI consumers.
+
+#### Scenario: One-shot render to PNG
+- **WHEN** Python code calls `pulsim.schematic.render(circuit, "out.png")` on a circuit built via the public Circuit API
+- **THEN** the call writes a non-empty PNG file
+- **AND** the call raises no exception when the `[schematic]` extra is installed
+
+#### Scenario: One-shot render to SVG
+- **WHEN** the destination path ends in `.svg`
+- **THEN** the call writes a well-formed SVG file parseable by standard XML libraries
+
+#### Scenario: Layout for GUI auto-place
+- **WHEN** Python code calls `pulsim.schematic.compute_layout(circuit).to_json()`
+- **THEN** the call returns a dict with keys `components`, `wires`, `junctions`, `canvas`, and `schema_version`
+- **AND** every numeric coordinate is a finite float
+- **AND** `schema_version` equals the string `"schematic-v1"`
+
+#### Scenario: Missing optional dependency at import time
+- **WHEN** Python imports `pulsim.schematic` without `schemdraw` or `networkx` installed
+- **THEN** the import succeeds without raising
+
+#### Scenario: Missing optional dependency at render time
+- **WHEN** `pulsim.schematic.render(...)` is called and `schemdraw` is not installed
+- **THEN** the call raises `ImportError` with a message containing the install instruction `pip install pulsim[schematic]`
+
+### Requirement: Switching-Device Analog Symbols in Schematic Render
+`pulsim.schematic.render` SHALL produce SVG output where MOSFET, IGBT, and voltage-controlled switch components are drawn with dedicated analog schematic symbols instead of falling back to a labeled generic rectangle.
+
+#### Scenario: Render a MOSFET in a boost converter
+- **WHEN** a circuit containing a MOSFET (e.g. the `Q1` in `boost_pfc`) is rendered via the default netlistsvg backend
+- **THEN** the SVG contains an element with the canonical N-channel MOSFET symbol (gate stub, channel rectangle, drain/source terminals)
+- **AND** does NOT contain a `s:type="generic"` element for that component
+
+#### Scenario: Render an IGBT
+- **WHEN** a circuit containing an IGBT is rendered
+- **THEN** the SVG contains an element with the IGBT symbol (MOSFET body + collector triangle)
+
+#### Scenario: Render a voltage-controlled switch
+- **WHEN** a circuit containing a vcswitch (e.g. the `S1` in `buck_converter`) is rendered
+- **THEN** the SVG contains an element with the vcswitch symbol (pivoting bar with explicit control terminal)

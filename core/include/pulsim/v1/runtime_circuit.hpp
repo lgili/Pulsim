@@ -33,6 +33,7 @@
 #include <functional>
 #include <limits>
 #include <variant>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -99,6 +100,32 @@ struct DeviceConnection {
     std::vector<Index> nodes;  // Node indices for this device
     Index branch_index = -1;   // For devices with branch currents (VS, L)
     Index branch_index_2 = -1; // For devices with two branch currents (Transformer)
+};
+
+/// Public read-only descriptor for one physical device added to a Circuit.
+/// Produced on demand by `Circuit::components()` over the existing
+/// `(devices_, connections_)` parallel storage. `kind` is the canonical
+/// lower-snake-case kind string matching the YAML `type:` field
+/// (e.g. "resistor", "voltage_source", "mosfet"). `nodes` preserves pin
+/// order from the originating `add_*` call. `params` carries best-effort
+/// numeric parameters keyed by the canonical short symbol (R, L, C, V, I)
+/// for primary device types; other devices return an empty map for now.
+struct ComponentDescriptor {
+    std::string name;
+    std::string kind;
+    std::vector<Index> nodes;
+    std::map<std::string, Real> params;
+};
+
+/// Classification of a node's electrical role, consumed by downstream
+/// layout/render engines as a placement prior (ground at south, sources
+/// at west, etc.). Returned by `Circuit::node_position_hint`.
+enum class NodeRole {
+    Ground,
+    SourcePos,
+    SourceNeg,
+    Load,
+    Internal,
 };
 
 /// Non-electrical components tracked by the mixed-domain runtime graph.
@@ -1225,6 +1252,120 @@ public:
             names.push_back(component.name);
         }
         return names;
+    }
+
+    /// Number of physical (MNA-stamping) devices added to the circuit.
+    [[nodiscard]] std::size_t num_components() const { return devices_.size(); }
+
+    /// Snapshot of every physical device added via `add_*` calls, in
+    /// insertion order. Each descriptor carries the user name, canonical
+    /// kind string, terminal node indices, and a best-effort parameter
+    /// map. The returned vector is a value snapshot — safe to retain
+    /// across later `add_*` calls.
+    ///
+    /// For circuits loaded via `YamlParser` the order mirrors the YAML
+    /// `components:` array. For code-built circuits the order matches the
+    /// sequence of `add_*` invocations. The output is deterministic across
+    /// runs for the same circuit construction sequence.
+    [[nodiscard]] std::vector<ComponentDescriptor> components() const {
+        std::vector<ComponentDescriptor> out;
+        out.reserve(devices_.size());
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            ComponentDescriptor desc;
+            desc.name = connections_[i].name;
+            desc.nodes = connections_[i].nodes;
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Resistor>) {
+                    desc.kind = "resistor";
+                    desc.params["R"] = dev.resistance();
+                } else if constexpr (std::is_same_v<T, Capacitor>) {
+                    desc.kind = "capacitor";
+                    desc.params["C"] = dev.capacitance();
+                } else if constexpr (std::is_same_v<T, Inductor>) {
+                    desc.kind = "inductor";
+                    desc.params["L"] = dev.inductance();
+                } else if constexpr (std::is_same_v<T, VoltageSource>) {
+                    desc.kind = "voltage_source";
+                    desc.params["V"] = dev.voltage();
+                } else if constexpr (std::is_same_v<T, CurrentSource>) {
+                    desc.kind = "current_source";
+                    desc.params["I"] = dev.current();
+                } else if constexpr (std::is_same_v<T, IdealDiode>) {
+                    desc.kind = "diode";
+                } else if constexpr (std::is_same_v<T, IdealSwitch>) {
+                    desc.kind = "switch";
+                } else if constexpr (std::is_same_v<T, VoltageControlledSwitch>) {
+                    desc.kind = "vcswitch";
+                } else if constexpr (std::is_same_v<T, MOSFET>) {
+                    desc.kind = "mosfet";
+                } else if constexpr (std::is_same_v<T, IGBT>) {
+                    desc.kind = "igbt";
+                } else if constexpr (std::is_same_v<T, Transformer>) {
+                    desc.kind = "transformer";
+                } else if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+                    desc.kind = "pwm_voltage_source";
+                } else if constexpr (std::is_same_v<T, SineVoltageSource>) {
+                    desc.kind = "sine_voltage_source";
+                } else if constexpr (std::is_same_v<T, PulseVoltageSource>) {
+                    desc.kind = "pulse_voltage_source";
+                } else if constexpr (std::is_same_v<T, DcMotorDevice>) {
+                    desc.kind = "dc_motor";
+                } else if constexpr (std::is_same_v<T, PmsmDevice>) {
+                    desc.kind = "pmsm";
+                } else {
+                    desc.kind = "unknown";
+                }
+            }, devices_[i]);
+            out.push_back(std::move(desc));
+        }
+        return out;
+    }
+
+    /// Classify a node by its electrical role for layout consumers.
+    /// Returns `Ground` for `circuit.ground()`, `SourcePos`/`SourceNeg`
+    /// for terminals of any voltage source variant, `Load` for the
+    /// non-ground end of any resistor whose other terminal is ground,
+    /// and `Internal` otherwise. Returns nullopt only for node IDs
+    /// outside `[ground(), num_nodes())`.
+    [[nodiscard]] std::optional<NodeRole> node_position_hint(Index node_id) const {
+        if (node_id == ground()) {
+            return NodeRole::Ground;
+        }
+        if (node_id < 0 || node_id >= num_nodes()) {
+            return std::nullopt;
+        }
+        bool is_load = false;
+        for (std::size_t i = 0; i < devices_.size(); ++i) {
+            const auto& conn = connections_[i];
+            std::optional<NodeRole> role = std::visit(
+                [&](const auto& dev) -> std::optional<NodeRole> {
+                    using T = std::decay_t<decltype(dev)>;
+                    if constexpr (std::is_same_v<T, VoltageSource>
+                               || std::is_same_v<T, PWMVoltageSource>
+                               || std::is_same_v<T, SineVoltageSource>
+                               || std::is_same_v<T, PulseVoltageSource>) {
+                        if (conn.nodes.size() >= 2) {
+                            if (conn.nodes[0] == node_id) return NodeRole::SourcePos;
+                            if (conn.nodes[1] == node_id) return NodeRole::SourceNeg;
+                        }
+                    } else if constexpr (std::is_same_v<T, Resistor>) {
+                        if (conn.nodes.size() == 2) {
+                            const bool a_is_ground = (conn.nodes[0] == ground());
+                            const bool b_is_ground = (conn.nodes[1] == ground());
+                            if ((conn.nodes[0] == node_id && b_is_ground)
+                             || (conn.nodes[1] == node_id && a_is_ground)) {
+                                is_load = true;
+                            }
+                        }
+                    }
+                    return std::nullopt;
+                },
+                devices_[i]);
+            if (role) return role;
+        }
+        if (is_load) return NodeRole::Load;
+        return NodeRole::Internal;
     }
 
     /// Canonical mixed-domain phase order used by the runtime scheduler.

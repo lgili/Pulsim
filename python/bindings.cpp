@@ -1261,6 +1261,20 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("domain", &VirtualChannelMetadata::domain)
         .def_readwrite("nodes", &VirtualChannelMetadata::nodes);
 
+    // -------------------------------------------------------------------------
+    // Component introspection (add-schematic-rendering Phase 1)
+    // -------------------------------------------------------------------------
+    py::class_<ComponentDescriptor>(v2, "ComponentDescriptor",
+        "Read-only descriptor for one physical device in a Circuit "
+        "(name, canonical kind, terminal node indices, best-effort param map).")
+        .def_readonly("name", &ComponentDescriptor::name)
+        .def_readonly("kind", &ComponentDescriptor::kind)
+        .def_readonly("nodes", &ComponentDescriptor::nodes)
+        .def_readonly("params", &ComponentDescriptor::params)
+        .def("__repr__", [](const ComponentDescriptor& d) {
+            return "<ComponentDescriptor name='" + d.name + "' kind='" + d.kind + "'>";
+        });
+
     // =========================================================================
     // Runtime Circuit Builder (Phase 3)
     // =========================================================================
@@ -1288,6 +1302,29 @@ void init_v2_module(py::module_& v2) {
              "Get signal names in state-vector order")
         .def("initial_state", &Circuit::initial_state,
              "Build initial state vector from device initial conditions")
+        // Component introspection (add-schematic-rendering Phase 1)
+        .def("num_components", &Circuit::num_components,
+             "Number of physical devices added via add_* calls.")
+        .def("components", &Circuit::components,
+             "Snapshot list of ComponentDescriptor in insertion order. "
+             "Each entry exposes name, kind, nodes, params.")
+        .def("node_position_hint",
+             [](const Circuit& c, Index node_id) -> py::object {
+                 auto role = c.node_position_hint(node_id);
+                 if (!role) return py::none();
+                 switch (*role) {
+                     case NodeRole::Ground:     return py::str("ground");
+                     case NodeRole::SourcePos:  return py::str("source_pos");
+                     case NodeRole::SourceNeg:  return py::str("source_neg");
+                     case NodeRole::Load:       return py::str("load");
+                     case NodeRole::Internal:   return py::str("internal");
+                 }
+                 return py::none();
+             },
+             py::arg("node_id"),
+             "Classify a node as one of "
+             "'ground' | 'source_pos' | 'source_neg' | 'load' | 'internal'. "
+             "Returns None for node IDs outside the circuit.")
         // Device addition
         .def("add_resistor",
              py::overload_cast<const std::string&, Index, Index, Real>(

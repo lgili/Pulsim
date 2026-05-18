@@ -50,6 +50,9 @@ dist/
 # Jupyter
 .ipynb_checkpoints/
 
+# Hypothesis (property-based testing cache)
+.hypothesis/
+
 # CMake API (scikit-build)
 .cmake/
 
@@ -63,3 +66,7 @@ examples/python/*.png
 # Parity dashboard outputs
 benchmarks/parity_dashboard_out/
 benchmarks/parity_out/
+
+# Node.js (elkjs for pulsim.schematic ELK backend)
+node_modules/
+package-lock.json
