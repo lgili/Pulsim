@@ -37,10 +37,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install system packages
+        # NOTE: gcc-13 (not clang-17) is the known-good toolchain for the
+        # PULSIM_BUILD_PYTHON=ON build on ubuntu-24.04 — the default clang-17
+        # + libstdc++-14 combination hits a `<tuple>` instantiation bug in
+        # `std::unordered_map<std::string, double>` paths reached by
+        # `_pulsim` bindings. The repository's `python-tests` job already
+        # pins gcc-13 for the same reason; we mirror that choice here.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev \
+            cmake ninja-build gcc-13 g++-13 \
             libsuitesparse-dev libeigen3-dev librsvg2-bin
 
       - uses: actions/setup-python@v5
@@ -56,13 +62,13 @@ jobs:
 
       - name: Configure CMake + build pulsim
         env:
-          CC: clang-17
-          CXX: clang++-17
+          CC: gcc-13
+          CXX: g++-13
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang-17 \
-            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DCMAKE_C_COMPILER=gcc-13 \
+            -DCMAKE_CXX_COMPILER=g++-13 \
             -DPULSIM_BUILD_PYTHON=ON \
             -DPython3_EXECUTABLE=$(which python3)
           cmake --build build --target _pulsim -j
