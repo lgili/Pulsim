@@ -1,0 +1,73 @@
+# Refrigerator compressor — fixed-frequency "CC convencional" topology.
+#
+# Models a typical domestic refrigerator:
+#   * 220 V / 60 Hz line supply
+#   * Single-phase induction motor (PSC topology) — the legacy
+#     compressor convencional that's still the workhorse of pre-
+#     inverter fridges and freezers.
+#   * Reciprocating piston compressor with R600a (isobutane) refrigerant
+#     — the modern domestic-refrigeration standard.
+#
+# Run with the Python YAML loader:
+#
+#   import pulsim as ps
+#   ckt, _ = ps.YamlParser().load_file("examples/refrigerator_compressor_cc.yaml")
+#   ps.Simulator(ckt, ps.SimulationOptions()).run_transient()
+#   print("ω =", ckt.single_phase_im_omega("M_compressor"), "rad/s")
+#
+# See docs/compressor-and-refrigerant-load.md for the full physics.
+
+schema: pulsim-v1
+version: 1
+
+simulation:
+  tstart: 0.0
+  tstop: 0.2          # 12 line cycles at 60 Hz
+  dt: 5e-5
+  step_mode: fixed
+
+components:
+  # ---- Line supply (220 V RMS / 60 Hz) ----
+  - type: voltage_source
+    name: V_line
+    nodes: [line, 0]
+    waveform:
+      type: sine
+      amplitude: 311.13   # 220 V RMS × √2
+      frequency: 60.0
+
+  # ---- 1φ PSC induction motor (CC compressor motor) ----
+  - type: single_phase_induction_motor
+    name: M_compressor
+    nodes: [line, 0]
+    # Main winding (α-axis)
+    R_s_main: 10.0
+    L_s_main: 50e-3
+    # Auxiliary winding (β-axis) + permanent run capacitor
+    R_s_aux: 20.0
+    L_s_aux: 80e-3
+    C_run: 4e-6
+    # Rotor (squirrel cage, referred to stator)
+    R_r: 8.0
+    L_r: 55e-3
+    L_m: 50e-3
+    # Mechanical
+    pole_pairs: 2       # 4-pole = 2 pole pairs (typical fridge)
+    J: 1e-4
+    b_friction: 1e-4
+    friction_coulomb: 0.05
+
+  # ---- Reciprocating compressor with R600a refrigerant ----
+  - type: compressor_load
+    name: COMP1
+    motor: M_compressor
+    refrigerant: R600a            # seeds polytropic_n + cycle pressures
+    topology: Reciprocating
+    num_cylinders: 1
+    displacement_m3: 6.0e-6       # 6 cm³ per revolution
+    b_friction: 5e-4
+    tau_coulomb: 0.02
+    # Inherited from refrigerant table:
+    #   polytropic_n   = 1.13   (R600a)
+    #   P_suction_Pa   = 5.9e4  (0.59 bar)
+    #   P_discharge_Pa = 5.3e5  (5.30 bar)

@@ -34,6 +34,7 @@ PULSIM_EXAMPLE_NOPLOT=1 python 01_ac_sweep_rc.py
 | 09 | `09_robustness_wrapper.py` | `pulsim.run_transient(robust=True)` retry loop + Newton/linear-solver auto-tune. | [`docs/robustness-policy.md`](../../docs/robustness-policy.md) |
 | 10 | `10_linear_solver_cache.py` | `BackendTelemetry.linear_factor_cache_*` hit-rate readout on a switching converter (≥ 97 % hit rate after warm-up). | [`docs/linear-solver-cache.md`](../../docs/linear-solver-cache.md) |
 | 11 | `11_yaml_ac_analysis.py` | Load circuit from YAML via `pulsim.YamlParser` then dispatch a Python-built `AcSweepOptions` (the `analysis:` block parser is shipped C++-side; the Python binding for `options.ac_sweeps` is a deferred follow-up). | [`docs/ac-analysis.md`](../../docs/ac-analysis.md) |
+| 14 | `14_refrigerator_compressor.py` | End-to-end domestic refrigerator: 1φ PSC induction motor (CC convencional) + Reciprocating compressor with R600a refrigerant — prints analytical compression torque + transient slip / speed / cap-voltage. Pair with [`examples/refrigerator_compressor_cc.yaml`](../refrigerator_compressor_cc.yaml). | [`docs/compressor-and-refrigerant-load.md`](../../docs/compressor-and-refrigerant-load.md) |
 
 ## Outputs
 

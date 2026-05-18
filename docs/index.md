@@ -116,11 +116,13 @@
     ---
 
     Vendor MOSFET / IGBT presets, converter templates (buck / boost /
-    full-bridge / LLC), PMSM / induction motor models, and three-phase
-    grid primitives (sources, PLLs, grid-following + grid-forming
-    inverters).
+    full-bridge / LLC), seven motor families (DC, PMSM, PMSM-FOC,
+    BLDC, 3φ and 1φ induction, mechanical), refrigeration compressor
+    loads (Reciprocating / Rotary / Scroll, with a curated refrigerant
+    table for R600a / R134a / R290 / R32 / R744), and three-phase grid
+    primitives (sources, PLLs, grid-following + grid-forming inverters).
 
-    [Catalog Devices](catalog-devices.md) · [Converter Templates](converter-templates.md) · [Motor Models](motor-models.md) · [Three-Phase Grid](three-phase-grid.md)
+    [Catalog Devices](catalog-devices.md) · [Converter Templates](converter-templates.md) · [Motor Models](motor-models.md) · [Compressor + Refrigerant Load](compressor-and-refrigerant-load.md) · [Three-Phase Grid](three-phase-grid.md)
 
 - :material-shield-check-outline: **Benchmark dashboards**
 
@@ -171,6 +173,7 @@ If that prints a version string, you're set. Otherwise see
 |---|---|
 | Buck / boost / LLC / FB converter | [Converter Templates](converter-templates.md), [Catalog Devices](catalog-devices.md) |
 | Three-phase / motor drives / vector control | [Three-Phase Grid](three-phase-grid.md), [Motor Models](motor-models.md), [Control Blocks](control-blocks-reference.md) |
+| Refrigeration / fridge / freezer compressor (CC convencional or inverter VCC) | [Compressor + Refrigerant Load](compressor-and-refrigerant-load.md), [Motor Models](motor-models.md) |
 | Magnetics design (saturation, core loss) | [Magnetic Models](magnetic-models.md), [KPI Reference](kpi-reference.md) |
 | Thermal margin sizing | [Electrothermal Workflow](electrothermal-workflow.md), [KPI Reference](kpi-reference.md) |
 | Closed-loop tuning | [AC Analysis](ac-analysis.md), [FRA](fra.md) |

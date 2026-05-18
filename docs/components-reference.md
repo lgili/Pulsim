@@ -44,6 +44,8 @@ Every component is a YAML map with at least `type`, `name`, and `nodes`:
 | Sources | `voltage_source` (DC / PWM / sine / pulse), `current_source` |
 | Switching | `diode`, `switch`, `vcswitch`, `mosfet` (`nmos` / `pmos`), `igbt`, `bjt_npn` ⚠, `bjt_pnp` ⚠, `thyristor` ⚠, `triac` ⚠ |
 | Protection | `fuse` ⚠, `circuit_breaker` ⚠, `relay` ⚠ |
+| Motors / mechanical | `dc_motor`, `pmsm`, `pmsm_foc`, `bldc_motor`, `induction_motor`, `single_phase_induction_motor`, `mechanical` |
+| Compressor load | `compressor_load` (attaches to a motor by name) |
 | Probes (no stamp) | `voltage_probe`, `current_probe`, `power_probe`, `electrical_scope`, `thermal_scope` |
 
 ---
@@ -633,7 +635,202 @@ Output channels: `<name>.state` (coil energized), `<name>.no_state`,
 
 ---
 
-## 5. Probes & scopes (no stamp)
+## 5. Motors, mechanical, and compressor load
+
+Seven motor / mechanical families plug into the same DeviceVariant
+walker as the electrical primitives. See the
+[Motor Models](motor-models.md) page for the full physics and the
+[Compressor + Refrigerant Load](compressor-and-refrigerant-load.md)
+page for the refrigeration-load layer.
+
+### `dc_motor`
+
+Brushed DC motor (separately-excited armature). 2 pins (armature+, armature−).
+
+```yaml
+- type: dc_motor
+  name: M1
+  nodes: [vin, vneg]
+  R_a: 0.5
+  L_a: 1e-3
+  K_e: 0.05
+  K_t: 0.05
+  J: 1e-4
+  b: 1e-5
+  omega_init: 0.0
+```
+
+Aliases: `dcmotor`, `dc-motor`.
+
+### `pmsm`
+
+Sinusoidal-back-EMF Permanent Magnet Synchronous Motor (SPM or IPM
+via `Ld ≠ Lq`). 4 pins (A, B, C, neutral).
+
+```yaml
+- type: pmsm
+  name: M1
+  nodes: [a, b, c, n]
+  Rs: 0.5
+  Ld: 2e-3
+  Lq: 2e-3
+  psi_pm: 0.05
+  pole_pairs: 4
+  J: 1e-3
+  b_friction: 1e-4
+```
+
+Aliases: `pmsm_dynamic`.
+
+### `pmsm_foc` (0 pins — signal-domain controller)
+
+FOC current loop with pole-zero cancellation tuning. Zero electrical
+pins (`nodes: []` or omit entirely).
+
+```yaml
+- type: pmsm_foc
+  name: Ctrl1
+  Rs: 0.5
+  Ld: 2e-3
+  Lq: 2e-3
+  psi_pm: 0.05
+  pole_pairs: 4
+  J: 1e-3
+  b_friction: 1e-4
+  bandwidth_hz: 1000
+  Vd_min: -50
+  Vd_max:  50
+  Vq_min: -50
+  Vq_max:  50
+```
+
+Aliases: `pmsmfoc`, `pmsm-foc`, `foc_current_loop`.
+
+### `bldc_motor`
+
+Trapezoidal-back-EMF BLDC motor. 4 pins (A, B, C, neutral).
+
+```yaml
+- type: bldc_motor
+  name: M1
+  nodes: [a, b, c, n]
+  R_s: 5.0
+  L_s: 8e-3
+  K_e_peak: 0.012
+  pole_pairs: 2
+  J: 5e-5
+  b_friction: 1e-5
+  friction_coulomb: 0.0
+```
+
+Aliases: `bldcmotor`, `bldc`.
+
+### `induction_motor`
+
+3φ squirrel-cage induction motor (αβ frame with rotor flux state).
+4 pins (A, B, C, neutral).
+
+```yaml
+- type: induction_motor
+  name: M1
+  nodes: [a, b, c, n]
+  R_s: 1.0
+  R_r: 1.5
+  L_s: 0.15
+  L_r: 0.15
+  L_m: 0.14
+  pole_pairs: 2
+  J: 0.01
+  b_friction: 1e-3
+```
+
+Aliases: `inductionmotor`, `induction`, `im`, `asyncmotor`.
+
+### `single_phase_induction_motor`
+
+Permanent Split Capacitor (PSC) 1φ induction motor — the *compressor
+convencional* (CC) motor used in legacy domestic refrigerators and
+freezers. **2 pins** (line, neutral); the run capacitor and auxiliary
+winding are internal to the device.
+
+```yaml
+- type: single_phase_induction_motor
+  name: M_cc
+  nodes: [line, 0]
+  R_s_main: 10.0
+  L_s_main: 50e-3
+  R_s_aux:  20.0
+  L_s_aux:  80e-3
+  C_run:    4e-6
+  R_r:      8.0
+  L_r:      55e-3
+  L_m:      50e-3
+  pole_pairs: 2
+  J: 1e-4
+  b_friction: 1e-4
+  friction_coulomb: 0.05
+```
+
+Aliases: `single_phase_im`, `psc_motor`, `cc_compressor_motor`.
+
+### `mechanical` (0 pins — shaft only)
+
+Standalone shaft / inertia block (used for multi-shaft layouts or
+when you want a pure mechanical load without an electrical motor).
+Zero electrical pins.
+
+```yaml
+- type: mechanical
+  name: Shaft1
+  J: 1e-3
+  b_friction: 1e-4
+  friction_coulomb: 0.0
+  omega_init: 0.0
+  theta_init: 0.0
+  tau_load_const: 0.5
+  tau_load_quad_coeff: 0.0
+```
+
+Aliases: `mechanical_device`, `shaft_device`.
+
+### `compressor_load` (0 pins — refrigeration load)
+
+Attaches a polytropic refrigeration-cycle torque profile to a
+previously-registered motor by name. Zero electrical pins.
+
+```yaml
+- type: compressor_load
+  name: COMP1
+  motor: M_cc                      # required — references a motor
+  refrigerant: R600a               # seeds polytropic_n + cycle pressures
+  topology: Reciprocating          # or Rotary / Scroll
+  num_cylinders: 1
+  displacement_m3: 6.0e-6
+  P_suction_Pa: 7.0e4              # override refrigerant default
+  P_discharge_Pa: 8.0e5            # override refrigerant default
+  polytropic_n: 1.13               # override refrigerant default
+  b_friction: 1e-3
+  tau_coulomb: 0.05
+  ripple_amplitude: 0.5
+```
+
+Aliases: `compressor`, `refrigeration_compressor`.
+
+Refrigerant table (`refrigerant:` field):
+
+| Value | `polytropic_n` | Typical use |
+|---|---|---|
+| `R600a` | 1.13 | Modern domestic fridge / freezer |
+| `R134a` | 1.30 | Legacy domestic / automotive AC |
+| `R290`  | 1.18 | EU domestic freezer / chiller |
+| `R32`   | 1.30 | Residential split AC |
+| `R744`  | 1.30 | Transcritical CO₂ heat pump |
+
+Unknown refrigerant strings fall back to `R600a` defaults.
+
+---
+
+## 6. Probes & scopes (no stamp)
 
 Probes don't contribute to the MNA — they're observation-only blocks
 that emit channels in the trace CSV alongside electrical state.
@@ -694,7 +891,7 @@ electrothermal port.
 
 ---
 
-## 6. C++ `Params` structs (Python API)
+## 7. C++ `Params` structs (Python API)
 
 These are the canonical defaults applied by the C++ device constructors.
 When you build a circuit directly from Python (skipping YAML), pass these
@@ -717,10 +914,18 @@ structs to the `add_*` methods.
 | `SineParams` | `amplitude=1, offset=0, frequency=50, phase=0` |
 | `PulseParams` | `v_initial=0, v_pulse=1, t_delay=0, t_rise=1e-9, t_fall=1e-9, t_width=1e-6, period=0` |
 | `RampParams` *(C++ only — no YAML path)* | `v_min=0, v_max=1, frequency=10e3, phase=0, triangle=false` |
+| `motors::DcMotorParams` | `R_a=0.5, L_a=1e-3, K_e=K_t=0.05, J=1e-4, b=1e-5` |
+| `motors::PmsmParams` | `Rs=0.5, Ld=Lq=2e-3, psi_pm=0.05, pole_pairs=4, J=1e-3, b_friction=1e-4` |
+| `motors::BldcMotorParams` | `R_s=5.0, L_s=8e-3, K_e_peak=0.012, pole_pairs=2, J=5e-5, b_friction=1e-5` |
+| `motors::InductionMotorParams` | `R_s=1.0, R_r=1.5, L_s=L_r=0.15, L_m=0.14, pole_pairs=2, J=0.01, b_friction=1e-3` |
+| `motors::SinglePhaseInductionMotorParams` | `R_s_main=10, L_s_main=50m, R_s_aux=20, L_s_aux=80m, C_run=4u, R_r=8, L_r=55m, L_m=50m, pole_pairs=2, J=1e-4` |
+| `MechanicalDevice::Params` | `J=1e-3, b_friction=1e-4, friction_coulomb=0` (via embedded `Shaft`) |
+| `PmsmFocDevice::Params` | `motor` (see PmsmParams) + `foc.bandwidth_hz=1000, foc.Vd/Vq_min/max=±50` |
+| `loads::CompressorParams` | `topology=Reciprocating, num_cylinders=1, displacement_m3=6e-6, P_suction_Pa=7e4, P_discharge_Pa=8e5, polytropic_n=1.13, b_friction=1e-3, tau_coulomb=0.05, ripple_amplitude=0.5` |
 
 ---
 
-## 7. Stamp-domain summary
+## 8. Stamp-domain summary
 
 The fourteen YAML types that contribute directly to MNA (G and b):
 
@@ -740,6 +945,20 @@ The fourteen YAML types that contribute directly to MNA (G and b):
 | 12 | `transformer` | 4 | yes | no | — |
 | 13 | `snubber_rc` | 2 | yes | yes | — |
 | 14 | `bjt_npn`/`bjt_pnp` ⚠ | 3 | no | no | yes |
+| 15 | `dc_motor` | 2 | yes | yes | — |
+| 16 | `pmsm` | 4 | yes | yes (back-EMF) | — |
+| 17 | `bldc_motor` | 4 | yes | yes (back-EMF) | — |
+| 18 | `induction_motor` | 4 | yes | yes (rotor flux) | — |
+| 19 | `single_phase_induction_motor` | 2 | yes | yes (PSC + rotor flux) | — |
+
+Signal-domain devices (zero electrical pins — no MNA contribution,
+walker still calls their `advance_state`):
+
+| YAML type | Purpose |
+|---|---|
+| `mechanical` | Shaft / inertia block for multi-shaft layouts |
+| `pmsm_foc` | FOC current loop controller (reads motor state, outputs Vd/Vq refs) |
+| `compressor_load` | Attaches a polytropic refrigeration-load profile to a motor |
 
 Virtual electrical-domain wrappers (no extra stamps; they perturb a base
 device):
@@ -766,6 +985,11 @@ device):
   callable from Python.
 - [Magnetic Models](magnetic-models.md) — saturating-inductor BH curve,
   transformer details, Steinmetz core-loss.
+- [Motor Models](motor-models.md) — full physics + validation for the
+  seven motor families above.
+- [Compressor + Refrigerant Load](compressor-and-refrigerant-load.md) —
+  polytropic refrigeration cycle, the refrigerant table (R600a, R134a,
+  R290, R32, R744), and end-to-end fridge-compressor recipes.
 - [Electrothermal Workflow](electrothermal-workflow.md) — how the
   `thermal:` block on MOSFET/IGBT works end-to-end.
 - [GUI Backend Parity](gui-component-parity.md) — table mapping every
