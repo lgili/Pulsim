@@ -129,6 +129,7 @@ nav:
       - FMI Export: fmi-export.md
       - Automatic Differentiation: automatic-differentiation.md
       - PWL Switching Engine: pwl-switching-migration.md
+      - Component Models Audit: component-models-audit.md
       - Convergence Tuning: convergence-tuning-guide.md
       - Linear-Solver Cache: linear-solver-cache.md
       - Robustness Policy: robustness-policy.md
