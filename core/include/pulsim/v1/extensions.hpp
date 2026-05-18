@@ -422,6 +422,23 @@ template<typename Device>
             ext.display_name = "CG";
             ext.capabilities = {"iterative", "spd_only", "preconditioned"};
             break;
+        // Phase 8 abstract values — extensions for these are advertised
+        // as virtual selectors that resolve at runtime.
+        case LinearSolverKind::Auto:
+            ext.extension_id = "auto";
+            ext.display_name = "Auto";
+            ext.capabilities = {"virtual", "size_adaptive"};
+            break;
+        case LinearSolverKind::Direct:
+            ext.extension_id = "direct";
+            ext.display_name = "Direct";
+            ext.capabilities = {"virtual", "direct"};
+            break;
+        case LinearSolverKind::Iterative:
+            ext.extension_id = "iterative";
+            ext.display_name = "Iterative";
+            ext.capabilities = {"virtual", "iterative"};
+            break;
     }
     return ext;
 }

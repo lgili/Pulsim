@@ -103,8 +103,31 @@ struct IterativeSolverConfig {
 // =============================================================================
 // Runtime Linear Solver Selection
 // =============================================================================
-
+//
+// simplify-and-harden-numerical-surface — Phase 8: the recommended
+// user-facing values are now `Auto`, `Direct`, and `Iterative`. The
+// 6 concrete-engine values (SparseLU, EnhancedSparseLU, KLU, GMRES,
+// BiCGSTAB, CG) remain SUPPORTED — internal code and power users
+// who want to force a specific engine keep using them. The
+// auto-selector resolves the abstract values:
+//
+//   - `Auto`      → `Direct` for systems with < 5000 unknowns,
+//                   else `Iterative`
+//   - `Direct`    → best-of(KLU, EnhancedSparseLU, SparseLU) available
+//                   on the current build
+//   - `Iterative` → best-of(GMRES, BiCGSTAB) for the system shape
+//
+// User-facing docs (numerical-configuration.md) lead with the
+// abstract values; the concrete engines stay reachable for power
+// users and for internal callers (auto-selector, fallback stacks,
+// telemetry).
 enum class LinearSolverKind {
+    // Phase 8 abstract values (recommended user surface).
+    Auto,        ///< Let the runtime pick Direct or Iterative by system size.
+    Direct,      ///< Force any direct sparse-LU style solver.
+    Iterative,   ///< Force any iterative Krylov solver.
+
+    // Concrete engines (kept for power users + internal use).
     SparseLU,
     EnhancedSparseLU,
     KLU,
@@ -117,18 +140,65 @@ enum class LinearSolverKind {
 /// when iterative. Used by Phase 6's iterative-refinement path to
 /// decide whether to run the post-solve residual check (iterative
 /// solvers apply equivalent refinement internally).
+///
+/// Phase 8: `Auto` returns `true` (the conservative path — refinement
+/// is harmless on iterative-resolved Auto solves because the
+/// auto-selector also routes to a direct engine when N is small).
+/// Power users who need precise control should pick an explicit
+/// engine.
 [[nodiscard]] constexpr bool is_direct_solver(LinearSolverKind k) noexcept {
     switch (k) {
+        case LinearSolverKind::Auto:
+        case LinearSolverKind::Direct:
         case LinearSolverKind::SparseLU:
         case LinearSolverKind::EnhancedSparseLU:
         case LinearSolverKind::KLU:
             return true;
+        case LinearSolverKind::Iterative:
         case LinearSolverKind::GMRES:
         case LinearSolverKind::BiCGSTAB:
         case LinearSolverKind::CG:
             return false;
     }
     return false;
+}
+
+/// Phase 8 auto-selector: resolve abstract `Auto`/`Direct`/`Iterative`
+/// values to a concrete engine in a single call (transitive — Auto
+/// first picks Direct or Iterative by size, then resolves the
+/// resulting abstract value to the concrete engine).
+///
+/// The threshold (5000 unknowns) matches the documented contract:
+/// small systems get the lower-overhead direct path, large systems
+/// get the memory-friendly iterative path.
+///
+/// Concrete engines pass through unchanged.
+[[nodiscard]] constexpr LinearSolverKind resolve_linear_solver_kind(
+        LinearSolverKind requested,
+        std::size_t system_size = 0) noexcept {
+    constexpr std::size_t kDirectIterativeThreshold = 5000;
+
+    // First pass: Auto → Direct or Iterative.
+    LinearSolverKind stage = requested;
+    if (stage == LinearSolverKind::Auto) {
+        stage = (system_size < kDirectIterativeThreshold)
+            ? LinearSolverKind::Direct
+            : LinearSolverKind::Iterative;
+    }
+
+    // Second pass: Direct → KLU; Iterative → GMRES.
+    switch (stage) {
+        case LinearSolverKind::Direct:
+            // Prefer KLU when available; the build-time fallback
+            // (no KLU) resolves to EnhancedSparseLU / SparseLU via
+            // the existing RuntimeLinearSolver dispatch.
+            return LinearSolverKind::KLU;
+        case LinearSolverKind::Iterative:
+            return LinearSolverKind::GMRES;
+        default:
+            // Concrete engine — pass through.
+            return stage;
+    }
 }
 
 struct LinearSolverTelemetry {
@@ -1698,6 +1768,9 @@ private:
     }
 
     bool analyze_with(LinearSolverKind kind, const SparseMatrix& A) {
+        // Phase 8: abstract values resolve to concrete engines.
+        kind = resolve_linear_solver_kind(
+            kind, static_cast<std::size_t>(A.rows()));
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->analyze(A);
@@ -1712,11 +1785,19 @@ private:
             case LinearSolverKind::CG:
                 if (!allow_cg(A)) return false;
                 return cg_->analyze(A);
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                // Defensive: `resolve_*` above guarantees these don't
+                // reach the switch, but be explicit for the compiler.
+                return false;
         }
         return false;
     }
 
     bool factorize_with(LinearSolverKind kind, const SparseMatrix& A) {
+        kind = resolve_linear_solver_kind(
+            kind, static_cast<std::size_t>(A.rows()));
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->factorize(A);
@@ -1731,11 +1812,17 @@ private:
             case LinearSolverKind::CG:
                 if (!allow_cg(A)) return false;
                 return cg_->factorize(A);
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                return false;
         }
         return false;
     }
 
     [[nodiscard]] LinearSolveResult solve_with(LinearSolverKind kind, const Vector& b) {
+        kind = resolve_linear_solver_kind(
+            kind, static_cast<std::size_t>(b.size()));
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->solve(b);
@@ -1749,11 +1836,19 @@ private:
                 return bicgstab_->solve(b);
             case LinearSolverKind::CG:
                 return cg_->solve(b);
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                return LinearSolveResult::failure(
+                    "Abstract solver kind did not resolve to a concrete engine");
         }
         return LinearSolveResult::failure("Unknown linear solver");
     }
 
     [[nodiscard]] bool is_singular_with(LinearSolverKind kind) const {
+        // Phase 8: abstract Auto/Direct/Iterative don't have a single
+        // backing solver — they get resolved at analyze/factorize time.
+        // Treat them as "unknown singularity" → conservatively false.
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->is_singular();
@@ -1767,6 +1862,10 @@ private:
                 return bicgstab_->is_singular();
             case LinearSolverKind::CG:
                 return cg_->is_singular();
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                return false;
         }
         return true;
     }

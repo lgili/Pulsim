@@ -219,7 +219,21 @@ void init_v2_module(py::module_& v2) {
         .value("Diverging", SolverStatus::Diverging)
         .export_values();
 
-    py::enum_<DCStrategy>(v2, "DCStrategy", "DC analysis convergence strategy")
+    py::enum_<DCStrategy>(v2, "DCStrategy",
+            "DC analysis convergence strategy. Recommended values: "
+            "`Auto` (orchestrates the full ladder) and `Override` "
+            "(skip the ladder and run only `strategy_override`). The "
+            "5 concrete strategies below stay supported for power "
+            "users and internal callers.")
+        .value("Auto",            DCStrategy::Auto,
+               "Try Direct → SourceStepping → GminStepping → "
+               "PseudoTransient → Homotopy in order until one succeeds.")
+        .value("Override",        DCStrategy::Override,
+               "Skip the Auto ladder and run only "
+               "`DCConvergenceConfig::strategy_override`. Useful for "
+               "debugging or for power users who know which strategy "
+               "their topology needs.")
+        // Concrete strategies.
         .value("Direct",          DCStrategy::Direct)
         .value("GminStepping",    DCStrategy::GminStepping)
         .value("SourceStepping",  DCStrategy::SourceStepping)
@@ -229,7 +243,6 @@ void init_v2_module(py::module_& v2) {
                "continuation: smoothly turns nonlinear devices on from "
                "g_off (linear MNA) to full nonlinear behavior. Last-resort "
                "in the Auto ladder.")
-        .value("Auto",            DCStrategy::Auto)
         .export_values();
 
     py::enum_<RLCDamping>(v2, "RLCDamping", "RLC circuit damping type")
@@ -2308,13 +2321,27 @@ void init_v2_module(py::module_& v2) {
             "accept Newton steps more aggressively; larger values backtrack "
             "more often. Standard textbook value is 1e-4.");
 
-    py::enum_<LinearSolverKind>(v2, "LinearSolverKind", "Linear solver types")
-        .value("SparseLU", LinearSolverKind::SparseLU)
+    py::enum_<LinearSolverKind>(v2, "LinearSolverKind",
+            "Linear solver kind. Recommended values: `Auto`, `Direct`, "
+            "`Iterative` (Phase 8 — auto-selector resolves to a concrete "
+            "engine by system size). The 6 concrete engines below stay "
+            "supported for power users and internal callers.")
+        // Phase 8 abstract values (recommended user surface).
+        .value("Auto",      LinearSolverKind::Auto,
+               "Let the runtime pick Direct or Iterative by system size "
+               "(< 5000 unknowns → Direct, else Iterative).")
+        .value("Direct",    LinearSolverKind::Direct,
+               "Force a direct sparse-LU style solver (KLU when available, "
+               "else EnhancedSparseLU / SparseLU).")
+        .value("Iterative", LinearSolverKind::Iterative,
+               "Force an iterative Krylov solver (GMRES preferred).")
+        // Concrete engines.
+        .value("SparseLU",         LinearSolverKind::SparseLU)
         .value("EnhancedSparseLU", LinearSolverKind::EnhancedSparseLU)
-        .value("KLU", LinearSolverKind::KLU)
-        .value("GMRES", LinearSolverKind::GMRES)
-        .value("BiCGSTAB", LinearSolverKind::BiCGSTAB)
-        .value("CG", LinearSolverKind::CG)
+        .value("KLU",              LinearSolverKind::KLU)
+        .value("GMRES",            LinearSolverKind::GMRES)
+        .value("BiCGSTAB",         LinearSolverKind::BiCGSTAB)
+        .value("CG",               LinearSolverKind::CG)
         .export_values();
 
     py::enum_<IterativeSolverConfig::PreconditionerKind>(v2, "PreconditionerKind",
@@ -2547,7 +2574,12 @@ void init_v2_module(py::module_& v2) {
             "Auto ladder; tune ladder_steps (default 5) and "
             "max_newton_per_step (default 10).")
         .def_readwrite("enable_random_restart", &DCConvergenceConfig::enable_random_restart)
-        .def_readwrite("max_strategy_attempts", &DCConvergenceConfig::max_strategy_attempts);
+        .def_readwrite("max_strategy_attempts", &DCConvergenceConfig::max_strategy_attempts)
+        // simplify-and-harden-numerical-surface — Phase 8.
+        .def_readwrite("strategy_override", &DCConvergenceConfig::strategy_override,
+            "When `strategy == DCStrategy.Override`, the orchestrator "
+            "skips the Auto ladder and runs only this specific concrete "
+            "strategy. Defaults to DCStrategy.Direct.");
 
     // simplify-and-harden-numerical-surface — Phase 7: HomotopyConfig.
     py::class_<HomotopyConfig>(v2, "HomotopyConfig",

@@ -104,8 +104,15 @@ struct FallbackPolicyOptions {
 };
 
 struct ModelRegularizationOptions {
-    bool enable_auto = false;
-    bool apply_only_in_recovery = true;
+    // harden-component-models-vs-psim-plecs Phase A6: both defaults
+    // flipped to ON. The per-device-class g_off_min floors below now
+    // apply at the first Newton step (not just on convergence retry),
+    // which masks floating-gate ill-conditioning on MOSFET / IGBT
+    // automatically. Users who need exact `g_off = 1e-12` for
+    // SPICE-parity tests can opt out via
+    // `opts.model_regularization.enable_auto = false`.
+    bool enable_auto = true;
+    bool apply_only_in_recovery = false;
     int retry_threshold = 2;
     int max_escalations = 4;
     Real escalation_factor = 2.0;
@@ -335,6 +342,11 @@ struct SimulationOptions {
     // PWL switching mode default (refactor-pwl-switching-engine, Phase 5).
     // Threads through to Circuit::set_default_switching_mode() at simulator
     // construction. `Auto` resolves to `Behavioral` for backward compat.
+    //
+    // simplify-and-harden-numerical-surface — Phase 11 (BLOCKED): the
+    // flip to Ideal default exposed stability gaps in the PWL Ideal
+    // path on some legacy buck/diode-loss circuits. Phase 11 is on
+    // hold pending PWL hardening; tracked in OpenSpec tasks.md § 11.
     SwitchingMode switching_mode = SwitchingMode::Auto;
 
     // BDF order control (currently supports order 1/2)

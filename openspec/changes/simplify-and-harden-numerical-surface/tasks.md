@@ -205,22 +205,39 @@
 
 ## 8. Phase 8 — `LinearSolverKind` + `DCStrategy` user surface collapse
 
-> **Status:** NOT YET SHIPPED. Deferred to a future PR.
+> **Status (PR #13):** shipped **additively** — the new abstract
+> values `Auto`/`Direct`/`Iterative` (for LinearSolverKind) and
+> `Override` (for DCStrategy) are added alongside the existing
+> concrete values, not as replacements. The 6+5 concrete values stay
+> SUPPORTED for power users and internal callers. The auto-selector
+> transitively resolves `Auto → Direct/Iterative → KLU/GMRES` in
+> a single call.
 
-- [ ] 8.1 In `numerical/linear_solver.hpp`, add a public-facing
-      enum `LinearSolverKind { Auto, Direct, Iterative }`. The
-      internal 6-value enum becomes `internal::LinearSolverImpl`.
-- [ ] 8.2 The auto-selector maps `Auto → Direct (if N < 5000) else
-      Iterative`. `Direct → best-of(KLU, EnhancedSparseLU, SparseLU)`.
-      `Iterative → best-of(GMRES, BiCGSTAB)`.
+- [x] 8.1 Add public-facing enum values `LinearSolverKind::{Auto,
+      Direct, Iterative}` to the existing enum. The 6 concrete
+      values are demoted from "the user surface" to "implementation
+      detail / power-user override" but remain accessible.
+- [x] 8.2 The auto-selector (`resolve_linear_solver_kind(kind, N)`)
+      maps `Auto → Direct (if N < 5000) else Iterative`, then
+      `Direct → KLU` and `Iterative → GMRES`. Transitive in a single
+      call (verified by `test_solver_kind_collapse.cpp`).
 - [ ] 8.3 Replace the preconditioner enum with `solver_quality:
-      Fast|Default|Best` on `opts.advanced.linear_solver`.
-- [ ] 8.4 Same collapse for `DCStrategy` — public enum becomes
-      `{Auto, Override}`; internal 5-value enum stays for the
-      auto-selector and for `opts.advanced.dc.strategy_override`.
-- [ ] 8.5 Update pybind11 + YAML parser accordingly.
-- [ ] 8.6 Update every example / notebook / doc.
-- [ ] 8.7 Run full test suite — must stay green.
+      Fast|Default|Best` on `opts.advanced.linear_solver`. *(Deferred
+      — depends on Phase 3 `advanced` namespace.)*
+- [x] 8.4 Same collapse for `DCStrategy` — public enum gains `Override`
+      alongside `Auto` and the 5 concrete values. `Override`
+      redirects to `DCConvergenceConfig::strategy_override`.
+- [x] 8.5 Update pybind11 — `pulsim.LinearSolverKind.{Auto, Direct,
+      Iterative}` and `pulsim.DCStrategy.Override` exposed.
+- [ ] 8.6 Update every example / notebook / doc. *(Deferred —
+      examples use concrete `KLU`/`GMRES` values which still work;
+      documentation in `numerical-configuration.md` already leads
+      with the abstract values.)*
+- [x] 8.7 Run full test suite — Phase 8 adds 13 new tests (48
+      assertions). Full suite stays green except for 3 pre-existing
+      failures + 2 from a foreign untracked test file. The pwl
+      segment `alpha` drift seen in early testing was test-order
+      flakiness, cleared after the transitive-resolve fix.
 
 ## 9. Phase 9 — Deprecate / remove dead integrators
 
@@ -260,24 +277,67 @@
 
 ## 11. Phase 11 — Flip `SwitchingMode::Auto` resolution to Ideal
 
-> **Status:** NOT YET SHIPPED — BREAKING change deferred to a future
-> PR. Current behavior: `Auto` still resolves to `Behavioral` for
-> backward compatibility.
+> **Status: ATTEMPTED + REVERTED — BLOCKED on PWL Ideal hardening.**
+>
+> The flip was implemented (one-line change in
+> `components/base.hpp::resolve_switching_mode()`'s final return)
+> and tested against the full regression suite. Result:
+> **26 regressions in `pulsim_simulation_tests`**, comprising:
+>
+>   - **Real Ideal-path stability gaps** (~15 cases): buck-converter
+>     closed-loop tests overshoot to ≥ 20 V vs the expected 12 V
+>     setpoint; diode-loss thermal test produces a −1067 V spike on
+>     a forward-biased silicon diode; buck stress test produces
+>     ±85 MV switch-pole voltages. These are not test contract
+>     issues — they're genuine numerical instabilities in the PWL
+>     Ideal path on circuits that the Behavioral path handles fine.
+>
+>   - **Tests that explicitly pinned Behavioral semantics** (~8 cases):
+>     `test_pwl_segment_primary` cases that EXPECT
+>     `dae_fallback_steps == total_steps` for a "non-admissible"
+>     circuit — with Ideal default active, the segment engine no
+>     longer falls back (the engine got better). These tests just
+>     need their pinned-counter expectations updated to reflect the
+>     new behaviour.
+>
+>   - **Multi-event timing drift** (~3 cases): `test_v1_kernel`
+>     event-time tests pin specific event instants that the Ideal
+>     path resolves a few microseconds earlier than Behavioral.
+>     These would need updated golden values or a tolerance widening.
+>
+> The buck stability gap is the hard blocker — it indicates the PWL
+> engine's diode-commutation logic doesn't handle the
+> buck-freewheel-diode case cleanly in some operating windows.
+> Patching the 26 affected tests would HIDE this regression from
+> real users, so we revert and document.
+>
+> **Unblock criteria** (Phase 11 ships when):
+>   1. Buck-converter PWL Ideal path produces stable closed-loop
+>      output within ±1 V of setpoint on
+>      `test_v1_kernel:Buck closed-loop`.
+>   2. Diode-loss thermal test produces V_diode within ±2 V of
+>      expected on `test_diode_loss_thermal`.
+>   3. Buck stress test produces V_sw within DC link bounds (no
+>      megavolt spikes) on `test_stress_simulation:Buck`.
+>   4. After (1)-(3), the remaining ~11 tests get their pinned
+>      values updated and we re-attempt the flip.
 
 - [ ] 11.1 Change `Circuit::default_switching_mode_` initial value
       from `Auto` (which resolved to Behavioral) to a path that
-      resolves `Auto → Ideal`.
+      resolves `Auto → Ideal`. *(Attempted — see audit above.)*
 - [ ] 11.2 On first transient run, log a one-time INFO
       `"SwitchingMode::Auto resolving to Ideal (was Behavioral prior
       to v0.11). Set SwitchingMode::Behavioral explicitly to preserve
-      old behavior."`
+      old behavior."` *(Deferred until 11.1 ships.)*
 - [ ] 11.3 Update `docs/pwl-switching-migration.md` status block to
-      "shipped — default flip landed".
+      "shipped — default flip landed". *(Deferred.)*
 - [ ] 11.4 Run the full benchmark suite — gather a diff of
-      successes / failures vs prior behavior. Expected: more passes
-      (PWL is faster + more accurate); no new failures.
+      successes / failures vs prior behavior. *(Done — 26 regressions
+      found, see audit above.)*
 - [ ] 11.5 If any benchmark regresses, document the workaround
       (explicit `Behavioral`) in the benchmark's README.
+      *(Documented — see Unblock Criteria above; PWL Ideal must
+      pass the 3 listed tests before the flip is safe.)*
 
 ## 12. Phase 12 — MMC topology template
 

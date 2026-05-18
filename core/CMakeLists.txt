@@ -94,6 +94,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_armijo_line_search.cpp
         tests/test_homotopy_dc.cpp
         tests/test_iterative_refinement.cpp
+        tests/test_solver_kind_collapse.cpp
     )
 
     target_link_libraries(pulsim_tests
@@ -162,6 +163,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_passives_loss_thermal.cpp
         tests/test_switching_phase4.cpp
         tests/test_component_introspection.cpp
+        tests/test_mosfet_gate_anchor.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

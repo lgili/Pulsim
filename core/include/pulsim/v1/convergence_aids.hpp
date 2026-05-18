@@ -637,7 +637,15 @@ private:
 // =============================================================================
 
 /// Strategy selection for DC analysis
+// simplify-and-harden-numerical-surface — Phase 8: the recommended
+// user-facing values are `Auto` (let the orchestrator pick) and
+// `Override` (the orchestrator skips the ladder and runs only the
+// specific strategy named in `DCConvergenceConfig::strategy_override`).
+// The 5 concrete strategies (Direct, GminStepping, SourceStepping,
+// PseudoTransient, Homotopy) remain SUPPORTED — power users who want
+// to force a specific strategy directly via `strategy` still can.
 enum class DCStrategy {
+    // Concrete strategies.
     Direct,             // Direct Newton solve
     GminStepping,       // Use Gmin stepping
     SourceStepping,     // Use source stepping
@@ -647,7 +655,13 @@ enum class DCStrategy {
                         // devices on from g_off (linear MNA) to full
                         // nonlinear behavior. Last-resort strategy in
                         // the `Auto` ladder.
-    Auto               // Try strategies in order until one works
+    Auto,               // Try strategies in order until one works
+
+    // Phase 8 abstract value: skip the ladder and run only the
+    // strategy named in `DCConvergenceConfig::strategy_override`.
+    // Useful for debugging or for power users who know which
+    // strategy their topology needs.
+    Override
 };
 
 /// simplify-and-harden-numerical-surface — Phase 7.
@@ -671,6 +685,12 @@ struct DCConvergenceConfig {
     HomotopyConfig homotopy_config;
     bool enable_random_restart = true;
     int max_strategy_attempts = 3;
+
+    // simplify-and-harden-numerical-surface — Phase 8: when
+    // `strategy == DCStrategy::Override`, the orchestrator skips
+    // the Auto ladder and runs only this specific strategy.
+    // Ignored when `strategy != Override`.
+    DCStrategy strategy_override = DCStrategy::Direct;
 };
 
 /// Result of DC analysis with convergence aids
@@ -778,8 +798,15 @@ public:
                 result = try_random_restart(num_nodes, num_branches, newton, system_func);
             }
         } else {
-            // Use specified strategy
-            switch (config_.strategy) {
+            // Use specified strategy. simplify-and-harden-numerical-surface
+            // — Phase 8: `Override` redirects to `strategy_override`
+            // (which must name a concrete strategy). Concrete values
+            // dispatch directly.
+            const DCStrategy chosen =
+                (config_.strategy == DCStrategy::Override)
+                    ? config_.strategy_override
+                    : config_.strategy;
+            switch (chosen) {
                 case DCStrategy::Direct:
                     result = try_direct(x_init, newton, system_func);
                     break;
@@ -804,7 +831,15 @@ public:
                             "Homotopy requires scaled system function";
                     }
                     break;
-                default:
+                case DCStrategy::Auto:
+                case DCStrategy::Override:
+                    // `Override` should have been redirected above; if
+                    // `strategy_override` was itself `Override` or
+                    // `Auto`, fall back to a Direct attempt.
+                    result.message =
+                        "DCStrategy::Override resolved to a non-concrete "
+                        "strategy; falling back to Direct.";
+                    result = try_direct(x_init, newton, system_func);
                     break;
             }
         }

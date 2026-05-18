@@ -51,6 +51,15 @@ using Vector = Eigen::VectorXd;
 //                   to Ideal whenever every switching device declares
 //                   supports_pwl.
 //
+//                   simplify-and-harden-numerical-surface — Phase 11
+//                   attempted the flip and discovered the PWL Ideal
+//                   path has stability gaps on some legacy
+//                   buck-converter + diode-loss benchmarks (vout
+//                   overshoots, diode voltage spikes). Phase 11 is
+//                   BLOCKED on PWL Ideal hardening for those topologies;
+//                   tracked in OpenSpec tasks.md § 11 with the audit
+//                   summary.
+//
 // Devices keep their own SwitchingMode field; users override globally via
 // SimulationOptions::switching_mode (separate proposal task) or per-device
 // via the device's set_switching_mode() setter.
