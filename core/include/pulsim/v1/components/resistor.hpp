@@ -132,23 +132,26 @@ public:
         v_last_ = 0.0;
     }
 
-    /// Sample I² · R(T_j) over the past `dt` seconds.
-    /// No-op when R_th_ja == 0 (legacy preserved).
+    /// Sample I² · R(T_j) over the past `dt` seconds. Always tracks
+    /// the conduction integral; `R_th_ja > 0` only controls whether
+    /// T_j evolves and R is temperature-corrected. With R_th_ja == 0
+    /// we use the static `resistance_` so the system summary still
+    /// reports per-resistor losses (matches the per-device accessor).
     void accumulate_loss(Scalar v_resistor, Scalar dt) noexcept {
         if (dt < Scalar{0}) return;
         const Scalar i = (resistance_ > Scalar{0})
             ? v_resistor / resistance_ : Scalar{0};
         v_last_ = v_resistor;
         i_last_ = i;
-        if (R_th_ja_ <= Scalar{0}) {
-            p_last_ = Scalar{0};
-            return;
-        }
-        const Scalar R_eff = R_at_Tj();
+        const Scalar R_eff = (R_th_ja_ > Scalar{0}) ? R_at_Tj() : resistance_;
         const Scalar p = i * i * R_eff;
+        // Trapezoidal time-averaging (see components/mosfet.hpp).
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_last_ + p)
+                           : p;
         p_last_ = p;
-        if (p > Scalar{0}) {
-            e_cond_ += p * dt;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
             if (p > p_peak_) p_peak_ = p;
         }
         t_sim_ += dt;

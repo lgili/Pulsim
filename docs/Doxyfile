@@ -98,7 +98,6 @@ WARN_FORMAT            = "$file:$line: $text"
 #---------------------------------------------------------------------------
 
 INPUT                  = ../core/include \
-                         ../api-grpc/include \
                          ../cli/src \
                          mainpage.md
 INPUT_ENCODING         = UTF-8

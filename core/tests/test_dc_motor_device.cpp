@@ -173,3 +173,53 @@ TEST_CASE("DC motor: rotor angle θ integrates ω over time",
     CHECK(theta_final > 0.0);
     CHECK(theta_final < omega_ss * 0.5);  // can't have travelled more than ω_ss·tstop
 }
+
+// Migrated from `test_pmsm_steady_state.cpp` as part of
+// consolidate-motors-and-three-phase Phase A.2: this test exercises the
+// DC motor's quadratic-load coefficient and belongs alongside the other
+// DC-motor regression cases — it lived in the PMSM steady-state file
+// only because the two helpers shipped in the same release.
+
+TEST_CASE("DC Motor: quadratic load coefficient drops steady-state speed below linear-friction case",
+          "[dc_motor][motor][regression]") {
+    // With τ_load_quad_coeff > 0, the motor sees additional load
+    // proportional to ω², which means steady-state ω is LOWER than the
+    // no-quadratic-load case under the same input voltage.
+    auto measure_omega_ss = [](Real quad_coeff) -> Real {
+        Circuit circuit;
+        const Index n_arm = circuit.add_node("arm");
+        motors::DcMotorParams p{};
+        p.R_a = 0.5;
+        p.L_a = 1e-2;
+        p.K_e = 0.05;
+        p.K_t = 0.05;
+        p.J = 1e-4;
+        p.b = 1e-5;
+        p.tau_load_quad_coeff = quad_coeff;
+        circuit.add_voltage_source("Va", n_arm, Circuit::ground(), 12.0);
+        circuit.add_dc_motor("M1", n_arm, Circuit::ground(), p);
+
+        SimulationOptions opts;
+        opts.tstart = 0.0;
+        opts.tstop = 2.0;     // 2 seconds — settles fully
+        opts.dt = 200e-6;
+        opts.dt_min = 1e-9;
+        opts.dt_max = 200e-6;
+        opts.adaptive_timestep = false;
+        opts.enable_bdf_order_control = false;
+        opts.newton_options.num_nodes = circuit.num_nodes();
+        opts.newton_options.num_branches = circuit.num_branches();
+        Simulator sim(circuit, opts);
+        const auto result = sim.run_transient();
+        REQUIRE(result.success);
+        return circuit.motor_omega("M1");
+    };
+
+    const Real omega_no_quad = measure_omega_ss(0.0);
+    const Real omega_with_quad = measure_omega_ss(1e-5);
+    INFO("ω_ss without quad = " << omega_no_quad << " rad/s, "
+         "with quad (1e-5) = " << omega_with_quad << " rad/s");
+    CHECK(omega_with_quad < omega_no_quad);
+    // The drop should be meaningful (>5%) at this coefficient and speed.
+    CHECK((omega_no_quad - omega_with_quad) / omega_no_quad > 0.05);
+}

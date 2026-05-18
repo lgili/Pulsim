@@ -316,6 +316,20 @@ const std::unordered_map<std::string, std::string>& component_alias_map() {
         add_aliases("pll", {"phase_locked_loop"});
         add_aliases("svm", {"space_vector_modulation", "svpwm"});
 
+        // consolidate-motors-and-three-phase, Phase D: YAML support for the
+        // four electrical motor families integrated as DeviceVariant members
+        // in Phases B.2a and C. Each maps onto the corresponding
+        // `Circuit::add_*` builder; node arity is 2 for DC brush, 4 for
+        // three-phase. The signal-domain devices (`MechanicalDevice`,
+        // `PmsmFocDevice`) have zero electrical pins and need parser
+        // surgery before they accept YAML; they stay reachable through the
+        // C++ / Python API only for now.
+        add_aliases("dc_motor", {"dcmotor", "dc-motor"});
+        add_aliases("pmsm", {"pmsm_dynamic"});
+        add_aliases("bldc_motor", {"bldcmotor", "bldc"});
+        add_aliases("induction_motor", {
+            "inductionmotor", "induction", "im", "asyncmotor"});
+
         return map;
     }();
     return aliases;
@@ -370,6 +384,11 @@ const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>>& comp
         {"thermal_scope", {1, std::numeric_limits<std::size_t>::max()}},
         {"signal_mux", {2, std::numeric_limits<std::size_t>::max()}},
         {"signal_demux", {2, std::numeric_limits<std::size_t>::max()}},
+        // consolidate-motors-and-three-phase Phase D: motor device arities.
+        {"dc_motor", {2, 2}},
+        {"pmsm", {4, 4}},
+        {"bldc_motor", {4, 4}},
+        {"induction_motor", {4, 4}},
         // Three-phase control blocks (Phase 28)
         {"clarke_transform", {3, 3}},
         {"inverse_clarke_transform", {3, 3}},
@@ -1690,7 +1709,26 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              // refactor-pwl-switching-engine, Phase 5.2: per-device override
              // of the simulation-level switching_mode. Accepted on diode,
              // switch, vcswitch, mosfet, igbt; ignored elsewhere.
-             "switching_mode"},
+             "switching_mode",
+             // consolidate-motors-and-three-phase Phase D: motor params.
+             // DC motor: R_a, L_a, K_e, K_t, J, b, tau_load_const/quad,
+             // omega_init, theta_init, i_a_init.
+             // PMSM: Rs, Ld, Lq, psi_pm, pole_pairs, J, b_friction,
+             // omega_init, theta_init.
+             // BLDC: R_s, L_s, K_e_peak, pole_pairs, J, b_friction,
+             // friction_coulomb, tau_load_const, tau_load_quad_coeff.
+             // Induction: R_s, R_r, L_s, L_r, L_m, pole_pairs, J,
+             // b_friction, friction_coulomb, tau_load_const,
+             // tau_load_quad_coeff.
+             "R_a", "L_a", "K_e", "K_t", "tau_load_const",
+             "tau_load_quad_coeff", "omega_init", "theta_init", "i_a_init",
+             "Rs", "Ld", "Lq", "psi_pm", "pole_pairs", "b_friction",
+             "friction_coulomb",
+             "R_s", "L_s", "K_e_peak", "R_r", "L_r", "L_m",
+             // Generic mechanical fields (J = inertia, b = viscous
+             // friction) used by every motor family — the same keys
+             // would otherwise collide with the BJT `beta` block above.
+             "J", "b"},
             "component", errors_, options_.strict);
 
         if (!comp["type"] || !comp["name"]) {
@@ -2013,6 +2051,71 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (!ratio_node) ratio_node = get_param("ratio");
             Real turns_ratio = parse_real(ratio_node, name + ".turns_ratio", errors_);
             circuit.add_transformer(name, node_at(0), node_at(1), node_at(2), node_at(3), turns_ratio);
+        }
+        // consolidate-motors-and-three-phase, Phase D: motor device dispatch.
+        // Maps the YAML `type: <motor>` directly onto the corresponding
+        // `Circuit::add_*` builder. Every numeric field on each motor's
+        // Params struct is forwarded with the same key name used in the C++
+        // struct — see motors/{dc_motor,pmsm,bldc_motor,induction_motor}.hpp
+        // for the authoritative field list.
+        else if (type == "dc_motor") {
+            motors::DcMotorParams p{};
+            if (get_param("R_a")) p.R_a = parse_real(get_param("R_a"), name + ".R_a", errors_);
+            if (get_param("L_a")) p.L_a = parse_real(get_param("L_a"), name + ".L_a", errors_);
+            if (get_param("K_e")) p.K_e = parse_real(get_param("K_e"), name + ".K_e", errors_);
+            if (get_param("K_t")) p.K_t = parse_real(get_param("K_t"), name + ".K_t", errors_);
+            if (get_param("J")) p.J = parse_real(get_param("J"), name + ".J", errors_);
+            if (get_param("b")) p.b = parse_real(get_param("b"), name + ".b", errors_);
+            // Note: DcMotorParams has tau_load_quad_coeff but NOT
+            // tau_load_const. Constant load on a DC motor is set externally
+            // via Circuit::set_dc_motor_tau_load(name, tau) after parsing.
+            if (get_param("tau_load_quad_coeff")) p.tau_load_quad_coeff = parse_real(get_param("tau_load_quad_coeff"), name + ".tau_load_quad_coeff", errors_);
+            if (get_param("omega_init")) p.omega_init = parse_real(get_param("omega_init"), name + ".omega_init", errors_);
+            if (get_param("theta_init")) p.theta_init = parse_real(get_param("theta_init"), name + ".theta_init", errors_);
+            if (get_param("i_a_init")) p.i_a_init = parse_real(get_param("i_a_init"), name + ".i_a_init", errors_);
+            circuit.add_dc_motor(name, node_at(0), node_at(1), p);
+        }
+        else if (type == "pmsm") {
+            motors::PmsmParams p{};
+            p.name = name;
+            if (get_param("Rs")) p.Rs = parse_real(get_param("Rs"), name + ".Rs", errors_);
+            if (get_param("Ld")) p.Ld = parse_real(get_param("Ld"), name + ".Ld", errors_);
+            if (get_param("Lq")) p.Lq = parse_real(get_param("Lq"), name + ".Lq", errors_);
+            if (get_param("psi_pm")) p.psi_pm = parse_real(get_param("psi_pm"), name + ".psi_pm", errors_);
+            if (get_param("pole_pairs")) p.pole_pairs = static_cast<int>(parse_real(get_param("pole_pairs"), name + ".pole_pairs", errors_));
+            if (get_param("J")) p.J = parse_real(get_param("J"), name + ".J", errors_);
+            if (get_param("b_friction")) p.b_friction = parse_real(get_param("b_friction"), name + ".b_friction", errors_);
+            if (get_param("omega_init")) p.omega_init = parse_real(get_param("omega_init"), name + ".omega_init", errors_);
+            if (get_param("theta_init")) p.theta_init = parse_real(get_param("theta_init"), name + ".theta_init", errors_);
+            circuit.add_pmsm(name, node_at(0), node_at(1), node_at(2), node_at(3), p);
+        }
+        else if (type == "bldc_motor") {
+            motors::BldcMotorParams p{};
+            if (get_param("R_s")) p.R_s = parse_real(get_param("R_s"), name + ".R_s", errors_);
+            if (get_param("L_s")) p.L_s = parse_real(get_param("L_s"), name + ".L_s", errors_);
+            if (get_param("K_e_peak")) p.K_e_peak = parse_real(get_param("K_e_peak"), name + ".K_e_peak", errors_);
+            if (get_param("pole_pairs")) p.pole_pairs = static_cast<int>(parse_real(get_param("pole_pairs"), name + ".pole_pairs", errors_));
+            if (get_param("J")) p.J = parse_real(get_param("J"), name + ".J", errors_);
+            if (get_param("b_friction")) p.b_friction = parse_real(get_param("b_friction"), name + ".b_friction", errors_);
+            if (get_param("friction_coulomb")) p.friction_coulomb = parse_real(get_param("friction_coulomb"), name + ".friction_coulomb", errors_);
+            if (get_param("tau_load_const")) p.tau_load_const = parse_real(get_param("tau_load_const"), name + ".tau_load_const", errors_);
+            if (get_param("tau_load_quad_coeff")) p.tau_load_quad_coeff = parse_real(get_param("tau_load_quad_coeff"), name + ".tau_load_quad_coeff", errors_);
+            circuit.add_bldc_motor(name, node_at(0), node_at(1), node_at(2), node_at(3), p);
+        }
+        else if (type == "induction_motor") {
+            motors::InductionMotorParams p{};
+            if (get_param("R_s")) p.R_s = parse_real(get_param("R_s"), name + ".R_s", errors_);
+            if (get_param("R_r")) p.R_r = parse_real(get_param("R_r"), name + ".R_r", errors_);
+            if (get_param("L_s")) p.L_s = parse_real(get_param("L_s"), name + ".L_s", errors_);
+            if (get_param("L_r")) p.L_r = parse_real(get_param("L_r"), name + ".L_r", errors_);
+            if (get_param("L_m")) p.L_m = parse_real(get_param("L_m"), name + ".L_m", errors_);
+            if (get_param("pole_pairs")) p.pole_pairs = static_cast<int>(parse_real(get_param("pole_pairs"), name + ".pole_pairs", errors_));
+            if (get_param("J")) p.J = parse_real(get_param("J"), name + ".J", errors_);
+            if (get_param("b_friction")) p.b_friction = parse_real(get_param("b_friction"), name + ".b_friction", errors_);
+            if (get_param("friction_coulomb")) p.friction_coulomb = parse_real(get_param("friction_coulomb"), name + ".friction_coulomb", errors_);
+            if (get_param("tau_load_const")) p.tau_load_const = parse_real(get_param("tau_load_const"), name + ".tau_load_const", errors_);
+            if (get_param("tau_load_quad_coeff")) p.tau_load_quad_coeff = parse_real(get_param("tau_load_quad_coeff"), name + ".tau_load_quad_coeff", errors_);
+            circuit.add_induction_motor(name, node_at(0), node_at(1), node_at(2), node_at(3), p);
         }
         else if (type == "snubber_rc") {
             YAML::Node r_node = get_param("resistance");

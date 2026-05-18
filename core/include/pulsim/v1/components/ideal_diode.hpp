@@ -89,6 +89,10 @@ public:
         // Default Qrr = 0 → no reverse-recovery loss recorded (legacy).
         Scalar Qrr        = 0.0;     ///< Reverse-recovery charge (C)
         Scalar Erec_shape = 0.5;     ///< Shape factor (0..1; 0.5 = symmetric)
+
+        // PSIM-style parasitic junction capacitance (F) anode-to-cathode.
+        // Opt-in auto-snubber for PWL Ideal path. Default 0 = legacy.
+        Scalar C_j        = 0.0;
     };
 
     explicit IdealDiode(Scalar g_on = 1e3,
@@ -115,7 +119,31 @@ public:
         , T_amb_(params.T_amb)
         , T_j_(params.T_amb)
         , Qrr_(params.Qrr)
-        , Erec_shape_(params.Erec_shape) {}
+        , Erec_shape_(params.Erec_shape)
+        // PSIM-style auto-snubber on by default whenever the user
+        // opts into a "realistic" diode (V_F0 > 0 indicates the
+        // Norton-shifted forward model is active; Qrr > 0 indicates
+        // reverse-recovery loss is being tracked). Either one means
+        // the device is being used in a power-electronics context
+        // where a finite-dt commutation path is wanted — without it,
+        // the PWL Ideal stamp presents an infinite-impedance jump at
+        // every commutation and a fast switch (boost diode) flickers
+        // off the bus ripple.
+        //   Qrr > 0   : 5 nF  (fast-recovery device, biggest cap)
+        //   V_F0 > 0  : 500 pF (line rectifier or general "realistic"
+        //                       diode — small cap, negligible at line
+        //                       frequency but enough to keep the
+        //                       commutation finite at switching dt)
+        //   both 0    : 0 F    (legacy ideal switch — backward compat)
+        // Set `params.C_j = 0` explicitly to opt out.
+        , C_j_(params.C_j > Scalar{0}
+               ? params.C_j
+               : (params.Qrr > Scalar{0}
+                  ? Scalar{5e-9}
+                  : (params.V_F0 > Scalar{0} ? Scalar{5e-10} : Scalar{0}))) {}
+
+    /// Parasitic junction capacitance (F) — see Params::C_j.
+    [[nodiscard]] Scalar C_j() const noexcept { return C_j_; }
 
     // --- Smoothing controls (Behavioral mode only) -----------------------------
     void set_smoothing(Scalar v_smooth) { v_smooth_ = v_smooth; }
@@ -249,22 +277,33 @@ public:
             const Scalar e_event = Qrr_ * V_r * Erec_shape_;
             if (e_event > Scalar{0}) {
                 e_sw_ += e_event;
-                ++ev_count_;
             }
+            // Count the recovery edge even when V_r is briefly 0 at the
+            // sample after commutation (the C_j charge ramp takes a few
+            // hundred ns to climb past zero — same root cause as the
+            // MOSFET/IGBT event-counter fix).
+            ++ev_count_;
         }
         was_conducting_ = conducting;
         was_conducting_initialized_ = true;
+
+        // Trapezoidal time-averaging — see components/mosfet.hpp for the
+        // rationale. For diode: only positive instantaneous power
+        // (forward conduction) contributes, matching the legacy
+        // rectangular-rule semantics.
+        const Scalar p_prev = (p_last_ > Scalar{0}) ? p_last_ : Scalar{0};
+        const Scalar p_now  = (p > Scalar{0}) ? p : Scalar{0};
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_prev + p_now)
+                           : p_now;
 
         v_last_ = v_diode;
         i_last_ = i_diode;
         p_last_ = p;
 
-        // Accumulate only the forward-conduction energy (positive instantaneous
-        // power). Off-state leakage (g_off · V²) is in the noise floor and
-        // ignored — matches the powerStage `LossAccumulator` convention.
-        if (p > Scalar{0}) {
-            e_cond_ += p * dt;
-            if (p > p_peak_) p_peak_ = p;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
+            if (p_now > p_peak_) p_peak_ = p_now;
         }
         t_sim_ += dt;
     }
@@ -300,9 +339,22 @@ public:
     ///    V_F0 == 0 (legacy model), this reduces to the original voltage>h
     ///    predicate.
     [[nodiscard]] bool should_commute(const PwlEventContext& ctx) const noexcept {
-        const Scalar h = std::max<Scalar>(ctx.event_hysteresis, event_hysteresis_);
+        // Voltage and current hysteresis are physically different scales —
+        // voltage in V (V_F0_at_Tj typically 0.5–1 V), current in A (forward
+        // current in a converter is typically A, not µA). A single shared
+        // band fits one or the other but not both. The event-scheduler can
+        // override per-call via `ctx.event_hysteresis`; locally we use the
+        // device defaults (`event_hysteresis_` for voltage,
+        // `event_hysteresis_current_` for current) so a boost diode doesn't
+        // flicker on round-off-scale current dips while still commutating
+        // cleanly at real zero-crossings.
+        const Scalar h_v = std::max<Scalar>(ctx.event_hysteresis, event_hysteresis_);
+        const Scalar h_i = std::max<Scalar>(ctx.event_hysteresis,
+                                             event_hysteresis_current_);
         const Scalar v_on_threshold = (V_F0_ > Scalar{0}) ? V_F0_at_Tj() : Scalar{0};
-        return pwl_state_ ? (ctx.current < -h) : (ctx.voltage > v_on_threshold + h);
+        return pwl_state_
+            ? (ctx.current < -h_i)
+            : (ctx.voltage > v_on_threshold + h_v);
     }
 
     /// Convenience: matches legacy `is_conducting()` semantics.
@@ -576,7 +628,15 @@ private:
     Scalar g_on_;
     Scalar g_off_;
     Scalar v_smooth_ = Scalar{0.1};         ///< Behavioral smoothing voltage.
-    Scalar event_hysteresis_ = Scalar{1e-9};///< PWL event-hysteresis band.
+    // PWL event-hysteresis bands. Voltage and current use different
+    // scales (V_F0 ≈ 0.5–1 V, forward current ≈ A), so we keep
+    // separate defaults: 10 mV on the off→on voltage check (filters
+    // round-off bus ripple) and 100 mA on the on→off current check
+    // (filters di/dt overshoot through the diode during commutation
+    // — a real boost diode in CCM has 1–10 A of forward current, so
+    // a 100 mA band is < 10 % of nominal and never trips falsely).
+    Scalar event_hysteresis_         = Scalar{1e-2};
+    Scalar event_hysteresis_current_ = Scalar{1e-1};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;                ///< on/off state (true = conducting).
 
@@ -606,6 +666,7 @@ private:
     // Reverse-recovery params (Phase 4 — defaults = 0 = disabled).
     Scalar Qrr_         = Scalar{0.0};
     Scalar Erec_shape_  = Scalar{0.5};
+    Scalar C_j_         = Scalar{0.0};
     bool   was_conducting_ = false;
     bool   was_conducting_initialized_ = false;
 };

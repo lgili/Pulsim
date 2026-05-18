@@ -79,6 +79,14 @@ public:
         Scalar I_ref     = 10.0;      // A — reference current for scaling
         Scalar V_ref     = 400.0;     // V — reference voltage for scaling
         Scalar Esw_tc    = 3.0e-3;    // 1/K — switching-energy TC
+
+        // PSIM-style parasitic output capacitance C_oss. Opt-in: when
+        // > 0 the runtime stamps it as a virtual cap between drain and
+        // source in the PWL state-space (assemble_state_space), giving
+        // the inductor commutation a finite-dt charge path so V_sw
+        // doesn't ring at PWM edges. Default 0 keeps legacy circuits
+        // unchanged. Typical values: 10 nF–100 nF for boost/buck dt~1µs.
+        Scalar C_oss     = 0.0;       // F
     };
 
     explicit MOSFET(std::string name = "")
@@ -96,6 +104,18 @@ public:
         // default Eon_25=Eoff_25=0 → mode stays at SwitchingMode::Auto.
         if (params.Eon_25 > Scalar{0} || params.Eoff_25 > Scalar{0}) {
             mode_ = SwitchingMode::Ideal;
+            // PSIM-style auto-snubber on by default for the PWL Ideal
+            // path. Sets a 10 nF parasitic C_oss across drain-source if
+            // the user didn't pick one explicitly. The default is
+            // large vs real datasheet values (~100 pF – 5 nF) so the
+            // snubber stays numerically stable at typical converter
+            // dt ~ 1 µs while keeping the artificial switching loss
+            // bounded (≈ 0.5·C·V²·f_sw — a few W on a 200 V / 100 kHz
+            // design). Set `params.C_oss = 0` *after* construction to
+            // model the ideal-switch limit explicitly.
+            if (params_.C_oss <= Scalar{0}) {
+                params_.C_oss = Scalar{1e-8};
+            }
         }
     }
 
@@ -179,6 +199,9 @@ public:
     [[nodiscard]] const Params& params() const { return params_; }
     [[nodiscard]] bool is_conducting() const noexcept { return pwl_state_; }
 
+    /// Parasitic output capacitance (F) — see Params::C_oss.
+    [[nodiscard]] Scalar C_oss() const noexcept { return params_.C_oss; }
+
     // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
     /// R_ds(on) at the device's current T_j (linear coefficient).
     /// Falls back to nominal `g_on` when the thermal model is disabled
@@ -256,8 +279,19 @@ public:
         // The very first call (was_on_initialized_ == false) just
         // establishes the baseline — no transition is counted. From
         // then on, every flip of `is_on` triggers an event.
-        if (was_on_initialized_ && (was_on_ != is_on) &&
-            params_.R_th_ja > Scalar{0}) {
+        //
+        // BUG FIX (investigate-pfc-boost): the event COUNT must
+        // increment whenever `was_on != is_on`, independently of
+        // whether the computed `e_event` happens to be positive.
+        // For ON→OFF transitions with realistic C_oss, V_DS hasn't
+        // risen to the blocking value yet at the sample right after
+        // the gate edge (RC charging through C_oss takes a few
+        // hundred ns vs dt ~ 5 µs); the V_block heuristic returns
+        // ≈ 0 and the energy term is 0 — but the event still
+        // happened, and the user expects `switching_events()` to
+        // reflect the physical edge count.
+        const bool event_fired = was_on_initialized_ && (was_on_ != is_on);
+        if (event_fired && params_.R_th_ja > Scalar{0}) {
             // Temperature-scaled per-event energy.
             const Scalar T_delta = T_j_ - params_.T_ref;
             const Scalar tc_factor = Scalar{1} + params_.Esw_tc * T_delta;
@@ -279,8 +313,8 @@ public:
                     tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;   // count the edge even if the energy term is 0
             } else if (!is_on && was_on_) {
                 // ON → OFF. Use the pre-transition current (i_last_)
                 // and the post-transition voltage (v_ds, now blocking).
@@ -290,39 +324,48 @@ public:
                     (I_pre / i_ref) * (V_block / v_ref) * tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;
             }
         }
         was_on_ = is_on;
         was_on_initialized_ = true;
 
-        // ----- Conduction loss (existing accumulator) ----------------
-        if (params_.R_th_ja <= Scalar{0}) {
-            // Thermal model disabled — still record last V/I for
-            // diagnostic but skip the integration.
-            const Scalar g  = is_on ? params_.g_on : params_.g_off;
-            v_last_ = v_ds;
-            i_last_ = g * v_ds;
-            p_last_ = v_ds * i_last_;
-            return;
-        }
-        const Scalar Rds = Rds_on_at_Tj();
-        const Scalar g  = is_on
-            ? (Rds > Scalar{0} ? Scalar{1}/Rds : params_.g_on)
+        // ----- Conduction loss (always tracked) ----------------------
+        // R_th_ja > 0 enables T_j-corrected R_ds(on); when disabled
+        // (R_th_ja == 0) we fall back to the static `g_on`/`g_off` but
+        // still integrate the conduction energy so the device's loss
+        // accessors and the system-level `SystemLossSummary` report a
+        // consistent number regardless of which thermal path the user
+        // wires up (`MOSFETParams.R_th_ja` or `opts.thermal_devices`).
+        const bool tj_corrected = params_.R_th_ja > Scalar{0};
+        const Scalar Rds = tj_corrected ? Rds_on_at_Tj() : Scalar{0};
+        const Scalar g = is_on
+            ? (tj_corrected && Rds > Scalar{0} ? Scalar{1}/Rds : params_.g_on)
             : params_.g_off;
         const Scalar i_ds = g * v_ds;
         const Scalar p = v_ds * i_ds;
 
+        // Trapezoidal time-averaging:
+        //   ∫_{t-dt}^{t} V·I dt ≈ 0.5 · dt · (|p_prev| + |p_now|)
+        // This is correct for slow signals and significantly reduces
+        // the over-count on fast transients (cap discharge into R_DS,
+        // PWM gate edges within dt) compared to the previous
+        // rectangular-end-of-step rule. The first call sees
+        // `t_sim_ == 0` so we use rectangular (no prior sample) to
+        // avoid a 0-init artifact.
+        const Scalar p_abs_prev = (p_last_ > Scalar{0}) ? p_last_ : -p_last_;
+        const Scalar p_abs_now  = (p > Scalar{0}) ? p : -p;
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_abs_prev + p_abs_now)
+                           : p_abs_now;
+
         v_last_ = v_ds;
         i_last_ = i_ds;
         p_last_ = p;
-        // Both forward and reverse conduction loss (P = V·I always
-        // positive in resistive operation, no body-diode model yet).
-        const Scalar p_abs = (p > Scalar{0}) ? p : -p;
-        if (p_abs > Scalar{0}) {
-            e_cond_ += p_abs * dt;
-            if (p_abs > p_peak_) p_peak_ = p_abs;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
+            if (p_abs_now > p_peak_) p_peak_ = p_abs_now;
         }
         t_sim_ += dt;
     }
@@ -611,7 +654,12 @@ private:
     }
 
     Params params_;
-    Scalar event_hysteresis_ = Scalar{1e-9};
+    // PWL gate-threshold hysteresis. Sub-nV default would flicker the
+    // MOSFET state on round-off V_GS noise; 10 mV matches the
+    // IdealDiode default. For typical 12-V PWM gate drives at
+    // V_th ≈ 4 V, this is < 0.1 % of the swing → never affects real
+    // commutations.
+    Scalar event_hysteresis_ = Scalar{1e-2};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
 

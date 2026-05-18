@@ -14,11 +14,17 @@
 #include "pulsim/v1/integration.hpp"
 #include "pulsim/v1/components/dc_motor_device.hpp"
 #include "pulsim/v1/components/pmsm_device.hpp"
+#include "pulsim/v1/components/pmsm_foc_device.hpp"
+#include "pulsim/v1/components/mechanical_device.hpp"
+#include "pulsim/v1/components/bldc_motor_device.hpp"
+#include "pulsim/v1/components/induction_motor_device.hpp"
+#include "pulsim/v1/grid/three_phase_source.hpp"
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <cmath>
+#include <numbers>
 #include <type_traits>
 #include <deque>
 #include <functional>
@@ -73,7 +79,11 @@ using DeviceVariant = std::variant<
     PulseVoltageSource,
     Transformer,
     DcMotorDevice,
-    PmsmDevice
+    PmsmDevice,
+    PmsmFocDevice,
+    MechanicalDevice,
+    BldcMotorDevice,
+    InductionMotorDevice
 >;
 
 // =============================================================================
@@ -653,6 +663,66 @@ public:
         // hits first.
         if (R_d > 0.0) p.g_on = 1.0 / R_d;
         add_bridge_rectifier(name, ac_a, ac_b, dc_pos, dc_neg, p);
+    }
+
+    /// Add an RC snubber across an existing MOSFET / IGBT / IdealDiode.
+    ///
+    /// Topology  (R in series with C, both between switch terminals)
+    ///
+    ///       drain ─── R ── (internal) ── C ── source
+    ///
+    /// The internal node is auto-created and named `<device>__snub_int`.
+    /// The series R damps the LC tank the inductor + switch + diode form
+    /// in a hard-switched converter — the parallel-only C_oss / C_j cap
+    /// (PSIM-style) leaves Q ≈ ∞ which Tustin can't damp at typical
+    /// converter dt. Adding R critically damps it: a good first guess
+    /// is `R ≈ √(L / C)` (e.g. for L = 100 µH and C = 100 nF, R ≈ 32 Ω).
+    /// Per-cycle dissipated energy: 0.5 · C · V_sw² (transferred from
+    /// the cap to R every commutation; bounded and predictable).
+    ///
+    /// Returns true if the device was found and the snubber installed.
+    /// The named device must already exist (MOSFET/IGBT/IdealDiode);
+    /// the snubber connects to the *power* terminals (drain↔source,
+    /// collector↔emitter, or anode↔cathode), not the gate.
+    bool add_rc_snubber(const std::string& device_name,
+                        Real R, Real C,
+                        Real initial_v_cap = 0.0) {
+        if (R <= Real{0} || C <= Real{0}) return false;
+        const auto idx = find_connection_index(device_name);
+        if (!idx.has_value()) return false;
+        const auto& conn = connections_[*idx];
+        if (conn.nodes.size() < 2) return false;
+
+        // Pick the power terminals (skip the gate for 3-terminal devices).
+        Index n_hi = -1, n_lo = -1;
+        std::visit([&](const auto& dev) {
+            (void)dev;
+            using T = std::decay_t<decltype(dev)>;
+            if constexpr (std::is_same_v<T, MOSFET> ||
+                          std::is_same_v<T, IGBT>) {
+                if (conn.nodes.size() >= 3) {
+                    n_hi = conn.nodes[1];   // drain / collector
+                    n_lo = conn.nodes[2];   // source / emitter
+                }
+            } else if constexpr (std::is_same_v<T, IdealDiode>) {
+                n_hi = conn.nodes[0];       // anode
+                n_lo = conn.nodes[1];       // cathode
+            }
+        }, devices_[*idx]);
+        if (n_hi < 0 && n_lo < 0) return false;
+
+        const std::string internal = device_name + "__snub_int";
+        const Index n_mid = add_node(internal);
+
+        // R from hi to mid
+        add_resistor(device_name + "__snub_R", n_hi, n_mid, R);
+
+        // C from mid to lo (pre-charge to V_sw_initial if user provided)
+        Capacitor::Params cp{};
+        cp.capacitance     = C;
+        cp.initial_voltage = initial_v_cap;
+        add_capacitor(device_name + "__snub_C", n_mid, n_lo, cp);
+        return true;
     }
 
     // ----- Diode loss / thermal accessors -----------------------------------
@@ -2528,6 +2598,43 @@ public:
         Real phase_a_deg = 0.0;                 // Phase A reference angle
         bool positive_sequence = true;          // false flips B/C
         Real unbalance_factor = 0.0;            // 0 = balanced, [0, 1)
+
+        // consolidate-motors-and-three-phase, Phase A.1: convert this Circuit-
+        // side params struct into the canonical math object
+        // `grid::ThreePhaseSource`. Note that the math object captures only
+        // the balanced sinusoidal portion — `unbalance_factor` is a Circuit-
+        // specific knob and survives outside the math object.
+        [[nodiscard]] grid::ThreePhaseSource to_grid_source() const {
+            grid::ThreePhaseSource src;
+            // V_LL_RMS → per-phase RMS: V_ph_RMS = V_LL_RMS / √3
+            static constexpr Real kOneOverSqrt3 = static_cast<Real>(0.5773502691896258);
+            src.v_rms = line_to_line_voltage_rms * kOneOverSqrt3;
+            src.frequency = frequency_hz;
+            // deg → rad
+            src.phase_rad = phase_a_deg * static_cast<Real>(0.017453292519943295);
+            src.sequence = positive_sequence ? grid::PhaseSequence::Positive
+                                             : grid::PhaseSequence::Negative;
+            return src;
+        }
+
+        // Inverse: build the Circuit-side params from a math-object source.
+        // The resulting struct has `unbalance_factor = 0` (the math object
+        // does not carry an asymmetry knob); callers wanting an unbalanced
+        // grid set the field separately after construction.
+        [[nodiscard]] static ThreePhaseSourceParams from_grid_source(
+            const grid::ThreePhaseSource& src) {
+            ThreePhaseSourceParams params;
+            // per-phase RMS → V_LL_RMS: V_LL_RMS = V_ph_RMS · √3
+            static constexpr Real kSqrt3 = static_cast<Real>(1.7320508075688772);
+            params.line_to_line_voltage_rms = src.v_rms * kSqrt3;
+            params.frequency_hz = src.frequency;
+            // rad → deg
+            params.phase_a_deg = src.phase_rad * static_cast<Real>(57.29577951308232);
+            params.positive_sequence =
+                (src.sequence == grid::PhaseSequence::Positive);
+            params.unbalance_factor = 0.0;
+            return params;
+        }
     };
     static_assert(std::is_trivially_copyable_v<ThreePhaseSourceParams>,
                   "ThreePhaseSourceParams must stay a POD aggregate so callers "
@@ -2542,38 +2649,16 @@ public:
         assert(params.frequency_hz > 0.0);
         assert(params.unbalance_factor >= 0.0 && params.unbalance_factor < 1.0);
 
-        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
-        // V_LL_RMS → per-phase peak: V_ph_peak = V_LL_RMS · √2 / √3
-        constexpr Real kSqrt2OverSqrt3 = static_cast<Real>(0.8164965809277261);
-        const Real v_peak_nominal = params.line_to_line_voltage_rms * kSqrt2OverSqrt3;
-        const Real phase_a_rad = params.phase_a_deg * static_cast<Real>(0.017453292519943295);
-
-        const Real shift_b = params.positive_sequence ? -kTwoPiOverThree :  kTwoPiOverThree;
-        const Real shift_c = params.positive_sequence ? -2.0 * kTwoPiOverThree : 2.0 * kTwoPiOverThree;
-
+        // consolidate-motors-and-three-phase, Phase A.1: math/signal
+        // computation goes through `grid::ThreePhaseSource` (single source
+        // of truth) — only the `unbalance_factor` per-leg scaling stays
+        // Circuit-side because the math object is canonically balanced.
+        const auto grid_src = params.to_grid_source();
         const Real scale_b = 1.0 - params.unbalance_factor;
         const Real scale_c = 1.0 + params.unbalance_factor;
-
-        const std::string base{name};
-
-        SineParams leg{};
-        leg.frequency = params.frequency_hz;
-        leg.offset = 0.0;
-
-        // Leg A — reference
-        leg.amplitude = v_peak_nominal;
-        leg.phase = phase_a_rad;
-        add_sine_voltage_source(base + "__A", node_a, node_neutral, leg);
-
-        // Leg B — shifted by ±120°
-        leg.amplitude = v_peak_nominal * scale_b;
-        leg.phase = phase_a_rad + shift_b;
-        add_sine_voltage_source(base + "__B", node_b, node_neutral, leg);
-
-        // Leg C — shifted by ±240°
-        leg.amplitude = v_peak_nominal * scale_c;
-        leg.phase = phase_a_rad + shift_c;
-        add_sine_voltage_source(base + "__C", node_c, node_neutral, leg);
+        add_three_phase_source_impl_(name, node_a, node_b, node_c,
+                                     node_neutral, grid_src,
+                                     /*scale_a=*/1.0, scale_b, scale_c);
     }
 
     // Convenience overload — explicit V_LL_RMS + frequency, no params struct.
@@ -2586,6 +2671,151 @@ public:
         params.frequency_hz = frequency_hz;
         add_three_phase_source(name, node_a, node_b, node_c, node_neutral, params);
     }
+
+    // consolidate-motors-and-three-phase, Phase A.1: math-object overload.
+    // Accepts a `grid::ThreePhaseSource` directly so callers that already
+    // hold the canonical math form can wire the source into Circuit without
+    // re-projecting through the Circuit-side params struct. Per-leg scale
+    // is balanced (unbalance_factor = 0); callers wanting an unbalanced
+    // grid use the params overload.
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const grid::ThreePhaseSource& source) {
+        assert(source.frequency > 0.0);
+        add_three_phase_source_impl_(name, node_a, node_b, node_c,
+                                     node_neutral, source,
+                                     /*scale_a=*/1.0, /*scale_b=*/1.0,
+                                     /*scale_c=*/1.0);
+    }
+
+    // consolidate-motors-and-three-phase, Phase B.1: programmable 3φ source.
+    // Decomposes into three sine legs with per-phase amplitude scaling from
+    // the math object's (g_a, g_b, g_c). The scaling is captured at
+    // construction time — runtime sag / swell updates require rebuilding
+    // the source (a true callback-driven path is a follow-up). The math
+    // object's `evaluate_with_sag` helper remains usable from Python /
+    // C++ code that drives the simulator manually without Circuit
+    // integration.
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const grid::ThreePhaseSourceProgrammable& source) {
+        assert(source.base.frequency > 0.0);
+        add_three_phase_source_impl_(name, node_a, node_b, node_c,
+                                     node_neutral, source.base,
+                                     source.g_a, source.g_b, source.g_c);
+    }
+
+    // consolidate-motors-and-three-phase, Phase B.1: harmonic 3φ source.
+    // Decomposes into 3 + 3·N sine legs (fundamental per phase + 3 sines
+    // per harmonic component). Each harmonic respects the fundamental's
+    // sequence (positive harmonics rotate the same direction; triplen
+    // harmonics naturally fold into the zero-sequence component).
+    //
+    // Naming convention for the spawned sine legs:
+    //   <name>__H0_A, <name>__H0_B, <name>__H0_C   (fundamental)
+    //   <name>__H1_A, ..., <name>__H1_C            (first harmonic in list)
+    //   <name>__H<k>_*                              (k-th harmonic, 1-indexed)
+    void add_three_phase_source(std::string_view name,
+                                Index node_a, Index node_b, Index node_c,
+                                Index node_neutral,
+                                const grid::ThreePhaseHarmonicSource& source) {
+        assert(source.fundamental.frequency > 0.0);
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        const Real v_peak =
+            source.fundamental.v_rms * std::numbers::sqrt2_v<Real>;
+        const Real shift_b =
+            (source.fundamental.sequence == grid::PhaseSequence::Positive)
+                ? -kTwoPiOverThree : kTwoPiOverThree;
+        const Real shift_c = -shift_b;
+
+        const std::string base_name{name};
+        SineParams leg{};
+        leg.offset = 0.0;
+
+        // ---- Fundamental (harmonic index 0) --------------------------------
+        {
+            leg.frequency = source.fundamental.frequency;
+            leg.amplitude = v_peak;
+            leg.phase = source.fundamental.phase_rad;
+            add_sine_voltage_source(base_name + "__H0_A",
+                                    node_a, node_neutral, leg);
+            leg.phase = source.fundamental.phase_rad + shift_b;
+            add_sine_voltage_source(base_name + "__H0_B",
+                                    node_b, node_neutral, leg);
+            leg.phase = source.fundamental.phase_rad + shift_c;
+            add_sine_voltage_source(base_name + "__H0_C",
+                                    node_c, node_neutral, leg);
+        }
+
+        // ---- Harmonic contributions ----------------------------------------
+        for (std::size_t k = 0; k < source.harmonics.size(); ++k) {
+            const auto& h = source.harmonics[k];
+            const Real V_n = v_peak * h.magnitude_pct;
+            const Real f_n =
+                static_cast<Real>(h.order) * source.fundamental.frequency;
+            const Real phi_n = source.fundamental.phase_rad + h.phase_rad;
+            const Real harm_shift_b =
+                static_cast<Real>(h.order) * shift_b;
+            const Real harm_shift_c =
+                static_cast<Real>(h.order) * shift_c;
+            const std::string tag =
+                "__H" + std::to_string(k + 1) + "_";
+
+            leg.frequency = f_n;
+            leg.amplitude = V_n;
+            leg.phase = phi_n;
+            add_sine_voltage_source(base_name + tag + "A",
+                                    node_a, node_neutral, leg);
+            leg.phase = phi_n + harm_shift_b;
+            add_sine_voltage_source(base_name + tag + "B",
+                                    node_b, node_neutral, leg);
+            leg.phase = phi_n + harm_shift_c;
+            add_sine_voltage_source(base_name + tag + "C",
+                                    node_c, node_neutral, leg);
+        }
+    }
+
+private:
+    // Internal worker used by both the params-struct and the math-object
+    // overloads. Decomposes the source into three sine legs against the
+    // neutral node. The per-leg scale factors carry the optional
+    // `unbalance_factor` asymmetry from the Circuit-side params struct.
+    void add_three_phase_source_impl_(std::string_view name,
+                                      Index node_a, Index node_b, Index node_c,
+                                      Index node_neutral,
+                                      const grid::ThreePhaseSource& source,
+                                      Real scale_a, Real scale_b, Real scale_c) {
+        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
+        // per-phase RMS → per-phase peak (the math object stores RMS).
+        const Real v_peak = source.v_rms * std::numbers::sqrt2_v<Real>;
+        const Real shift_b = (source.sequence == grid::PhaseSequence::Positive)
+            ? -kTwoPiOverThree
+            : kTwoPiOverThree;
+        const Real shift_c = (source.sequence == grid::PhaseSequence::Positive)
+            ? -2.0 * kTwoPiOverThree
+            : 2.0 * kTwoPiOverThree;
+
+        const std::string base{name};
+        SineParams leg{};
+        leg.frequency = source.frequency;
+        leg.offset = 0.0;
+
+        leg.amplitude = v_peak * scale_a;
+        leg.phase = source.phase_rad;
+        add_sine_voltage_source(base + "__A", node_a, node_neutral, leg);
+
+        leg.amplitude = v_peak * scale_b;
+        leg.phase = source.phase_rad + shift_b;
+        add_sine_voltage_source(base + "__B", node_b, node_neutral, leg);
+
+        leg.amplitude = v_peak * scale_c;
+        leg.phase = source.phase_rad + shift_c;
+        add_sine_voltage_source(base + "__C", node_c, node_neutral, leg);
+    }
+
+public:
 
     // ----- Three-phase 2-level VSI helper (Track 4 follow-up) -----------------
     //
@@ -2835,91 +3065,16 @@ public:
         add_three_phase_rl_load(name, node_a, node_b, node_c, node_neutral, params);
     }
 
-    // ----- PMSM steady-state (constant rotor speed) helper -------------------
-    //
-    // Adds a 3-phase Permanent-Magnet Synchronous Motor at a FIXED rotor
-    // speed — the rotor is treated as a hard mechanical reference. Each
-    // phase appears electrically as R_s in series with L_s in series with
-    // a sinusoidal back-EMF source whose amplitude is ω_e·λ_pm and whose
-    // frequency is ω_e/(2π). Per-phase back-EMFs are 120° apart.
-    //
-    // This is the same model used by ``benchmarks/circuits/
-    // motor_pmsm_dq_open_loop.yaml`` but generalised to the abc-frame so
-    // you can connect a VSI on the line side and study harmonics / losses
-    // without modelling the rotor dynamics. Use ``add_pmsm()`` (future
-    // device-variant) when rotor inertia + spin-up transients matter.
-    //
-    // Note on saliency: this helper assumes a non-salient (L_d = L_q)
-    // machine. Salient-pole PMSMs would need different per-axis modelling
-    // which only matters once rotor angle interacts with the impedance —
-    // i.e., once the dynamic device-variant integration lands.
-
-    struct PmsmSteadyStateParams {
-        Real R_s = 0.5;              ///< Ω — stator phase resistance
-        Real L_s = 2e-3;             ///< H — stator phase inductance (non-salient)
-        Real lambda_pm = 0.1;        ///< V·s/rad — rotor flux linkage
-        Real omega_electrical = 314.159265358979;  ///< rad/s — fixed ω_e (50 Hz default)
-        Real phase_a_offset_deg = 0.0;  ///< rotor angle offset for phase A
-        bool positive_sequence = true;  ///< false flips B/C order
-    };
-    static_assert(std::is_trivially_copyable_v<PmsmSteadyStateParams>,
-                  "PmsmSteadyStateParams must stay a POD aggregate.");
-
-    void add_pmsm_steady_state(std::string_view name,
-                                Index node_a, Index node_b, Index node_c,
-                                Index node_neutral,
-                                const PmsmSteadyStateParams& params) {
-        assert(params.R_s > 0.0);
-        assert(params.L_s >= 0.0);
-        assert(params.omega_electrical > 0.0);
-
-        constexpr Real kTwoPiOverThree = static_cast<Real>(2.0943951023931953);
-        constexpr Real kDegToRad = static_cast<Real>(0.017453292519943295);
-
-        const Real omega_e = params.omega_electrical;
-        const Real freq_hz = omega_e / (2.0 * 3.14159265358979323846);
-        const Real e_peak = omega_e * params.lambda_pm;
-        const Real phase_a_rad = params.phase_a_offset_deg * kDegToRad;
-        const Real shift_b = params.positive_sequence ? -kTwoPiOverThree :  kTwoPiOverThree;
-        const Real shift_c = params.positive_sequence ? -2.0 * kTwoPiOverThree : 2.0 * kTwoPiOverThree;
-
-        const std::string base{name};
-
-        auto emit_phase = [&](const std::string& suffix,
-                              Index line, Real phase_rad) {
-            // Intermediate nodes inside each phase: line ─[R_s]─ m1 ─[L_s]─ m2 ─[V_emf]─ neutral
-            const Index n_m1 = add_node(base + "__m1_" + suffix);
-            const Index n_m2 = add_node(base + "__m2_" + suffix);
-            add_resistor(base + "__R_" + suffix, line, n_m1, params.R_s);
-            add_inductor(base + "__L_" + suffix, n_m1, n_m2, params.L_s);
-
-            // Back-EMF as sinusoidal voltage source: V_emf = e_peak · sin(ω_e·t + φ)
-            SineParams emf{};
-            emf.amplitude = e_peak;
-            emf.frequency = freq_hz;
-            emf.offset = 0.0;
-            emf.phase = phase_rad;
-            add_sine_voltage_source(base + "__E_" + suffix, n_m2, node_neutral, emf);
-        };
-
-        emit_phase("A", node_a, phase_a_rad);
-        emit_phase("B", node_b, phase_a_rad + shift_b);
-        emit_phase("C", node_c, phase_a_rad + shift_c);
-    }
-
-    // Convenience overload — explicit (R_s, L_s, λ_pm, ω_e) without a params struct.
-    void add_pmsm_steady_state(std::string_view name,
-                                Index node_a, Index node_b, Index node_c,
-                                Index node_neutral,
-                                Real R_s, Real L_s, Real lambda_pm,
-                                Real omega_electrical) {
-        PmsmSteadyStateParams params{};
-        params.R_s = R_s;
-        params.L_s = L_s;
-        params.lambda_pm = lambda_pm;
-        params.omega_electrical = omega_electrical;
-        add_pmsm_steady_state(name, node_a, node_b, node_c, node_neutral, params);
-    }
+    // consolidate-motors-and-three-phase, Phase A.2: the steady-state PMSM
+    // helper (`PmsmSteadyStateParams` + `add_pmsm_steady_state(...)`) was a
+    // placeholder for the dynamic device-variant `PmsmDevice` (see
+    // `components/pmsm_device.hpp` and `Circuit::add_pmsm(...)`). The same
+    // operating point is reachable today by constructing a `PmsmDevice`
+    // and pinning its mechanical speed via the initial-condition path or
+    // by holding the load torque to balance the rotor — see the migrated
+    // test cases in `test_pmsm_dynamic.cpp`. The placeholder is removed
+    // because keeping two PMSM stamping paths invites silent drift between
+    // the steady-state algebra and the full dq dynamics.
 
     void add_pulse_voltage_source(const std::string& name, Index npos, Index nneg,
                                    const PulseParams& params) {
@@ -3092,6 +3247,240 @@ public:
     }
     [[nodiscard]] Real pmsm_i_c(std::string_view name) const {
         const auto* m = find_device<PmsmDevice>(name);
+        return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- Mechanical device (consolidate-motors-and-three-phase, B.2a) -------
+    //
+    // Adds a signal-domain mechanical primitive (shaft inertia + friction +
+    // optional constant / quadratic load) with NO electrical pins. Used to
+    // build multi-shaft topologies: a single MechanicalDevice can be the
+    // load seen by a motor's `set_tau_load`, while the motor's
+    // electromagnetic torque is pushed to the device via `set_tau_input`.
+    // The device's `update_history()` (driven by the variant walker on
+    // accepted steps) advances ω, θ via forward Euler.
+
+    void add_mechanical(const std::string& name,
+                        const MechanicalDevice::Params& params) {
+        assert(params.shaft.J > 0.0);
+        MechanicalDevice dev(params, name);
+        devices_.emplace_back(std::move(dev));
+        // No nodes, no branch — pure mechanical/signal device.
+        connections_.push_back({name, {}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    /// Push torque input to a mechanical device by name (typically called
+    /// from a mixed-domain block with the upstream motor's τ_em).
+    void set_mechanical_tau_input(std::string_view name, Real tau) {
+        if (auto* m = find_device<MechanicalDevice>(name)) {
+            m->set_tau_input(tau);
+        }
+    }
+
+    /// Read mechanical state by name. Returns NaN if not found.
+    [[nodiscard]] Real mechanical_omega(std::string_view name) const {
+        const auto* m = find_device<MechanicalDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mechanical_theta(std::string_view name) const {
+        const auto* m = find_device<MechanicalDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real mechanical_reaction_torque(std::string_view name) const {
+        const auto* m = find_device<MechanicalDevice>(name);
+        return m ? m->reaction_torque() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- PMSM-FOC current loop (consolidate-motors-and-three-phase, B.2b) ----
+    //
+    // Signal-domain current-loop controller (id + iq PI). Wraps
+    // motors::PmsmFocCurrentLoop. Takes (id_ref, iq_ref, id_meas, iq_meas, dt)
+    // and outputs (Vd_ref, Vq_ref) for the inverter modulator. No electrical
+    // pins, no MNA contribution; user wires measurements / references each
+    // step and reads back the voltage references.
+
+    void add_pmsm_foc(const std::string& name,
+                      const PmsmFocDevice::Params& params) {
+        assert(params.motor.Ld > 0.0 && params.motor.Lq > 0.0);
+        assert(params.foc.bandwidth_hz > 0.0);
+        PmsmFocDevice dev(params, name);
+        devices_.emplace_back(std::move(dev));
+        connections_.push_back({name, {}, -1});
+        register_connection_name(connections_.size() - 1);
+    }
+
+    /// Convenience overload — auto-derives FOC params from motor + bandwidth.
+    void add_pmsm_foc(const std::string& name,
+                      const motors::PmsmParams& motor,
+                      Real bandwidth_hz = 1000.0) {
+        PmsmFocDevice::Params p{};
+        p.motor = motor;
+        p.foc.bandwidth_hz = bandwidth_hz;
+        add_pmsm_foc(name, p);
+    }
+
+    void set_pmsm_foc_references(std::string_view name,
+                                  Real id_ref, Real iq_ref) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->set_references(id_ref, iq_ref);
+        }
+    }
+    void set_pmsm_foc_measurements(std::string_view name,
+                                    Real id_meas, Real iq_meas) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->set_measurements(id_meas, iq_meas);
+        }
+    }
+    void retune_pmsm_foc(std::string_view name,
+                         const motors::PmsmParams& motor,
+                         const motors::PmsmFocCurrentLoopParams& foc) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->retune(motor, foc);
+        }
+    }
+    void reset_pmsm_foc(std::string_view name) {
+        if (auto* d = find_device<PmsmFocDevice>(name)) {
+            d->reset();
+        }
+    }
+
+    [[nodiscard]] Real pmsm_foc_vd_ref(std::string_view name) const {
+        const auto* d = find_device<PmsmFocDevice>(name);
+        return d ? d->vd_ref() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real pmsm_foc_vq_ref(std::string_view name) const {
+        const auto* d = find_device<PmsmFocDevice>(name);
+        return d ? d->vq_ref() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- BLDC motor (consolidate-motors-and-three-phase, Phase C.1) ---------
+    //
+    // Three-phase BLDC with trapezoidal back-EMF (120° flat-top). Stamps 3
+    // reserved branch rows for line currents i_a / i_b / i_c into MNA. State
+    // (i_*, ω, θ) advances via forward-Euler on accepted timesteps. Matches
+    // the PMSM device API shape: 4 pins (A, B, C, N), `add_bldc_motor`
+    // builder, `set_bldc_*` torque-input setter, and `bldc_*` readout
+    // accessors. The motor-models spec requires BldcMotorDevice; this brings
+    // it online for benchmark + tutorial work.
+
+    void add_bldc_motor(const std::string& name,
+                        Index n_a, Index n_b, Index n_c, Index n_neutral,
+                        const motors::BldcMotorParams& params) {
+        assert(params.R_s > 0.0);
+        assert(params.L_s > 0.0);
+        assert(params.J   > 0.0);
+        assert(params.pole_pairs > 0);
+
+        const Index br_a = num_nodes() + num_branches_;
+        const Index br_b = br_a + 1;
+        const Index br_c = br_a + 2;
+        BldcMotorDevice motor(params, name);
+        motor.set_branch_indices(br_a, br_b, br_c);
+        devices_.emplace_back(std::move(motor));
+        connections_.push_back(
+            {name, {n_a, n_b, n_c, n_neutral}, br_a, br_b});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 3;
+    }
+
+    void set_bldc_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<BldcMotorDevice>(name)) {
+            m->set_load_torque(tau);
+        }
+    }
+
+    [[nodiscard]] Real bldc_omega(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_theta(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_i_a(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_i_b(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->i_b() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real bldc_i_c(std::string_view name) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- Induction motor (consolidate-motors-and-three-phase, Phase C.2) ----
+    //
+    // Three-phase squirrel-cage induction motor in stationary αβ frame with
+    // rotor flux as state. 4 pins (A, B, C, N), 3 reserved branch rows.
+    // Slip-dependent torque per Krause/Bose formulation. Closes the
+    // motor-models spec gap.
+
+    void add_induction_motor(const std::string& name,
+                             Index n_a, Index n_b, Index n_c, Index n_neutral,
+                             const motors::InductionMotorParams& params) {
+        assert(params.R_s > 0.0);
+        assert(params.L_s > 0.0);
+        assert(params.J   > 0.0);
+        assert(params.pole_pairs > 0);
+
+        const Index br_a = num_nodes() + num_branches_;
+        const Index br_b = br_a + 1;
+        const Index br_c = br_a + 2;
+        InductionMotorDevice motor(params, name);
+        motor.set_branch_indices(br_a, br_b, br_c);
+        devices_.emplace_back(std::move(motor));
+        connections_.push_back(
+            {name, {n_a, n_b, n_c, n_neutral}, br_a, br_b});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 3;
+    }
+
+    void set_induction_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<InductionMotorDevice>(name)) {
+            m->set_load_torque(tau);
+        }
+    }
+
+    [[nodiscard]] Real induction_omega(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_theta(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    /// Read the induction motor slip s = (ω_sync − ω_e) / ω_sync.
+    /// The synchronous frequency must be supplied because the Circuit
+    /// itself doesn't know which stator source (V/f drive, grid, etc.)
+    /// is exciting the motor. For a 50 Hz grid with any pole count,
+    /// ω_sync_electrical = 2·π·50 ≈ 314 rad/s. See
+    /// `induction_slip_from_hz(name, f_sync_hz)` for the Hz overload.
+    [[nodiscard]] Real induction_slip(std::string_view name,
+                                       Real omega_sync_electrical) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->slip(omega_sync_electrical)
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    /// Slip overload that takes f_sync in Hz instead of ω_sync in rad/s.
+    [[nodiscard]] Real induction_slip_from_hz(std::string_view name,
+                                               Real f_sync_hz) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->slip_from_hz(f_sync_hz)
+                 : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_i_a(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->i_a() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_i_b(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        return m ? m->i_b() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real induction_i_c(std::string_view name) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
         return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
     }
 
@@ -3535,6 +3924,53 @@ public:
                 else if constexpr (std::is_same_v<T, PmsmDevice>) {
                     // Read 3 line currents + 3 terminal voltages (relative to
                     // the neutral node) and advance ω, θ via forward-Euler.
+                    const Index n_a = conn.nodes[0];
+                    const Index n_b = conn.nodes[1];
+                    const Index n_c = conn.nodes[2];
+                    const Index n_n = conn.nodes[3];
+                    const Index br_a = conn.branch_index;
+                    const Index br_b = conn.branch_index_2;
+                    const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+                    const Real v_n = (n_n >= 0) ? x[n_n] : 0.0;
+                    const Real v_a = ((n_a >= 0) ? x[n_a] : 0.0) - v_n;
+                    const Real v_b = ((n_b >= 0) ? x[n_b] : 0.0) - v_n;
+                    const Real v_c = ((n_c >= 0) ? x[n_c] : 0.0) - v_n;
+                    const Real i_a = (br_a >= 0) ? x[br_a] : 0.0;
+                    const Real i_b = (br_b >= 0) ? x[br_b] : 0.0;
+                    const Real i_c = (br_c >= 0) ? x[br_c] : 0.0;
+
+                    if (initialize) {
+                        dev.reset_history_for_transient_start(i_a, i_b, i_c);
+                    } else {
+                        dev.advance_state(v_a, v_b, v_c, i_a, i_b, i_c,
+                                          timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T, MechanicalDevice> ||
+                                   std::is_same_v<T, PmsmFocDevice>) {
+                    // consolidate-motors-and-three-phase, Phase B.2a + B.2b:
+                    // signal-domain devices (no electrical state to read from
+                    // x). For MechanicalDevice: forward-Euler advances ω, θ
+                    // under user-supplied tau_input minus load + friction.
+                    // For PmsmFocDevice: runs the (id, iq) PI loop step and
+                    // caches Vd_ref / Vq_ref for the next inverter command.
+                    if (initialize) {
+                        // DC OP: hold internal state at initial values.
+                    } else {
+                        dev.set_timestep(timestep_);
+                        dev.update_history();
+                    }
+                }
+                else if constexpr (std::is_same_v<T, BldcMotorDevice> ||
+                                   std::is_same_v<T, InductionMotorDevice>) {
+                    // consolidate-motors-and-three-phase, Phase C: BLDC and
+                    // Induction motors share the PmsmDevice advance contract
+                    // (3 line currents + 3 phase-to-neutral voltages → forward-
+                    // Euler mechanical advance + state update). The math
+                    // diverges inside `advance_state`: BLDC uses trapezoidal
+                    // back-EMF and 6-step commutation awareness; induction
+                    // uses αβ rotor-flux state + slip-dependent torque.
                     const Index n_a = conn.nodes[0];
                     const Index n_b = conn.nodes[1];
                     const Index n_c = conn.nodes[2];
@@ -4078,6 +4514,16 @@ public:
                     if (nodes.size() >= 2) {
                         const Real g = dev.pwl_state() ? dev.g_on() : dev.g_off();
                         stamp_g(g, nodes[0], nodes[1]);
+                        // Opt-in parasitic junction capacitance C_j —
+                        // only stamped when user (or Qrr > 0
+                        // auto-default in the constructor) requested
+                        // it. Avoid blanket fallback here: a small
+                        // cap on every Ideal-mode diode (e.g. line
+                        // rectifier bridge) perturbs subgraphs that
+                        // never needed snubbing.
+                        if (dev.C_j() > Real{0}) {
+                            stamp_capacitance(dev.C_j(), nodes[0], nodes[1]);
+                        }
                     }
                 } else if constexpr (std::is_same_v<T, IdealSwitch>) {
                     if (nodes.size() >= 2) {
@@ -4094,15 +4540,23 @@ public:
                     if (nodes.size() >= 3) {
                         const Real g = dev.pwl_state() ? dev.params().g_on
                                                        : dev.params().g_off;
-                        // Drain–source path only (gate stamps deferred to the
-                        // catalog-tier change once Coss/Ciss are modeled).
                         stamp_g(g, nodes[1], nodes[2]);
+                        // Opt-in parasitic output cap C_oss — only when
+                        // the user (or Eon_25 > 0 auto-default) asked
+                        // for it. No blanket fallback: see the diode
+                        // branch above for rationale.
+                        if (dev.C_oss() > Real{0}) {
+                            stamp_capacitance(dev.C_oss(), nodes[1], nodes[2]);
+                        }
                     }
                 } else if constexpr (std::is_same_v<T, IGBT>) {
                     if (nodes.size() >= 3) {
                         const Real g = dev.pwl_state() ? dev.params().g_on
                                                        : dev.params().g_off;
                         stamp_g(g, nodes[1], nodes[2]);
+                        if (dev.C_oss() > Real{0}) {
+                            stamp_capacitance(dev.C_oss(), nodes[1], nodes[2]);
+                        }
                     }
                 } else if constexpr (std::is_same_v<T, Transformer>) {
                     // Coupled inductor support uses a separate stamp pass
@@ -5232,6 +5686,42 @@ private:
             stamp_phase(n_b, br_b, e_b);
             stamp_phase(n_c, br_c, e_c);
         }
+        else if constexpr (std::is_same_v<T, BldcMotorDevice> ||
+                           std::is_same_v<T, InductionMotorDevice>) {
+            // consolidate-motors-and-three-phase, Phase C DC OP stamp.
+            // Shares the PmsmDevice phase stamping pattern: each phase
+            // inductor is a short, so per-phase
+            //   v_k − v_N − R_s · i_k − e_k(θ_init) = 0
+            // For BLDC, e_k(θ_init) comes from the trapezoidal back-EMF
+            // table evaluated at the stored rotor angle. For Induction at
+            // DC OP, rotor flux is zero → e_k ≡ 0, so the device reduces
+            // to a per-phase R_s resistor in series with the line.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real e_a = dev.back_emf_a();
+            const Real e_b = dev.back_emf_b();
+            const Real e_c = dev.back_emf_c();
+
+            auto stamp_phase = [&](Index n_line, Index br, Real e_k) {
+                if (br < 0) return;
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -p.R_s);
+                b[br] += e_k;
+            };
+            stamp_phase(n_a, br_a, e_a);
+            stamp_phase(n_b, br_b, e_b);
+            stamp_phase(n_c, br_c, e_c);
+        }
     }
 
     template<typename Device, typename Triplets>
@@ -5520,6 +6010,59 @@ private:
                 const Real i_br = x[br];
 
                 // KCL at line / neutral nodes
+                if (n_line >= 0) f[n_line] += i_br;
+                if (n_n    >= 0) f[n_n]    -= i_br;
+                if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(n_n,    br, -1.0);
+
+                const Real v_line = (n_line >= 0) ? x[n_line] : 0.0;
+                const Real v_neut = (n_n    >= 0) ? x[n_n]    : 0.0;
+                f[br] += (v_line - v_neut) - r_eq * i_br + v_hist - e_k;
+
+                if (n_line >= 0) triplets.emplace_back(br, n_line, 1.0);
+                if (n_n    >= 0) triplets.emplace_back(br, n_n,   -1.0);
+                triplets.emplace_back(br, br, -r_eq);
+            };
+
+            stamp_phase(n_a, br_a, dev.i_a_prev(), dev.v_La_prev(), dev.back_emf_a());
+            stamp_phase(n_b, br_b, dev.i_b_prev(), dev.v_Lb_prev(), dev.back_emf_b());
+            stamp_phase(n_c, br_c, dev.i_c_prev(), dev.v_Lc_prev(), dev.back_emf_c());
+        }
+        else if constexpr (std::is_same_v<T, BldcMotorDevice> ||
+                           std::is_same_v<T, InductionMotorDevice>) {
+            // consolidate-motors-and-three-phase, Phase C transient stamp.
+            // Same shape as PmsmDevice — per-phase trapezoidal companion
+            // (R_s + 2·L_eff/dt series) with back-EMF semi-implicit source.
+            // BLDC uses params().L_s directly; Induction uses
+            // l_s_effective() (σ·L_s in the αβ frame). Back-EMF: BLDC
+            // trapezoidal table; Induction (L_m/L_r)·dψ_r/dt projected to
+            // the abc frame.
+            const auto& p = dev.params();
+            const Index n_a = conn.nodes[0];
+            const Index n_b = conn.nodes[1];
+            const Index n_c = conn.nodes[2];
+            const Index n_n = conn.nodes[3];
+            const Index br_a = conn.branch_index;
+            const Index br_b = conn.branch_index_2;
+            const Index br_c = (br_a >= 0) ? br_a + 2 : -1;
+
+            const Real l_s = [&]() {
+                if constexpr (std::is_same_v<T, BldcMotorDevice>) {
+                    return p.L_s;
+                } else {
+                    return dev.l_s_effective();
+                }
+            }();
+            const Real two_L_over_dt =
+                2.0 * l_s / std::max<Real>(timestep_, 1e-30);
+            const Real r_eq = p.R_s + two_L_over_dt;
+
+            auto stamp_phase = [&](Index n_line, Index br, Real i_prev,
+                                   Real v_L_prev, Real e_k) {
+                if (br < 0) return;
+                const Real v_hist = two_L_over_dt * i_prev + v_L_prev;
+                const Real i_br = x[br];
+
                 if (n_line >= 0) f[n_line] += i_br;
                 if (n_n    >= 0) f[n_n]    -= i_br;
                 if (n_line >= 0) triplets.emplace_back(n_line, br, 1.0);

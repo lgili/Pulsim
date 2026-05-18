@@ -459,7 +459,11 @@ void init_v2_module(py::module_& v2) {
                        "0 disables E_rec accumulation.")
         .def_readwrite("Erec_shape", &IdealDiode::Params::Erec_shape,
                        "Recovery waveform shape (0..1; 0.5 = symmetric "
-                       "triangular, 0.33 = soft-recovery, 0.67 = hard).");
+                       "triangular, 0.33 = soft-recovery, 0.67 = hard).")
+        .def_readwrite("C_j",        &IdealDiode::Params::C_j,
+                       "Parasitic junction capacitance (F) anode-to-cathode. "
+                       "Opt-in PSIM-style auto-snubber for the PWL Ideal "
+                       "path. Default 0; see MOSFETParams.C_oss for tuning.");
 
     py::class_<IdealSwitch>(v2, "IdealSwitch", "Controllable ideal switch")
         .def(py::init<Real, Real, bool, std::string>(),
@@ -501,7 +505,14 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("V_ref",     &MOSFET::Params::V_ref,
                        "Reference voltage for E_sw scaling (V).")
         .def_readwrite("Esw_tc",    &MOSFET::Params::Esw_tc,
-                       "Switching-energy temperature coefficient (1/K).");
+                       "Switching-energy temperature coefficient (1/K).")
+        .def_readwrite("C_oss",     &MOSFET::Params::C_oss,
+                       "Parasitic output capacitance drain-source (F). "
+                       "Opt-in PSIM-style auto-snubber for the PWL Ideal "
+                       "path — gives the inductor commutation a finite-dt "
+                       "charge path. Default 0 (no parasitic stamped). "
+                       "Typical values: 1 nF–50 nF; tune so the inductor "
+                       "current charges C_oss to V_bus in 5–10 timesteps.");
 
     py::class_<MOSFET>(v2, "MOSFET", "MOSFET Level 1 (Shichman-Hodges) model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -543,7 +554,11 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("V_ref",     &IGBT::Params::V_ref,
                        "Reference voltage for E_sw scaling (V).")
         .def_readwrite("Esw_tc",    &IGBT::Params::Esw_tc,
-                       "Switching-energy temperature coefficient (1/K).");
+                       "Switching-energy temperature coefficient (1/K).")
+        .def_readwrite("C_oss",     &IGBT::Params::C_oss,
+                       "Parasitic C_oes (F) collector-to-emitter. Opt-in "
+                       "PSIM-style auto-snubber for PWL Ideal path. "
+                       "Default 0; see MOSFETParams.C_oss for tuning.");
 
     py::class_<IGBT>(v2, "IGBT", "Simplified IGBT power device model")
         .def(py::init<std::string>(), py::arg("name") = "")
@@ -595,7 +610,99 @@ void init_v2_module(py::module_& v2) {
                        "True = positive (abc) sequence, False = negative (acb)")
         .def_readwrite("unbalance_factor",
                        &Circuit::ThreePhaseSourceParams::unbalance_factor,
-                       "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u");
+                       "0 = balanced; 0..1 scales |V_b|=1-u and |V_c|=1+u")
+        .def("to_grid_source",
+             &Circuit::ThreePhaseSourceParams::to_grid_source,
+             "Convert the Circuit-side params struct to the canonical "
+             "`grid::ThreePhaseSource` math object (loses unbalance_factor — "
+             "the math object is canonically balanced).")
+        .def_static("from_grid_source",
+                    &Circuit::ThreePhaseSourceParams::from_grid_source,
+                    py::arg("source"),
+                    "Build a ThreePhaseSourceParams from a grid::ThreePhaseSource "
+                    "math object (unbalance_factor defaults to 0).");
+
+    // consolidate-motors-and-three-phase, Phase A.1: expose the canonical
+    // three-phase source math object so Python users can prefer it over the
+    // Circuit-side params struct when working in the grid math surface.
+    py::enum_<grid::PhaseSequence>(v2, "PhaseSequence",
+            "Three-phase rotation sequence (positive = abc, negative = acb).")
+        .value("Positive", grid::PhaseSequence::Positive)
+        .value("Negative", grid::PhaseSequence::Negative);
+
+    py::class_<grid::ThreePhaseSource>(v2, "ThreePhaseSourceModel",
+            "Canonical balanced sinusoidal three-phase source (math object "
+            "from `pulsim::v1::grid::ThreePhaseSource`). Composes into "
+            "ThreePhaseSourceParams; usable directly via the matching "
+            "Circuit.add_three_phase_source overload.")
+        .def(py::init<>())
+        .def_readwrite("v_rms", &grid::ThreePhaseSource::v_rms,
+                       "Per-phase RMS voltage (V)")
+        .def_readwrite("frequency", &grid::ThreePhaseSource::frequency,
+                       "Fundamental frequency (Hz)")
+        .def_readwrite("phase_rad", &grid::ThreePhaseSource::phase_rad,
+                       "Initial phase angle (rad)")
+        .def_readwrite("sequence", &grid::ThreePhaseSource::sequence,
+                       "Phase rotation sequence (Positive/Negative)")
+        .def("evaluate", &grid::ThreePhaseSource::evaluate, py::arg("t"),
+             "Return the instantaneous (v_a, v_b, v_c) triple at time t.");
+
+    // consolidate-motors-and-three-phase, Phase B.1: programmable + harmonic
+    // 3φ source math objects, plus their `Circuit.add_three_phase_source`
+    // overloads. The programmable source wraps the base ThreePhaseSourceModel
+    // with per-phase scale envelopes (g_a / g_b / g_c) for sag / swell test
+    // fixtures. The harmonic source adds a list of (order, magnitude_pct,
+    // phase_rad) components on top of the fundamental.
+    py::class_<grid::ThreePhaseSourceProgrammable>(v2,
+            "ThreePhaseSourceProgrammable",
+            "Three-phase source with per-phase scale envelopes (sag/swell "
+            "fixtures). Wraps a base ThreePhaseSourceModel.")
+        .def(py::init<>())
+        .def_readwrite("base", &grid::ThreePhaseSourceProgrammable::base,
+                       "Base balanced source.")
+        .def_readwrite("g_a", &grid::ThreePhaseSourceProgrammable::g_a,
+                       "Phase A scale envelope (1.0 = nominal).")
+        .def_readwrite("g_b", &grid::ThreePhaseSourceProgrammable::g_b,
+                       "Phase B scale envelope (1.0 = nominal).")
+        .def_readwrite("g_c", &grid::ThreePhaseSourceProgrammable::g_c,
+                       "Phase C scale envelope (1.0 = nominal).")
+        .def("evaluate", &grid::ThreePhaseSourceProgrammable::evaluate,
+             py::arg("t"),
+             "Return the instantaneous scaled (v_a, v_b, v_c) triple.")
+        .def("evaluate_with_sag",
+             &grid::ThreePhaseSourceProgrammable::evaluate_with_sag,
+             py::arg("t"), py::arg("t_sag"), py::arg("g_a_after"),
+             "Stateless sag-on-A helper: drops g_a to `g_a_after` for "
+             "t >= t_sag; B and C stay at their stored gains.");
+
+    py::class_<grid::HarmonicComponent>(v2, "HarmonicComponent",
+            "Single harmonic component for ThreePhaseHarmonicSource.")
+        .def(py::init<>())
+        .def_readwrite("order", &grid::HarmonicComponent::order,
+                       "Harmonic order (e.g., 5 = 5th harmonic).")
+        .def_readwrite("magnitude_pct",
+                       &grid::HarmonicComponent::magnitude_pct,
+                       "Amplitude as fraction of fundamental peak.")
+        .def_readwrite("phase_rad",
+                       &grid::HarmonicComponent::phase_rad,
+                       "Extra phase offset relative to fundamental (rad).");
+
+    py::class_<grid::ThreePhaseHarmonicSource>(v2,
+            "ThreePhaseHarmonicSource",
+            "Three-phase source with arbitrary harmonic injection on top of "
+            "the fundamental.")
+        .def(py::init<>())
+        .def_readwrite("fundamental",
+                       &grid::ThreePhaseHarmonicSource::fundamental,
+                       "Fundamental sinusoidal three-phase source.")
+        .def_readwrite("harmonics",
+                       &grid::ThreePhaseHarmonicSource::harmonics,
+                       "List of HarmonicComponent triples (order, "
+                       "magnitude_pct, phase_rad).")
+        .def("evaluate", &grid::ThreePhaseHarmonicSource::evaluate,
+             py::arg("t"),
+             "Return the instantaneous (v_a, v_b, v_c) triple at time t — "
+             "fundamental + harmonic contributions summed per phase.");
 
     py::enum_<Circuit::PwmModulation>(
             v2, "PwmModulation",
@@ -688,26 +795,12 @@ void init_v2_module(py::module_& v2) {
                        &Circuit::ThreePhaseRLLoadParams::unbalance_factor,
                        "0 = balanced; [0, 1) scales |Z_b|=1-u and |Z_c|=1+u.");
 
-    py::class_<Circuit::PmsmSteadyStateParams>(
-            v2, "PmsmSteadyStateParams",
-            "PMSM at fixed rotor speed — 3-phase R+L+back-EMF model.")
-        .def(py::init<>())
-        .def_readwrite("R_s", &Circuit::PmsmSteadyStateParams::R_s,
-                       "Stator phase resistance (Ω).")
-        .def_readwrite("L_s", &Circuit::PmsmSteadyStateParams::L_s,
-                       "Stator phase inductance (H). Non-salient (L_d=L_q).")
-        .def_readwrite("lambda_pm", &Circuit::PmsmSteadyStateParams::lambda_pm,
-                       "Rotor flux linkage (V·s/rad).")
-        .def_readwrite("omega_electrical",
-                       &Circuit::PmsmSteadyStateParams::omega_electrical,
-                       "Fixed electrical angular velocity (rad/s).")
-        .def_readwrite("phase_a_offset_deg",
-                       &Circuit::PmsmSteadyStateParams::phase_a_offset_deg,
-                       "Phase A back-EMF angle offset (degrees).")
-        .def_readwrite("positive_sequence",
-                       &Circuit::PmsmSteadyStateParams::positive_sequence,
-                       "True = abc sequence (B = −120°, C = −240°). "
-                       "False = acb (B = +120°, C = +240°).");
+    // consolidate-motors-and-three-phase, Phase A.2: PmsmSteadyStateParams
+    // removed in favor of the canonical `PmsmDevice` (DeviceVariant).
+    // Steady-state operating points are reachable by constructing a
+    // `Pmsm` via `Circuit.add_pmsm(...)` with the rotor mechanical speed
+    // held fixed at the desired ω_m. See `test_pmsm_dynamic.cpp` for the
+    // migrated regression cases.
 
     py::class_<motors::DcMotorParams>(
             v2, "DcMotorParams",
@@ -772,6 +865,133 @@ void init_v2_module(py::module_& v2) {
                        "Initial mechanical angular velocity (rad/s).")
         .def_readwrite("theta_init", &motors::PmsmParams::theta_init,
                        "Initial rotor angle (rad).");
+
+    // consolidate-motors-and-three-phase, Phase B.2a: signal-domain shaft +
+    // mechanical-device parameter binding. The Shaft is exposed standalone
+    // because MechanicalDevice::Params embeds it; users construct
+    // `Shaft(J=…, b_friction=…, …)` then attach it via
+    // `MechanicalDeviceParams(shaft=…)`.
+    py::class_<motors::Shaft>(v2, "Shaft",
+            "Rotating shaft primitive (J, friction, ω state). Building block "
+            "for MechanicalDeviceParams.")
+        .def(py::init<>())
+        .def_readwrite("J", &motors::Shaft::J,
+                       "Rotor + load inertia (kg·m²).")
+        .def_readwrite("b_friction", &motors::Shaft::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("friction_coulomb", &motors::Shaft::friction_coulomb,
+                       "Coulomb friction torque (N·m).")
+        .def_readwrite("omega", &motors::Shaft::omega,
+                       "Initial / current angular velocity (rad/s).");
+
+    py::class_<MechanicalDevice::Params>(v2, "MechanicalDeviceParams",
+            "Signal-domain mechanical device parameters (shaft + load + "
+            "optional gear ratio). Used by Circuit::add_mechanical.")
+        .def(py::init<>())
+        .def_readwrite("shaft", &MechanicalDevice::Params::shaft,
+                       "Embedded Shaft (inertia + friction + initial ω).")
+        .def_readwrite("theta_init", &MechanicalDevice::Params::theta_init,
+                       "Initial mechanical angle (rad).")
+        .def_readwrite("tau_load_const",
+                       &MechanicalDevice::Params::tau_load_const,
+                       "Constant load torque (N·m), opposes motion.")
+        .def_readwrite("tau_load_quad_coeff",
+                       &MechanicalDevice::Params::tau_load_quad_coeff,
+                       "Quadratic load coefficient: τ_load_quad = k·ω·|ω|.")
+        .def_readwrite("gear_ratio",
+                       &MechanicalDevice::Params::gear_ratio,
+                       "Optional speed ratio for gearbox downstream.");
+
+    // consolidate-motors-and-three-phase, Phase C.1: BLDC motor parameters.
+    py::class_<motors::BldcMotorParams>(v2, "BldcMotorParams",
+            "BLDC (trapezoidal back-EMF) motor parameters. Used by "
+            "Circuit::add_bldc_motor.")
+        .def(py::init<>())
+        .def_readwrite("R_s", &motors::BldcMotorParams::R_s,
+                       "Stator phase resistance (Ω).")
+        .def_readwrite("L_s", &motors::BldcMotorParams::L_s,
+                       "Stator phase inductance (H, non-salient).")
+        .def_readwrite("K_e_peak", &motors::BldcMotorParams::K_e_peak,
+                       "Peak back-EMF constant per phase (V·s/rad).")
+        .def_readwrite("pole_pairs", &motors::BldcMotorParams::pole_pairs,
+                       "Number of pole pairs.")
+        .def_readwrite("J", &motors::BldcMotorParams::J,
+                       "Rotor inertia (kg·m²).")
+        .def_readwrite("b_friction", &motors::BldcMotorParams::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("friction_coulomb",
+                       &motors::BldcMotorParams::friction_coulomb,
+                       "Coulomb friction torque (N·m).")
+        .def_readwrite("tau_load_const",
+                       &motors::BldcMotorParams::tau_load_const,
+                       "Constant load torque (N·m).")
+        .def_readwrite("tau_load_quad_coeff",
+                       &motors::BldcMotorParams::tau_load_quad_coeff,
+                       "Quadratic load coefficient.");
+
+    // consolidate-motors-and-three-phase, Phase B.2b: PMSM-FOC controller.
+    py::class_<motors::PmsmFocCurrentLoopParams>(v2, "PmsmFocCurrentLoopParams",
+            "PMSM-FOC current-loop tuning parameters (bandwidth + V_d/V_q "
+            "clamps). Embedded in PmsmFocDeviceParams.")
+        .def(py::init<>())
+        .def_readwrite("bandwidth_hz",
+                       &motors::PmsmFocCurrentLoopParams::bandwidth_hz,
+                       "Target current-loop crossover frequency (Hz).")
+        .def_readwrite("Vd_min",
+                       &motors::PmsmFocCurrentLoopParams::Vd_min,
+                       "Lower clamp on V_d output (V).")
+        .def_readwrite("Vd_max",
+                       &motors::PmsmFocCurrentLoopParams::Vd_max,
+                       "Upper clamp on V_d output (V).")
+        .def_readwrite("Vq_min",
+                       &motors::PmsmFocCurrentLoopParams::Vq_min,
+                       "Lower clamp on V_q output (V).")
+        .def_readwrite("Vq_max",
+                       &motors::PmsmFocCurrentLoopParams::Vq_max,
+                       "Upper clamp on V_q output (V).");
+
+    py::class_<PmsmFocDevice::Params>(v2, "PmsmFocDeviceParams",
+            "Composite parameters for the PMSM-FOC current-loop device — "
+            "the PMSM motor parameters (used to derive PI gains via pole-zero "
+            "cancellation) plus the FOC tuning struct.")
+        .def(py::init<>())
+        .def_readwrite("motor", &PmsmFocDevice::Params::motor,
+                       "PMSM electrical/mechanical parameters used for tuning.")
+        .def_readwrite("foc", &PmsmFocDevice::Params::foc,
+                       "FOC bandwidth + clamps.");
+
+    // consolidate-motors-and-three-phase, Phase C.2: Induction motor params.
+    py::class_<motors::InductionMotorParams>(v2, "InductionMotorParams",
+            "Squirrel-cage induction motor parameters (stationary αβ frame). "
+            "Used by Circuit::add_induction_motor.")
+        .def(py::init<>())
+        .def_readwrite("R_s", &motors::InductionMotorParams::R_s,
+                       "Stator phase resistance (Ω).")
+        .def_readwrite("R_r", &motors::InductionMotorParams::R_r,
+                       "Rotor resistance referred to stator (Ω).")
+        .def_readwrite("L_s", &motors::InductionMotorParams::L_s,
+                       "Stator self-inductance (H).")
+        .def_readwrite("L_r", &motors::InductionMotorParams::L_r,
+                       "Rotor self-inductance (H).")
+        .def_readwrite("L_m", &motors::InductionMotorParams::L_m,
+                       "Mutual inductance (H, < L_s and < L_r typically).")
+        .def_readwrite("pole_pairs",
+                       &motors::InductionMotorParams::pole_pairs,
+                       "Number of pole pairs.")
+        .def_readwrite("J", &motors::InductionMotorParams::J,
+                       "Rotor inertia (kg·m²).")
+        .def_readwrite("b_friction",
+                       &motors::InductionMotorParams::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("friction_coulomb",
+                       &motors::InductionMotorParams::friction_coulomb,
+                       "Coulomb friction torque (N·m).")
+        .def_readwrite("tau_load_const",
+                       &motors::InductionMotorParams::tau_load_const,
+                       "Constant load torque (N·m).")
+        .def_readwrite("tau_load_quad_coeff",
+                       &motors::InductionMotorParams::tau_load_quad_coeff,
+                       "Quadratic load coefficient.");
 
     py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
         .def(py::init<>())
@@ -1081,6 +1301,17 @@ void init_v2_module(py::module_& v2) {
              py::arg("R_th_ja") = 25.0, py::arg("T_amb") = 25.0,
              "Convenience overload: bridge rectifier with explicit "
              "(V_F0, R_d, R_th_ja, T_amb) numbers (no params struct).")
+        .def("add_rc_snubber", &Circuit::add_rc_snubber,
+             py::arg("device_name"), py::arg("R"), py::arg("C"),
+             py::arg("initial_v_cap") = 0.0,
+             "Add a damped RC snubber across an existing MOSFET / IGBT "
+             "/ IdealDiode. Creates an internal node "
+             "(<device>__snub_int) and installs R + C in series between "
+             "the device's power terminals (drain↔source for MOSFET/"
+             "IGBT, anode↔cathode for diode). The series R critically "
+             "damps the inductor-side LC tank that the PWL-only "
+             "parallel C_oss / C_j cannot. A good first guess: "
+             "R ≈ sqrt(L/C). Returns True if the device was found.")
         // Diode loss + thermal accessors.
         .def("diode_average_power",  &Circuit::diode_average_power,
              py::arg("name"),
@@ -1318,6 +1549,40 @@ void init_v2_module(py::module_& v2) {
              py::arg("node_c"), py::arg("node_neutral"),
              py::arg("v_line_to_line_rms"), py::arg("frequency_hz"),
              "Add a balanced 3-phase voltage source (positive sequence, 0% unbalance).")
+        // consolidate-motors-and-three-phase, Phase A.1: math-object overload.
+        // Pass `pulsim.ThreePhaseSourceModel` directly when the caller is
+        // already working in the grid math-object surface.
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index,
+                               const grid::ThreePhaseSource&>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"), py::arg("source"),
+             "Add a balanced 3-phase voltage source from the grid::ThreePhaseSource "
+             "math object (consolidate-motors-and-three-phase Phase A.1). The math "
+             "object is the canonical signal representation; the params-struct "
+             "overload converts to this form internally.")
+        // consolidate-motors-and-three-phase, Phase B.1: programmable + harmonic
+        // overloads. Both math objects decompose into independent sine legs at
+        // construction time (programmable: 3 legs with per-phase scale;
+        // harmonic: 3 + 3·N legs for fundamental + harmonics).
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index,
+                               const grid::ThreePhaseSourceProgrammable&>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"), py::arg("source"),
+             "Add a programmable 3-phase source (per-phase scale envelope). "
+             "Scaling is captured at construction; runtime sag/swell requires "
+             "rebuilding the source.")
+        .def("add_three_phase_source",
+             py::overload_cast<std::string_view, Index, Index, Index, Index,
+                               const grid::ThreePhaseHarmonicSource&>(
+                 &Circuit::add_three_phase_source),
+             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
+             py::arg("node_c"), py::arg("node_neutral"), py::arg("source"),
+             "Add a harmonic-injected 3-phase source. Decomposes into "
+             "3 + 3·N sine legs (one per harmonic per phase).")
         // Three-phase 2-level VSI (Track 4 follow-up). Decomposes into 6
         // NMOS switches + 6 SPWM gate drivers internally.
         .def("add_three_phase_vsi",
@@ -1360,27 +1625,9 @@ void init_v2_module(py::module_& v2) {
              py::arg("resistance_per_phase"), py::arg("inductance_per_phase"),
              "Add a balanced three-phase RL load in Star configuration "
              "(default topology) with explicit R and L values.")
-        // PMSM steady-state helper (constant rotor speed model).
-        .def("add_pmsm_steady_state",
-             py::overload_cast<std::string_view, Index, Index, Index, Index,
-                               const Circuit::PmsmSteadyStateParams&>(
-                 &Circuit::add_pmsm_steady_state),
-             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
-             py::arg("node_c"), py::arg("node_neutral"), py::arg("params"),
-             "Add a 3-phase PMSM at fixed rotor speed: R_s + L_s + sinusoidal "
-             "back-EMF per phase, 120° apart. Use this when rotor dynamics are "
-             "not part of the analysis; for spin-up transients, use the future "
-             "full device-variant ``add_pmsm()``.")
-        .def("add_pmsm_steady_state",
-             py::overload_cast<std::string_view, Index, Index, Index, Index,
-                               Real, Real, Real, Real>(
-                 &Circuit::add_pmsm_steady_state),
-             py::arg("name"), py::arg("node_a"), py::arg("node_b"),
-             py::arg("node_c"), py::arg("node_neutral"),
-             py::arg("R_s"), py::arg("L_s"),
-             py::arg("lambda_pm"), py::arg("omega_electrical"),
-             "Add a 3-phase PMSM at fixed rotor speed with explicit "
-             "(R_s, L_s, λ_pm, ω_e) values.")
+        // consolidate-motors-and-three-phase, Phase A.2: `add_pmsm_steady_state`
+        // removed. Use `Circuit.add_pmsm(...)` with the rotor mechanical state
+        // held fixed at the desired ω_m to obtain the same operating point.
         // DC motor — Track 2 of three-phase / motors / magnetics integration.
         .def("add_dc_motor",
              py::overload_cast<const std::string&, Index, Index,
@@ -1455,6 +1702,106 @@ void init_v2_module(py::module_& v2) {
              "Read the phase B line current of a PMSM (A).")
         .def("pmsm_i_c", &Circuit::pmsm_i_c, py::arg("name"),
              "Read the phase C line current of a PMSM (A).")
+        // consolidate-motors-and-three-phase, Phase B.2b: PMSM-FOC current
+        // loop. Signal-domain controller wrapping motors::PmsmFocCurrentLoop.
+        .def("add_pmsm_foc",
+             py::overload_cast<const std::string&, const PmsmFocDevice::Params&>(
+                 &Circuit::add_pmsm_foc),
+             py::arg("name"), py::arg("params"),
+             "Add a PMSM-FOC current-loop controller (no electrical pins). "
+             "Tuned from PMSM (R_s, L_d, L_q) and target bandwidth_hz via "
+             "pole-zero cancellation.")
+        .def("add_pmsm_foc",
+             py::overload_cast<const std::string&,
+                               const motors::PmsmParams&, Real>(
+                 &Circuit::add_pmsm_foc),
+             py::arg("name"), py::arg("motor"),
+             py::arg("bandwidth_hz") = 1000.0,
+             "Convenience overload — auto-derives FOC params from motor + "
+             "target bandwidth (default 1 kHz).")
+        .def("set_pmsm_foc_references", &Circuit::set_pmsm_foc_references,
+             py::arg("name"), py::arg("id_ref"), py::arg("iq_ref"),
+             "Push d/q current references into the PMSM-FOC loop.")
+        .def("set_pmsm_foc_measurements", &Circuit::set_pmsm_foc_measurements,
+             py::arg("name"), py::arg("id_meas"), py::arg("iq_meas"),
+             "Push d/q current measurements (typically pmsm_i_d/_q on the "
+             "coupled PMSM) into the PMSM-FOC loop.")
+        .def("retune_pmsm_foc", &Circuit::retune_pmsm_foc,
+             py::arg("name"), py::arg("motor"), py::arg("foc"),
+             "Online retune of the PMSM-FOC PI gains.")
+        .def("reset_pmsm_foc", &Circuit::reset_pmsm_foc, py::arg("name"),
+             "Reset PMSM-FOC integrator state.")
+        .def("pmsm_foc_vd_ref", &Circuit::pmsm_foc_vd_ref, py::arg("name"),
+             "Read the last V_d reference output (V).")
+        .def("pmsm_foc_vq_ref", &Circuit::pmsm_foc_vq_ref, py::arg("name"),
+             "Read the last V_q reference output (V).")
+        // consolidate-motors-and-three-phase, Phase B.2a: signal-domain
+        // Mechanical device for multi-shaft topologies.
+        .def("add_mechanical", &Circuit::add_mechanical,
+             py::arg("name"), py::arg("params"),
+             "Add a signal-domain mechanical device (shaft + load) with no "
+             "electrical pins. Couples to motors via set_tau_input / "
+             "set_tau_load wiring done by the user.")
+        .def("set_mechanical_tau_input",
+             &Circuit::set_mechanical_tau_input,
+             py::arg("name"), py::arg("tau"),
+             "Push torque input to a MechanicalDevice (typically a motor's "
+             "electromagnetic torque).")
+        .def("mechanical_omega", &Circuit::mechanical_omega, py::arg("name"),
+             "Read mechanical angular velocity (rad/s).")
+        .def("mechanical_theta", &Circuit::mechanical_theta, py::arg("name"),
+             "Read mechanical angle (rad).")
+        .def("mechanical_reaction_torque",
+             &Circuit::mechanical_reaction_torque, py::arg("name"),
+             "Read reaction torque exposed back upstream (N·m).")
+        // consolidate-motors-and-three-phase, Phase C.1: BLDC motor.
+        .def("add_bldc_motor", &Circuit::add_bldc_motor,
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"), py::arg("n_c"),
+             py::arg("n_neutral"), py::arg("params"),
+             "Add a three-phase BLDC motor (trapezoidal back-EMF, 4 pins, 3 "
+             "reserved branch rows). Closes motor-models spec gap.")
+        .def("set_bldc_tau_load", &Circuit::set_bldc_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Set external shaft load torque on a BLDC motor (N·m).")
+        .def("bldc_omega", &Circuit::bldc_omega, py::arg("name"),
+             "Read BLDC mechanical angular velocity (rad/s).")
+        .def("bldc_theta", &Circuit::bldc_theta, py::arg("name"),
+             "Read BLDC rotor angle (rad).")
+        .def("bldc_i_a", &Circuit::bldc_i_a, py::arg("name"),
+             "Read BLDC phase A line current (A).")
+        .def("bldc_i_b", &Circuit::bldc_i_b, py::arg("name"),
+             "Read BLDC phase B line current (A).")
+        .def("bldc_i_c", &Circuit::bldc_i_c, py::arg("name"),
+             "Read BLDC phase C line current (A).")
+        // consolidate-motors-and-three-phase, Phase C.2: Induction motor.
+        .def("add_induction_motor", &Circuit::add_induction_motor,
+             py::arg("name"), py::arg("n_a"), py::arg("n_b"), py::arg("n_c"),
+             py::arg("n_neutral"), py::arg("params"),
+             "Add a three-phase squirrel-cage induction motor (αβ frame with "
+             "rotor flux state, 4 pins, 3 reserved branch rows). Closes "
+             "motor-models spec gap.")
+        .def("set_induction_tau_load", &Circuit::set_induction_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Set external shaft load torque on an induction motor (N·m).")
+        .def("induction_omega", &Circuit::induction_omega, py::arg("name"),
+             "Read induction motor mechanical angular velocity (rad/s).")
+        .def("induction_theta", &Circuit::induction_theta, py::arg("name"),
+             "Read induction motor rotor angle (rad).")
+        .def("induction_slip", &Circuit::induction_slip,
+             py::arg("name"), py::arg("omega_sync_electrical"),
+             "Read induction motor slip s = (ω_sync − ω_e) / ω_sync. "
+             "`omega_sync_electrical` (rad/s) is supplied by the caller "
+             "because the Circuit doesn't know which stator source is "
+             "exciting the motor. For a 50 Hz grid: 2·π·50 ≈ 314 rad/s.")
+        .def("induction_slip_from_hz", &Circuit::induction_slip_from_hz,
+             py::arg("name"), py::arg("f_sync_hz"),
+             "Slip overload that takes f_sync in Hz instead of rad/s.")
+        .def("induction_i_a", &Circuit::induction_i_a, py::arg("name"),
+             "Read induction motor phase A line current (A).")
+        .def("induction_i_b", &Circuit::induction_i_b, py::arg("name"),
+             "Read induction motor phase B line current (A).")
+        .def("induction_i_c", &Circuit::induction_i_c, py::arg("name"),
+             "Read induction motor phase C line current (A).")
         // PWM control
         .def("set_pwm_duty", &Circuit::set_pwm_duty,
              py::arg("name"), py::arg("duty"),
@@ -3431,131 +3778,14 @@ void init_v2_module(py::module_& v2) {
            "Create simple single-stage thermal model");
 
     // =========================================================================
-    // Power Loss Calculation Module
+    // System-level loss aggregation
+    // -------------------------------------------------------------------------
+    // Per-device loss params (Rds_on(T_j), V_F0, Eon_25, Qrr, R_th_ja, ...)
+    // live on each device own Params struct (MOSFETParams, IGBTParams,
+    // RealisticDiodeParams, ResistorParams, CapacitorParams, InductorParams).
+    // These system-level types aggregate per-device readings into a
+    // converter-wide summary.
     // =========================================================================
-
-    py::class_<MOSFETLossParams>(v2, "MOSFETLossParams",
-        "MOSFET loss model parameters for conduction and switching losses")
-        .def(py::init<>())
-        .def_readwrite("Rds_on", &MOSFETLossParams::Rds_on,
-             "On-state resistance at 25C (Ω)")
-        .def_readwrite("Rds_on_tc", &MOSFETLossParams::Rds_on_tc,
-             "Temperature coefficient (Ω/K)")
-        .def_readwrite("Qg", &MOSFETLossParams::Qg,
-             "Total gate charge (C)")
-        .def_readwrite("Eon_25C", &MOSFETLossParams::Eon_25C,
-             "Turn-on energy at 25C (J)")
-        .def_readwrite("Eoff_25C", &MOSFETLossParams::Eoff_25C,
-             "Turn-off energy at 25C (J)")
-        .def_readwrite("I_ref", &MOSFETLossParams::I_ref,
-             "Reference current for Esw (A)")
-        .def_readwrite("V_ref", &MOSFETLossParams::V_ref,
-             "Reference voltage for Esw (V)")
-        .def_readwrite("T_ref", &MOSFETLossParams::T_ref,
-             "Reference temperature (C)")
-        .def_readwrite("Esw_tc", &MOSFETLossParams::Esw_tc,
-             "Switching energy temp coefficient (1/K)")
-        .def("Rds_on_at_T", &MOSFETLossParams::Rds_on_at_T, py::arg("T"),
-             "Calculate Rds_on at temperature T");
-
-    py::class_<IGBTLossParams>(v2, "IGBTLossParams",
-        "IGBT loss model parameters")
-        .def(py::init<>())
-        .def_readwrite("Vce_sat", &IGBTLossParams::Vce_sat,
-             "Collector-emitter saturation voltage (V)")
-        .def_readwrite("Rce", &IGBTLossParams::Rce,
-             "Collector-emitter resistance (Ω)")
-        .def_readwrite("Vce_tc", &IGBTLossParams::Vce_tc,
-             "Vce temperature coefficient (V/K)")
-        .def_readwrite("Eon_25C", &IGBTLossParams::Eon_25C,
-             "Turn-on energy at 25C (J)")
-        .def_readwrite("Eoff_25C", &IGBTLossParams::Eoff_25C,
-             "Turn-off energy at 25C (J)")
-        .def_readwrite("I_ref", &IGBTLossParams::I_ref,
-             "Reference current (A)")
-        .def_readwrite("V_ref", &IGBTLossParams::V_ref,
-             "Reference voltage (V)")
-        .def_readwrite("T_ref", &IGBTLossParams::T_ref,
-             "Reference temperature (C)")
-        .def_readwrite("Esw_tc", &IGBTLossParams::Esw_tc,
-             "Switching energy temp coefficient (1/K)")
-        .def("Vce_sat_at_T", &IGBTLossParams::Vce_sat_at_T, py::arg("T"),
-             "Calculate Vce_sat at temperature T");
-
-    py::class_<DiodeLossParams>(v2, "DiodeLossParams",
-        "Diode loss model parameters")
-        .def(py::init<>())
-        .def_readwrite("Vf", &DiodeLossParams::Vf,
-             "Forward voltage at 25C (V)")
-        .def_readwrite("Rd", &DiodeLossParams::Rd,
-             "Dynamic resistance (Ω)")
-        .def_readwrite("Vf_tc", &DiodeLossParams::Vf_tc,
-             "Vf temperature coefficient (V/K)")
-        .def_readwrite("Qrr", &DiodeLossParams::Qrr,
-             "Reverse recovery charge (C)")
-        .def_readwrite("trr", &DiodeLossParams::trr,
-             "Reverse recovery time (s)")
-        .def_readwrite("Irr_factor", &DiodeLossParams::Irr_factor,
-             "Irr as fraction of If")
-        .def_readwrite("Err_factor", &DiodeLossParams::Err_factor,
-             "Err factor")
-        .def_readwrite("T_ref", &DiodeLossParams::T_ref,
-             "Reference temperature (C)")
-        .def("Vf_at_T", &DiodeLossParams::Vf_at_T, py::arg("T"),
-             "Calculate Vf at temperature T")
-        .def("Err", &DiodeLossParams::Err,
-             py::arg("If"), py::arg("Vr"), py::arg("T"),
-             "Calculate reverse recovery energy");
-
-    // Conduction loss functions
-    py::class_<ConductionLoss>(v2, "ConductionLoss",
-        "Static methods for conduction loss calculation")
-        .def_static("resistor", &ConductionLoss::resistor,
-             py::arg("I"), py::arg("R"),
-             "Resistor conduction loss: P = I² * R")
-        .def_static("mosfet", &ConductionLoss::mosfet,
-             py::arg("I"), py::arg("params"), py::arg("T"),
-             "MOSFET conduction loss: P = I² * Rds_on(T)")
-        .def_static("igbt", &ConductionLoss::igbt,
-             py::arg("I"), py::arg("params"), py::arg("T"),
-             "IGBT conduction loss: P = Vce_sat * I + Rce * I²")
-        .def_static("diode", &ConductionLoss::diode,
-             py::arg("I"), py::arg("params"), py::arg("T"),
-             "Diode conduction loss: P = Vf * I + Rd * I²");
-
-    // Switching loss functions
-    py::class_<SwitchingLoss>(v2, "SwitchingLoss",
-        "Static methods for switching loss calculation")
-        .def_static("mosfet_Eon", &SwitchingLoss::mosfet_Eon,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "MOSFET turn-on energy")
-        .def_static("mosfet_Eoff", &SwitchingLoss::mosfet_Eoff,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "MOSFET turn-off energy")
-        .def_static("mosfet_total", &SwitchingLoss::mosfet_total,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "MOSFET total switching energy per cycle")
-        .def_static("mosfet_power", &SwitchingLoss::mosfet_power,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
-             "MOSFET switching power at frequency f_sw")
-        .def_static("igbt_Eon", &SwitchingLoss::igbt_Eon,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "IGBT turn-on energy")
-        .def_static("igbt_Eoff", &SwitchingLoss::igbt_Eoff,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "IGBT turn-off energy")
-        .def_static("igbt_total", &SwitchingLoss::igbt_total,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("params"),
-             "IGBT total switching energy per cycle")
-        .def_static("igbt_power", &SwitchingLoss::igbt_power,
-             py::arg("I"), py::arg("V"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
-             "IGBT switching power at frequency f_sw")
-        .def_static("diode_Err", &SwitchingLoss::diode_Err,
-             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("params"),
-             "Diode reverse recovery energy")
-        .def_static("diode_power", &SwitchingLoss::diode_power,
-             py::arg("If"), py::arg("Vr"), py::arg("T"), py::arg("f_sw"), py::arg("params"),
-             "Diode reverse recovery power at frequency f_sw");
 
     py::class_<LossBreakdown>(v2, "LossBreakdown",
         "Breakdown of losses by type")

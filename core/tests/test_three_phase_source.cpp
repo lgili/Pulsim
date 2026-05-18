@@ -248,3 +248,89 @@ TEST_CASE("three-phase source: unbalance factor scales B and C amplitudes",
     CHECK(v_b_peak < v_a_peak);
     CHECK(v_c_peak > v_a_peak);
 }
+
+// consolidate-motors-and-three-phase, Phase A.1: composition over duplication
+// validates that the new `to_grid_source()` / `from_grid_source()` accessors
+// round-trip the parameters and that the new math-object overload of
+// `add_three_phase_source` produces an identical circuit to the params-struct
+// overload.
+
+TEST_CASE("Phase A.1: ThreePhaseSourceParams round-trips through grid::ThreePhaseSource",
+          "[consolidation][three-phase][composition]") {
+    Circuit::ThreePhaseSourceParams params{};
+    params.line_to_line_voltage_rms = 400.0;
+    params.frequency_hz = 50.0;
+    params.phase_a_deg = 17.5;
+    params.positive_sequence = false;
+    params.unbalance_factor = 0.0;   // round-trip drops asymmetry
+
+    const auto math_obj = params.to_grid_source();
+    // V_LL_RMS=400 → V_ph_RMS = 400/√3 ≈ 230.94
+    CHECK(math_obj.v_rms == Approx(230.9401).margin(1e-3));
+    CHECK(math_obj.frequency == Approx(50.0));
+    // 17.5° → 0.30543 rad
+    CHECK(math_obj.phase_rad == Approx(0.30543261909900763).margin(1e-9));
+    CHECK(math_obj.sequence == grid::PhaseSequence::Negative);
+
+    const auto restored = Circuit::ThreePhaseSourceParams::from_grid_source(math_obj);
+    CHECK(restored.line_to_line_voltage_rms == Approx(400.0).margin(1e-9));
+    CHECK(restored.frequency_hz == Approx(50.0));
+    CHECK(restored.phase_a_deg == Approx(17.5).margin(1e-9));
+    CHECK(restored.positive_sequence == false);
+    CHECK(restored.unbalance_factor == 0.0);
+}
+
+TEST_CASE("Phase A.1: math-object overload of add_three_phase_source matches params overload",
+          "[consolidation][three-phase][composition]") {
+    // Build two circuits side by side: one via the legacy params overload,
+    // one via the new math-object overload. Internal SineVoltageSource
+    // amplitudes / phases / frequencies must agree leg-for-leg.
+    Circuit ck_legacy;
+    Circuit ck_grid;
+
+    // Both circuits get the same neutral + three phase nodes.
+    auto la = ck_legacy.add_node("a");
+    auto lb = ck_legacy.add_node("b");
+    auto lc = ck_legacy.add_node("c");
+    auto ln = ck_legacy.add_node("n");
+    auto ga = ck_grid.add_node("a");
+    auto gb = ck_grid.add_node("b");
+    auto gc = ck_grid.add_node("c");
+    auto gn = ck_grid.add_node("n");
+
+    // Same source — once via params, once via grid math object.
+    Circuit::ThreePhaseSourceParams params{};
+    params.line_to_line_voltage_rms = 400.0;
+    params.frequency_hz = 60.0;
+    params.phase_a_deg = 0.0;
+    params.positive_sequence = true;
+    params.unbalance_factor = 0.0;
+
+    ck_legacy.add_three_phase_source("S", la, lb, lc, ln, params);
+    ck_grid.add_three_phase_source("S", ga, gb, gc, gn, params.to_grid_source());
+
+    // Same number of devices (4 = 3 sine legs + 1 ground, etc., but exact
+    // structure is implementation-detail — what matters is that the device
+    // counts match).
+    REQUIRE(ck_legacy.devices().size() == ck_grid.devices().size());
+
+    // Per-leg sine amplitudes should be identical. Walk the connections in
+    // order and pick out the three SineVoltageSource devices by name suffix.
+    auto leg_amplitude = [](const Circuit& circ, const std::string& leg) -> Real {
+        const auto& conns = circ.connections();
+        const auto& devs = circ.devices();
+        for (std::size_t i = 0; i < conns.size(); ++i) {
+            if (conns[i].name == std::string{"S__"} + leg) {
+                if (auto* s = std::get_if<SineVoltageSource>(&devs[i])) {
+                    return s->params().amplitude;
+                }
+            }
+        }
+        FAIL("leg " << leg << " not found");
+        return Real{0};
+    };
+
+    CHECK(leg_amplitude(ck_legacy, "A") == Approx(leg_amplitude(ck_grid, "A")).margin(1e-9));
+    CHECK(leg_amplitude(ck_legacy, "B") == Approx(leg_amplitude(ck_grid, "B")).margin(1e-9));
+    CHECK(leg_amplitude(ck_legacy, "C") == Approx(leg_amplitude(ck_grid, "C")).margin(1e-9));
+}

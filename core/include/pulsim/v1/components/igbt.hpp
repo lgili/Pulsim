@@ -58,6 +58,10 @@ public:
         Scalar I_ref     = 50.0;       // A — reference current (typical IGBT)
         Scalar V_ref     = 600.0;      // V — reference voltage
         Scalar Esw_tc    = 3.0e-3;     // 1/K
+
+        // PSIM-style parasitic C_ces (C-E auto-snubber). See
+        // components/mosfet.hpp::Params::C_oss for tuning notes.
+        Scalar C_oss     = 0.0;        // F
     };
 
     explicit IGBT(std::string name = "")
@@ -71,12 +75,20 @@ public:
         // preserved when Eon_25 == Eoff_25 == 0 (default).
         if (params.Eon_25 > Scalar{0} || params.Eoff_25 > Scalar{0}) {
             mode_ = SwitchingMode::Ideal;
+            // PSIM-style auto-snubber — see components/mosfet.hpp.
+            // 20 nF default tracks the larger C_ces typical of IGBTs.
+            if (params_.C_oss <= Scalar{0}) {
+                params_.C_oss = Scalar{2e-8};
+            }
         }
     }
 
     explicit IGBT(Scalar vth, Scalar g_on = 1e4, std::string name = "")
         : Base(std::move(name))
         , params_{vth, g_on, 1e-12, 1.5} {}
+
+    /// Parasitic C_ces between collector and emitter (F).
+    [[nodiscard]] Scalar C_oss() const noexcept { return params_.C_oss; }
 
     // -------- Loss + thermal API (Phase 2 of inverter-bridge-losses) --------
     [[nodiscard]] Scalar V_ce_sat_at_Tj() const noexcept {
@@ -160,8 +172,8 @@ public:
                     (I_post / i_ref) * (V_block / v_ref) * tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;   // count the edge regardless of energy magnitude
             } else if (!is_on && was_on_) {
                 // ON → OFF. Use i_last_ (pre-state I) and v_ce (now blocking).
                 const Scalar I_pre = (i_last_ > Scalar{0}) ?
@@ -171,37 +183,51 @@ public:
                     (I_pre / i_ref) * (V_block / v_ref) * tc_factor;
                 if (e_event > Scalar{0}) {
                     e_sw_ += e_event;
-                    ++ev_count_;
                 }
+                ++ev_count_;
             }
         }
         was_on_ = is_on;
         was_on_initialized_ = true;
 
-        // ----- Conduction loss (existing) ---------------------------
-        if (params_.R_th_ja <= Scalar{0}) {
-            const Scalar g = is_on ? params_.g_on : params_.g_off;
-            v_last_ = v_ce; i_last_ = g * v_ce; p_last_ = v_ce * i_last_;
-            return;
-        }
-        const Scalar V_ce_sat_T = V_ce_sat_at_Tj();
-        const Scalar R_ce_T     = Rce_at_Tj();
+        // ----- Conduction loss (always tracked) ---------------------
+        // R_th_ja > 0 enables T_j-corrected (V_ce_sat, R_ce); when
+        // disabled we fall back to the static `g_on`/`g_off` but still
+        // integrate the conduction energy so the device's loss
+        // accessors and `SystemLossSummary` stay consistent.
+        const bool tj_corrected = params_.R_th_ja > Scalar{0};
         Scalar i_c;
-        if (is_on) {
-            // V_ce = V_ce_sat + I_c · R_ce  →  I_c = (V_ce − V_ce_sat) / R_ce
-            i_c = (v_ce - V_ce_sat_T) / std::max<Scalar>(R_ce_T, Scalar{1e-9});
-            if (i_c < Scalar{0}) i_c = Scalar{0};   // IGBT doesn't conduct in reverse
+        if (tj_corrected) {
+            const Scalar V_ce_sat_T = V_ce_sat_at_Tj();
+            const Scalar R_ce_T     = Rce_at_Tj();
+            if (is_on) {
+                // V_ce = V_ce_sat + I_c · R_ce  →  I_c = (V_ce − V_ce_sat) / R_ce
+                i_c = (v_ce - V_ce_sat_T) / std::max<Scalar>(R_ce_T, Scalar{1e-9});
+                if (i_c < Scalar{0}) i_c = Scalar{0};   // IGBT doesn't conduct in reverse
+            } else {
+                i_c = params_.g_off * v_ce;
+            }
         } else {
-            i_c = params_.g_off * v_ce;
+            const Scalar g = is_on ? params_.g_on : params_.g_off;
+            i_c = g * v_ce;
         }
         const Scalar p = v_ce * i_c;
+
+        // Trapezoidal time-averaging (see components/mosfet.hpp for the
+        // rationale — drops the over-count from rectangular-end-of-step
+        // integration on fast V_CE transients).
+        const Scalar p_prev = (p_last_ > Scalar{0}) ? p_last_ : Scalar{0};
+        const Scalar p_now  = (p > Scalar{0}) ? p : Scalar{0};
+        const Scalar p_avg = (t_sim_ > Scalar{0})
+                           ? Scalar{0.5} * (p_prev + p_now)
+                           : p_now;
 
         v_last_ = v_ce;
         i_last_ = i_c;
         p_last_ = p;
-        if (p > Scalar{0}) {
-            e_cond_ += p * dt;
-            if (p > p_peak_) p_peak_ = p;
+        if (p_avg > Scalar{0}) {
+            e_cond_ += p_avg * dt;
+            if (p_now > p_peak_) p_peak_ = p_now;
         }
         t_sim_ += dt;
     }
@@ -486,7 +512,9 @@ private:
     }
 
     Params params_;
-    Scalar event_hysteresis_ = Scalar{1e-9};
+    // Match MOSFET / IdealDiode hysteresis default (see those headers
+    // for the rationale on why 1e-2 V/A is the right scale).
+    Scalar event_hysteresis_ = Scalar{1e-2};
     SwitchingMode mode_ = SwitchingMode::Auto;
     bool pwl_state_ = false;
 

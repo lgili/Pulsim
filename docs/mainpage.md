@@ -34,13 +34,6 @@ The Pulsim library is organized into the following main namespaces:
 - @ref pulsim::devices::IGBT
 - @ref pulsim::devices::Transformer
 
-### gRPC API (`pulsim::api::grpc`)
-
-- @ref pulsim::api::grpc::SimulatorServer - gRPC server implementation
-- @ref pulsim::api::grpc::SessionManager - Session management
-- @ref pulsim::api::grpc::JobQueue - Job queue for async simulation
-- @ref pulsim::api::grpc::MetricsServer - Prometheus metrics
-
 ## Quick Start
 
 ### Basic Simulation
@@ -95,25 +88,6 @@ int main() {
 }
 ```
 
-### Using the gRPC Server
-
-```cpp
-#include <pulsim/api/grpc/server.hpp>
-
-int main() {
-    pulsim::api::grpc::ServerConfig config;
-    config.listen_address = "0.0.0.0:50051";
-    config.max_sessions = 64;
-    config.num_workers = 8;
-
-    pulsim::api::grpc::SimulatorServer server(config);
-    server.start();
-    server.wait();
-
-    return 0;
-}
-```
-
 ## Building
 
 ### Requirements
@@ -136,7 +110,6 @@ cmake --build . --parallel
 |--------|---------|-------------|
 | `PULSIM_BUILD_TESTS` | ON | Build unit tests |
 | `PULSIM_BUILD_PYTHON` | OFF | Build Python bindings |
-| `PULSIM_BUILD_GRPC` | OFF | Build gRPC API |
 | `PULSIM_BUILD_EXAMPLES` | OFF | Build examples |
 
 ## Module Documentation
@@ -148,7 +121,6 @@ cmake --build . --parallel
 - [Devices](@ref devices/) - Device models
 - [Thermal](@ref thermal.hpp) - Thermal modeling
 - [Losses](@ref losses.hpp) - Loss calculation
-- [gRPC API](@ref api/grpc/) - Remote API
 
 ## See Also
 

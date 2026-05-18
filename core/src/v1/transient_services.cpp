@@ -850,6 +850,20 @@ public:
         state.switching_energy.reverse_recovery += energy;
     }
 
+    // Snapshot per-step power for the thermal service.
+    //
+    // Single source of truth: each device's per-device accumulator
+    // (Resistor/Capacitor/Inductor/IdealDiode/MOSFET/IGBT) — these expose
+    // `last_power()` already T_j-corrected via the device's own `T_j_`
+    // state (driven by the thermal service). The legacy recompute path
+    // remains for devices that have no per-device loss accumulator
+    // (IdealSwitch, VoltageControlledSwitch).
+    //
+    // Reading `dev.last_power()` here picks up the previous accepted
+    // step's value (the simulator orders `update_history` AFTER this
+    // commit). For the thermal service that one-step lag is negligible
+    // because the thermal time constant τ greatly exceeds dt — and the
+    // cumulative integration of the loss accumulator is identical.
     void commit_accepted_segment(const Vector& x,
                                  Real dt,
                                  std::span<const Real> thermal_scale) override {
@@ -883,13 +897,38 @@ public:
         for (std::size_t i = 0; i < devices.size(); ++i) {
             const auto& conn = conns[i];
             Real p_cond = 0.0;
+            bool used_device_accumulator = false;
 
             std::visit([&](const auto& dev) {
                 using T = std::decay_t<decltype(dev)>;
 
-                if constexpr (std::is_same_v<T, Resistor>) {
-                    const Real v = node_voltage(conn.nodes[0]) - node_voltage(conn.nodes[1]);
-                    p_cond = (v * v) / dev.resistance();
+                if constexpr (
+                    std::is_same_v<T, Resistor> ||
+                    std::is_same_v<T, Capacitor> ||
+                    std::is_same_v<T, Inductor> ||
+                    std::is_same_v<T, IdealDiode> ||
+                    std::is_same_v<T, MOSFET> ||
+                    std::is_same_v<T, IGBT>) {
+                    // Pull from device-side accumulator (single source of
+                    // truth). `last_power()` is already T_j-corrected
+                    // internally so we do NOT apply thermal_factor again.
+                    p_cond = dev.last_power();
+                    used_device_accumulator = true;
+
+                    // Legacy options-driven reverse-recovery for diodes:
+                    // still honored if user populated `options_.switching_energy`.
+                    // Device-side Qrr-based detection runs in parallel inside
+                    // `dev.accumulate_loss()` and is read back by `finalize()`.
+                    if constexpr (std::is_same_v<T, IdealDiode>) {
+                        const bool conducting = dev.is_conducting();
+                        if (diode_conducting_[i] && !conducting) {
+                            const auto& energy_opt = switching_energy_[i];
+                            if (energy_opt.has_value() && energy_opt->err > 0.0) {
+                                commit_reverse_recovery_event(conn.name, energy_opt->err);
+                            }
+                        }
+                        diode_conducting_[i] = conducting;
+                    }
                 } else if constexpr (std::is_same_v<T, IdealSwitch>) {
                     const Real g = dev.is_closed() ? dev.g_on() : dev.g_off();
                     const Real v = node_voltage(conn.nodes[0]) - node_voltage(conn.nodes[1]);
@@ -902,63 +941,19 @@ public:
                     const Real v = node_voltage(conn.nodes[1]) - node_voltage(conn.nodes[2]);
                     const Real i_dev = g * v;
                     p_cond = std::abs(v * i_dev);
-                } else if constexpr (std::is_same_v<T, IdealDiode>) {
-                    const Real v = node_voltage(conn.nodes[0]) - node_voltage(conn.nodes[1]);
-                    const Real g = dev.is_conducting() ? dev.g_on() : dev.g_off();
-                    const Real i_dev = g * v;
-                    p_cond = std::max<Real>(0.0, v * i_dev);
-
-                    const bool conducting = dev.is_conducting();
-                    if (diode_conducting_[i] && !conducting) {
-                        const auto& energy_opt = switching_energy_[i];
-                        if (energy_opt.has_value() && energy_opt->err > 0.0) {
-                            commit_reverse_recovery_event(conn.name, energy_opt->err);
-                        }
-                    }
-                    diode_conducting_[i] = conducting;
-                } else if constexpr (std::is_same_v<T, MOSFET>) {
-                    const Real vg = node_voltage(conn.nodes[0]);
-                    const Real vd = node_voltage(conn.nodes[1]);
-                    const Real vs = node_voltage(conn.nodes[2]);
-                    const auto params = dev.params();
-
-                    const Real sign = params.is_nmos ? 1.0 : -1.0;
-                    const Real vgs = sign * (vg - vs);
-                    const Real vds = sign * (vd - vs);
-
-                    Real id = 0.0;
-                    if (vgs <= params.vth) {
-                        id = params.g_off * vds;
-                    } else if (vds < vgs - params.vth) {
-                        const Real vov = vgs - params.vth;
-                        id = params.kp * (vov * vds - 0.5 * vds * vds) * (1.0 + params.lambda * vds);
-                    } else {
-                        const Real vov = vgs - params.vth;
-                        id = 0.5 * params.kp * vov * vov * (1.0 + params.lambda * vds);
-                    }
-
-                    id *= sign;
-                    p_cond = std::abs((vd - vs) * id);
-                } else if constexpr (std::is_same_v<T, IGBT>) {
-                    const Real vg = node_voltage(conn.nodes[0]);
-                    const Real vc = node_voltage(conn.nodes[1]);
-                    const Real ve = node_voltage(conn.nodes[2]);
-                    const auto params = dev.params();
-
-                    const Real vge = vg - ve;
-                    const Real vce = vc - ve;
-                    const bool on = (vge > params.vth) && (vce > 0);
-                    const Real g = on ? params.g_on : params.g_off;
-                    const Real i_dev = g * vce;
-                    p_cond = std::abs(vce * i_dev);
                 }
             }, devices[i]);
 
-            p_cond *= thermal_factor(i);
+            if (!used_device_accumulator) {
+                p_cond *= thermal_factor(i);
+            }
             const Real p_clamped = std::max<Real>(0.0, p_cond);
             last_device_power_[i] = p_clamped;
 
-            if (p_clamped > 0.0) {
+            // Service-side accumulator tracks the legacy-branch devices only;
+            // for devices with per-device accumulators, `finalize()` reads
+            // straight from device state to avoid double-bookkeeping.
+            if (p_clamped > 0.0 && !used_device_accumulator) {
                 auto& state = states_[i];
                 state.accumulator.add_sample(p_clamped, dt);
                 state.peak_power = std::max(state.peak_power, p_clamped);
@@ -976,38 +971,105 @@ public:
             return summary;
         }
 
+        const auto& devices = circuit_.devices();
         const auto& conns = circuit_.connections();
-        for (std::size_t i = 0; i < states_.size() && i < conns.size(); ++i) {
-            const auto& state = states_[i];
-            if (state.accumulator.num_samples() == 0 &&
-                state.accumulator.switching_energy() == 0.0) {
-                continue;
-            }
 
+        for (std::size_t i = 0; i < devices.size() && i < conns.size(); ++i) {
             LossResult res;
             res.device_name = conns[i].name;
-            res.total_energy = state.accumulator.total_energy();
-            res.average_power = duration > 0.0 ? res.total_energy / duration : 0.0;
-            res.peak_power = state.peak_power;
+            bool active = false;
 
-            const Real conduction_energy = state.accumulator.conduction_energy();
-            const Real switching_energy = state.accumulator.switching_energy();
-            res.breakdown.conduction = duration > 0.0 ? conduction_energy / duration : 0.0;
-            res.breakdown.turn_on = duration > 0.0 ? state.switching_energy.turn_on / duration : 0.0;
-            res.breakdown.turn_off = duration > 0.0 ? state.switching_energy.turn_off / duration : 0.0;
-            res.breakdown.reverse_recovery = duration > 0.0
-                ? state.switching_energy.reverse_recovery / duration
-                : 0.0;
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
 
-            if (res.breakdown.turn_on == 0.0 &&
-                res.breakdown.turn_off == 0.0 &&
-                res.breakdown.reverse_recovery == 0.0) {
-                res.breakdown.turn_on = duration > 0.0 ? switching_energy / duration : 0.0;
+                if constexpr (
+                    std::is_same_v<T, Resistor> ||
+                    std::is_same_v<T, Capacitor> ||
+                    std::is_same_v<T, Inductor> ||
+                    std::is_same_v<T, IdealDiode> ||
+                    std::is_same_v<T, MOSFET> ||
+                    std::is_same_v<T, IGBT>) {
+                    // Single source of truth: device's own accumulator. The
+                    // numbers reported here are the same ones the per-device
+                    // accessors (`Circuit::mosfet_average_power`, etc.) return.
+                    const Real total_E = dev.total_energy();
+                    Real cond_E = total_E;
+                    Real sw_E = Real{0};
+                    if constexpr (
+                        std::is_same_v<T, IdealDiode> ||
+                        std::is_same_v<T, MOSFET> ||
+                        std::is_same_v<T, IGBT>) {
+                        cond_E = dev.conduction_energy();
+                        sw_E   = dev.switching_energy();
+                    }
+
+                    const Real peak = dev.peak_power();
+                    if (total_E > 0.0 || peak > 0.0 ||
+                        states_[i].switching_energy.turn_on > 0.0 ||
+                        states_[i].switching_energy.turn_off > 0.0 ||
+                        states_[i].switching_energy.reverse_recovery > 0.0) {
+                        res.total_energy = total_E;
+                        res.peak_power   = peak;
+                        res.average_power = duration > 0.0 ? total_E / duration : 0.0;
+                        res.breakdown.conduction = duration > 0.0 ? cond_E / duration : 0.0;
+
+                        // Service-side split (only populated via
+                        // `commit_switching_event` / `commit_reverse_recovery_event`,
+                        // which come from `options_.switching_energy`).
+                        const auto& state = states_[i];
+                        res.breakdown.turn_on  = duration > 0.0 ? state.switching_energy.turn_on  / duration : 0.0;
+                        res.breakdown.turn_off = duration > 0.0 ? state.switching_energy.turn_off / duration : 0.0;
+                        res.breakdown.reverse_recovery = duration > 0.0
+                            ? state.switching_energy.reverse_recovery / duration : 0.0;
+
+                        // Fallback: if the user did not configure the service-
+                        // side split, lump device-side `e_sw_` (Qrr/Eon_25/Eoff_25
+                        // detection inside `accumulate_loss`) into turn_on.
+                        if (res.breakdown.turn_on == 0.0 &&
+                            res.breakdown.turn_off == 0.0 &&
+                            res.breakdown.reverse_recovery == 0.0 &&
+                            sw_E > 0.0) {
+                            res.breakdown.turn_on = duration > 0.0 ? sw_E / duration : 0.0;
+                        }
+                        active = true;
+                    }
+                } else {
+                    // Legacy path (IdealSwitch / VoltageControlledSwitch /
+                    // anything without a per-device loss accumulator).
+                    const auto& state = states_[i];
+                    if (state.accumulator.num_samples() == 0 &&
+                        state.accumulator.switching_energy() == 0.0) {
+                        return;
+                    }
+                    res.total_energy = state.accumulator.total_energy();
+                    res.average_power = duration > 0.0 ? res.total_energy / duration : 0.0;
+                    res.peak_power = state.peak_power;
+
+                    const Real conduction_energy = state.accumulator.conduction_energy();
+                    const Real switching_energy  = state.accumulator.switching_energy();
+                    res.breakdown.conduction = duration > 0.0 ? conduction_energy / duration : 0.0;
+                    res.breakdown.turn_on    = duration > 0.0 ? state.switching_energy.turn_on / duration : 0.0;
+                    res.breakdown.turn_off   = duration > 0.0 ? state.switching_energy.turn_off / duration : 0.0;
+                    res.breakdown.reverse_recovery = duration > 0.0
+                        ? state.switching_energy.reverse_recovery / duration : 0.0;
+
+                    if (res.breakdown.turn_on == 0.0 &&
+                        res.breakdown.turn_off == 0.0 &&
+                        res.breakdown.reverse_recovery == 0.0) {
+                        res.breakdown.turn_on = duration > 0.0 ? switching_energy / duration : 0.0;
+                    }
+                    active = true;
+                }
+            }, devices[i]);
+
+            if (active) {
+                summary.device_losses.push_back(std::move(res));
             }
-
-            summary.device_losses.push_back(std::move(res));
         }
 
+        // Efficiency is left to the user: set `summary.input_power` and
+        // `summary.output_power` (e.g. from integrated V·I at the converter
+        // terminals) and call `summary.compute_totals()` to populate η.
         summary.compute_totals();
         return summary;
     }

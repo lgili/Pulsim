@@ -19,7 +19,7 @@ runtime contract. The migration rule is strict:
 | JSON dependency in top-level build | `CMakeLists.txt` (`FetchContent` nlohmann/json block) | no dependency in supported v1 YAML runtime path | removed_phase_2 |
 | Legacy include path in Python build | `python/CMakeLists.txt` (`core/legacy/include`) | remove include, bind only to v1 headers | removed_phase_1 |
 | Duplicate bindings translation unit | `python/bindings_v2.cpp` | consolidate on active `python/bindings.cpp` path | removed_phase_1 |
-| Planned API tests permanently skipped | `python/tests/test_simulation.py`, `python/tests/test_circuit.py`, `python/tests/test_gui_integration.py`, `python/tests/test_thermal.py`, `python/tests/test_parser.py`, `python/tests/test_grpc_client.py` | implement supported API tests or remove stale planned suites | remove_or_replace |
+| Planned API tests permanently skipped | `python/tests/test_simulation.py`, `python/tests/test_circuit.py`, `python/tests/test_gui_integration.py`, `python/tests/test_thermal.py`, `python/tests/test_parser.py` | implement supported API tests or remove stale planned suites | remove_or_replace |
 | JSON benchmark fixtures | `benchmarks/circuits/*.json` | YAML-only benchmark corpus in `benchmarks/circuits/*.yaml` | removed_phase_2 |
 | Legacy/stale docs suggesting unsupported user flows | `README.md`, `docs/user-guide.md`, `docs/python/index.rst` | Python-only user docs + migration notes | rewrite_required |
 

@@ -43,11 +43,14 @@ SimulationOptions make_opts(Real tstop, Real dt) {
 
 }  // namespace
 
-TEST_CASE("MOSFET loss model is OFF by default (backward compatibility)",
+TEST_CASE("MOSFET loss accumulator runs without thermal feedback",
           "[switch_loss][regression]") {
-    // Default MOSFET::Params has R_th_ja = 0 → no accumulator, no
-    // thermal model. The mosfet_average_power accessor should return 0
-    // after a sim, matching pre-Phase-2 behaviour exactly.
+    // Unified pipeline: losses are always tracked from device's own
+    // accumulator; `R_th_ja == 0` (default) only disables T_j feedback,
+    // so the device dissipates but its junction temperature stays at
+    // T_amb. The previous "loss model off by default" semantic is gone —
+    // the loss number is now consistent whether or not the user wired
+    // a thermal model.
     Circuit circuit;
     const Index gate = circuit.add_node("gate");
     const Index drain = circuit.add_node("drain");
@@ -55,7 +58,7 @@ TEST_CASE("MOSFET loss model is OFF by default (backward compatibility)",
 
     circuit.add_voltage_source("Vgate", gate, source, 5.0);
     circuit.add_voltage_source("Vdrain", drain, source, 12.0);
-    MOSFET::Params mp{};   // default — R_th_ja=0
+    MOSFET::Params mp{};   // default — R_th_ja=0 (no thermal feedback)
     circuit.add_mosfet("M1", gate, drain, source, mp);
 
     auto opts = make_opts(1e-3, 50e-6);
@@ -64,13 +67,15 @@ TEST_CASE("MOSFET loss model is OFF by default (backward compatibility)",
     Simulator sim(circuit, opts);
     REQUIRE(sim.run_transient().success);
 
-    CHECK(circuit.mosfet_average_power("M1") == Approx(0.0));
-    CHECK(circuit.mosfet_total_energy("M1") == Approx(0.0));
-    // Junction temp accessor returns the init value (T_amb) when not active.
+    // V_gs > vth → channel is on, with V_drain = 12 V across `g_on`.
+    // Conduction loss is always tracked.
+    CHECK(circuit.mosfet_total_energy("M1") > 0.0);
+    CHECK(circuit.mosfet_average_power("M1") > 0.0);
+    // No thermal feedback (R_th_ja = 0) so T_j stays at T_amb.
     CHECK(circuit.mosfet_junction_temperature("M1") == Approx(25.0));
 }
 
-TEST_CASE("IGBT loss model is OFF by default (backward compatibility)",
+TEST_CASE("IGBT loss accumulator runs without thermal feedback",
           "[switch_loss][regression]") {
     Circuit circuit;
     const Index gate = circuit.add_node("gate");
@@ -79,7 +84,7 @@ TEST_CASE("IGBT loss model is OFF by default (backward compatibility)",
 
     circuit.add_voltage_source("Vgate", gate, emit, 15.0);
     circuit.add_voltage_source("Vc", coll, emit, 10.0);
-    IGBT::Params ip{};         // default — R_th_ja=0
+    IGBT::Params ip{};         // default — R_th_ja=0 (no thermal feedback)
     circuit.add_igbt("G1", gate, coll, emit, ip);
 
     auto opts = make_opts(1e-3, 50e-6);
@@ -88,8 +93,8 @@ TEST_CASE("IGBT loss model is OFF by default (backward compatibility)",
     Simulator sim(circuit, opts);
     REQUIRE(sim.run_transient().success);
 
-    CHECK(circuit.igbt_average_power("G1") == Approx(0.0));
-    CHECK(circuit.igbt_total_energy("G1") == Approx(0.0));
+    CHECK(circuit.igbt_total_energy("G1") > 0.0);
+    CHECK(circuit.igbt_average_power("G1") > 0.0);
     CHECK(circuit.igbt_junction_temperature("G1") == Approx(25.0));
 }
 
