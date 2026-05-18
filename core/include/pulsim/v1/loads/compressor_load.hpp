@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pulsim/v1/loads/refrigerants.hpp"
 #include "pulsim/v1/numeric_types.hpp"
 
 #include <cmath>
@@ -213,5 +214,40 @@ private:
     Real tau_mean_ = 0.0;
     Real W_ind_    = 0.0;
 };
+
+// =============================================================================
+// Helpers tying CompressorParams to the refrigerant table
+// =============================================================================
+
+/// Build a `CompressorParams` pre-filled with the curated polytropic_n
+/// and typical suction / discharge pressures for the given refrigerant.
+/// All other fields (topology, displacement, friction, ripple) stay at
+/// their struct defaults — the caller customizes them as needed.
+///
+/// Example: a typical Embraco R600a domestic refrigerator (6 cm³)
+///
+///   auto p = loads::compressor_defaults_for(loads::Refrigerant::R600a);
+///   p.displacement_m3 = 6.0e-6;
+///   circuit.attach_compressor_load("M_compressor", p);
+[[nodiscard]] inline CompressorParams compressor_defaults_for(
+        Refrigerant r) noexcept {
+    const auto props = refrigerant(r);
+    CompressorParams p{};
+    p.polytropic_n     = props.polytropic_n;
+    p.P_suction_Pa     = props.typical_P_suction_Pa;
+    p.P_discharge_Pa   = props.typical_P_discharge_Pa;
+    return p;
+}
+
+/// Apply just the refrigerant-dependent fields (polytropic_n + typical
+/// suction / discharge) to an existing CompressorParams in-place. Useful
+/// when the user has already configured topology / displacement / friction
+/// and just wants to swap the refrigerant.
+inline void apply_refrigerant(CompressorParams& p, Refrigerant r) noexcept {
+    const auto props = refrigerant(r);
+    p.polytropic_n   = props.polytropic_n;
+    p.P_suction_Pa   = props.typical_P_suction_Pa;
+    p.P_discharge_Pa = props.typical_P_discharge_Pa;
+}
 
 }  // namespace pulsim::v1::loads

@@ -329,11 +329,20 @@ const std::unordered_map<std::string, std::string>& component_alias_map() {
         add_aliases("bldc_motor", {"bldcmotor", "bldc"});
         add_aliases("induction_motor", {
             "inductionmotor", "induction", "im", "asyncmotor"});
+        // compressor-models: 1φ PSC induction motor (line/neutral).
+        add_aliases("single_phase_induction_motor", {
+            "single_phase_induction",
+            "single_phase_im", "psc_motor", "cc_compressor_motor"});
 
         // consolidate-motors-and-three-phase Item 3: zero-pin signal-
         // domain devices. `nodes:` is optional in YAML for these types.
         add_aliases("mechanical", {"mechanical_device", "shaft_device"});
         add_aliases("pmsm_foc", {"pmsmfoc", "pmsm-foc", "foc_current_loop"});
+
+        // compressor-models: zero-pin mechanical load that attaches to a
+        // previously-registered motor by name.
+        add_aliases("compressor_load", {
+            "compressor", "refrigeration_compressor"});
 
         return map;
     }();
@@ -394,9 +403,13 @@ const std::unordered_map<std::string, std::pair<std::size_t, std::size_t>>& comp
         {"pmsm", {4, 4}},
         {"bldc_motor", {4, 4}},
         {"induction_motor", {4, 4}},
+        // compressor-models: 1φ PSC induction motor (line, neutral).
+        {"single_phase_induction_motor", {2, 2}},
         // consolidate-motors-and-three-phase Item 3: zero-pin signal-domain.
         {"mechanical", {0, 0}},
         {"pmsm_foc", {0, 0}},
+        // compressor-models: zero-pin compressor load (references motor by name).
+        {"compressor_load", {0, 0}},
         // Three-phase control blocks (Phase 28)
         {"clarke_transform", {3, 3}},
         {"inverse_clarke_transform", {3, 3}},
@@ -1738,7 +1751,17 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              // would otherwise collide with the BJT `beta` block above.
              "J", "b",
              // Item 3: pmsm_foc current-loop tuning fields.
-             "bandwidth_hz", "Vd_min", "Vd_max", "Vq_min", "Vq_max"},
+             "bandwidth_hz", "Vd_min", "Vd_max", "Vq_min", "Vq_max",
+             // compressor-models: single-phase PSC induction motor —
+             // main / auxiliary winding R / L pair + run cap + rotor +
+             // mechanical fields. (J / b_friction / friction_coulomb /
+             // pole_pairs / R_r / L_r / L_m already in the list above.)
+             "R_s_main", "L_s_main", "R_s_aux", "L_s_aux", "C_run",
+             // compressor-models: compressor_load (zero-pin) — motor
+             // reference + topology + cycle pressures + ripple.
+             "motor", "refrigerant", "topology", "num_cylinders",
+             "displacement_m3", "P_suction_Pa", "P_discharge_Pa",
+             "polytropic_n", "tau_coulomb", "ripple_amplitude"},
             "component", errors_, options_.strict);
 
         if (!comp["type"] || !comp["name"]) {
@@ -1761,7 +1784,8 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         // mandatory `nodes:` field — they have no electrical pins and no
         // MNA contribution.
         const bool is_signal_domain =
-            (type == "mechanical" || type == "pmsm_foc");
+            (type == "mechanical" || type == "pmsm_foc" ||
+             type == "compressor_load");
         std::vector<std::string> nodes;
         if (is_signal_domain) {
             // Honor `nodes: []` if the user supplied it, but accept absence.
@@ -2143,6 +2167,102 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (get_param("tau_load_const")) p.tau_load_const = parse_real(get_param("tau_load_const"), name + ".tau_load_const", errors_);
             if (get_param("tau_load_quad_coeff")) p.tau_load_quad_coeff = parse_real(get_param("tau_load_quad_coeff"), name + ".tau_load_quad_coeff", errors_);
             circuit.add_induction_motor(name, node_at(0), node_at(1), node_at(2), node_at(3), p);
+        }
+        // compressor-models: single-phase PSC induction motor for the
+        // legacy "compressor convencional" (CC) used in pre-inverter
+        // domestic refrigerators / freezers. Two pins (line, neutral);
+        // run capacitor + auxiliary winding are internal.
+        else if (type == "single_phase_induction_motor") {
+            motors::SinglePhaseInductionMotorParams p{};
+            if (get_param("R_s_main")) p.R_s_main = parse_real(get_param("R_s_main"), name + ".R_s_main", errors_);
+            if (get_param("L_s_main")) p.L_s_main = parse_real(get_param("L_s_main"), name + ".L_s_main", errors_);
+            if (get_param("R_s_aux"))  p.R_s_aux  = parse_real(get_param("R_s_aux"),  name + ".R_s_aux",  errors_);
+            if (get_param("L_s_aux"))  p.L_s_aux  = parse_real(get_param("L_s_aux"),  name + ".L_s_aux",  errors_);
+            if (get_param("C_run"))    p.C_run    = parse_real(get_param("C_run"),    name + ".C_run",    errors_);
+            if (get_param("R_r"))      p.R_r      = parse_real(get_param("R_r"),      name + ".R_r",      errors_);
+            if (get_param("L_r"))      p.L_r      = parse_real(get_param("L_r"),      name + ".L_r",      errors_);
+            if (get_param("L_m"))      p.L_m      = parse_real(get_param("L_m"),      name + ".L_m",      errors_);
+            if (get_param("pole_pairs")) p.pole_pairs = static_cast<int>(parse_real(get_param("pole_pairs"), name + ".pole_pairs", errors_));
+            if (get_param("J"))        p.J        = parse_real(get_param("J"),        name + ".J",        errors_);
+            if (get_param("b_friction")) p.b_friction = parse_real(get_param("b_friction"), name + ".b_friction", errors_);
+            if (get_param("friction_coulomb")) p.friction_coulomb = parse_real(get_param("friction_coulomb"), name + ".friction_coulomb", errors_);
+            circuit.add_single_phase_induction_motor(name, node_at(0), node_at(1), p);
+        }
+        // compressor-models: zero-pin compressor load. Attaches a polytropic
+        // torque profile (Reciprocating / Rotary / Scroll) to a previously
+        // registered motor (BLDC, PMSM, DC, Induction, single-phase IM) by
+        // name. The `motor` field selects the target motor; `refrigerant`
+        // (R600a / R134a / R290 / R32 / R744) seeds polytropic_n + typical
+        // cycle pressures from the curated refrigerant table. Per-field
+        // overrides take precedence over the refrigerant defaults.
+        else if (type == "compressor_load") {
+            const YAML::Node motor_node = get_param("motor");
+            if (!motor_node.IsDefined() || motor_node.IsNull() ||
+                !motor_node.IsScalar()) {
+                push_error(errors_, kDiagInvalidParameter,
+                           "compressor_load '" + name + "' requires a "
+                           "'motor: <name>' field naming the target motor.");
+                continue;
+            }
+            const std::string motor_name = motor_node.as<std::string>();
+
+            // Seed from refrigerant defaults (R600a) so users can override
+            // just topology / displacement and inherit reasonable cycle
+            // pressures + polytropic_n.
+            loads::CompressorParams p =
+                loads::compressor_defaults_for(loads::Refrigerant::R600a);
+            // Defensive: yaml-cpp's `operator bool()` on autovivified
+            // nodes is unreliable across versions. Wrap parse_real
+            // through a helper that only fires when the YAML key is
+            // explicitly present + non-null.
+            auto override_real = [&](const char* key, Real& slot) {
+                const YAML::Node n = get_param(key);
+                if (n.IsDefined() && !n.IsNull()) {
+                    slot = parse_real(n, name + "." + key, errors_);
+                }
+            };
+            auto override_int = [&](const char* key, int& slot) {
+                const YAML::Node n = get_param(key);
+                if (n.IsDefined() && !n.IsNull()) {
+                    slot = static_cast<int>(
+                            parse_real(n, name + "." + key, errors_));
+                }
+            };
+
+            const YAML::Node refrigerant_node = get_param("refrigerant");
+            if (refrigerant_node && refrigerant_node.IsScalar()) {
+                const auto r = loads::refrigerant_from_string(
+                        refrigerant_node.as<std::string>());
+                loads::apply_refrigerant(p, r);
+            }
+
+            const YAML::Node topology_node = get_param("topology");
+            if (topology_node && topology_node.IsScalar()) {
+                const std::string t = topology_node.as<std::string>();
+                if (t == "Reciprocating" || t == "reciprocating") {
+                    p.topology = loads::CompressorTopology::Reciprocating;
+                } else if (t == "Rotary" || t == "rotary") {
+                    p.topology = loads::CompressorTopology::Rotary;
+                } else if (t == "Scroll" || t == "scroll") {
+                    p.topology = loads::CompressorTopology::Scroll;
+                } else {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "compressor_load '" + name + "' has "
+                               "unknown topology '" + t + "' (expected "
+                               "Reciprocating / Rotary / Scroll).");
+                }
+            }
+
+            override_int ("num_cylinders",    p.num_cylinders);
+            override_real("displacement_m3",  p.displacement_m3);
+            override_real("P_suction_Pa",     p.P_suction_Pa);
+            override_real("P_discharge_Pa",   p.P_discharge_Pa);
+            override_real("polytropic_n",     p.polytropic_n);
+            override_real("b_friction",       p.b_friction);
+            override_real("tau_coulomb",      p.tau_coulomb);
+            override_real("ripple_amplitude", p.ripple_amplitude);
+
+            circuit.attach_compressor_load(motor_name, p);
         }
         // consolidate-motors-and-three-phase Item 3: zero-pin signal-domain
         // dispatch. Both devices accept the flat field set at the component

@@ -18,6 +18,7 @@
 #include "pulsim/v1/components/mechanical_device.hpp"
 #include "pulsim/v1/components/bldc_motor_device.hpp"
 #include "pulsim/v1/components/induction_motor_device.hpp"
+#include "pulsim/v1/components/single_phase_induction_motor_device.hpp"
 #include "pulsim/v1/components/hysteresis_inductor_device.hpp"
 #include "pulsim/v1/grid/three_phase_source.hpp"
 #include "pulsim/v1/loads/compressor_load.hpp"
@@ -87,6 +88,7 @@ using DeviceVariant = std::variant<
     MechanicalDevice,
     BldcMotorDevice,
     InductionMotorDevice,
+    SinglePhaseInductionMotorDevice,
     HysteresisInductorDevice
 >;
 
@@ -167,6 +169,12 @@ public:
                         dev.set_branch_index(conn.branch_index);
                     } else if constexpr (std::is_same_v<T, Transformer>) {
                         dev.set_branch_indices(conn.branch_index, conn.branch_index_2);
+                    } else if constexpr (std::is_same_v<T,
+                                              SinglePhaseInductionMotorDevice>) {
+                        // 2-branch PSC motor: keep internal branch indices
+                        // aligned when nodes get added after registration.
+                        dev.set_branch_indices(conn.branch_index,
+                                                conn.branch_index_2);
                     }
                 }, devices_[i]);
             }
@@ -3218,6 +3226,27 @@ public:
         /// both PWMs" — at every transition, both switches stay OFF for
         /// `dead_time_s` seconds.
         Real dead_time_s = 0.0;
+        /// Add antiparallel body diodes across every MOSFET (anode at the
+        /// MOSFET's source, cathode at its drain). Default true. These are
+        /// the intrinsic body diodes every real MOSFET has — they let the
+        /// inductive-load current freewheel when the switch is OFF
+        /// (during dead-time, OR during the instant-commutation moment in
+        /// the legacy gate pattern where PWL Ideal doesn't model reverse
+        /// conduction). Without them, V_pole is unclamped during
+        /// commutation and the simulator produces large transient spikes
+        /// that the loss accumulator captures as bogus power.
+        ///
+        /// Default false. Real MOSFETs have these intrinsic diodes but
+        /// the PWL Ideal MOSFET already conducts reverse symmetrically
+        /// when ON (`I = g_on · V_ds` for any sign of V_ds), so they're
+        /// not needed for the freewheel in the legacy gate pattern.
+        /// Set this true only with `dead_time_s > 0` — during the
+        /// both-OFF window the inductor genuinely has no current path
+        /// without a body diode. Note: even with `dead_time_s > 0`, the
+        /// PWL Ideal body diode at the conducting MOSFET's V_ds ≈ 0
+        /// boundary tends to flip state every Newton iteration; the
+        /// helper sets them to Behavioral mode to smooth the transition.
+        bool add_body_diodes = false;
     };
     static_assert(std::is_trivially_copyable_v<ThreePhaseVsiParams>,
                   "ThreePhaseVsiParams must stay a POD aggregate.");
@@ -3323,23 +3352,55 @@ public:
                 ql->set_switching_mode(SwitchingMode::Ideal);
             }
 
-            // When dead-time > 0, add antiparallel body diodes across each
-            // MOSFET so the inductor current has a freewheel path during
-            // the both-OFF window. Without these, the dead-time would leave
-            // the inductive load with nowhere to dump its energy.
-            // High-side body diode: anode at n_phase, cathode at vdc+
-            //   (i.e., reverse-direction across the HS MOSFET drain-source).
-            // Low-side  body diode: anode at vdc−, cathode at n_phase
-            //   (reverse-direction across the LS MOSFET drain-source).
-            if (use_dead_time) {
+            // Add antiparallel body diodes across each MOSFET when
+            // `add_body_diodes` is true (the default). Every real MOSFET
+            // has one — they clamp V_pole during commutation and provide
+            // the inductive freewheel path that PWL Ideal mode cannot
+            // model from the MOSFET alone. Without them the simulator
+            // produces large V_pole transient spikes at every commutation,
+            // which the loss accumulator then captures as bogus power.
+            //
+            //   HS body diode: anode at n_phase, cathode at vdc+
+            //     → conducts when V_phase > V_dc + V_F (HS freewheel up)
+            //   LS body diode: anode at vdc−, cathode at n_phase
+            //     → conducts when V_phase < −V_F     (LS freewheel down)
+            //
+            // Together they bound V_phase to [−V_F, V_dc + V_F] regardless
+            // of switch state or load type. This is the textbook half-
+            // bridge model — `set_default_switching_mode` cannot replicate
+            // it on the MOSFET alone because the MOSFET's stamp only
+            // covers gate-controlled drain-source conduction.
+            if (params.add_body_diodes) {
                 IdealDiode::Params dpar{};
                 dpar.V_F0 = Real{0.7};    // typical Si body diode V_F
                 dpar.R_d  = Real{0.025};   // 25 mΩ on-state slope
                 dpar.g_on = Real{1.0} / dpar.R_d;
+                // Explicit C_j = 0 — the in-ctor auto-default would set
+                // 5e-10 F (since V_F0 > 0) which couples phase ↔ DC rail
+                // through a parasitic cap and creates Newton instability
+                // at every MOSFET commutation. Body diodes are clamps,
+                // not parasitic-cap models; their job is purely the
+                // freewheel.
+                dpar.C_j = Real{0};
                 add_diode(base + "__BD" + suffix + "H",
                           n_phase, node_vdc_pos, dpar);
                 add_diode(base + "__BD" + suffix + "L",
                           node_vdc_neg, n_phase, dpar);
+                // Body diodes run in Behavioral (smooth) mode — they sit
+                // right at threshold every time the MOSFET they shadow
+                // turns ON (V_anode - V_cathode ≈ 0), and a PWL Ideal
+                // diode at threshold flips state every Newton iteration,
+                // creating ±10 kV V_pole oscillation. Smooth Shichman-
+                // Hodges has no discrete state to flip; it follows a
+                // continuous V-I curve.
+                if (auto* d = find_device<IdealDiode>(
+                        base + "__BD" + suffix + "H")) {
+                    d->set_switching_mode(SwitchingMode::Behavioral);
+                }
+                if (auto* d = find_device<IdealDiode>(
+                        base + "__BD" + suffix + "L")) {
+                    d->set_switching_mode(SwitchingMode::Behavioral);
+                }
             }
 
             // High-side gate driver: PWM between G_kH and the leg output
@@ -3913,6 +3974,70 @@ public:
     [[nodiscard]] Real induction_i_c(std::string_view name) const {
         const auto* m = find_device<InductionMotorDevice>(name);
         return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
+    }
+
+    // ----- Single-phase induction motor (CC compressor motor) ----------------
+    //
+    // 2-pin device for the "compressor convencional" found in pre-inverter
+    // domestic refrigerators / freezers. PSC (Permanent Split Capacitor)
+    // topology — the run capacitor and auxiliary winding are internal
+    // to the device, so the user just sees a line / neutral pair.
+
+    void add_single_phase_induction_motor(
+        const std::string& name,
+        Index n_line, Index n_neutral,
+        const SinglePhaseInductionMotorDevice::Params& params) {
+        assert(params.R_s_main > 0.0);
+        assert(params.L_s_main > 0.0);
+        assert(params.C_run > 0.0);
+        assert(params.J > 0.0);
+        assert(params.pole_pairs > 0);
+
+        const Index br_main = num_nodes() + num_branches_;
+        const Index br_aux  = br_main + 1;
+        SinglePhaseInductionMotorDevice motor(params, name);
+        motor.set_branch_indices(br_main, br_aux);
+        devices_.emplace_back(std::move(motor));
+        connections_.push_back(
+            {name, {n_line, n_neutral}, br_main, br_aux});
+        register_connection_name(connections_.size() - 1);
+        num_branches_ += 2;
+    }
+
+    void set_single_phase_im_tau_load(std::string_view name, Real tau) {
+        if (auto* m = find_device<SinglePhaseInductionMotorDevice>(name)) {
+            m->set_load_torque(tau);
+        }
+    }
+
+    [[nodiscard]] Real single_phase_im_omega(std::string_view name) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        return m ? m->omega_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real single_phase_im_theta(std::string_view name) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        return m ? m->theta_m() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real single_phase_im_i_main(std::string_view name) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        return m ? m->i_main() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real single_phase_im_i_aux(std::string_view name) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        return m ? m->i_aux() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real single_phase_im_i_line(std::string_view name) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        return m ? m->i_line() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real single_phase_im_V_cap(std::string_view name) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        return m ? m->V_cap() : std::numeric_limits<Real>::quiet_NaN();
+    }
+    [[nodiscard]] Real single_phase_im_torque(std::string_view name) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        return m ? m->electromagnetic_torque()
+                 : std::numeric_limits<Real>::quiet_NaN();
     }
 
     // ----- Compressor load (compressor-models feature) -----------------------
@@ -4534,6 +4659,35 @@ public:
                         }
                         dev.advance_state(v_a, v_b, v_c, i_a, i_b, i_c,
                                           timestep_);
+                    }
+                }
+                else if constexpr (std::is_same_v<T,
+                                       SinglePhaseInductionMotorDevice>) {
+                    // compressor-models, "CC" convencional: 2-pin
+                    // (line, neutral) single-phase induction motor with the
+                    // PSC topology. Two MNA branch rows (i_main on α-axis,
+                    // i_aux on β-axis through the run capacitor). We read
+                    // both currents from x and hand them to advance_state
+                    // which evolves rotor flux, mechanical state, and the
+                    // internal capacitor voltage forward by `timestep_`.
+                    const Index br_main = conn.branch_index;
+                    const Index br_aux  = conn.branch_index_2;
+                    const Real i_main = (br_main >= 0) ? x[br_main] : 0.0;
+                    const Real i_aux  = (br_aux  >= 0) ? x[br_aux]  : 0.0;
+                    if (initialize) {
+                        dev.reset_history_for_transient_start(i_main, i_aux);
+                    } else {
+                        // compressor-models: if a compressor load is
+                        // attached to this single-phase motor by name,
+                        // push the angle/speed dependent demand BEFORE
+                        // the mechanical advance.
+                        const auto it = compressor_loads_.find(conn.name);
+                        if (it != compressor_loads_.end()) {
+                            dev.set_load_torque(
+                                it->second.load_torque(dev.theta_m(),
+                                                        dev.omega_m()));
+                        }
+                        dev.advance_state(i_main, i_aux, timestep_);
                     }
                 }
                 else if constexpr (std::is_same_v<T, HysteresisInductorDevice>) {
@@ -6295,6 +6449,34 @@ private:
             stamp_phase(n_b, br_b, e_b);
             stamp_phase(n_c, br_c, e_c);
         }
+        else if constexpr (std::is_same_v<T,
+                               SinglePhaseInductionMotorDevice>) {
+            // compressor-models "CC" DC OP stamp. At DC, the main winding
+            // inductor is a short (R_s_main resistor between line and
+            // neutral), and the aux branch's run capacitor blocks DC so
+            // i_aux = 0. Rotor flux ≡ 0 at DC OP, so no back-EMF.
+            const auto& p = dev.params();
+            const Index n_line    = conn.nodes[0];
+            const Index n_neutral = conn.nodes[1];
+            const Index br_main   = conn.branch_index;
+            const Index br_aux    = conn.branch_index_2;
+
+            // Main branch: v_line − v_neutral − R_s_main · i_main = 0
+            if (br_main >= 0) {
+                if (n_line    >= 0) triplets.emplace_back(n_line,    br_main, 1.0);
+                if (n_neutral >= 0) triplets.emplace_back(n_neutral, br_main, -1.0);
+                if (n_line    >= 0) triplets.emplace_back(br_main, n_line,    1.0);
+                if (n_neutral >= 0) triplets.emplace_back(br_main, n_neutral, -1.0);
+                triplets.emplace_back(br_main, br_main, -p.R_s_main);
+            }
+            // Aux branch: i_aux = 0 (cap blocks DC). Stamp identity on
+            // the branch diagonal so the row reads "1·i_aux = 0".
+            if (br_aux >= 0) {
+                triplets.emplace_back(br_aux, br_aux, 1.0);
+                // No KCL contribution: i_aux is pinned to 0, so it
+                // contributes nothing to the line/neutral KCL.
+            }
+        }
     }
 
     template<typename Device, typename Triplets>
@@ -6653,6 +6835,59 @@ private:
             stamp_phase(n_a, br_a, dev.i_a_prev(), dev.v_La_prev(), dev.back_emf_a());
             stamp_phase(n_b, br_b, dev.i_b_prev(), dev.v_Lb_prev(), dev.back_emf_b());
             stamp_phase(n_c, br_c, dev.i_c_prev(), dev.v_Lc_prev(), dev.back_emf_c());
+        }
+        else if constexpr (std::is_same_v<T,
+                               SinglePhaseInductionMotorDevice>) {
+            // compressor-models "CC" transient stamp. Two branches (main on
+            // α, aux on β). Per-branch trapezoidal companion mirrors the 3φ
+            // induction motor, but only 2 windings, and the aux branch has
+            // the internal run capacitor V_cap subtracted from the driving
+            // voltage so the PSC topology behaves correctly.
+            const auto& p = dev.params();
+            const Index n_line    = conn.nodes[0];
+            const Index n_neutral = conn.nodes[1];
+            const Index br_main   = conn.branch_index;
+            const Index br_aux    = conn.branch_index_2;
+
+            const Real dt = std::max<Real>(timestep_, 1e-30);
+            const Real two_L_main_over_dt = 2.0 * p.L_s_main / dt;
+            const Real two_L_aux_over_dt  = 2.0 * p.L_s_aux  / dt;
+            const Real r_eq_main = p.R_s_main + two_L_main_over_dt;
+            const Real r_eq_aux  = p.R_s_aux  + two_L_aux_over_dt;
+
+            auto stamp_branch = [&](Index br, Real r_eq, Real two_L_over_dt,
+                                     Real i_prev, Real v_L_prev,
+                                     Real e_k, Real v_cap_subtract) {
+                if (br < 0) return;
+                const Real v_hist = two_L_over_dt * i_prev + v_L_prev;
+                const Real i_br = x[br];
+
+                // KCL at line / neutral nodes
+                if (n_line    >= 0) f[n_line]    += i_br;
+                if (n_neutral >= 0) f[n_neutral] -= i_br;
+                if (n_line    >= 0) triplets.emplace_back(n_line,    br,  1.0);
+                if (n_neutral >= 0) triplets.emplace_back(n_neutral, br, -1.0);
+
+                // Branch eq: v_line − v_neutral − V_cap_sub − r_eq · i
+                //            + v_hist − e_k = 0
+                const Real v_l = (n_line    >= 0) ? x[n_line]    : 0.0;
+                const Real v_n = (n_neutral >= 0) ? x[n_neutral] : 0.0;
+                f[br] += (v_l - v_n) - v_cap_subtract
+                       - r_eq * i_br + v_hist - e_k;
+
+                if (n_line    >= 0) triplets.emplace_back(br, n_line,    1.0);
+                if (n_neutral >= 0) triplets.emplace_back(br, n_neutral, -1.0);
+                triplets.emplace_back(br, br, -r_eq);
+            };
+
+            // Main (α) — no capacitor in series.
+            stamp_branch(br_main, r_eq_main, two_L_main_over_dt,
+                         dev.i_main(), dev.v_L_main_prev(),
+                         dev.back_emf_alpha(), /*v_cap_subtract=*/0.0);
+            // Aux (β) — run capacitor in series, V_cap subtracted.
+            stamp_branch(br_aux, r_eq_aux, two_L_aux_over_dt,
+                         dev.i_aux(), dev.v_L_aux_prev(),
+                         dev.back_emf_beta(), /*v_cap_subtract=*/dev.V_cap());
         }
     }
 
