@@ -1275,21 +1275,27 @@ public:
             desc.nodes = connections_[i].nodes;
             std::visit([&](const auto& dev) {
                 using T = std::decay_t<decltype(dev)>;
+                // NOTE: we deliberately use emplace(string_view{...}, value)
+                // rather than `params["..."] = value`. The latter goes
+                // through std::unordered_map::operator[] which triggers a
+                // libstdc++-14 <tuple> / std::forward_as_tuple instantiation
+                // bug under clang-17 on Ubuntu 24.04. emplace() bypasses
+                // that path entirely.
                 if constexpr (std::is_same_v<T, Resistor>) {
                     desc.kind = "resistor";
-                    desc.params["R"] = dev.resistance();
+                    desc.params.emplace("R", dev.resistance());
                 } else if constexpr (std::is_same_v<T, Capacitor>) {
                     desc.kind = "capacitor";
-                    desc.params["C"] = dev.capacitance();
+                    desc.params.emplace("C", dev.capacitance());
                 } else if constexpr (std::is_same_v<T, Inductor>) {
                     desc.kind = "inductor";
-                    desc.params["L"] = dev.inductance();
+                    desc.params.emplace("L", dev.inductance());
                 } else if constexpr (std::is_same_v<T, VoltageSource>) {
                     desc.kind = "voltage_source";
-                    desc.params["V"] = dev.voltage();
+                    desc.params.emplace("V", dev.voltage());
                 } else if constexpr (std::is_same_v<T, CurrentSource>) {
                     desc.kind = "current_source";
-                    desc.params["I"] = dev.current();
+                    desc.params.emplace("I", dev.current());
                 } else if constexpr (std::is_same_v<T, IdealDiode>) {
                     desc.kind = "diode";
                 } else if constexpr (std::is_same_v<T, IdealSwitch>) {
