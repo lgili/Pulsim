@@ -93,6 +93,11 @@ from ._pulsim import (
     BldcMotorParams,
     InductionMotorParams,
 
+    # compressor-models: single-phase induction motor (PSC) for the
+    # legacy fixed-frequency "compressor convencional" found in pre-
+    # inverter domestic refrigerators / freezers.
+    SinglePhaseInductionMotorParams,
+
     # consolidate-motors-and-three-phase Phase B.2b: PMSM-FOC current loop.
     PmsmFocCurrentLoopParams,
     PmsmFocDeviceParams,
@@ -101,6 +106,16 @@ from ._pulsim import (
     CompressorTopology,
     CompressorParams,
     CompressorLoad,
+
+    # compressor-models follow-up: curated refrigerant table (R600a,
+    # R134a, R290, R32, R744) with polytropic_n + typical cycle
+    # pressures, plus helpers to build a CompressorParams from a
+    # refrigerant identifier.
+    Refrigerant,
+    RefrigerantProperties,
+    refrigerant,
+    compressor_defaults_for,
+    apply_refrigerant,
 
     # consolidate-motors-and-three-phase Phase B.1: programmable + harmonic
     # three-phase source math objects.
@@ -1205,11 +1220,17 @@ __all__ = [
     "MechanicalDeviceParams",
     "BldcMotorParams",
     "InductionMotorParams",
+    "SinglePhaseInductionMotorParams",
     "PmsmFocCurrentLoopParams",
     "PmsmFocDeviceParams",
     "CompressorTopology",
     "CompressorParams",
     "CompressorLoad",
+    "Refrigerant",
+    "RefrigerantProperties",
+    "refrigerant",
+    "compressor_defaults_for",
+    "apply_refrigerant",
     "ThreePhaseSourceProgrammable",
     "ThreePhaseHarmonicSource",
     "HarmonicComponent",

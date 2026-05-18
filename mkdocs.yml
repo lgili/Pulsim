@@ -135,6 +135,7 @@ nav:
   - Domain Libraries:
       - Magnetic Models: magnetic-models.md
       - Motor Models: motor-models.md
+      - Compressor + Refrigerant Load: compressor-and-refrigerant-load.md
       - Three-Phase Grid Library: three-phase-grid.md
       - Catalog Devices: catalog-devices.md
       - Converter Templates: converter-templates.md

@@ -144,6 +144,9 @@ if(PULSIM_BUILD_TESTS)
         tests/test_bldc_benchmark_yaml.cpp
         tests/test_hysteresis_inductor_device.cpp
         tests/test_compressor_load.cpp
+        tests/test_single_phase_induction_motor.cpp
+        tests/test_refrigerants.cpp
+        tests/test_yaml_compressor_load.cpp
         tests/test_three_phase_rl_load.cpp
         tests/test_pmsm_dynamic.cpp
         tests/test_three_phase_vsi.cpp

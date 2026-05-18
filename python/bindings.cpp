@@ -781,7 +781,18 @@ void init_v2_module(py::module_& v2) {
                        "breaks Newton convergence. The helper switches to "
                        "a 'phase-shifted + dead_time' gate-drive pattern "
                        "where both gates are OFF for `dead_time_s` at "
-                       "every transition.");
+                       "every transition.")
+        .def_readwrite("add_body_diodes",
+                       &Circuit::ThreePhaseVsiParams::add_body_diodes,
+                       "Add antiparallel body diodes across every MOSFET "
+                       "(default True). These are the intrinsic body diodes "
+                       "every real MOSFET has — they clamp V_pole during "
+                       "commutation and let inductive load current freewheel. "
+                       "Without them, V_pole is unclamped during switching "
+                       "and the simulator produces large transient spikes "
+                       "that the loss accumulator captures as bogus power. "
+                       "Set False only when emulating discrete switches with "
+                       "no body diode.");
 
     py::enum_<Circuit::ThreePhaseLoadTopology>(
             v2, "ThreePhaseLoadTopology",
@@ -997,6 +1008,63 @@ void init_v2_module(py::module_& v2) {
              py::arg("params"), "Online retune of the compressor parameters.")
         .def_property_readonly("params", &loads::CompressorLoad::params);
 
+    // compressor-models follow-up: curated refrigerant table for the
+    // common domestic / commercial fluids (R600a, R134a, R290, R32, R744).
+    py::enum_<loads::Refrigerant>(v2, "Refrigerant",
+            "Refrigerant fluid identifier. Used by the helper "
+            "`compressor_defaults_for(refrigerant)` to fill in "
+            "polytropic_n and typical suction / discharge pressures on a "
+            "CompressorParams.")
+        .value("R600a", loads::Refrigerant::R600a,
+               "Isobutane — modern domestic standard, near-zero GWP.")
+        .value("R134a", loads::Refrigerant::R134a,
+               "Tetrafluoroethane — legacy domestic / automotive AC.")
+        .value("R290",  loads::Refrigerant::R290,
+               "Propane — EU domestic freezers, commercial chillers.")
+        .value("R32",   loads::Refrigerant::R32,
+               "Difluoromethane — residential split AC, HFC blend "
+               "constituent.")
+        .value("R744",  loads::Refrigerant::R744,
+               "CO₂ — transcritical heat-pump water heaters, "
+               "commercial supermarket cascades.");
+
+    py::class_<loads::RefrigerantProperties>(v2, "RefrigerantProperties",
+            "Curated physical properties of a refrigerant — name, "
+            "polytropic exponent, typical cycle pressures, critical "
+            "temperature / pressure. Returned by "
+            "`pulsim.refrigerant(Refrigerant.XYZ)`.")
+        .def_readonly("polytropic_n",
+                      &loads::RefrigerantProperties::polytropic_n)
+        .def_readonly("typical_P_suction_Pa",
+                      &loads::RefrigerantProperties::typical_P_suction_Pa)
+        .def_readonly("typical_P_discharge_Pa",
+                      &loads::RefrigerantProperties::typical_P_discharge_Pa)
+        .def_readonly("critical_temperature_K",
+                      &loads::RefrigerantProperties::critical_temperature_K)
+        .def_readonly("critical_pressure_Pa",
+                      &loads::RefrigerantProperties::critical_pressure_Pa)
+        .def_property_readonly("name", [](const loads::RefrigerantProperties& p) {
+            return std::string{p.name};
+        });
+
+    v2.def("refrigerant", &loads::refrigerant, py::arg("which"),
+           "Look up curated properties for a refrigerant.");
+
+    v2.def("compressor_defaults_for",
+           &loads::compressor_defaults_for, py::arg("refrigerant"),
+           "Build a CompressorParams pre-filled with the refrigerant's "
+           "polytropic_n and typical suction / discharge pressures. "
+           "Other fields (topology, displacement, friction) stay at "
+           "their struct defaults.");
+
+    v2.def("apply_refrigerant",
+           &loads::apply_refrigerant,
+           py::arg("params"), py::arg("refrigerant"),
+           "Apply just the refrigerant-dependent fields (polytropic_n + "
+           "typical pressures) to an existing CompressorParams in place. "
+           "Useful for swapping refrigerants on a pre-configured "
+           "compressor.");
+
     // consolidate-motors-and-three-phase, Phase B.2b: PMSM-FOC controller.
     py::class_<motors::PmsmFocCurrentLoopParams>(v2, "PmsmFocCurrentLoopParams",
             "PMSM-FOC current-loop tuning parameters (bandwidth + V_d/V_q "
@@ -1060,6 +1128,56 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("tau_load_quad_coeff",
                        &motors::InductionMotorParams::tau_load_quad_coeff,
                        "Quadratic load coefficient.");
+
+    // compressor-models: single-phase induction motor (PSC topology) for
+    // the "compressor convencional" (CC) found in pre-inverter domestic
+    // refrigerators / freezers. Two windings (main + auxiliary at 90°
+    // spatial) with a permanent run capacitor in series with the aux
+    // winding. Used by Circuit::add_single_phase_induction_motor.
+    py::class_<motors::SinglePhaseInductionMotorParams>(v2,
+            "SinglePhaseInductionMotorParams",
+            "Single-phase induction motor (PSC) parameters. Models the "
+            "fixed-frequency 'compressor convencional' (CC) used in legacy "
+            "refrigerator / freezer compressors. Main winding on α-axis, "
+            "auxiliary winding on β-axis with the run capacitor permanently "
+            "in series.")
+        .def(py::init<>())
+        .def_readwrite("R_s_main",
+                       &motors::SinglePhaseInductionMotorParams::R_s_main,
+                       "Main winding stator resistance (Ω).")
+        .def_readwrite("L_s_main",
+                       &motors::SinglePhaseInductionMotorParams::L_s_main,
+                       "Main winding stator self-inductance (H).")
+        .def_readwrite("R_s_aux",
+                       &motors::SinglePhaseInductionMotorParams::R_s_aux,
+                       "Auxiliary winding stator resistance (Ω).")
+        .def_readwrite("L_s_aux",
+                       &motors::SinglePhaseInductionMotorParams::L_s_aux,
+                       "Auxiliary winding stator self-inductance (H).")
+        .def_readwrite("C_run",
+                       &motors::SinglePhaseInductionMotorParams::C_run,
+                       "Permanent run capacitor in series with the aux "
+                       "winding (F).")
+        .def_readwrite("R_r",
+                       &motors::SinglePhaseInductionMotorParams::R_r,
+                       "Rotor resistance referred to stator (Ω).")
+        .def_readwrite("L_r",
+                       &motors::SinglePhaseInductionMotorParams::L_r,
+                       "Rotor self-inductance referred to stator (H).")
+        .def_readwrite("L_m",
+                       &motors::SinglePhaseInductionMotorParams::L_m,
+                       "Mutual inductance (H).")
+        .def_readwrite("pole_pairs",
+                       &motors::SinglePhaseInductionMotorParams::pole_pairs,
+                       "Number of pole pairs (4-pole CC compressor = 2).")
+        .def_readwrite("J", &motors::SinglePhaseInductionMotorParams::J,
+                       "Rotor + shaft inertia (kg·m²).")
+        .def_readwrite("b_friction",
+                       &motors::SinglePhaseInductionMotorParams::b_friction,
+                       "Viscous friction coefficient (N·m·s).")
+        .def_readwrite("friction_coulomb",
+                       &motors::SinglePhaseInductionMotorParams::friction_coulomb,
+                       "Coulomb friction torque (N·m).");
 
     py::class_<RampParams>(v2, "RampParams", "Ramp/triangle generator parameters")
         .def(py::init<>())
@@ -1952,6 +2070,41 @@ void init_v2_module(py::module_& v2) {
              "Read induction motor phase B line current (A).")
         .def("induction_i_c", &Circuit::induction_i_c, py::arg("name"),
              "Read induction motor phase C line current (A).")
+        // compressor-models: single-phase induction motor (CC compressor).
+        .def("add_single_phase_induction_motor",
+             &Circuit::add_single_phase_induction_motor,
+             py::arg("name"), py::arg("n_line"), py::arg("n_neutral"),
+             py::arg("params"),
+             "Add a single-phase induction motor with PSC topology "
+             "(2 pins: line, neutral). The run capacitor and auxiliary "
+             "winding are internal to the device. Models the fixed-"
+             "frequency 'compressor convencional' (CC) used in legacy "
+             "domestic refrigerator / freezer compressors.")
+        .def("set_single_phase_im_tau_load",
+             &Circuit::set_single_phase_im_tau_load,
+             py::arg("name"), py::arg("tau"),
+             "Set the shaft load torque on a single-phase IM (N·m).")
+        .def("single_phase_im_omega",
+             &Circuit::single_phase_im_omega, py::arg("name"),
+             "Single-phase IM mechanical angular velocity (rad/s).")
+        .def("single_phase_im_theta",
+             &Circuit::single_phase_im_theta, py::arg("name"),
+             "Single-phase IM rotor angle (rad).")
+        .def("single_phase_im_i_main",
+             &Circuit::single_phase_im_i_main, py::arg("name"),
+             "Single-phase IM main winding current (A).")
+        .def("single_phase_im_i_aux",
+             &Circuit::single_phase_im_i_aux, py::arg("name"),
+             "Single-phase IM auxiliary winding current (A).")
+        .def("single_phase_im_i_line",
+             &Circuit::single_phase_im_i_line, py::arg("name"),
+             "Single-phase IM total line current (A), i_main + i_aux.")
+        .def("single_phase_im_V_cap",
+             &Circuit::single_phase_im_V_cap, py::arg("name"),
+             "Single-phase IM run capacitor voltage (V).")
+        .def("single_phase_im_torque",
+             &Circuit::single_phase_im_torque, py::arg("name"),
+             "Single-phase IM electromagnetic torque (N·m).")
         // compressor-models: attach a refrigeration compressor load
         // profile to a registered motor (BLDC, PMSM, DC, Induction).
         .def("attach_compressor_load", &Circuit::attach_compressor_load,
