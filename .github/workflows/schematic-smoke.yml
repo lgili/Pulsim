@@ -61,6 +61,8 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang-17 \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
             -DPULSIM_BUILD_PYTHON=ON \
             -DPython3_EXECUTABLE=$(which python3)
           cmake --build build --target _pulsim -j
