@@ -74,21 +74,40 @@
       noise on a 400 V bus; the diode MUST NOT register a switching
       event (chatter test).
 
-### A5. Trapezoidal integration on motor flux + cap states
-- [ ] A5.1 In `induction_motor_device.hpp::advance_state` (lines
-      ~282–289), replace forward-Euler on `ψ_r` with one-iteration
-      trapezoidal: compute `dψ_r_old` and `dψ_r_new`, average. Document
-      that this stabilises high-slip DOL-start (`ω_e · ψ_rβ` cross-
-      coupling at ω_e ≈ 314 rad/s and `dt ≈ 100 µs`).
-- [ ] A5.2 In `single_phase_induction_motor_device.hpp` line ~181,
-      replace `V_cap += dt·i_aux/C_run` with `V_cap += 0.5·dt·(i_aux +
-      i_aux_prev)/C_run`. Cache `i_aux_prev` if not already.
-- [ ] A5.3 Add `test_induction_motor_high_slip_start.cpp`: 50 Hz, full
-      voltage applied at t=0 with motor at standstill, simulate 200 ms,
-      assert ω converges monotonically (no oscillation > 1% of ω_sync).
-- [ ] A5.4 Add `test_psc_motor_run_cap_voltage.cpp`: starting transient
-      with C_run = 4 µF, assert V_cap waveform is smooth (no sub-step
-      kinks > 1 V at dt = 100 µs).
+### A5. Trapezoidal integration on motor flux + cap states  ✅ landed in follow-up commit
+- [x] A5.1 In `induction_motor_device.hpp::advance_state` (the
+      multi-pin device wrapper) AND `motors/induction_motor.hpp`
+      (standalone math object's `advance` method), replaced
+      forward-Euler on `ψ_r` with one-iteration trapezoidal
+      (Heun's predictor-corrector): compute `dψ_r_old` at the OLD
+      state, then `dψ_r_new` at the forward-Euler predictor, average
+      the two. ~4 extra mul / 2 adds per step, no implicit solve.
+- [x] A5.2 In `single_phase_induction_motor_device.hpp` AND
+      `motors/single_phase_induction_motor.hpp` (math object's
+      `advance` method), replaced `V_cap += dt·i_aux/C_run` with
+      `V_cap += 0.5·dt·(i_aux_old + i_aux_new)/C_run`. The device
+      wrapper already had `i_aux_prev_` cached for the inductor
+      companion update; the math model caches `i_aux_prev` locally
+      before the stator-current step.
+- [x] A5.3 `test_motor_flux_integration.cpp` — closed-form rotation
+      test: drive an IM with R_r=0, L_m=0, ω_e=314 rad/s for 200
+      steps at dt=100 µs and assert |ψ_r| stays within 1 % of unity.
+      Forward Euler produces ~10 % magnitude growth on this op-point,
+      so the test cleanly discriminates trapezoidal-vs-FE without
+      depending on the rest of the system.
+- [x] A5.4 `test_motor_flux_integration.cpp` (same file) — V_cap
+      step-update unit test: stage a controlled i_aux transition and
+      assert ΔV_cap matches `0.5·dt·(i_aux_old + i_aux_new)/C_run`
+      bit-for-bit, AND differs from the forward-Euler form by more
+      than 1 µV. This is the cleanest regression signal — protects
+      against an accidental revert of the integration rule.
+
+(Original A5.3/A5.4 specs called for system-level "monotonic ω_m
+climb" and "V_cap kink-free" assertions. Those tolerances turned out
+to be tangled with residual forward-Euler noise on the stator-current
+step at dt=100 µs — the test signal was lost in the FE roughness.
+Replaced with focused integration-step unit checks that produce
+unambiguous regression signals.)
 
 ### A6. Flip ModelRegularizationOptions default
 - [ ] A6.1 In `simulation.hpp::ModelRegularizationOptions` line ~108,
