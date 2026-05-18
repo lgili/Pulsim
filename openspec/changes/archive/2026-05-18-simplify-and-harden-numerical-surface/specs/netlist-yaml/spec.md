@@ -70,8 +70,6 @@ struct field names.
 - **AND** the parser emits a warning with code
   `PULSIM_YAML_W_DEPRECATED_FIELD` referencing the new path
 
-## MODIFIED Requirements
-
 ### Requirement: Simulation Block Schema
 
 The YAML `simulation:` block SHALL recognize the following top-level

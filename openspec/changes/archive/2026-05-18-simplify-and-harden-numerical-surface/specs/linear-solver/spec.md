@@ -110,34 +110,69 @@ refinement internally.
 - **THEN** the refinement check is skipped entirely
 - **AND** `linear_refinement_steps == 0`
 
-## REMOVED Requirements
+### Requirement: Auto-Select Always-On Migration
 
-### Requirement: Linear-Solver Auto-Select Threshold Fields
+The system SHALL deprecate the user-facing
+`LinearSolverStackConfig::auto_select` (boolean), `size_threshold`,
+and `nnz_threshold` fields in v0.11 and SHALL remove them in v0.12.
+The auto-selector SHALL become unconditionally active. Users who
+need to override the auto-selector's choice SHALL set
+`opts.advanced.linear_solver.kind = LinearSolverKind::Direct` or
+`Iterative` explicitly.
 
-**Reason**: `LinearSolverStackConfig::auto_select` (boolean),
-`size_threshold`, and `nnz_threshold` exist today as user-tunable
-fields, but in practice the auto-selector should always be active
+**Rationale**: In practice the auto-selector should always be active
 and the thresholds should be internal implementation choices that
 the kernel maintainers tune from benchmark data — not user-visible
 configuration.
 
-**Migration**: These fields SHALL be removed from the public
-`LinearSolverStackConfig` in v0.12. The auto-selector becomes
-unconditionally active. Users who need to *override* the
-auto-selector's choice SHALL set
-`opts.advanced.linear_solver.kind = LinearSolverKind::Direct` or
-`Iterative` explicitly.
+#### Scenario: Legacy auto_select field warns in v0.11
 
-### Requirement: Preconditioner Enum on Public API
+- **GIVEN** a user sets `opts.linear_solver.auto_select = false` in
+  v0.11 along with a hand-picked solver kind
+- **WHEN** the simulator constructs
+- **THEN** the user's explicit kind choice is honoured
+- **AND** a deprecation warning surfaces pointing the user at the
+  `LinearSolverKind::Direct | Iterative` override path
 
-**Reason**: The 5-value preconditioner enum (`None_`, `Jacobi`,
-`ILU0`, `ILUT`, `AMG`) leaks sparse-linear-algebra implementation
-choices into the user-facing API. A power-electronics user
-simulating a buck converter does not need to know what ILU0 vs
-ILUT is to get a working simulation.
+#### Scenario: Auto-select threshold fields removed in v0.12
 
-**Migration**: Replaced by the `solver_quality: Fast|Default|Best`
-knob (see ADDED requirement). The internal enum stays for the
-auto-selector but moves to `internal::Preconditioner`. v0.11 emits
-a deprecation warning when users select the old enum values; v0.12
-removes them from the public API.
+- **GIVEN** the same code in v0.12 (after the removal cycle)
+- **WHEN** the simulator constructs
+- **THEN** the `auto_select`, `size_threshold`, and `nnz_threshold`
+  fields no longer compile
+- **AND** the migration error points the user at the explicit
+  `LinearSolverKind` override
+
+### Requirement: Preconditioner Enum Migration to SolverQuality
+
+The system SHALL deprecate the 5-value `PreconditionerKind` enum
+(`None_`, `Jacobi`, `ILU0`, `ILUT`, `AMG`) on the public API in
+v0.11 and SHALL remove the public surface in v0.12. The internal
+implementation enum SHALL move under `internal::PreconditionerImpl`
+and SHALL remain reachable via
+`opts.advanced.linear_solver.iterative_config.preconditioner` for
+power users.
+
+The canonical user-facing replacement SHALL be the
+`solver_quality: Fast|Default|Best` knob (see the
+"Solver-Quality Knob Replaces Preconditioner Enum" requirement above).
+
+**Rationale**: The 5-value preconditioner enum leaks sparse-linear-
+algebra implementation choices into the user-facing API. A
+power-electronics user simulating a buck converter does not need to
+know what ILU0 vs ILUT is to get a working simulation.
+
+#### Scenario: Legacy PreconditionerKind selection warns in v0.11
+
+- **GIVEN** a user sets the preconditioner enum directly in v0.11
+- **WHEN** the iterative solver runs
+- **THEN** the choice is honoured at runtime
+- **AND** a deprecation warning surfaces pointing the user at
+  `SolverQuality`
+
+#### Scenario: Public PreconditionerKind removed in v0.12
+
+- **GIVEN** the same code in v0.12
+- **WHEN** the code compiles
+- **THEN** the public enum no longer exists; only the internal one
+  remains, accessible under `opts.advanced.linear_solver.iterative_config`

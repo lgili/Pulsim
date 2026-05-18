@@ -56,8 +56,6 @@ Existing top-level field accessors (e.g. `opts.newton_options`,
 - **THEN** the value is forwarded to `opts.advanced.newton.max_iterations`
 - **AND** a `DeprecationWarning` is raised on first access per process
 
-## MODIFIED Requirements
-
 ### Requirement: SimulationOptions Python Surface
 
 The Python `SimulationOptions` class SHALL expose the following

@@ -74,42 +74,38 @@ canonical selector is `opts.step_mode = TransientStepMode::Variable
   is applied
 - **AND** a deprecation warning is logged once per process
 
-## REMOVED Requirements
+## ADDED Requirements
 
-### Requirement: BDF3-5 Integrators
+### Requirement: Deprecated Integrator Enum Values
 
-**Reason**: `BDF3`, `BDF4`, and `BDF5` are theoretically supported
-but are not A-stable for stiff switching topologies. They have zero
-benchmark coverage in the Pulsim suite; analysis showed the
-oscillations they produce on diode commutation and PWM edges make
-them unsafe defaults for any power-electronics circuit.
+The `Integrator` enum SHALL mark `BDF3`, `BDF4`, `BDF5`, `Gear`, and
+`SDIRK2` as deprecated for one release cycle (v0.11), then SHALL
+remove them in v0.12. Users explicitly selecting any of these values
+SHALL receive a compile-time `[[deprecated]]` warning (C++) and a
+YAML parser `PULSIM_YAML_W_DEPRECATED_FIELD` warning.
 
-**Migration**: Users explicitly selecting `Integrator::BDF3`,
-`BDF4`, or `BDF5` SHALL receive a deprecation warning in v0.11.
-v0.12 SHALL remove these enum values. Suggested replacement:
-`Integrator::TRBDF2` for stiff dynamics requiring order ≥ 2, or
-`Integrator::RosenbrockW` for explicitly stiff problems.
+**Rationale**:
+- `BDF3 / BDF4 / BDF5`: not A-stable for stiff switching topologies;
+  zero benchmark coverage; oscillations on diode commutation make them
+  unsafe defaults. Replacement: `TRBDF2` (order 2, A-stable) or
+  `RosenbrockW`.
+- `Gear`: literal alias for `BDF2` (zero behavioural difference).
+  Replacement: `BDF2`.
+- `SDIRK2`: research-grade implementation with zero benchmark coverage
+  and no production validation. Replacement: `TRBDF2`.
 
-### Requirement: Gear Alias
+#### Scenario: Deprecated integrator emits warning in v0.11
 
-**Reason**: The `Integrator::Gear` enum value is a literal alias
-for `Integrator::BDF2` (verified in the C++ implementation). It
-exists only as a back-compat hook from an early integration where
-"Gear" was the documented name. Today it duplicates `BDF2` with no
-behavioural difference.
+- **GIVEN** a user selects `Integrator::BDF5` (or `BDF3`, `BDF4`,
+  `Gear`, `SDIRK2`) in v0.11
+- **WHEN** the code compiles
+- **THEN** the C++ compiler emits a `[[deprecated]]` warning with the
+  suggested replacement
+- **AND** the integrator still works at runtime (deprecation cycle)
 
-**Migration**: Users selecting `Integrator::Gear` SHALL receive a
-deprecation warning in v0.11. v0.12 SHALL remove the enum value.
-Replacement: `Integrator::BDF2`.
+#### Scenario: Deprecated integrator removed in v0.12
 
-### Requirement: SDIRK2 Integrator
-
-**Reason**: The `Integrator::SDIRK2` (singly-diagonally-implicit
-Runge-Kutta order 2) value exists in the enum but has zero benchmark
-coverage and no documentation. The implementation is research-grade
-and has not been validated on production circuits.
-
-**Migration**: Users selecting `Integrator::SDIRK2` SHALL receive
-a deprecation warning in v0.11. v0.12 SHALL remove the enum value.
-Replacement: `Integrator::TRBDF2` (also second-order stiff-stable,
-multi-stage, with full benchmark coverage).
+- **GIVEN** the same code in v0.12 (after the removal cycle)
+- **WHEN** the code compiles
+- **THEN** the enum value no longer exists and the compile fails
+- **AND** the migration message points the user at the replacement

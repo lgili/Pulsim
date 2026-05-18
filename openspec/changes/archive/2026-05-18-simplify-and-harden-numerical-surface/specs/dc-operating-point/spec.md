@@ -77,8 +77,6 @@ increments; `Preset::HighFidelity` SHALL use 10 increments.
 - **AND** the DC analysis fails with `DcConvergenceFailure` rather
   than attempting homotopy
 
-## MODIFIED Requirements
-
 ### Requirement: Strategy Telemetry
 
 The system SHALL report which DC strategy successfully produced the
