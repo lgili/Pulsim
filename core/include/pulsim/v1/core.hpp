@@ -20,10 +20,20 @@
 #include "pulsim/v1/expression_templates.hpp"
 #include "pulsim/v1/circuit_graph.hpp"
 #include "pulsim/v1/solver.hpp"
-#include "pulsim/v1/integration.hpp"
-#include "pulsim/v1/high_performance.hpp"
+// simplify-and-harden-numerical-surface — Phase 1.9: canonical
+// include paths for numerical primitives. These wrappers re-export
+// from the legacy paths (integration.hpp, convergence_aids.hpp, etc.),
+// so this migration is purely cosmetic and back-compat-preserving;
+// new code SHOULD use the numerical/ paths going forward.
+#include "pulsim/v1/numerical/integrator.hpp"
+#include "pulsim/v1/numerical/linear_solver.hpp"
+#include "pulsim/v1/numerical/newton.hpp"
+#include "pulsim/v1/numerical/dc_strategy.hpp"
+#include "pulsim/v1/numerical/timestep_control.hpp"
+#include "pulsim/v1/numerical/stiffness.hpp"
+#include "pulsim/v1/numerical/formulation.hpp"
+#include "pulsim/v1/numerical/preset.hpp"
 #include "pulsim/v1/extensions.hpp"
-#include "pulsim/v1/convergence_aids.hpp"
 #include "pulsim/v1/validation.hpp"
 #include "pulsim/v1/runtime_circuit.hpp"
 #include "pulsim/v1/parser/yaml_parser.hpp"

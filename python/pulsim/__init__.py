@@ -30,6 +30,12 @@ from ._pulsim import (
     # materializes a fully-tuned SimulationOptions.
     Preset,
 
+    # simplify-and-harden-numerical-surface — Phase 3 MVP: namespaced
+    # view over the advanced numerical knobs. Returned by
+    # `opts.advanced()`. Flat-field path (opts.newton_options, etc.)
+    # keeps working.
+    AdvancedOptions,
+
     # Device Classes - Linear
     Resistor,
     Capacitor,

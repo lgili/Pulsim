@@ -2995,6 +2995,58 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("peak_temperature", &ComponentElectrothermalTelemetry::peak_temperature)
         .def_readwrite("average_temperature", &ComponentElectrothermalTelemetry::average_temperature);
 
+    // simplify-and-harden-numerical-surface — Phase 3 MVP.
+    // Reference view over the advanced numerical knobs. Returned by
+    // `SimulationOptions.advanced()`. Each field is a reference into
+    // the underlying SimulationOptions — mutating through the view
+    // mutates the original (and vice versa).
+    py::class_<AdvancedOptions>(v2, "AdvancedOptions",
+        "Reference view over the advanced numerical knobs of a "
+        "SimulationOptions. Returned by SimulationOptions.advanced(). "
+        "Mutating through this view mutates the underlying "
+        "SimulationOptions; the flat-field path (opts.newton_options, "
+        "etc.) keeps working and mutates the same data.")
+        // pybind11 cannot take pointer-to-reference-member, so the
+        // sub-fields are exposed as get/set property lambdas. Each
+        // getter returns a reference into the underlying
+        // SimulationOptions; each setter copy-assigns through that
+        // reference.
+        .def_property("newton",
+            [](AdvancedOptions& s) -> NewtonOptions& { return s.newton; },
+            [](AdvancedOptions& s, const NewtonOptions& v) { s.newton = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("timestep",
+            [](AdvancedOptions& s) -> AdvancedTimestepConfig& { return s.timestep; },
+            [](AdvancedOptions& s, const AdvancedTimestepConfig& v) { s.timestep = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("lte",
+            [](AdvancedOptions& s) -> RichardsonLTEConfig& { return s.lte; },
+            [](AdvancedOptions& s, const RichardsonLTEConfig& v) { s.lte = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("bdf_order",
+            [](AdvancedOptions& s) -> BDFOrderConfig& { return s.bdf_order; },
+            [](AdvancedOptions& s, const BDFOrderConfig& v) { s.bdf_order = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("dc",
+            [](AdvancedOptions& s) -> DCConvergenceConfig& { return s.dc; },
+            [](AdvancedOptions& s, const DCConvergenceConfig& v) { s.dc = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("stiffness",
+            [](AdvancedOptions& s) -> StiffnessConfig& { return s.stiffness; },
+            [](AdvancedOptions& s, const StiffnessConfig& v) { s.stiffness = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("fallback",
+            [](AdvancedOptions& s) -> FallbackPolicyOptions& { return s.fallback; },
+            [](AdvancedOptions& s, const FallbackPolicyOptions& v) { s.fallback = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("formulation",
+            [](AdvancedOptions& s) { return s.formulation; },
+            [](AdvancedOptions& s, FormulationMode v) { s.formulation = v; })
+        .def_property("linear_solver",
+            [](AdvancedOptions& s) -> LinearSolverStackConfig& { return s.linear_solver; },
+            [](AdvancedOptions& s, const LinearSolverStackConfig& v) { s.linear_solver = v; },
+            py::return_value_policy::reference_internal);
+
     py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
         .def(py::init<>())
         // simplify-and-harden-numerical-surface — Phase 2: canonical entry
@@ -3010,6 +3062,23 @@ void init_v2_module(py::module_& v2) {
                     "strategy, stiffness, and Newton tuning. The user "
                     "supplies only `dt` and `tstop`; everything else comes "
                     "from the preset's tuned recipe.")
+        // simplify-and-harden-numerical-surface — Phase 3 MVP:
+        // `opts.advanced()` returns a view exposing the advanced
+        // numerical knobs under their friendly names. The flat-field
+        // path (`opts.newton_options`, etc.) keeps working — both
+        // forms mutate the same data. The full god-class refactor
+        // (collapse the 28 flat fields + deprecate the aliases) is
+        // a separate PR.
+        .def("advanced",
+             py::overload_cast<>(&SimulationOptions::advanced),
+             py::return_value_policy::reference_internal,
+             "Reference view over the advanced numerical knobs "
+             "(newton, timestep, lte, bdf_order, dc, stiffness, "
+             "fallback, formulation, linear_solver). Lets users "
+             "write `opts.advanced().newton.max_iterations = 100` "
+             "for discoverability; the flat-field path "
+             "(`opts.newton_options.max_iterations = 100`) keeps "
+             "working and mutates the same underlying data.")
         .def_readwrite("tstart", &SimulationOptions::tstart)
         .def_readwrite("tstop", &SimulationOptions::tstop)
         .def_readwrite("dt", &SimulationOptions::dt)

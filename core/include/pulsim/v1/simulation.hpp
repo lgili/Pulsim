@@ -10,6 +10,7 @@
 #include "pulsim/v1/transient_services.hpp"
 #include "pulsim/v1/frequency_analysis.hpp"
 #include "pulsim/v1/numerical/preset.hpp"
+#include "pulsim/v1/numerical/advanced_options.hpp"
 #include "pulsim/simulation_control.hpp"
 
 #include <cstdint>
@@ -394,6 +395,44 @@ struct SimulationOptions {
     /// implicit — any device with `Params::C_oss > 0` is respected as
     /// "user-set" and never mutated.
     AutoParasiticsOptions auto_parasitics{};
+
+    // simplify-and-harden-numerical-surface — Phase 3 MVP.
+    //
+    // Return a reference view over the advanced numerical knobs.
+    // Lets users write `opts.advanced().newton.max_iterations = 100`
+    // for discoverability, while preserving the existing flat-field
+    // path (`opts.newton_options.max_iterations = 100`) for
+    // back-compat. Both forms mutate the same underlying data.
+    //
+    // The full Phase 3 god-class refactor (collapse 28 flat fields
+    // under `opts.advanced.*` + deprecate the top-level aliases) is
+    // a separate PR. This MVP just exposes the namespaced view.
+    [[nodiscard]] AdvancedOptions advanced() noexcept {
+        return AdvancedOptions{
+            newton_options,
+            timestep_config,
+            lte_config,
+            bdf_config,
+            dc_config,
+            stiffness_config,
+            fallback_policy,
+            formulation_mode,
+            linear_solver,
+        };
+    }
+    [[nodiscard]] AdvancedOptionsConst advanced() const noexcept {
+        return AdvancedOptionsConst{
+            newton_options,
+            timestep_config,
+            lte_config,
+            bdf_config,
+            dc_config,
+            stiffness_config,
+            fallback_policy,
+            formulation_mode,
+            linear_solver,
+        };
+    }
 
     // simplify-and-harden-numerical-surface — Phase 2.
     //
