@@ -134,11 +134,14 @@
       The flat-field bindings (`opts.newton_options`, etc.) keep
       working unchanged. *(Deprecation shims on the flat fields
       deferred along with 3.3.)*
-- [ ] 3.5 Update YAML parser: `simulation.advanced.{newton, timestep,
-      dc, stiffness, formulation, linear_solver}.*` is the canonical
-      path; old keys still parse but emit
-      `PULSIM_YAML_W_DEPRECATED_FIELD`. *(Deferred along with 3.3 —
-      depends on the flat-field deprecation contract.)*
+- [x] 3.5 YAML parser already supports `simulation.advanced.*` as
+      an additive namespace (was wired in an earlier change for
+      back-compat). Pinned by `python/tests/test_yaml_advanced_namespace.py`
+      (3 cases): `simulation.advanced.newton.max_iterations` and
+      `simulation.advanced.integrator` reach the same fields as the
+      flat forms; when both forms are set, advanced.* wins (the
+      canonical path). The `PULSIM_YAML_W_DEPRECATED_FIELD` emission
+      on the flat-form path is deferred along with 3.3.
 - [ ] 3.6 Migrate every example, notebook, and docs snippet to the
       `opts.advanced.*` namespace. *(Deferred — examples and docs
       currently use the flat fields; both forms work, so this is a
@@ -292,10 +295,16 @@
       Iterative}` and `pulsim.DCStrategy.Override` exposed. Pinned by
       Python pytest `python/tests/test_homotopy_override.py` (7
       cases) + `python/tests/test_solver_quality.py` (6 cases).
-- [ ] 8.6 Update every example / notebook / doc. *(Deferred —
-      examples use concrete `KLU`/`GMRES` values which still work;
-      documentation in `numerical-configuration.md` already leads
-      with the abstract values.)*
+- [x] 8.6 Update docs to lead with the abstract enum values.
+      `docs/numerical-configuration.md` now has a dedicated section
+      "Recommended user-surface enums (Phase 8 + 8.3)" with tables
+      for `LinearSolverKind.{Auto, Direct, Iterative}`,
+      `SolverQuality.{Fast, Default, Best}`, and
+      `DCStrategy.{Auto, Override}`. Plus a section "Namespaced
+      advanced knobs (Phase 3 MVP)" covering `opts.advanced()` +
+      YAML `simulation.advanced.*`. Examples / notebook migration
+      to abstract values is a follow-up — they currently use the
+      concrete engines (KLU, GMRES) which still work.
 - [x] 8.7 Run full test suite — Phase 8 adds 13 new tests (48
       assertions). Full suite stays green except for 3 pre-existing
       failures + 2 from a foreign untracked test file. The pwl

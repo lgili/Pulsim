@@ -257,6 +257,86 @@ After the v0.11 surface cleanup, the **curated** integrator set is:
 | `Gear` | `BDF2` (literal alias) |
 | `SDIRK2` | `TRBDF2` (research-grade, no benchmark coverage) |
 
+## Recommended user-surface enums (Phase 8 + 8.3)
+
+In v0.11 the linear-solver and DC-strategy public enums grew
+**friendly abstract values** alongside the legacy concrete engines.
+The concrete engines stay supported for power users; the new
+abstract values are what new code should reach for first.
+
+### `LinearSolverKind` — abstract values
+
+| Value | Resolves to |
+|---|---|
+| `LinearSolverKind.Auto` | Direct (when N < 5000) or Iterative (else); the auto-selector picks at runtime |
+| `LinearSolverKind.Direct` | KLU (or EnhancedSparseLU / SparseLU when KLU isn't built in) |
+| `LinearSolverKind.Iterative` | GMRES (or BiCGSTAB for symmetric systems) |
+
+The 6 concrete engines (`SparseLU`, `EnhancedSparseLU`, `KLU`,
+`GMRES`, `BiCGSTAB`, `CG`) still work — pick one explicitly only
+when you know the auto-selector's choice is wrong for your circuit.
+
+### `SolverQuality` — preconditioner selector
+
+```python
+cfg = ps.LinearSolverStackConfig()
+cfg.solver_quality = ps.SolverQuality.Best   # Fast | Default | Best
+cfg.apply_solver_quality()
+```
+
+| Value | Internal preconditioner |
+|---|---|
+| `SolverQuality.Fast` | `None_` (no preconditioner, lowest overhead) |
+| `SolverQuality.Default` | `ILU0` (production sweet-spot for power-electronics MNA) |
+| `SolverQuality.Best` | `ILUT` (heavier setup, better convergence on ill-conditioned systems) |
+
+Replaces the leaky `PreconditionerKind` enum (`None_`, `Jacobi`,
+`ILU0`, `ILUT`, `AMG`) in user-facing API. The full 5-value enum
+stays available for users who want a specific preconditioner.
+
+### `DCStrategy` — abstract values
+
+| Value | Behavior |
+|---|---|
+| `DCStrategy.Auto` | Orchestrates the full ladder: Direct → SourceStepping → GminStepping → PseudoTransient → Homotopy |
+| `DCStrategy.Override` | Skip the Auto ladder and run only `DCConvergenceConfig.strategy_override` (a concrete strategy) |
+
+The 5 concrete strategies (`Direct`, `GminStepping`, `SourceStepping`,
+`PseudoTransient`, `Homotopy`) still work directly.
+
+## Namespaced advanced knobs (Phase 3 MVP)
+
+`opts.advanced()` returns a reference view over the 9 advanced
+numerical sub-configs:
+
+```python
+opts = ps.SimulationOptions.from_preset(ps.Preset.Robust, 1e-6, 1e-3)
+adv = opts.advanced()
+adv.newton.max_iterations = 100        # → opts.newton_options.max_iterations
+adv.stiffness.enable      = False      # → opts.stiffness_config.enable
+adv.dc.strategy           = ps.DCStrategy.Override
+adv.linear_solver.solver_quality = ps.SolverQuality.Best
+adv.linear_solver.apply_solver_quality()
+```
+
+The flat-field path (`opts.newton_options`, `opts.stiffness_config`,
+etc.) keeps working — both paths mutate the same underlying data
+(the view holds references, not copies). Pick whichever form you
+find more discoverable.
+
+The same namespacing works in YAML:
+
+```yaml
+simulation:
+  preset: robust
+  tstop: 1e-3
+  dt: 1e-6
+  advanced:
+    newton:
+      max_iterations: 100
+    integrator: bdf1
+```
+
 ## Telemetry reference
 
 Every transient run exposes a `result.backend_telemetry` and
