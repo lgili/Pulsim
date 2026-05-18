@@ -9,6 +9,7 @@
 #include "pulsim/v1/losses.hpp"
 #include "pulsim/v1/transient_services.hpp"
 #include "pulsim/v1/frequency_analysis.hpp"
+#include "pulsim/v1/numerical/preset.hpp"
 #include "pulsim/simulation_control.hpp"
 
 #include <cstdint>
@@ -360,6 +361,119 @@ struct SimulationOptions {
     /// implicit — any device with `Params::C_oss > 0` is respected as
     /// "user-set" and never mutated.
     AutoParasiticsOptions auto_parasitics{};
+
+    // simplify-and-harden-numerical-surface — Phase 2.
+    //
+    // Static factory that materializes a fully-tuned `SimulationOptions`
+    // from a single `Preset` choice. The 95% case — pick a preset, set
+    // tstop + dt, run.
+    //
+    // The returned struct is a complete numerical configuration: integrator,
+    // linear solver, timestep controller, DC strategy, stiffness policy,
+    // Newton tuning. Users override individual fields ONLY when their
+    // circuit needs something different from the preset's defaults.
+    //
+    // Per-preset materialization tables follow the same field-value
+    // recipes as the previous `make_robust_options(...)` helper in
+    // `python/bindings.cpp` — the difference is that the recipe lives in
+    // the C++ core (header-only, reachable from Python and YAML), not in
+    // the Python binding layer.
+    //
+    // NOTE: `newton_options.num_nodes` and `newton_options.num_branches`
+    // are NOT set here; they are circuit-specific and get populated by
+    // the user code or the `Simulator` constructor.
+    [[nodiscard]] static SimulationOptions from_preset(Preset preset,
+                                                        Real dt,
+                                                        Real tstop) {
+        SimulationOptions opts;
+        opts.tstart = Real{0};
+        opts.tstop  = tstop;
+        opts.dt     = dt;
+
+        switch (preset) {
+            case Preset::Fast: {
+                // Pure-switching topology (buck, boost, full-bridge, basic
+                // 3φ VSI). PWL Ideal switching path, Trapezoidal, KLU,
+                // fixed step. Smallest per-step overhead.
+                opts.switching_mode = SwitchingMode::Ideal;
+                opts.integrator     = Integrator::Trapezoidal;
+                opts.step_mode      = TransientStepMode::Fixed;
+                opts.step_mode_explicit  = true;
+                opts.adaptive_timestep   = false;
+                opts.enable_bdf_order_control = false;
+                opts.stiffness_config.enable = false;
+                opts.max_step_retries        = 2;
+                opts.dt_min = std::max<Real>(1e-12, dt * 1e-3);
+                opts.dt_max = dt;
+                break;
+            }
+
+            case Preset::Auto:
+            case Preset::Robust: {
+                // Motor drives, mixed-domain, magnetics, thermal feedback.
+                // Mirrors `python/bindings.cpp::build_robust_transient_options`
+                // — the long-standing robust profile that's been the de-facto
+                // production default. `Auto` defers to `Robust` today; it
+                // will evolve as the engine improves.
+                opts.integrator         = Integrator::TRBDF2;
+                opts.step_mode          = TransientStepMode::Variable;
+                opts.step_mode_explicit = true;
+                opts.adaptive_timestep  = true;
+
+                opts.timestep_config = AdvancedTimestepConfig::for_power_electronics();
+                opts.timestep_config.dt_initial   = dt;
+                opts.timestep_config.dt_min       = std::max<Real>(1e-10, dt * 1e-2);
+                opts.timestep_config.dt_max       = std::max<Real>(opts.timestep_config.dt_max, dt * 20.0);
+                opts.timestep_config.error_tolerance =
+                    std::max<Real>(opts.timestep_config.error_tolerance, 5e-3);
+
+                opts.lte_config = RichardsonLTEConfig::defaults();
+                opts.lte_config.voltage_tolerance = 5e-3;
+                opts.lte_config.current_tolerance = 1e-4;
+                opts.lte_config.use_weighted_norm = true;
+
+                opts.enable_bdf_order_control     = true;
+                opts.bdf_config.min_order         = 1;
+                opts.bdf_config.max_order         = 2;
+                opts.bdf_config.initial_order     = 1;
+
+                opts.max_step_retries = 12;
+
+                opts.fallback_policy.trace_retries          = true;
+                opts.fallback_policy.enable_transient_gmin  = true;
+                opts.fallback_policy.gmin_retry_threshold   = 1;
+                opts.fallback_policy.gmin_initial           = 1e-8;
+                opts.fallback_policy.gmin_max               = 1e-3;
+                opts.fallback_policy.gmin_growth            = 10.0;
+
+                opts.stiffness_config.enable                       = true;
+                opts.stiffness_config.switch_integrator            = true;
+                opts.stiffness_config.stiff_integrator             = Integrator::BDF1;
+                opts.stiffness_config.rejection_streak_threshold   = 2;
+                opts.stiffness_config.newton_iter_threshold        = 30;
+                opts.stiffness_config.newton_streak_threshold      = 2;
+                opts.stiffness_config.cooldown_steps               = 3;
+                break;
+            }
+
+            case Preset::HighFidelity: {
+                // Parity-validation runs (PLECS / PSIM / SPICE / ngspice).
+                // Inherits `Robust`'s framework and tightens tolerances +
+                // dt_max for bit-comparable waveforms.
+                opts = SimulationOptions::from_preset(Preset::Robust, dt, tstop);
+
+                opts.timestep_config.error_tolerance = 5e-4;     // 10× tighter
+                opts.timestep_config.dt_max          = dt * 2.0; // 10× smaller cap
+
+                opts.lte_config.voltage_tolerance = 5e-4;
+                opts.lte_config.current_tolerance = 1e-5;
+
+                opts.max_step_retries = 24;
+                break;
+            }
+        }
+        return opts;
+    }
 };
 
 struct SimulationResult {

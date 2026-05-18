@@ -2539,6 +2539,29 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("success", &DCAnalysisResult::success)
         .def_readonly("message", &DCAnalysisResult::message);
 
+    // simplify-and-harden-numerical-surface — Phase 2: numerical preset.
+    py::enum_<Preset>(v2, "Preset",
+            "Numerical configuration preset — single named choice that "
+            "materializes every numerical knob (integrator, linear solver, "
+            "timestep controller, DC strategy, stiffness, Newton tuning) "
+            "into a coherent profile. 95% of users should pick one of "
+            "these and override individual fields only where their circuit "
+            "genuinely differs.")
+        .value("Auto",         Preset::Auto,
+               "Default — currently maps to Robust. Tracks the production "
+               "recommendation as the engine evolves.")
+        .value("Fast",         Preset::Fast,
+               "Pure-switching topologies (buck, boost, full-bridge, basic "
+               "3φ VSI). PWL Ideal + Trapezoidal + KLU + fixed step.")
+        .value("Robust",       Preset::Robust,
+               "Motor drives, mixed-domain, magnetics, thermal feedback. "
+               "TRBDF2 + KLU + variable step + stiffness + 12-step retries.")
+        .value("HighFidelity", Preset::HighFidelity,
+               "Parity validation (vs PLECS / PSIM / SPICE). TRBDF2 + tight "
+               "LTE + small dt_max for bit-comparable waveforms. 3-10× "
+               "slower than Robust.")
+        .export_values();
+
     py::enum_<Integrator>(v2, "Integrator", "Transient integration method")
         .value("Trapezoidal", Integrator::Trapezoidal)
         .value("BDF1", Integrator::BDF1)
@@ -2862,6 +2885,19 @@ void init_v2_module(py::module_& v2) {
 
     py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
         .def(py::init<>())
+        // simplify-and-harden-numerical-surface — Phase 2: canonical entry
+        // point. `SimulationOptions.from_preset(Preset.Auto, dt, tstop)`
+        // replaces the hand-tune-50-fields path with a single named choice.
+        // Override individual fields after construction only where your
+        // circuit genuinely differs from the preset.
+        .def_static("from_preset", &SimulationOptions::from_preset,
+                    py::arg("preset"), py::arg("dt"), py::arg("tstop"),
+                    "Build a SimulationOptions instance from a numerical "
+                    "preset. Returns a fully-tuned configuration covering "
+                    "integrator, linear solver, timestep controller, DC "
+                    "strategy, stiffness, and Newton tuning. The user "
+                    "supplies only `dt` and `tstop`; everything else comes "
+                    "from the preset's tuned recipe.")
         .def_readwrite("tstart", &SimulationOptions::tstart)
         .def_readwrite("tstop", &SimulationOptions::tstop)
         .def_readwrite("dt", &SimulationOptions::dt)

@@ -25,6 +25,11 @@ from ._pulsim import (
     FormulationMode,
     SwitchingMode,
 
+    # simplify-and-harden-numerical-surface — Phase 2: numerical preset.
+    # Single named choice (Auto / Fast / Robust / HighFidelity) that
+    # materializes a fully-tuned SimulationOptions.
+    Preset,
+
     # Device Classes - Linear
     Resistor,
     Capacitor,

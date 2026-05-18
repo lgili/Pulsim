@@ -756,6 +756,7 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                             "lte", "bdf", "solver", "shooting", "harmonic_balance", "hb", "thermal",
                             "max_step_retries", "fallback", "model_regularization", "formulation",
                             "direct_formulation_fallback", "switching_mode",
+                            "preset",
                             "backend", "sundials", "advanced"},
                       "simulation", errors_, options_.strict);
 
@@ -765,6 +766,31 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                                      "lte", "bdf", "solver", "fallback", "formulation",
                                      "direct_formulation_fallback", "backend", "sundials"},
                           "simulation.advanced", errors_, options_.strict);
+        }
+
+        // simplify-and-harden-numerical-surface — Phase 2: numerical preset.
+        // When `simulation.preset:` is present, seed `options` from the
+        // preset's tuned recipe FIRST. All explicit per-field overrides
+        // below then take precedence over the preset's defaults.
+        if (sim["preset"]) {
+            const auto preset_raw =
+                parse_string_scalar(sim["preset"], "simulation.preset", errors_);
+            if (preset_raw) {
+                // We need `dt` and `tstop` to materialize the preset, but
+                // those may be explicitly set below. Pick provisional
+                // values (the preset's downstream tunings rely mostly on
+                // `dt`); explicit `dt` / `tstop` below overrides without
+                // re-applying the preset.
+                const Real provisional_dt = sim["dt"]
+                    ? parse_real(sim["dt"], "simulation.dt", errors_)
+                    : options.dt;
+                const Real provisional_tstop = sim["tstop"]
+                    ? parse_real(sim["tstop"], "simulation.tstop", errors_)
+                    : options.tstop;
+                options = SimulationOptions::from_preset(
+                        parse_preset_or_auto(*preset_raw),
+                        provisional_dt, provisional_tstop);
+            }
         }
 
         if (sim["tstart"]) options.tstart = parse_real(sim["tstart"], "simulation.tstart", errors_);

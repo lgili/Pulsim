@@ -90,6 +90,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_motor_models.cpp
         tests/test_grid_library.cpp
         tests/test_robustness_profile.cpp
+        tests/test_preset.cpp
     )
 
     target_link_libraries(pulsim_tests
@@ -147,6 +148,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_single_phase_induction_motor.cpp
         tests/test_refrigerants.cpp
         tests/test_yaml_compressor_load.cpp
+        tests/test_yaml_preset.cpp
         tests/test_three_phase_rl_load.cpp
         tests/test_pmsm_dynamic.cpp
         tests/test_three_phase_vsi.cpp
