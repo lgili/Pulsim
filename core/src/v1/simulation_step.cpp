@@ -62,9 +62,11 @@ NewtonResult Simulator::solve_step(Real t_next, Real dt, const Vector& x_prev) {
         if (method == Integrator::TRBDF2) {
             return solve_trbdf2_step(t_next, dt, x_prev);
         }
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
         if (method == Integrator::RosenbrockW || method == Integrator::SDIRK2) {
             return solve_sdirk2_step(t_next, dt, x_prev, method);
         }
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
     }
 
     circuit_.set_current_time(t_next);

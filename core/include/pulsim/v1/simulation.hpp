@@ -298,7 +298,16 @@ struct SimulationOptions {
     LinearSolverStackConfig linear_solver = LinearSolverStackConfig::defaults();
 
     // Adaptive timestep + LTE
+    //
+    // simplify-and-harden-numerical-surface — Phase 10 (DEPRECATED).
+    // `adaptive_timestep` (bool) is the legacy enable-switch; `step_mode`
+    // (enum) is the canonical replacement. Setting one without the other
+    // can produce inconsistent state. Field-level [[deprecated]] is
+    // deferred to the AdvancedOptions migration (Phase 3) so this PR
+    // doesn't churn every internal use site. The YAML parser already
+    // emits PULSIM_YAML_W_DEPRECATED_FIELD when this key is used.
     bool adaptive_timestep = true;
+
     // Canonical timestep mode selection. When explicitly set through runtime/YAML
     // surfaces, this field defines fixed vs variable semantics.
     TransientStepMode step_mode = TransientStepMode::Variable;
@@ -306,6 +315,12 @@ struct SimulationOptions {
     AdvancedTimestepConfig timestep_config = AdvancedTimestepConfig::for_power_electronics();
     RichardsonLTEConfig lte_config = RichardsonLTEConfig::defaults();
     FormulationMode formulation_mode = FormulationMode::ProjectedWrapper;
+
+    // simplify-and-harden-numerical-surface — Phase 10 (DEPRECATED).
+    // The DAE fallback is now unconditionally on internally — users that
+    // need to disable it should report a bug rather than configure it.
+    // Field-level [[deprecated]] is deferred to the AdvancedOptions
+    // migration (Phase 3); the YAML parser emits a warning at the surface.
     bool direct_formulation_fallback = true;
 
     // Integration method selection

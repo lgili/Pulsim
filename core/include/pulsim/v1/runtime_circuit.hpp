@@ -6344,6 +6344,7 @@ private:
     }
 
     static constexpr int companion_order(Integrator method) {
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
         switch (method) {
             case Integrator::BDF1:
             case Integrator::RosenbrockW:
@@ -6359,6 +6360,7 @@ private:
             default:
                 return 2;
         }
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
     }
 
     std::vector<DeviceVariant> devices_;

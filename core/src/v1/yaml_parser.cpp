@@ -872,6 +872,14 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             if (const auto value = parse_bool_scalar(direct_formulation_fallback, fallback_path, errors_)) {
                 options.direct_formulation_fallback = *value;
             }
+            // simplify-and-harden-numerical-surface — Phase 10. The DAE
+            // fallback is now unconditionally on internally; this field
+            // is a no-op. Removed in the next major release.
+            push_warning(warnings_, kDiagDeprecatedField,
+                         "'" + fallback_path + "' is deprecated and "
+                         "ignored — DAE formulation fallback is now "
+                         "always-on internally. Remove this key from "
+                         "your YAML.");
         }
 
         YAML::Node adaptive_timestep = expert_node("adaptive_timestep");
@@ -1174,6 +1182,11 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
         }
         if (integrator_node) {
             std::string method = normalize_key(integrator_node.as<std::string>());
+            // Deprecated values (`bdf3..bdf5`, `gear`, `sdirk2`) still
+            // parse — emit a warning per
+            // simplify-and-harden-numerical-surface Phase 9. They will
+            // be rejected in the next major release.
+            PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
             if (method == "trapezoidal" || method == "tr") {
                 options.integrator = Integrator::Trapezoidal;
             } else if (method == "bdf1" || method == "be" || method == "backwardeuler") {
@@ -1182,21 +1195,43 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
                 options.integrator = Integrator::BDF2;
             } else if (method == "bdf3") {
                 options.integrator = Integrator::BDF3;
+                push_warning(warnings_, kDiagDeprecatedField,
+                             "simulation.integrator='bdf3' is deprecated; "
+                             "use 'bdf2' / 'trbdf2' / 'rosenbrockw' instead. "
+                             "Removed in the next major release.");
             } else if (method == "bdf4") {
                 options.integrator = Integrator::BDF4;
+                push_warning(warnings_, kDiagDeprecatedField,
+                             "simulation.integrator='bdf4' is deprecated; "
+                             "use 'bdf2' / 'trbdf2' / 'rosenbrockw' instead. "
+                             "Removed in the next major release.");
             } else if (method == "bdf5") {
                 options.integrator = Integrator::BDF5;
+                push_warning(warnings_, kDiagDeprecatedField,
+                             "simulation.integrator='bdf5' is deprecated; "
+                             "use 'bdf2' / 'trbdf2' / 'rosenbrockw' instead. "
+                             "Removed in the next major release.");
             } else if (method == "gear") {
                 options.integrator = Integrator::Gear;
+                push_warning(warnings_, kDiagDeprecatedField,
+                             "simulation.integrator='gear' is a literal "
+                             "alias for 'bdf2' — use 'bdf2' directly. "
+                             "Removed in the next major release.");
             } else if (method == "trbdf2") {
                 options.integrator = Integrator::TRBDF2;
             } else if (method == "rosenbrock" || method == "rosenbrockw" || method == "rosenbrockw2") {
                 options.integrator = Integrator::RosenbrockW;
             } else if (method == "sdirk2") {
                 options.integrator = Integrator::SDIRK2;
+                push_warning(warnings_, kDiagDeprecatedField,
+                             "simulation.integrator='sdirk2' has no "
+                             "validated production benchmark coverage; "
+                             "use 'trbdf2' instead. Removed in the next "
+                             "major release.");
             } else {
                 errors_.push_back("Invalid integrator: " + integrator_node.as<std::string>());
             }
+            PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
         }
 
         // refactor-pwl-switching-engine, Phase 5: switching_mode controls
