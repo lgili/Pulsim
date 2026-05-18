@@ -103,6 +103,17 @@ from ._pulsim import (
     ThreePhaseHarmonicSource,
     HarmonicComponent,
 
+    # boost-pfc-auto-parasitics (Pulsim 0.10.0a12): pre-flight topology
+    # analysis + automatic C_oss / C_j sizing. The Simulator runs this
+    # automatically by default; the types here are exposed so users can
+    # introspect what was auto-configured via `result.topology_report`.
+    AutoParasiticsOptions,
+    TopologyReport,
+    TopologyIssue,
+    TopologyIssueSeverity,
+    ParasiticAction,
+    ParasiticActionKind,
+
     # Control Blocks
     PIController,
     PIDController,
@@ -1189,6 +1200,12 @@ __all__ = [
     "ThreePhaseSourceProgrammable",
     "ThreePhaseHarmonicSource",
     "HarmonicComponent",
+    "AutoParasiticsOptions",
+    "TopologyReport",
+    "TopologyIssue",
+    "TopologyIssueSeverity",
+    "ParasiticAction",
+    "ParasiticActionKind",
     "SineVoltageSource",
     "RampParams",
     "RampGenerator",

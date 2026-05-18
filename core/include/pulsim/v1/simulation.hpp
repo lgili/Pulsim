@@ -352,6 +352,14 @@ struct SimulationOptions {
     /// special plumbing).
     std::vector<AcSweepOptions> ac_sweeps;
     std::vector<FraOptions>     fra_sweeps;
+
+    /// `boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): pre-flight topology
+    /// analysis + automatic snubber sizing. Default ON so cold-start users
+    /// hit convergent boost-class circuits out of the box; opt out with
+    /// `opts.auto_parasitics.enabled = false`. Per-device opt-out is
+    /// implicit — any device with `Params::C_oss > 0` is respected as
+    /// "user-set" and never mutated.
+    AutoParasiticsOptions auto_parasitics{};
 };
 
 struct SimulationResult {
@@ -379,6 +387,14 @@ struct SimulationResult {
     SystemLossSummary loss_summary;
     ThermalSummary thermal_summary;
     std::vector<ComponentElectrothermalTelemetry> component_electrothermal;
+
+    /// `boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): report from the
+    /// pre-flight topology analyser the Simulator ran before assembly.
+    /// Lists every detected switch-inductor adjacency, the predicted
+    /// V_sw overshoot for the current C_oss, and what (if anything) the
+    /// runtime auto-configured to keep the circuit numerically well-behaved.
+    /// Empty when `options.auto_parasitics.enabled = false`.
+    TopologyReport topology_report;
 };
 
 struct PeriodicSteadyStateResult {
@@ -575,6 +591,13 @@ private:
     Circuit& circuit_;
     SimulationOptions options_;
     NewtonRaphsonSolver<RuntimeLinearSolver> newton_solver_;
+
+    /// `boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): the most recent
+    /// pre-flight TopologyReport produced at Simulator construction. Used
+    /// by the Python `SimulationResult.topology_report` accessor to surface
+    /// "what did the runtime auto-configure for me?" to the user. Empty
+    /// when `options_.auto_parasitics.enabled = false`.
+    TopologyReport last_topology_report_{};
 
     std::vector<SwitchMonitor> switch_monitors_;
     std::unordered_map<std::string, std::size_t> device_index_;

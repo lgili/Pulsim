@@ -667,6 +667,14 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     options_.newton_options.num_nodes = circuit_.num_nodes();
     options_.newton_options.num_branches = circuit_.num_branches();
     enforce_explicit_step_mode(options_);
+    // `boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): pre-flight topology
+    // analysis BEFORE `apply_auto_transient_profile` so that any switches
+    // dropped to Behavioral mode (because PWL Ideal is infeasible for
+    // their L+f_sw combination) feed correctly into the backend's
+    // switching-mode resolution. The report is parked on the Simulator
+    // so the result can carry it back to Python (see `last_topology_report_`).
+    last_topology_report_ = circuit_.auto_configure_parasitics(
+        options_.auto_parasitics);
     apply_auto_transient_profile(options_, circuit_);
     enforce_explicit_step_mode(options_);
     options_.newton_options.num_nodes = circuit_.num_nodes();
@@ -1615,6 +1623,12 @@ void Simulator::process_accepted_step_events(Real t, Real dt_used,
 }
 
 void Simulator::finalize_transient_telemetry(SimulationResult& result) {
+    // `boost-pfc-auto-parasitics` (Pulsim 0.10.0a12): surface the report
+    // produced by the pre-flight topology analyser at Simulator
+    // construction (see ctor) so Python callers can introspect what was
+    // auto-configured. The report is a value-type so this is a cheap copy.
+    result.topology_report = last_topology_report_;
+
     // Phase 3 of `refactor-linear-solver-cache`: aggregate counters from
     // both the shared linear-solve service (Newton-DAE workload) and the
     // segment stepper's per-key LRU cache (segment-primary / PWL workload).

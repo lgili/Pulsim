@@ -97,6 +97,11 @@ configure_file(
     COPYONLY
 )
 configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/snubber.py
+    ${CMAKE_BINARY_DIR}/python/pulsim/snubber.py
+    COPYONLY
+)
+configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/__init__.pyi
     ${CMAKE_BINARY_DIR}/python/pulsim/__init__.pyi
     COPYONLY
@@ -111,5 +116,6 @@ install(FILES
     pulsim/__init__.py
     pulsim/netlist.py
     pulsim/signal_evaluator.py
+    pulsim/snubber.py
     DESTINATION pulsim
 )

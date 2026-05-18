@@ -116,3 +116,48 @@ components:
     REQUIRE(parser.errors().empty());
     CHECK(circuit.induction_omega("M1") == Approx(0.0));
 }
+
+// Item 3 of the deferred-items follow-up: zero-pin signal-domain devices.
+// `mechanical` and `pmsm_foc` load from YAML without a `nodes:` array —
+// they have no electrical pins and no MNA contribution.
+
+TEST_CASE("Item 3: YAML mechanical parses into MechanicalDevice (no nodes)",
+          "[consolidation][yaml][mechanical]") {
+    const std::string yaml = R"(
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-3
+  dt: 1e-5
+components:
+  - { type: mechanical, name: Shaft1,
+      J: 1e-3, b_friction: 0.01, omega_init: 0.0,
+      tau_load_const: 0.0 }
+)";
+    parser::YamlParser parser;
+    const auto circuit = load_circuit(yaml, parser);
+    REQUIRE(parser.errors().empty());
+    CHECK(circuit.mechanical_omega("Shaft1") == Approx(0.0));
+}
+
+TEST_CASE("Item 3: YAML pmsm_foc parses into PmsmFocDevice (no nodes)",
+          "[consolidation][yaml][pmsm_foc]") {
+    const std::string yaml = R"(
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-3
+  dt: 1e-5
+components:
+  - { type: pmsm_foc, name: Ctrl1,
+      Rs: 0.5, Ld: 1.5e-3, Lq: 1.5e-3,
+      psi_pm: 0.05, pole_pairs: 4, J: 1e-3,
+      bandwidth_hz: 1000.0, Vd_min: -50.0, Vd_max: 50.0,
+      Vq_min: -50.0, Vq_max: 50.0 }
+)";
+    parser::YamlParser parser;
+    const auto circuit = load_circuit(yaml, parser);
+    REQUIRE(parser.errors().empty());
+    CHECK(circuit.pmsm_foc_vd_ref("Ctrl1") == Approx(0.0));
+    CHECK(circuit.pmsm_foc_vq_ref("Ctrl1") == Approx(0.0));
+}
