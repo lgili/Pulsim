@@ -1,6 +1,6 @@
 ## Phase A — High-impact, low-cost (~1.5 days)
 
-### A1. IGBT V_CE_sat Norton-shift in Behavioral stamp
+### A1. IGBT V_CE_sat Norton-shift in Behavioral stamp  ⏸ deferred to next session
 - [ ] A1.1 Add `V_ce_sat_at_Tj()` accessor return value to the
       `i_C(V_CE)` Behavioral expression in
       `igbt.hpp::stamp_jacobian_behavioral` (~line 343). Mirror the
@@ -15,6 +15,16 @@
 - [ ] A1.4 Update `test_ad_igbt_stamp.cpp` cross-validation to use the
       new expression; the AD vs manual `1e-12 margin` assertion must
       still pass.
+
+(Deferred from the A2+A5+A6 implementation pass: A1 changes the
+on-state V_CE behaviour from ~5 mV (`g_on = 1e4`) to ~1.5 V + 50·Rce
+(realistic IGBT sat voltage), which is a substantial behaviour break
+across the existing IGBT test set. The change also needs the
+AD-vs-manual stamp parity re-verified across all
+`test_ad_igbt_stamp.cpp` op-points. Doing this safely needs a dedicated
+session with the existing IGBT tests audited side-by-side — landing
+A1 alongside A2+A5 in the same window risks confounding regression
+signals.)
 
 ### A2. Gate-row diagonal anchor on MOSFET + IGBT  ✅ landed in `b75f81c`
 - [x] A2.1 Add `MOSFETParams::g_gate_leak = 1e-9` (S). Stamp
