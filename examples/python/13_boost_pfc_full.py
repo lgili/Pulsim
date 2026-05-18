@@ -151,14 +151,12 @@ print(f"  Snubbers: C_oss = {mp.C_oss*1e6:.0f} µF, C_j = {dbst.C_j*1e9:.0f} nF"
 # =============================================================================
 # Simulate (2 line cycles)
 # =============================================================================
-opts = ps.SimulationOptions()
-opts.tstart = 0.0; opts.tstop = 33e-3
-opts.dt = 500e-9
-opts.dt_min = 1e-9; opts.dt_max = 2e-6
-opts.adaptive_timestep = True
-opts.enable_bdf_order_control = True
-opts.enable_events = True
-opts.enable_losses = True
+# simplify-and-harden-numerical-surface — Phase 2 + 14.8: PFC boost +
+# active controller → Preset.Robust.
+opts = ps.SimulationOptions.from_preset(ps.Preset.Robust,
+                                          dt=500e-9, tstop=33e-3)
+opts.dt_min = 1e-9
+opts.dt_max = 2e-6
 opts.newton_options.num_nodes = c.num_nodes()
 opts.newton_options.num_branches = c.num_branches()
 

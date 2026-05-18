@@ -2,6 +2,8 @@
 
 #include "pulsim/v1/runtime_circuit.hpp"
 
+#include <algorithm>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -365,6 +367,112 @@ mmc_3phase_inverter(const Mmc3PhaseParams& p = {}) {
                               h.ac_c, h.v_dc_neg);
 
     return {std::move(ckt), std::move(h)};
+}
+
+// =============================================================================
+// simplify-and-harden-numerical-surface — Phase 12.4
+// MMC capacitor-balancing controller (sort-and-pick algorithm)
+// =============================================================================
+//
+// Pure helper that decides which submodules to insert vs bypass at
+// each control step. The canonical round-robin sort-and-pick scheme
+// used in the MMC literature (Hagiwara & Akagi, 2009):
+//
+//   1. Sort submodules by current cap voltage.
+//   2. If arm current is CHARGING the caps (positive direction, from
+//      DC+ → arm → AC midpoint when upper arm is conducting), insert
+//      the N submodules with the LOWEST cap voltage — these get
+//      charged up, evening out the spread.
+//   3. If arm current is DISCHARGING the caps (negative direction),
+//      insert the N submodules with the HIGHEST cap voltage — these
+//      get discharged down.
+//   4. Bypass the rest.
+//
+// The level command `num_inserted` is the modulator's output (e.g.
+// from a PD-PWM controller). The arm-current sign determines whether
+// we balance by inserting low- or high-voltage caps. Over many switch
+// cycles this drives all cap voltages toward the same average.
+//
+// This is a pure decision function — it returns a vector of gate
+// commands (one bool per submodule, true = INSERT, false = BYPASS).
+// The caller wires those gate commands to the corresponding
+// MmcArmHandles::gate_nodes (e.g. by calling
+// `ckt.set_voltage_source("VG_smX", high_voltage_if_inserted)`).
+
+/// Per-submodule input to the balancing controller.
+struct MmcSubmoduleState {
+    /// Stable identifier — typically the submodule index in the arm
+    /// (0..N-1) or the gate node name. Used to map decisions back to
+    /// the user's gate sources.
+    int submodule_id = 0;
+    /// Current cap voltage at the controller's sample instant.
+    Real v_cap = 0.0;
+};
+
+/// Output of `mmc_balance_submodules`: which submodules to insert
+/// (in the order they originally appeared in the input vector).
+struct MmcSubmoduleCommand {
+    int submodule_id = 0;
+    bool insert = false;
+};
+
+/// Decide which `num_inserted` submodules to insert at the upcoming
+/// switch cycle. Round-robin sort-and-pick — natural balancing of
+/// cap voltages over many cycles when caps are nominally balanced.
+///
+/// - `submodule_states`: per-submodule cap voltages right now.
+/// - `arm_current`: signed arm current at the controller's sample
+///   instant. Positive = caps are CHARGED when inserted; negative =
+///   caps are DISCHARGED when inserted.
+/// - `num_inserted`: target number of submodules to insert this
+///   cycle (typically the level-modulator output). Clamped to
+///   `[0, submodule_states.size()]`.
+///
+/// Returns a vector of (id, insert) decisions in the SAME ORDER as
+/// `submodule_states` (so callers can use it directly without
+/// re-sorting).
+[[nodiscard]] inline std::vector<MmcSubmoduleCommand>
+mmc_balance_submodules(const std::vector<MmcSubmoduleState>& submodule_states,
+                        Real arm_current,
+                        int num_inserted) {
+    const int N = static_cast<int>(submodule_states.size());
+    const int n_insert = std::clamp(num_inserted, 0, N);
+
+    // Build sorted indices: low → high cap voltage.
+    std::vector<int> sorted_idx(static_cast<std::size_t>(N));
+    std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
+    std::sort(sorted_idx.begin(), sorted_idx.end(),
+              [&](int a, int b) {
+                  return submodule_states[a].v_cap <
+                         submodule_states[b].v_cap;
+              });
+
+    // Pick which sorted positions to insert:
+    //   arm_current >= 0 (charging) → insert the FIRST n_insert
+    //     (lowest cap voltages get charged up).
+    //   arm_current <  0 (discharging) → insert the LAST n_insert
+    //     (highest cap voltages get discharged down).
+    std::vector<bool> insert_flag(static_cast<std::size_t>(N), false);
+    if (arm_current >= Real{0}) {
+        for (int k = 0; k < n_insert; ++k) {
+            insert_flag[static_cast<std::size_t>(sorted_idx[k])] = true;
+        }
+    } else {
+        for (int k = 0; k < n_insert; ++k) {
+            insert_flag[static_cast<std::size_t>(sorted_idx[N - 1 - k])] = true;
+        }
+    }
+
+    // Return decisions in the ORIGINAL submodule order.
+    std::vector<MmcSubmoduleCommand> commands;
+    commands.reserve(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        commands.push_back({
+            submodule_states[static_cast<std::size_t>(i)].submodule_id,
+            insert_flag[static_cast<std::size_t>(i)],
+        });
+    }
+    return commands;
 }
 
 /// Returns a reference YAML netlist for a 9-submodule MMC arm at

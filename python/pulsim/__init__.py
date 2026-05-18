@@ -239,6 +239,10 @@ from ._pulsim import (
     PreconditionerKind,
     IterativeSolverConfig,
     LinearSolverStackConfig,
+    # simplify-and-harden-numerical-surface — Phase 8.3: friendly
+    # preconditioner selector (Fast / Default / Best) replacing the
+    # leaky PreconditionerKind enum in user-facing API.
+    SolverQuality,
     detect_simd_level,
     simd_vector_width,
     backend_capabilities,

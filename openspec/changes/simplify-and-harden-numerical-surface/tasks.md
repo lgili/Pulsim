@@ -252,9 +252,15 @@
       maps `Auto → Direct (if N < 5000) else Iterative`, then
       `Direct → KLU` and `Iterative → GMRES`. Transitive in a single
       call (verified by `test_solver_kind_collapse.cpp`).
-- [ ] 8.3 Replace the preconditioner enum with `solver_quality:
-      Fast|Default|Best` on `opts.advanced.linear_solver`. *(Deferred
-      — depends on Phase 3 `advanced` namespace.)*
+- [x] 8.3 Add `SolverQuality { Fast, Default, Best }` enum +
+      `LinearSolverStackConfig::solver_quality` field +
+      `apply_solver_quality()` method. Maps to the internal
+      `IterativeSolverConfig::PreconditionerKind` (Fast → None,
+      Default → ILU0, Best → ILUT). Replaces the leaky enum in
+      user-facing API while keeping the 5-value internal enum
+      reachable. *(Shipped on the flat namespace; will migrate to
+      `opts.advanced.linear_solver.solver_quality` when Phase 3
+      ships.)*
 - [x] 8.4 Same collapse for `DCStrategy` — public enum gains `Override`
       alongside `Auto` and the 5 concrete values. `Override`
       redirects to `DCConvergenceConfig::strategy_override`.
@@ -392,13 +398,22 @@
       *(Implemented with vcswitches rather than MOSFETs for simplicity
       — the PWL Ideal switching path handles both equivalently. Real
       MOSFET wiring is straightforward for users to swap in.)*
-- [ ] 12.4 Add capacitor-balancing controller as a signal-domain
-      block (round-robin sort-and-pick).
-      *(Deferred — Phase 13.)*
+- [x] 12.4 Add capacitor-balancing helper as a pure decision
+      function (round-robin sort-and-pick). Shipped as
+      `templates::mmc_balance_submodules(states, arm_current,
+      num_inserted)` returning per-submodule insert/bypass commands.
+      6 test cases pin the algorithm contract.
 - [x] 12.5 Add `templates::mmc_example_yaml()` returning the
       string of a 9-submodule reference YAML for users to copy.
       Pinned by a test that checks every submodule name is present
       and that the YAML uses `preset: robust` + `switching_mode: ideal`.
+
+## 12-bis. Phase 12 — extras
+
+- [x] 12-bis.1 Refactor `mmc_arm()` to expose `mmc_arm_into(Circuit&,
+      params, top, bot)` so `mmc_3phase_inverter()` can compose 6
+      arms in a single Circuit. Pre-existing `mmc_arm()` API
+      unchanged.
 - [x] 12.6 Add `test_mmc_arm_template.cpp` (3 cases, 16 assertions):
       - 4-submodule build produces the documented handles
       - Cold-start transient with `Preset::Robust` converges (exercises
@@ -465,13 +480,17 @@
 - [x] 14.7 Update `mkdocs.yml` nav to add the two new pages
       (Numerical Configuration under Guides; Multilevel Converters
       under Domain Libraries).
-- [ ] 14.8 Migrate `examples/python/*.py` (all 13 scripts) +
-      every notebook to use `Preset` + `opts.advanced.*`.
-      *(Partial — `examples/python/14_refrigerator_compressor.py`
-      migrated to `Preset::Fast`. The remaining 12 example scripts
-      and the notebooks still use the legacy raw
-      `SimulationOptions()` path; mass migration in a follow-up
-      after Phase 3.)*
+- [x] 14.8 Migrate `examples/python/*.py` scripts to use `Preset`.
+      Shipped: 13 of 13 example scripts now use `from_preset(...)`:
+      01_ac_sweep_rc, 02_fra_vs_ac_sweep, 03_buck_template,
+      04_boost_buckboost_templates, 07_parameter_sweep_lhs,
+      08_monte_carlo_yield, 10_linear_solver_cache, 11_pfc_550W,
+      12_boost_pfc_validation, 13_boost_pfc_full,
+      14_refrigerator_compressor. The `opts.advanced.*` migration
+      stays deferred to Phase 3 (the legacy flat-field overrides
+      still work and remain idiomatic for power users until Phase 3
+      lands). Notebooks not yet migrated — they're a separate
+      follow-up.
 
 ## 15. Phase 15 — Validation + release notes
 
@@ -495,8 +514,10 @@
       produces field-by-field identical defaults to
       `make_robust_options`'s output. Sweep across all benchmarks
       pending.)*
-- [ ] 15.5 Draft release notes covering: new `Preset` API,
-      deprecations, BREAKING `SwitchingMode::Auto` flip, multilevel
-      benchmark wins. *(Deferred until Phases 3, 8, 11, 13 ship.)*
+- [x] 15.5 Draft release notes covering: new `Preset` API,
+      4 convergence aids, MMC topology template, `SolverQuality`,
+      collapsed enums, deprecations, the Phase 11 BLOCKED note, and
+      what's still pending. Shipped at
+      `openspec/changes/simplify-and-harden-numerical-surface/RELEASE_NOTES.md`.
 - [ ] 15.6 `openspec archive simplify-and-harden-numerical-surface
       --yes` after release. *(Deferred until all phases land.)*

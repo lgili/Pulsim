@@ -2366,6 +2366,19 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("ilut_fill_factor", &IterativeSolverConfig::ilut_fill_factor)
         .def_static("defaults", &IterativeSolverConfig::defaults);
 
+    // simplify-and-harden-numerical-surface — Phase 8.3.
+    py::enum_<SolverQuality>(v2, "SolverQuality",
+            "Friendly preconditioner selector. Fast → no precond; "
+            "Default → ILU0 (production sweet spot); Best → ILUT "
+            "(heavier setup, better convergence on ill-conditioned "
+            "systems). Replaces the leaky PreconditionerKind enum "
+            "in user-facing API; the full 5-value enum stays available "
+            "for power users.")
+        .value("Fast",    SolverQuality::Fast)
+        .value("Default", SolverQuality::Default)
+        .value("Best",    SolverQuality::Best)
+        .export_values();
+
     py::class_<LinearSolverStackConfig>(v2, "LinearSolverStackConfig",
         "Runtime linear solver stack configuration")
         .def(py::init<>())
@@ -2378,6 +2391,15 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("size_threshold", &LinearSolverStackConfig::size_threshold)
         .def_readwrite("nnz_threshold", &LinearSolverStackConfig::nnz_threshold)
         .def_readwrite("diag_min_threshold", &LinearSolverStackConfig::diag_min_threshold)
+        // simplify-and-harden-numerical-surface — Phase 8.3.
+        .def_readwrite("solver_quality", &LinearSolverStackConfig::solver_quality,
+            "Friendly preconditioner selector (Fast / Default / Best). "
+            "Call `apply_solver_quality()` after changing to push the "
+            "value into `iterative_config.preconditioner`.")
+        .def("apply_solver_quality",
+             &LinearSolverStackConfig::apply_solver_quality,
+             "Resolve `solver_quality` to the underlying "
+             "iterative_config.preconditioner.")
         .def_static("defaults", &LinearSolverStackConfig::defaults);
 
     // =========================================================================

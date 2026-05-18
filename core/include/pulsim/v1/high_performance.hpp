@@ -227,6 +227,50 @@ struct LinearSolverTelemetry {
     int linear_refinement_steps = 0;
 };
 
+// simplify-and-harden-numerical-surface — Phase 8.3.
+//
+// Friendly preconditioner selector that replaces the leaky
+// IterativeSolverConfig::PreconditionerKind enum in user-facing API.
+//   Fast    → no preconditioner (lowest overhead per iteration)
+//   Default → ILU0 (the production sweet-spot for power-electronics MNA)
+//   Best    → ILUT (heavier setup, better convergence on ill-conditioned
+//             systems)
+//
+// The internal `IterativeSolverConfig::PreconditionerKind` enum stays
+// available for power users + the auto-selector — this enum just
+// promotes a smaller user-friendly surface.
+enum class SolverQuality : std::uint8_t {
+    Fast,
+    Default,
+    Best,
+};
+
+[[nodiscard]] constexpr std::string_view to_string(SolverQuality q) noexcept {
+    switch (q) {
+        case SolverQuality::Fast:    return "Fast";
+        case SolverQuality::Default: return "Default";
+        case SolverQuality::Best:    return "Best";
+    }
+    return "Default";
+}
+
+/// Map a friendly SolverQuality value to the concrete preconditioner
+/// enum the iterative solver actually consumes. Pulsim's
+/// PreconditionerKind lives nested under `IterativeSolverConfig`, so
+/// the return type is `IterativeSolverConfig::PreconditionerKind`.
+[[nodiscard]] constexpr IterativeSolverConfig::PreconditionerKind
+resolve_solver_quality(SolverQuality q) noexcept {
+    switch (q) {
+        case SolverQuality::Fast:
+            return IterativeSolverConfig::PreconditionerKind::None;
+        case SolverQuality::Default:
+            return IterativeSolverConfig::PreconditionerKind::ILU0;
+        case SolverQuality::Best:
+            return IterativeSolverConfig::PreconditionerKind::ILUT;
+    }
+    return IterativeSolverConfig::PreconditionerKind::ILU0;
+}
+
 struct LinearSolverStackConfig {
     std::vector<LinearSolverKind> order { LinearSolverKind::SparseLU };
     std::vector<LinearSolverKind> fallback_order {};
@@ -237,6 +281,19 @@ struct LinearSolverStackConfig {
     int size_threshold = 2000;
     int nnz_threshold = 200000;
     Real diag_min_threshold = 1e-12;
+
+    // simplify-and-harden-numerical-surface — Phase 8.3.
+    // Friendly preconditioner selector. When set, overrides
+    // `iterative_config.preconditioner` via `apply_solver_quality()`.
+    // Default = `Default` (= ILU0) preserves the historical behavior.
+    SolverQuality solver_quality = SolverQuality::Default;
+
+    /// Apply `solver_quality` to `iterative_config.preconditioner`.
+    /// Called automatically at simulator construction; safe to call
+    /// directly if you mutated `solver_quality` after construction.
+    void apply_solver_quality() noexcept {
+        iterative_config.preconditioner = resolve_solver_quality(solver_quality);
+    }
 
     [[nodiscard]] static LinearSolverStackConfig defaults() {
         return {};

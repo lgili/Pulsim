@@ -153,14 +153,14 @@ c.add_resistor("R_load", n_bus, gnd, load)
 # =============================================================================
 # Simulate (2 line cycles — enough to settle and capture switching detail)
 # =============================================================================
-opts = ps.SimulationOptions()
-opts.tstart = 0.0; opts.tstop = 33e-3
-opts.dt = 2e-6
-opts.dt_min = 1e-9; opts.dt_max = 5e-6
-opts.adaptive_timestep = True
-opts.enable_bdf_order_control = True
-opts.enable_events = True
-opts.enable_losses = True
+# simplify-and-harden-numerical-surface — Phase 2 + 14.8: PFC has a
+# boost stage + active controller — Preset.Robust gives TRBDF2 +
+# variable step + stiffness + 12 retries, which is exactly what was
+# being assembled by hand below.
+opts = ps.SimulationOptions.from_preset(ps.Preset.Robust,
+                                          dt=2e-6, tstop=33e-3)
+opts.dt_min = 1e-9
+opts.dt_max = 5e-6
 # NOTE: opts.switching_mode left at Auto — Pulsim 0.10.0a12+ auto-promotes
 # to Ideal because the MOSFET opted in (Eon_25 > 0). This is the backend
 # fix landed in `apply_auto_transient_profile`.
