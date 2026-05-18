@@ -41,6 +41,9 @@ def test_enable_emits_deprecation_warning_per_field():
         "fallback_policy",
         "formulation_mode",
         "linear_solver",
+        # Phase 10.1 bool fields covered by the same shim.
+        "adaptive_timestep",
+        "direct_formulation_fallback",
     ]
 
     with warnings.catch_warnings(record=True) as caught:

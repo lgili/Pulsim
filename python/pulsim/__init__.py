@@ -725,17 +725,28 @@ def _make_advanced_alias_property(field_name: str, advanced_path: str):
     return property(_getter, _setter)
 
 
-# Map of (legacy flat field → canonical `opts.advanced().*` path).
+# Map of (legacy flat field → canonical replacement guidance).
+# The 9 sub-block fields collapse under `opts.advanced().<name>`. The 2
+# boolean fields (`adaptive_timestep`, `direct_formulation_fallback`)
+# from Phase 10.1 are also covered here — they have NO `advanced.*`
+# equivalent; the canonical replacement is `opts.step_mode` (for
+# adaptive_timestep) or "remove entirely; DAE fallback is now
+# unconditional internally" (for direct_formulation_fallback).
 _ADVANCED_FIELD_ALIASES = {
-    "newton_options":    "newton",
-    "timestep_config":   "timestep",
-    "lte_config":        "lte",
-    "bdf_config":        "bdf_order",
-    "dc_config":         "dc",
-    "stiffness_config":  "stiffness",
-    "fallback_policy":   "fallback",
-    "formulation_mode":  "formulation",
-    "linear_solver":     "linear_solver",
+    "newton_options":               "newton",
+    "timestep_config":              "timestep",
+    "lte_config":                   "lte",
+    "bdf_config":                   "bdf_order",
+    "dc_config":                    "dc",
+    "stiffness_config":             "stiffness",
+    "fallback_policy":              "fallback",
+    "formulation_mode":             "formulation",
+    "linear_solver":                "linear_solver",
+    # Phase 10.1: bool fields deprecated in favour of step_mode / the
+    # unconditional-internal-fallback contract. The "advanced path" for
+    # these is a documentation string the warning quotes verbatim.
+    "adaptive_timestep":            "step_mode (set to Variable / Fixed)",
+    "direct_formulation_fallback":  "(removed — DAE fallback is unconditional internally)",
 }
 
 # NOTE: we DO NOT install these deprecation properties yet. Doing so would
