@@ -166,6 +166,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_component_introspection.cpp
         tests/test_mosfet_gate_anchor.cpp
         tests/test_motor_flux_integration.cpp
+        tests/test_igbt_vce_sat_stamp.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

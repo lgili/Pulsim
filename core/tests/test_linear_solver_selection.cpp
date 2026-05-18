@@ -541,7 +541,12 @@ components:
 
     auto [circuit_without_block, options_without_block] = parser.load_string(yaml_without_block);
     REQUIRE(parser.errors().empty());
-    CHECK_FALSE(options_without_block.model_regularization.enable_auto);
+    // harden-component-models-vs-psim-plecs Phase A6 flipped the default
+    // `enable_auto` from false → true so the g_off_min floors mask
+    // floating-gate ill-conditioning on the first Newton step (see
+    // simulation.hpp::ModelRegularizationOptions). YAML inputs that omit
+    // the block now inherit the same on-by-default behaviour.
+    CHECK(options_without_block.model_regularization.enable_auto);
     CHECK(options_without_block.model_regularization.retry_threshold == 2);
     CHECK(options_without_block.model_regularization.max_escalations == 4);
     CHECK(circuit_without_block.num_devices() == 1);

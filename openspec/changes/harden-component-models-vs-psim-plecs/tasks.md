@@ -1,30 +1,44 @@
 ## Phase A — High-impact, low-cost (~1.5 days)
 
-### A1. IGBT V_CE_sat Norton-shift in Behavioral stamp  ⏸ deferred to next session
-- [ ] A1.1 Add `V_ce_sat_at_Tj()` accessor return value to the
-      `i_C(V_CE)` Behavioral expression in
-      `igbt.hpp::stamp_jacobian_behavioral` (~line 343). Mirror the
-      diode pattern: `i_C = (V_CE − V_CE_sat·alpha_gate) / R_CE_on` with
-      `R_CE_on` the existing Params field.
-- [ ] A1.2 Update the AD path (`stamp_jacobian_via_ad`) to match — the
-      AD expression must autodiff the same template the manual stamp
-      encodes so `test_ad_igbt_stamp.cpp` continues to cross-validate.
-- [ ] A1.3 Add `test_igbt_vce_sat_stamp.cpp`: 50 A through an ON IGBT
-      with `v_ce_sat = 1.5 V` produces `V_CE ≈ 1.5 V + 50·R_CE_on`, not
-      `50/g_on ≈ 5 mV`.
-- [ ] A1.4 Update `test_ad_igbt_stamp.cpp` cross-validation to use the
-      new expression; the AD vs manual `1e-12 margin` assertion must
-      still pass.
+### A1. IGBT V_CE_sat Norton-shift in Behavioral stamp  ✅ landed via opt-in flag
+- [x] A1.1 Norton-shifted `i_C(V_CE)` lives behind a new
+      `IGBTParams::enable_vce_sat_stamp` flag (OFF by default for
+      back-compat). When ON, the expression becomes
+      `i_C = α · (V_CE − V_CE_sat) / R_CE_on + (1 − α) · V_CE · g_off`
+      where `α` is the existing sigmoid blend and `R_CE_on = 1/Rce`,
+      both already on `Params`. `V_CE_sat` is taken from
+      `V_ce_sat_at_Tj()` so the temperature-coefficient pipeline
+      (`V_ce_tc`) flows through automatically.
+- [x] A1.2 The AD path differentiates the same template the manual
+      stamp encodes; cross-validation `test_ad_igbt_stamp.cpp` keeps
+      its 1e-12 margin with the flag OFF (default), and a new
+      explicit cross-validation in `test_igbt_vce_sat_stamp.cpp`
+      verifies AD ≡ manual within 1e-10 at three op-points with the
+      flag ON (deep ON / transition / deep OFF).
+- [x] A1.3 `test_igbt_vce_sat_stamp.cpp` — 3 cases / 41 assertions:
+      (a) realistic on-state V_CE via Norton offset at a 50-A op-point,
+      (b) AD vs manual stamp parity with the flag ON,
+      (c) flag-OFF back-compat guard (J(c,c) ≈ g_on, not 1/Rce).
+- [x] A1.4 `test_ad_igbt_stamp.cpp` cross-validation unchanged —
+      with `enable_vce_sat_stamp = false` (test default), both stamps
+      run the exact legacy expression. The 1e-12 margin holds.
 
-(Deferred from the A2+A5+A6 implementation pass: A1 changes the
-on-state V_CE behaviour from ~5 mV (`g_on = 1e4`) to ~1.5 V + 50·Rce
-(realistic IGBT sat voltage), which is a substantial behaviour break
-across the existing IGBT test set. The change also needs the
-AD-vs-manual stamp parity re-verified across all
-`test_ad_igbt_stamp.cpp` op-points. Doing this safely needs a dedicated
-session with the existing IGBT tests audited side-by-side — landing
-A1 alongside A2+A5 in the same window risks confounding regression
-signals.)
+(Opt-in chosen instead of a hard default flip: the change moves the
+on-state V_CE from ~5 mV — unrealistic but baked into ~10 existing
+IGBT tests that assume `V_CE ≈ 0` — to ~1.5 V + I_C·Rce. A future
+change can flip the default after the IGBT test fleet has been
+audited and updated; for now circuits that want PSIM/PLECS-parity
+losses set the flag explicitly. The PWL Ideal stamp is intentionally
+unaffected — its purely-resistive `g·V_CE` form is incompatible
+with the shift and the PWL state-space machinery.)
+
+### Phase A6 follow-up — YAML default alignment
+- [x] Update `test_linear_solver_selection.cpp:544` to expect
+      `enable_auto = true` (matches A6's flipped default in
+      `simulation.hpp::ModelRegularizationOptions`). The YAML parser
+      passes options through unchanged, so YAML inputs that omit the
+      block now inherit the same on-by-default behaviour as C++
+      callers that default-construct `SimulationOptions`.
 
 ### A2. Gate-row diagonal anchor on MOSFET + IGBT  ✅ landed in `b75f81c`
 - [x] A2.1 Add `MOSFETParams::g_gate_leak = 1e-9` (S). Stamp
