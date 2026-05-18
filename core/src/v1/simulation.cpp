@@ -1603,6 +1603,13 @@ void Simulator::process_accepted_step_events(Real t, Real dt_used,
         result.backend_telemetry.pwl_topology_transitions += 1;
         result.backend_telemetry.pwl_event_commutations +=
             static_cast<int>(committed_events.size());
+        // simplify-and-harden-numerical-surface — Phase 5: count groups
+        // of ≥ 2 commutations resolved at a single bisected alpha (the
+        // coalescence step in bisect_pwl_event_alpha picked up multiple
+        // devices that crossed within tolerance of each other).
+        if (committed_events.size() >= 2) {
+            result.backend_telemetry.simultaneous_event_groups += 1;
+        }
         for (const auto& evt : committed_events) {
             SimulationEvent sim_event;
             sim_event.time = event_time;

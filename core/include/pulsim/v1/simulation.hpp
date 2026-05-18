@@ -150,6 +150,12 @@ struct BackendTelemetry {
     // PWL commutation time. Reads zero when the first-order scheduler is
     // active or when no step contained a commutation.
     int pwl_event_bisections = 0;
+    // simplify-and-harden-numerical-surface — Phase 5. Counts every step
+    // where the bisection coalesced ≥ 2 simultaneous device commutations
+    // into a single atomic Newton solve. Reads zero on single-event
+    // steps; fires on 3φ inverter synchronous gate edges, MMC submodule
+    // batches, and similar densely-switching topologies.
+    int simultaneous_event_groups = 0;
     int segment_model_cache_hits = 0;
     int segment_model_cache_misses = 0;
     int linear_factor_cache_hits = 0;

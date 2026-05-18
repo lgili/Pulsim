@@ -5717,6 +5717,42 @@ public:
                 events_hi = std::move(events_mid);
             }
         }
+
+        // simplify-and-harden-numerical-surface — Phase 5.
+        // Simultaneous-event coalescence: the bisection above converges on
+        // the EARLIEST crossing alpha. If two or more devices commute
+        // within `coalesce_window · tolerance` of each other (a common
+        // case for synchronously-commanded gates in 3φ inverters and MMC
+        // arms), the secondary devices fire SLIGHTLY after `alpha_hi`
+        // and are missed by `events_hi`. We re-scan a small margin past
+        // `alpha_hi` to pick them up, then merge the new entries into
+        // `events_hi` and apply them all in one Newton solve at
+        // `event_time = t + alpha_hi · dt_used`.
+        //
+        // This fixes MMC convergence: hundreds of submodules switching
+        // at the same arm-PWM edge previously serialised through N
+        // Newton solves (one per submodule). Now they fire atomically.
+        constexpr int coalesce_window_multiplier = 16;
+        const Real alpha_coalesce = std::min(
+            Real{1.0},
+            alpha_hi + coalesce_window_multiplier * tolerance);
+        if (alpha_coalesce > alpha_hi) {
+            auto events_coalesced = events_at(interp(alpha_coalesce));
+            // Merge: keep all existing `events_hi`, append any new
+            // device_index not already represented.
+            for (const auto& candidate : events_coalesced) {
+                bool already = false;
+                for (const auto& existing : events_hi) {
+                    if (existing.device_index == candidate.device_index) {
+                        already = true;
+                        break;
+                    }
+                }
+                if (!already) {
+                    events_hi.push_back(candidate);
+                }
+            }
+        }
         return PwlEventBisection{alpha_hi, std::move(events_hi), iter};
     }
 

@@ -2848,6 +2848,14 @@ void init_v2_module(py::module_& v2) {
                         "linear-interpolation bisection on x_prev→x_now to refine "
                         "the PWL commutation time within `event_tolerance`. "
                         "Reads zero when no step contained a commutation.")
+        // simplify-and-harden-numerical-surface — Phase 5 telemetry.
+        .def_readwrite("simultaneous_event_groups",
+                        &BackendTelemetry::simultaneous_event_groups,
+                        "Phase 5 telemetry: count of steps where ≥ 2 PWL "
+                        "device commutations were coalesced into a single "
+                        "atomic Newton solve (3φ inverter synchronous gate "
+                        "edges, MMC submodule batches, etc.). Reads zero "
+                        "on single-event steps.")
         .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
         .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
         .def_readwrite("linear_factor_cache_hits", &BackendTelemetry::linear_factor_cache_hits)
