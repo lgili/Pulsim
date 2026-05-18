@@ -152,6 +152,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_yaml_compressor_load.cpp
         tests/test_yaml_preset.cpp
         tests/test_simultaneous_events.cpp
+        tests/test_mmc_arm_template.cpp
         tests/test_three_phase_rl_load.cpp
         tests/test_pmsm_dynamic.cpp
         tests/test_three_phase_vsi.cpp
