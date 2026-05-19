@@ -427,6 +427,16 @@ public:
         //   (M + dt/2 · N) x_{n+1} = (M − dt/2 · N) x_n + dt/2 · (b_now + b_next)
         // The downstream stepper evaluates rhs = A·x_now + c (B·u is unused
         // for fixed-shape sources because b(t) variability is folded into c).
+        //
+        // NOTE on consistent initialization: Tustin gives the correct fixed
+        // point for algebraic constraints (`N·x = b`) IFF x_now already
+        // satisfies them. When `run_transient(x0)` is called with x0 that
+        // violates a constraint (e.g. x0 = zeros while a Vsource enforces
+        // V(node) = 12 V), the Tustin update for the algebraic row becomes
+        // `N·x_next = -N·x_now + 2·b ≠ b`, and V(node) oscillates between
+        // 0 and 24 V at successive steps. The fix lives in
+        // `Simulator::run_transient_native_impl` which snaps x0 to a
+        // constraint-consistent state before the first step.
         const Real half_dt = 0.5 * dt_safe;
 
         auto linear_model = std::make_shared<SegmentLinearStateSpace>();

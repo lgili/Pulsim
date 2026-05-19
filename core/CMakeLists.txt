@@ -128,6 +128,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_stress_simulation.cpp
         tests/test_pwl_segment_primary.cpp
         tests/test_pwl_speedup_benchmark.cpp
+        tests/test_consistent_initialization.cpp
         tests/test_linear_cache_numeric_lru.cpp
         tests/test_linear_cache_phase6_benchmarks.cpp
         tests/test_frequency_analysis_phase1.cpp
