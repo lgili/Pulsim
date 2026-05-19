@@ -19,8 +19,11 @@ import pulsim as ps
 
 def _run(circuit, tstop=200e-6, dt=5e-6):
     opts = ps.SimulationOptions()
-    opts.tstart = 0.0; opts.tstop = tstop
-    opts.dt = dt; opts.dt_min = 1e-9; opts.dt_max = dt
+    opts.tstart = 0.0
+    opts.tstop = tstop
+    opts.dt = dt
+    opts.dt_min = 1e-9
+    opts.dt_max = dt
     opts.adaptive_timestep = False
     opts.enable_bdf_order_control = False
     opts.newton_options.num_nodes = circuit.num_nodes()
@@ -45,11 +48,13 @@ class TestModulatedPwm:
         assert r.success
 
         # Time-averaged V_n after skipping startup should be ~ V_dc/2.
-        sum_v = 0.0; count = 0
+        sum_v = 0.0
+        count = 0
         for t, state in zip(r.time, r.states):
             if t < 10e-3:
                 continue
-            sum_v += state[n]; count += 1
+            sum_v += state[n]
+            count += 1
         v_avg = sum_v / count
         assert v_avg == pytest.approx(6.0, rel=0.20)
 
@@ -58,7 +63,8 @@ class TestModulatedPwm:
         n = c.add_node("n")
         gnd = ps.Circuit.ground()
         p = ps.ModulatedPwmParams()
-        p.v_high = 12.0; p.v_low = 0.0
+        p.v_high = 12.0
+        p.v_low = 0.0
         p.switching_frequency_hz = 2000.0
         p.modulation_index = 0.8
         p.modulation_frequency_hz = 50.0
@@ -69,11 +75,13 @@ class TestModulatedPwm:
         assert r.success
         # SVM mean over a full line cycle is still 0.5 (3rd harmonic
         # has zero mean), so the rail average is V_dc/2.
-        sum_v = 0.0; count = 0
+        sum_v = 0.0
+        count = 0
         for t, state in zip(r.time, r.states):
             if t < 10e-3:
                 continue
-            sum_v += state[n]; count += 1
+            sum_v += state[n]
+            count += 1
         assert (sum_v / count) == pytest.approx(6.0, rel=0.20)
 
 
@@ -93,7 +101,10 @@ class TestSwitchingLossAutoPromotion:
         gnd = ps.Circuit.ground()
 
         mp = ps.MOSFETParams()
-        mp.vth = 2.0; mp.kp = 10.0; mp.g_on = 100.0; mp.g_off = 1e-12
+        mp.vth = 2.0
+        mp.kp = 10.0
+        mp.g_on = 100.0
+        mp.g_off = 1e-12
         mp.is_nmos = True
         mp.R_th_ja = 1.0
         mp.T_amb = 25.0
@@ -151,7 +162,8 @@ class TestDiodeReverseRecovery:
         # dp.Qrr defaults to 0 → no E_rec recorded
         c.add_diode("D1", a, gnd, dp)
         sine = ps.SineParams()
-        sine.amplitude = 5.0; sine.frequency = 1000.0
+        sine.amplitude = 5.0
+        sine.frequency = 1000.0
         c.add_sine_voltage_source("Vs", a, gnd, sine)
         r = _run(c, tstop=5e-3, dt=5e-6)
         assert r.success

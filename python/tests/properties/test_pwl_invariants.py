@@ -13,7 +13,6 @@ We exercise this on randomized passive-RC circuits in PWL Ideal mode.
 
 from __future__ import annotations
 
-import math
 
 import pytest
 

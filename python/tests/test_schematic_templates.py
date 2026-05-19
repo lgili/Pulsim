@@ -14,7 +14,7 @@ import pytest
 
 import pulsim as ps
 from pulsim.schematic import recognize_all
-from pulsim.schematic.templates import _BRIDGE_SIZE_MM, _BOOST_SIZE_MM, apply_templates
+from pulsim.schematic.templates import _BRIDGE_SIZE_MM, apply_templates
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

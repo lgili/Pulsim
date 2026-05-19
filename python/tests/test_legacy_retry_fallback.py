@@ -16,7 +16,6 @@ These tests pin both contracts without depending on a circuit actually
 hitting a retry, which would require a non-deterministic failure mode.
 """
 
-import os
 import warnings
 
 import pytest

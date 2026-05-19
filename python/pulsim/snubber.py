@@ -332,7 +332,7 @@ def advise(L: float,
     # interpret the simulation waveforms they get.
     V_default = predict_overshoot(L, 10e-9, I_peak)
     P_default = 0.5 * 10e-9 * V_bus * V_bus * f_sw
-    p(f"For reference, the runtime's default C_oss = 10 nF predicts:")
+    p("For reference, the runtime's default C_oss = 10 nF predicts:")
     p(f"  V_overshoot = {V_default:.0f} V ({V_default/V_bus*100:.0f} % of V_bus)")
     p(f"  P_loss      = {P_default:.2f} W (½·C·V²·f_sw, hard-switched)")
     p()

@@ -10,7 +10,6 @@ exercised through the Python bindings. Verifies that:
   - The raw `pulsim.SimulationOptions()` constructor still works.
 """
 
-import math
 
 import pytest
 

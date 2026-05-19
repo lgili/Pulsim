@@ -91,7 +91,7 @@ class TestRealisticDiodeBehavior:
         assert r.success
 
         i_d = c.diode_last_current("D1")
-        v_d = c.diode_last_voltage("D1")
+        c.diode_last_voltage("D1")
         p_avg = c.diode_average_power("D1")
         p_expected = (p.V_F0 + p.R_d * I_target) * I_target
         assert i_d == pytest.approx(I_target, rel=0.10)

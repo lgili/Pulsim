@@ -201,7 +201,7 @@ def test_sweep_records_failure_reasons():
 
 
 def test_sweep_to_pandas_returns_wide_frame():
-    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pandas")
 
     def make_rc(R):
         ckt = pulsim.Circuit()

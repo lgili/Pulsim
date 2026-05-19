@@ -11,12 +11,12 @@ These tests pin three behaviors:
      the user's `max_overshoot_frac` target.
   2. **Application**: after `run_transient()`, the MOSFET's C_oss has
      actually changed (auto-parasitics is not just diagnostic).
-  3. **Opt-out**: a user-set `C_oss = X` is respected; a user-set
+  3. **Opt-out**: a user-set `C_oss = X` is respected
+  a user-set
      `enabled = False` disables the analyzer entirely.
 """
 from __future__ import annotations
 
-import math
 import pytest
 import pulsim as ps
 
@@ -38,8 +38,10 @@ def _build_boost(C_oss_user: float = 0.0,
         auto-parasitics decides to act). Default 60 µJ.
     """
     c = ps.Circuit()
-    n_bulk = c.add_node("bulk"); n_sw = c.add_node("sw")
-    n_bus = c.add_node("bus"); n_gate = c.add_node("gate")
+    n_bulk = c.add_node("bulk")
+    n_sw = c.add_node("sw")
+    n_bus = c.add_node("bus")
+    n_gate = c.add_node("gate")
     gnd = ps.Circuit.ground()
 
     c.add_voltage_source("Vdc", n_bulk, gnd, 310.0)
@@ -50,10 +52,15 @@ def _build_boost(C_oss_user: float = 0.0,
     c.add_inductor("L_boost", n_bulk, n_sw, ind)
 
     mp = ps.MOSFETParams()
-    mp.vth = 4.0; mp.kp = 50.0; mp.g_on = 50.0; mp.g_off = 1e-12
+    mp.vth = 4.0
+    mp.kp = 50.0
+    mp.g_on = 50.0
+    mp.g_off = 1e-12
     mp.is_nmos = True
-    mp.Eon_25 = Eon_25; mp.Eoff_25 = 2 * Eon_25
-    mp.I_ref = 5.0; mp.V_ref = 400.0
+    mp.Eon_25 = Eon_25
+    mp.Eoff_25 = 2 * Eon_25
+    mp.I_ref = 5.0
+    mp.V_ref = 400.0
     mp.R_th_ja = 1.5
     if C_oss_user > 0:
         mp.C_oss = C_oss_user
@@ -61,15 +68,19 @@ def _build_boost(C_oss_user: float = 0.0,
     c.add_pwm_voltage_source("Vg", n_gate, gnd, 12.0, 0.0, 100e3, 0.25)
 
     dbst = ps.RealisticDiodeParams()
-    dbst.V_F0 = 0.85; dbst.R_d = 30e-3; dbst.g_on = 1.0/dbst.R_d
+    dbst.V_F0 = 0.85
+    dbst.R_d = 30e-3
+    dbst.g_on = 1.0/dbst.R_d
     dbst.Qrr = 60e-9
     c.add_diode("D_boost", n_sw, n_bus, dbst)
 
     cap_o = ps.CapacitorParams()
-    cap_o.capacitance = 220e-6; cap_o.initial_voltage = cap_initial_V
+    cap_o.capacitance = 220e-6
+    cap_o.initial_voltage = cap_initial_V
     c.add_capacitor("C_out", n_bus, gnd, cap_o)
 
-    load = ps.ResistorParams(); load.resistance = 291.0
+    load = ps.ResistorParams()
+    load.resistance = 291.0
     c.add_resistor("R_load", n_bus, gnd, load)
 
     return c
@@ -78,8 +89,11 @@ def _build_boost(C_oss_user: float = 0.0,
 def _short_opts():
     """Minimum-cost transient options for a 50 µs smoke."""
     opts = ps.SimulationOptions()
-    opts.tstart = 0.0; opts.tstop = 50e-6; opts.dt = 100e-9
-    opts.dt_min = 1e-9; opts.dt_max = 200e-9
+    opts.tstart = 0.0
+    opts.tstop = 50e-6
+    opts.dt = 100e-9
+    opts.dt_min = 1e-9
+    opts.dt_max = 200e-9
     opts.auto_parasitics.verbose = False  # silence stderr in pytest
     return opts
 
@@ -122,7 +136,8 @@ class TestDetection:
 class TestApplication:
     def test_simulator_runs_auto_config_by_default(self):
         """Constructing a Simulator on a boost circuit triggers the
-        pre-flight; the result must carry a non-empty topology_report
+        pre-flight
+        the result must carry a non-empty topology_report
         with at least one applied action."""
         c = _build_boost()
         opts = _short_opts()
@@ -214,9 +229,11 @@ class TestNoFalsePositives:
         """An RL load with no switch should produce zero issues — the
         analyzer must never act on circuits without commutation."""
         c = ps.Circuit()
-        n1 = c.add_node("n1"); gnd = ps.Circuit.ground()
+        n1 = c.add_node("n1")
+        gnd = ps.Circuit.ground()
         c.add_voltage_source("V", n1, gnd, 5.0)
-        ind = ps.InductorParams(); ind.inductance = 1e-3
+        ind = ps.InductorParams()
+        ind.inductance = 1e-3
         c.add_inductor("L", n1, gnd, ind)
         report = c.auto_configure_parasitics()
         assert len(report.issues) == 0
