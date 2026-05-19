@@ -316,16 +316,6 @@ from .frequency_analysis import (
     load_ac_result_csv,
 )
 
-# Closed-loop control helpers: IMC auto-tuner for buck topologies.
-# Use with the existing C++-backed `pulsim.PIController` class
-# (Kp, Ki, update(error, t)). See `pulsim.control` docstring for
-# the rationale behind preferring the standalone PI over the
-# `add_virtual_component("pi_controller", ...)` mixed-domain block.
-from .control import (
-    PIGains,
-    auto_tune_pi_buck,
-)
-
 # Converter templates (add-converter-templates)
 from . import templates as templates  # noqa: E402  (re-export submodule)
 
@@ -1392,9 +1382,6 @@ __all__ = [
     # Control Blocks
     "PIController",
     "PIDController",
-    # Closed-loop helpers (Python-side, work with PIController)
-    "PIGains",
-    "auto_tune_pi_buck",
     "Comparator",
     "SampleHold",
     "RateLimiter",
