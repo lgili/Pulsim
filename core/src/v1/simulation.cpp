@@ -2001,7 +2001,32 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
         circuit_.set_integration_order(std::clamp(bdf_controller_.current_order(), 1, 2));
     }
 
-    circuit_.update_history(x, true);
+    // Per-period closed-loop fix: only force `initialize=true` on the
+    // very first transient call against this circuit. Subsequent calls
+    // (typical pattern: construct a fresh `Simulator(ckt, opts)` each
+    // PWM period, carry `x` across) MUST preserve the dynamic device
+    // history (`cap.i_prev`, `inductor.v_prev`) on the same `Circuit`
+    // instance; otherwise `update_history(x, true)` zeros `cap.i_prev`
+    // and the per-period boost trajectory drifts away from the
+    // one-shot trajectory. See `RuntimeCircuit::has_any_dynamic_history()`
+    // for the full rationale.
+    // Per-period closed-loop fix: only initialize history on the very
+    // first transient call against this circuit. On continuations the
+    // dynamic devices (cap, inductor) already hold valid (v_prev,
+    // i_prev) on the same Circuit instance — calling update_history
+    // again would force the BDF1 path to overwrite i_prev with
+    // (C/dt)·(v − v_prev), which is zero when x has been carried
+    // forward unchanged. That zeroed i_prev then propagates as a
+    // discontinuity into the next integration step and makes the
+    // per-period boost trajectory drift away from the one-shot run.
+    if (!circuit_.has_any_dynamic_history()) {
+        circuit_.update_history(x, true);
+    }
+    // else: continuation — the dynamic devices (cap, inductor) already
+    // hold valid (v_prev, i_prev) on the same Circuit instance from
+    // the previous Simulator run; calling update_history(x, true) here
+    // would force i_prev=0 and overwrite v_prev with x[node], breaking
+    // the per-period closed-loop pattern.
 
     auto append_virtual_sample = [&](const Vector& state, Real sample_time) {
         if (circuit_.num_virtual_components() == 0) {

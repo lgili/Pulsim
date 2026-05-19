@@ -4694,6 +4694,37 @@ public:
     // Update Dynamic Element History (for transient)
     // =========================================================================
 
+    /// Returns true iff at least one Capacitor or Inductor on this
+    /// circuit has already been stepped (i.e. carries a real
+    /// `i_prev` / `v_prev` from a previous transient run). Used by
+    /// `Simulator::run_transient_native_impl` to discriminate
+    ///   * the very first call on a fresh circuit (no dynamic device
+    ///     has history yet → safe to set `i_prev = 0` per the
+    ///     "DC steady-state at t=0" convention), from
+    ///   * subsequent calls that continue a per-period closed-loop
+    ///     pattern where the user reconstructs `Simulator(ckt, opts)`
+    ///     each period and carries `x` across calls. The caps/inductors
+    ///     still hold valid history on the same `Circuit` instance,
+    ///     so passing `initialize=true` would zero `i_prev` and
+    ///     destroy the carried state, causing `vout` to drift
+    ///     monotonically away from the one-shot trajectory.
+    [[nodiscard]] bool has_any_dynamic_history() const noexcept {
+        bool found = false;
+        for (const auto& device_variant : devices_) {
+            if (found) break;
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, Capacitor> ||
+                              std::is_same_v<T, Inductor>) {
+                    if (dev.history_initialized()) {
+                        found = true;
+                    }
+                }
+            }, device_variant);
+        }
+        return found;
+    }
+
     /// Update capacitor/inductor history after a successful timestep
     /// @param x Current state vector
     /// @param initialize If true, this is initialization (t=0) - set i_prev=0 for caps
