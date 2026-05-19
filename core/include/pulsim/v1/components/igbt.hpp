@@ -62,6 +62,60 @@ public:
         // PSIM-style parasitic C_ces (C-E auto-snubber). See
         // components/mosfet.hpp::Params::C_oss for tuning notes.
         Scalar C_oss     = 0.0;        // F
+
+        // Gate-row Jacobian anchor (harden-component-models-vs-psim-plecs
+        // Phase A2). Mirrors MOSFETParams::g_gate_leak — see that
+        // header for the rationale (gate row would otherwise be all-zero
+        // when the gate has no other attached devices, making the MNA
+        // matrix singular). 1 nS matches the SPICE GMIN default and
+        // sits 1e-3 below the lowest-realistic g_off, so the device's
+        // small-signal behaviour is unaffected.
+        Scalar g_gate_leak = 1e-9;     // S
+
+        // V_CE_sat Norton-shift in the Behavioral stamp
+        // (harden-component-models-vs-psim-plecs Phase A1). OFF by
+        // default — turning it ON swaps the legacy on-state stamp
+        // `i_C = g_on · V_CE` for the PSIM/PLECS-style Norton form
+        // `i_C = (V_CE − V_CE_sat) / Rce`, blended via the same
+        // sigmoid alpha that gates the on/off transition.
+        //
+        // Legacy ON state (flag = false):
+        //     V_CE = I_C / g_on = 50 A / 1e4 ≈ 5 mV   (unrealistic)
+        // Norton-shifted (flag = true):
+        //     V_CE = V_CE_sat + I_C · Rce
+        //          = 1.5 V + 50 A · 0.02 Ω = 2.5 V   (PSIM/PLECS-parity)
+        //
+        // OFF by default so existing tests that pin V_CE near 0 stay
+        // green. New circuits that want realistic IGBT conduction
+        // losses opt in by setting `enable_vce_sat_stamp = true`.
+        // The Ideal (PWL) stamp is unaffected — it is purely g·V_CE
+        // and the shift would conflict with the PWL state-space form;
+        // the shift lives only on the Behavioral / AD paths.
+        bool   enable_vce_sat_stamp = false;
+
+        // Antiparallel diode (harden-component-models-vs-psim-plecs
+        // Phase B2). Mirror of MOSFETParams body diode block — IGBT
+        // modules ship with an antiparallel "freewheel" diode between
+        // emitter (anode) and collector (cathode). When the load is
+        // inductive and the IGBT turns OFF, the freewheel path keeps
+        // the inductor current flowing through the antiparallel diode
+        // — without this, V_collector swings to −∞ at turn-off.
+        //
+        //   V_ec = v_e − v_c
+        //   α_apd = sigmoid(κ · (V_ec − V_F0))
+        //   i_apd = α_apd · (V_ec − V_F0) / R_d + (1 − α_apd) · V_ec · g_off
+        //
+        // The freewheel current SUBTRACTS from the main collector
+        // current (it flows in the opposite reference direction,
+        // emitter → collector).
+        //
+        // OFF by default so existing IGBT tests that don't model
+        // freewheel paths stay green. Production inverter circuits
+        // should set `antiparallel_diode_enable = true`.
+        bool   antiparallel_diode_enable = false;
+        Scalar antiparallel_diode_V_F0   = 1.0;     // forward drop (V)
+        Scalar antiparallel_diode_R_d    = 20e-3;   // forward slope (Ω)
+        Scalar antiparallel_diode_g_off  = 1e-9;    // reverse leakage (S)
     };
 
     explicit IGBT(std::string name = "")
@@ -351,6 +405,29 @@ public:
         const S alpha_dir  = Real{1.0} / (Real{1.0} + exp(-kappa * vce));
         const S alpha = alpha_gate * alpha_dir;
         const Real g_off = params_.g_off;
+
+        if (params_.enable_vce_sat_stamp) {
+            // harden-component-models-vs-psim-plecs Phase A1: Norton-
+            // shifted on-state model — PSIM/PLECS-parity. R_CE_on is
+            // taken from Rce (the realistic 10-50 mΩ on-state slope);
+            // the V_CE_sat offset is the fixed forward voltage that
+            // remains even at zero current.
+            //
+            //   i_C = alpha · (V_CE − V_CE_sat) / R_CE_on
+            //       + (1 − alpha) · V_CE · g_off
+            //
+            // Expanding gives a clean form for AD differentiation:
+            //   i_C = [g_off + (g_on_eff − g_off) · alpha] · V_CE
+            //         − alpha · V_CE_sat · g_on_eff
+            // where g_on_eff = 1 / R_CE_on.
+            const Real Rce_safe =
+                (params_.Rce > Real{1e-9}) ? params_.Rce : Real{1e-9};
+            const Real g_on_eff = Real{1.0} / Rce_safe;
+            const Real v_ce_sat_t = V_ce_sat_at_Tj();
+            const S g_eff = g_off + (g_on_eff - g_off) * alpha;
+            return g_eff * vce - alpha * v_ce_sat_t * g_on_eff;
+        }
+
         const Real g_on  = params_.g_on;
         const S g_eff = g_off + (g_on - g_off) * alpha;
         return g_eff * vce;
@@ -367,6 +444,13 @@ public:
         const NodeIndex n_gate = nodes[0];
         const NodeIndex n_collector = nodes[1];
         const NodeIndex n_emitter = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor (see Params::g_gate_leak comment + MOSFET
+        // mirror). Residual untouched.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar v_g = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar v_c = (n_collector >= 0) ? x[n_collector] : Scalar{0.0};
@@ -440,6 +524,12 @@ private:
         const NodeIndex n_collector = nodes[1];
         const NodeIndex n_emitter = nodes[2];
 
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor (see Params::g_gate_leak + MOSFET mirror).
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
+
         const Scalar vg = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar vc = (n_collector >= 0) ? x[n_collector] : Scalar{0.0};
         const Scalar ve = (n_emitter >= 0) ? x[n_emitter] : Scalar{0.0};
@@ -454,26 +544,47 @@ private:
         const Scalar sigma_d = Scalar{1.0} /
             (Scalar{1.0} + std::exp(-kappa * vce));
         const Scalar alpha = sigma_g * sigma_d;
-
-        const Scalar dg = params_.g_on - params_.g_off;
-        const Scalar g_eff = params_.g_off + dg * alpha;
+        const Scalar dsigma_g_dvge = kappa * sigma_g * (Scalar{1.0} - sigma_g);
+        const Scalar dsigma_d_dvce = kappa * sigma_d * (Scalar{1.0} - sigma_d);
+        const Scalar dalpha_dvge = sigma_d * dsigma_g_dvge;
+        const Scalar dalpha_dvce = sigma_g * dsigma_d_dvce;
 
         // Telemetry: pwl_state mirrors the on/off bit at α > 0.5.
         pwl_state_ = (alpha > Scalar{0.5});
 
-        const Scalar ic = g_eff * vce;
+        // Pick g_on (the on-state branch slope) based on the
+        // V_CE_sat Norton-shift flag (Phase A1). When the flag is OFF
+        // the legacy g_on = params_.g_on is used and the additional
+        // offset term is zero — exactly the pre-A1 stamp.
+        Scalar g_on_used;
+        Scalar offset_shift;     // = alpha · V_CE_sat · g_on_eff (added to −i_C)
+        if (params_.enable_vce_sat_stamp) {
+            const Real Rce_safe =
+                (params_.Rce > Real{1e-9}) ? params_.Rce : Real{1e-9};
+            g_on_used = Scalar{1.0} / Rce_safe;
+            offset_shift = alpha * V_ce_sat_at_Tj() * g_on_used;
+        } else {
+            g_on_used = params_.g_on;
+            offset_shift = Scalar{0.0};
+        }
+        const Scalar dg = g_on_used - params_.g_off;
+        const Scalar g_eff = params_.g_off + dg * alpha;
 
-        // Closed-form partials of the sigmoid blend.
-        const Scalar dsigma_g_dvge = kappa * sigma_g * (Scalar{1.0} - sigma_g);
-        const Scalar dsigma_d_dvce = kappa * sigma_d * (Scalar{1.0} - sigma_d);
-        const Scalar dg_eff_dvge   = dg * sigma_d * dsigma_g_dvge;
-        const Scalar dg_eff_dvce   = dg * sigma_g * dsigma_d_dvce;
-
-        // Drain-current partials w.r.t. terminal voltages (chain rule:
-        // vge = vg - ve, vce = vc - ve).
-        const Scalar di_dvg = dg_eff_dvge * vce;
-        const Scalar di_dvc = dg_eff_dvce * vce + g_eff;
+        //   i_C = g_eff · vce − offset_shift          (offset_shift = α·V_CE_sat·g_on)
+        // Partials:
+        //   ∂(g_eff·vce)/∂vge = dg · ∂α/∂vge · vce
+        //   ∂(g_eff·vce)/∂vce = dg · ∂α/∂vce · vce + g_eff
+        //   ∂offset_shift/∂vge = V_CE_sat·g_on · ∂α/∂vge
+        //   ∂offset_shift/∂vce = V_CE_sat·g_on · ∂α/∂vce
+        const Scalar v_ce_sat_g_on = params_.enable_vce_sat_stamp
+            ? V_ce_sat_at_Tj() * g_on_used : Scalar{0.0};
+        const Scalar di_dvg =
+            dg * dalpha_dvge * vce - v_ce_sat_g_on * dalpha_dvge;
+        const Scalar di_dvc =
+            dg * dalpha_dvce * vce + g_eff - v_ce_sat_g_on * dalpha_dvce;
         const Scalar di_dve = -di_dvg - di_dvc;
+
+        const Scalar ic = g_eff * vce - offset_shift;
 
         // Norton companion offset (Taylor residual form).
         const Scalar i_eq = ic - di_dvg * vg - di_dvc * vc - di_dve * ve;
@@ -499,8 +610,18 @@ private:
     template<typename Matrix, typename Vec>
     void stamp_jacobian_ideal(Matrix& J, Vec& f, const Vec& x,
                               std::span<const NodeIndex> nodes) const {
+        const NodeIndex n_gate = nodes[0];
         const NodeIndex n_collector = nodes[1];
         const NodeIndex n_emitter = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor. The PWL Ideal C-E stamp does not touch the
+        // gate row at all (gate is queried only in the commute event
+        // detector), so this anchor is the only thing keeping the row
+        // non-singular when the gate is otherwise unconnected.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar vc = (n_collector >= 0) ? x[n_collector] : Scalar{0.0};
         const Scalar ve = (n_emitter >= 0) ? x[n_emitter] : Scalar{0.0};

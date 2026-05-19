@@ -3888,6 +3888,101 @@ public:
         return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- Motor winding steady-state temperature (Phase B3) -----------------
+    //
+    // harden-component-models-vs-psim-plecs Phase B3.4. Given a measured /
+    // estimated RMS winding current `i_rms`, returns the steady-state
+    // winding temperature T_w (°C) at thermal equilibrium:
+    //
+    //   T_w = T_amb + n_phases · I_rms² · R_s(T_w) · R_th
+    //   R_s(T_w) = R_s_nominal · (1 + R_s_tc · (T_w − T_ref_winding))
+    //
+    // Closed-form solving for T_w:
+    //
+    //   T_w − T_ref =
+    //     (T_amb − T_ref + n_phases · I_rms² · R_s · R_th)
+    //     / (1 − n_phases · I_rms² · R_s · R_s_tc · R_th)
+    //
+    // `n_phases = 1` for DC motors, `1.5` for 3-phase (3 phases × 1/2 from
+    // the αβ Clarke convention so I_rms refers to per-phase RMS), `1` for
+    // single-phase induction motors with shared (main + aux) winding RMS.
+    //
+    // Returns NaN if the motor is not found, or if the thermal model is
+    // disabled (`R_th_winding_to_ambient = 0`), or if the linear thermal
+    // model becomes unstable (denominator ≤ 0 → R_s_tc-driven runaway).
+private:
+    [[nodiscard]] static Real solve_steady_state_winding_temperature(
+        Real R_s_nominal, Real R_th, Real T_amb, Real R_s_tc,
+        Real T_ref_winding, Real n_phases, Real i_rms) noexcept {
+        if (!(R_th > Real{0}) || !std::isfinite(i_rms)) {
+            return std::numeric_limits<Real>::quiet_NaN();
+        }
+        const Real power_factor =
+            n_phases * i_rms * i_rms * R_s_nominal * R_th;
+        const Real denom = Real{1} - power_factor * R_s_tc;
+        if (!(denom > Real{0})) {
+            // Linear thermal model unstable — physical runaway.
+            return std::numeric_limits<Real>::quiet_NaN();
+        }
+        return T_ref_winding +
+            (T_amb - T_ref_winding + power_factor) / denom;
+    }
+
+public:
+    [[nodiscard]] Real dc_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_a_rms) const {
+        const auto* m = find_device<DcMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.R_a, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1}, i_a_rms);
+    }
+    [[nodiscard]] Real pmsm_steady_state_winding_temperature(
+        std::string_view name, Real i_s_rms) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.Rs, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1.5}, i_s_rms);
+    }
+    [[nodiscard]] Real bldc_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_s_rms) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.R_s, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1.5}, i_s_rms);
+    }
+    [[nodiscard]] Real induction_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_s_rms) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.R_s, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1.5}, i_s_rms);
+    }
+    [[nodiscard]] Real single_phase_induction_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_rms) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        // Main + aux windings share one R_th; use the average of the two
+        // R_s values as the effective resistance.
+        const Real R_s_avg = Real{0.5} * (p.R_s_main + p.R_s_aux);
+        return solve_steady_state_winding_temperature(
+            R_s_avg, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1}, i_rms);
+    }
+
     // ----- Mechanical device (consolidate-motors-and-three-phase, B.2a) -------
     //
     // Adds a signal-domain mechanical primitive (shaft inertia + friction +
@@ -5717,6 +5812,42 @@ public:
                 events_hi = std::move(events_mid);
             }
         }
+
+        // simplify-and-harden-numerical-surface — Phase 5.
+        // Simultaneous-event coalescence: the bisection above converges on
+        // the EARLIEST crossing alpha. If two or more devices commute
+        // within `coalesce_window · tolerance` of each other (a common
+        // case for synchronously-commanded gates in 3φ inverters and MMC
+        // arms), the secondary devices fire SLIGHTLY after `alpha_hi`
+        // and are missed by `events_hi`. We re-scan a small margin past
+        // `alpha_hi` to pick them up, then merge the new entries into
+        // `events_hi` and apply them all in one Newton solve at
+        // `event_time = t + alpha_hi · dt_used`.
+        //
+        // This fixes MMC convergence: hundreds of submodules switching
+        // at the same arm-PWM edge previously serialised through N
+        // Newton solves (one per submodule). Now they fire atomically.
+        constexpr int coalesce_window_multiplier = 16;
+        const Real alpha_coalesce = std::min(
+            Real{1.0},
+            alpha_hi + coalesce_window_multiplier * tolerance);
+        if (alpha_coalesce > alpha_hi) {
+            auto events_coalesced = events_at(interp(alpha_coalesce));
+            // Merge: keep all existing `events_hi`, append any new
+            // device_index not already represented.
+            for (const auto& candidate : events_coalesced) {
+                bool already = false;
+                for (const auto& existing : events_hi) {
+                    if (existing.device_index == candidate.device_index) {
+                        already = true;
+                        break;
+                    }
+                }
+                if (!already) {
+                    events_hi.push_back(candidate);
+                }
+            }
+        }
         return PwlEventBisection{alpha_hi, std::move(events_hi), iter};
     }
 
@@ -6344,6 +6475,7 @@ private:
     }
 
     static constexpr int companion_order(Integrator method) {
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
         switch (method) {
             case Integrator::BDF1:
             case Integrator::RosenbrockW:
@@ -6359,6 +6491,7 @@ private:
             default:
                 return 2;
         }
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
     }
 
     std::vector<DeviceVariant> devices_;
@@ -7291,8 +7424,8 @@ private:
         // ∂id_actual/∂vs = − di_internal_dvgs − di_internal_dvds
         const Real id = sign * id_internal;
         const Real di_dvg = di_internal_dvgs;
-        const Real di_dvd = di_internal_dvds;
-        const Real di_dvs = -di_internal_dvgs - di_internal_dvds;
+        Real di_dvd = di_internal_dvds;
+        Real di_dvs = -di_internal_dvgs - di_internal_dvds;
 
         // Newton-Raphson Jacobian + physical residual stamp. The
         // legacy Norton-companion form (`J += di_dvN`, `f -= i_eq`
@@ -7314,22 +7447,60 @@ private:
         // sign convention as the R and IGBT stamps (`f[node] +=
         // current leaving node`).
 
-        // Drain row: + ∂id/∂x_i.
+        // Body diode (harden-component-models-vs-psim-plecs Phase B1).
+        // Anode = source, cathode = drain, sign-agnostic w.r.t. NMOS/PMOS.
+        // Forward-biased when V_sd = vs − vd > V_F0. The diode current
+        // flows source → drain — opposite reference to id_channel —
+        // so it is SUBTRACTED from the total drain-leaving current.
+        //
+        //   i_bd = α_bd · (V_sd − V_F0) / R_d + (1 − α_bd) · V_sd · g_off_bd
+        //   α_bd = sigmoid(κ · (V_sd − V_F0))   smooth blend for Newton
+        //
+        // Partials w.r.t. terminal voltages:
+        //   ∂V_sd/∂vd = −1, ∂V_sd/∂vs = +1, ∂V_sd/∂vg = 0
+        //   id_total = id_channel − i_bd
+        //   ∂id_total/∂vd = di_dvd + ∂i_bd/∂V_sd
+        //   ∂id_total/∂vs = di_dvs − ∂i_bd/∂V_sd
+        //   ∂id_total/∂vg = di_dvg (unchanged)
+        Real id_total = id;
+        if (p.body_diode_enable) {
+            const Real V_F0 = p.body_diode_V_F0;
+            const Real R_d_safe =
+                (p.body_diode_R_d > Real{1e-9}) ? p.body_diode_R_d : Real{1e-9};
+            const Real g_on_bd = Real{1.0} / R_d_safe;
+            const Real g_off_bd = p.body_diode_g_off;
+            const Real v_sd = vs - vd;
+            const Real alpha_bd =
+                Real{1.0} / (Real{1.0} + std::exp(-kappa * (v_sd - V_F0)));
+            const Real dalpha_bd_dvsd =
+                kappa * alpha_bd * (Real{1.0} - alpha_bd);
+            const Real i_bd =
+                alpha_bd * (v_sd - V_F0) * g_on_bd +
+                (Real{1.0} - alpha_bd) * v_sd * g_off_bd;
+            const Real di_bd_dvsd =
+                dalpha_bd_dvsd * ((v_sd - V_F0) * g_on_bd - v_sd * g_off_bd) +
+                alpha_bd * g_on_bd + (Real{1.0} - alpha_bd) * g_off_bd;
+            id_total -= i_bd;
+            di_dvd   += di_bd_dvsd;   // because -(-di_bd_dvsd)
+            di_dvs   -= di_bd_dvsd;   // because -(+di_bd_dvsd)
+        }
+
+        // Drain row: + ∂id_total/∂x_i.
         if (n_drain >= 0) {
             triplets.emplace_back(n_drain, n_drain, di_dvd);
             if (n_gate >= 0)   triplets.emplace_back(n_drain, n_gate, di_dvg);
             if (n_source >= 0) triplets.emplace_back(n_drain, n_source, di_dvs);
         }
-        // Source row: − ∂id/∂x_i  (current arriving at source = −id).
+        // Source row: − ∂id_total/∂x_i  (current arriving at source = −id_total).
         if (n_source >= 0) {
             triplets.emplace_back(n_source, n_source, -di_dvs);
             if (n_drain >= 0) triplets.emplace_back(n_source, n_drain, -di_dvd);
             if (n_gate >= 0)  triplets.emplace_back(n_source, n_gate, -di_dvg);
         }
 
-        // Physical residual: +id leaves drain, −id arrives at source.
-        if (n_drain >= 0)  f[n_drain]  += id;
-        if (n_source >= 0) f[n_source] -= id;
+        // Physical residual: +id_total leaves drain, −id_total arrives at source.
+        if (n_drain >= 0)  f[n_drain]  += id_total;
+        if (n_source >= 0) f[n_source] -= id_total;
     }
 
     template<typename Triplets>
@@ -7357,13 +7528,54 @@ private:
         if (const auto forced = forced_switch_state(device_index); forced.has_value()) {
             is_on = *forced;
         }
-        Real g = is_on ? g_on_eff : g_off_eff;
-        Real ic = g * vce;
+        const Real g_channel = is_on ? g_on_eff : g_off_eff;
+        Real ic_total = g_channel * vce;
+        // Channel partials: ∂ic_channel/∂vc = +g, ∂ic_channel/∂ve = −g.
+        Real g_cc = g_channel;      // J(c,c)
+        Real g_ce = -g_channel;     // J(c,e)
 
-        // Simple model without saturation for now
-        stamp_conductance(g, n_collector, n_emitter, triplets);
-        if (n_collector >= 0) f[n_collector] += ic;
-        if (n_emitter >= 0) f[n_emitter] -= ic;
+        // Antiparallel diode (Phase B2). Anode = emitter, cathode =
+        // collector. Forward-biased when V_ec = ve − vc > V_F0.
+        // The freewheel current flows emitter → collector — opposite
+        // reference to the main ic — so it is SUBTRACTED from ic_total.
+        if (p.antiparallel_diode_enable) {
+            constexpr Real kappa = 20.0;  // matches the IGBT smooth-gm κ
+            const Real V_F0 = p.antiparallel_diode_V_F0;
+            const Real R_d_safe =
+                (p.antiparallel_diode_R_d > Real{1e-9})
+                ? p.antiparallel_diode_R_d : Real{1e-9};
+            const Real g_on_apd = Real{1.0} / R_d_safe;
+            const Real g_off_apd = p.antiparallel_diode_g_off;
+            const Real v_ec = ve - vc;
+            const Real alpha_apd =
+                Real{1.0} / (Real{1.0} + std::exp(-kappa * (v_ec - V_F0)));
+            const Real dalpha_apd_dvec =
+                kappa * alpha_apd * (Real{1.0} - alpha_apd);
+            const Real i_apd =
+                alpha_apd * (v_ec - V_F0) * g_on_apd +
+                (Real{1.0} - alpha_apd) * v_ec * g_off_apd;
+            const Real di_apd_dvec =
+                dalpha_apd_dvec * ((v_ec - V_F0) * g_on_apd - v_ec * g_off_apd) +
+                alpha_apd * g_on_apd + (Real{1.0} - alpha_apd) * g_off_apd;
+            // ∂V_ec/∂vc = −1, ∂V_ec/∂ve = +1; ic_total = ic_channel − i_apd.
+            ic_total -= i_apd;
+            g_cc     += di_apd_dvec;     // because -(-di_apd_dvec)
+            g_ce     -= di_apd_dvec;     // because -(+di_apd_dvec)
+        }
+
+        // Stamp the combined conductance (channel + diode partials).
+        if (n_collector >= 0) {
+            triplets.emplace_back(n_collector, n_collector, g_cc);
+            if (n_emitter >= 0)
+                triplets.emplace_back(n_collector, n_emitter, g_ce);
+        }
+        if (n_emitter >= 0) {
+            triplets.emplace_back(n_emitter, n_emitter, -g_ce);
+            if (n_collector >= 0)
+                triplets.emplace_back(n_emitter, n_collector, -g_cc);
+        }
+        if (n_collector >= 0) f[n_collector] += ic_total;
+        if (n_emitter >= 0) f[n_emitter] -= ic_total;
     }
 
     // =========================================================================

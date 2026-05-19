@@ -92,6 +92,10 @@ TEST_CASE("AD MOSFET stamp matches manual across Shichman-Hodges regions",
         .g_on = 1e3,
     };
     MOSFET m(params, "M_nmos");
+    // simplify-and-harden-numerical-surface §11: default Auto now resolves to
+    // Ideal (v0.11 flip). The cross-validation contract tests Shichman-Hodges
+    // Behavioral stamps, so we pin Behavioral explicitly.
+    m.set_switching_mode(SwitchingMode::Behavioral);
 
     SECTION("cutoff (Vgs ≤ Vth)") {
         cross_validate(m, /*v_g=*/1.0, /*v_d=*/5.0, /*v_s=*/0.0, "cutoff");
@@ -130,6 +134,9 @@ TEST_CASE("AD MOSFET stamp matches manual across Shichman-Hodges regions (PMOS)"
         .g_on = 1e3,
     };
     MOSFET m(params, "M_pmos_xv");
+    // simplify-and-harden-numerical-surface §11: pin Behavioral (Auto now
+    // resolves to Ideal by default).
+    m.set_switching_mode(SwitchingMode::Behavioral);
 
     SECTION("PMOS cutoff") {
         cross_validate(m, /*v_g=*/-1.0, /*v_d=*/-5.0, /*v_s=*/0.0, "pmos_cutoff");

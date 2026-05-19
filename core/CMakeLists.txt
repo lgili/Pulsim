@@ -90,6 +90,11 @@ if(PULSIM_BUILD_TESTS)
         tests/test_motor_models.cpp
         tests/test_grid_library.cpp
         tests/test_robustness_profile.cpp
+        tests/test_preset.cpp
+        tests/test_armijo_line_search.cpp
+        tests/test_homotopy_dc.cpp
+        tests/test_iterative_refinement.cpp
+        tests/test_solver_kind_collapse.cpp
     )
 
     target_link_libraries(pulsim_tests
@@ -123,6 +128,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_stress_simulation.cpp
         tests/test_pwl_segment_primary.cpp
         tests/test_pwl_speedup_benchmark.cpp
+        tests/test_consistent_initialization.cpp
         tests/test_linear_cache_numeric_lru.cpp
         tests/test_linear_cache_phase6_benchmarks.cpp
         tests/test_frequency_analysis_phase1.cpp
@@ -147,6 +153,10 @@ if(PULSIM_BUILD_TESTS)
         tests/test_single_phase_induction_motor.cpp
         tests/test_refrigerants.cpp
         tests/test_yaml_compressor_load.cpp
+        tests/test_yaml_preset.cpp
+        tests/test_simultaneous_events.cpp
+        tests/test_mmc_arm_template.cpp
+        tests/test_mmc_balancer.cpp
         tests/test_three_phase_rl_load.cpp
         tests/test_pmsm_dynamic.cpp
         tests/test_three_phase_vsi.cpp
@@ -155,6 +165,11 @@ if(PULSIM_BUILD_TESTS)
         tests/test_passives_loss_thermal.cpp
         tests/test_switching_phase4.cpp
         tests/test_component_introspection.cpp
+        tests/test_mosfet_gate_anchor.cpp
+        tests/test_motor_flux_integration.cpp
+        tests/test_igbt_vce_sat_stamp.cpp
+        tests/test_body_diode.cpp
+        tests/test_motor_winding_thermal.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests

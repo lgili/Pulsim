@@ -422,6 +422,23 @@ template<typename Device>
             ext.display_name = "CG";
             ext.capabilities = {"iterative", "spd_only", "preconditioned"};
             break;
+        // Phase 8 abstract values — extensions for these are advertised
+        // as virtual selectors that resolve at runtime.
+        case LinearSolverKind::Auto:
+            ext.extension_id = "auto";
+            ext.display_name = "Auto";
+            ext.capabilities = {"virtual", "size_adaptive"};
+            break;
+        case LinearSolverKind::Direct:
+            ext.extension_id = "direct";
+            ext.display_name = "Direct";
+            ext.capabilities = {"virtual", "direct"};
+            break;
+        case LinearSolverKind::Iterative:
+            ext.extension_id = "iterative";
+            ext.display_name = "Iterative";
+            ext.capabilities = {"virtual", "iterative"};
+            break;
     }
     return ext;
 }
@@ -432,6 +449,7 @@ template<typename Device>
     ext.version = "builtin";
     ext.telemetry_fields = {"dt", "integration_order", "lte"};
 
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
     switch (integrator) {
         case Integrator::Trapezoidal:
             ext.extension_id = "trapezoidal";
@@ -474,6 +492,7 @@ template<typename Device>
             ext.display_name = "SDIRK2";
             break;
     }
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
 
     ext.capabilities.push_back("order_" + std::to_string(method_order(integrator)));
     ext.capabilities.push_back(is_stiff_stable(integrator) ? "stiff_stable" : "general");
@@ -511,13 +530,17 @@ template<typename Device>
     if (!register_checked(make_builtin_integrator_extension(Integrator::Trapezoidal))) return {};
     if (!register_checked(make_builtin_integrator_extension(Integrator::BDF1))) return {};
     if (!register_checked(make_builtin_integrator_extension(Integrator::BDF2))) return {};
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
     if (!register_checked(make_builtin_integrator_extension(Integrator::BDF3))) return {};
     if (!register_checked(make_builtin_integrator_extension(Integrator::BDF4))) return {};
     if (!register_checked(make_builtin_integrator_extension(Integrator::BDF5))) return {};
     if (!register_checked(make_builtin_integrator_extension(Integrator::Gear))) return {};
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
     if (!register_checked(make_builtin_integrator_extension(Integrator::TRBDF2))) return {};
     if (!register_checked(make_builtin_integrator_extension(Integrator::RosenbrockW))) return {};
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
     if (!register_checked(make_builtin_integrator_extension(Integrator::SDIRK2))) return {};
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
 
     return registry;
 }

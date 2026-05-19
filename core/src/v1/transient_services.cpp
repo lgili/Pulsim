@@ -223,7 +223,20 @@ class DefaultEquationAssemblerService final : public EquationAssemblerService {
 public:
     DefaultEquationAssemblerService(Circuit& circuit, const SimulationOptions& options)
         : circuit_(circuit)
-        , options_(options) {}
+        , options_(options) {
+        // simplify-and-harden-numerical-surface — gmin floor.
+        // SPICE-equivalent baseline conductance applied to every node
+        // diagonal on every transient step. Prevents the floating-node
+        // MNA singularity that emerges in switching converters during
+        // the dead-time interval (e.g. buck where both the main switch
+        // and the freewheel diode are OFF simultaneously). At 1e-12 S
+        // default the leakage current is 12 pA at 12 V — orders of
+        // magnitude below any measurable observable, but keeps the
+        // matrix well-conditioned.
+        if (options_.baseline_node_gmin > 0.0) {
+            transient_gmin_ = options_.baseline_node_gmin;
+        }
+    }
 
     void assemble_system(const Vector& x,
                          Real t_next,
@@ -260,7 +273,10 @@ public:
     }
 
     void set_transient_gmin(Real gmin) override {
-        transient_gmin_ = std::max<Real>(0.0, gmin);
+        // Honour the SPICE-equivalent baseline floor (default 1e-12).
+        // Retry / fallback paths can only escalate gmin above the floor.
+        const Real floor = std::max<Real>(0.0, options_.baseline_node_gmin);
+        transient_gmin_ = std::max<Real>(floor, gmin);
     }
 
     [[nodiscard]] Real transient_gmin() const override {
@@ -411,6 +427,16 @@ public:
         //   (M + dt/2 · N) x_{n+1} = (M − dt/2 · N) x_n + dt/2 · (b_now + b_next)
         // The downstream stepper evaluates rhs = A·x_now + c (B·u is unused
         // for fixed-shape sources because b(t) variability is folded into c).
+        //
+        // NOTE on consistent initialization: Tustin gives the correct fixed
+        // point for algebraic constraints (`N·x = b`) IFF x_now already
+        // satisfies them. When `run_transient(x0)` is called with x0 that
+        // violates a constraint (e.g. x0 = zeros while a Vsource enforces
+        // V(node) = 12 V), the Tustin update for the algebraic row becomes
+        // `N·x_next = -N·x_now + 2·b ≠ b`, and V(node) oscillates between
+        // 0 and 24 V at successive steps. The fix lives in
+        // `Simulator::run_transient_native_impl` which snaps x0 to a
+        // constraint-consistent state before the first step.
         const Real half_dt = 0.5 * dt_safe;
 
         auto linear_model = std::make_shared<SegmentLinearStateSpace>();

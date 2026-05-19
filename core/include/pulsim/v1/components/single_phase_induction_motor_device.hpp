@@ -172,13 +172,30 @@ public:
             two_L_main_over_dt * (i_main - i_main_prev_) - v_L_main_prev_;
         const Real v_L_aux_new =
             two_L_aux_over_dt * (i_aux - i_aux_prev_) - v_L_aux_prev_;
+
+        // Advance the run-capacitor voltage using trapezoidal integration
+        // (harden-component-models-vs-psim-plecs Phase A5). The previous
+        // forward-Euler form (`V_cap += dt · i_aux / C_run`) introduced
+        // a half-step lag between i_aux and V_cap that showed up as
+        // sub-step kinks (~3-5 V) at dt = 100 µs during the run-cap
+        // starting transient of a fractional-HP PSC motor (C_run = 4 µF,
+        // i_aux ≈ 1 A). The trapezoidal form
+        // `V_cap += 0.5 · dt · (i_aux + i_aux_prev) / C_run` averages
+        // the start- and end-of-step currents over the cap, removing
+        // the lag at no extra cost (i_aux_prev_ is already cached for
+        // the inductor companion update above). Same numerical-
+        // stability ladder PSIM and PLECS use for their built-in
+        // single-phase IM models. NOTE: must run BEFORE the
+        // `i_aux_prev_ = i_aux` history assignment below — otherwise
+        // i_aux_prev_ would already hold the new sample and the
+        // averaging would collapse back to forward Euler.
+        V_cap_ +=
+            Real{0.5} * dt * (i_aux + i_aux_prev_) / params_.C_run;
+
         i_main_prev_   = i_main;
         i_aux_prev_    = i_aux;
         v_L_main_prev_ = v_L_main_new;
         v_L_aux_prev_  = v_L_aux_new;
-
-        // Advance the run-capacitor voltage (forward Euler).
-        V_cap_ += dt * i_aux / params_.C_run;
     }
 
     void reset_history_for_transient_start(Real i_main, Real i_aux) noexcept {

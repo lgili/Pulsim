@@ -44,12 +44,11 @@ def make_buck(L: float, C: float):
 
 
 def make_options() -> pulsim.SimulationOptions:
-    opts = pulsim.SimulationOptions()
-    opts.tstop = 2e-3
-    opts.dt = 1e-7
-    opts.adaptive_timestep = False
-    opts.switching_mode = pulsim.SwitchingMode.Ideal
-    return opts
+    # simplify-and-harden-numerical-surface — Phase 2 + 14.8: Preset.Fast
+    # already includes PWL Ideal + fixed step. No further overrides
+    # needed for this parameter sweep over a buck topology.
+    return pulsim.SimulationOptions.from_preset(pulsim.Preset.Fast,
+                                                  dt=1e-7, tstop=2e-3)
 
 
 def main() -> None:

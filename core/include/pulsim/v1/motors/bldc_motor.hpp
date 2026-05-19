@@ -90,6 +90,13 @@ struct BldcMotorParams {
     // Initial state
     Real omega_init      = 0.0;        ///< mechanical (rad/s)
     Real theta_init      = 0.0;        ///< mechanical (rad)
+
+    // Stator-winding thermal model (harden-component-models-vs-psim-plecs
+    // Phase B3). Default 0 keeps thermal model OFF for back-compat.
+    Real R_th_winding_to_ambient = 0.0;
+    Real T_amb                   = 25.0;
+    Real R_s_tc                  = 3.93e-3;
+    Real T_ref_winding           = 20.0;
 };
 
 class BldcMotor {

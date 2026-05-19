@@ -2,34 +2,89 @@
 
 Este guia concentra as configurações que mais impactam convergência, tempo de simulação e fidelidade.
 
-## Bloco `simulation`
+## ⚠️ Primeiro passo — escolha um `preset`
 
-Configuração base:
+Antes de configurar qualquer outro campo, pegue um dos quatro presets
+em [`numerical-configuration.md`](numerical-configuration.md). 95%
+dos casos se resolvem com uma única decisão:
 
 ```yaml
 simulation:
-  tstart: 0.0
-  tstop: 2e-3
+  preset: robust          # auto | fast | robust | high_fidelity
+  tstop: 1e-3
   dt: 1e-6
-  step_mode: variable   # fixed | variable
-  formulation: projected_wrapper  # projected_wrapper | direct
-  dt_min: 1e-10
-  dt_max: 1e-4
-  integrator: trbdf2
 ```
 
-Campos práticos:
+O resto deste guia é override avançado que só precisa quando o
+preset não basta.
 
-- `tstop`, `dt`: resolução e duração.
-- `step_mode`: `fixed` para grade determinística; `variable` para adaptação automática.
-- `formulation`: `projected_wrapper` (padrão, mais robusto em mistas) ou `direct` (DAE direto).
-- `adaptive_timestep`: override avançado (evite no fluxo canônico; prefira `step_mode`).
-- `integrator`: `trapezoidal`, `bdf1..bdf5`, `trbdf2`, `rosenbrockw`, `sdirk2`.
+## Bloco `simulation` — referência completa
 
-Observação de migração:
+Tabela canônica de cada campo `simulation.*` reconhecido pelo parser
+YAML (`pulsim-v1`).
 
-- `simulation.backend` e `simulation.sundials` são campos legados para transiente e não
-  fazem parte do caminho suportado; use `simulation.step_mode` + `simulation.formulation`.
+### Top-level (recomendado para usuários)
+
+| Campo | Valores | Default | Notas |
+|---|---|---|---|
+| `preset` | `auto` / `fast` / `robust` / `high_fidelity` | — | Materializa um perfil numérico completo. Outros campos `simulation.*` aplicam ON TOP do preset. |
+| `tstart` | float | `0.0` | Tempo inicial (s) |
+| `tstop` | float | `1e-3` | Tempo final (s) |
+| `dt` | float | `1e-6` | Passo inicial / fixo (s) |
+| `dt_min` | float | `1e-12` | Limite mínimo do passo adaptativo |
+| `dt_max` | float | `1e-3` | Limite máximo do passo adaptativo |
+| `step_mode` | `fixed` / `variable` | `variable` | Canônico — substitui `adaptive_timestep` |
+| `switching_mode` | `auto` / `ideal` / `behavioral` | `auto` (resolve para `behavioral` hoje) | PWL fast path = `ideal` |
+| `integrator` | ver tabela abaixo | `trapezoidal` (`trbdf2` em Robust) | |
+| `enable_events` | bool | `true` | |
+| `enable_losses` | bool | `true` | |
+| `enable_bdf_order_control` | bool | `false` (`true` em Robust) | Ordem BDF adaptativa |
+| `formulation` | `projected_wrapper` / `direct` | `projected_wrapper` | DAE assembly strategy |
+
+### Integradores aceitos
+
+| Valor | Status |
+|---|---|
+| `trapezoidal` | ✅ Default — order 2, A-stable |
+| `bdf1` (ou `be`) | ✅ Backward Euler — L-stable fallback |
+| `bdf2` | ✅ Order 2, A-stable |
+| `trbdf2` | ✅ Híbrido trapezoidal + BDF2 — default Robust |
+| `rosenbrockw` (ou `rosenbrock`) | ✅ Linearly implicit stiff |
+| `bdf3`, `bdf4`, `bdf5` | ⚠️ Deprecated — emitem warning, removidos no próximo major |
+| `gear` | ⚠️ Deprecated — alias literal de `bdf2` |
+| `sdirk2` | ⚠️ Deprecated — sem cobertura de benchmark |
+
+### Sub-blocos avançados
+
+> Status: ainda **não** colapsados sob `advanced.*` na release atual
+> (Phase 3 do `simplify-and-harden-numerical-surface` change). Os
+> campos abaixo seguem reconhecidos no top-level `simulation.*` por
+> compatibilidade. Quando Phase 3 ship, eles migrarão.
+
+| Sub-bloco | Conteúdo | Quem usa |
+|---|---|---|
+| `newton` | `max_iterations`, `armijo_line_search`, `armijo_sigma`, ... | Tuning do Newton interno |
+| `timestep` | `error_tolerance`, `growth_factor`, `safety_factor`, ... | Controlador adaptativo de `dt` |
+| `lte` | `voltage_tolerance`, `current_tolerance`, `use_weighted_norm` | Estimação de erro local |
+| `bdf` | `min_order`, `max_order`, `initial_order` | Controle de ordem BDF |
+| `solver` | `order`, `fallback_order`, `direct_config`, `iterative_config` | Stack de solvers lineares |
+| `dc_config` | `strategy`, `homotopy_config`, sub-configs | DC operating point |
+| `stiffness` | `enable`, `switch_integrator`, `stiff_integrator`, thresholds | Detecção e mitigação de stiffness |
+| `fallback` | `enable_transient_gmin`, `gmin_initial`, etc. | Recuperação de divergência |
+
+### Campos depreciados
+
+| Campo | Substituto | Quando some |
+|---|---|---|
+| `adaptive_timestep: bool` | `step_mode: fixed \| variable` | Próximo major |
+| `direct_formulation_fallback: bool` | (sempre on internamente) | Próximo major |
+| `integrator: bdf3 \| bdf4 \| bdf5` | `bdf2` / `trbdf2` / `rosenbrockw` | Próximo major |
+| `integrator: gear` | `bdf2` | Próximo major |
+| `integrator: sdirk2` | `trbdf2` | Próximo major |
+| `simulation.backend`, `simulation.sundials` | use `step_mode` + `formulation` no caminho canônico | Já não é caminho suportado |
+
+Veja [Migration Guide § 8](migration-guide.md#8-numerical-surface--v010--v011)
+para recipes de migração concretos por campo.
 
 ## Solver linear em runtime
 

@@ -49,6 +49,17 @@ struct PmsmParams {
     Real i_q_init     = 0.0;
     Real omega_init   = 0.0;       ///< mechanical (rad/s)
     Real theta_init   = 0.0;       ///< mechanical (rad)
+
+    // Stator-winding thermal model (harden-component-models-vs-psim-plecs
+    // Phase B3). Default `R_th_winding_to_ambient = 0` keeps thermal
+    // model OFF for back-compat. When > 0:
+    //   T_w_ss = T_amb + 1.5·I_s_rms²·R_s(T_w)·R_th_winding_to_ambient
+    // (factor 1.5 captures the 3-phase RMS dissipation across all
+    // three phase windings sharing one effective R_th).
+    Real R_th_winding_to_ambient = 0.0;
+    Real T_amb                   = 25.0;
+    Real R_s_tc                  = 3.93e-3;
+    Real T_ref_winding           = 20.0;
 };
 
 class Pmsm {

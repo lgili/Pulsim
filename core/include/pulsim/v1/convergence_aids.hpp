@@ -9,6 +9,15 @@
 // - 5.3: Pseudo-Transient Continuation - implicit dynamics for DC
 // - 5.4: Robust Initialization - intelligent initial guesses
 // =============================================================================
+//
+// simplify-and-harden-numerical-surface — Phase 1.10: this header is the
+// LEGACY location for the Newton + DC-strategy machinery. New user code
+// SHOULD prefer the canonical `numerical/newton.hpp` and
+// `numerical/dc_strategy.hpp` paths. Opt into a deprecation reminder
+// with `-DPULSIM_WARN_DEPRECATED_HEADERS=1`.
+#if defined(PULSIM_WARN_DEPRECATED_HEADERS) && PULSIM_WARN_DEPRECATED_HEADERS
+#pragma message("pulsim/v1/convergence_aids.hpp is the legacy include path; prefer pulsim/v1/numerical/newton.hpp or pulsim/v1/numerical/dc_strategy.hpp (simplify-and-harden-numerical-surface §1.10)")
+#endif
 
 #include "pulsim/v1/numeric_types.hpp"
 #include "pulsim/v1/solver.hpp"
@@ -637,12 +646,42 @@ private:
 // =============================================================================
 
 /// Strategy selection for DC analysis
+// simplify-and-harden-numerical-surface — Phase 8: the recommended
+// user-facing values are `Auto` (let the orchestrator pick) and
+// `Override` (the orchestrator skips the ladder and runs only the
+// specific strategy named in `DCConvergenceConfig::strategy_override`).
+// The 5 concrete strategies (Direct, GminStepping, SourceStepping,
+// PseudoTransient, Homotopy) remain SUPPORTED — power users who want
+// to force a specific strategy directly via `strategy` still can.
 enum class DCStrategy {
+    // Concrete strategies.
     Direct,             // Direct Newton solve
     GminStepping,       // Use Gmin stepping
     SourceStepping,     // Use source stepping
     PseudoTransient,    // Use pseudo-transient
-    Auto               // Try strategies in order until one works
+    Homotopy,           // simplify-and-harden-numerical-surface — Phase 7.
+                        // Lambda continuation: smoothly turn nonlinear
+                        // devices on from g_off (linear MNA) to full
+                        // nonlinear behavior. Last-resort strategy in
+                        // the `Auto` ladder.
+    Auto,               // Try strategies in order until one works
+
+    // Phase 8 abstract value: skip the ladder and run only the
+    // strategy named in `DCConvergenceConfig::strategy_override`.
+    // Useful for debugging or for power users who know which
+    // strategy their topology needs.
+    Override
+};
+
+/// simplify-and-harden-numerical-surface — Phase 7.
+/// Homotopy continuation configuration. The λ parameter steps from 0
+/// (all nonlinear devices replaced by their linear off-state
+/// conductance — fully linear MNA) to 1 (full nonlinear model). Each
+/// step solves Newton with the previous λ's solution as warm-start.
+struct HomotopyConfig {
+    bool enable = true;
+    int ladder_steps = 5;       ///< Default for Auto / Robust.
+    int max_newton_per_step = 10;
 };
 
 /// DC solver configuration
@@ -652,8 +691,15 @@ struct DCConvergenceConfig {
     SourceSteppingConfig source_config;
     PseudoTransientConfig pseudo_config;
     InitializationConfig init_config;
+    HomotopyConfig homotopy_config;
     bool enable_random_restart = true;
     int max_strategy_attempts = 3;
+
+    // simplify-and-harden-numerical-surface — Phase 8: when
+    // `strategy == DCStrategy::Override`, the orchestrator skips
+    // the Auto ladder and runs only this specific strategy.
+    // Ignored when `strategy != Override`.
+    DCStrategy strategy_override = DCStrategy::Direct;
 };
 
 /// Result of DC analysis with convergence aids
@@ -665,6 +711,10 @@ struct DCAnalysisResult {
     bool success = false;
     std::string message;
     LinearSolverTelemetry linear_solver_telemetry;
+
+    // simplify-and-harden-numerical-surface — Phase 7 telemetry.
+    int homotopy_steps = 0;            ///< Lambda increments executed.
+    bool homotopy_ladder_completed = false;
 };
 
 /// Integrated DC solver with automatic strategy selection
@@ -740,13 +790,32 @@ public:
             result = try_pseudo_transient(x_init, num_nodes, newton, system_func);
             if (result.success) return result;
 
+            // simplify-and-harden-numerical-surface — Phase 7.
+            // Last-resort: homotopy continuation on the nonlinear devices.
+            // Cold-start multilevel converters (NPC, MMC, flying-cap) often
+            // hang at PseudoTransient because the nonlinear residual
+            // landscape has too many local minima; homotopy walks the
+            // solution path continuously from a fully-linear MNA to the
+            // full nonlinear model and is provably convergent.
+            if (config_.homotopy_config.enable && scaled_func) {
+                result = try_homotopy(x_init, scaled_func);
+                if (result.success) return result;
+            }
+
             // Random restart if all strategies fail
             if (config_.enable_random_restart) {
                 result = try_random_restart(num_nodes, num_branches, newton, system_func);
             }
         } else {
-            // Use specified strategy
-            switch (config_.strategy) {
+            // Use specified strategy. simplify-and-harden-numerical-surface
+            // — Phase 8: `Override` redirects to `strategy_override`
+            // (which must name a concrete strategy). Concrete values
+            // dispatch directly.
+            const DCStrategy chosen =
+                (config_.strategy == DCStrategy::Override)
+                    ? config_.strategy_override
+                    : config_.strategy;
+            switch (chosen) {
                 case DCStrategy::Direct:
                     result = try_direct(x_init, newton, system_func);
                     break;
@@ -763,7 +832,23 @@ public:
                 case DCStrategy::PseudoTransient:
                     result = try_pseudo_transient(x_init, num_nodes, newton, system_func);
                     break;
-                default:
+                case DCStrategy::Homotopy:
+                    if (scaled_func) {
+                        result = try_homotopy(x_init, scaled_func);
+                    } else {
+                        result.message =
+                            "Homotopy requires scaled system function";
+                    }
+                    break;
+                case DCStrategy::Auto:
+                case DCStrategy::Override:
+                    // `Override` should have been redirected above; if
+                    // `strategy_override` was itself `Override` or
+                    // `Auto`, fall back to a Direct attempt.
+                    result.message =
+                        "DCStrategy::Override resolved to a non-concrete "
+                        "strategy; falling back to Direct.";
+                    result = try_direct(x_init, newton, system_func);
                     break;
             }
         }
@@ -834,6 +919,83 @@ private:
         result.success = result.newton_result.success();
         result.message = result.success ? "Gmin stepping succeeded" :
                          "Gmin stepping failed: " + result.newton_result.error_message;
+        attach_linear_telemetry(result, newton);
+        return result;
+    }
+
+    /// simplify-and-harden-numerical-surface — Phase 7.
+    /// Homotopy continuation: ramps the `scaled_func` scale parameter
+    /// from 0 to 1 in `homotopy_config.ladder_steps` discrete steps,
+    /// warm-starting Newton at each step from the previous step's
+    /// solution. The contract for `scaled_func` is that `scale = 0`
+    /// produces a fully convergent linear MNA (typically by replacing
+    /// nonlinear device branches with their off-state conductance), and
+    /// `scale = 1` is the full nonlinear model. Power-electronics
+    /// circuits where the only nonlinearities are diode / MOSFET I-V
+    /// curves get the right semantics for free by reusing
+    /// `SourceSteppingConfig::scaled_func`.
+    ///
+    /// This is the strategy of last resort in the `Auto` ladder —
+    /// invoked only after Direct, GminStepping, SourceStepping, and
+    /// PseudoTransient have all failed.
+    DCAnalysisResult try_homotopy(
+        const Vector& x0,
+        ScaledSystemFunction& scaled_func) {
+
+        DCAnalysisResult result;
+        result.strategy_used = DCStrategy::Homotopy;
+
+        NewtonOptions opts;
+        opts.max_iterations = config_.homotopy_config.max_newton_per_step;
+        opts.auto_damping = true;
+        opts.armijo_line_search = true;  // Phase 4 default
+        NewtonRaphsonSolver<LinearPolicy> newton(opts);
+        apply_linear_config(newton);
+
+        const int N = std::max(2, config_.homotopy_config.ladder_steps);
+        Vector x = x0;
+        int total_iters = 0;
+
+        for (int step = 1; step <= N; ++step) {
+            const Real lambda =
+                static_cast<Real>(step) / static_cast<Real>(N);
+
+            auto system = [&](const Vector& xi, Vector& f, SparseMatrix& J) {
+                scaled_func(xi, f, J, lambda);
+            };
+
+            auto step_result = newton.solve(x, system);
+            total_iters += step_result.iterations;
+
+            if (!step_result.success()) {
+                result.newton_result = step_result;
+                result.total_newton_iterations = total_iters;
+                result.homotopy_steps = step - 1;
+                result.homotopy_ladder_completed = false;
+                result.success = false;
+                result.message =
+                    "Homotopy stalled at λ=" + std::to_string(lambda) +
+                    ": " + step_result.error_message;
+                attach_linear_telemetry(result, newton);
+                return result;
+            }
+
+            x = step_result.solution;
+        }
+
+        // Reached λ = 1 successfully.
+        NewtonResult final_result;
+        final_result.solution = x;
+        final_result.status = SolverStatus::Success;
+        final_result.iterations = total_iters;
+
+        result.newton_result = std::move(final_result);
+        result.total_newton_iterations = total_iters;
+        result.homotopy_steps = N;
+        result.homotopy_ladder_completed = true;
+        result.success = true;
+        result.message = "Homotopy continuation succeeded in " +
+                         std::to_string(N) + " λ steps";
         attach_linear_telemetry(result, newton);
         return result;
     }

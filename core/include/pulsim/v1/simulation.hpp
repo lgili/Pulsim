@@ -9,6 +9,8 @@
 #include "pulsim/v1/losses.hpp"
 #include "pulsim/v1/transient_services.hpp"
 #include "pulsim/v1/frequency_analysis.hpp"
+#include "pulsim/v1/numerical/preset.hpp"
+#include "pulsim/v1/numerical/advanced_options.hpp"
 #include "pulsim/simulation_control.hpp"
 
 #include <cstdint>
@@ -103,8 +105,15 @@ struct FallbackPolicyOptions {
 };
 
 struct ModelRegularizationOptions {
-    bool enable_auto = false;
-    bool apply_only_in_recovery = true;
+    // harden-component-models-vs-psim-plecs Phase A6: both defaults
+    // flipped to ON. The per-device-class g_off_min floors below now
+    // apply at the first Newton step (not just on convergence retry),
+    // which masks floating-gate ill-conditioning on MOSFET / IGBT
+    // automatically. Users who need exact `g_off = 1e-12` for
+    // SPICE-parity tests can opt out via
+    // `opts.model_regularization.enable_auto = false`.
+    bool enable_auto = true;
+    bool apply_only_in_recovery = false;
     int retry_threshold = 2;
     int max_escalations = 4;
     Real escalation_factor = 2.0;
@@ -149,6 +158,12 @@ struct BackendTelemetry {
     // PWL commutation time. Reads zero when the first-order scheduler is
     // active or when no step contained a commutation.
     int pwl_event_bisections = 0;
+    // simplify-and-harden-numerical-surface — Phase 5. Counts every step
+    // where the bisection coalesced ≥ 2 simultaneous device commutations
+    // into a single atomic Newton solve. Reads zero on single-event
+    // steps; fires on 3φ inverter synchronous gate edges, MMC submodule
+    // batches, and similar densely-switching topologies.
+    int simultaneous_event_groups = 0;
     int segment_model_cache_hits = 0;
     int segment_model_cache_misses = 0;
     int linear_factor_cache_hits = 0;
@@ -297,7 +312,16 @@ struct SimulationOptions {
     LinearSolverStackConfig linear_solver = LinearSolverStackConfig::defaults();
 
     // Adaptive timestep + LTE
+    //
+    // simplify-and-harden-numerical-surface — Phase 10 (DEPRECATED).
+    // `adaptive_timestep` (bool) is the legacy enable-switch; `step_mode`
+    // (enum) is the canonical replacement. Setting one without the other
+    // can produce inconsistent state. Field-level [[deprecated]] is
+    // deferred to the AdvancedOptions migration (Phase 3) so this PR
+    // doesn't churn every internal use site. The YAML parser already
+    // emits PULSIM_YAML_W_DEPRECATED_FIELD when this key is used.
     bool adaptive_timestep = true;
+
     // Canonical timestep mode selection. When explicitly set through runtime/YAML
     // surfaces, this field defines fixed vs variable semantics.
     TransientStepMode step_mode = TransientStepMode::Variable;
@@ -305,6 +329,12 @@ struct SimulationOptions {
     AdvancedTimestepConfig timestep_config = AdvancedTimestepConfig::for_power_electronics();
     RichardsonLTEConfig lte_config = RichardsonLTEConfig::defaults();
     FormulationMode formulation_mode = FormulationMode::ProjectedWrapper;
+
+    // simplify-and-harden-numerical-surface — Phase 10 (DEPRECATED).
+    // The DAE fallback is now unconditionally on internally — users that
+    // need to disable it should report a bug rather than configure it.
+    // Field-level [[deprecated]] is deferred to the AdvancedOptions
+    // migration (Phase 3); the YAML parser emits a warning at the surface.
     bool direct_formulation_fallback = true;
 
     // Integration method selection
@@ -312,7 +342,16 @@ struct SimulationOptions {
 
     // PWL switching mode default (refactor-pwl-switching-engine, Phase 5).
     // Threads through to Circuit::set_default_switching_mode() at simulator
-    // construction. `Auto` resolves to `Behavioral` for backward compat.
+    // construction. As of v0.11 (simplify-and-harden-numerical-surface,
+    // Phase 11) `Auto` resolves to `Ideal` — the PWL state-space engine
+    // is preferred whenever every switching device declares supports_pwl.
+    //
+    // Users on legacy buck-converter / diode-loss circuits who relied on
+    // the prior Behavioral semantics must opt in:
+    //   opts.switching_mode = SwitchingMode::Behavioral;
+    //
+    // Known PWL Ideal stability gaps on those topologies are tracked in
+    // the follow-up OpenSpec change `harden-pwl-ideal-buck-diode`.
     SwitchingMode switching_mode = SwitchingMode::Auto;
 
     // BDF order control (currently supports order 1/2)
@@ -341,6 +380,23 @@ struct SimulationOptions {
     FallbackPolicyOptions fallback_policy{};
     ModelRegularizationOptions model_regularization{};
 
+    /// SPICE-equivalent baseline node conductance ("gmin floor").
+    ///
+    /// Adds a tiny conductance to ground from every MNA node diagonal
+    /// on every transient step (NOT only as a retry fallback). Prevents
+    /// the floating-node MNA singularity that emerges in switching
+    /// converters during the dead-time interval (e.g. buck where both
+    /// the main switch and the freewheel diode are OFF simultaneously
+    /// — the sw_node has no DC path to ground for that micro-window,
+    /// and the un-regularized solve silently freezes time-dependent
+    /// sources at their t=0 value).
+    ///
+    /// Default `1e-12 S` matches NGSpice / LTspice / HSpice. At
+    /// V_bus = 12 V that leaks `12 pA` per node — orders of magnitude
+    /// below any measurable observable. Set to `0.0` to opt out
+    /// (legacy un-regularized behaviour).
+    Real baseline_node_gmin = 1e-12;
+
     /// Phase 7 of `add-frequency-domain-analysis`: declarative analyses
     /// loaded from the YAML `analysis:` array. The user runs them via the
     /// existing `Simulator::run_ac_sweep` / `Simulator::run_fra` methods,
@@ -360,6 +416,157 @@ struct SimulationOptions {
     /// implicit — any device with `Params::C_oss > 0` is respected as
     /// "user-set" and never mutated.
     AutoParasiticsOptions auto_parasitics{};
+
+    // simplify-and-harden-numerical-surface — Phase 3 MVP.
+    //
+    // Return a reference view over the advanced numerical knobs.
+    // Lets users write `opts.advanced().newton.max_iterations = 100`
+    // for discoverability, while preserving the existing flat-field
+    // path (`opts.newton_options.max_iterations = 100`) for
+    // back-compat. Both forms mutate the same underlying data.
+    //
+    // The full Phase 3 god-class refactor (collapse 28 flat fields
+    // under `opts.advanced.*` + deprecate the top-level aliases) is
+    // a separate PR. This MVP just exposes the namespaced view.
+    [[nodiscard]] AdvancedOptions advanced() noexcept {
+        return AdvancedOptions{
+            newton_options,
+            timestep_config,
+            lte_config,
+            bdf_config,
+            dc_config,
+            stiffness_config,
+            fallback_policy,
+            formulation_mode,
+            linear_solver,
+        };
+    }
+    [[nodiscard]] AdvancedOptionsConst advanced() const noexcept {
+        return AdvancedOptionsConst{
+            newton_options,
+            timestep_config,
+            lte_config,
+            bdf_config,
+            dc_config,
+            stiffness_config,
+            fallback_policy,
+            formulation_mode,
+            linear_solver,
+        };
+    }
+
+    // simplify-and-harden-numerical-surface — Phase 2.
+    //
+    // Static factory that materializes a fully-tuned `SimulationOptions`
+    // from a single `Preset` choice. The 95% case — pick a preset, set
+    // tstop + dt, run.
+    //
+    // The returned struct is a complete numerical configuration: integrator,
+    // linear solver, timestep controller, DC strategy, stiffness policy,
+    // Newton tuning. Users override individual fields ONLY when their
+    // circuit needs something different from the preset's defaults.
+    //
+    // Per-preset materialization tables follow the same field-value
+    // recipes as the previous `make_robust_options(...)` helper in
+    // `python/bindings.cpp` — the difference is that the recipe lives in
+    // the C++ core (header-only, reachable from Python and YAML), not in
+    // the Python binding layer.
+    //
+    // NOTE: `newton_options.num_nodes` and `newton_options.num_branches`
+    // are NOT set here; they are circuit-specific and get populated by
+    // the user code or the `Simulator` constructor.
+    [[nodiscard]] static SimulationOptions from_preset(Preset preset,
+                                                        Real dt,
+                                                        Real tstop) {
+        SimulationOptions opts;
+        opts.tstart = Real{0};
+        opts.tstop  = tstop;
+        opts.dt     = dt;
+
+        switch (preset) {
+            case Preset::Fast: {
+                // Pure-switching topology (buck, boost, full-bridge, basic
+                // 3φ VSI). PWL Ideal switching path, Trapezoidal, KLU,
+                // fixed step. Smallest per-step overhead.
+                opts.switching_mode = SwitchingMode::Ideal;
+                opts.integrator     = Integrator::Trapezoidal;
+                opts.step_mode      = TransientStepMode::Fixed;
+                opts.step_mode_explicit  = true;
+                opts.adaptive_timestep   = false;
+                opts.enable_bdf_order_control = false;
+                opts.stiffness_config.enable = false;
+                opts.max_step_retries        = 2;
+                opts.dt_min = std::max<Real>(1e-12, dt * 1e-3);
+                opts.dt_max = dt;
+                break;
+            }
+
+            case Preset::Auto:
+            case Preset::Robust: {
+                // Motor drives, mixed-domain, magnetics, thermal feedback.
+                // Mirrors `python/bindings.cpp::build_robust_transient_options`
+                // — the long-standing robust profile that's been the de-facto
+                // production default. `Auto` defers to `Robust` today; it
+                // will evolve as the engine improves.
+                opts.integrator         = Integrator::TRBDF2;
+                opts.step_mode          = TransientStepMode::Variable;
+                opts.step_mode_explicit = true;
+                opts.adaptive_timestep  = true;
+
+                opts.timestep_config = AdvancedTimestepConfig::for_power_electronics();
+                opts.timestep_config.dt_initial   = dt;
+                opts.timestep_config.dt_min       = std::max<Real>(1e-10, dt * 1e-2);
+                opts.timestep_config.dt_max       = std::max<Real>(opts.timestep_config.dt_max, dt * 20.0);
+                opts.timestep_config.error_tolerance =
+                    std::max<Real>(opts.timestep_config.error_tolerance, 5e-3);
+
+                opts.lte_config = RichardsonLTEConfig::defaults();
+                opts.lte_config.voltage_tolerance = 5e-3;
+                opts.lte_config.current_tolerance = 1e-4;
+                opts.lte_config.use_weighted_norm = true;
+
+                opts.enable_bdf_order_control     = true;
+                opts.bdf_config.min_order         = 1;
+                opts.bdf_config.max_order         = 2;
+                opts.bdf_config.initial_order     = 1;
+
+                opts.max_step_retries = 12;
+
+                opts.fallback_policy.trace_retries          = true;
+                opts.fallback_policy.enable_transient_gmin  = true;
+                opts.fallback_policy.gmin_retry_threshold   = 1;
+                opts.fallback_policy.gmin_initial           = 1e-8;
+                opts.fallback_policy.gmin_max               = 1e-3;
+                opts.fallback_policy.gmin_growth            = 10.0;
+
+                opts.stiffness_config.enable                       = true;
+                opts.stiffness_config.switch_integrator            = true;
+                opts.stiffness_config.stiff_integrator             = Integrator::BDF1;
+                opts.stiffness_config.rejection_streak_threshold   = 2;
+                opts.stiffness_config.newton_iter_threshold        = 30;
+                opts.stiffness_config.newton_streak_threshold      = 2;
+                opts.stiffness_config.cooldown_steps               = 3;
+                break;
+            }
+
+            case Preset::HighFidelity: {
+                // Parity-validation runs (PLECS / PSIM / SPICE / ngspice).
+                // Inherits `Robust`'s framework and tightens tolerances +
+                // dt_max for bit-comparable waveforms.
+                opts = SimulationOptions::from_preset(Preset::Robust, dt, tstop);
+
+                opts.timestep_config.error_tolerance = 5e-4;     // 10× tighter
+                opts.timestep_config.dt_max          = dt * 2.0; // 10× smaller cap
+
+                opts.lte_config.voltage_tolerance = 5e-4;
+                opts.lte_config.current_tolerance = 1e-5;
+
+                opts.max_step_retries = 24;
+                break;
+            }
+        }
+        return opts;
+    }
 };
 
 struct SimulationResult {

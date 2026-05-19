@@ -276,17 +276,54 @@ public:
         // -- 4. Compute torque from updated stator currents + rotor flux. --
         tau_em_ = motor_.electromagnetic_torque();
 
-        // -- 5. Advance rotor flux (forward Euler) using NEW i_s. --
+        // -- 5. Advance rotor flux using one-iteration trapezoidal
+        //       (Heun's predictor-corrector) instead of forward Euler.
+        //       harden-component-models-vs-psim-plecs Phase A5.
+        //
+        //       The rotor-flux ODE is linear with the αβ cross-coupling
+        //       block `[-k, -ω_e; +ω_e, -k]` where k = R_r / L_r. At
+        //       50 Hz DOL starting (ω_e ≈ 314 rad/s) with dt = 100 µs,
+        //       ω_e·dt ≈ 0.031 rad/step. Forward Euler accumulates a
+        //       phase-lag error of ω_e²·dt/2 ≈ 5 rad/s per step on the
+        //       perpendicular axis — visible as a slow drift in
+        //       |ψ_r| that destabilises high-slip starts.
+        //
+        //       Trapezoidal averages dψ at the start (using current
+        //       ψ_r and i_s) and at the predicted end (using the
+        //       forward-Euler predictor's ψ_r and the same i_s, since
+        //       i_s is already the freshly-solved post-step value).
+        //       Net cost: 4 extra mul + 2 adds per step. No implicit
+        //       solve required because the linear ODE coefficients
+        //       (k, ω_e, R_r·L_m/L_r) are constant over the step.
         const Real l_r = std::max<Real>(p.L_r, Real{1e-30});
         const Real omega_e = motor_.omega_electrical();
-        const Real dpsi_a = -(p.R_r / l_r) * motor_.psi_ra()
-                            + (p.R_r * p.L_m / l_r) * i_sa_new
-                            - omega_e * motor_.psi_rb();
-        const Real dpsi_b = -(p.R_r / l_r) * motor_.psi_rb()
-                            + (p.R_r * p.L_m / l_r) * i_sb_new
-                            + omega_e * motor_.psi_ra();
-        motor_.set_rotor_flux(motor_.psi_ra() + dt * dpsi_a,
-                              motor_.psi_rb() + dt * dpsi_b);
+        const Real k_r = p.R_r / l_r;
+        const Real g_r = p.R_r * p.L_m / l_r;
+
+        const Real psi_ra_old = motor_.psi_ra();
+        const Real psi_rb_old = motor_.psi_rb();
+
+        // Predictor: forward Euler on (ψ_ra, ψ_rb).
+        const Real dpsi_a_old = -k_r * psi_ra_old
+                                + g_r * i_sa_new
+                                - omega_e * psi_rb_old;
+        const Real dpsi_b_old = -k_r * psi_rb_old
+                                + g_r * i_sb_new
+                                + omega_e * psi_ra_old;
+        const Real psi_ra_pred = psi_ra_old + dt * dpsi_a_old;
+        const Real psi_rb_pred = psi_rb_old + dt * dpsi_b_old;
+
+        // Corrector: dψ at the predicted endpoint.
+        const Real dpsi_a_new = -k_r * psi_ra_pred
+                                + g_r * i_sa_new
+                                - omega_e * psi_rb_pred;
+        const Real dpsi_b_new = -k_r * psi_rb_pred
+                                + g_r * i_sb_new
+                                + omega_e * psi_ra_pred;
+
+        motor_.set_rotor_flux(
+            psi_ra_old + Real{0.5} * dt * (dpsi_a_old + dpsi_a_new),
+            psi_rb_old + Real{0.5} * dt * (dpsi_b_old + dpsi_b_new));
 
         // -- 6. Mechanical forward-Euler step. --
         const Real omega_speed = motor_.omega_m();

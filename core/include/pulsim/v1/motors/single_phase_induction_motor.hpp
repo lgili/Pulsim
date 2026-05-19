@@ -78,6 +78,13 @@ struct SinglePhaseInductionMotorParams {
     Real J = 1e-4;                ///< kg·m² — rotor + shaft inertia
     Real b_friction = 1e-4;       ///< N·m·s — viscous friction
     Real friction_coulomb = 0.05; ///< N·m — Coulomb friction
+
+    // Winding thermal model (harden-component-models-vs-psim-plecs
+    // Phase B3). Default 0 keeps thermal model OFF for back-compat.
+    Real R_th_winding_to_ambient = 0.0;
+    Real T_amb                   = 25.0;
+    Real R_s_tc                  = 3.93e-3;
+    Real T_ref_winding           = 20.0;
 };
 
 class SinglePhaseInductionMotor {
@@ -126,15 +133,22 @@ public:
                                 Lm_over_Lr * dpsi_rb_dt) /
                                 params_.L_s_aux;
 
-        // Capacitor voltage derivative.
-        const Real dV_cap_dt = i_aux_ / params_.C_run;
-
-        // Forward-Euler advance of all state.
+        // Forward-Euler advance of stator currents and rotor flux. The
+        // capacitor voltage gets trapezoidal treatment below
+        // (harden-component-models-vs-psim-plecs Phase A5) — see the
+        // device-wrapper analogue in
+        // `components/single_phase_induction_motor_device.hpp`.
+        const Real i_aux_prev = i_aux_;
         psi_ra_ += dt * dpsi_ra_dt;
         psi_rb_ += dt * dpsi_rb_dt;
         i_main_ += dt * di_main_dt;
         i_aux_  += dt * di_aux_dt;
-        V_cap_  += dt * dV_cap_dt;
+
+        // Trapezoidal cap update: V_cap_new = V_cap + 0.5·dt·(i_aux_old +
+        // i_aux_new)/C_run. Removes the half-step lag that the previous
+        // forward-Euler form (`V_cap += dt·i_aux/C_run`) introduced in
+        // the run-cap starting transient at dt = 100 µs.
+        V_cap_ += Real{0.5} * dt * (i_aux_prev + i_aux_) / params_.C_run;
 
         // Torque + mechanical advance.
         const Real p = static_cast<Real>(params_.pole_pairs);

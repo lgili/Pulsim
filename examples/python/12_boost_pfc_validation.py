@@ -143,14 +143,12 @@ c.add_resistor("R_load", n_bus, gnd, load)
 # =============================================================================
 # Simulate (3 line cycles)
 # =============================================================================
-opts = ps.SimulationOptions()
-opts.tstart = 0.0; opts.tstop = 20e-3            # 1 line cycle plenty for SS check
-opts.dt = 100e-9                                  # 100 ns ≈ 100 samples / sw cycle
-opts.dt_min = 1e-9; opts.dt_max = 200e-9
-opts.adaptive_timestep = True
-opts.enable_bdf_order_control = True
-opts.enable_events = True
-opts.enable_losses = True
+# simplify-and-harden-numerical-surface — Phase 2 + 14.8: PFC boost +
+# active controller → Preset.Robust.
+opts = ps.SimulationOptions.from_preset(ps.Preset.Robust,
+                                          dt=100e-9, tstop=20e-3)
+opts.dt_min = 1e-9
+opts.dt_max = 200e-9
 # NOTE: opts.switching_mode left at Auto — backend auto-promotes when
 # the MOSFET opts into PWL Ideal mode (Eon_25 > 0). This is the
 # `8ba749f` backend fix.

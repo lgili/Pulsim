@@ -30,15 +30,14 @@ def simulate_topology(exp, label: str, *, tstop: float = 1e-3, dt: float = 1e-7)
     exp.circuit.set_pwl_state("Q1", False)
     exp.circuit.set_pwl_state("D1", False)
 
-    opts = pulsim.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = tstop
-    opts.dt = dt
+    # simplify-and-harden-numerical-surface — Phase 2 + 14.8: Preset.Fast
+    # gives PWL Ideal + Trapezoidal + fixed step — the historical buck/
+    # boost/buckboost recipe. Override only `integrator` for the BDF1
+    # stiffness fallback this example exercises.
+    opts = pulsim.SimulationOptions.from_preset(pulsim.Preset.Fast,
+                                                 dt=dt, tstop=tstop)
     opts.dt_min = 1e-12
-    opts.dt_max = dt
-    opts.adaptive_timestep = False
     opts.integrator = pulsim.Integrator.BDF1
-    opts.switching_mode = pulsim.SwitchingMode.Ideal
     opts.newton_options.num_nodes = exp.circuit.num_nodes()
     opts.newton_options.num_branches = exp.circuit.num_branches()
 

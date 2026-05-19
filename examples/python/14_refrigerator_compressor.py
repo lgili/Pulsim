@@ -82,15 +82,17 @@ def print_analytical(ckt: ps.Circuit) -> None:
 
 
 def run_transient(ckt: ps.Circuit) -> None:
-    opts = ps.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = 0.20  # 12 line cycles at 60 Hz
-    opts.dt = 5e-5
-    opts.dt_min = 1e-9
-    opts.dt_max = 5e-5
-    opts.adaptive_timestep = False
-    opts.enable_bdf_order_control = False
-    opts.newton_options.num_nodes = ckt.num_nodes()
+    # simplify-and-harden-numerical-surface — Phase 2 + Phase 14:
+    # use the canonical `from_preset(...)` factory instead of the
+    # legacy hand-tune-fields path. `Preset.Fast` is the right pick
+    # for this fixed-frequency 60 Hz PSC motor — no high-stiffness
+    # dynamics, no nonlinear devices, so the Robust profile would add
+    # overhead this circuit doesn't need. See
+    # docs/numerical-configuration.md for the preset chooser.
+    opts = ps.SimulationOptions.from_preset(ps.Preset.Fast,
+                                              dt=5e-5,
+                                              tstop=0.20)  # 12 line cycles
+    opts.newton_options.num_nodes    = ckt.num_nodes()
     opts.newton_options.num_branches = ckt.num_branches()
 
     sim = ps.Simulator(ckt, opts)

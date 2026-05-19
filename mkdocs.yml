@@ -119,6 +119,7 @@ nav:
   - Guides:
       - Examples and Results: examples-and-results.md
       - Notebooks: notebooks.md
+      - Numerical Configuration: numerical-configuration.md
       - AC Analysis: ac-analysis.md
       - Frequency Response Analysis (FRA): fra.md
       - Electrothermal Workflow: electrothermal-workflow.md
@@ -128,6 +129,7 @@ nav:
       - FMI Export: fmi-export.md
       - Automatic Differentiation: automatic-differentiation.md
       - PWL Switching Engine: pwl-switching-migration.md
+      - Component Models Audit: component-models-audit.md
       - Convergence Tuning: convergence-tuning-guide.md
       - Linear-Solver Cache: linear-solver-cache.md
       - Robustness Policy: robustness-policy.md
@@ -136,6 +138,7 @@ nav:
       - Magnetic Models: magnetic-models.md
       - Motor Models: motor-models.md
       - Compressor + Refrigerant Load: compressor-and-refrigerant-load.md
+      - Multilevel Converters: multilevel-converters.md
       - Three-Phase Grid Library: three-phase-grid.md
       - Catalog Devices: catalog-devices.md
       - Converter Templates: converter-templates.md

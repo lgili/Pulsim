@@ -219,12 +219,30 @@ void init_v2_module(py::module_& v2) {
         .value("Diverging", SolverStatus::Diverging)
         .export_values();
 
-    py::enum_<DCStrategy>(v2, "DCStrategy", "DC analysis convergence strategy")
-        .value("Direct", DCStrategy::Direct)
-        .value("GminStepping", DCStrategy::GminStepping)
-        .value("SourceStepping", DCStrategy::SourceStepping)
+    py::enum_<DCStrategy>(v2, "DCStrategy",
+            "DC analysis convergence strategy. Recommended values: "
+            "`Auto` (orchestrates the full ladder) and `Override` "
+            "(skip the ladder and run only `strategy_override`). The "
+            "5 concrete strategies below stay supported for power "
+            "users and internal callers.")
+        .value("Auto",            DCStrategy::Auto,
+               "Try Direct → SourceStepping → GminStepping → "
+               "PseudoTransient → Homotopy in order until one succeeds.")
+        .value("Override",        DCStrategy::Override,
+               "Skip the Auto ladder and run only "
+               "`DCConvergenceConfig::strategy_override`. Useful for "
+               "debugging or for power users who know which strategy "
+               "their topology needs.")
+        // Concrete strategies.
+        .value("Direct",          DCStrategy::Direct)
+        .value("GminStepping",    DCStrategy::GminStepping)
+        .value("SourceStepping",  DCStrategy::SourceStepping)
         .value("PseudoTransient", DCStrategy::PseudoTransient)
-        .value("Auto", DCStrategy::Auto)
+        .value("Homotopy",        DCStrategy::Homotopy,
+               "simplify-and-harden-numerical-surface — Phase 7. Lambda "
+               "continuation: smoothly turns nonlinear devices on from "
+               "g_off (linear MNA) to full nonlinear behavior. Last-resort "
+               "in the Auto ladder.")
         .export_values();
 
     py::enum_<RLCDamping>(v2, "RLCDamping", "RLC circuit damping type")
@@ -2292,15 +2310,38 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("max_current_step", &NewtonOptions::max_current_step,
             "Max current change per iteration [A] (default: 10.0)")
         .def_readwrite("enable_limiting", &NewtonOptions::enable_limiting,
-            "Enable voltage/current limiting (default: True)");
+            "Enable voltage/current limiting (default: True)")
+        // simplify-and-harden-numerical-surface — Phase 4: Armijo line search.
+        .def_readwrite("armijo_line_search", &NewtonOptions::armijo_line_search,
+            "Use Armijo descent condition ||f(x+α·dx)|| ≤ (1−σ·α)·||f(x)|| "
+            "in the inner backtracking line search (default: True). When "
+            "False, falls back to the legacy 'any reduction' criterion.")
+        .def_readwrite("armijo_sigma", &NewtonOptions::armijo_sigma,
+            "Armijo constant σ (default: 1e-4). Tighter values (smaller σ) "
+            "accept Newton steps more aggressively; larger values backtrack "
+            "more often. Standard textbook value is 1e-4.");
 
-    py::enum_<LinearSolverKind>(v2, "LinearSolverKind", "Linear solver types")
-        .value("SparseLU", LinearSolverKind::SparseLU)
+    py::enum_<LinearSolverKind>(v2, "LinearSolverKind",
+            "Linear solver kind. Recommended values: `Auto`, `Direct`, "
+            "`Iterative` (Phase 8 — auto-selector resolves to a concrete "
+            "engine by system size). The 6 concrete engines below stay "
+            "supported for power users and internal callers.")
+        // Phase 8 abstract values (recommended user surface).
+        .value("Auto",      LinearSolverKind::Auto,
+               "Let the runtime pick Direct or Iterative by system size "
+               "(< 5000 unknowns → Direct, else Iterative).")
+        .value("Direct",    LinearSolverKind::Direct,
+               "Force a direct sparse-LU style solver (KLU when available, "
+               "else EnhancedSparseLU / SparseLU).")
+        .value("Iterative", LinearSolverKind::Iterative,
+               "Force an iterative Krylov solver (GMRES preferred).")
+        // Concrete engines.
+        .value("SparseLU",         LinearSolverKind::SparseLU)
         .value("EnhancedSparseLU", LinearSolverKind::EnhancedSparseLU)
-        .value("KLU", LinearSolverKind::KLU)
-        .value("GMRES", LinearSolverKind::GMRES)
-        .value("BiCGSTAB", LinearSolverKind::BiCGSTAB)
-        .value("CG", LinearSolverKind::CG)
+        .value("KLU",              LinearSolverKind::KLU)
+        .value("GMRES",            LinearSolverKind::GMRES)
+        .value("BiCGSTAB",         LinearSolverKind::BiCGSTAB)
+        .value("CG",               LinearSolverKind::CG)
         .export_values();
 
     py::enum_<IterativeSolverConfig::PreconditionerKind>(v2, "PreconditionerKind",
@@ -2325,6 +2366,19 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("ilut_fill_factor", &IterativeSolverConfig::ilut_fill_factor)
         .def_static("defaults", &IterativeSolverConfig::defaults);
 
+    // simplify-and-harden-numerical-surface — Phase 8.3.
+    py::enum_<SolverQuality>(v2, "SolverQuality",
+            "Friendly preconditioner selector. Fast → no precond; "
+            "Default → ILU0 (production sweet spot); Best → ILUT "
+            "(heavier setup, better convergence on ill-conditioned "
+            "systems). Replaces the leaky PreconditionerKind enum "
+            "in user-facing API; the full 5-value enum stays available "
+            "for power users.")
+        .value("Fast",    SolverQuality::Fast)
+        .value("Default", SolverQuality::Default)
+        .value("Best",    SolverQuality::Best)
+        .export_values();
+
     py::class_<LinearSolverStackConfig>(v2, "LinearSolverStackConfig",
         "Runtime linear solver stack configuration")
         .def(py::init<>())
@@ -2337,6 +2391,15 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("size_threshold", &LinearSolverStackConfig::size_threshold)
         .def_readwrite("nnz_threshold", &LinearSolverStackConfig::nnz_threshold)
         .def_readwrite("diag_min_threshold", &LinearSolverStackConfig::diag_min_threshold)
+        // simplify-and-harden-numerical-surface — Phase 8.3.
+        .def_readwrite("solver_quality", &LinearSolverStackConfig::solver_quality,
+            "Friendly preconditioner selector (Fast / Default / Best). "
+            "Call `apply_solver_quality()` after changing to push the "
+            "value into `iterative_config.preconditioner`.")
+        .def("apply_solver_quality",
+             &LinearSolverStackConfig::apply_solver_quality,
+             "Resolve `solver_quality` to the underlying "
+             "iterative_config.preconditioner.")
         .def_static("defaults", &LinearSolverStackConfig::defaults);
 
     // =========================================================================
@@ -2527,8 +2590,34 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("source_config", &DCConvergenceConfig::source_config)
         .def_readwrite("pseudo_config", &DCConvergenceConfig::pseudo_config)
         .def_readwrite("init_config", &DCConvergenceConfig::init_config)
+        // simplify-and-harden-numerical-surface — Phase 7: homotopy.
+        .def_readwrite("homotopy_config", &DCConvergenceConfig::homotopy_config,
+            "Homotopy continuation config. Enabled by default in the "
+            "Auto ladder; tune ladder_steps (default 5) and "
+            "max_newton_per_step (default 10).")
         .def_readwrite("enable_random_restart", &DCConvergenceConfig::enable_random_restart)
-        .def_readwrite("max_strategy_attempts", &DCConvergenceConfig::max_strategy_attempts);
+        .def_readwrite("max_strategy_attempts", &DCConvergenceConfig::max_strategy_attempts)
+        // simplify-and-harden-numerical-surface — Phase 8.
+        .def_readwrite("strategy_override", &DCConvergenceConfig::strategy_override,
+            "When `strategy == DCStrategy.Override`, the orchestrator "
+            "skips the Auto ladder and runs only this specific concrete "
+            "strategy. Defaults to DCStrategy.Direct.");
+
+    // simplify-and-harden-numerical-surface — Phase 7: HomotopyConfig.
+    py::class_<HomotopyConfig>(v2, "HomotopyConfig",
+            "Homotopy continuation configuration for DC operating point. "
+            "Lambda steps from 0 (linear MNA, all nonlinear devices "
+            "replaced by their g_off conductance) to 1 (full nonlinear "
+            "model). Each step solves Newton warm-started from the "
+            "previous step.")
+        .def(py::init<>())
+        .def_readwrite("enable", &HomotopyConfig::enable,
+            "Enable homotopy as the 5th strategy in the Auto ladder "
+            "(default True).")
+        .def_readwrite("ladder_steps", &HomotopyConfig::ladder_steps,
+            "Number of lambda increments (default 5; HighFidelity uses 10).")
+        .def_readwrite("max_newton_per_step", &HomotopyConfig::max_newton_per_step,
+            "Max Newton iterations at each lambda step (default 10).");
 
     py::class_<DCAnalysisResult>(v2, "DCAnalysisResult", "DC analysis result")
         .def(py::init<>())
@@ -2537,7 +2626,38 @@ void init_v2_module(py::module_& v2) {
         .def_readonly("random_restarts", &DCAnalysisResult::random_restarts)
         .def_readonly("total_newton_iterations", &DCAnalysisResult::total_newton_iterations)
         .def_readonly("success", &DCAnalysisResult::success)
-        .def_readonly("message", &DCAnalysisResult::message);
+        .def_readonly("message", &DCAnalysisResult::message)
+        // simplify-and-harden-numerical-surface — Phase 7 telemetry.
+        .def_readonly("homotopy_steps", &DCAnalysisResult::homotopy_steps,
+            "Number of lambda increments executed (0 if homotopy was "
+            "not invoked).")
+        .def_readonly("homotopy_ladder_completed",
+                       &DCAnalysisResult::homotopy_ladder_completed,
+            "True if homotopy reached lambda=1 successfully; False if it "
+            "stalled partway.");
+
+    // simplify-and-harden-numerical-surface — Phase 2: numerical preset.
+    py::enum_<Preset>(v2, "Preset",
+            "Numerical configuration preset — single named choice that "
+            "materializes every numerical knob (integrator, linear solver, "
+            "timestep controller, DC strategy, stiffness, Newton tuning) "
+            "into a coherent profile. 95% of users should pick one of "
+            "these and override individual fields only where their circuit "
+            "genuinely differs.")
+        .value("Auto",         Preset::Auto,
+               "Default — currently maps to Robust. Tracks the production "
+               "recommendation as the engine evolves.")
+        .value("Fast",         Preset::Fast,
+               "Pure-switching topologies (buck, boost, full-bridge, basic "
+               "3φ VSI). PWL Ideal + Trapezoidal + KLU + fixed step.")
+        .value("Robust",       Preset::Robust,
+               "Motor drives, mixed-domain, magnetics, thermal feedback. "
+               "TRBDF2 + KLU + variable step + stiffness + 12-step retries.")
+        .value("HighFidelity", Preset::HighFidelity,
+               "Parity validation (vs PLECS / PSIM / SPICE). TRBDF2 + tight "
+               "LTE + small dt_max for bit-comparable waveforms. 3-10× "
+               "slower than Robust.")
+        .export_values();
 
     py::enum_<Integrator>(v2, "Integrator", "Transient integration method")
         .value("Trapezoidal", Integrator::Trapezoidal)
@@ -2651,7 +2771,14 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("last_factorize_time_seconds", &LinearSolverTelemetry::last_factorize_time_seconds)
         .def_readwrite("last_solve_time_seconds", &LinearSolverTelemetry::last_solve_time_seconds)
         .def_readwrite("last_solver", &LinearSolverTelemetry::last_solver)
-        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner);
+        .def_readwrite("last_preconditioner", &LinearSolverTelemetry::last_preconditioner)
+        // simplify-and-harden-numerical-surface — Phase 6 telemetry.
+        .def_readwrite("linear_refinement_steps",
+                       &LinearSolverTelemetry::linear_refinement_steps,
+            "Count of times the post-solve residual exceeded "
+            "10·epsilon_machine and one round of iterative refinement "
+            "was applied (Phase 6). Zero on well-conditioned MNA; fires "
+            "on multilevel converters with dense floating-cap loops.");
 
     py::enum_<SimulationEventType>(v2, "SimulationEventType", "Simulation event kind")
         .value("SwitchOn", SimulationEventType::SwitchOn)
@@ -2775,6 +2902,14 @@ void init_v2_module(py::module_& v2) {
                         "linear-interpolation bisection on x_prev→x_now to refine "
                         "the PWL commutation time within `event_tolerance`. "
                         "Reads zero when no step contained a commutation.")
+        // simplify-and-harden-numerical-surface — Phase 5 telemetry.
+        .def_readwrite("simultaneous_event_groups",
+                        &BackendTelemetry::simultaneous_event_groups,
+                        "Phase 5 telemetry: count of steps where ≥ 2 PWL "
+                        "device commutations were coalesced into a single "
+                        "atomic Newton solve (3φ inverter synchronous gate "
+                        "edges, MMC submodule batches, etc.). Reads zero "
+                        "on single-event steps.")
         .def_readwrite("segment_model_cache_hits", &BackendTelemetry::segment_model_cache_hits)
         .def_readwrite("segment_model_cache_misses", &BackendTelemetry::segment_model_cache_misses)
         .def_readwrite("linear_factor_cache_hits", &BackendTelemetry::linear_factor_cache_hits)
@@ -2860,8 +2995,90 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("peak_temperature", &ComponentElectrothermalTelemetry::peak_temperature)
         .def_readwrite("average_temperature", &ComponentElectrothermalTelemetry::average_temperature);
 
+    // simplify-and-harden-numerical-surface — Phase 3 MVP.
+    // Reference view over the advanced numerical knobs. Returned by
+    // `SimulationOptions.advanced()`. Each field is a reference into
+    // the underlying SimulationOptions — mutating through the view
+    // mutates the original (and vice versa).
+    py::class_<AdvancedOptions>(v2, "AdvancedOptions",
+        "Reference view over the advanced numerical knobs of a "
+        "SimulationOptions. Returned by SimulationOptions.advanced(). "
+        "Mutating through this view mutates the underlying "
+        "SimulationOptions; the flat-field path (opts.newton_options, "
+        "etc.) keeps working and mutates the same data.")
+        // pybind11 cannot take pointer-to-reference-member, so the
+        // sub-fields are exposed as get/set property lambdas. Each
+        // getter returns a reference into the underlying
+        // SimulationOptions; each setter copy-assigns through that
+        // reference.
+        .def_property("newton",
+            [](AdvancedOptions& s) -> NewtonOptions& { return s.newton; },
+            [](AdvancedOptions& s, const NewtonOptions& v) { s.newton = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("timestep",
+            [](AdvancedOptions& s) -> AdvancedTimestepConfig& { return s.timestep; },
+            [](AdvancedOptions& s, const AdvancedTimestepConfig& v) { s.timestep = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("lte",
+            [](AdvancedOptions& s) -> RichardsonLTEConfig& { return s.lte; },
+            [](AdvancedOptions& s, const RichardsonLTEConfig& v) { s.lte = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("bdf_order",
+            [](AdvancedOptions& s) -> BDFOrderConfig& { return s.bdf_order; },
+            [](AdvancedOptions& s, const BDFOrderConfig& v) { s.bdf_order = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("dc",
+            [](AdvancedOptions& s) -> DCConvergenceConfig& { return s.dc; },
+            [](AdvancedOptions& s, const DCConvergenceConfig& v) { s.dc = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("stiffness",
+            [](AdvancedOptions& s) -> StiffnessConfig& { return s.stiffness; },
+            [](AdvancedOptions& s, const StiffnessConfig& v) { s.stiffness = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("fallback",
+            [](AdvancedOptions& s) -> FallbackPolicyOptions& { return s.fallback; },
+            [](AdvancedOptions& s, const FallbackPolicyOptions& v) { s.fallback = v; },
+            py::return_value_policy::reference_internal)
+        .def_property("formulation",
+            [](AdvancedOptions& s) { return s.formulation; },
+            [](AdvancedOptions& s, FormulationMode v) { s.formulation = v; })
+        .def_property("linear_solver",
+            [](AdvancedOptions& s) -> LinearSolverStackConfig& { return s.linear_solver; },
+            [](AdvancedOptions& s, const LinearSolverStackConfig& v) { s.linear_solver = v; },
+            py::return_value_policy::reference_internal);
+
     py::class_<SimulationOptions>(v2, "SimulationOptions", "Full transient simulation options")
         .def(py::init<>())
+        // simplify-and-harden-numerical-surface — Phase 2: canonical entry
+        // point. `SimulationOptions.from_preset(Preset.Auto, dt, tstop)`
+        // replaces the hand-tune-50-fields path with a single named choice.
+        // Override individual fields after construction only where your
+        // circuit genuinely differs from the preset.
+        .def_static("from_preset", &SimulationOptions::from_preset,
+                    py::arg("preset"), py::arg("dt"), py::arg("tstop"),
+                    "Build a SimulationOptions instance from a numerical "
+                    "preset. Returns a fully-tuned configuration covering "
+                    "integrator, linear solver, timestep controller, DC "
+                    "strategy, stiffness, and Newton tuning. The user "
+                    "supplies only `dt` and `tstop`; everything else comes "
+                    "from the preset's tuned recipe.")
+        // simplify-and-harden-numerical-surface — Phase 3 MVP:
+        // `opts.advanced()` returns a view exposing the advanced
+        // numerical knobs under their friendly names. The flat-field
+        // path (`opts.newton_options`, etc.) keeps working — both
+        // forms mutate the same data. The full god-class refactor
+        // (collapse the 28 flat fields + deprecate the aliases) is
+        // a separate PR.
+        .def("advanced",
+             py::overload_cast<>(&SimulationOptions::advanced),
+             py::return_value_policy::reference_internal,
+             "Reference view over the advanced numerical knobs "
+             "(newton, timestep, lte, bdf_order, dc, stiffness, "
+             "fallback, formulation, linear_solver). Lets users "
+             "write `opts.advanced().newton.max_iterations = 100` "
+             "for discoverability; the flat-field path "
+             "(`opts.newton_options.max_iterations = 100`) keeps "
+             "working and mutates the same underlying data.")
         .def_readwrite("tstart", &SimulationOptions::tstart)
         .def_readwrite("tstop", &SimulationOptions::tstop)
         .def_readwrite("dt", &SimulationOptions::dt)
@@ -2913,6 +3130,13 @@ void init_v2_module(py::module_& v2) {
         .def_readwrite("thermal", &SimulationOptions::thermal)
         .def_readwrite("thermal_devices", &SimulationOptions::thermal_devices)
         .def_readwrite("gmin_fallback", &SimulationOptions::gmin_fallback)
+        .def_readwrite("baseline_node_gmin", &SimulationOptions::baseline_node_gmin,
+                       "SPICE-equivalent baseline node conductance (S) applied to "
+                       "every MNA node diagonal on every transient step. Prevents "
+                       "the floating-node singularity that emerges in switching "
+                       "converters during dead-time (e.g. buck where both switch "
+                       "and freewheel diode are OFF). Default 1e-12 — matches "
+                       "NGSpice/LTspice. Set to 0.0 to opt out of the gmin floor.")
         .def_readwrite("max_step_retries", &SimulationOptions::max_step_retries)
         .def_readwrite("fallback_policy", &SimulationOptions::fallback_policy)
         .def_readwrite("model_regularization", &SimulationOptions::model_regularization)

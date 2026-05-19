@@ -153,14 +153,20 @@ TEST_CASE("PWL segment-primary handles switching device in Ideal mode",
 }
 
 // -----------------------------------------------------------------------------
-// Default Auto mode resolves to Behavioral → DAE fallback (regression guard)
+// Explicit Behavioral mode → DAE fallback (regression guard)
 // -----------------------------------------------------------------------------
+//
+// simplify-and-harden-numerical-surface §11 (v0.11): the default Auto
+// resolution flipped from Behavioral → Ideal. To preserve the "DAE-fallback
+// is reachable" regression contract, this test now pins Behavioral
+// explicitly; the prior default-Auto coverage is delivered by the
+// "PWL segment-primary engages with Ideal default" Phase 11 contract.
 
-TEST_CASE("PWL segment-primary stays inactive when devices are in Auto/Behavioral mode",
+TEST_CASE("PWL segment-primary stays inactive when devices are in Behavioral mode",
           "[v1][pwl][phase3][backward_compat]") {
-    // Same circuit as the previous test, but leave SwitchingMode at default
-    // (Auto → Behavioral). The segment engine must refuse admissibility and
-    // the run should complete via the legacy DAE Newton path.
+    // Same circuit as the previous test, but pin Behavioral explicitly.
+    // The segment engine must refuse admissibility and the run should
+    // complete via the legacy DAE Newton path.
     Circuit ckt;
     auto in = ckt.add_node("in");
     auto mid = ckt.add_node("mid");
@@ -170,7 +176,9 @@ TEST_CASE("PWL segment-primary stays inactive when devices are in Auto/Behaviora
     ckt.add_switch("SW1", in, mid, /*closed=*/true, 1e6, 1e-12);
     ckt.add_resistor("R1", mid, out, 1e3);
     ckt.add_capacitor("C1", out, Circuit::ground(), 1e-6, 0.0);
-    // Note: no `set_switching_mode_for_all` — default Auto → Behavioral.
+    // Phase 11 (v0.11): default Auto now resolves to Ideal. Pin Behavioral
+    // to exercise the legacy DAE fallback path that this regression guards.
+    ckt.set_default_switching_mode(SwitchingMode::Behavioral);
 
     SimulationOptions opts;
     opts.tstart = 0.0;
@@ -183,6 +191,7 @@ TEST_CASE("PWL segment-primary stays inactive when devices are in Auto/Behaviora
     // BDF1 keeps solve_step on the segment-primary lambda path so we can
     // observe the admissibility refusal via segment_non_admissible_steps.
     opts.integrator = Integrator::BDF1;
+    opts.switching_mode = SwitchingMode::Behavioral;
     opts.newton_options.num_nodes = ckt.num_nodes();
     opts.newton_options.num_branches = ckt.num_branches();
 

@@ -57,15 +57,16 @@ def main() -> None:
     exp.circuit.set_pwl_state("Q1", False)
     exp.circuit.set_pwl_state("D1", False)
 
-    opts = pulsim.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = 1e-3
-    opts.dt = 1e-7
+    # simplify-and-harden-numerical-surface — Phase 2 + 14.8: use the
+    # canonical `from_preset(...)` factory. `Preset.Fast` is the right
+    # pick for a pure-switching buck converter (PWL Ideal + Trapezoidal +
+    # fixed step) — same defaults as the legacy hand-tuned profile below.
+    opts = pulsim.SimulationOptions.from_preset(pulsim.Preset.Fast,
+                                                 dt=1e-7, tstop=1e-3)
+    # Override only the per-circuit fields that genuinely differ from the
+    # Fast preset's defaults.
     opts.dt_min = 1e-12
-    opts.dt_max = 1e-7
-    opts.adaptive_timestep = False
-    opts.integrator = pulsim.Integrator.BDF1
-    opts.switching_mode = pulsim.SwitchingMode.Ideal
+    opts.integrator = pulsim.Integrator.BDF1   # BDF1 stiffness fallback
     opts.newton_options.num_nodes = exp.circuit.num_nodes()
     opts.newton_options.num_branches = exp.circuit.num_branches()
 

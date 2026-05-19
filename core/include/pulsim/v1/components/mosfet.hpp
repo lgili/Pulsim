@@ -87,6 +87,49 @@ public:
         // doesn't ring at PWM edges. Default 0 keeps legacy circuits
         // unchanged. Typical values: 10 nF–100 nF for boost/buck dt~1µs.
         Scalar C_oss     = 0.0;       // F
+
+        // Gate-row Jacobian anchor (harden-component-models-vs-psim-plecs
+        // Phase A2). The MOSFET device only stamps the drain and source
+        // rows of the MNA matrix, so when the gate node has no other
+        // attached devices (floating gate during DC OP, ESD diode chain
+        // not yet stamped, simplified test rigs) the gate row is all-zero
+        // and the system is singular. `g_gate_leak` stamps a tiny
+        // resistive path from gate to ground on the Jacobian DIAGONAL
+        // only (the residual stays zero — the leak does not contribute
+        // any current term, just regularises the linear solve). At
+        // 1 nS the gate sits within a few microvolts of 0 for any real
+        // gate drive, so the device behaviour in normal use is unchanged;
+        // the value mirrors the SPICE GMIN default. Set to 0 to opt
+        // back into the old "singular row" behaviour for SPICE-parity
+        // testing — but doing so puts the burden of an external R_g on
+        // the user.
+        Scalar g_gate_leak = 1e-9;    // S
+
+        // Body diode (harden-component-models-vs-psim-plecs Phase B1).
+        // Every real power MOSFET has an intrinsic antiparallel diode
+        // between source (anode) and drain (cathode). When the device
+        // is reverse-biased on the channel (V_sd > V_F0), this diode
+        // conducts — the synchronous-rectification dead-time path that
+        // PSIM/PLECS model out of the box.
+        //
+        // Stamped in the smooth-blend / AD / Ideal Jacobian paths
+        // when `body_diode_enable = true`. The diode current is
+        //   i_bd = α_bd · (V_sd − V_F0) / R_d + (1 − α_bd) · V_sd · g_off
+        // with α_bd = sigmoid(κ · (V_sd − V_F0)), so the transition is
+        // smooth for Newton convergence. The diode current is SUBTRACTED
+        // from the channel current id (opposite reference direction).
+        //
+        // OFF by default for back-compat: existing tests that pin
+        // V_drain to negative values (e.g., −V_dc during a synchronous
+        // buck dead-time) currently expect the FET in pure cutoff with
+        // no clamp. Setting `body_diode_enable = true` clamps V_drain
+        // to V_source − V_F0 in those cases, which is the realistic
+        // behaviour — a future change can flip the default once the
+        // FET test fleet has been audited.
+        bool   body_diode_enable = false;
+        Scalar body_diode_V_F0   = 0.8;     // forward drop (V)
+        Scalar body_diode_R_d    = 25e-3;   // forward slope (Ω)
+        Scalar body_diode_g_off  = 1e-9;    // reverse leakage (S)
     };
 
     explicit MOSFET(std::string name = "")
@@ -457,7 +500,37 @@ public:
 
         // Plus cutoff leakage (small, applies in all regions).
         const S id = id_ch + params_.g_off * vds;
-        return sign * id;
+
+        // Body diode (harden-component-models-vs-psim-plecs Phase B1).
+        // Anode = source, cathode = drain. Forward-biased when V_sd > V_F0.
+        //
+        //   V_sd  = v_s − v_d         (UNSIGNED — independent of NMOS/PMOS)
+        //   α_bd  = sigmoid(κ · (V_sd − V_F0))
+        //   i_bd  = α_bd · (V_sd − V_F0) / R_d + (1 − α_bd) · V_sd · g_off
+        //
+        // Norton-shift form mirroring `ideal_diode.hpp`. Returned current
+        // is the drain-to-source channel current MINUS the body-diode
+        // current (the diode flows in the opposite reference direction,
+        // source → drain). The PMOS sign-fold is applied to the channel
+        // term only — the body diode is anchored to the physical
+        // (source, drain) pins and does not flip with NMOS/PMOS.
+        const S id_signed_channel = sign * id;
+        if (params_.body_diode_enable) {
+            const Real V_F0 = params_.body_diode_V_F0;
+            const Real R_d_safe =
+                (params_.body_diode_R_d > Real{1e-9})
+                ? params_.body_diode_R_d : Real{1e-9};
+            const Real g_on_bd = Real{1.0} / R_d_safe;
+            const Real g_off_bd = params_.body_diode_g_off;
+            const S v_sd = v_s - v_d;
+            const S alpha_bd =
+                Real{1.0} / (Real{1.0} + exp(-kappa * (v_sd - V_F0)));
+            const S i_bd =
+                alpha_bd * (v_sd - V_F0) * g_on_bd +
+                (Real{1.0} - alpha_bd) * v_sd * g_off_bd;
+            return id_signed_channel - i_bd;
+        }
+        return id_signed_channel;
     }
 
     /// AD-derived stamp of the Behavioral residual + Jacobian. Replicates
@@ -472,6 +545,14 @@ public:
         const NodeIndex n_gate = nodes[0];
         const NodeIndex n_drain = nodes[1];
         const NodeIndex n_source = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor — mirrors the manual stamp so the AD
+        // cross-validation (test_ad_mosfet_stamp) stays bit-for-bit
+        // with the behavioral path.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar v_g = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar v_d = (n_drain >= 0) ? x[n_drain] : Scalar{0.0};
@@ -534,6 +615,15 @@ private:
         const NodeIndex n_gate = nodes[0];
         const NodeIndex n_drain = nodes[1];
         const NodeIndex n_source = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor (see Params::g_gate_leak comment). Stamped
+        // before the channel-current contributions so the leak is
+        // present even on the very first Newton step. Residual is left
+        // untouched — the leak is a Jacobian-only regulariser.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar vg = (n_gate >= 0) ? x[n_gate] : Scalar{0.0};
         const Scalar vd = (n_drain >= 0) ? x[n_drain] : Scalar{0.0};
@@ -610,13 +700,43 @@ private:
         //   ∂id_actual/∂vd = sign · (sign · di/dvds) = di_internal_dvds
         //
         // (The two `sign` factors cancel in vg/vd partials, net negative on vs.)
-        const Scalar id = sign * id_internal;
-        const Scalar di_dvg = di_internal_dvgs;
-        const Scalar di_dvd = di_internal_dvds;
-        const Scalar di_dvs = -di_internal_dvgs - di_internal_dvds;
+        const Scalar id_channel = sign * id_internal;
+        Scalar di_dvg = di_internal_dvgs;
+        Scalar di_dvd = di_internal_dvds;
+        Scalar di_dvs = -di_internal_dvgs - di_internal_dvds;
 
         // Telemetry: pwl_state mirrors the channel-on bit (~ Vgs > Vth).
         pwl_state_ = (sigma_g > Scalar{0.5});
+
+        // Body diode contribution (Phase B1) — anode=source, cathode=drain,
+        // sign-agnostic w.r.t. NMOS/PMOS. The diode current flows in the
+        // OPPOSITE reference direction to the channel id, so it is
+        // subtracted from id_total.
+        Scalar id_total = id_channel;
+        if (params_.body_diode_enable) {
+            const Scalar V_F0 = params_.body_diode_V_F0;
+            const Scalar R_d_safe =
+                (params_.body_diode_R_d > Scalar{1e-9})
+                ? params_.body_diode_R_d : Scalar{1e-9};
+            const Scalar g_on_bd = Scalar{1.0} / R_d_safe;
+            const Scalar g_off_bd = params_.body_diode_g_off;
+            const Scalar v_sd = vs - vd;
+            const Scalar alpha_bd =
+                Scalar{1.0} / (Scalar{1.0} + std::exp(-kappa * (v_sd - V_F0)));
+            const Scalar dalpha_bd_dvsd =
+                kappa * alpha_bd * (Scalar{1.0} - alpha_bd);
+            const Scalar i_bd =
+                alpha_bd * (v_sd - V_F0) * g_on_bd +
+                (Scalar{1.0} - alpha_bd) * v_sd * g_off_bd;
+            const Scalar di_bd_dvsd =
+                dalpha_bd_dvsd * ((v_sd - V_F0) * g_on_bd - v_sd * g_off_bd) +
+                alpha_bd * g_on_bd + (Scalar{1.0} - alpha_bd) * g_off_bd;
+            // ∂V_sd/∂v_s = +1, ∂V_sd/∂v_d = −1, ∂V_sd/∂v_g = 0
+            id_total = id_channel - i_bd;
+            di_dvd += di_bd_dvsd;
+            di_dvs -= di_bd_dvsd;
+        }
+        const Scalar id = id_total;
 
         // Norton companion residual (Taylor-offset form, matches the AD path).
         const Scalar i_eq = id - di_dvg * vg - di_dvd * vd - di_dvs * vs;
@@ -643,8 +763,19 @@ private:
     template<typename Matrix, typename Vec>
     void stamp_jacobian_ideal(Matrix& J, Vec& f, const Vec& x,
                               std::span<const NodeIndex> nodes) const {
+        const NodeIndex n_gate = nodes[0];
         const NodeIndex n_drain = nodes[1];
         const NodeIndex n_source = nodes[2];
+
+        // harden-component-models-vs-psim-plecs Phase A2: gate-row
+        // diagonal anchor. Especially important in PWL Ideal mode
+        // because the resistive D-S stamp does NOT touch the gate row
+        // at all (Vgs is queried only via the commute event detector),
+        // so without this anchor the gate is genuinely floating in the
+        // linear solve.
+        if (n_gate >= 0 && params_.g_gate_leak > Scalar{0}) {
+            J.coeffRef(n_gate, n_gate) += params_.g_gate_leak;
+        }
 
         const Scalar vd = (n_drain >= 0) ? x[n_drain] : Scalar{0.0};
         const Scalar vs = (n_source >= 0) ? x[n_source] : Scalar{0.0};
@@ -653,7 +784,11 @@ private:
         const Scalar g = pwl_state_ ? params_.g_on : params_.g_off;
         const Scalar id = g * vds;
 
-        // Pure drain-source resistive stamp; no gm contribution.
+        // Pure drain-source resistive stamp; no gm contribution. Legacy
+        // physical-current convention preserved verbatim (the same
+        // residual convention used by every other runtime stamp); the
+        // body diode contribution below adds itself as an EXTRA term
+        // without disturbing this baseline.
         if (n_drain >= 0) {
             J.coeffRef(n_drain, n_drain) += g;
             if (n_source >= 0) J.coeffRef(n_drain, n_source) -= g;
@@ -665,6 +800,58 @@ private:
 
         if (n_drain >= 0) f[n_drain] -= id;
         if (n_source >= 0) f[n_source] += id;
+
+        // Body diode (Phase B1) — opt-in, Norton-shifted smooth-blend
+        // mirroring the Behavioral path. The diode flows source →
+        // drain, so its current is ADDED to drain residual (current
+        // entering drain from the diode = positive into the drain
+        // node) and SUBTRACTED from source. With body_diode_enable =
+        // false (default) this entire block is skipped — restoring
+        // bit-exact pre-B1 behaviour for the PWL Ideal path.
+        if (params_.body_diode_enable) {
+            const Scalar V_F0 = params_.body_diode_V_F0;
+            const Scalar R_d_safe =
+                (params_.body_diode_R_d > Scalar{1e-9})
+                ? params_.body_diode_R_d : Scalar{1e-9};
+            const Scalar g_on_bd = Scalar{1.0} / R_d_safe;
+            const Scalar g_off_bd = params_.body_diode_g_off;
+            const Scalar v_sd = vs - vd;
+            const Scalar kappa = kSmoothRegionSharpness;
+            const Scalar alpha_bd =
+                Scalar{1.0} / (Scalar{1.0} + std::exp(-kappa * (v_sd - V_F0)));
+            const Scalar dalpha_bd_dvsd =
+                kappa * alpha_bd * (Scalar{1.0} - alpha_bd);
+            const Scalar i_bd =
+                alpha_bd * (v_sd - V_F0) * g_on_bd +
+                (Scalar{1.0} - alpha_bd) * v_sd * g_off_bd;
+            const Scalar di_bd_dvsd =
+                dalpha_bd_dvsd * ((v_sd - V_F0) * g_on_bd - v_sd * g_off_bd) +
+                alpha_bd * g_on_bd + (Scalar{1.0} - alpha_bd) * g_off_bd;
+            // ∂V_sd/∂vd = -1, ∂V_sd/∂vs = +1. The diode current i_bd
+            // flows source → drain (opposite of id_channel), so it is
+            // SUBTRACTED from the residual `f[d] -= id` written above:
+            //   f[d] -= -i_bd   →   f[d] += i_bd
+            //   f[s] += -i_bd   →   f[s] -= i_bd
+            // And its Jacobian partials w.r.t. vd, vs are
+            //   ∂i_bd/∂vd = -di_bd_dvsd, ∂i_bd/∂vs = +di_bd_dvsd.
+            // Since id_total = id_ch - i_bd, the J updates are
+            //   J(d,d) += -(-di_bd_dvsd) = +di_bd_dvsd
+            //   J(d,s) += -(+di_bd_dvsd) = -di_bd_dvsd
+            //   J(s,d) += +(-di_bd_dvsd) = -di_bd_dvsd
+            //   J(s,s) += +(+di_bd_dvsd) = +di_bd_dvsd
+            if (n_drain >= 0) {
+                J.coeffRef(n_drain, n_drain) += di_bd_dvsd;
+                if (n_source >= 0)
+                    J.coeffRef(n_drain, n_source) -= di_bd_dvsd;
+            }
+            if (n_source >= 0) {
+                J.coeffRef(n_source, n_source) += di_bd_dvsd;
+                if (n_drain >= 0)
+                    J.coeffRef(n_source, n_drain) -= di_bd_dvsd;
+            }
+            if (n_drain >= 0)  f[n_drain]  += i_bd;
+            if (n_source >= 0) f[n_source] -= i_bd;
+        }
     }
 
     Params params_;

@@ -50,7 +50,9 @@ def main() -> int:
         args.output_dir,
         selected=args.only,
         matrix=False,
-        simulation_overrides={"adaptive_timestep": True},
+        # simplify-and-harden-numerical-surface §10: use canonical
+        # `step_mode: variable` (replaces deprecated `adaptive_timestep`).
+        simulation_overrides={"step_mode": "variable"},
         scenario_filter=args.scenarios,
         adaptive_dt_max_factor=args.dt_max_factor,
     )

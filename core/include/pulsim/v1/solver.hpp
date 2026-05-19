@@ -473,6 +473,25 @@ struct NewtonOptions {
     Index num_branches = 0;   // For weighted norm
     ConvergenceChecker::Tolerances tolerances;
 
+    // simplify-and-harden-numerical-surface — Phase 4. Armijo line search.
+    //
+    // When `armijo_line_search = true` (default), the line search accepts a
+    // trial step only when the residual norm satisfies the Armijo descent
+    // condition:
+    //
+    //     ||f(x + α·dx)|| ≤ (1 − σ·α) · ||f(x)||
+    //
+    // with σ = `armijo_sigma`. This is strictly stronger than the legacy
+    // "any reduction" criterion (`||f_new|| < ||f_old||`) and provides
+    // provable convergence guarantees on multilevel converter cold starts
+    // where the Newton step direction is correct but the full-length step
+    // overshoots.
+    //
+    // Setting `armijo_line_search = false` falls back to the legacy
+    // criterion (preserves pre-v0.11 numerical behavior).
+    bool armijo_line_search = true;
+    Real armijo_sigma = 1e-4;
+
     // Anderson acceleration (optional)
     bool enable_anderson = false;
     int anderson_depth = 5;
@@ -1094,7 +1113,18 @@ private:
         return clamped;
     }
 
-    /// Simple backtracking line search
+    /// Backtracking line search. Defaults to the Armijo descent condition
+    /// when `options_.armijo_line_search == true`; falls back to the
+    /// legacy "any reduction" criterion when disabled.
+    ///
+    /// simplify-and-harden-numerical-surface — Phase 4. The Armijo
+    /// condition `||f(x + α·dx)|| ≤ (1 − σ·α) · ||f(x)||` is strictly
+    /// stronger than the legacy `||f_new|| > ||f_old||` check. On
+    /// multilevel converter cold starts where the Newton step direction
+    /// is correct but the full-length step overshoots into a region with
+    /// a higher residual norm, Armijo recovers in 2-4 backtracks where
+    /// the legacy criterion either accepts a marginal improvement (then
+    /// stalls) or never finds an acceptable step.
     LineSearchResult line_search(const Vector& x, const Vector& dx, Real f_norm,
                                  ResidualFunction& residual_eval, Real initial_damping) {
         Real damping = initial_damping;
@@ -1106,10 +1136,23 @@ private:
         residual_eval(x_new, f_new);
         Real f_new_norm = f_new.norm();
 
-        // Reduce damping while residual increases
-        int max_backtracks = 10;
+        // Acceptance criterion: Armijo (default) or legacy "any reduction".
+        auto accept = [&](Real alpha, Real new_norm) -> bool {
+            if (options_.armijo_line_search) {
+                // ||f_new|| ≤ (1 - σ·α) · ||f_old||
+                const Real threshold =
+                    f_norm * (Real{1} - options_.armijo_sigma * alpha);
+                return new_norm <= threshold;
+            }
+            return new_norm <= f_norm;
+        };
+
+        // Reduce damping while criterion is not satisfied.
+        const int max_backtracks = 10;
         int bt = 0;
-        while (f_new_norm > f_norm && damping > options_.min_damping && bt < max_backtracks) {
+        while (!accept(damping, f_new_norm) &&
+               damping > options_.min_damping &&
+               bt < max_backtracks) {
             damping *= 0.5;
             x_new = x + dx * damping;
             residual_eval(x_new, f_new);
@@ -1117,7 +1160,8 @@ private:
             ++bt;
         }
 
-        // Gradually restore damping
+        // Gradually restore damping when convergence is healthy (no
+        // backtracks needed → grow toward `initial_damping`).
         LineSearchResult result;
         result.damping = std::min(damping * 1.5, options_.initial_damping);
         result.backtracks = bt;

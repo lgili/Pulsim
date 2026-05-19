@@ -37,48 +37,49 @@ Richardson LTE estimation SHALL:
 
 ### Requirement: Timestep Controller
 
-The system SHALL implement an adaptive timestep controller that combines LTE-based and Newton-iteration-based feedback.
+The system SHALL implement an adaptive timestep controller that
+combines LTE-based and Newton-iteration-based feedback. The
+controller SHALL adjust the timestep based on the LTE estimate
+versus tolerance, reduce the timestep when Newton iterations exceed
+the target, increase the timestep when Newton iterations fall below
+the minimum threshold, and apply smoothing to prevent timestep
+oscillation.
 
-The controller SHALL:
-- Adjust timestep based on LTE estimate vs tolerance
-- Reduce timestep when Newton iterations exceed target
-- Increase timestep when Newton iterations are below threshold
-- Apply smoothing to prevent timestep oscillation
+The controller's tuning fields SHALL live under
+`opts.advanced.timestep.*` (per the AdvancedOptions namespace
+reorganization). The legacy boolean
+`SimulationOptions::adaptive_timestep` SHALL be deprecated; the
+canonical selector is `opts.step_mode = TransientStepMode::Variable
+| TransientStepMode::Fixed`.
 
 #### Scenario: LTE-based timestep reduction
 
-- **GIVEN** current timestep dt with computed LTE > tolerance
-- **WHEN** the controller suggests next timestep
-- **THEN** the new timestep is reduced by factor `(tolerance / LTE)^(1/3)`
-- **AND** a safety factor of 0.9 is applied
+- **GIVEN** a transient simulation where the LTE estimate exceeds
+  the tolerance
+- **WHEN** the timestep controller runs
+- **THEN** the next timestep is reduced
 
-#### Scenario: LTE-based timestep increase
+#### Scenario: Newton-feedback timestep growth
 
-- **GIVEN** current timestep dt with computed LTE < 0.1 * tolerance
-- **WHEN** the controller suggests next timestep
-- **THEN** the new timestep may be increased
-- **AND** increase is limited to factor of 1.5
+- **GIVEN** a transient simulation where Newton consistently
+  converges in fewer than the target iteration count
+- **WHEN** the timestep controller runs
+- **THEN** the next timestep grows by a bounded factor
 
-#### Scenario: Newton iteration feedback - slow convergence
+#### Scenario: Step mode is the canonical enable switch
 
-- **GIVEN** target Newton iterations = 5 and actual iterations = 10
-- **WHEN** the controller suggests next timestep
-- **THEN** timestep is reduced by factor of 0.5
-- **AND** this overrides LTE-based increase
+- **GIVEN** a user sets `opts.step_mode = TransientStepMode::Fixed`
+- **WHEN** the simulator runs
+- **THEN** the timestep controller is bypassed and the user's `dt`
+  is used unchanged
 
-#### Scenario: Newton iteration feedback - fast convergence
+#### Scenario: Legacy adaptive_timestep emits deprecation warning
 
-- **GIVEN** target Newton iterations = 5 and actual iterations = 2
-- **WHEN** the controller suggests next timestep
-- **THEN** timestep may be increased by factor up to 1.5
-- **AND** this is combined with LTE-based adjustment
-
-#### Scenario: Timestep smoothing
-
-- **GIVEN** suggested timestep is 5x larger than previous timestep
-- **WHEN** smoothing is applied
-- **THEN** the actual timestep increase is limited to 2x
-- **AND** gradual ramp-up prevents oscillation
+- **GIVEN** legacy user code that sets `opts.adaptive_timestep = true`
+- **WHEN** the field is accessed
+- **THEN** the equivalent `opts.step_mode = TransientStepMode::Variable`
+  is applied
+- **AND** a deprecation warning is logged once per process
 
 ### Requirement: Event-Driven Timestep Control
 
@@ -171,4 +172,38 @@ New options SHALL include:
 - **WHEN** LTE and Newton iterations allow increase
 - **THEN** timestep may double between steps
 - **AND** simulation completes faster with acceptable accuracy loss
+
+### Requirement: Deprecated Integrator Enum Values
+
+The `Integrator` enum SHALL mark `BDF3`, `BDF4`, `BDF5`, `Gear`, and
+`SDIRK2` as deprecated for one release cycle (v0.11), then SHALL
+remove them in v0.12. Users explicitly selecting any of these values
+SHALL receive a compile-time `[[deprecated]]` warning (C++) and a
+YAML parser `PULSIM_YAML_W_DEPRECATED_FIELD` warning.
+
+**Rationale**:
+- `BDF3 / BDF4 / BDF5`: not A-stable for stiff switching topologies;
+  zero benchmark coverage; oscillations on diode commutation make them
+  unsafe defaults. Replacement: `TRBDF2` (order 2, A-stable) or
+  `RosenbrockW`.
+- `Gear`: literal alias for `BDF2` (zero behavioural difference).
+  Replacement: `BDF2`.
+- `SDIRK2`: research-grade implementation with zero benchmark coverage
+  and no production validation. Replacement: `TRBDF2`.
+
+#### Scenario: Deprecated integrator emits warning in v0.11
+
+- **GIVEN** a user selects `Integrator::BDF5` (or `BDF3`, `BDF4`,
+  `Gear`, `SDIRK2`) in v0.11
+- **WHEN** the code compiles
+- **THEN** the C++ compiler emits a `[[deprecated]]` warning with the
+  suggested replacement
+- **AND** the integrator still works at runtime (deprecation cycle)
+
+#### Scenario: Deprecated integrator removed in v0.12
+
+- **GIVEN** the same code in v0.12 (after the removal cycle)
+- **WHEN** the code compiles
+- **THEN** the enum value no longer exists and the compile fails
+- **AND** the migration message points the user at the replacement
 

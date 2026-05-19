@@ -9,6 +9,15 @@
 // - 3.4: Local Truncation Error (LTE) estimation
 // - State history management for reactive elements
 // =============================================================================
+//
+// simplify-and-harden-numerical-surface — Phase 1.10: this header is the
+// LEGACY location for the `Integrator` enum and integration helpers. New
+// user code SHOULD prefer the canonical `numerical/integrator.hpp` path.
+// The legacy header continues to compile unchanged; opt into a
+// deprecation reminder with `-DPULSIM_WARN_DEPRECATED_HEADERS=1`.
+#if defined(PULSIM_WARN_DEPRECATED_HEADERS) && PULSIM_WARN_DEPRECATED_HEADERS
+#pragma message("pulsim/v1/integration.hpp is the legacy include path; prefer pulsim/v1/numerical/integrator.hpp (simplify-and-harden-numerical-surface §1.10)")
+#endif
 
 #include "pulsim/v1/numeric_types.hpp"
 #include <Eigen/Dense>
@@ -32,21 +41,56 @@ namespace pulsim::v1 {
 // Integration Method Types
 // =============================================================================
 
+// simplify-and-harden-numerical-surface — Phase 9.
+//
+// Curated integrator set: Trapezoidal, BDF1, BDF2, TRBDF2, RosenbrockW.
+// These are the integrators with validated benchmark coverage on
+// power-electronics topologies.
+//
+// `BDF3`, `BDF4`, `BDF5`, `Gear`, and `SDIRK2` are kept in the enum
+// for one release with `[[deprecated]]` markers. They will be removed
+// from the public enum in the next major version. Rationale:
+//   - BDF3/4/5: not A-stable for stiff switching topologies; zero
+//     production benchmark coverage; produce oscillations on diode
+//     commutation and PWM edges.
+//   - Gear:     literal alias for BDF2 — zero behavioral difference.
+//   - SDIRK2:   research-grade implementation, never validated on
+//     production circuits.
+//
+// Migration: pick `BDF2` or `TRBDF2` for second-order stiff dynamics,
+// or `RosenbrockW` for explicitly stiff problems.
 enum class Integrator {
-    Trapezoidal,   // Second-order, A-stable
-    BDF1,          // Backward Euler, first-order, L-stable
-    BDF2,          // Second-order, A-stable
-    BDF3,          // Third-order
-    BDF4,          // Fourth-order
-    BDF5,          // Fifth-order
-    Gear,          // Alias for BDF2 (compatibility)
-    TRBDF2,        // Trapezoidal + BDF2 (stiff-stable)
-    RosenbrockW,   // Linearly implicit Rosenbrock-W (stiff-stable)
-    SDIRK2         // 2nd-order SDIRK (stiff-stable)
+    Trapezoidal,   ///< Second-order, A-stable. Power-electronics default.
+    BDF1,          ///< Backward Euler, first-order, L-stable. Stiff fallback.
+    BDF2,          ///< Second-order, A-stable. General-purpose stiff.
+    BDF3 [[deprecated("BDF3 is not A-stable for switching topologies — use BDF2 / TRBDF2 / RosenbrockW. Removed in next major release.")]],
+    BDF4 [[deprecated("BDF4 is not A-stable for switching topologies — use BDF2 / TRBDF2 / RosenbrockW. Removed in next major release.")]],
+    BDF5 [[deprecated("BDF5 is not A-stable for switching topologies — use BDF2 / TRBDF2 / RosenbrockW. Removed in next major release.")]],
+    Gear [[deprecated("Gear is a literal alias for BDF2 — use BDF2 directly. Removed in next major release.")]],
+    TRBDF2,        ///< Trapezoidal + BDF2 (stiff-stable). Robust preset default.
+    RosenbrockW,   ///< Linearly implicit Rosenbrock-W (stiff-stable).
+    SDIRK2 [[deprecated("SDIRK2 has no validated production benchmark coverage — use TRBDF2 instead. Removed in next major release.")]]
 };
+
+// simplify-and-harden-numerical-surface — Phase 9.
+// Internal helpers still need to handle every enum value (including
+// deprecated ones) until the next major release. Silence the
+// `-Wdeprecated-declarations` warning in these blocks; user-facing
+// code that touches `Integrator::BDF3` etc. still gets the warning.
+#if defined(__clang__) || defined(__GNUC__)
+#  define PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH \
+    _Pragma("GCC diagnostic push") \
+    _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#  define PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP \
+    _Pragma("GCC diagnostic pop")
+#else
+#  define PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
+#  define PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
+#endif
 
 /// Get integration method order
 [[nodiscard]] constexpr int method_order(Integrator m) noexcept {
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
     switch (m) {
         case Integrator::Trapezoidal: return 2;
         case Integrator::BDF1: return 1;
@@ -60,6 +104,7 @@ enum class Integrator {
         case Integrator::SDIRK2: return 2;
         default: return 1;
     }
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
 }
 
 /// Check if method requires startup sequence
@@ -68,6 +113,7 @@ enum class Integrator {
 }
 
 [[nodiscard]] constexpr bool is_stiff_stable(Integrator m) noexcept {
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
     switch (m) {
         case Integrator::BDF1:
         case Integrator::TRBDF2:
@@ -77,6 +123,7 @@ enum class Integrator {
         default:
             return false;
     }
+    PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
 }
 
 // =============================================================================
@@ -515,6 +562,7 @@ struct IntegrationCoeffs {
 
         IntegrationCoeffs result;
 
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
         switch (method) {
             case Integrator::Trapezoidal: {
                 Real v_prev = v_history.empty() ? 0.0 : v_history[0];
@@ -541,6 +589,7 @@ struct IntegrationCoeffs {
                 break;
             }
         }
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
 
         // Apply numeric guards
         result.g_eq = NumericGuard::clamp_conductance(result.g_eq);
@@ -558,6 +607,7 @@ struct IntegrationCoeffs {
 
         IntegrationCoeffs result;
 
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_PUSH
         switch (method) {
             case Integrator::Trapezoidal: {
                 Real i_prev = i_history.empty() ? 0.0 : i_history[0];
@@ -584,6 +634,7 @@ struct IntegrationCoeffs {
                 break;
             }
         }
+        PULSIM_INTEGRATOR_INTERNAL_WARNINGS_POP
 
         result.g_eq = NumericGuard::clamp_conductance(result.g_eq);
         result.i_eq = NumericGuard::clamp_current(result.i_eq);

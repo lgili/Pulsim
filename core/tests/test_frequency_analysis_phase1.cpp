@@ -216,8 +216,11 @@ TEST_CASE("Phase 1.4: linearize fails with typed reason on Behavioral devices",
     ckt.add_diode("D1", sw_n, out, /*g_on=*/1e3, /*g_off=*/1e-9);
     ckt.add_resistor("R1", out, Circuit::ground(), 100.0);
     ckt.add_capacitor("C1", out, Circuit::ground(), 1e-6, 0.0);
-    // Note: leave the diode in default Auto → Behavioral mode (no
-    // `set_switching_mode_for_all`). Linearization should bail out.
+    // simplify-and-harden-numerical-surface §11: default Auto now resolves
+    // to Ideal in v0.11. This test asserts the Behavioral linearization
+    // bail-out; pin Behavioral explicitly to preserve the regression
+    // contract.
+    ckt.set_default_switching_mode(SwitchingMode::Behavioral);
 
     SimulationOptions opts;
     opts.tstart = 0.0;
@@ -225,6 +228,7 @@ TEST_CASE("Phase 1.4: linearize fails with typed reason on Behavioral devices",
     opts.dt     = 1e-7;
     opts.dt_min = 1e-12;
     opts.adaptive_timestep = false;
+    opts.switching_mode = SwitchingMode::Behavioral;
     opts.newton_options.num_nodes    = ckt.num_nodes();
     opts.newton_options.num_branches = ckt.num_branches();
 

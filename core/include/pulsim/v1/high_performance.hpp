@@ -10,6 +10,15 @@
 // - 4.4: SIMD detection and optimization helpers
 // - 4.5: Cache-friendly SoA data layouts
 // =============================================================================
+//
+// simplify-and-harden-numerical-surface — Phase 1.10: this header is the
+// LEGACY location for the linear-solver policy + iterative-solver knobs.
+// New user code SHOULD prefer the canonical `numerical/linear_solver.hpp`
+// path. Opt into a deprecation reminder with
+// `-DPULSIM_WARN_DEPRECATED_HEADERS=1`.
+#if defined(PULSIM_WARN_DEPRECATED_HEADERS) && PULSIM_WARN_DEPRECATED_HEADERS
+#pragma message("pulsim/v1/high_performance.hpp is the legacy include path; prefer pulsim/v1/numerical/linear_solver.hpp (simplify-and-harden-numerical-surface §1.10)")
+#endif
 
 #include "pulsim/v1/numeric_types.hpp"
 #include "pulsim/v1/solver.hpp"
@@ -103,8 +112,31 @@ struct IterativeSolverConfig {
 // =============================================================================
 // Runtime Linear Solver Selection
 // =============================================================================
-
+//
+// simplify-and-harden-numerical-surface — Phase 8: the recommended
+// user-facing values are now `Auto`, `Direct`, and `Iterative`. The
+// 6 concrete-engine values (SparseLU, EnhancedSparseLU, KLU, GMRES,
+// BiCGSTAB, CG) remain SUPPORTED — internal code and power users
+// who want to force a specific engine keep using them. The
+// auto-selector resolves the abstract values:
+//
+//   - `Auto`      → `Direct` for systems with < 5000 unknowns,
+//                   else `Iterative`
+//   - `Direct`    → best-of(KLU, EnhancedSparseLU, SparseLU) available
+//                   on the current build
+//   - `Iterative` → best-of(GMRES, BiCGSTAB) for the system shape
+//
+// User-facing docs (numerical-configuration.md) lead with the
+// abstract values; the concrete engines stay reachable for power
+// users and for internal callers (auto-selector, fallback stacks,
+// telemetry).
 enum class LinearSolverKind {
+    // Phase 8 abstract values (recommended user surface).
+    Auto,        ///< Let the runtime pick Direct or Iterative by system size.
+    Direct,      ///< Force any direct sparse-LU style solver.
+    Iterative,   ///< Force any iterative Krylov solver.
+
+    // Concrete engines (kept for power users + internal use).
     SparseLU,
     EnhancedSparseLU,
     KLU,
@@ -112,6 +144,71 @@ enum class LinearSolverKind {
     BiCGSTAB,
     CG
 };
+
+/// `true` when the kind is a direct sparse-LU style solver, `false`
+/// when iterative. Used by Phase 6's iterative-refinement path to
+/// decide whether to run the post-solve residual check (iterative
+/// solvers apply equivalent refinement internally).
+///
+/// Phase 8: `Auto` returns `true` (the conservative path — refinement
+/// is harmless on iterative-resolved Auto solves because the
+/// auto-selector also routes to a direct engine when N is small).
+/// Power users who need precise control should pick an explicit
+/// engine.
+[[nodiscard]] constexpr bool is_direct_solver(LinearSolverKind k) noexcept {
+    switch (k) {
+        case LinearSolverKind::Auto:
+        case LinearSolverKind::Direct:
+        case LinearSolverKind::SparseLU:
+        case LinearSolverKind::EnhancedSparseLU:
+        case LinearSolverKind::KLU:
+            return true;
+        case LinearSolverKind::Iterative:
+        case LinearSolverKind::GMRES:
+        case LinearSolverKind::BiCGSTAB:
+        case LinearSolverKind::CG:
+            return false;
+    }
+    return false;
+}
+
+/// Phase 8 auto-selector: resolve abstract `Auto`/`Direct`/`Iterative`
+/// values to a concrete engine in a single call (transitive — Auto
+/// first picks Direct or Iterative by size, then resolves the
+/// resulting abstract value to the concrete engine).
+///
+/// The threshold (5000 unknowns) matches the documented contract:
+/// small systems get the lower-overhead direct path, large systems
+/// get the memory-friendly iterative path.
+///
+/// Concrete engines pass through unchanged.
+[[nodiscard]] constexpr LinearSolverKind resolve_linear_solver_kind(
+        LinearSolverKind requested,
+        std::size_t system_size = 0) noexcept {
+    constexpr std::size_t kDirectIterativeThreshold = 5000;
+
+    // First pass: Auto → Direct or Iterative.
+    LinearSolverKind stage = requested;
+    if (stage == LinearSolverKind::Auto) {
+        stage = (system_size < kDirectIterativeThreshold)
+            ? LinearSolverKind::Direct
+            : LinearSolverKind::Iterative;
+    }
+
+    // Second pass: Direct → KLU; Iterative → GMRES.
+    switch (stage) {
+        case LinearSolverKind::Direct:
+            // Prefer KLU when available; the build-time fallback
+            // (no KLU) resolves to EnhancedSparseLU / SparseLU via
+            // the existing RuntimeLinearSolver dispatch.
+            return LinearSolverKind::KLU;
+        case LinearSolverKind::Iterative:
+            return LinearSolverKind::GMRES;
+        default:
+            // Concrete engine — pass through.
+            return stage;
+    }
+}
 
 struct LinearSolverTelemetry {
     int total_solve_calls = 0;
@@ -129,7 +226,59 @@ struct LinearSolverTelemetry {
     double last_solve_time_seconds = 0.0;
     std::optional<LinearSolverKind> last_solver;
     std::optional<IterativeSolverConfig::PreconditionerKind> last_preconditioner;
+
+    // simplify-and-harden-numerical-surface — Phase 6. Counts every time
+    // the post-solve residual `||b - A·x|| / ||b||` exceeded the
+    // `10 · ε_machine` threshold and one round of iterative refinement
+    // was applied. Zero in the common case (well-conditioned MNA); fires
+    // on flying-cap, MMC, and other dense-floating-cap topologies where
+    // KLU's back-substitution accumulates round-off.
+    int linear_refinement_steps = 0;
 };
+
+// simplify-and-harden-numerical-surface — Phase 8.3.
+//
+// Friendly preconditioner selector that replaces the leaky
+// IterativeSolverConfig::PreconditionerKind enum in user-facing API.
+//   Fast    → no preconditioner (lowest overhead per iteration)
+//   Default → ILU0 (the production sweet-spot for power-electronics MNA)
+//   Best    → ILUT (heavier setup, better convergence on ill-conditioned
+//             systems)
+//
+// The internal `IterativeSolverConfig::PreconditionerKind` enum stays
+// available for power users + the auto-selector — this enum just
+// promotes a smaller user-friendly surface.
+enum class SolverQuality : std::uint8_t {
+    Fast,
+    Default,
+    Best,
+};
+
+[[nodiscard]] constexpr std::string_view to_string(SolverQuality q) noexcept {
+    switch (q) {
+        case SolverQuality::Fast:    return "Fast";
+        case SolverQuality::Default: return "Default";
+        case SolverQuality::Best:    return "Best";
+    }
+    return "Default";
+}
+
+/// Map a friendly SolverQuality value to the concrete preconditioner
+/// enum the iterative solver actually consumes. Pulsim's
+/// PreconditionerKind lives nested under `IterativeSolverConfig`, so
+/// the return type is `IterativeSolverConfig::PreconditionerKind`.
+[[nodiscard]] constexpr IterativeSolverConfig::PreconditionerKind
+resolve_solver_quality(SolverQuality q) noexcept {
+    switch (q) {
+        case SolverQuality::Fast:
+            return IterativeSolverConfig::PreconditionerKind::None;
+        case SolverQuality::Default:
+            return IterativeSolverConfig::PreconditionerKind::ILU0;
+        case SolverQuality::Best:
+            return IterativeSolverConfig::PreconditionerKind::ILUT;
+    }
+    return IterativeSolverConfig::PreconditionerKind::ILU0;
+}
 
 struct LinearSolverStackConfig {
     std::vector<LinearSolverKind> order { LinearSolverKind::SparseLU };
@@ -141,6 +290,19 @@ struct LinearSolverStackConfig {
     int size_threshold = 2000;
     int nnz_threshold = 200000;
     Real diag_min_threshold = 1e-12;
+
+    // simplify-and-harden-numerical-surface — Phase 8.3.
+    // Friendly preconditioner selector. When set, overrides
+    // `iterative_config.preconditioner` via `apply_solver_quality()`.
+    // Default = `Default` (= ILU0) preserves the historical behavior.
+    SolverQuality solver_quality = SolverQuality::Default;
+
+    /// Apply `solver_quality` to `iterative_config.preconditioner`.
+    /// Called automatically at simulator construction; safe to call
+    /// directly if you mutated `solver_quality` after construction.
+    void apply_solver_quality() noexcept {
+        iterative_config.preconditioner = resolve_solver_quality(solver_quality);
+    }
 
     [[nodiscard]] static LinearSolverStackConfig defaults() {
         return {};
@@ -1424,6 +1586,35 @@ public:
         auto active_kind = *active_kind_;
         auto result = timed_solve_with(active_kind);
         update_telemetry(active_kind, result);
+
+        // simplify-and-harden-numerical-surface — Phase 6.
+        // Automatic iterative refinement on the direct-solve path when the
+        // post-solve residual exceeds `10 · ε_machine`. Triggers on
+        // ill-conditioned MNA matrices (flying-cap, MMC, dense-floating-cap
+        // networks) where the partial-pivoting back-substitution accumulates
+        // round-off. Skipped for iterative solvers (GMRES / BiCGSTAB / CG)
+        // because they apply equivalent refinement internally.
+        if (result.has_value() && last_matrix_ && is_direct_solver(active_kind)) {
+            const Real b_norm = b.norm();
+            if (b_norm > Real{0}) {
+                const Vector& x = result.value();
+                const Vector r = b - (*last_matrix_) * x;
+                const Real rel_res = r.norm() / b_norm;
+                constexpr Real refinement_threshold =
+                    Real{10} * std::numeric_limits<Real>::epsilon();
+                if (rel_res > refinement_threshold) {
+                    // One round: solve A·δ = r using the existing
+                    // factorization (re-use of factor is cheap; only the
+                    // back-substitution runs), then x ← x + δ.
+                    auto refine = solve_with(active_kind, r);
+                    if (refine.has_value()) {
+                        result.value() = x + refine.value();
+                        telemetry_.linear_refinement_steps += 1;
+                    }
+                }
+            }
+        }
+
         if (result || !config_.allow_fallback || !last_matrix_) {
             return result;
         }
@@ -1643,6 +1834,9 @@ private:
     }
 
     bool analyze_with(LinearSolverKind kind, const SparseMatrix& A) {
+        // Phase 8: abstract values resolve to concrete engines.
+        kind = resolve_linear_solver_kind(
+            kind, static_cast<std::size_t>(A.rows()));
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->analyze(A);
@@ -1657,11 +1851,19 @@ private:
             case LinearSolverKind::CG:
                 if (!allow_cg(A)) return false;
                 return cg_->analyze(A);
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                // Defensive: `resolve_*` above guarantees these don't
+                // reach the switch, but be explicit for the compiler.
+                return false;
         }
         return false;
     }
 
     bool factorize_with(LinearSolverKind kind, const SparseMatrix& A) {
+        kind = resolve_linear_solver_kind(
+            kind, static_cast<std::size_t>(A.rows()));
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->factorize(A);
@@ -1676,11 +1878,17 @@ private:
             case LinearSolverKind::CG:
                 if (!allow_cg(A)) return false;
                 return cg_->factorize(A);
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                return false;
         }
         return false;
     }
 
     [[nodiscard]] LinearSolveResult solve_with(LinearSolverKind kind, const Vector& b) {
+        kind = resolve_linear_solver_kind(
+            kind, static_cast<std::size_t>(b.size()));
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->solve(b);
@@ -1694,11 +1902,19 @@ private:
                 return bicgstab_->solve(b);
             case LinearSolverKind::CG:
                 return cg_->solve(b);
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                return LinearSolveResult::failure(
+                    "Abstract solver kind did not resolve to a concrete engine");
         }
         return LinearSolveResult::failure("Unknown linear solver");
     }
 
     [[nodiscard]] bool is_singular_with(LinearSolverKind kind) const {
+        // Phase 8: abstract Auto/Direct/Iterative don't have a single
+        // backing solver — they get resolved at analyze/factorize time.
+        // Treat them as "unknown singularity" → conservatively false.
         switch (kind) {
             case LinearSolverKind::SparseLU:
                 return sparse_->is_singular();
@@ -1712,6 +1928,10 @@ private:
                 return bicgstab_->is_singular();
             case LinearSolverKind::CG:
                 return cg_->is_singular();
+            case LinearSolverKind::Auto:
+            case LinearSolverKind::Direct:
+            case LinearSolverKind::Iterative:
+                return false;
         }
         return true;
     }

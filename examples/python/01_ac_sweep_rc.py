@@ -32,10 +32,10 @@ def build_rc(R: float = 1e3, C: float = 1e-6) -> tuple[pulsim.Circuit, pulsim.Si
     ckt.add_resistor("R1", in_, out, R)
     ckt.add_capacitor("C1", out, ckt.ground(), C, 0.0)
 
-    opts = pulsim.SimulationOptions()
-    opts.tstop = 1e-6
-    opts.dt = 1e-7
-    opts.adaptive_timestep = False
+    # simplify-and-harden-numerical-surface — Phase 2 + 14.8: simple
+    # linear RC, Preset.Fast covers it with a fixed step + KLU.
+    opts = pulsim.SimulationOptions.from_preset(pulsim.Preset.Fast,
+                                                 dt=1e-7, tstop=1e-6)
     opts.newton_options.num_nodes = ckt.num_nodes()
     opts.newton_options.num_branches = ckt.num_branches()
     return ckt, opts

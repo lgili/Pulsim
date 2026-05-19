@@ -85,6 +85,18 @@ struct InductionMotorParams {
     Real friction_coulomb = 0.0;       ///< N·m — Coulomb friction
     Real tau_load_const     = 0.0;     ///< N·m — speed-independent load
     Real tau_load_quad_coeff = 0.0;    ///< N·m / (rad/s)² — fan-style load
+
+    // Winding thermal model (harden-component-models-vs-psim-plecs
+    // Phase B3). Default `R_th_winding_to_ambient = 0` keeps the
+    // thermal model OFF for back-compat. When > 0, the steady-state
+    // winding temperature is
+    //     T_w_ss = T_amb + I_s_rms² · R_s(T_w) · R_th_winding_to_ambient
+    // and `R_s(T_w) = R_s · (1 + R_s_tc · (T_w − T_ref_winding))`.
+    // Users query `T_w_ss` via the device wrapper accessor.
+    Real R_th_winding_to_ambient = 0.0;  ///< K/W (0 = thermal model OFF)
+    Real T_amb                   = 25.0; ///< °C
+    Real R_s_tc                  = 3.93e-3; ///< 1/K (copper coefficient)
+    Real T_ref_winding           = 20.0; ///< °C — reference for R_s_tc
 };
 
 class InductionMotor {
@@ -148,19 +160,43 @@ public:
                              + lm_rr_over_lr2 * psi_rb_
                              - lm_over_lr * omega_e * psi_ra_) / sigma_ls;
 
-        // -- Step 3: rotor flux derivatives (using OLD i_s for explicit Euler). --
-        const Real dpsi_a = -(r_r / l_r) * psi_ra_
-                            + (r_r * l_m / l_r) * i_sa_
+        // -- Step 3: rotor flux derivatives at the OLD state. --
+        const Real k_r = r_r / l_r;
+        const Real g_r = r_r * l_m / l_r;
+        const Real dpsi_a = -k_r * psi_ra_
+                            + g_r * i_sa_
                             - omega_e * psi_rb_;
-        const Real dpsi_b = -(r_r / l_r) * psi_rb_
-                            + (r_r * l_m / l_r) * i_sb_
+        const Real dpsi_b = -k_r * psi_rb_
+                            + g_r * i_sb_
                             + omega_e * psi_ra_;
 
-        // -- Step 4: apply forward Euler. --
-        i_sa_   += dt * didt_a;
-        i_sb_   += dt * didt_b;
-        psi_ra_ += dt * dpsi_a;
-        psi_rb_ += dt * dpsi_b;
+        // -- Step 4: advance stator currents (forward Euler) and rotor
+        //            flux (one-iteration trapezoidal, Heun's predictor-
+        //            corrector — harden-component-models-vs-psim-plecs
+        //            Phase A5). The rotor-flux ODE is linear with the αβ
+        //            cross-coupling block `[-k_r, -ω_e; +ω_e, -k_r]`;
+        //            at 50 Hz DOL-start (ω_e ≈ 314 rad/s, dt ≈ 100 µs)
+        //            forward Euler accumulates a perpendicular-axis
+        //            phase-lag error of ω_e²·dt/2 ≈ 5 rad/s per step,
+        //            visible as a slow |ψ_r| drift that destabilises
+        //            high-slip starts. Trapezoidal averages dψ at the
+        //            old state and at the forward-Euler predictor —
+        //            4 extra mul + 2 adds per step, no implicit solve.
+        i_sa_ += dt * didt_a;
+        i_sb_ += dt * didt_b;
+
+        const Real psi_ra_pred = psi_ra_ + dt * dpsi_a;
+        const Real psi_rb_pred = psi_rb_ + dt * dpsi_b;
+        // Use the freshly-advanced stator currents in the corrector
+        // (same convention as the device wrapper's advance_state).
+        const Real dpsi_a_pred = -k_r * psi_ra_pred
+                                 + g_r * i_sa_
+                                 - omega_e * psi_rb_pred;
+        const Real dpsi_b_pred = -k_r * psi_rb_pred
+                                 + g_r * i_sb_
+                                 + omega_e * psi_ra_pred;
+        psi_ra_ += Real{0.5} * dt * (dpsi_a + dpsi_a_pred);
+        psi_rb_ += Real{0.5} * dt * (dpsi_b + dpsi_b_pred);
 
         // -- Step 5: shaft acceleration. --
         const Real sign_w = (omega_m_ > Real{0}) ? Real{1.0}

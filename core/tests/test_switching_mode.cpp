@@ -63,14 +63,16 @@ TEST_CASE("resolve_switching_mode falls back deterministically",
                                        SwitchingMode::Behavioral) ==
                 SwitchingMode::Behavioral);
     }
-    SECTION("Auto + Auto resolves to Behavioral (Phase 1 backward-compat)") {
+    SECTION("Auto + Auto resolves to Ideal "
+            "(v0.11 flip — simplify-and-harden-numerical-surface §11)") {
         REQUIRE(resolve_switching_mode(SwitchingMode::Auto,
                                        SwitchingMode::Auto) ==
-                SwitchingMode::Behavioral);
+                SwitchingMode::Ideal);
     }
-    SECTION("default circuit-default argument is Behavioral") {
+    SECTION("default circuit-default argument is Ideal "
+            "(v0.11 flip — simplify-and-harden-numerical-surface §11)") {
         REQUIRE(resolve_switching_mode(SwitchingMode::Auto) ==
-                SwitchingMode::Behavioral);
+                SwitchingMode::Ideal);
     }
 }
 

@@ -1603,6 +1603,13 @@ void Simulator::process_accepted_step_events(Real t, Real dt_used,
         result.backend_telemetry.pwl_topology_transitions += 1;
         result.backend_telemetry.pwl_event_commutations +=
             static_cast<int>(committed_events.size());
+        // simplify-and-harden-numerical-surface — Phase 5: count groups
+        // of ≥ 2 commutations resolved at a single bisected alpha (the
+        // coalescence step in bisect_pwl_event_alpha picked up multiple
+        // devices that crossed within tolerance of each other).
+        if (committed_events.size() >= 2) {
+            result.backend_telemetry.simultaneous_event_groups += 1;
+        }
         for (const auto& evt : committed_events) {
             SimulationEvent sim_event;
             sim_event.time = event_time;
@@ -1861,6 +1868,79 @@ SimulationResult Simulator::run_transient_native_impl(const Vector& x0,
     Real t = options_.tstart;
     Real dt = options_.dt;
     Vector x = x0;
+
+    // ----------------------------------------------------------------------
+    // Consistent initialization for voltage-source constraints.
+    //
+    // The segment-primary (Tustin) discretization gives correct fixed
+    // points for algebraic rows (`N·x = b`) IFF the supplied `x` already
+    // satisfies them. When the caller passes an inconsistent `x0` (the
+    // canonical case: `run_transient(zeros)` on a circuit that contains
+    // a voltage source enforcing `V(node) = V_src ≠ 0`), Tustin's
+    // discretization of the constraint becomes
+    //   `N·x_next = -N·x_now + 2·b`
+    // which lets x ping-pong between two values that average to the
+    // true constraint, rather than locking it to `b`. Symptom: V(vref)
+    // alternates between 0 V and 2·V_src on consecutive steps, and the
+    // last-step sample depends on the parity of the step count.
+    //
+    // Fix: directly snap each voltage source's enforced node voltage in
+    // x0 to its source value at t = tstart. We restrict the snap to
+    // voltage-source devices specifically (not "all algebraic rows"),
+    // because nonlinear devices (smooth-stamp diodes, MOSFETs, etc.)
+    // also have M.row(i) = 0 but their constraint `g(x) = 0` is NOT
+    // equivalent to a linear `N·x = b` — snapping them with the
+    // linearized stamp would destroy the nonlinear operating point and
+    // make subsequent Newton iterations diverge. Voltage sources are
+    // safe: their constraint IS exactly `V(npos) - V(nneg) = V_src`,
+    // which we can enforce in one O(1) write per source.
+    //
+    // For sources connecting ground to a real node we set V(node) = ±V_src
+    // directly. For floating sources we set V(npos) = V(nneg) + V_src
+    // (after the npos / nneg sweep — order-independent because we only
+    // ever write to one endpoint).
+    if (x.size() == circuit_.system_size()) {
+        const auto& devices = circuit_.devices();
+        const auto& conns = circuit_.connections();
+        for (std::size_t i = 0; i < devices.size(); ++i) {
+            const auto& conn = conns[i];
+            if (conn.nodes.size() < 2) continue;
+            const Index npos = conn.nodes[0];
+            const Index nneg = conn.nodes[1];
+
+            Real v_src = Real{0};
+            bool is_vsource = false;
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, VoltageSource>) {
+                    v_src = dev.voltage();
+                    is_vsource = true;
+                } else if constexpr (std::is_same_v<T, PWMVoltageSource> ||
+                                     std::is_same_v<T, SineVoltageSource> ||
+                                     std::is_same_v<T, PulseVoltageSource>) {
+                    v_src = dev.voltage_at(t);
+                    is_vsource = true;
+                }
+            }, devices[i]);
+            if (!is_vsource) continue;
+
+            // Snap the enforced node voltage in x0. We snap the side
+            // that's a real node; if both are real, snap npos relative
+            // to nneg's current value.
+            if (npos >= 0 && nneg < 0) {
+                // Grounded source: V(npos) - 0 = V_src
+                x[npos] = v_src;
+            } else if (npos < 0 && nneg >= 0) {
+                // Reverse-grounded: 0 - V(nneg) = V_src
+                x[nneg] = -v_src;
+            } else if (npos >= 0 && nneg >= 0) {
+                // Floating source: V(npos) = V(nneg) + V_src
+                x[npos] = x[nneg] + v_src;
+            }
+            // (Both negative — degenerate, source between two ground
+            // references; nothing to snap.)
+        }
+    }
 
     int rejection_streak = 0;
     int high_iter_streak = 0;

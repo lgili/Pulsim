@@ -241,3 +241,121 @@ PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py
 4. Update CI jobs to run Python benchmark/parity/stress scripts.
 5. Add GUI parity regression gate (`test_gui_component_parity.py`) in CI.
 6. Validate with `openspec validate refactor-python-only-v1-hardening --strict`.
+
+## 8. Numerical Surface — v0.10 → v0.11
+
+The `simplify-and-harden-numerical-surface` change collapses the
+50-field tuning surface into a single `Preset` enum + four
+profiles, deprecates dead integrators + redundant booleans, and adds
+four automatic convergence aids (Armijo line search, simultaneous
+event coalescence, iterative refinement, homotopy continuation) that
+all engage by default.
+
+Full reference: [Numerical Configuration](numerical-configuration.md).
+The migration recipes below cover only the changes that affect
+existing user code.
+
+### 8.1 `make_robust_options(...)` → `SimulationOptions.from_preset(...)`
+
+```python
+# Before (still works):
+opts = ps.make_robust_options(circuit, 0.0, 1e-3, 1e-6,
+                                ps.NewtonOptions(),
+                                ps.LinearSolverStackConfig.defaults())
+
+# After (recommended):
+opts = ps.SimulationOptions.from_preset(ps.Preset.Robust,
+                                          dt=1e-6, tstop=1e-3)
+```
+
+The two paths produce numerically identical configurations for the
+Robust profile. `from_preset()` adds three more named profiles
+(`Auto`, `Fast`, `HighFidelity`) on the same surface.
+
+### 8.2 `adaptive_timestep` → `step_mode`
+
+YAML:
+```yaml
+# Before (emits PULSIM_YAML_W_DEPRECATED_FIELD):
+simulation:
+  adaptive_timestep: true
+
+# After:
+simulation:
+  step_mode: variable        # or "fixed"
+```
+
+Python:
+```python
+# Before (still works, will be removed in next major release):
+opts.adaptive_timestep = True
+
+# After:
+opts.step_mode = ps.StepMode.Variable   # or StepMode.Fixed
+```
+
+### 8.3 `direct_formulation_fallback` → just remove it
+
+The DAE fallback is now **unconditionally on internally**. The field
+is a no-op.
+
+YAML:
+```yaml
+# Before (emits PULSIM_YAML_W_DEPRECATED_FIELD):
+simulation:
+  direct_formulation_fallback: true
+
+# After: just remove the field.
+```
+
+### 8.4 Deprecated integrators
+
+| Removed (warning in v0.11, error in next major) | Replacement |
+|---|---|
+| `Integrator.BDF3` / `BDF4` / `BDF5` | `Integrator.BDF2`, `TRBDF2`, or `RosenbrockW` |
+| `Integrator.Gear` | `Integrator.BDF2` (literal alias) |
+| `Integrator.SDIRK2` | `Integrator.TRBDF2` |
+
+YAML:
+```yaml
+# Before:
+simulation:
+  integrator: bdf5
+
+# After:
+simulation:
+  integrator: trbdf2     # for stiff dynamics with order ≥ 2
+  # or: bdf2 / rosenbrockw
+```
+
+### 8.5 New telemetry counters (additive — no migration needed)
+
+Four new diagnostic counters appear in `result.backend_telemetry` /
+`result.linear_solver_telemetry` / `result.dc_result`:
+
+| Counter | Where | Meaning |
+|---|---|---|
+| `simultaneous_event_groups` | `backend_telemetry` | Steps where ≥ 2 PWL devices commuted atomically |
+| `linear_refinement_steps` | `linear_solver_telemetry` | Direct-solve residual exceeded threshold; one round of iterative refinement fired |
+| `homotopy_steps` | `dc_result` | Lambda increments executed in the homotopy continuation |
+| `homotopy_ladder_completed` | `dc_result` | True if homotopy reached `λ = 1` |
+| `line_search_backtracks` | `newton_result.telemetry` | Already existed; now reflects Armijo backtracks |
+
+If you have CI gates that pin telemetry-counter values, audit them
+against the new fields.
+
+### 8.6 Convergence improvements are silent (no migration needed)
+
+The four convergence aids (Armijo line search inside Newton,
+simultaneous PWL event coalescence, KLU iterative refinement,
+homotopy DC OP) all engage **automatically** when their trigger
+conditions are met. No user-facing knobs to flip. Circuits that
+previously failed convergence on a cold-start may now succeed; that's
+the intended improvement.
+
+If a benchmark of yours regresses because the new behavior produces
+a numerically slightly-different trajectory, set
+`opts.newton_options.armijo_line_search = False` and
+`opts.dc_config.homotopy_config.enable = False` to reproduce the
+v0.10 behavior. Reach out via the issue tracker so we can pin the
+regression as a parity test.

@@ -31,15 +31,13 @@ def main() -> None:
     exp.circuit.set_pwl_state("Q1", False)
     exp.circuit.set_pwl_state("D1", False)
 
-    opts = pulsim.SimulationOptions()
-    opts.tstart = 0.0
-    opts.tstop = 5e-4                                 # 50 PWM periods
-    opts.dt = 1e-7
+    # simplify-and-harden-numerical-surface — Phase 2 + 14.8: Preset.Fast
+    # already gives PWL Ideal + fixed step. BDF1 override matches the
+    # legacy stiffness fallback this example exercises.
+    opts = pulsim.SimulationOptions.from_preset(pulsim.Preset.Fast,
+                                                 dt=1e-7, tstop=5e-4)
     opts.dt_min = 1e-12
-    opts.dt_max = 1e-7
-    opts.adaptive_timestep = False
     opts.integrator = pulsim.Integrator.BDF1
-    opts.switching_mode = pulsim.SwitchingMode.Ideal
     opts.newton_options.num_nodes = exp.circuit.num_nodes()
     opts.newton_options.num_branches = exp.circuit.num_branches()
 
