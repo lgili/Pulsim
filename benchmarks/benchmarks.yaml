@@ -85,12 +85,14 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [trbdf2, rosenbrockw]
-  # periodic_rc_pwm intentionally NOT in the SPICE parity manifest:
-  # it uses shooting_default / harmonic_balance scenarios that return
-  # the periodic steady-state directly, which is not comparable to a
-  # transient ngspice run. The circuit YAML stays in benchmarks/
-  # circuits/ for the (Pulsim-only) periodic-analysis bench, but it
-  # has no place here.
+  # periodic_rc_pwm — Pulsim-only periodic-analysis bench. Kept in
+  # the benchmark index so the stress catalog (which uses
+  # shooting_default / harmonic_balance scenarios) can resolve it,
+  # but explicitly carries no SPICE netlist or observables — the
+  # parity dashboard ignores entries without a `ngspice_netlist` /
+  # `ltspice_netlist` field.
+  - path: circuits/periodic_rc_pwm.yaml
+    scenarios: [direct_trap, shooting_default, harmonic_balance]
 
   # ----- Component-coverage benchmarks (Phase 7) -----
   - path: circuits/current_source_rc.yaml

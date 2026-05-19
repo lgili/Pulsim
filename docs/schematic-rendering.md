@@ -143,4 +143,4 @@ def test_my_circuit_renders(tmp_path):
     ET.parse(out)  # raises on malformed SVG
 ```
 
-The schematic test suite in [`python/tests/test_schematic_render.py`](../python/tests/test_schematic_render.py) covers SVG/PNG output, the unknown-kind fallback, and the lazy-import gate — read that file for more patterns.
+The schematic test suite in [`python/tests/test_schematic_render.py`](https://github.com/lgili/Pulsim/blob/main/python/tests/test_schematic_render.py) covers SVG/PNG output, the unknown-kind fallback, and the lazy-import gate — read that file for more patterns.

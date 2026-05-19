@@ -238,7 +238,7 @@ def _svg_to_png(svg_path: Path, png_path: Path, width_px: int = 1400) -> Path:
 
 
 def render(
-    circuit,
+    circuit: Any,
     path: Any,
     format: str | None = None,
     position_hints: dict[str, dict[str, Any]] | None = None,
