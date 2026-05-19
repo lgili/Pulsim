@@ -41,6 +41,15 @@ struct DcMotorParams {
     Real i_a_init   = 0.0;
     Real omega_init = 0.0;
     Real theta_init = 0.0;
+
+    // Armature-winding thermal model (harden-component-models-vs-psim-plecs
+    // Phase B3). When `R_th_winding_to_ambient > 0` the steady-state
+    // armature temperature is `T_w = T_amb + I_a_rms²·R_a(T_w)·R_th`.
+    // Default 0 keeps thermal model OFF (back-compat).
+    Real R_th_winding_to_ambient = 0.0;
+    Real T_amb                   = 25.0;
+    Real R_s_tc                  = 3.93e-3;
+    Real T_ref_winding           = 20.0;
 };
 
 class DcMotor {

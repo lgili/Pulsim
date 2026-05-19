@@ -782,15 +782,32 @@ private:
         const Scalar vds = vd - vs;
 
         const Scalar g = pwl_state_ ? params_.g_on : params_.g_off;
-        // Channel current (drain → source positive convention).
-        Scalar id_total = g * vds;
-        // Channel partials w.r.t. vd, vs.
-        Scalar di_dvd = g;
-        Scalar di_dvs = -g;
+        const Scalar id = g * vds;
 
-        // Body diode (Phase B1) — independent of pwl_state_, Norton-
-        // shifted Vd-Vs form mirroring the Behavioral path. The diode
-        // flows source → drain, so its current SUBTRACTS from id_total.
+        // Pure drain-source resistive stamp; no gm contribution. Legacy
+        // physical-current convention preserved verbatim (the same
+        // residual convention used by every other runtime stamp); the
+        // body diode contribution below adds itself as an EXTRA term
+        // without disturbing this baseline.
+        if (n_drain >= 0) {
+            J.coeffRef(n_drain, n_drain) += g;
+            if (n_source >= 0) J.coeffRef(n_drain, n_source) -= g;
+        }
+        if (n_source >= 0) {
+            J.coeffRef(n_source, n_source) += g;
+            if (n_drain >= 0) J.coeffRef(n_source, n_drain) -= g;
+        }
+
+        if (n_drain >= 0) f[n_drain] -= id;
+        if (n_source >= 0) f[n_source] += id;
+
+        // Body diode (Phase B1) — opt-in, Norton-shifted smooth-blend
+        // mirroring the Behavioral path. The diode flows source →
+        // drain, so its current is ADDED to drain residual (current
+        // entering drain from the diode = positive into the drain
+        // node) and SUBTRACTED from source. With body_diode_enable =
+        // false (default) this entire block is skipped — restoring
+        // bit-exact pre-B1 behaviour for the PWL Ideal path.
         if (params_.body_diode_enable) {
             const Scalar V_F0 = params_.body_diode_V_F0;
             const Scalar R_d_safe =
@@ -810,27 +827,31 @@ private:
             const Scalar di_bd_dvsd =
                 dalpha_bd_dvsd * ((v_sd - V_F0) * g_on_bd - v_sd * g_off_bd) +
                 alpha_bd * g_on_bd + (Scalar{1.0} - alpha_bd) * g_off_bd;
-            id_total -= i_bd;
-            // ∂V_sd/∂vd = -1, ∂V_sd/∂vs = +1, and id_total = id_ch - i_bd.
-            di_dvd += di_bd_dvsd;   // because -(-di_bd_dvsd)
-            di_dvs -= di_bd_dvsd;   // because -(+di_bd_dvsd)
+            // ∂V_sd/∂vd = -1, ∂V_sd/∂vs = +1. The diode current i_bd
+            // flows source → drain (opposite of id_channel), so it is
+            // SUBTRACTED from the residual `f[d] -= id` written above:
+            //   f[d] -= -i_bd   →   f[d] += i_bd
+            //   f[s] += -i_bd   →   f[s] -= i_bd
+            // And its Jacobian partials w.r.t. vd, vs are
+            //   ∂i_bd/∂vd = -di_bd_dvsd, ∂i_bd/∂vs = +di_bd_dvsd.
+            // Since id_total = id_ch - i_bd, the J updates are
+            //   J(d,d) += -(-di_bd_dvsd) = +di_bd_dvsd
+            //   J(d,s) += -(+di_bd_dvsd) = -di_bd_dvsd
+            //   J(s,d) += +(-di_bd_dvsd) = -di_bd_dvsd
+            //   J(s,s) += +(+di_bd_dvsd) = +di_bd_dvsd
+            if (n_drain >= 0) {
+                J.coeffRef(n_drain, n_drain) += di_bd_dvsd;
+                if (n_source >= 0)
+                    J.coeffRef(n_drain, n_source) -= di_bd_dvsd;
+            }
+            if (n_source >= 0) {
+                J.coeffRef(n_source, n_source) += di_bd_dvsd;
+                if (n_drain >= 0)
+                    J.coeffRef(n_source, n_drain) -= di_bd_dvsd;
+            }
+            if (n_drain >= 0)  f[n_drain]  += i_bd;
+            if (n_source >= 0) f[n_source] -= i_bd;
         }
-
-        // Norton companion offset (Taylor residual): i_eq = id - J·x.
-        const Scalar i_eq = id_total - di_dvd * vd - di_dvs * vs;
-
-        if (n_drain >= 0) {
-            J.coeffRef(n_drain, n_drain) += di_dvd;
-            if (n_source >= 0) J.coeffRef(n_drain, n_source) += di_dvs;
-        }
-        if (n_source >= 0) {
-            J.coeffRef(n_source, n_source) -= di_dvs;
-            if (n_drain >= 0) J.coeffRef(n_source, n_drain) -= di_dvd;
-        }
-
-        // Norton offset residual update.
-        if (n_drain >= 0) f[n_drain] -= i_eq;
-        if (n_source >= 0) f[n_source] += i_eq;
     }
 
     Params params_;

@@ -85,6 +85,18 @@ struct InductionMotorParams {
     Real friction_coulomb = 0.0;       ///< N·m — Coulomb friction
     Real tau_load_const     = 0.0;     ///< N·m — speed-independent load
     Real tau_load_quad_coeff = 0.0;    ///< N·m / (rad/s)² — fan-style load
+
+    // Winding thermal model (harden-component-models-vs-psim-plecs
+    // Phase B3). Default `R_th_winding_to_ambient = 0` keeps the
+    // thermal model OFF for back-compat. When > 0, the steady-state
+    // winding temperature is
+    //     T_w_ss = T_amb + I_s_rms² · R_s(T_w) · R_th_winding_to_ambient
+    // and `R_s(T_w) = R_s · (1 + R_s_tc · (T_w − T_ref_winding))`.
+    // Users query `T_w_ss` via the device wrapper accessor.
+    Real R_th_winding_to_ambient = 0.0;  ///< K/W (0 = thermal model OFF)
+    Real T_amb                   = 25.0; ///< °C
+    Real R_s_tc                  = 3.93e-3; ///< 1/K (copper coefficient)
+    Real T_ref_winding           = 20.0; ///< °C — reference for R_s_tc
 };
 
 class InductionMotor {

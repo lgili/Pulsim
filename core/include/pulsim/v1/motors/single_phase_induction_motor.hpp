@@ -78,6 +78,13 @@ struct SinglePhaseInductionMotorParams {
     Real J = 1e-4;                ///< kg·m² — rotor + shaft inertia
     Real b_friction = 1e-4;       ///< N·m·s — viscous friction
     Real friction_coulomb = 0.05; ///< N·m — Coulomb friction
+
+    // Winding thermal model (harden-component-models-vs-psim-plecs
+    // Phase B3). Default 0 keeps thermal model OFF for back-compat.
+    Real R_th_winding_to_ambient = 0.0;
+    Real T_amb                   = 25.0;
+    Real R_s_tc                  = 3.93e-3;
+    Real T_ref_winding           = 20.0;
 };
 
 class SinglePhaseInductionMotor {
