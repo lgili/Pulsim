@@ -185,6 +185,10 @@ def test_bode_plot_produces_matplotlib_axes():
 
 
 def test_bode_plot_rejects_failed_result():
+    # `bode_plot` imports matplotlib at the top of its module — guard
+    # so this test skips cleanly on minimal CI envs that don't bundle
+    # matplotlib (e.g. windows-latest python-tests).
+    pytest.importorskip("matplotlib")
     failed = pulsim.AcSweepResult()
     # Default-constructed: success = False.
     assert not failed.success

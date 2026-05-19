@@ -89,6 +89,14 @@ PeriodicSteadyStateResult Simulator::run_periodic_shooting(const Vector& x0,
     Vector guess = x0;
     Vector residual;
     for (int iter = 0; iter < options.max_iterations; ++iter) {
+        // Shooting needs fresh device state from `guess` each iteration —
+        // the per-period closed-loop history-preservation fix in
+        // `run_transient_native_impl` (which skips `update_history(x, true)`
+        // when devices already have history) is the wrong semantics here,
+        // because each shooting iteration starts a brand-new cycle from
+        // the latest guess. Explicitly reset the dynamic history before
+        // every iteration so caps / inductors get re-seeded from `guess`.
+        circuit_.update_history(guess, true);
         SimulationResult cycle = shooting_sim.run_transient(guess);
         if (!cycle.success || cycle.states.empty()) {
             result.success = false;
