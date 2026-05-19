@@ -186,7 +186,7 @@ def test_schematic_top_level_is_lazy_importable() -> None:
 # They rely on the Pulsim-extended analog skin (pulsim_analog.svg) being
 # present in the build tree; CI environments without Node.js will skip
 # the netlistsvg backend entirely.
-import os
+import os  # noqa: E402 — module-level guard kept next to its skipif
 
 _NETLISTSVG_DEFAULT = pytest.mark.skipif(
     os.environ.get("PULSIM_SCHEMATIC_BACKEND", "netlistsvg").lower() != "netlistsvg",

@@ -125,3 +125,7 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 "python/pulsim/remote/*_pb2.py" = ["E402", "F401"]
 "python/pulsim/remote/*_pb2_grpc.py" = ["F401"]
+# Hypothesis property tests use the pytest.importorskip pattern, which
+# requires real imports below the importorskip calls. E402 is the
+# expected idiom there.
+"python/tests/properties/*.py" = ["E402"]

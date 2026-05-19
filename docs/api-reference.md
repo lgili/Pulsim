@@ -167,15 +167,14 @@ This page is generated from the `pulsim` package surface (stubs + public exports
 
 ::: pulsim.SwitchingEnergy
 
-::: pulsim.MOSFETLossParams
-
-::: pulsim.IGBTLossParams
-
-::: pulsim.DiodeLossParams
-
-::: pulsim.ConductionLoss
-
-::: pulsim.SwitchingLoss
+<!--
+MOSFETLossParams / IGBTLossParams / DiodeLossParams / ConductionLoss /
+SwitchingLoss were removed as standalone classes — loss parameters now
+live on the device params (MOSFETParams, IGBTParams, RealisticDiodeParams)
+and per-device accumulators are exposed via the Circuit / Simulator
+accessors (mosfet_*_loss, diode_*_loss, igbt_*_loss). The aggregate
+breakdown stays via the helpers below.
+-->
 
 ::: pulsim.LossBreakdown
 

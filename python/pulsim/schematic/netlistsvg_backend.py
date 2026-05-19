@@ -257,7 +257,7 @@ def _build_yosys_json(components: list, ground_id: int) -> dict[str, Any]:
 
 
 def render_netlistsvg(
-    circuit,
+    circuit: Any,
     svg_path: Any,
     position_hints: dict[str, dict[str, Any]] | None = None,
 ) -> Path:

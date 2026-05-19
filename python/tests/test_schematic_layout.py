@@ -17,12 +17,9 @@ import pytest
 import pulsim as ps
 from pulsim import schematic
 from pulsim.schematic import (
-    BoundingBox,
     ComponentPlacement,
     SchematicLayout,
     TerminalAnchor,
-    Wire,
-    WireEndpoint,
     compute_layout,
 )
 from pulsim.schematic.types import SCHEMATIC_SCHEMA_VERSION

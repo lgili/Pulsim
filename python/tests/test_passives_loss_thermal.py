@@ -16,8 +16,11 @@ import pulsim as ps
 
 def _run(circuit, tstop=10e-3, dt=100e-6):
     opts = ps.SimulationOptions()
-    opts.tstart = 0.0; opts.tstop = tstop
-    opts.dt = dt; opts.dt_min = 1e-9; opts.dt_max = dt
+    opts.tstart = 0.0
+    opts.tstop = tstop
+    opts.dt = dt
+    opts.dt_min = 1e-9
+    opts.dt_max = dt
     opts.adaptive_timestep = False
     opts.enable_bdf_order_control = False
     opts.newton_options.num_nodes = circuit.num_nodes()
@@ -30,21 +33,29 @@ class TestPassivesBindings:
 
     def test_resistor_params_exposed(self):
         p = ps.ResistorParams()
-        p.resistance = 100.0; p.TCR = 4e-3; p.R_th_ja = 50.0; p.T_amb = 25.0
+        p.resistance = 100.0
+        p.TCR = 4e-3
+        p.R_th_ja = 50.0
+        p.T_amb = 25.0
         assert p.resistance == pytest.approx(100.0)
         assert p.TCR == pytest.approx(4e-3)
         assert p.R_th_ja == pytest.approx(50.0)
 
     def test_capacitor_params_exposed(self):
         p = ps.CapacitorParams()
-        p.capacitance = 330e-6; p.ESR = 0.5; p.ESR_tc = 0.01; p.R_th_ja = 8.0
+        p.capacitance = 330e-6
+        p.ESR = 0.5
+        p.ESR_tc = 0.01
+        p.R_th_ja = 8.0
         assert p.capacitance == pytest.approx(330e-6)
         assert p.ESR == pytest.approx(0.5)
         assert p.R_th_ja == pytest.approx(8.0)
 
     def test_inductor_params_exposed(self):
         p = ps.InductorParams()
-        p.inductance = 200e-6; p.DCR = 0.05; p.R_th_ja = 12.0
+        p.inductance = 200e-6
+        p.DCR = 0.05
+        p.R_th_ja = 12.0
         assert p.inductance == pytest.approx(200e-6)
         assert p.DCR == pytest.approx(0.05)
 
@@ -83,8 +94,10 @@ class TestPassivesBehavior:
         n = c.add_node("n")
         c.add_voltage_source("Vs", n, ps.Circuit.ground(), 10.0)
         rp = ps.ResistorParams()
-        rp.resistance = 10.0; rp.TCR = 0.0
-        rp.R_th_ja = 2.0; rp.T_amb = 25.0
+        rp.resistance = 10.0
+        rp.TCR = 0.0
+        rp.R_th_ja = 2.0
+        rp.T_amb = 25.0
         c.add_resistor("R1", n, ps.Circuit.ground(), rp)
         r = _run(c)
         assert r.success
@@ -97,11 +110,15 @@ class TestPassivesBehavior:
     def test_inductor_DCR_loss(self):
         # V → L → R_load → GND. Steady-state I = V/R_load.
         c = ps.Circuit()
-        a = c.add_node("a"); b = c.add_node("b")
+        a = c.add_node("a")
+        b = c.add_node("b")
         c.add_voltage_source("Vs", a, ps.Circuit.ground(), 5.0)
         lp = ps.InductorParams()
-        lp.inductance = 1e-3; lp.DCR = 0.05; lp.DCR_tc = 0.0
-        lp.R_th_ja = 3.0; lp.T_amb = 25.0
+        lp.inductance = 1e-3
+        lp.DCR = 0.05
+        lp.DCR_tc = 0.0
+        lp.R_th_ja = 3.0
+        lp.T_amb = 25.0
         c.add_inductor("L1", a, b, lp)
         c.add_resistor("Rload", b, ps.Circuit.ground(), 1.0)
         r = _run(c, tstop=50e-3, dt=100e-6)
@@ -133,7 +150,8 @@ class TestPowerStageCapMatch:
         sine = ps.SineParams()
         sine.amplitude = 100.0 * math.sqrt(2.0)
         sine.frequency = 60.0
-        sine.offset = 0.0; sine.phase = 0.0
+        sine.offset = 0.0
+        sine.phase = 0.0
         c.add_sine_voltage_source("Vac", ac, gnd, sine)
 
         cp = ps.CapacitorParams()

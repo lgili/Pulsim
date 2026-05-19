@@ -166,7 +166,7 @@ from ._pulsim import (
     dc_operating_point,
 
     # Transient Simulation
-    run_transient as _run_transient_native,
+    run_transient as _run_transient_native,  # noqa: F401 — kept for forward compat
     run_transient_streaming as _run_transient_streaming_native,
     SimulationOptions,
     SimulationResult,
@@ -1514,4 +1514,35 @@ __all__ = [
     "SignalEvaluator",
     "AlgebraicLoopError",
     "SIGNAL_TYPES",
+
+    # simplify-and-harden-numerical-surface — Phase 2 + 3 public surface
+    "Preset",
+    "AdvancedOptions",
+
+    # Top-level run_transient convenience (kernel-level, no Simulator object)
+    "run_transient",
+
+    # Robustness primitives re-exported for explicit user control
+    "HomotopyConfig",
+    "SolverQuality",
+
+    # add-frequency-domain-analysis — Phase 1/2/3 public types
+    "LinearSystem",
+    "AcSweepScale",
+    "AcSweepOptions",
+    "AcMeasurement",
+    "AcSweepResult",
+    "FraOptions",
+    "FraMeasurement",
+    "FraResult",
+
+    # frequency_analysis plotting + export helpers
+    "bode_plot",
+    "nyquist_plot",
+    "fra_overlay",
+    "export_ac_csv",
+    "export_fra_csv",
+    "export_ac_json",
+    "export_fra_json",
+    "load_ac_result_csv",
 ]

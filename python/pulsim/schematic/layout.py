@@ -525,7 +525,7 @@ def _compute_canvas(pos_mm: dict[int, tuple[float, float]]) -> BoundingBox:
     )
 
 
-def compute_layout(circuit) -> SchematicLayout:
+def compute_layout(circuit: Any) -> SchematicLayout:
     """Build a deterministic :class:`SchematicLayout` for a Circuit.
 
     Default backend is **ELK** (Eclipse Layout Kernel via elkjs running on

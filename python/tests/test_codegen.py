@@ -12,7 +12,6 @@ CI environments without a C compiler.
 from __future__ import annotations
 
 import math
-import os
 import shutil
 import subprocess
 import tempfile

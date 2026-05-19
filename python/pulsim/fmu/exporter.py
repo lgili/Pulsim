@@ -28,8 +28,6 @@ is the cross-tool follow-up tracked in Phase 7.
 
 from __future__ import annotations
 
-import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -303,7 +301,7 @@ def _emit_model_description(
             </ScalarVariable>"""))
     all_vars = "\n    ".join(input_vars + output_vars + state_vars)
     n_outputs = len(outputs)
-    output_indices = " ".join(
+    " ".join(
         str(len(inputs) + i + 1) for i in range(n_outputs))
     # Build the <Unknown ...> tags outside the outer f-string so the nested
     # double-quoted f-string + `\"` escape (which Python 3.10/3.11 rejects

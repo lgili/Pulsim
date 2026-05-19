@@ -291,18 +291,18 @@ def _emit_c99(
     body_lines.append("}")
     body = "\n".join(body_lines) + "\n"
 
-    test_runner = textwrap.dedent(f"""\
+    test_runner = textwrap.dedent("""\
         /* PIL harness for pulsim_model_step. Reads (input_trace, n_steps)
          * via argv, runs the generated model, and writes the y trace
          * back to stdout as one line per step. */
         #include "model.h"
         #include <stdio.h>
         #include <stdlib.h>
-        int main(int argc, char** argv) {{
-            if (argc < 2) {{
+        int main(int argc, char** argv) {
+            if (argc < 2) {
                 fprintf(stderr, "usage: %s <n_steps> [u_const]\\n", argv[0]);
                 return 1;
-            }}
+            }
             int n_steps = atoi(argv[1]);
             float u_const = (argc >= 3) ? (float)atof(argv[2]) : 0.0f;
             PulsimModel m;
@@ -310,16 +310,16 @@ def _emit_c99(
             float u[PULSIM_INPUT_SIZE];
             for (size_t i = 0; i < PULSIM_INPUT_SIZE; ++i) u[i] = u_const;
             float y[PULSIM_OUTPUT_SIZE];
-            for (int k = 0; k < n_steps; ++k) {{
+            for (int k = 0; k < n_steps; ++k) {
                 pulsim_model_step(&m, u, y);
-                for (size_t i = 0; i < PULSIM_OUTPUT_SIZE; ++i) {{
+                for (size_t i = 0; i < PULSIM_OUTPUT_SIZE; ++i) {
                     if (i) putchar(',');
                     printf("%.10e", y[i]);
-                }}
+                }
                 putchar('\\n');
-            }}
+            }
             return 0;
-        }}
+        }
         """)
 
     written = []

@@ -27,7 +27,7 @@ IGBTs, and voltage-controlled switches:
 contract tests for the PWL path. On the in-tree buck benchmark (5 PWM
 cycles @ 100 kHz, `dt = 100 ns`) `Ideal` mode runs roughly **240× faster
 wall-clock** than `Behavioral` on AppleClang 17 / Release+LTO. The buck
-test [`test_pwl_speedup_benchmark.cpp`](../core/tests/test_pwl_speedup_benchmark.cpp)
+test [`test_pwl_speedup_benchmark.cpp`](https://github.com/lgili/Pulsim/blob/main/core/tests/test_pwl_speedup_benchmark.cpp)
 asserts a loose `≤3×` ratio to absorb CI noise; the full numbers are
 logged via Catch2 `INFO`.
 

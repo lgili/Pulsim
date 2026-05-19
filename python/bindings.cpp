@@ -3287,6 +3287,54 @@ void init_v2_module(py::module_& v2) {
         .def("run_transient", [](Simulator& sim, const Vector& x0) {
             return sim.run_transient(x0);
         }, py::arg("x0"), "Run transient simulation with explicit initial state")
+        // Closed-loop pattern: take a Python callback invoked after every
+        // accepted timestep. The callback receives (t, state_dict). It may
+        // read state, run a controller (PI / dq / ACMC / whatever) and
+        // call back into the circuit via `set_pwm_duty(name, value)` or
+        // `set_pmsm_foc_references(...)` to close the loop. The GIL is
+        // released around the C++ integration loop; the callback's
+        // re-entry into pybind11 is GIL-safe because we cache `is_none()`
+        // checks at the top and acquire the GIL inside the per-step
+        // callback wrapper. See `run_transient_streaming` for the parallel
+        // implementation of the same architecture against a free function.
+        .def("run_transient", [](Simulator& sim, const Vector& x0,
+                                  Circuit& circuit,
+                                  py::object data_callback) {
+            const bool have_cb = !data_callback.is_none();
+
+            // Pre-extract node names while the GIL is comfortably held.
+            std::vector<std::string> node_names;
+            for (Index i = 0; i < circuit.num_nodes(); ++i) {
+                node_names.push_back(circuit.node_name(i));
+            }
+
+            auto cpp_callback = [&, have_cb](Real t, const Vector& state) {
+                if (!have_cb) return;
+                py::gil_scoped_acquire acquire;
+                try {
+                    py::dict sd;
+                    for (size_t i = 0; i < node_names.size(); ++i) {
+                        sd[py::str("V(" + node_names[i] + ")")] =
+                            state[static_cast<Index>(i)];
+                    }
+                    data_callback(t, sd);
+                } catch (...) {
+                    // Swallow callback exceptions so they don't kill the
+                    // C++ integration loop; user can detect via missing
+                    // updates.
+                }
+            };
+
+            SimulationResult result;
+            {
+                py::gil_scoped_release release;
+                result = sim.run_transient(x0, cpp_callback, nullptr, nullptr);
+            }
+            return result;
+        }, py::arg("x0"), py::arg("circuit"), py::arg("callback"),
+           "Run transient simulation with a Python callback invoked after every "
+           "accepted timestep. Use to implement closed-loop control (call "
+           "circuit.set_pwm_duty from the callback).")
         .def("run_periodic_shooting", [](Simulator& sim, const PeriodicSteadyStateOptions& options) {
             return sim.run_periodic_shooting(options);
         }, py::arg("options") = PeriodicSteadyStateOptions(),
@@ -3580,14 +3628,23 @@ void init_v2_module(py::module_& v2) {
         int actual_emit_interval = emit_interval > 0 ? emit_interval : 100;
         const Real total_duration = t_stop - t_start;
 
-        auto callback = [&](Real time, const Vector& state) {
+        // Snapshot is_none() flags at construction time (under the
+        // GIL the caller still holds), so the hot per-step path doesn't
+        // touch pybind11 objects without the GIL. The flags are
+        // captured by value into the lambda.
+        const bool have_data_cb = !data_callback.is_none();
+        const bool have_progress_cb = !progress_callback.is_none();
+        const bool have_cancel_cb = !cancel_check.is_none();
+
+        auto callback = [&, have_data_cb, have_progress_cb, have_cancel_cb]
+                        (Real time, const Vector& state) {
             step++;
             bool emit = (step % actual_emit_interval == 0);
 
-            if (emit || !cancel_check.is_none()) {
+            if (emit || have_cancel_cb) {
                 py::gil_scoped_acquire acquire;
 
-                if (emit && !data_callback.is_none()) {
+                if (emit && have_data_cb) {
                     try {
                         py::dict state_dict;
                         for (size_t i = 0; i < node_names.size(); ++i) {
@@ -3599,7 +3656,7 @@ void init_v2_module(py::module_& v2) {
                     }
                 }
 
-                if (emit && !progress_callback.is_none()) {
+                if (emit && have_progress_cb) {
                     try {
                         Real progress = total_duration > 0
                             ? (time - t_start) / total_duration * 100.0
@@ -3611,7 +3668,7 @@ void init_v2_module(py::module_& v2) {
                     }
                 }
 
-                if (!cancel_check.is_none()) {
+                if (have_cancel_cb) {
                     try {
                         if (py::cast<bool>(cancel_check())) {
                             stop_requested.store(true);
@@ -3623,7 +3680,18 @@ void init_v2_module(py::module_& v2) {
             }
         };
 
-        SimulationResult result = sim.run_transient(x0, callback, nullptr, &control);
+        // Release the GIL while the C++ integration loop runs. This lets
+        // other Python threads progress AND gives the inner callback's
+        // `py::gil_scoped_acquire` a real acquire/release pair so it
+        // can safely re-enter pybind11 (e.g. `circuit.set_pwm_duty(...)`
+        // from a closed-loop controller). The release is scoped to
+        // just the simulator call so the surrounding code (which
+        // touches py::object locals) runs with the GIL held.
+        SimulationResult result;
+        {
+            py::gil_scoped_release release;
+            result = sim.run_transient(x0, callback, nullptr, &control);
+        }
 
         bool success = result.success;
         std::string message = result.message.empty()
@@ -3676,7 +3744,17 @@ void init_v2_module(py::module_& v2) {
             circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
             data_callback, progress_callback, cancel_check, emit_interval);
     },
-    py::call_guard<py::gil_scoped_release>(),
+    // NOTE: NO `py::call_guard<py::gil_scoped_release>` here.
+    // The function body copies py::object args (data_callback,
+    // progress_callback, cancel_check) into the impl call. A
+    // py::object copy increments the underlying Python reference
+    // count, which MUST hold the GIL. With `gil_scoped_release` as
+    // a call guard, the GIL would be released *before* the body
+    // runs, so the inner copy hits `inc_ref` without GIL and
+    // pybind11's assertion aborts the process. The impl itself
+    // releases the GIL via `gil_scoped_release` around the long
+    // `sim.run_transient(...)` call after the py::objects are
+    // safely stashed in the lambda.
     py::arg("circuit"),
     py::arg("t_start"),
     py::arg("t_stop"),
@@ -3730,7 +3808,7 @@ void init_v2_module(py::module_& v2) {
             circuit, t_start, t_stop, dt, x0, newton_opts, linear_solver,
             data_callback, progress_callback, cancel_check, emit_interval);
     },
-    py::call_guard<py::gil_scoped_release>(),
+    // No `call_guard<gil_scoped_release>` here — see note above.
     py::arg("circuit"),
     py::arg("t_start"),
     py::arg("t_stop"),
