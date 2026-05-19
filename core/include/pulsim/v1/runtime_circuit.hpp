@@ -3888,6 +3888,101 @@ public:
         return m ? m->i_c() : std::numeric_limits<Real>::quiet_NaN();
     }
 
+    // ----- Motor winding steady-state temperature (Phase B3) -----------------
+    //
+    // harden-component-models-vs-psim-plecs Phase B3.4. Given a measured /
+    // estimated RMS winding current `i_rms`, returns the steady-state
+    // winding temperature T_w (°C) at thermal equilibrium:
+    //
+    //   T_w = T_amb + n_phases · I_rms² · R_s(T_w) · R_th
+    //   R_s(T_w) = R_s_nominal · (1 + R_s_tc · (T_w − T_ref_winding))
+    //
+    // Closed-form solving for T_w:
+    //
+    //   T_w − T_ref =
+    //     (T_amb − T_ref + n_phases · I_rms² · R_s · R_th)
+    //     / (1 − n_phases · I_rms² · R_s · R_s_tc · R_th)
+    //
+    // `n_phases = 1` for DC motors, `1.5` for 3-phase (3 phases × 1/2 from
+    // the αβ Clarke convention so I_rms refers to per-phase RMS), `1` for
+    // single-phase induction motors with shared (main + aux) winding RMS.
+    //
+    // Returns NaN if the motor is not found, or if the thermal model is
+    // disabled (`R_th_winding_to_ambient = 0`), or if the linear thermal
+    // model becomes unstable (denominator ≤ 0 → R_s_tc-driven runaway).
+private:
+    [[nodiscard]] static Real solve_steady_state_winding_temperature(
+        Real R_s_nominal, Real R_th, Real T_amb, Real R_s_tc,
+        Real T_ref_winding, Real n_phases, Real i_rms) noexcept {
+        if (!(R_th > Real{0}) || !std::isfinite(i_rms)) {
+            return std::numeric_limits<Real>::quiet_NaN();
+        }
+        const Real power_factor =
+            n_phases * i_rms * i_rms * R_s_nominal * R_th;
+        const Real denom = Real{1} - power_factor * R_s_tc;
+        if (!(denom > Real{0})) {
+            // Linear thermal model unstable — physical runaway.
+            return std::numeric_limits<Real>::quiet_NaN();
+        }
+        return T_ref_winding +
+            (T_amb - T_ref_winding + power_factor) / denom;
+    }
+
+public:
+    [[nodiscard]] Real dc_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_a_rms) const {
+        const auto* m = find_device<DcMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.R_a, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1}, i_a_rms);
+    }
+    [[nodiscard]] Real pmsm_steady_state_winding_temperature(
+        std::string_view name, Real i_s_rms) const {
+        const auto* m = find_device<PmsmDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.Rs, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1.5}, i_s_rms);
+    }
+    [[nodiscard]] Real bldc_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_s_rms) const {
+        const auto* m = find_device<BldcMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.R_s, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1.5}, i_s_rms);
+    }
+    [[nodiscard]] Real induction_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_s_rms) const {
+        const auto* m = find_device<InductionMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        return solve_steady_state_winding_temperature(
+            p.R_s, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1.5}, i_s_rms);
+    }
+    [[nodiscard]] Real single_phase_induction_motor_steady_state_winding_temperature(
+        std::string_view name, Real i_rms) const {
+        const auto* m = find_device<SinglePhaseInductionMotorDevice>(name);
+        if (!m) return std::numeric_limits<Real>::quiet_NaN();
+        const auto& p = m->params();
+        // Main + aux windings share one R_th; use the average of the two
+        // R_s values as the effective resistance.
+        const Real R_s_avg = Real{0.5} * (p.R_s_main + p.R_s_aux);
+        return solve_steady_state_winding_temperature(
+            R_s_avg, p.R_th_winding_to_ambient, p.T_amb,
+            p.R_s_tc, p.T_ref_winding,
+            /*n_phases=*/Real{1}, i_rms);
+    }
+
     // ----- Mechanical device (consolidate-motors-and-three-phase, B.2a) -------
     //
     // Adds a signal-domain mechanical primitive (shaft inertia + friction +
