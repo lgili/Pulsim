@@ -150,6 +150,7 @@ install(FILES
     pulsim/signal_evaluator.py
     pulsim/frequency_analysis.py
     pulsim/templates.py
+    pulsim/snubber.py
     DESTINATION pulsim
 )
 
