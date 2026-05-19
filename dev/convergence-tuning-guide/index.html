@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/convergence-tuning-guide/">
       
       
-        <link rel="prev" href="../automatic-differentiation/">
+        <link rel="prev" href="../component-models-audit/">
       
       
         <link rel="next" href="../linear-solver-cache/">
@@ -808,6 +808,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../numerical-configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ac-analysis/" class="md-nav__link">
         
   
@@ -892,6 +913,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../schematic-rendering/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Schematic Rendering
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../code-generation/" class="md-nav__link">
         
   
@@ -939,6 +981,48 @@
   
   <span class="md-ellipsis">
     Automatic Differentiation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pwl-switching-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PWL Switching Engine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../component-models-audit/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Component Models Audit
   </span>
   
 
@@ -1001,9 +1085,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#primeiro-passo-escolha-um-preset" class="md-nav__link">
+    <span class="md-ellipsis">
+      ⚠️ Primeiro passo — escolha um preset
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sintomas-comuns" class="md-nav__link">
     <span class="md-ellipsis">
       Sintomas comuns
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#convergence-aids-automaticas-ligadas-por-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      Convergence aids automáticas (ligadas por default)
     </span>
   </a>
   
@@ -1250,6 +1352,48 @@
   
   <span class="md-ellipsis">
     Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compressor-and-refrigerant-load/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compressor + Refrigerant Load
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multilevel-converters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multilevel Converters
   </span>
   
 
@@ -1671,9 +1815,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#primeiro-passo-escolha-um-preset" class="md-nav__link">
+    <span class="md-ellipsis">
+      ⚠️ Primeiro passo — escolha um preset
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sintomas-comuns" class="md-nav__link">
     <span class="md-ellipsis">
       Sintomas comuns
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#convergence-aids-automaticas-ligadas-por-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      Convergence aids automáticas (ligadas por default)
     </span>
   </a>
   
@@ -1799,6 +1961,21 @@
 
 <h1 id="convergence-tuning-guide-python-yaml">Convergence Tuning Guide (Python + YAML)<a class="headerlink" href="#convergence-tuning-guide-python-yaml" title="Permanent link">&para;</a></h1>
 <p>Este guia foca no runtime suportado: Python + YAML (<code>pulsim-v1</code>).</p>
+<h2 id="primeiro-passo-escolha-um-preset">⚠️ Primeiro passo — escolha um preset<a class="headerlink" href="#primeiro-passo-escolha-um-preset" title="Permanent link">&para;</a></h2>
+<p>Antes de tunar campo a campo, <strong>escolha um preset numérico</strong> em
+<a href="../numerical-configuration/"><code>numerical-configuration.md</code></a>. 95% dos
+casos de não-convergência se resolvem trocando <code>Preset.Auto</code> por
+<code>Preset.Robust</code> (que liga TRBDF2 + stiffness + 12 retries + Armijo
+line search + homotopy DC):</p>
+<div class="highlight"><pre><span></span><code><span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="o">.</span><span class="n">from_preset</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">Preset</span><span class="o">.</span><span class="n">Robust</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">preset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">robust</span>
+<span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-3</span>
+<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-6</span>
+</code></pre></div>
+<p>O resto deste guia é para os casos restantes que precisam de tuning
+fino. Se o preset resolver, <strong>não passe daqui</strong>.</p>
 <h2 id="sintomas-comuns">Sintomas comuns<a class="headerlink" href="#sintomas-comuns" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Falha no ponto de operação DC (<code>dc_operating_point</code>).</li>
@@ -1806,13 +1983,52 @@
 <li>Queda para fallback linear com frequência alta.</li>
 <li>Passos muito pequenos e simulação lenta.</li>
 </ul>
+<h2 id="convergence-aids-automaticas-ligadas-por-default">Convergence aids automáticas (ligadas por default)<a class="headerlink" href="#convergence-aids-automaticas-ligadas-por-default" title="Permanent link">&para;</a></h2>
+<p>Pulsim ship com quatro aids automáticas que disparam em casos
+difíceis sem o usuário precisar configurar — todas chegaram com o
+release <code>simplify-and-harden-numerical-surface</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Aid</th>
+<th>Quando dispara</th>
+<th>Sintoma de que ajudou</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Armijo line search</strong> (Newton)</td>
+<td>Sempre que o full step Newton aumenta o resíduo</td>
+<td><code>result.newton_result.telemetry.line_search_backtracks &gt; 0</code></td>
+</tr>
+<tr>
+<td><strong>Coalescência de eventos simultâneos</strong> (PWL)</td>
+<td>≥ 2 switches comutam dentro da tolerância de bisection</td>
+<td><code>result.backend_telemetry.simultaneous_event_groups &gt; 0</code></td>
+</tr>
+<tr>
+<td><strong>Iterative refinement</strong> (KLU/SparseLU)</td>
+<td>Resíduo pós-back-solve &gt; 10·ε_machine</td>
+<td><code>result.linear_solver_telemetry.linear_refinement_steps &gt; 0</code></td>
+</tr>
+<tr>
+<td><strong>Homotopy continuation</strong> (DC OP)</td>
+<td>Direct → Source → Gmin → PseudoTransient all fail</td>
+<td><code>result.dc_result.strategy_used == DCStrategy.Homotopy</code></td>
+</tr>
+</tbody>
+</table>
+<p>Veja <a href="../numerical-configuration/#convergence-aids">Numerical Configuration</a>
+para detalhes e tuning de cada uma.</p>
 <h2 id="checklist-rapido">Checklist rápido<a class="headerlink" href="#checklist-rapido" title="Permanent link">&para;</a></h2>
 <ol>
+<li><strong>Pegue o preset certo</strong> (<code>Preset.Robust</code> é o ponto de partida).</li>
 <li>Garanta caminho DC para o terra (evite nós flutuantes).</li>
-<li>Use <code>simulation.solver.order</code> e <code>fallback_order</code> explícitos.</li>
-<li>Em circuitos stiff, prefira <code>integrator: trbdf2</code> ou <code>rosenbrockw</code>.</li>
-<li>Ative precondicionador ILUT para malhas grandes.</li>
-<li>Use <code>adaptive_timestep: false</code> quando quiser baseline determinístico.</li>
+<li>Use <code>simulation.solver.order</code> e <code>fallback_order</code> explícitos só se
+   precisar mais que o auto-selector.</li>
+<li>Em circuitos stiff, o preset Robust já escolhe <code>integrator: trbdf2</code>
+   automaticamente. Override para <code>rosenbrockw</code> só se TRBDF2 falhar.</li>
+<li><code>Preset.Fast</code> quando o circuito é só switching.</li>
 </ol>
 <h2 id="verificar-backends-compilados">Verificar backends compilados<a class="headerlink" href="#verificar-backends-compilados" title="Permanent link">&para;</a></h2>
 <p>No Python:</p>
@@ -1930,7 +2146,7 @@ suportado de transiente, use o core nativo com <code>simulation.step_mode</code>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../automatic-differentiation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Automatic Differentiation">
+          <a href="../component-models-audit/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Component Models Audit">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1940,7 +2156,7 @@ suportado de transiente, use o core nativo com <code>simulation.step_mode</code>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Automatic Differentiation
+                Component Models Audit
               </div>
             </div>
           </a>

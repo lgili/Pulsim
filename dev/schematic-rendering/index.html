@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/fmi-export/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/schematic-rendering/">
       
       
-        <link rel="prev" href="../code-generation/">
+        <link rel="prev" href="../parameter-sweep/">
       
       
-        <link rel="next" href="../automatic-differentiation/">
+        <link rel="next" href="../code-generation/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>FMI Export - PulsimCore</title>
+        <title>Schematic Rendering - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#fmi-export" class="md-skip">
+        <a href="#schematic-rendering" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              FMI Export
+              Schematic Rendering
             
           </span>
         </div>
@@ -910,10 +910,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../schematic-rendering/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Schematic Rendering
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -922,6 +942,107 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-gets-rendered" class="md-nav__link">
+    <span class="md-ellipsis">
+      What gets rendered
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install" class="md-nav__link">
+    <span class="md-ellipsis">
+      Install
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#backends-and-how-to-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      Backends and how to switch
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gui-auto-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      GUI auto-placement
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#custom-output-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      Custom output paths
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      Known limits
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#programmatic-circuits" class="md-nav__link">
+    <span class="md-ellipsis">
+      Programmatic circuits
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-your-schematic-in-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      Testing your schematic in code
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -952,30 +1073,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    FMI Export
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -984,89 +1085,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
-    <span class="md-ellipsis">
-      TL;DR
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#whats-inside" class="md-nav__link">
-    <span class="md-ellipsis">
-      What's inside
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#value-reference-layout" class="md-nav__link">
-    <span class="md-ellipsis">
-      Value reference layout
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fmi2dostep-semantics" class="md-nav__link">
-    <span class="md-ellipsis">
-      fmi2DoStep semantics
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#validation-gates" class="md-nav__link">
-    <span class="md-ellipsis">
-      Validation gates
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#limitations-follow-ups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Limitations / follow-ups
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      See also
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1764,63 +1782,81 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
+  <a href="#quick-start" class="md-nav__link">
     <span class="md-ellipsis">
-      TL;DR
+      Quick start
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#whats-inside" class="md-nav__link">
+  <a href="#what-gets-rendered" class="md-nav__link">
     <span class="md-ellipsis">
-      What's inside
+      What gets rendered
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#value-reference-layout" class="md-nav__link">
+  <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
-      Value reference layout
+      Install
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#fmi2dostep-semantics" class="md-nav__link">
+  <a href="#backends-and-how-to-switch" class="md-nav__link">
     <span class="md-ellipsis">
-      fmi2DoStep semantics
+      Backends and how to switch
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#validation-gates" class="md-nav__link">
+  <a href="#gui-auto-placement" class="md-nav__link">
     <span class="md-ellipsis">
-      Validation gates
+      GUI auto-placement
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#limitations-follow-ups" class="md-nav__link">
+  <a href="#custom-output-paths" class="md-nav__link">
     <span class="md-ellipsis">
-      Limitations / follow-ups
+      Custom output paths
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
+  <a href="#known-limits" class="md-nav__link">
     <span class="md-ellipsis">
-      See also
+      Known limits
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#programmatic-circuits" class="md-nav__link">
+    <span class="md-ellipsis">
+      Programmatic circuits
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-your-schematic-in-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      Testing your schematic in code
     </span>
   </a>
   
@@ -1841,7 +1877,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/fmi-export.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/schematic-rendering.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1850,181 +1886,184 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/fmi-export.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/schematic-rendering.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="fmi-export">FMI Export<a class="headerlink" href="#fmi-export" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p>Status: shipped — FMI 2.0 Co-Simulation export pipeline. ME export +
-FMU import + FMI 3.0 + cross-tool validation are the natural
-follow-ups.</p>
-</blockquote>
-<p><code>pulsim.fmu</code> packages a Pulsim Circuit as a self-contained
-<strong>FMI 2.0 Co-Simulation</strong> <code>.fmu</code> file. The exported FMU drops into any
-FMI master that speaks 2.0 — OMSimulator, Dymola, MATLAB/Simulink (via
-the Co-Simulation block), FMPy, ANSYS Twin Builder. The internal solver
-is the discrete state-space machinery shipped in
-<a href="../code-generation/"><code>add-realtime-code-generation</code></a>, so the FMU runs
-deterministically at the codegen-fixed dt.</p>
-<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span>
+<h1 id="schematic-rendering">Schematic Rendering<a class="headerlink" href="#schematic-rendering" title="Permanent link">&para;</a></h1>
+<p>Render any Pulsim circuit to a publication-quality schematic SVG or PNG with one Python call. The default backend produces real analog symbols (resistor zig-zag, capacitor parallel lines, MOSFET vertical body, ground rails, etc.) — not labeled boxes — and routes wires orthogonally.</p>
+<h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
 
-<span class="n">ckt</span> <span class="o">=</span> <span class="o">...</span>   <span class="c1"># your Pulsim Circuit</span>
-<span class="n">summary</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">fmu</span><span class="o">.</span><span class="n">export</span><span class="p">(</span>
-    <span class="n">ckt</span><span class="p">,</span>
-    <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span>
-    <span class="n">out_path</span><span class="o">=</span><span class="s2">&quot;gen/buck.fmu&quot;</span><span class="p">,</span>
-    <span class="n">model_name</span><span class="o">=</span><span class="s2">&quot;buck&quot;</span><span class="p">,</span>
-    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;vout&quot;</span><span class="p">],</span>
-<span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>         <span class="c1"># gen/buck.fmu</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="o">.</span><span class="n">guid</span><span class="p">)</span>         <span class="c1"># auto-generated UUID</span>
+<span class="n">parser</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParser</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">())</span>
+<span class="n">circuit</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;examples/buck_converter.yaml&quot;</span><span class="p">)</span>
+
+<span class="c1"># SVG — vector, scales to any resolution</span>
+<span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="s2">&quot;buck.svg&quot;</span><span class="p">)</span>
+
+<span class="c1"># PNG — handy for embedding in docs / chat</span>
+<span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="s2">&quot;buck.png&quot;</span><span class="p">)</span>
 </code></pre></div>
-<p>The exported file is a valid <code>.fmu</code> archive with the standard layout:</p>
-<div class="highlight"><pre><span></span><code>buck.fmu
-├── modelDescription.xml          # FMI 2.0 metadata
-├── binaries/
-│   └── &lt;platform&gt;/buck.&lt;ext&gt;      # compiled shared library
-└── sources/
-    ├── model.c                    # codegen output
-    ├── model.h
-    └── fmu_entry.c                # FMI 2.0 CS callback wrapper
-</code></pre></div>
-<h2 id="whats-inside">What's inside<a class="headerlink" href="#whats-inside" title="Permanent link">&para;</a></h2>
-<p><code>pulsim.fmu.export</code> orchestrates four steps:</p>
-<ol>
-<li><strong>Codegen</strong> the discrete state-space C via
-   <code>pulsim.codegen.generate(circuit, dt, out_dir, target='c99')</code>.</li>
-<li><strong>Emit</strong> an FMI 2.0 CS wrapper (<code>fmu_entry.c</code>) implementing the
-   minimal callback set:<ul>
-<li><code>fmi2GetVersion</code>, <code>fmi2GetTypesPlatform</code></li>
-<li><code>fmi2Instantiate</code>, <code>fmi2FreeInstance</code>, <code>fmi2Reset</code>,
-  <code>fmi2Terminate</code></li>
-<li><code>fmi2SetupExperiment</code>, <code>fmi2EnterInitializationMode</code>,
-  <code>fmi2ExitInitializationMode</code></li>
-<li><code>fmi2SetReal</code>, <code>fmi2GetReal</code></li>
-<li><code>fmi2DoStep</code>, <code>fmi2CancelStep</code></li>
-</ul>
-</li>
-<li><strong>Generate</strong> <code>modelDescription.xml</code> with the model's metadata,
-   inputs / outputs / states declared with FMI value references.</li>
-<li><strong>Compile</strong> <code>model.c + fmu_entry.c</code> into a shared library
-   (<code>.so</code> / <code>.dylib</code> / <code>.dll</code> per platform) and <strong>zip</strong> everything
-   into the <code>.fmu</code>.</li>
-</ol>
-<h2 id="value-reference-layout">Value reference layout<a class="headerlink" href="#value-reference-layout" title="Permanent link">&para;</a></h2>
+<p>That's it. No layout configuration required for the common case.</p>
+<h2 id="what-gets-rendered">What gets rendered<a class="headerlink" href="#what-gets-rendered" title="Permanent link">&para;</a></h2>
+<p>Every device introspected via <code>Circuit.components()</code> becomes a symbol on the canvas:</p>
 <table>
 <thead>
 <tr>
-<th>Range</th>
-<th>Variable kind</th>
+<th>Pulsim kind</th>
+<th>Symbol</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>1, 2, ...</code></td>
-<td>Inputs (FMI causality <code>input</code>)</td>
+<td><code>resistor</code></td>
+<td>IEC rectangle (zig-zag with the alternative skin)</td>
 </tr>
 <tr>
-<td><code>1000, 1001, ...</code></td>
-<td>Outputs (FMI causality <code>output</code>)</td>
+<td><code>capacitor</code></td>
+<td>Two parallel lines</td>
 </tr>
 <tr>
-<td><code>2000, 2001, ...</code></td>
-<td>Internal state (FMI causality <code>local</code>)</td>
+<td><code>inductor</code></td>
+<td>Coiled spiral</td>
+</tr>
+<tr>
+<td><code>voltage_source</code> / <code>pwm_voltage_source</code> / <code>sine_voltage_source</code> / <code>pulse_voltage_source</code></td>
+<td>Circle with ±, sine, pulse, or DC indicator</td>
+</tr>
+<tr>
+<td><code>current_source</code></td>
+<td>Circle with arrow</td>
+</tr>
+<tr>
+<td><code>diode</code></td>
+<td>Triangle + cathode bar</td>
+</tr>
+<tr>
+<td><code>mosfet</code></td>
+<td>N-channel MOSFET (vertical channel, gate left, body-diode arrow)</td>
+</tr>
+<tr>
+<td><code>igbt</code></td>
+<td>MOSFET body + collector triangle</td>
+</tr>
+<tr>
+<td><code>vcswitch</code></td>
+<td>Open contacts + tilted switch arm + dashed control input</td>
+</tr>
+<tr>
+<td><code>transformer</code></td>
+<td>Two coupled coils</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td>Labeled rectangle (graceful fallback)</td>
 </tr>
 </tbody>
 </table>
-<p>The exporter writes one <code>&lt;ScalarVariable&gt;</code> per requested input /
-output node plus one <code>x_i</code> for each internal state coordinate so
-masters can inspect the model's evolution.</p>
-<h2 id="fmi2dostep-semantics">fmi2DoStep semantics<a class="headerlink" href="#fmi2dostep-semantics" title="Permanent link">&para;</a></h2>
-<p>Each call to <code>fmi2DoStep(c, t_now, h, ...)</code> advances the FMU's
-internal state by <code>floor(h / dt_internal + 0.5)</code> substeps of the
-codegen-fixed <code>dt_internal</code>. For an FMU built with <code>dt=1e-6</code> and a
-master calling <code>fmi2DoStep(..., 1e-4, ...)</code>, each call runs 100
-internal substeps.</p>
-<p>The FMU advertises <code>canHandleVariableCommunicationStepSize="true"</code> —
-the master may pick its own <code>h</code> per call — but <code>h</code> should be a
-multiple of <code>dt_internal</code> (or close to it) for bit-deterministic
-behavior.</p>
-<h2 id="validation-gates">Validation gates<a class="headerlink" href="#validation-gates" title="Permanent link">&para;</a></h2>
+<p>Each terminal connecting to ground gets its own <code>gnd</code> symbol — standard schematic convention.</p>
+<h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
+<p>The default backend needs <strong>Node.js</strong> + <strong>netlistsvg</strong> (the production renderer used by the Yosys / openlane ecosystem, with a Pulsim-extended analog skin). PNG output additionally requires <code>librsvg</code> or <code>cairosvg</code> for the SVG→PNG conversion.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Repo root</span>
+npm<span class="w"> </span>install<span class="w"> </span>netlistsvg<span class="w"> </span>elkjs
+
+<span class="c1"># macOS — for PNG output</span>
+brew<span class="w"> </span>install<span class="w"> </span>librsvg
+
+<span class="c1"># Debian/Ubuntu — for PNG output</span>
+sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>librsvg2-bin
+
+<span class="c1"># Python side: nothing extra; pulsim.schematic is part of the core wheel.</span>
+</code></pre></div>
+<p>If <code>pulsim.schematic.render(...)</code> is called without Node installed, an <code>ImportError</code> fires with the exact install command.</p>
+<h2 id="backends-and-how-to-switch">Backends and how to switch<a class="headerlink" href="#backends-and-how-to-switch" title="Permanent link">&para;</a></h2>
+<p><code>PULSIM_SCHEMATIC_BACKEND</code> selects the rendering backend:</p>
 <table>
 <thead>
 <tr>
-<th>Gate</th>
-<th>Test</th>
-<th>Status</th>
+<th>Value</th>
+<th>When to use</th>
+<th>Output</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>G.1</strong> Valid FMI 2.0 layout</td>
-<td><code>test_fmu_export_produces_valid_zip_layout</code></td>
-<td>Zip contains <code>modelDescription.xml</code> + <code>binaries/&lt;platform&gt;/&lt;lib&gt;</code> + <code>sources/</code></td>
+<td><code>netlistsvg</code> (default)</td>
+<td>Default — publication quality</td>
+<td>SVG (PNG/PDF/JPG via rsvg-convert)</td>
 </tr>
 <tr>
-<td><strong>G.1 partial</strong> Compliance via XML structure</td>
-<td><code>test_model_description_xml_is_well_formed</code></td>
-<td>XML parses; <code>fmiVersion="2.0"</code>; <code>&lt;CoSimulation&gt;</code> block present with required attributes</td>
+<td><code>elk</code></td>
+<td>Need a Python <code>SchematicLayout</code> object (e.g. for GUI auto-place)</td>
+<td>SVG/PNG via schemdraw + ELK Sugiyama layered layout</td>
 </tr>
 <tr>
-<td><strong>G.1 partial</strong> Symbol exports</td>
-<td><code>test_fmu_shared_library_exports_fmi2_symbols</code></td>
-<td>All 13 FMI 2.0 CS callback symbols load via <code>dlsym</code></td>
-</tr>
-<tr>
-<td><strong>G.3</strong> Cross-tool parity</td>
-<td><code>test_fmu_round_trip_step_via_ctypes</code></td>
-<td>ctypes-loaded library executes <code>fmi2Instantiate</code> + 10 <code>fmi2DoStep</code> calls without crashing</td>
+<td><code>spring</code></td>
+<td>No Node.js available, or comparing against the legacy layout</td>
+<td>SVG/PNG via schemdraw + force-directed</td>
 </tr>
 </tbody>
 </table>
-<p>The full <code>fmuCheck</code> integration + cross-tool benchmark in OMSimulator
-/ Simulink / Dymola is deferred to Phase 7 (cross-tool validation).
-The structural + ctypes-roundtrip tests above catch regressions on
-the export pipeline itself; tool compatibility lives downstream.</p>
-<h2 id="limitations-follow-ups">Limitations / follow-ups<a class="headerlink" href="#limitations-follow-ups" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nv">PULSIM_SCHEMATIC_BACKEND</span><span class="o">=</span>elk<span class="w"> </span>python<span class="w"> </span>my_script.py
+</code></pre></div>
+<h2 id="gui-auto-placement">GUI auto-placement<a class="headerlink" href="#gui-auto-placement" title="Permanent link">&para;</a></h2>
+<p>For a GUI that wants to read component coordinates and draw the canvas itself, use the ELK backend's <code>SchematicLayout</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;PULSIM_SCHEMATIC_BACKEND&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;elk&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+<span class="n">parser</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">YamlParser</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">YamlParserOptions</span><span class="p">())</span>
+<span class="n">circuit</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;examples/buck_converter.yaml&quot;</span><span class="p">)</span>
+
+<span class="n">layout</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">compute_layout</span><span class="p">(</span><span class="n">circuit</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="n">layout</span><span class="o">.</span><span class="n">to_json</span><span class="p">()</span>
+<span class="c1"># payload is a dict with keys: components, wires, junctions, canvas, schema_version</span>
+<span class="c1"># Coordinates in mm, origin top-left, +x right, +y down.</span>
+</code></pre></div>
+<p><code>payload["components"]</code> is a dict keyed by component name with <code>{x, y, rotation, terminal_anchors, ...}</code>. <code>payload["wires"]</code> is a list of <code>{from, to, path}</code>. The schema version is <code>"schematic-v1"</code> and stays stable for GUI consumers.</p>
+<h2 id="custom-output-paths">Custom output paths<a class="headerlink" href="#custom-output-paths" title="Permanent link">&para;</a></h2>
+<p>Both SVG and raster formats infer from the path extension. Override explicitly with <code>format=</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="s2">&quot;out.svg&quot;</span><span class="p">)</span>           <span class="c1"># → SVG</span>
+<span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="s2">&quot;out.png&quot;</span><span class="p">)</span>           <span class="c1"># → PNG</span>
+<span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="s2">&quot;out.pdf&quot;</span><span class="p">)</span>           <span class="c1"># → PDF (rsvg-convert)</span>
+<span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">circuit</span><span class="p">,</span> <span class="s2">&quot;diagram&quot;</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;svg&quot;</span><span class="p">)</span>  <span class="c1"># explicit</span>
+</code></pre></div>
+<h2 id="known-limits">Known limits<a class="headerlink" href="#known-limits" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Model Exchange export</strong> (Phase 3): would expose
-  <code>fmi2GetDerivatives</code> / <code>fmi2GetEventIndicators</code> /
-  <code>fmi2NewDiscreteStates</code> / <code>fmi2EnterEventMode</code>. Requires the AD
-  Jacobian path from <code>add-automatic-differentiation</code> — deferred.</li>
-<li><strong>FMU import</strong> (Phase 4): load a third-party FMU as a Pulsim
-  signal-domain block via DLL/dylib loading + Gauss-Seidel master
-  loop. Deferred (separate change for the master orchestration).</li>
-<li><strong>FMI 3.0 support</strong> (Phase 6): <code>fmi3Float64</code> types, updated XML
-  schema, terminal kinds. Deferred until FMI 3.0 ecosystem support
-  is broader.</li>
-<li><strong>Cross-tool validation</strong> (Phase 7): explicit OMSimulator /
-  Simulink / Dymola / Twin Builder runs in CI — license-permitting.</li>
-<li><strong>Performance optimization</strong> (Phase 8): <code>fmi2DoStep</code> overhead ≤
-  50 µs per call on buck-size models. Today's wrapper does one
-  matrix-vector multiply per substep with no allocation; the basic
-  performance is fine. The cycle-budget enforcement that codegen
-  Phase 6 covers carries over directly here.</li>
-<li><strong>YAML <code>fmu_export:</code> section</strong> (Phase 5.1): declarative export
-  config alongside the simulation block. Lands once the
-  Circuit-variant integration's parser dispatch is final.</li>
-<li><strong>Multi-topology FMU</strong> (per-topology switching matrices): same
-  follow-up as the multi-topology codegen tracked under
-  <code>add-realtime-code-generation</code>.</li>
+<li><strong>Layout is auto-computed.</strong> Component positions follow netlistsvg's ELK layered placement, which honors connectivity but doesn't reproduce a hand-drawn "textbook" layout for every topology. Tracked in <a href="../openspec/changes/add-schematic-position-hints"><code>openspec/changes/add-schematic-position-hints</code></a> — manual position hints are blocked by upstream netlistsvg bugs and require a fork or a Python re-implementation to land.</li>
+<li><strong>Switching-device symbols</strong> (<code>mosfet</code>, <code>igbt</code>, <code>vcswitch</code>) ship in the Pulsim analog skin (<code>python/pulsim/schematic/skin/pulsim_analog.svg</code>). If you load a custom skin that drops them, they fall back to a labeled <code>generic</code> rectangle.</li>
+<li><strong>Probes / control blocks</strong> (<code>voltage_probe</code>, <code>pi_controller</code>, …) don't have analog skin symbols. They render as labeled boxes.</li>
+<li><strong>SPICE-style directives</strong> (<code>.tran</code>, <code>.ic</code>, etc.) are not part of the rendered graphic — they live in the YAML <code>simulation:</code> block.</li>
 </ul>
-<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../code-generation/"><code>code-generation.md</code></a> — the discrete
-  state-space pipeline this module sits on top of.</li>
-<li><a href="../linear-solver-cache/"><code>linear-solver-cache.md</code></a> — the per-key
-  cache that the multi-topology FMU export will reuse via the
-  topology bitmask.</li>
-<li>Runnable example: <code>examples/python/06_fmu_export.py</code> (export +
-  zip layout inspection + ctypes load + 13/13 FMI 2.0 CS symbol
-  check).</li>
-</ul>
+<h2 id="programmatic-circuits">Programmatic circuits<a class="headerlink" href="#programmatic-circuits" title="Permanent link">&para;</a></h2>
+<p>The same <code>render()</code> works for circuits built in Python:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+
+<span class="n">ckt</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="p">()</span>
+<span class="n">vin</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;vin&quot;</span><span class="p">)</span>
+<span class="n">vout</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;vout&quot;</span><span class="p">)</span>
+<span class="n">gnd</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">ground</span><span class="p">()</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;V1&quot;</span><span class="p">,</span> <span class="n">vin</span><span class="p">,</span> <span class="n">gnd</span><span class="p">,</span> <span class="mf">12.0</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">&quot;R1&quot;</span><span class="p">,</span> <span class="n">vin</span><span class="p">,</span> <span class="n">vout</span><span class="p">,</span> <span class="mf">1_000.0</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">&quot;C1&quot;</span><span class="p">,</span> <span class="n">vout</span><span class="p">,</span> <span class="n">gnd</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+
+<span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">ckt</span><span class="p">,</span> <span class="s2">&quot;rc.svg&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="testing-your-schematic-in-code">Testing your schematic in code<a class="headerlink" href="#testing-your-schematic-in-code" title="Permanent link">&para;</a></h2>
+<p><code>pulsim.schematic.render(circuit, path)</code> returns a <code>pathlib.Path</code>. A simple smoke test:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">xml.etree.ElementTree</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ET</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_my_circuit_renders</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+    <span class="n">ckt</span> <span class="o">=</span> <span class="n">build_my_circuit</span><span class="p">()</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">schematic</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="n">ckt</span><span class="p">,</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;my.svg&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">out</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="n">out</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span> <span class="o">&gt;</span> <span class="mi">0</span>
+    <span class="n">ET</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>  <span class="c1"># raises on malformed SVG</span>
+</code></pre></div>
+<p>The schematic test suite in <a href="https://github.com/lgili/Pulsim/blob/main/python/tests/test_schematic_render.py"><code>python/tests/test_schematic_render.py</code></a> covers SVG/PNG output, the unknown-kind fallback, and the lazy-import gate — read that file for more patterns.</p>
 
 
 
@@ -2060,7 +2099,7 @@ the export pipeline itself; tool compatibility lives downstream.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../code-generation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Real-Time Code Generation">
+          <a href="../parameter-sweep/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Parameter Sweep">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2070,20 +2109,20 @@ the export pipeline itself; tool compatibility lives downstream.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Real-Time Code Generation
+                Parameter Sweep
               </div>
             </div>
           </a>
         
         
           
-          <a href="../automatic-differentiation/" class="md-footer__link md-footer__link--next" aria-label="Next: Automatic Differentiation">
+          <a href="../code-generation/" class="md-footer__link md-footer__link--next" aria-label="Next: Real-Time Code Generation">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Automatic Differentiation
+                Real-Time Code Generation
               </div>
             </div>
             <div class="md-footer__button md-icon">

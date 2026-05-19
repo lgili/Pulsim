@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/fmi-export/">
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/pwl-switching-migration/">
       
       
-        <link rel="prev" href="../code-generation/">
+        <link rel="prev" href="../automatic-differentiation/">
       
       
-        <link rel="next" href="../automatic-differentiation/">
+        <link rel="next" href="../component-models-audit/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>FMI Export - PulsimCore</title>
+        <title>PWL Switching Engine - PulsimCore</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#fmi-export" class="md-skip">
+        <a href="#pwl-switching-engine-migration-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              FMI Export
+              PWL Switching Engine
             
           </span>
         </div>
@@ -952,30 +952,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    FMI Export
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -984,89 +964,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
-    <span class="md-ellipsis">
-      TL;DR
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#whats-inside" class="md-nav__link">
-    <span class="md-ellipsis">
-      What's inside
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#value-reference-layout" class="md-nav__link">
-    <span class="md-ellipsis">
-      Value reference layout
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fmi2dostep-semantics" class="md-nav__link">
-    <span class="md-ellipsis">
-      fmi2DoStep semantics
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#validation-gates" class="md-nav__link">
-    <span class="md-ellipsis">
-      Validation gates
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#limitations-follow-ups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Limitations / follow-ups
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      See also
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1097,10 +994,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../pwl-switching-migration/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    PWL Switching Engine
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -1109,6 +1026,146 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#switchingmode-and-how-it-resolves" class="md-nav__link">
+    <span class="md-ellipsis">
+      SwitchingMode and how it resolves
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-ways-to-opt-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      Three ways to opt in
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Three ways to opt in">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-simulation-level-yaml-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Simulation-level YAML field
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-per-device-yaml-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Per-device YAML override
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-python-c-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Python / C++ API
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caveats-and-follow-up-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      Caveats and follow-up work
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Caveats and follow-up work">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choose-bdf1-to-actually-engage-the-segment-engine-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      Choose BDF1 to actually engage the segment engine today
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-timing-is-first-order-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event timing is first-order today
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caching-of-topology-factorization-is-unbounded-for-now" class="md-nav__link">
+    <span class="md-ellipsis">
+      Caching of topology factorization is unbounded for now
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migration-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      Migration checklist
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deprecation-of-the-python-retry-wrapper" class="md-nav__link">
+    <span class="md-ellipsis">
+      Deprecation of the Python retry wrapper
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1764,54 +1821,111 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr" class="md-nav__link">
+  <a href="#switchingmode-and-how-it-resolves" class="md-nav__link">
     <span class="md-ellipsis">
-      TL;DR
+      SwitchingMode and how it resolves
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#whats-inside" class="md-nav__link">
+  <a href="#three-ways-to-opt-in" class="md-nav__link">
     <span class="md-ellipsis">
-      What's inside
+      Three ways to opt in
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Three ways to opt in">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-simulation-level-yaml-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Simulation-level YAML field
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-per-device-yaml-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Per-device YAML override
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-python-c-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Python / C++ API
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caveats-and-follow-up-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      Caveats and follow-up work
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Caveats and follow-up work">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choose-bdf1-to-actually-engage-the-segment-engine-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      Choose BDF1 to actually engage the segment engine today
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-timing-is-first-order-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event timing is first-order today
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caching-of-topology-factorization-is-unbounded-for-now" class="md-nav__link">
+    <span class="md-ellipsis">
+      Caching of topology factorization is unbounded for now
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migration-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      Migration checklist
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#value-reference-layout" class="md-nav__link">
+  <a href="#deprecation-of-the-python-retry-wrapper" class="md-nav__link">
     <span class="md-ellipsis">
-      Value reference layout
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fmi2dostep-semantics" class="md-nav__link">
-    <span class="md-ellipsis">
-      fmi2DoStep semantics
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#validation-gates" class="md-nav__link">
-    <span class="md-ellipsis">
-      Validation gates
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#limitations-follow-ups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Limitations / follow-ups
+      Deprecation of the Python retry wrapper
     </span>
   </a>
   
@@ -1841,7 +1955,7 @@
                   
 
   
-    <a href="https://github.com/lgili/Pulsim/edit/main/docs/fmi-export.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/pwl-switching-migration.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1850,180 +1964,212 @@
     
       
     
-    <a href="https://github.com/lgili/Pulsim/raw/main/docs/fmi-export.md" title="View source of this page" class="md-content__button md-icon">
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/pwl-switching-migration.md" title="View source of this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
     </a>
   
 
 
-<h1 id="fmi-export">FMI Export<a class="headerlink" href="#fmi-export" title="Permanent link">&para;</a></h1>
+<h1 id="pwl-switching-engine-migration-guide">PWL Switching Engine — Migration Guide<a class="headerlink" href="#pwl-switching-engine-migration-guide" title="Permanent link">&para;</a></h1>
 <blockquote>
-<p>Status: shipped — FMI 2.0 Co-Simulation export pipeline. ME export +
-FMU import + FMI 3.0 + cross-tool validation are the natural
-follow-ups.</p>
+<p><strong>Status (v0.11):</strong> PWL engine is now the <strong>default</strong>. As of
+<code>simplify-and-harden-numerical-surface</code> Phase 11,
+<code>SwitchingMode::Auto</code> resolves to <strong>Ideal</strong> automatically — the
+state-space fast path engages out of the box on any switching
+converter where every device declares <code>supports_pwl</code>. The previous
+Behavioral semantics remain available by setting
+<code>opts.switching_mode = SwitchingMode::Behavioral</code> explicitly.</p>
+<p>Known stability gaps on a small set of legacy buck-converter /
+diode-loss circuits (vout overshoots, forward-bias diode spikes)
+are tracked in the follow-up OpenSpec change
+<code>openspec/changes/harden-pwl-ideal-buck-diode/</code>. The 16 affected
+tests pin Behavioral explicitly with inline comments referencing
+that follow-up.</p>
 </blockquote>
-<p><code>pulsim.fmu</code> packages a Pulsim Circuit as a self-contained
-<strong>FMI 2.0 Co-Simulation</strong> <code>.fmu</code> file. The exported FMU drops into any
-FMI master that speaks 2.0 — OMSimulator, Dymola, MATLAB/Simulink (via
-the Co-Simulation block), FMPy, ANSYS Twin Builder. The internal solver
-is the discrete state-space machinery shipped in
-<a href="../code-generation/"><code>add-realtime-code-generation</code></a>, so the FMU runs
-deterministically at the codegen-fixed dt.</p>
-<h2 id="tldr">TL;DR<a class="headerlink" href="#tldr" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span>
-
-<span class="n">ckt</span> <span class="o">=</span> <span class="o">...</span>   <span class="c1"># your Pulsim Circuit</span>
-<span class="n">summary</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">fmu</span><span class="o">.</span><span class="n">export</span><span class="p">(</span>
-    <span class="n">ckt</span><span class="p">,</span>
-    <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span>
-    <span class="n">out_path</span><span class="o">=</span><span class="s2">&quot;gen/buck.fmu&quot;</span><span class="p">,</span>
-    <span class="n">model_name</span><span class="o">=</span><span class="s2">&quot;buck&quot;</span><span class="p">,</span>
-    <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;vout&quot;</span><span class="p">],</span>
-<span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>         <span class="c1"># gen/buck.fmu</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="o">.</span><span class="n">guid</span><span class="p">)</span>         <span class="c1"># auto-generated UUID</span>
-</code></pre></div>
-<p>The exported file is a valid <code>.fmu</code> archive with the standard layout:</p>
-<div class="highlight"><pre><span></span><code>buck.fmu
-├── modelDescription.xml          # FMI 2.0 metadata
-├── binaries/
-│   └── &lt;platform&gt;/buck.&lt;ext&gt;      # compiled shared library
-└── sources/
-    ├── model.c                    # codegen output
-    ├── model.h
-    └── fmu_entry.c                # FMI 2.0 CS callback wrapper
-</code></pre></div>
-<h2 id="whats-inside">What's inside<a class="headerlink" href="#whats-inside" title="Permanent link">&para;</a></h2>
-<p><code>pulsim.fmu.export</code> orchestrates four steps:</p>
-<ol>
-<li><strong>Codegen</strong> the discrete state-space C via
-   <code>pulsim.codegen.generate(circuit, dt, out_dir, target='c99')</code>.</li>
-<li><strong>Emit</strong> an FMI 2.0 CS wrapper (<code>fmu_entry.c</code>) implementing the
-   minimal callback set:<ul>
-<li><code>fmi2GetVersion</code>, <code>fmi2GetTypesPlatform</code></li>
-<li><code>fmi2Instantiate</code>, <code>fmi2FreeInstance</code>, <code>fmi2Reset</code>,
-  <code>fmi2Terminate</code></li>
-<li><code>fmi2SetupExperiment</code>, <code>fmi2EnterInitializationMode</code>,
-  <code>fmi2ExitInitializationMode</code></li>
-<li><code>fmi2SetReal</code>, <code>fmi2GetReal</code></li>
-<li><code>fmi2DoStep</code>, <code>fmi2CancelStep</code></li>
-</ul>
-</li>
-<li><strong>Generate</strong> <code>modelDescription.xml</code> with the model's metadata,
-   inputs / outputs / states declared with FMI value references.</li>
-<li><strong>Compile</strong> <code>model.c + fmu_entry.c</code> into a shared library
-   (<code>.so</code> / <code>.dylib</code> / <code>.dll</code> per platform) and <strong>zip</strong> everything
-   into the <code>.fmu</code>.</li>
-</ol>
-<h2 id="value-reference-layout">Value reference layout<a class="headerlink" href="#value-reference-layout" title="Permanent link">&para;</a></h2>
+<p>Pulsim's switching engine has two execution paths for diodes, MOSFETs,
+IGBTs, and voltage-controlled switches:</p>
 <table>
 <thead>
 <tr>
-<th>Range</th>
-<th>Variable kind</th>
+<th>Path</th>
+<th>Per-step cost</th>
+<th>Newton iterations</th>
+<th>Accuracy on switching topologies</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>1, 2, ...</code></td>
-<td>Inputs (FMI causality <code>input</code>)</td>
+<td><strong>Behavioral</strong> (<code>SwitchingMode::Behavioral</code>)</td>
+<td>Newton iteration with smooth <code>tanh</code> / Shichman-Hodges stamps</td>
+<td>Multiple per step</td>
+<td>Smooth transitions; Newton sometimes thrashes near commutation</td>
 </tr>
 <tr>
-<td><code>1000, 1001, ...</code></td>
-<td>Outputs (FMI causality <code>output</code>)</td>
-</tr>
-<tr>
-<td><code>2000, 2001, ...</code></td>
-<td>Internal state (FMI causality <code>local</code>)</td>
+<td><strong>PWL / Ideal</strong> (<code>SwitchingMode::Ideal</code>)</td>
+<td>One linear solve per step on the cached topology factorization</td>
+<td><strong>Zero</strong> in stable topology windows</td>
+<td>Sharp transitions; events detected at end of step (bisection follow-up below)</td>
 </tr>
 </tbody>
 </table>
-<p>The exporter writes one <code>&lt;ScalarVariable&gt;</code> per requested input /
-output node plus one <code>x_i</code> for each internal state coordinate so
-masters can inspect the model's evolution.</p>
-<h2 id="fmi2dostep-semantics">fmi2DoStep semantics<a class="headerlink" href="#fmi2dostep-semantics" title="Permanent link">&para;</a></h2>
-<p>Each call to <code>fmi2DoStep(c, t_now, h, ...)</code> advances the FMU's
-internal state by <code>floor(h / dt_internal + 0.5)</code> substeps of the
-codegen-fixed <code>dt_internal</code>. For an FMU built with <code>dt=1e-6</code> and a
-master calling <code>fmi2DoStep(..., 1e-4, ...)</code>, each call runs 100
-internal substeps.</p>
-<p>The FMU advertises <code>canHandleVariableCommunicationStepSize="true"</code> —
-the master may pick its own <code>h</code> per call — but <code>h</code> should be a
-multiple of <code>dt_internal</code> (or close to it) for bit-deterministic
-behavior.</p>
-<h2 id="validation-gates">Validation gates<a class="headerlink" href="#validation-gates" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Gate</th>
-<th>Test</th>
-<th>Status</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>G.1</strong> Valid FMI 2.0 layout</td>
-<td><code>test_fmu_export_produces_valid_zip_layout</code></td>
-<td>Zip contains <code>modelDescription.xml</code> + <code>binaries/&lt;platform&gt;/&lt;lib&gt;</code> + <code>sources/</code></td>
-</tr>
-<tr>
-<td><strong>G.1 partial</strong> Compliance via XML structure</td>
-<td><code>test_model_description_xml_is_well_formed</code></td>
-<td>XML parses; <code>fmiVersion="2.0"</code>; <code>&lt;CoSimulation&gt;</code> block present with required attributes</td>
-</tr>
-<tr>
-<td><strong>G.1 partial</strong> Symbol exports</td>
-<td><code>test_fmu_shared_library_exports_fmi2_symbols</code></td>
-<td>All 13 FMI 2.0 CS callback symbols load via <code>dlsym</code></td>
-</tr>
-<tr>
-<td><strong>G.3</strong> Cross-tool parity</td>
-<td><code>test_fmu_round_trip_step_via_ctypes</code></td>
-<td>ctypes-loaded library executes <code>fmi2Instantiate</code> + 10 <code>fmi2DoStep</code> calls without crashing</td>
-</tr>
-</tbody>
-</table>
-<p>The full <code>fmuCheck</code> integration + cross-tool benchmark in OMSimulator
-/ Simulink / Dymola is deferred to Phase 7 (cross-tool validation).
-The structural + ctypes-roundtrip tests above catch regressions on
-the export pipeline itself; tool compatibility lives downstream.</p>
-<h2 id="limitations-follow-ups">Limitations / follow-ups<a class="headerlink" href="#limitations-follow-ups" title="Permanent link">&para;</a></h2>
+<p><code>refactor-pwl-switching-engine</code> lands the infrastructure and end-to-end
+contract tests for the PWL path. On the in-tree buck benchmark (5 PWM
+cycles @ 100 kHz, <code>dt = 100 ns</code>) <code>Ideal</code> mode runs roughly <strong>240× faster
+wall-clock</strong> than <code>Behavioral</code> on AppleClang 17 / Release+LTO. The buck
+test <a href="https://github.com/lgili/Pulsim/blob/main/core/tests/test_pwl_speedup_benchmark.cpp"><code>test_pwl_speedup_benchmark.cpp</code></a>
+asserts a loose <code>≤3×</code> ratio to absorb CI noise; the full numbers are
+logged via Catch2 <code>INFO</code>.</p>
+<h2 id="switchingmode-and-how-it-resolves">SwitchingMode and how it resolves<a class="headerlink" href="#switchingmode-and-how-it-resolves" title="Permanent link">&para;</a></h2>
+<p>Every PWL-eligible device carries a <code>mode_</code> field with three values:</p>
 <ul>
-<li><strong>Model Exchange export</strong> (Phase 3): would expose
-  <code>fmi2GetDerivatives</code> / <code>fmi2GetEventIndicators</code> /
-  <code>fmi2NewDiscreteStates</code> / <code>fmi2EnterEventMode</code>. Requires the AD
-  Jacobian path from <code>add-automatic-differentiation</code> — deferred.</li>
-<li><strong>FMU import</strong> (Phase 4): load a third-party FMU as a Pulsim
-  signal-domain block via DLL/dylib loading + Gauss-Seidel master
-  loop. Deferred (separate change for the master orchestration).</li>
-<li><strong>FMI 3.0 support</strong> (Phase 6): <code>fmi3Float64</code> types, updated XML
-  schema, terminal kinds. Deferred until FMI 3.0 ecosystem support
-  is broader.</li>
-<li><strong>Cross-tool validation</strong> (Phase 7): explicit OMSimulator /
-  Simulink / Dymola / Twin Builder runs in CI — license-permitting.</li>
-<li><strong>Performance optimization</strong> (Phase 8): <code>fmi2DoStep</code> overhead ≤
-  50 µs per call on buck-size models. Today's wrapper does one
-  matrix-vector multiply per substep with no allocation; the basic
-  performance is fine. The cycle-budget enforcement that codegen
-  Phase 6 covers carries over directly here.</li>
-<li><strong>YAML <code>fmu_export:</code> section</strong> (Phase 5.1): declarative export
-  config alongside the simulation block. Lands once the
-  Circuit-variant integration's parser dispatch is final.</li>
-<li><strong>Multi-topology FMU</strong> (per-topology switching matrices): same
-  follow-up as the multi-topology codegen tracked under
-  <code>add-realtime-code-generation</code>.</li>
+<li><code>SwitchingMode::Ideal</code> — opt-in to the PWL state-space fast path.</li>
+<li><code>SwitchingMode::Behavioral</code> — force the legacy smooth-stamp / Newton path.</li>
+<li><code>SwitchingMode::Auto</code> — defer to the circuit-level default supplied at
+  Simulator construction time.</li>
 </ul>
+<p>The Simulator pushes <code>SimulationOptions::switching_mode</code> into
+<code>Circuit::default_switching_mode_</code>. At each segment-engine and
+event-scan call site, devices in <code>Auto</code> resolve via
+<code>resolve_switching_mode(device_mode, circuit_default)</code>. The current
+shipped default for the circuit-level resolution is <strong>Behavioral</strong>.</p>
+<h2 id="three-ways-to-opt-in">Three ways to opt in<a class="headerlink" href="#three-ways-to-opt-in" title="Permanent link">&para;</a></h2>
+<h3 id="1-simulation-level-yaml-field">1. Simulation-level YAML field<a class="headerlink" href="#1-simulation-level-yaml-field" title="Permanent link">&para;</a></h3>
+<p>Applies to every PWL-eligible device that is still in <code>Auto</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">schema</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pulsim-v1</span>
+<span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100e-6</span>
+<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100e-9</span>
+<span class="w">  </span><span class="nt">switching_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ideal</span><span class="w">   </span><span class="c1"># also accepts: auto, pwl, behavioral, smooth</span>
+<span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">voltage_source</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Vin</span><span class="p p-Indicator">,</span><span class="nt"> nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">],</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">12.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">switch</span><span class="p p-Indicator">,</span><span class="nt">         name</span><span class="p">:</span><span class="w"> </span><span class="nv">SW</span><span class="p p-Indicator">,</span><span class="nt">  nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vin</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">],</span><span class="nt"> initial_state</span><span class="p">:</span><span class="w"> </span><span class="nv">false</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">diode</span><span class="p p-Indicator">,</span><span class="nt">          name</span><span class="p">:</span><span class="w"> </span><span class="nv">D</span><span class="p p-Indicator">,</span><span class="nt">   nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sw</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">inductor</span><span class="p p-Indicator">,</span><span class="nt">       name</span><span class="p">:</span><span class="w"> </span><span class="nv">L</span><span class="p p-Indicator">,</span><span class="nt">   nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">sw</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">vout</span><span class="p p-Indicator">],</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">22e-6</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">capacitor</span><span class="p p-Indicator">,</span><span class="nt">      name</span><span class="p">:</span><span class="w"> </span><span class="nv">C</span><span class="p p-Indicator">,</span><span class="nt">   nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">],</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">100e-6</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">resistor</span><span class="p p-Indicator">,</span><span class="nt">       name</span><span class="p">:</span><span class="w"> </span><span class="nv">R</span><span class="p p-Indicator">,</span><span class="nt">   nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">vout</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">],</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">5.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<h3 id="2-per-device-yaml-override">2. Per-device YAML override<a class="headerlink" href="#2-per-device-yaml-override" title="Permanent link">&para;</a></h3>
+<p>Overrides the simulation-level default for one device. Useful when most
+of the circuit is in <code>Ideal</code> mode but a single device needs the smooth
+stamp (control-loop linearization, large-signal stability work):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">switching_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ideal</span>
+<span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">diode</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">D_fast</span><span class="p p-Indicator">,</span><span class="nt"> nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">a</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">b</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">                        </span><span class="c1"># follows simulation default → Ideal</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">diode</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">D_soft</span><span class="p p-Indicator">,</span><span class="nt"> nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">c</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">d</span><span class="p p-Indicator">],</span><span class="nt"> switching_mode</span><span class="p">:</span><span class="w"> </span><span class="nv">behavioral</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">  </span><span class="c1"># forced Behavioral</span>
+</code></pre></div>
+<p>The per-device field is honored on <code>diode</code>, <code>switch</code>, <code>vcswitch</code>,
+<code>mosfet</code>, and <code>igbt</code>. Aliases mirror the simulation-level parser:
+<code>pwl == ideal</code> and <code>smooth == behavioral</code>. Strict mode rejects unknown
+values with diagnostic <code>Invalid &lt;device&gt;.switching_mode: '&lt;value&gt;'</code>.</p>
+<h3 id="3-python-c-api">3. Python / C++ API<a class="headerlink" href="#3-python-c-api" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+
+<span class="n">circuit</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="p">()</span>
+<span class="c1"># ... add devices ...</span>
+
+<span class="c1"># Whole-circuit:</span>
+<span class="n">circuit</span><span class="o">.</span><span class="n">set_switching_mode_for_all</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">SwitchingMode</span><span class="o">.</span><span class="n">Ideal</span><span class="p">)</span>
+
+<span class="c1"># Per-device:</span>
+<span class="n">circuit</span><span class="o">.</span><span class="n">set_switching_mode</span><span class="p">(</span><span class="s2">&quot;D1&quot;</span><span class="p">,</span> <span class="n">ps</span><span class="o">.</span><span class="n">SwitchingMode</span><span class="o">.</span><span class="n">Ideal</span><span class="p">)</span>
+<span class="n">circuit</span><span class="o">.</span><span class="n">set_switching_mode</span><span class="p">(</span><span class="s2">&quot;D_softstart&quot;</span><span class="p">,</span> <span class="n">ps</span><span class="o">.</span><span class="n">SwitchingMode</span><span class="o">.</span><span class="n">Behavioral</span><span class="p">)</span>
+
+<span class="c1"># Or through simulation options (Auto-mode devices resolve to this):</span>
+<span class="n">options</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="p">()</span>
+<span class="n">options</span><span class="o">.</span><span class="n">switching_mode</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SwitchingMode</span><span class="o">.</span><span class="n">Ideal</span>
+</code></pre></div>
+<p>The C++ surface mirrors the Python names: <code>Circuit::set_switching_mode(name, mode)</code>,
+<code>Circuit::set_switching_mode_for_all(mode)</code>, and the
+<code>SimulationOptions::switching_mode</code> field.</p>
+<h2 id="caveats-and-follow-up-work">Caveats and follow-up work<a class="headerlink" href="#caveats-and-follow-up-work" title="Permanent link">&para;</a></h2>
+<h3 id="choose-bdf1-to-actually-engage-the-segment-engine-today">Choose <code>BDF1</code> to actually engage the segment engine today<a class="headerlink" href="#choose-bdf1-to-actually-engage-the-segment-engine-today" title="Permanent link">&para;</a></h3>
+<p><code>apply_auto_transient_profile</code> rewrites <code>Integrator::Trapezoidal</code> →
+<code>Integrator::TRBDF2</code> for switching circuits, and TRBDF2's multi-stage
+Newton path bypasses the segment-primary fast path. To run the PWL
+state-space engine on switching circuits today, set the integrator
+explicitly:</p>
+<div class="highlight"><pre><span></span><code><span class="n">options</span><span class="o">.</span><span class="n">integrator</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Integrator</span><span class="o">.</span><span class="n">BDF1</span>
+</code></pre></div>
+<p>Adding segment-primary support to TRBDF2 (multistage segment integration)
+is logged for a follow-up change.</p>
+<h3 id="event-timing-is-first-order-today">Event timing is first-order today<a class="headerlink" href="#event-timing-is-first-order-today" title="Permanent link">&para;</a></h3>
+<p>When a PWL device's <code>should_commute(PwlEventContext)</code> predicate fires
+after a step is accepted, the commutation is committed at the <em>end</em> of
+that step. The Tustin step itself ran with the old topology spanning the
+full <code>dt</code>, so the post-event state can drift by up to one <code>dt</code> worth of
+old-topology integration before the new topology takes over.</p>
+<p>The architecture for bisection-to-event time (full second-order accuracy
+at the commutation instant) is in place: <code>Circuit::scan_pwl_commutations(x)</code>
+returns the candidate set, and <code>Circuit::commit_pwl_commutations(events)</code>
+applies them. The remaining work is to:</p>
+<ol>
+<li>Bisect linearly in <code>α ∈ [0, 1]</code> between <code>x_prev</code> and <code>x_now</code> to find
+   the earliest <code>α</code> where any candidate device crosses its threshold
+   within <code>event_tolerance</code>.</li>
+<li>Reuse the existing event-aligned step-splitting infrastructure
+   (<code>find_switch_event_time</code> plus the <code>event_request.threshold_crossing_time</code>
+   path) so the next solve_step lands exactly at the bisected time with
+   the old topology, then commits.</li>
+</ol>
+<p>The <code>pwl_event_bisections</code> telemetry counter is already wired and reads
+zero under the first-order scheduler; it will increment under the
+bisecting scheduler.</p>
+<h3 id="caching-of-topology-factorization-is-unbounded-for-now">Caching of topology factorization is unbounded for now<a class="headerlink" href="#caching-of-topology-factorization-is-unbounded-for-now" title="Permanent link">&para;</a></h3>
+<p>The segment-stepper caches per-topology factorizations forever. For
+circuits with k switching devices, the worst case is <code>2^k</code> topologies in
+the cache. For k ≤ 12 (typical interleaved 3φ converter with control
+sensing), this is comfortable. For larger grids, LRU eviction and a
+<code>PwlTopologyExplosion</code> diagnostic land in <code>refactor-linear-solver-cache</code>
+(already archived) — the cache key design is now owned end-to-end by
+that change.</p>
+<h2 id="migration-checklist">Migration checklist<a class="headerlink" href="#migration-checklist" title="Permanent link">&para;</a></h2>
+<p>When converting an existing netlist to PWL mode:</p>
+<ul>
+<li>[ ] Set <code>simulation.switching_mode: ideal</code> (or set
+      <code>SimulationOptions.switching_mode = SwitchingMode.Ideal</code> in code).</li>
+<li>[ ] Set <code>simulation.integrator: bdf1</code> to bypass the TRBDF2 auto-profile
+      and engage the segment engine end-to-end.</li>
+<li>[ ] If a specific device must remain on the smooth path (e.g., for a
+      control-loop linearization), set its
+      <code>components[].switching_mode: behavioral</code>.</li>
+<li>[ ] Run the simulation and verify <code>backend_telemetry.state_space_primary_steps</code>
+      is non-zero — every step that lands on the fast path increments it,
+      and <code>dae_fallback_steps</code> increments when the segment engine bails
+      out (mixed Ideal / Behavioral devices, transformer in the netlist,
+      etc.).</li>
+<li>[ ] Compare waveforms to the Behavioral baseline; the engine targets
+      <code>≤ 0.5%</code> parity vs LTspice on PSIM-style switching benchmarks (gate
+      G.2 in the change's <code>tasks.md</code>).</li>
+</ul>
+<h2 id="deprecation-of-the-python-retry-wrapper">Deprecation of the Python retry wrapper<a class="headerlink" href="#deprecation-of-the-python-retry-wrapper" title="Permanent link">&para;</a></h2>
+<p>The Python <code>run_transient</code> wrapper layer historically applied three
+retries with shrinking <code>dt</code>, auto-installed high-value bleeder resistors,
+and re-tuned Newton/linear solver options to coax difficult
+switching circuits through Newton iteration. Once PWL Ideal mode is the
+default for switching circuits, the wrapper becomes a no-op cost.</p>
+<p>The first step of that deprecation ships behind environment variable
+<code>PULSIM_LEGACY_RETRY_FALLBACK</code> (default <code>1</code> to preserve behavior). When
+set to <code>0</code>, the wrapper bypasses retries / bleeders entirely and calls
+through to a single transient pass:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">PULSIM_LEGACY_RETRY_FALLBACK</span><span class="o">=</span><span class="m">0</span><span class="w"> </span>python<span class="w"> </span>my_simulation.py
+</code></pre></div>
+<p>A <code>DeprecationWarning</code> fires on the first retry of any run when the
+variable is unset, pointing here. The wrapper itself is removed in
+<code>refactor-unify-robustness-policy</code> once Auto resolves to Ideal by default.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../code-generation/"><code>code-generation.md</code></a> — the discrete
-  state-space pipeline this module sits on top of.</li>
-<li><a href="../linear-solver-cache/"><code>linear-solver-cache.md</code></a> — the per-key
-  cache that the multi-topology FMU export will reuse via the
-  topology bitmask.</li>
-<li>Runnable example: <code>examples/python/06_fmu_export.py</code> (export +
-  zip layout inspection + ctypes load + 13/13 FMI 2.0 CS symbol
-  check).</li>
+<li><a href="https://github.com/lgili/Pulsim/blob/main/openspec/changes/refactor-pwl-switching-engine/proposal.md"><code>refactor-pwl-switching-engine</code></a>
+  — change proposal, design, and tasks list.</li>
+<li><a href="../backend-architecture/">Backend Architecture</a> — where the segment
+  engine sits in the solver pipeline.</li>
+<li><a href="../convergence-tuning-guide/">Convergence Tuning Guide</a> — what to
+  tweak when neither path converges (large signal or pathological
+  algebraic loops).</li>
+<li><a href="../linear-solver-cache/">Linear-Solver Cache</a> — how the per-topology
+  KLU factorization cache amortizes the cost across PWM cycles.</li>
 </ul>
 
 
@@ -2060,7 +2206,7 @@ the export pipeline itself; tool compatibility lives downstream.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../code-generation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Real-Time Code Generation">
+          <a href="../automatic-differentiation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Automatic Differentiation">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2070,20 +2216,20 @@ the export pipeline itself; tool compatibility lives downstream.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Real-Time Code Generation
+                Automatic Differentiation
               </div>
             </div>
           </a>
         
         
           
-          <a href="../automatic-differentiation/" class="md-footer__link md-footer__link--next" aria-label="Next: Automatic Differentiation">
+          <a href="../component-models-audit/" class="md-footer__link md-footer__link--next" aria-label="Next: Component Models Audit">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Automatic Differentiation
+                Component Models Audit
               </div>
             </div>
             <div class="md-footer__button md-icon">

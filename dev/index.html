@@ -882,6 +882,27 @@
   
   
     <li class="md-nav__item">
+      <a href="numerical-configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="ac-analysis/" class="md-nav__link">
         
   
@@ -966,6 +987,27 @@
   
   
     <li class="md-nav__item">
+      <a href="schematic-rendering/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Schematic Rendering
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="code-generation/" class="md-nav__link">
         
   
@@ -1013,6 +1055,48 @@
   
   <span class="md-ellipsis">
     Automatic Differentiation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="pwl-switching-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PWL Switching Engine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="component-models-audit/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Component Models Audit
   </span>
   
 
@@ -1188,6 +1272,48 @@
   
   <span class="md-ellipsis">
     Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compressor-and-refrigerant-load/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compressor + Refrigerant Load
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="multilevel-converters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multilevel Converters
   </span>
   
 
@@ -1772,10 +1898,12 @@ integration with Simulink / OpenModelica.</p>
 <p>:material-circuit-board: <strong>Domain libraries</strong></p>
 <hr />
 <p>Vendor MOSFET / IGBT presets, converter templates (buck / boost /
-full-bridge / LLC), PMSM / induction motor models, and three-phase
-grid primitives (sources, PLLs, grid-following + grid-forming
-inverters).</p>
-<p><a href="catalog-devices/">Catalog Devices</a> · <a href="converter-templates/">Converter Templates</a> · <a href="motor-models/">Motor Models</a> · <a href="three-phase-grid/">Three-Phase Grid</a></p>
+full-bridge / LLC), seven motor families (DC, PMSM, PMSM-FOC,
+BLDC, 3φ and 1φ induction, mechanical), refrigeration compressor
+loads (Reciprocating / Rotary / Scroll, with a curated refrigerant
+table for R600a / R134a / R290 / R32 / R744), and three-phase grid
+primitives (sources, PLLs, grid-following + grid-forming inverters).</p>
+<p><a href="catalog-devices/">Catalog Devices</a> · <a href="converter-templates/">Converter Templates</a> · <a href="motor-models/">Motor Models</a> · <a href="compressor-and-refrigerant-load/">Compressor + Refrigerant Load</a> · <a href="three-phase-grid/">Three-Phase Grid</a></p>
 </li>
 <li>
 <p>:material-shield-check-outline: <strong>Benchmark dashboards</strong></p>
@@ -1804,6 +1932,7 @@ robust convergence policies.</p>
 <h2 id="recommended-learning-path">Recommended learning path<a class="headerlink" href="#recommended-learning-path" title="Permanent link">&para;</a></h2>
 <ol>
 <li><a href="getting-started/">Getting Started</a> — install, run an RC step, see the output CSV.</li>
+<li><a href="numerical-configuration/">Numerical Configuration</a> — the four presets (<code>Auto</code>/<code>Fast</code>/<code>Robust</code>/<code>HighFidelity</code>) that materialise a full tuning profile in one call.</li>
 <li><a href="user-guide/">User Guide</a> — the canonical runtime flow.</li>
 <li><a href="netlist-format/">Netlist YAML Format</a> — schema for your first real circuit.</li>
 <li><a href="components-reference/">Components Reference</a> + <a href="control-blocks-reference/">Control Blocks Reference</a> — every block at your disposal.</li>
@@ -1822,12 +1951,24 @@ robust convergence policies.</p>
 </thead>
 <tbody>
 <tr>
+<td>First simulation — what numerical knobs to set</td>
+<td><a href="numerical-configuration/">Numerical Configuration</a></td>
+</tr>
+<tr>
 <td>Buck / boost / LLC / FB converter</td>
 <td><a href="converter-templates/">Converter Templates</a>, <a href="catalog-devices/">Catalog Devices</a></td>
 </tr>
 <tr>
+<td>Multilevel (NPC, T-type, flying-cap, MMC)</td>
+<td><a href="multilevel-converters/">Multilevel Converters</a>, <a href="numerical-configuration/">Numerical Configuration</a></td>
+</tr>
+<tr>
 <td>Three-phase / motor drives / vector control</td>
 <td><a href="three-phase-grid/">Three-Phase Grid</a>, <a href="motor-models/">Motor Models</a>, <a href="control-blocks-reference/">Control Blocks</a></td>
+</tr>
+<tr>
+<td>Refrigeration / fridge / freezer compressor (CC convencional or inverter VCC)</td>
+<td><a href="compressor-and-refrigerant-load/">Compressor + Refrigerant Load</a>, <a href="motor-models/">Motor Models</a></td>
 </tr>
 <tr>
 <td>Magnetics design (saturation, core loss)</td>

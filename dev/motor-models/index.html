@@ -16,7 +16,7 @@
         <link rel="prev" href="../magnetic-models/">
       
       
-        <link rel="next" href="../three-phase-grid/">
+        <link rel="next" href="../compressor-and-refrigerant-load/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -805,6 +805,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../numerical-configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ac-analysis/" class="md-nav__link">
         
   
@@ -889,6 +910,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../schematic-rendering/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Schematic Rendering
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../code-generation/" class="md-nav__link">
         
   
@@ -936,6 +978,48 @@
   
   <span class="md-ellipsis">
     Automatic Differentiation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pwl-switching-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PWL Switching Engine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../component-models-audit/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Component Models Audit
   </span>
   
 
@@ -1155,46 +1239,46 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr-pmsm-foc-current-loop" class="md-nav__link">
+  <a href="#quick-chooser" class="md-nav__link">
     <span class="md-ellipsis">
-      TL;DR — PMSM-FOC current loop
+      Quick chooser
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#mechanical-primitives" class="md-nav__link">
+  <a href="#tldr-three-end-to-end-snippets" class="md-nav__link">
     <span class="md-ellipsis">
-      Mechanical primitives
+      TL;DR — three end-to-end snippets
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Mechanical primitives">
+    <nav class="md-nav" aria-label="TL;DR — three end-to-end snippets">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#shaft" class="md-nav__link">
+  <a href="#python-bldc-drive-at-6-v-on-phase-a" class="md-nav__link">
     <span class="md-ellipsis">
-      Shaft
+      Python (BLDC drive at 6 V on phase A)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#gearbox" class="md-nav__link">
+  <a href="#yaml-220-v-60-hz-1-psc-compressor-motor" class="md-nav__link">
     <span class="md-ellipsis">
-      GearBox
+      YAML (220 V / 60 Hz 1φ PSC compressor motor)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#loads" class="md-nav__link">
+  <a href="#c-pmsm-with-the-foc-current-loop" class="md-nav__link">
     <span class="md-ellipsis">
-      Loads
+      C++ (PMSM with the FOC current loop)
     </span>
   </a>
   
@@ -1202,6 +1286,102 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-math-object-device-wrapper" class="md-nav__link">
+    <span class="md-ellipsis">
+      Architecture: math object + device wrapper
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-model-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Per-model reference
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Per-model reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc-motor-dc_motor" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC motor (dc_motor)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pmsm-pmsm-sinusoidal-back-emf" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMSM (pmsm) — sinusoidal back-EMF
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pmsm-foc-controller-pmsm_foc-0-pin-signal-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMSM-FOC controller (pmsm_foc) — 0-pin signal device
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bldc-motor-bldc_motor-trapezoidal-back-emf" class="md-nav__link">
+    <span class="md-ellipsis">
+      BLDC motor (bldc_motor) — trapezoidal back-EMF
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-induction-motor-induction_motor-squirrel-cage" class="md-nav__link">
+    <span class="md-ellipsis">
+      3φ Induction motor (induction_motor) — squirrel cage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-phase-induction-motor-single_phase_induction_motor-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      Single-phase Induction motor (single_phase_induction_motor) — NEW
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mechanicaldevice-mechanical-0-pin-shaft" class="md-nav__link">
+    <span class="md-ellipsis">
+      MechanicalDevice (mechanical) — 0-pin shaft
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mechanical-primitives-header-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mechanical primitives (header-only)
+    </span>
+  </a>
   
 </li>
       
@@ -1215,69 +1395,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pmsm" class="md-nav__link">
+  <a href="#validation-gates" class="md-nav__link">
     <span class="md-ellipsis">
-      PMSM
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="PMSM">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#no-load-gate-g4" class="md-nav__link">
-    <span class="md-ellipsis">
-      No-load gate (G.4)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#locked-rotor-gate-g4" class="md-nav__link">
-    <span class="md-ellipsis">
-      Locked-rotor gate (G.4)
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#dc-motor" class="md-nav__link">
-    <span class="md-ellipsis">
-      DC motor
+      Validation gates
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#pmsm-foc-current-loop" class="md-nav__link">
+  <a href="#when-to-use-which-model" class="md-nav__link">
     <span class="md-ellipsis">
-      PMSM-FOC current loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#validation" class="md-nav__link">
-    <span class="md-ellipsis">
-      Validation
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#follow-ups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Follow-ups
+      When to use which model
     </span>
   </a>
   
@@ -1296,6 +1425,48 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compressor-and-refrigerant-load/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compressor + Refrigerant Load
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multilevel-converters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multilevel Converters
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -1713,46 +1884,46 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tldr-pmsm-foc-current-loop" class="md-nav__link">
+  <a href="#quick-chooser" class="md-nav__link">
     <span class="md-ellipsis">
-      TL;DR — PMSM-FOC current loop
+      Quick chooser
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#mechanical-primitives" class="md-nav__link">
+  <a href="#tldr-three-end-to-end-snippets" class="md-nav__link">
     <span class="md-ellipsis">
-      Mechanical primitives
+      TL;DR — three end-to-end snippets
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Mechanical primitives">
+    <nav class="md-nav" aria-label="TL;DR — three end-to-end snippets">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#shaft" class="md-nav__link">
+  <a href="#python-bldc-drive-at-6-v-on-phase-a" class="md-nav__link">
     <span class="md-ellipsis">
-      Shaft
+      Python (BLDC drive at 6 V on phase A)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#gearbox" class="md-nav__link">
+  <a href="#yaml-220-v-60-hz-1-psc-compressor-motor" class="md-nav__link">
     <span class="md-ellipsis">
-      GearBox
+      YAML (220 V / 60 Hz 1φ PSC compressor motor)
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#loads" class="md-nav__link">
+  <a href="#c-pmsm-with-the-foc-current-loop" class="md-nav__link">
     <span class="md-ellipsis">
-      Loads
+      C++ (PMSM with the FOC current loop)
     </span>
   </a>
   
@@ -1760,6 +1931,102 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-math-object-device-wrapper" class="md-nav__link">
+    <span class="md-ellipsis">
+      Architecture: math object + device wrapper
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-model-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Per-model reference
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Per-model reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc-motor-dc_motor" class="md-nav__link">
+    <span class="md-ellipsis">
+      DC motor (dc_motor)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pmsm-pmsm-sinusoidal-back-emf" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMSM (pmsm) — sinusoidal back-EMF
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pmsm-foc-controller-pmsm_foc-0-pin-signal-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      PMSM-FOC controller (pmsm_foc) — 0-pin signal device
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bldc-motor-bldc_motor-trapezoidal-back-emf" class="md-nav__link">
+    <span class="md-ellipsis">
+      BLDC motor (bldc_motor) — trapezoidal back-EMF
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-induction-motor-induction_motor-squirrel-cage" class="md-nav__link">
+    <span class="md-ellipsis">
+      3φ Induction motor (induction_motor) — squirrel cage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-phase-induction-motor-single_phase_induction_motor-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      Single-phase Induction motor (single_phase_induction_motor) — NEW
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mechanicaldevice-mechanical-0-pin-shaft" class="md-nav__link">
+    <span class="md-ellipsis">
+      MechanicalDevice (mechanical) — 0-pin shaft
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mechanical-primitives-header-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mechanical primitives (header-only)
+    </span>
+  </a>
   
 </li>
       
@@ -1773,69 +2040,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pmsm" class="md-nav__link">
+  <a href="#validation-gates" class="md-nav__link">
     <span class="md-ellipsis">
-      PMSM
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="PMSM">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#no-load-gate-g4" class="md-nav__link">
-    <span class="md-ellipsis">
-      No-load gate (G.4)
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#locked-rotor-gate-g4" class="md-nav__link">
-    <span class="md-ellipsis">
-      Locked-rotor gate (G.4)
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#dc-motor" class="md-nav__link">
-    <span class="md-ellipsis">
-      DC motor
+      Validation gates
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#pmsm-foc-current-loop" class="md-nav__link">
+  <a href="#when-to-use-which-model" class="md-nav__link">
     <span class="md-ellipsis">
-      PMSM-FOC current loop
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#validation" class="md-nav__link">
-    <span class="md-ellipsis">
-      Validation
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#follow-ups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Follow-ups
+      When to use which model
     </span>
   </a>
   
@@ -1883,202 +2099,330 @@
 
 <h1 id="motor-models">Motor Models<a class="headerlink" href="#motor-models" title="Permanent link">&para;</a></h1>
 <blockquote>
-<p>Status: shipped — mechanical primitives + Park/Clarke + PMSM + DC
-motor + PMSM-FOC current loop. Induction / BLDC / sensors are the
-natural follow-ups.</p>
+<p><strong>Status: shipped.</strong> Seven motor families are wired all the way through
+<code>Circuit::DeviceVariant</code>, the YAML parser, and the Python bindings —
+DC, PMSM, PMSM-FOC (signal-domain controller), <code>MechanicalDevice</code>
+(shaft-only signal device for multi-shaft builds), BLDC (trapezoidal
+back-EMF), 3φ squirrel-cage Induction, and 1φ PSC Induction (the
+<em>compressor convencional</em> / CC motor used in legacy refrigeration
+compressors).</p>
 </blockquote>
-<p>Motor models are the mechanical-electrical bridge of the simulator.
-Phase 1.2's <code>add-motor-models</code> lays down the rotor-frame primitives
-that every drive design needs:</p>
+<p>Motor models bridge the electrical and mechanical domains. Every model
+is <code>pulsim::v1::DeviceVariant</code>-aware: the Circuit reserves MNA branch
+rows, the stamping walker assembles the trapezoidal-companion or
+back-EMF terms each step, and the advance walker integrates the
+mechanical state forward.</p>
+<h2 id="quick-chooser">Quick chooser<a class="headerlink" href="#quick-chooser" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>You want…</th>
+<th>Use</th>
+<th>YAML <code>type:</code></th>
+<th>Pins</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Brushed DC motor (battery + armature)</td>
+<td><code>DcMotorDevice</code></td>
+<td><code>dc_motor</code></td>
+<td>2</td>
+</tr>
+<tr>
+<td>Sinusoidal-back-EMF PMSM (SPM / IPM)</td>
+<td><code>PmsmDevice</code></td>
+<td><code>pmsm</code></td>
+<td>4 (3φ + neutral)</td>
+</tr>
+<tr>
+<td>Trapezoidal-back-EMF BLDC</td>
+<td><code>BldcMotorDevice</code></td>
+<td><code>bldc_motor</code></td>
+<td>4</td>
+</tr>
+<tr>
+<td>3φ squirrel-cage induction motor</td>
+<td><code>InductionMotorDevice</code></td>
+<td><code>induction_motor</code></td>
+<td>4</td>
+</tr>
+<tr>
+<td>1φ PSC induction motor for legacy compressors</td>
+<td><code>SinglePhaseInductionMotorDevice</code></td>
+<td><code>single_phase_induction_motor</code></td>
+<td>2</td>
+</tr>
+<tr>
+<td>FOC current loop (controller only, no electrical pins)</td>
+<td><code>PmsmFocDevice</code></td>
+<td><code>pmsm_foc</code></td>
+<td>0</td>
+</tr>
+<tr>
+<td>Standalone shaft / multi-shaft / pure-mechanical load</td>
+<td><code>MechanicalDevice</code></td>
+<td><code>mechanical</code></td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p>Plus the compressor / refrigerant load layer that attaches to any of
+the above by name — see <a href="../compressor-and-refrigerant-load/">Compressor + Refrigerant Load</a>.</p>
+<h2 id="tldr-three-end-to-end-snippets">TL;DR — three end-to-end snippets<a class="headerlink" href="#tldr-three-end-to-end-snippets" title="Permanent link">&para;</a></h2>
+<h3 id="python-bldc-drive-at-6-v-on-phase-a">Python (BLDC drive at 6 V on phase A)<a class="headerlink" href="#python-bldc-drive-at-6-v-on-phase-a" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+
+<span class="n">ckt</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="p">()</span>
+<span class="n">a</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">);</span> <span class="n">b</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;b&quot;</span><span class="p">);</span> <span class="n">c</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;c&quot;</span><span class="p">)</span>
+<span class="n">n</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;n&quot;</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;V_a&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="o">.</span><span class="n">ground</span><span class="p">(),</span> <span class="mf">6.0</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;V_b&quot;</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="o">.</span><span class="n">ground</span><span class="p">(),</span> <span class="mf">0.0</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;V_c&quot;</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="o">.</span><span class="n">ground</span><span class="p">(),</span> <span class="mf">0.0</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;V_n&quot;</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="o">.</span><span class="n">ground</span><span class="p">(),</span> <span class="mf">0.0</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">BldcMotorParams</span><span class="p">()</span>
+<span class="n">p</span><span class="o">.</span><span class="n">R_s</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">;</span> <span class="n">p</span><span class="o">.</span><span class="n">L_s</span> <span class="o">=</span> <span class="mf">8e-3</span><span class="p">;</span> <span class="n">p</span><span class="o">.</span><span class="n">K_e_peak</span> <span class="o">=</span> <span class="mf">0.012</span>
+<span class="n">p</span><span class="o">.</span><span class="n">pole_pairs</span> <span class="o">=</span> <span class="mi">2</span><span class="p">;</span> <span class="n">p</span><span class="o">.</span><span class="n">J</span> <span class="o">=</span> <span class="mf">5e-5</span><span class="p">;</span> <span class="n">p</span><span class="o">.</span><span class="n">b_friction</span> <span class="o">=</span> <span class="mf">1e-5</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_bldc_motor</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">p</span><span class="p">)</span>
+
+<span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="p">()</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">tstop</span> <span class="o">=</span> <span class="mf">5e-3</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">dt</span> <span class="o">=</span> <span class="mf">1e-5</span>
+<span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">ckt</span><span class="p">,</span> <span class="n">opts</span><span class="p">)</span><span class="o">.</span><span class="n">run_transient</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ω =&quot;</span><span class="p">,</span> <span class="n">ckt</span><span class="o">.</span><span class="n">bldc_omega</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">),</span> <span class="s2">&quot;rad/s&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;τ_em =&quot;</span><span class="p">,</span> <span class="n">ckt</span><span class="o">.</span><span class="n">bldc_torque</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">),</span> <span class="s2">&quot;N·m&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="yaml-220-v-60-hz-1-psc-compressor-motor">YAML (220 V / 60 Hz 1φ PSC compressor motor)<a class="headerlink" href="#yaml-220-v-60-hz-1-psc-compressor-motor" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">schema</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pulsim-v1</span>
+<span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
+<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5e-5</span>
+<span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">sine_voltage_source</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">V_line</span><span class="p p-Indicator">,</span><span class="nt"> nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">line</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">],</span>
+<span class="nt">      amplitude</span><span class="p">:</span><span class="w"> </span><span class="nv">311.0</span><span class="p p-Indicator">,</span><span class="nt"> frequency</span><span class="p">:</span><span class="w"> </span><span class="nv">60.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> type</span><span class="p">:</span><span class="w"> </span><span class="nv">voltage_source</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">V_n</span><span class="p p-Indicator">,</span><span class="nt"> nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">],</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">0.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">single_phase_induction_motor</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">M_cc</span>
+<span class="w">    </span><span class="nt">nodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">line</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">R_s_main</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">    </span><span class="nt">L_s_main</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50e-3</span>
+<span class="w">    </span><span class="nt">R_s_aux</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">20.0</span>
+<span class="w">    </span><span class="nt">L_s_aux</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">80e-3</span>
+<span class="w">    </span><span class="nt">C_run</span><span class="p">:</span><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">4e-6</span>
+<span class="w">    </span><span class="nt">R_r</span><span class="p">:</span><span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">8.0</span>
+<span class="w">    </span><span class="nt">L_r</span><span class="p">:</span><span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">55e-3</span>
+<span class="w">    </span><span class="nt">L_m</span><span class="p">:</span><span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">50e-3</span>
+<span class="w">    </span><span class="nt">pole_pairs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">    </span><span class="nt">J</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
+</code></pre></div>
+<h3 id="c-pmsm-with-the-foc-current-loop">C++ (PMSM with the FOC current loop)<a class="headerlink" href="#c-pmsm-with-the-foc-current-loop" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/runtime_circuit.hpp&quot;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">pulsim</span><span class="o">::</span><span class="nn">v1</span><span class="p">;</span>
+
+<span class="n">Circuit</span><span class="w"> </span><span class="n">ckt</span><span class="p">;</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ckt</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">&quot;a&quot;</span><span class="p">);</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ckt</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">&quot;b&quot;</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ckt</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">&quot;c&quot;</span><span class="p">);</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ckt</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">&quot;n&quot;</span><span class="p">);</span>
+<span class="c1">// ... voltage sources ...</span>
+
+<span class="n">motors</span><span class="o">::</span><span class="n">PmsmParams</span><span class="w"> </span><span class="n">motor_p</span><span class="p">{};</span>
+<span class="n">motor_p</span><span class="p">.</span><span class="n">Rs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.5</span><span class="p">;</span><span class="w"> </span><span class="n">motor_p</span><span class="p">.</span><span class="n">Ld</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">motor_p</span><span class="p">.</span><span class="n">Lq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2e-3</span><span class="p">;</span>
+<span class="n">motor_p</span><span class="p">.</span><span class="n">psi_pm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span><span class="w"> </span><span class="n">motor_p</span><span class="p">.</span><span class="n">pole_pairs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="n">motor_p</span><span class="p">.</span><span class="n">J</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">;</span><span class="w"> </span><span class="n">motor_p</span><span class="p">.</span><span class="n">b_friction</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-4</span><span class="p">;</span>
+<span class="n">ckt</span><span class="p">.</span><span class="n">add_pmsm</span><span class="p">(</span><span class="s">&quot;M1&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">motor_p</span><span class="p">);</span>
+
+<span class="n">PmsmFocDevice</span><span class="o">::</span><span class="n">Params</span><span class="w"> </span><span class="n">foc_p</span><span class="p">{};</span>
+<span class="n">foc_p</span><span class="p">.</span><span class="n">motor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">motor_p</span><span class="p">;</span>
+<span class="n">foc_p</span><span class="p">.</span><span class="n">foc</span><span class="p">.</span><span class="n">bandwidth_hz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1000.0</span><span class="p">;</span>
+<span class="n">foc_p</span><span class="p">.</span><span class="n">foc</span><span class="p">.</span><span class="n">Vd_min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">-50.0</span><span class="p">;</span><span class="w"> </span><span class="n">foc_p</span><span class="p">.</span><span class="n">foc</span><span class="p">.</span><span class="n">Vd_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">50.0</span><span class="p">;</span>
+<span class="n">foc_p</span><span class="p">.</span><span class="n">foc</span><span class="p">.</span><span class="n">Vq_min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">-50.0</span><span class="p">;</span><span class="w"> </span><span class="n">foc_p</span><span class="p">.</span><span class="n">foc</span><span class="p">.</span><span class="n">Vq_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">50.0</span><span class="p">;</span>
+<span class="n">ckt</span><span class="p">.</span><span class="n">add_pmsm_foc</span><span class="p">(</span><span class="s">&quot;Ctrl1&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">foc_p</span><span class="p">);</span>
+</code></pre></div>
+<hr />
+<h2 id="architecture-math-object-device-wrapper">Architecture: math object + device wrapper<a class="headerlink" href="#architecture-math-object-device-wrapper" title="Permanent link">&para;</a></h2>
+<p>Every motor model has two layers:</p>
 <table>
 <thead>
 <tr>
 <th>Layer</th>
-<th>Header</th>
 <th>Purpose</th>
+<th>Location</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Mechanical primitives</td>
-<td><code>motors/mechanical.hpp</code></td>
-<td><code>Shaft</code>, <code>GearBox</code>, <code>ConstantTorqueLoad</code>, <code>FanLoad</code>, <code>FlywheelLoad</code></td>
+<td><strong>Math object</strong></td>
+<td>Standalone integrator — usable in isolation for control-design unit tests</td>
+<td><code>core/include/pulsim/v1/motors/*.hpp</code></td>
 </tr>
 <tr>
-<td>Frame transforms</td>
-<td><code>motors/frame_transforms.hpp</code></td>
-<td>Clarke / Park / inverse, plus composite <code>abc_to_dq</code> and <code>dq_to_abc</code></td>
-</tr>
-<tr>
-<td>PMSM</td>
-<td><code>motors/pmsm.hpp</code></td>
-<td><code>Pmsm</code> device in dq-frame, including saliency (Ld ≠ Lq) for IPM machines</td>
-</tr>
-<tr>
-<td>DC motor</td>
-<td><code>motors/dc_motor.hpp</code></td>
-<td>Separately-excited armature equations + closed-form steady-state speed</td>
-</tr>
-<tr>
-<td>FOC current loop</td>
-<td><code>motors/pmsm_foc.hpp</code></td>
-<td>Cascaded PI for id / iq, auto-tuned from the motor's (Rs, Ld, Lq) and a target bandwidth</td>
+<td><strong>Device wrapper</strong></td>
+<td><code>DeviceVariant</code> entry — handles MNA stamping, branch-row reservation, walker integration</td>
+<td><code>core/include/pulsim/v1/components/*_device.hpp</code></td>
 </tr>
 </tbody>
 </table>
-<p>Like the other Fase 1 / 2 changes, the motor layer is <strong>header-only</strong>.
-Full Circuit-side integration (registering motors as
-<code>Circuit::DeviceVariant</code> entries that stamp the right phase voltages
-into MNA) lands in a follow-up; today the math objects compose freely
-in user-space code and tests.</p>
-<h2 id="tldr-pmsm-foc-current-loop">TL;DR — PMSM-FOC current loop<a class="headerlink" href="#tldr-pmsm-foc-current-loop" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/motors/pmsm.hpp&quot;</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;pulsim/v1/motors/pmsm_foc.hpp&quot;</span>
-<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">pulsim</span><span class="o">::</span><span class="nn">v1</span><span class="o">::</span><span class="nn">motors</span><span class="p">;</span>
-
-<span class="n">PmsmParams</span><span class="w"> </span><span class="n">motor_p</span><span class="p">{</span>
-<span class="w">    </span><span class="p">.</span><span class="n">Rs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.5</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Ld</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Lq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">psi_pm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">,</span>
-<span class="w">    </span><span class="p">.</span><span class="n">pole_pairs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">J</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">b_friction</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-4</span><span class="p">,</span>
-<span class="p">};</span>
-<span class="n">Pmsm</span><span class="w"> </span><span class="nf">motor</span><span class="p">(</span><span class="n">motor_p</span><span class="p">);</span>
-
-<span class="c1">// 500 Hz current-loop bandwidth, ±50 V output clamp.</span>
-<span class="n">PmsmFocCurrentLoop</span><span class="w"> </span><span class="nf">foc</span><span class="p">(</span><span class="n">motor_p</span><span class="p">,</span><span class="w"> </span><span class="p">{.</span><span class="n">bandwidth_hz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">500.0</span><span class="p">,</span>
-<span class="w">                                  </span><span class="p">.</span><span class="n">Vd_min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">-50</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Vd_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">50</span><span class="p">,</span>
-<span class="w">                                  </span><span class="p">.</span><span class="n">Vq_min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">-50</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Vq_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">50</span><span class="p">});</span>
-
-<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">iq_ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">5.0</span><span class="p">,</span><span class="w"> </span><span class="n">id_ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">;</span><span class="w">     </span><span class="c1">// 5 A torque-producing</span>
-<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">dt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-5</span><span class="p">;</span><span class="w">                       </span><span class="c1">// 100 kHz control loop</span>
-<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">N_steps</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">Vd</span><span class="p">,</span><span class="w"> </span><span class="n">Vq</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">foc</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">id_ref</span><span class="p">,</span><span class="w"> </span><span class="n">iq_ref</span><span class="p">,</span>
-<span class="w">                              </span><span class="n">motor</span><span class="p">.</span><span class="n">i_d</span><span class="p">(),</span><span class="w"> </span><span class="n">motor</span><span class="p">.</span><span class="n">i_q</span><span class="p">(),</span><span class="w"> </span><span class="n">dt</span><span class="p">);</span>
-<span class="w">    </span><span class="n">motor</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">Vd</span><span class="p">,</span><span class="w"> </span><span class="n">Vq</span><span class="p">,</span><span class="w"> </span><span class="cm">/*tau_load*/</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">dt</span><span class="p">);</span>
-<span class="p">}</span>
-</code></pre></div>
-<p>The PI tuning <code>K_p = ω_c · L</code>, <code>K_i = K_p · R_s / L</code> cancels the plant
-pole at <code>R_s/L</code> and places unity-gain crossover at <code>ω_c</code>. Both d-axis
-and q-axis loops use the same recipe with their respective inductances.</p>
-<h2 id="mechanical-primitives">Mechanical primitives<a class="headerlink" href="#mechanical-primitives" title="Permanent link">&para;</a></h2>
-<h3 id="shaft"><code>Shaft</code><a class="headerlink" href="#shaft" title="Permanent link">&para;</a></h3>
-<p>Implements <code>J · dω/dt = τ_input − τ_load − b·ω − τ_coulomb·sign(ω)</code> via
-forward-Euler. Used as the mechanical port for every motor model.</p>
-<div class="highlight"><pre><span></span><code><span class="n">Shaft</span><span class="w"> </span><span class="n">sh</span><span class="p">{.</span><span class="n">J</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">b_friction</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">};</span>
-<span class="n">sh</span><span class="p">.</span><span class="n">advance</span><span class="p">(</span><span class="cm">/*tau_net*/</span><span class="mf">0.5</span><span class="p">,</span><span class="w"> </span><span class="cm">/*dt*/</span><span class="mf">1e-5</span><span class="p">);</span>
-<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">omega</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sh</span><span class="p">.</span><span class="n">omega</span><span class="p">;</span>
-</code></pre></div>
-<p>Time constant: <code>τ_m = J / b</code>. After <code>5·τ_m</code> of constant input torque
-the shaft settles within 1 % of <code>ω_ss = τ/b</code>.</p>
-<h3 id="gearbox"><code>GearBox</code><a class="headerlink" href="#gearbox" title="Permanent link">&para;</a></h3>
-<p>Ideal speed reducer. <code>ratio = ω_in / ω_out</code>, <code>efficiency</code> ∈ (0, 1].</p>
-<div class="highlight"><pre><span></span><code><span class="n">GearBox</span><span class="w"> </span><span class="n">gb</span><span class="p">{.</span><span class="n">ratio</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">10.0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">efficiency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.95</span><span class="p">};</span>
-<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">omega_load_side</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gb</span><span class="p">.</span><span class="n">omega_out</span><span class="p">(</span><span class="n">motor</span><span class="p">.</span><span class="n">omega_m</span><span class="p">());</span>
-<span class="k">const</span><span class="w"> </span><span class="n">Real</span><span class="w"> </span><span class="n">torque_load_side</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gb</span><span class="p">.</span><span class="n">torque_out</span><span class="p">(</span><span class="n">motor_torque</span><span class="p">);</span>
-</code></pre></div>
-<p>Reflecting load torque back to the motor side: <code>gb.reflect_load(τ_out) =
-τ_out / (ratio · η)</code>.</p>
-<h3 id="loads">Loads<a class="headerlink" href="#loads" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Load</th>
-<th>Math</th>
-<th>Use</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ConstantTorqueLoad</code></td>
-<td><code>τ_load = τ</code></td>
-<td>Industrial motor with a fixed mechanical brake</td>
-</tr>
-<tr>
-<td><code>FanLoad</code></td>
-<td><code>τ_load = k · ω · |ω|</code></td>
-<td>Fans / blowers / propellers / quadratic torque profiles</td>
-</tr>
-<tr>
-<td><code>FlywheelLoad</code></td>
-<td><code>τ_load = 0</code>, <code>J += J_extra</code></td>
-<td>Pure-inertia load (sums into the shaft's J)</td>
-</tr>
-</tbody>
-</table>
-<h2 id="frame-transforms">Frame transforms<a class="headerlink" href="#frame-transforms" title="Permanent link">&para;</a></h2>
-<p>The Clarke / Park transforms convert between three coordinate frames
-power-electronics engineers reach for hourly:</p>
-<table>
-<thead>
-<tr>
-<th>Frame</th>
-<th>Variables</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>3φ stationary</td>
-<td><code>(a, b, c)</code></td>
-<td>Inverter output / motor terminals</td>
-</tr>
-<tr>
-<td>2φ stationary</td>
-<td><code>(α, β)</code></td>
-<td>Compact transient analysis</td>
-</tr>
-<tr>
-<td>2φ rotating</td>
-<td><code>(d, q)</code></td>
-<td>dq-frame steady-state for FOC / control design</td>
-</tr>
-</tbody>
-</table>
-<p>Pulsim uses the <strong>amplitude-invariant</strong> convention (Clarke prefactor
-<code>2/3</code>) — the same one Texas Instruments / STMicro motor-control
-libraries use. Round-tripping <code>abc → dq → abc</code> at any rotor angle is
-identity within numerical noise (pinned by the unit tests).</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// abc → dq at rotor angle θ_e</span>
-<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">d</span><span class="p">,</span><span class="w"> </span><span class="n">q</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">abc_to_dq</span><span class="p">(</span><span class="n">va</span><span class="p">,</span><span class="w"> </span><span class="n">vb</span><span class="p">,</span><span class="w"> </span><span class="n">vc</span><span class="p">,</span><span class="w"> </span><span class="n">motor</span><span class="p">.</span><span class="n">theta_electrical</span><span class="p">());</span>
-
-<span class="c1">// dq → abc (PWM modulator gets these phase references)</span>
-<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">Va</span><span class="p">,</span><span class="w"> </span><span class="n">Vb</span><span class="p">,</span><span class="w"> </span><span class="n">Vc</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dq_to_abc</span><span class="p">(</span><span class="n">Vd_ref</span><span class="p">,</span><span class="w"> </span><span class="n">Vq_ref</span><span class="p">,</span><span class="w"> </span><span class="n">motor</span><span class="p">.</span><span class="n">theta_electrical</span><span class="p">());</span>
-</code></pre></div>
-<h2 id="pmsm">PMSM<a class="headerlink" href="#pmsm" title="Permanent link">&para;</a></h2>
-<p>Standard rotor-frame equations:</p>
-<div class="highlight"><pre><span></span><code>v_d = R_s · i_d + L_d · di_d/dt − ω_e · L_q · i_q
-v_q = R_s · i_q + L_q · di_q/dt + ω_e · (L_d · i_d + ψ_PM)
-τ_em = (3/2) · p · (ψ_PM · i_q + (L_d − L_q) · i_d · i_q)
-</code></pre></div>
-<p><code>L_d ≠ L_q</code> produces the reluctance torque term <code>(L_d − L_q)·i_d·i_q</code>
-— relevant for interior-permanent-magnet (IPM) machines where saliency
-is significant. Surface-PMSM / <code>L_d = L_q</code> reduces to the classical
-<code>τ_em = (3/2)·p·ψ_PM·i_q</code>.</p>
-<h3 id="no-load-gate-g4">No-load gate (G.4)<a class="headerlink" href="#no-load-gate-g4" title="Permanent link">&para;</a></h3>
-<p>Spinning the unexcited rotor produces back-EMF
-<code>v_back = ψ_PM · ω_e = ψ_PM · p · ω_m</code> per phase (peak). Pinned by
-<code>Phase 3.4</code> in the test suite.</p>
-<h3 id="locked-rotor-gate-g4">Locked-rotor gate (G.4)<a class="headerlink" href="#locked-rotor-gate-g4" title="Permanent link">&para;</a></h3>
-<p>With ω_m forced to zero (huge inertia), applying <code>V_q</code> drives <code>i_q</code>
-toward <code>V_q / R_s</code> on the L_q time constant. Pinned by <code>Phase 3.5</code>.</p>
-<h2 id="dc-motor">DC motor<a class="headerlink" href="#dc-motor" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>v_a  = R_a · i_a + L_a · di_a/dt + K_e · ω
+<p>The math objects (<code>motors::Pmsm</code>, <code>motors::BldcMotor</code>,
+<code>motors::InductionMotor</code>, <code>motors::DcMotor</code>,
+<code>motors::SinglePhaseInductionMotor</code>) compose freely in user-space C++
+code without involving the Circuit at all — useful for offline tuning
+of FOC gains or for building custom benchmarks.</p>
+<p>The device wrappers (<code>PmsmDevice</code>, <code>BldcMotorDevice</code>,
+<code>InductionMotorDevice</code>, <code>DcMotorDevice</code>,
+<code>SinglePhaseInductionMotorDevice</code>, <code>MechanicalDevice</code>, <code>PmsmFocDevice</code>)
+implement <code>DynamicDeviceBase&lt;DeviceT&gt;</code> — they expose <code>stamp_impl</code>,
+<code>jacobian_pattern_impl</code>, and <code>update_history_impl</code>, and the
+<code>RuntimeCircuit</code> walker drives them through the canonical
+DC-OP → transient → advance pipeline.</p>
+<h2 id="per-model-reference">Per-model reference<a class="headerlink" href="#per-model-reference" title="Permanent link">&para;</a></h2>
+<h3 id="dc-motor-dc_motor">DC motor (<code>dc_motor</code>)<a class="headerlink" href="#dc-motor-dc_motor" title="Permanent link">&para;</a></h3>
+<p>Standard separately-excited armature model:</p>
+<div class="highlight"><pre><span></span><code>v_a  = R_a · i_a + L_a · di_a/dt + K_e · ω_m
 τ_em = K_t · i_a
 J · dω/dt = τ_em − τ_load − b · ω
 </code></pre></div>
-<p>Closed-form steady-state speed:</p>
-<div class="highlight"><pre><span></span><code>ω_ss = (V·K_t − τ_load·R_a) / (K_t·K_e + b·R_a)
-</code></pre></div>
-<p>Mechanical time constant: <code>τ_m ≈ J · R_a / (K_t · K_e)</code>. Both helpers
-are exposed on the <code>DcMotor</code> class so the test gate ("speed step
-matches first-order analytical within ≤ 5 %") is direct.</p>
-<h2 id="pmsm-foc-current-loop">PMSM-FOC current loop<a class="headerlink" href="#pmsm-foc-current-loop" title="Permanent link">&para;</a></h2>
-<p><code>PmsmFocCurrentLoop</code> wraps two <code>PiCompensator</code> instances (from the
-<code>add-converter-templates</code> change) with the canonical "pole-zero
-cancellation" tuning. Bandwidth defaults to 1 kHz — fast enough for
-typical PWM rates of 10–20 kHz.</p>
+<p><strong>Pins</strong>: <code>[armature+, armature−]</code>. The motor stamps as an
+inductor-in-series-with-a-back-EMF source via trapezoidal companion;
+the mechanical state is forward-Euler-integrated per accepted step.</p>
 <table>
 <thead>
 <tr>
-<th>Tuning rule</th>
+<th>Field</th>
+<th>Unit</th>
+<th>Default</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>R_a</code></td>
+<td>Ω</td>
+<td>0.5</td>
+<td>Armature resistance</td>
+</tr>
+<tr>
+<td><code>L_a</code></td>
+<td>H</td>
+<td>1e-3</td>
+<td>Armature inductance</td>
+</tr>
+<tr>
+<td><code>K_e</code></td>
+<td>V·s/rad</td>
+<td>0.05</td>
+<td>Back-EMF constant</td>
+</tr>
+<tr>
+<td><code>K_t</code></td>
+<td>N·m/A</td>
+<td>0.05</td>
+<td>Torque constant (<code>K_e = K_t</code> for ideal motor)</td>
+</tr>
+<tr>
+<td><code>J</code></td>
+<td>kg·m²</td>
+<td>1e-4</td>
+<td>Rotor inertia</td>
+</tr>
+<tr>
+<td><code>b</code></td>
+<td>N·m·s</td>
+<td>1e-5</td>
+<td>Viscous friction</td>
+</tr>
+<tr>
+<td><code>tau_load_quad_coeff</code></td>
+<td>N·m·s²</td>
+<td>0</td>
+<td>Optional <code>τ = k·ω²</code> load</td>
+</tr>
+<tr>
+<td><code>omega_init</code></td>
+<td>rad/s</td>
+<td>0</td>
+<td>Initial speed</td>
+</tr>
+<tr>
+<td><code>i_a_init</code></td>
+<td>A</td>
+<td>0</td>
+<td>Initial armature current</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">ckt</span><span class="o">.</span><span class="n">set_dc_motor_tau_load</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)</span>   <span class="c1"># constant 0.5 N·m brake</span>
+<span class="n">ω</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">motor_omega</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">)</span>
+<span class="n">i</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">motor_armature_current</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Closed-form steady-state speed:
+<code>ω_ss = (V·K_t − τ_load·R_a) / (K_t·K_e + b·R_a)</code>.</p>
+<h3 id="pmsm-pmsm-sinusoidal-back-emf">PMSM (<code>pmsm</code>) — sinusoidal back-EMF<a class="headerlink" href="#pmsm-pmsm-sinusoidal-back-emf" title="Permanent link">&para;</a></h3>
+<p>Standard rotor-frame (αβ → dq) equations:</p>
+<div class="highlight"><pre><span></span><code>v_d = R_s·i_d + L_d·di_d/dt − ω_e · L_q · i_q
+v_q = R_s·i_q + L_q·di_q/dt + ω_e · (L_d · i_d + ψ_PM)
+τ_em = (3/2) · p · (ψ_PM · i_q + (L_d − L_q) · i_d · i_q)
+</code></pre></div>
+<p><code>L_d ≠ L_q</code> produces the reluctance torque term — relevant for
+<strong>Interior Permanent Magnet (IPM)</strong> machines where saliency is
+significant. Surface PMSM (<code>L_d = L_q</code>) reduces to the classical
+<code>τ_em = (3/2)·p·ψ_PM·i_q</code>.</p>
+<p><strong>Pins</strong>: <code>[A, B, C, N]</code> (4-wire wye). Each phase reserves one MNA
+branch row stamped via per-phase trapezoidal companion + back-EMF
+source.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Unit</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Rs</code></td>
+<td>Ω</td>
+<td>0.5</td>
+</tr>
+<tr>
+<td><code>Ld</code>, <code>Lq</code></td>
+<td>H</td>
+<td>2e-3</td>
+</tr>
+<tr>
+<td><code>psi_pm</code></td>
+<td>Wb</td>
+<td>0.05</td>
+</tr>
+<tr>
+<td><code>pole_pairs</code></td>
+<td>–</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>J</code>, <code>b_friction</code></td>
+<td>kg·m², N·m·s</td>
+<td>1e-3, 1e-4</td>
+</tr>
+<tr>
+<td><code>omega_init</code>, <code>theta_init</code></td>
+<td>rad/s, rad</td>
+<td>0, 0</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">ckt</span><span class="o">.</span><span class="n">set_pmsm_tau_load</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+<span class="n">ω</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">pmsm_omega</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">)</span>
+<span class="n">i_a</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">pmsm_i_a</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="pmsm-foc-controller-pmsm_foc-0-pin-signal-device">PMSM-FOC controller (<code>pmsm_foc</code>) — 0-pin signal device<a class="headerlink" href="#pmsm-foc-controller-pmsm_foc-0-pin-signal-device" title="Permanent link">&para;</a></h3>
+<p>Cascaded PI for <code>i_d</code> / <code>i_q</code> with <strong>pole-zero cancellation</strong> tuning
+auto-derived from the motor's <code>(R_s, L_d, L_q)</code> and a target bandwidth:</p>
+<table>
+<thead>
+<tr>
+<th>Gain</th>
 <th>Formula</th>
 </tr>
 </thead>
@@ -2101,85 +2445,478 @@ typical PWM rates of 10–20 kHz.</p>
 </tr>
 </tbody>
 </table>
-<p><code>retune(motor, foc_params)</code> rebuilds the gains from updated motor
-parameters or a new bandwidth target — useful for adaptive control or
-parameter identification flows.</p>
-<p>The loop's <code>step(id_ref, iq_ref, id_meas, iq_meas, dt)</code> returns
-<code>(Vd_ref, Vq_ref)</code> which the user feeds either into a PMSM model
-directly (for control-loop bench tests) or into an inverse-Park +
-Space-Vector-Modulator chain (for full PWM-on-inverter simulation).</p>
-<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
-<p>Six gate-level tests (all in <code>test_motor_models.cpp</code>):</p>
+<p>The device has <strong>zero electrical pins</strong>: it's a signal-domain block
+that reads the motor's <code>(i_d, i_q)</code> and produces <code>(V_d_ref, V_q_ref)</code>
+each step. Feed those into an inverter / PWM modulator (or directly
+into a PMSM in bench mode).</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pmsm_foc</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Ctrl1</span>
+<span class="w">  </span><span class="nt">Rs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+<span class="w">  </span><span class="nt">Ld</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2e-3</span>
+<span class="w">  </span><span class="nt">Lq</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2e-3</span>
+<span class="w">  </span><span class="nt">psi_pm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.05</span>
+<span class="w">  </span><span class="nt">pole_pairs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span>
+<span class="w">  </span><span class="nt">J</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-3</span>
+<span class="w">  </span><span class="nt">b_friction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
+<span class="w">  </span><span class="nt">bandwidth_hz</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<span class="w">  </span><span class="nt">Vd_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-50</span>
+<span class="w">  </span><span class="nt">Vd_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<span class="w">  </span><span class="nt">Vq_min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-50</span>
+<span class="w">  </span><span class="nt">Vq_max</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="n">ckt</span><span class="o">.</span><span class="n">set_pmsm_foc_iq_ref</span><span class="p">(</span><span class="s2">&quot;Ctrl1&quot;</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">)</span>   <span class="c1"># 5 A torque-producing reference</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">set_pmsm_foc_id_ref</span><span class="p">(</span><span class="s2">&quot;Ctrl1&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+<span class="n">Vd_ref</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">pmsm_foc_vd_ref</span><span class="p">(</span><span class="s2">&quot;Ctrl1&quot;</span><span class="p">)</span>
+<span class="n">Vq_ref</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">pmsm_foc_vq_ref</span><span class="p">(</span><span class="s2">&quot;Ctrl1&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="bldc-motor-bldc_motor-trapezoidal-back-emf">BLDC motor (<code>bldc_motor</code>) — trapezoidal back-EMF<a class="headerlink" href="#bldc-motor-bldc_motor-trapezoidal-back-emf" title="Permanent link">&para;</a></h3>
+<p>Same 3φ pin layout as PMSM but back-EMF is <strong>trapezoidal</strong> (six 60°
+flat-top segments per electrical revolution). Suited for 6-step
+commutation drives common in low-cost BLDC controllers.</p>
+<div class="highlight"><pre><span></span><code>e_k(θ_e) = K_e_peak · trap(θ_e − φ_k)       # k ∈ {a, b, c}, φ_k = 0°, 120°, 240°
+τ_em = (e_a·i_a + e_b·i_b + e_c·i_c) / ω_m
+</code></pre></div>
 <table>
 <thead>
 <tr>
-<th>Gate</th>
-<th>Test</th>
-<th>Result</th>
+<th>Field</th>
+<th>Unit</th>
+<th>Default</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>G.1</strong> Shaft / friction model</td>
-<td><code>Phase 1: shaft + flywheel + step torque</code></td>
-<td>ω_ss within ±2 % at 5·τ_m for J=b=1e-3</td>
+<td><code>R_s</code></td>
+<td>Ω</td>
+<td>5.0</td>
 </tr>
 <tr>
-<td><strong>G.1</strong> Park round-trip</td>
-<td><code>Phase 2: Clarke / Park identity</code></td>
-<td>Sinusoidal balanced 3φ → (d=1, q=0) within 1e-12</td>
+<td><code>L_s</code></td>
+<td>H</td>
+<td>8e-3</td>
 </tr>
 <tr>
-<td><strong>G.4</strong> PMSM no-load</td>
-<td><code>Phase 3.4</code></td>
-<td><code>back_emf_peak() == ψ_PM · p · ω_m</code> to machine precision</td>
+<td><code>K_e_peak</code></td>
+<td>V·s/rad</td>
+<td>0.012</td>
 </tr>
 <tr>
-<td><strong>G.4</strong> PMSM locked-rotor</td>
-<td><code>Phase 3.5</code></td>
-<td>i_q converges to V_q / R_s within ±1 % over 0.5 s</td>
+<td><code>pole_pairs</code></td>
+<td>–</td>
+<td>2</td>
 </tr>
 <tr>
-<td><strong>G.1</strong> DC motor speed step</td>
-<td><code>Phase 5.2</code></td>
-<td>ω matches <code>(V·K_t − τ·R_a) / (K_t·K_e + b·R_a)</code> within ±5 % at 12·τ_m</td>
+<td><code>J</code></td>
+<td>kg·m²</td>
+<td>5e-5</td>
 </tr>
 <tr>
-<td><strong>G.3</strong> PMSM-FOC tracking</td>
-<td><code>Phase 7</code></td>
-<td>i_q tracks i_q_ref within ±5 % after ≈ 50 ms at 500 Hz bandwidth</td>
+<td><code>b_friction</code>, <code>friction_coulomb</code></td>
+<td>N·m·s, N·m</td>
+<td>1e-5, 0</td>
 </tr>
 </tbody>
 </table>
-<h2 id="follow-ups">Follow-ups<a class="headerlink" href="#follow-ups" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>Induction motor</strong> (<code>InductionMotorDevice</code>): rotor flux observer,
-  slip computation, V/f start-up tutorial. Math is well-known; ships
-  alongside the <code>add-three-phase-grid-library</code> change which provides
-  the inverter side.</li>
-<li><strong>BLDC / trapezoidal back-EMF</strong>: hall-sensor commutation table,
-  6-step modulation. Tracked separately from the sinusoidal PMSM.</li>
-<li><strong>Sensor models</strong>: <code>EncoderQuadrature</code>, <code>HallSensor</code>, <code>Resolver</code>.
-  Encoder is straightforward; resolver wants a sinusoidal-modulator +
-  demodulator pair that justifies its own change.</li>
-<li><strong>Saturation <code>L_d(i_d), L_q(i_q)</code></strong>: lookup-table extension of the
-  PMSM's constant inductances. Lands when the magnetic catalog's
-  <code>BHCurveTable</code> is wired through to motor stators.</li>
-<li><strong>Speed / position outer loops</strong>: the FOC current loop is final;
-  the cascaded speed PI + position-loop PI follow alongside the
-  closed-loop benchmark suite (<code>add-closed-loop-benchmarks</code>).</li>
-<li><strong><code>Circuit::DeviceVariant</code> integration</strong>: register <code>Pmsm</code> /
-  <code>DcMotor</code> so a YAML netlist can declare <code>type: pmsm, parameters:
-  {Rs: ..., Ld: ..., ...}</code> and the existing parser dispatches to
-  these models. Pairs with the <code>add-three-phase-grid-library</code> change.</li>
-</ul>
+<div class="highlight"><pre><span></span><code><span class="n">ckt</span><span class="o">.</span><span class="n">set_bldc_tau_load</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
+<span class="n">ω</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">bldc_omega</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">)</span>
+<span class="n">τ</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">bldc_torque</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="3-induction-motor-induction_motor-squirrel-cage">3φ Induction motor (<code>induction_motor</code>) — squirrel cage<a class="headerlink" href="#3-induction-motor-induction_motor-squirrel-cage" title="Permanent link">&para;</a></h3>
+<p>αβ-frame stationary model with rotor flux state <code>ψ_r = (ψ_rα, ψ_rβ)</code>:</p>
+<div class="highlight"><pre><span></span><code>v_α = R_s·i_α + σ·L_s·di_α/dt + (L_m/L_r) · dψ_rα/dt
+v_β = R_s·i_β + σ·L_s·di_β/dt + (L_m/L_r) · dψ_rβ/dt
+dψ_rα/dt = −R_r/L_r·ψ_rα + R_r·L_m/L_r·i_α − ω_e·ψ_rβ
+dψ_rβ/dt = −R_r/L_r·ψ_rβ + R_r·L_m/L_r·i_β + ω_e·ψ_rα
+τ_em = (3/2) · p · (L_m/L_r) · (ψ_rα·i_β − ψ_rβ·i_α)
+</code></pre></div>
+<p><code>σ = 1 − L_m² / (L_s · L_r)</code> is the leakage coefficient.</p>
+<p><strong>Pins</strong>: <code>[A, B, C, N]</code>. Three MNA branch rows (per-phase trapezoidal
+companion). At DC OP, rotor flux is zero → no back-EMF, so each phase
+reduces to <code>R_s</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Unit</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>R_s</code></td>
+<td>Ω</td>
+<td>1.0</td>
+</tr>
+<tr>
+<td><code>R_r</code></td>
+<td>Ω</td>
+<td>1.5</td>
+</tr>
+<tr>
+<td><code>L_s</code>, <code>L_r</code></td>
+<td>H</td>
+<td>0.15</td>
+</tr>
+<tr>
+<td><code>L_m</code></td>
+<td>H</td>
+<td>0.14</td>
+</tr>
+<tr>
+<td><code>pole_pairs</code></td>
+<td>–</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>J</code>, <code>b_friction</code></td>
+<td>kg·m², N·m·s</td>
+<td>0.01, 1e-3</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="n">ckt</span><span class="o">.</span><span class="n">set_induction_tau_load</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
+<span class="n">slip</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">induction_slip</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="o">*</span><span class="n">math</span><span class="o">.</span><span class="n">pi</span><span class="o">*</span><span class="mi">50</span><span class="p">)</span>  <span class="c1"># 50 Hz synchronous</span>
+<span class="n">ω</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">induction_omega</span><span class="p">(</span><span class="s2">&quot;M1&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="single-phase-induction-motor-single_phase_induction_motor-new">Single-phase Induction motor (<code>single_phase_induction_motor</code>) — <strong>NEW</strong><a class="headerlink" href="#single-phase-induction-motor-single_phase_induction_motor-new" title="Permanent link">&para;</a></h3>
+<p>The <em>compressor convencional</em> (CC) motor used in pre-inverter domestic
+refrigerators and freezers. Permanent Split Capacitor (PSC) topology:
+main winding on α-axis, auxiliary winding on β-axis (90° spatial), with
+a permanent run capacitor in series with the auxiliary winding. The
+phase shift created by the cap turns a single-phase line voltage into
+a quasi-2φ rotating field, enabling self-start without an external
+inverter.</p>
+<p><strong>Pins: 2</strong> — <code>[line, neutral]</code>. The run capacitor and aux winding are
+<strong>internal to the device</strong>. Two MNA branch rows (<code>i_main</code>, <code>i_aux</code>).</p>
+<div class="highlight"><pre><span></span><code>v_main = R_s_main·i_main + L_s_main·di_main/dt + (L_m/L_r)·dψ_rα/dt
+v_aux − V_cap = R_s_aux·i_aux + L_s_aux·di_aux/dt + (L_m/L_r)·dψ_rβ/dt
+dV_cap/dt = i_aux / C_run
+dψ_rα/dt = −R_r/L_r·ψ_rα + R_r·L_m/L_r·i_main − ω_e·ψ_rβ
+dψ_rβ/dt = −R_r/L_r·ψ_rβ + R_r·L_m/L_r·i_aux  + ω_e·ψ_rα
+τ_em = p · (L_m/L_r) · (ψ_rα·i_aux − ψ_rβ·i_main)
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Unit</th>
+<th>Default</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>R_s_main</code></td>
+<td>Ω</td>
+<td>10.0</td>
+<td>Main winding resistance</td>
+</tr>
+<tr>
+<td><code>L_s_main</code></td>
+<td>H</td>
+<td>50e-3</td>
+<td>Main winding self-inductance</td>
+</tr>
+<tr>
+<td><code>R_s_aux</code></td>
+<td>Ω</td>
+<td>20.0</td>
+<td>Auxiliary winding resistance</td>
+</tr>
+<tr>
+<td><code>L_s_aux</code></td>
+<td>H</td>
+<td>80e-3</td>
+<td>Auxiliary winding self-inductance</td>
+</tr>
+<tr>
+<td><code>C_run</code></td>
+<td>F</td>
+<td>4e-6</td>
+<td>Permanent run capacitor in aux branch</td>
+</tr>
+<tr>
+<td><code>R_r</code></td>
+<td>Ω</td>
+<td>8.0</td>
+<td>Rotor resistance (referred to stator)</td>
+</tr>
+<tr>
+<td><code>L_r</code></td>
+<td>H</td>
+<td>55e-3</td>
+<td>Rotor self-inductance</td>
+</tr>
+<tr>
+<td><code>L_m</code></td>
+<td>H</td>
+<td>50e-3</td>
+<td>Mutual inductance</td>
+</tr>
+<tr>
+<td><code>pole_pairs</code></td>
+<td>–</td>
+<td>2</td>
+<td>4-pole = 2 pole pairs (typical fridge)</td>
+</tr>
+<tr>
+<td><code>J</code></td>
+<td>kg·m²</td>
+<td>1e-4</td>
+<td>Rotor + shaft inertia</td>
+</tr>
+<tr>
+<td><code>b_friction</code></td>
+<td>N·m·s</td>
+<td>1e-4</td>
+<td>Viscous friction</td>
+</tr>
+<tr>
+<td><code>friction_coulomb</code></td>
+<td>N·m</td>
+<td>0.05</td>
+<td>Coulomb friction</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ps</span>
+
+<span class="n">ckt</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="p">()</span>
+<span class="n">line</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;line&quot;</span><span class="p">);</span> <span class="n">neutral</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="s2">&quot;neutral&quot;</span><span class="p">)</span>
+
+<span class="c1"># 220 V (RMS) / 60 Hz line.</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_sine_voltage_source</span><span class="p">(</span><span class="s2">&quot;V_line&quot;</span><span class="p">,</span> <span class="n">line</span><span class="p">,</span> <span class="n">neutral</span><span class="p">,</span>
+                             <span class="mf">220.0</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span><span class="o">**</span><span class="mf">0.5</span><span class="p">),</span> <span class="mf">60.0</span><span class="p">)</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">&quot;V_n&quot;</span><span class="p">,</span> <span class="n">neutral</span><span class="p">,</span> <span class="n">ps</span><span class="o">.</span><span class="n">Circuit</span><span class="o">.</span><span class="n">ground</span><span class="p">(),</span> <span class="mf">0.0</span><span class="p">)</span>
+
+<span class="c1"># CC compressor motor with default Embraco-style PSC params.</span>
+<span class="n">p</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SinglePhaseInductionMotorParams</span><span class="p">()</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">add_single_phase_induction_motor</span><span class="p">(</span><span class="s2">&quot;M_cc&quot;</span><span class="p">,</span> <span class="n">line</span><span class="p">,</span> <span class="n">neutral</span><span class="p">,</span> <span class="n">p</span><span class="p">)</span>
+
+<span class="n">opts</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">SimulationOptions</span><span class="p">()</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">tstop</span> <span class="o">=</span> <span class="mf">0.2</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">dt</span> <span class="o">=</span> <span class="mf">5e-5</span>
+<span class="n">ps</span><span class="o">.</span><span class="n">Simulator</span><span class="p">(</span><span class="n">ckt</span><span class="p">,</span> <span class="n">opts</span><span class="p">)</span><span class="o">.</span><span class="n">run_transient</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ω      =&quot;</span><span class="p">,</span> <span class="n">ckt</span><span class="o">.</span><span class="n">single_phase_im_omega</span><span class="p">(</span><span class="s2">&quot;M_cc&quot;</span><span class="p">),</span> <span class="s2">&quot;rad/s&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;i_main =&quot;</span><span class="p">,</span> <span class="n">ckt</span><span class="o">.</span><span class="n">single_phase_im_i_main</span><span class="p">(</span><span class="s2">&quot;M_cc&quot;</span><span class="p">),</span> <span class="s2">&quot;A&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;V_cap  =&quot;</span><span class="p">,</span> <span class="n">ckt</span><span class="o">.</span><span class="n">single_phase_im_V_cap</span><span class="p">(</span><span class="s2">&quot;M_cc&quot;</span><span class="p">),</span> <span class="s2">&quot;V&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;τ_em   =&quot;</span><span class="p">,</span> <span class="n">ckt</span><span class="o">.</span><span class="n">single_phase_im_torque</span><span class="p">(</span><span class="s2">&quot;M_cc&quot;</span><span class="p">),</span> <span class="s2">&quot;N·m&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Rotation direction is a wiring choice.</strong> The PSC topology can rotate
+in either direction depending on the relative phase produced by the
+run capacitor; real CC compressors pick a direction by mechanical
+winding sense. Tests should compare magnitudes, not signed values.</p>
+<p>To attach a refrigeration-cycle load:</p>
+<div class="highlight"><pre><span></span><code><span class="n">comp</span> <span class="o">=</span> <span class="n">ps</span><span class="o">.</span><span class="n">compressor_defaults_for</span><span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="n">Refrigerant</span><span class="o">.</span><span class="n">R600a</span><span class="p">)</span>
+<span class="n">comp</span><span class="o">.</span><span class="n">displacement_m3</span> <span class="o">=</span> <span class="mf">6e-6</span>
+<span class="n">ckt</span><span class="o">.</span><span class="n">attach_compressor_load</span><span class="p">(</span><span class="s2">&quot;M_cc&quot;</span><span class="p">,</span> <span class="n">comp</span><span class="p">)</span>
+</code></pre></div>
+<p>See <a href="../compressor-and-refrigerant-load/">Compressor + Refrigerant Load</a>
+for the full compressor docs.</p>
+<h3 id="mechanicaldevice-mechanical-0-pin-shaft">MechanicalDevice (<code>mechanical</code>) — 0-pin shaft<a class="headerlink" href="#mechanicaldevice-mechanical-0-pin-shaft" title="Permanent link">&para;</a></h3>
+<p>Standalone shaft / inertia block with no electrical pins. Useful for
+multi-shaft mechanical topologies (e.g. coupling two motors through a
+gear, or modelling a flywheel) without forcing a motor into the
+build.</p>
+<div class="highlight"><pre><span></span><code>J · dω_m/dt = τ_input − τ_load_const − τ_load_quad·ω·|ω|
+              − b_friction·ω − τ_coulomb·sign(ω)
+θ_m += dt · ω_m
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mechanical</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shaft1</span>
+<span class="w">  </span><span class="nt">J</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-3</span>
+<span class="w">  </span><span class="nt">b_friction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-4</span>
+<span class="w">  </span><span class="nt">tau_load_const</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="n">ckt</span><span class="o">.</span><span class="n">set_mechanical_tau_input</span><span class="p">(</span><span class="s2">&quot;Shaft1&quot;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+<span class="n">ω</span> <span class="o">=</span> <span class="n">ckt</span><span class="o">.</span><span class="n">mechanical_omega</span><span class="p">(</span><span class="s2">&quot;Shaft1&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="mechanical-primitives-header-only">Mechanical primitives (header-only)<a class="headerlink" href="#mechanical-primitives-header-only" title="Permanent link">&para;</a></h2>
+<p>The free-standing math helpers in <code>motors/mechanical.hpp</code> are still
+the simplest way to build custom mechanical topologies in user-space:</p>
+<table>
+<thead>
+<tr>
+<th>Helper</th>
+<th>Math</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Shaft</code></td>
+<td><code>J·dω/dt = τ_net − b·ω − τ_C·sign(ω)</code></td>
+<td>Foundation block — used inside every motor</td>
+</tr>
+<tr>
+<td><code>GearBox</code></td>
+<td><code>ω_out = ω_in / ratio</code>, <code>τ_out = τ_in · ratio · η</code></td>
+<td>Ideal speed reducer</td>
+</tr>
+<tr>
+<td><code>ConstantTorqueLoad</code></td>
+<td><code>τ_load = τ</code></td>
+<td>Industrial brake / constant friction</td>
+</tr>
+<tr>
+<td><code>FanLoad</code></td>
+<td><code>τ_load = k · ω · |ω|</code></td>
+<td>Quadratic torque profile (fans, blowers, props)</td>
+</tr>
+<tr>
+<td><code>FlywheelLoad</code></td>
+<td><code>τ_load = 0</code>, <code>J += J_extra</code></td>
+<td>Pure-inertia load</td>
+</tr>
+</tbody>
+</table>
+<p>Compose them in user-space when you need a mechanical layout that
+doesn't fit <code>MechanicalDevice</code> directly.</p>
+<h2 id="frame-transforms">Frame transforms<a class="headerlink" href="#frame-transforms" title="Permanent link">&para;</a></h2>
+<p><code>motors/frame_transforms.hpp</code> provides Clarke / Park transforms in the
+<strong>amplitude-invariant</strong> convention (Clarke prefactor <code>2/3</code>), matching
+Texas Instruments / STMicro motor-control library conventions. Round-tripping <code>abc → dq → abc</code> at any rotor angle is identity within
+machine precision (pinned by <code>test_motor_models.cpp</code>).</p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">d</span><span class="p">,</span><span class="w"> </span><span class="n">q</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">motors</span><span class="o">::</span><span class="n">abc_to_dq</span><span class="p">(</span><span class="n">va</span><span class="p">,</span><span class="w"> </span><span class="n">vb</span><span class="p">,</span><span class="w"> </span><span class="n">vc</span><span class="p">,</span><span class="w"> </span><span class="n">theta_e</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">Va</span><span class="p">,</span><span class="w"> </span><span class="n">Vb</span><span class="p">,</span><span class="w"> </span><span class="n">Vc</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">motors</span><span class="o">::</span><span class="n">dq_to_abc</span><span class="p">(</span><span class="n">Vd_ref</span><span class="p">,</span><span class="w"> </span><span class="n">Vq_ref</span><span class="p">,</span><span class="w"> </span><span class="n">theta_e</span><span class="p">);</span>
+</code></pre></div>
+<hr />
+<h2 id="validation-gates">Validation gates<a class="headerlink" href="#validation-gates" title="Permanent link">&para;</a></h2>
+<p>Each motor model has at least one physics gate test in the suite. The
+list is non-exhaustive — see <code>core/tests/test_*motor*</code> and
+<code>test_pmsm_*</code> for the full coverage.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Gate</th>
+<th>Test file</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DC motor</td>
+<td>Step response → analytical <code>ω_ss</code> within ±5 %</td>
+<td><code>test_dc_motor_device.cpp</code></td>
+</tr>
+<tr>
+<td>PMSM</td>
+<td>No-load: <code>back_emf_peak = ψ_PM · p · ω_m</code> to FP precision</td>
+<td><code>test_motor_models.cpp</code></td>
+</tr>
+<tr>
+<td>PMSM</td>
+<td>Locked-rotor: <code>i_q → V_q / R_s</code> within ±1 %</td>
+<td><code>test_motor_models.cpp</code></td>
+</tr>
+<tr>
+<td>PMSM</td>
+<td>Full transient at 100 V / 200 rad/s → analytical match</td>
+<td><code>test_pmsm_dynamic.cpp</code></td>
+</tr>
+<tr>
+<td>PMSM-FOC</td>
+<td>Bandwidth tracking: <code>i_q</code> follows <code>i_q_ref</code> within ±5 % at design BW</td>
+<td><code>test_pmsm_foc_device.cpp</code></td>
+</tr>
+<tr>
+<td>BLDC</td>
+<td>Trapezoidal back-EMF shape vs analytical at no load</td>
+<td><code>test_bldc_motor_device.cpp</code></td>
+</tr>
+<tr>
+<td>BLDC</td>
+<td>Full YAML benchmark — 6-step commutation under load</td>
+<td><code>test_bldc_benchmark_yaml.cpp</code></td>
+</tr>
+<tr>
+<td>Induction</td>
+<td>Locked-rotor inrush current envelope</td>
+<td><code>test_induction_motor_device.cpp</code></td>
+</tr>
+<tr>
+<td>Induction</td>
+<td>No-load: rotor accelerates toward synchronous</td>
+<td><code>test_induction_motor_device.cpp</code></td>
+</tr>
+<tr>
+<td>Induction</td>
+<td>Loaded: slip stabilises at positive value</td>
+<td><code>test_induction_motor_device.cpp</code></td>
+</tr>
+<tr>
+<td>1φ PSC IM</td>
+<td>60 Hz sine drive: currents bounded, rotor self-starts</td>
+<td><code>test_single_phase_induction_motor.cpp</code></td>
+</tr>
+<tr>
+<td>1φ PSC IM</td>
+<td>Circuit-level 220 V transient: rotor reaches sync magnitude</td>
+<td><code>test_single_phase_induction_motor.cpp</code></td>
+</tr>
+<tr>
+<td>MechanicalDevice</td>
+<td>Shaft step → <code>ω_ss = τ/b</code> within ±2 % at 5·τ_m</td>
+<td><code>test_mechanical_device.cpp</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="when-to-use-which-model">When to use which model<a class="headerlink" href="#when-to-use-which-model" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Application</th>
+<th>Suggested model</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bench-test a DC motor / brushed gearbox</td>
+<td><code>dc_motor</code></td>
+</tr>
+<tr>
+<td>FOC PMSM design / current-loop tuning</td>
+<td><code>pmsm</code> + <code>pmsm_foc</code></td>
+</tr>
+<tr>
+<td>BLDC controller bring-up (6-step commutation)</td>
+<td><code>bldc_motor</code></td>
+</tr>
+<tr>
+<td>Industrial 3φ AC motor on a grid / inverter</td>
+<td><code>induction_motor</code></td>
+</tr>
+<tr>
+<td><strong>Legacy fixed-frequency refrigerator / freezer compressor</strong></td>
+<td><code>single_phase_induction_motor</code></td>
+</tr>
+<tr>
+<td>Inverter-driven modern compressor (variable-speed)</td>
+<td><code>bldc_motor</code> or <code>pmsm</code> + <code>pmsm_foc</code></td>
+</tr>
+<tr>
+<td>Multi-shaft mechanical topology / no electrical pins</td>
+<td><code>mechanical</code></td>
+</tr>
+<tr>
+<td>Standalone control-loop / FOC bench without electrical model</td>
+<td><code>pmsm_foc</code></td>
+</tr>
+</tbody>
+</table>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../converter-templates/"><code>converter-templates.md</code></a> — the PMSM-FOC
-  loop's <code>PiCompensator</code> ships with the converter-templates change.</li>
-<li><a href="../ac-analysis/"><code>ac-analysis.md</code></a> — when the motor + inverter is
-  part of a closed loop, the AC sweep helper lets you verify the
-  measured loop-gain margin against the FOC's design target.</li>
+<li><strong><a href="../compressor-and-refrigerant-load/">Compressor + Refrigerant Load</a></strong>
+  — attach a polytropic refrigeration-cycle load to any motor; covers
+  the <em>compressor convencional</em> (CC) flow end-to-end.</li>
+<li><strong><a href="../three-phase-grid/">Three-Phase Grid Library</a></strong> — programmable
+  3φ sources, harmonics, VSI inverter helpers that feed the motors.</li>
+<li><strong><a href="../converter-templates/">Converter Templates</a></strong> — PI compensators
+  shared by the FOC current loop.</li>
+<li><strong><a href="../components-reference/">Components Reference</a></strong> — full YAML
+  component table.</li>
 </ul>
 
 
@@ -2233,13 +2970,13 @@ Space-Vector-Modulator chain (for full PWM-on-inverter simulation).</p>
         
         
           
-          <a href="../three-phase-grid/" class="md-footer__link md-footer__link--next" aria-label="Next: Three-Phase Grid Library">
+          <a href="../compressor-and-refrigerant-load/" class="md-footer__link md-footer__link--next" aria-label="Next: Compressor + Refrigerant Load">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Three-Phase Grid Library
+                Compressor + Refrigerant Load
               </div>
             </div>
             <div class="md-footer__button md-icon">

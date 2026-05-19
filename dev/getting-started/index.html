@@ -902,6 +902,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../numerical-configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ac-analysis/" class="md-nav__link">
         
   
@@ -986,6 +1007,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../schematic-rendering/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Schematic Rendering
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../code-generation/" class="md-nav__link">
         
   
@@ -1033,6 +1075,48 @@
   
   <span class="md-ellipsis">
     Automatic Differentiation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pwl-switching-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PWL Switching Engine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../component-models-audit/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Component Models Audit
   </span>
   
 
@@ -1208,6 +1292,48 @@
   
   <span class="md-ellipsis">
     Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compressor-and-refrigerant-load/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compressor + Refrigerant Load
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multilevel-converters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multilevel Converters
   </span>
   
 
@@ -1736,15 +1862,24 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"
 python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>pulsim
 </code></pre></div>
 <h2 id="first-simulation-rc-step">First Simulation (RC Step)<a class="headerlink" href="#first-simulation-rc-step" title="Permanent link">&para;</a></h2>
+<p>The recommended starting pattern uses <code>SimulationOptions.from_preset(...)</code>
+to materialise a fully-tuned configuration with one decision — see
+<a href="../numerical-configuration/">Numerical Configuration</a> for the full
+preset menu.</p>
 <div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>python3<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
 <span class="s">import pulsim as ps</span>
 
+<span class="s"># Build (or load) a circuit</span>
 <span class="s">parser = ps.YamlParser(ps.YamlParserOptions())</span>
-<span class="s">circuit, options = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
+<span class="s">circuit, _ = parser.load(&quot;benchmarks/circuits/rc_step.yaml&quot;)</span>
 
-<span class="s">options.newton_options.num_nodes = int(circuit.num_nodes())</span>
+<span class="s"># One-call numerical configuration. `Preset.Auto` is a good default</span>
+<span class="s"># for new circuits; pick `Preset.Fast` for pure-switching converters,</span>
+<span class="s"># `Preset.HighFidelity` for parity validation runs.</span>
+<span class="s">options = ps.SimulationOptions.from_preset(ps.Preset.Auto,</span>
+<span class="s">                                            dt=1e-6, tstop=1e-3)</span>
+<span class="s">options.newton_options.num_nodes    = int(circuit.num_nodes())</span>
 <span class="s">options.newton_options.num_branches = int(circuit.num_branches())</span>
-<span class="s">options.step_mode = ps.StepMode.Variable</span>
 
 <span class="s">sim = ps.Simulator(circuit, options)</span>
 <span class="s">result = sim.run_transient(circuit.initial_state())</span>
@@ -1760,6 +1895,12 @@ python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </s
 <li>non-zero <code>steps</code> and <code>samples</code></li>
 <li>monotonic RC charging behavior on <code>V(out)</code></li>
 </ul>
+<p>The same preset is available via YAML:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">simulation</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">preset</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">         </span><span class="c1"># auto | fast | robust | high_fidelity</span>
+<span class="w">  </span><span class="nt">tstop</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-3</span>
+<span class="w">  </span><span class="nt">dt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-6</span>
+</code></pre></div>
 <h2 id="run-core-validation-commands">Run Core Validation Commands<a class="headerlink" href="#run-core-validation-commands" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># Python runtime tests</span>
 <span class="nv">PYTHONPATH</span><span class="o">=</span>build/python<span class="w"> </span>pytest<span class="w"> </span>python/tests<span class="w"> </span>-v<span class="w"> </span>--ignore<span class="o">=</span>python/tests/validation
@@ -1769,9 +1910,13 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
 </code></pre></div>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ol>
+<li>Read <a href="../numerical-configuration/">Numerical Configuration</a> to
+   understand the four presets and when to override individual fields.</li>
 <li>Read <a href="../user-guide/">User Guide</a> for canonical backend usage patterns.</li>
 <li>Use <a href="../examples-and-results/">Examples and Results</a> for converter scenarios.</li>
 <li>Add CI quality checks from <a href="../benchmarks-and-parity/">Benchmarks and Parity</a>.</li>
+<li>For multilevel converters (NPC, MMC, flying-cap), see
+   <a href="../multilevel-converters/">Multilevel Converters</a>.</li>
 </ol>
 
 

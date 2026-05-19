@@ -1,0 +1,3004 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-performance backend for power electronics simulation (Python-first + YAML netlists)">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/component-models-audit/">
+      
+      
+        <link rel="prev" href="../pwl-switching-migration/">
+      
+      
+        <link rel="next" href="../convergence-tuning-guide/">
+      
+      
+      <link rel="icon" href="../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>Component Models Audit - PulsimCore</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#component-models-audit-pulsim-vs-psim-plecs" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="PulsimCore" class="md-header__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PulsimCore
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Component Models Audit
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+  Overview
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../components-reference/" class="md-tabs__link">
+          
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../examples-and-results/" class="md-tabs__link">
+          
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../magnetic-models/" class="md-tabs__link">
+          
+  
+  Domain Libraries
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../benchmarks-and-parity/" class="md-tabs__link">
+          
+  
+  Quality Gates
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../gui-component-parity/" class="md-tabs__link">
+          
+  
+  Compatibility
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PulsimCore" class="md-nav__button md-logo" aria-label="PulsimCore" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    PulsimCore
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Overview
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Documentation Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend-architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backend Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../components-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Components Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-blocks-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Control Blocks Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kpi-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    KPI Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../netlist-format/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Netlist YAML Format
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../python-api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Python API (Legacy Notes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Guides
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples-and-results/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Examples and Results
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../numerical-configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ac-analysis/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AC Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fra/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Frequency Response Analysis (FRA)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../electrothermal-workflow/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Electrothermal Workflow
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-sweep/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sweep
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../schematic-rendering/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Schematic Rendering
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-generation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Real-Time Code Generation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fmi-export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FMI Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../automatic-differentiation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Automatic Differentiation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pwl-switching-migration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PWL Switching Engine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Component Models Audit
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Component Models Audit
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr-executive-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR — Executive Summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-switching-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Switching Devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Switching Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-mosfet-componentsmosfethpp-717-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.1 MOSFET (components/mosfet.hpp, 717 LOC)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-igbt-componentsigbthpp-562-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.2 IGBT (components/igbt.hpp, 562 LOC)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-idealdiode-realisticdiode-componentsideal_diodehpp-705-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.3 IdealDiode / RealisticDiode (components/ideal_diode.hpp, 705 LOC)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-idealswitch-voltagecontrolledswitch-minor-uniformity-outliers" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.4 IdealSwitch + VoltageControlledSwitch — minor uniformity outliers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#15-cross-switch-uniformity-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.5 Cross-switch uniformity matrix
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-passives-magnetics" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Passives &amp; Magnetics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Passives & Magnetics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-resistor-capacitor-inductor-the-gold-standard" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 Resistor / Capacitor / Inductor — the gold standard
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-transformer-the-1-fidelity-gap" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Transformer — the #1 fidelity gap
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-hysteresisinductor-half-finished" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.3 HysteresisInductor — half-finished
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-steinmetz-core-loss-exists-but-disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.4 Steinmetz core loss — exists, but disconnected
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-passive-uniformity-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.5 Passive uniformity matrix
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-motors" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Motors
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Motors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-per-motor-fidelity" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1 Per-motor fidelity
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-motor-uniformity-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2 Motor uniformity matrix
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-motor-convergence-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.3 Motor convergence gaps
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-top-10-prioritized-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Top 10 Prioritized Improvements
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-unification-gaps-cross-cutting" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Unification Gaps (cross-cutting)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Unification Gaps (cross-cutting)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-params-name-constructor" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1 Params + name constructor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-thermal-binding-r_th_ja-t_amb" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.2 Thermal binding (R_th_ja, T_amb)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-_user_set-flag-for-auto-defaulted-parasitics" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.3 *_user_set() flag for auto-defaulted parasitics
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-accumulate_loss-family-quartet" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.4 accumulate_loss family quartet
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-stamp-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.5 Stamp convention
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-field-naming" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.6 Field naming
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-solver-side-levers-already-in-place" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Solver-Side Levers Already in Place
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-what-this-means-for-convergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. What This Means for Convergence
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../convergence-tuning-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convergence Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../linear-solver-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Linear-Solver Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../robustness-policy/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Robustness Policy
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Domain Libraries
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Domain Libraries
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../magnetic-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Magnetic Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motor-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motor Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compressor-and-refrigerant-load/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compressor + Refrigerant Load
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multilevel-converters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multilevel Converters
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../three-phase-grid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Three-Phase Grid Library
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-devices/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog Devices
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../converter-templates/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Converter Templates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Quality Gates
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Quality Gates
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks-and-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Benchmarks and Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spice-parity-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SPICE Parity Dashboard
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../property-based-testing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Property-Based Testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Compatibility
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Compatibility
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui-component-parity/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    GUI Backend Parity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#tldr-executive-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      TL;DR — Executive Summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-switching-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Switching Devices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Switching Devices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-mosfet-componentsmosfethpp-717-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.1 MOSFET (components/mosfet.hpp, 717 LOC)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-igbt-componentsigbthpp-562-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.2 IGBT (components/igbt.hpp, 562 LOC)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-idealdiode-realisticdiode-componentsideal_diodehpp-705-loc" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.3 IdealDiode / RealisticDiode (components/ideal_diode.hpp, 705 LOC)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-idealswitch-voltagecontrolledswitch-minor-uniformity-outliers" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.4 IdealSwitch + VoltageControlledSwitch — minor uniformity outliers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#15-cross-switch-uniformity-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.5 Cross-switch uniformity matrix
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-passives-magnetics" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Passives &amp; Magnetics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Passives & Magnetics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-resistor-capacitor-inductor-the-gold-standard" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1 Resistor / Capacitor / Inductor — the gold standard
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-transformer-the-1-fidelity-gap" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Transformer — the #1 fidelity gap
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-hysteresisinductor-half-finished" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.3 HysteresisInductor — half-finished
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-steinmetz-core-loss-exists-but-disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.4 Steinmetz core loss — exists, but disconnected
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-passive-uniformity-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.5 Passive uniformity matrix
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-motors" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Motors
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Motors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-per-motor-fidelity" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1 Per-motor fidelity
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-motor-uniformity-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2 Motor uniformity matrix
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-motor-convergence-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.3 Motor convergence gaps
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-top-10-prioritized-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Top 10 Prioritized Improvements
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-unification-gaps-cross-cutting" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. Unification Gaps (cross-cutting)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Unification Gaps (cross-cutting)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-params-name-constructor" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1 Params + name constructor
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-thermal-binding-r_th_ja-t_amb" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.2 Thermal binding (R_th_ja, T_amb)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-_user_set-flag-for-auto-defaulted-parasitics" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.3 *_user_set() flag for auto-defaulted parasitics
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-accumulate_loss-family-quartet" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.4 accumulate_loss family quartet
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-stamp-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.5 Stamp convention
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-field-naming" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.6 Field naming
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-solver-side-levers-already-in-place" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Solver-Side Levers Already in Place
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-what-this-means-for-convergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. What This Means for Convergence
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      See also
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/component-models-audit.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/component-models-audit.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="component-models-audit-pulsim-vs-psim-plecs">Component Models Audit — Pulsim vs PSIM / PLECS<a class="headerlink" href="#component-models-audit-pulsim-vs-psim-plecs" title="Permanent link">&para;</a></h1>
+<p>Date: 2026-05-18. Sources: full reads of every file in
+<code>core/include/pulsim/v1/components/</code> (20 files, ~5400 LOC) plus the magnetic
+helpers in <code>core/include/pulsim/v1/magnetic/</code> and the motor math objects in
+<code>core/include/pulsim/v1/motors/</code>.</p>
+<p>This audit answers three questions:</p>
+<ol>
+<li><strong>Are our component models competitive with PSIM and PLECS?</strong> — fidelity
+   vs the commercial state of the art.</li>
+<li><strong>Are they uniform among themselves?</strong> — same <code>Params</code> POD shape, same
+   <code>accumulate_loss</code> / thermal / switching-mode contract across the family.</li>
+<li><strong>Where can we improve, especially for Newton convergence in extreme
+   cases?</strong> — concrete bug list with line numbers.</li>
+</ol>
+<hr />
+<h2 id="tldr-executive-summary">TL;DR — Executive Summary<a class="headerlink" href="#tldr-executive-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Status vs PSIM/PLECS</th>
+<th>Confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Passives (R, C, L)</strong></td>
+<td>✅ <strong>Ahead</strong> — TCR / ESR / DCR + thermal binding on every passive. PSIM stock has no thermal.</td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>MOSFET (PWL Ideal + auto-snubber)</strong></td>
+<td>🟢 <strong>On par</strong> — competes with PLECS Level-1, exceeds PSIM "ideal MOSFET".</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><strong>MOSFET (Behavioral / Shichman-Hodges)</strong></td>
+<td>🟡 <strong>Behind</strong> — teaching-level Level-1 model with <code>kp</code>/<code>λ</code>; no body diode; not datasheet-driven.</td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>IGBT</strong></td>
+<td>🔴 <strong>Behind</strong> — <code>V_CE_sat</code> is in the loss accumulator but <strong>NOT in the stamp</strong>. User sees 5 mV drop where datasheet says 1.5 V.</td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>IdealDiode (RealisticDiode)</strong></td>
+<td>🟢 <strong>Matches PLECS, exceeds PSIM</strong> — V_F0 + R_d Norton, Qrr reverse recovery, tiered C_j auto-default.</td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>Transformer</strong></td>
+<td>🔴 <strong>Behind</strong> — only ideal-N-turns. No Lm / leakage / saturation / losses. Saturable math exists in <code>magnetic/</code> but is not wired to the device wrapper.</td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>HysteresisInductor</strong></td>
+<td>🟡 <strong>Half-done</strong> — Jiles-Atherton math runs as a <em>side-channel state</em>, but <code>L_eff</code> in the MNA stamp is <strong>constant</strong>, so saturation isn't in the loop.</td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>Motors (DC, PMSM, BLDC, 3φ IM)</strong></td>
+<td>🟡 <strong>On par</strong> for the base models, but no winding thermal, no automatic shaft coupling, no nameplate-to-equivalent-circuit helpers, no DC field-winding variants.</td>
+<td>High</td>
+</tr>
+<tr>
+<td><strong>Single-phase PSC motor</strong></td>
+<td>🟡 <strong>Pure PSC only</strong> — no CSCR / centrifugal-switch variants, no symmetrical-components torque dip near synchronous speed.</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><strong>Auto-parasitics + snubber advisor</strong></td>
+<td>🟢 <strong>Ahead</strong> — <code>Circuit.auto_configure_parasitics()</code> is a clear differentiator vs PSIM (which leaves snubber sizing to the user).</td>
+<td>High</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Bottom line.</strong> If we put Pulsim head-to-head with PSIM/PLECS on a realistic
+350 W LLC converter + flyback + 3φ motor drive benchmark today, we'd win on
+loss/thermal reporting and snubber automation, lose on <strong>transformer
+fidelity</strong> (the #1 gap) and on <strong>IGBT V_CE_sat in the stamp</strong> (the #2 gap),
+and tie on most everything else.</p>
+<hr />
+<h2 id="1-switching-devices">1. Switching Devices<a class="headerlink" href="#1-switching-devices" title="Permanent link">&para;</a></h2>
+<p>Full agent report cross-checked against my own reading of the files. Source
+line numbers cited inline.</p>
+<h3 id="11-mosfet-componentsmosfethpp-717-loc">1.1 MOSFET (<code>components/mosfet.hpp</code>, 717 LOC)<a class="headerlink" href="#11-mosfet-componentsmosfethpp-717-loc" title="Permanent link">&para;</a></h3>
+<p><strong>Fidelity.</strong> Two stamp paths:
+- <strong>PWL Ideal</strong> (line ~644): <code>g_on</code> / <code>g_off</code> keyed by <code>pwl_state_</code> — <em>structurally</em> equivalent to PLECS "MOSFET Level 1" and PSIM "Switch". With the <code>boost-pfc-auto-parasitics</code> pre-flight we ship today, <code>C_oss</code> is auto-sized to keep the Tustin LC tank bounded. <strong>Competitive.</strong>
+- <strong>Behavioral</strong> (line ~532): Shichman-Hodges Level-1 with a sigmoid blend across cutoff/triode/saturation (<code>κ = kSmoothRegionSharpness = 50</code>, line 397). This is closer to LTspice Level-1 than to a power-MOSFET model — datasheets give <code>R_ds_on</code>, <code>V_GS(th)</code>, <code>g_fs</code>, <code>C_oss</code>, <code>Q_g</code>, not <code>kp</code> and <code>λ</code>. <strong>Teaching-level model.</strong></p>
+<p><strong>Critical gaps:</strong>
+- <strong>No body diode</strong> (acknowledged in lines 17–20 header). PLECS and PSIM both bundle one with the MOSFET primitive. Synchronous-rectification waveforms in Pulsim show V_sw going to −V_dc instead of clamping at one diode drop.
+- <strong>Datasheet usability 2/5:</strong> <code>kp</code> and <code>λ</code> are SPICE-Level-1 fields, not datasheet fields. Rename to <code>R_ds_on</code> + <code>g_fs</code> + <code>V_th</code> as primary, derive <code>kp</code> internally.</p>
+<p><strong>Convergence — V_gs = 0 cutoff trace.</strong> The audit confirmed the cutoff-region failure is <strong>not</strong> a missing stamp on the gate row per se — the <code>jacobian_pattern_impl</code> (line 193) reserves all 9 entries. The actual two failure modes:</p>
+<ol>
+<li><strong>In float-precision builds</strong>, <code>sigma_g = 1/(1+exp(κ·(V_th − V_gs)))</code> underflows to denormal/flush-to-zero by <code>V_gs = 0, V_th = 4</code>, killing the derivative chain.</li>
+<li><strong>In any precision</strong>, the gate-row <em>diagonal</em> is never anchored — <code>J(n_gate, n_gate)</code> is only stamped if some other device (PWM source, gate driver R) provides it. With a Thevenin-source gate driver of high impedance, the gate row is ill-conditioned.</li>
+</ol>
+<p><strong>Fixes (high-priority, low-cost):</strong>
+- Reduce <code>κ</code> from 50 to 20 (or clamp <code>sigma_g = max(sigma_g, 1e-30)</code> post-exp).
+- Stamp <code>J(n_gate, n_gate) += g_gate_leak ≈ 1e-9</code> unconditionally to anchor the gate node.</p>
+<h3 id="12-igbt-componentsigbthpp-562-loc">1.2 IGBT (<code>components/igbt.hpp</code>, 562 LOC)<a class="headerlink" href="#12-igbt-componentsigbthpp-562-loc" title="Permanent link">&para;</a></h3>
+<p><strong>Fidelity — the biggest single fidelity bug in the library.</strong></p>
+<p>The <code>v_ce_sat</code> field (line 36) is consumed <em>only</em> in <code>accumulate_loss</code> (line 174); it never appears in <code>stamp_jacobian_behavioral</code> (line 343). So the MNA solution gives <code>V_CE = I_C / g_on = 50 A / 1e4 = 5 mV</code> everywhere — physically wrong by ~300×. A user putting this into a 3φ inverter and reading line-line voltages sees 10 mV switch drops where they expect ~3 V (= 2 IGBTs in series).</p>
+<p><strong>Fix.</strong> Mirror the diode's Norton-shift pattern:</p>
+<div class="highlight"><pre><span></span><code>i_C(t) = (V_CE(t) − V_CE_sat(T_j)) / R_CE_on   when ON
+</code></pre></div>
+<p>with <code>R_CE_on</code> already a Params field (line 44) and Norton current source <code>I_0 = V_CE_sat / R_CE_on</code>. This both makes the IGBT current zero at V_CE = V_CE_sat (matches datasheets) <strong>and</strong> gives Newton a finite-slope landing zone instead of a thin sigmoid edge.</p>
+<p><strong>Secondary gaps:</strong> no tail-current model (PSIM/PLECS have it — IGBT turn-off losses are dominated by it), no antiparallel diode (every real bridge has one), no shoot-through current clamp (two ON IGBTs in a half-bridge give <code>g_on² ≈ 1e8 S</code> → Newton diverges).</p>
+<h3 id="13-idealdiode-realisticdiode-componentsideal_diodehpp-705-loc">1.3 IdealDiode / RealisticDiode (<code>components/ideal_diode.hpp</code>, 705 LOC)<a class="headerlink" href="#13-idealdiode-realisticdiode-componentsideal_diodehpp-705-loc" title="Permanent link">&para;</a></h3>
+<p><strong>The best-modeled device in the library.</strong> <code>V_F0 + R_d</code> Norton-shifted forward fit (line 619) is exactly the PLECS "thermal diode" model. T_j-correction on V_F0 (line 185), <code>Qrr</code> reverse-recovery on ON→OFF (lines 289–301), tiered <code>C_j</code> auto-snubber by trigger (5 nF for <code>Qrr &gt; 0</code>, 500 pF for <code>V_F0 &gt; 0</code>, 0 otherwise, line 139). <strong>Matches PLECS; exceeds PSIM</strong> (PSIM lacks Qrr in its default diode).</p>
+<p><strong>Uniformity gaps with MOSFET/IGBT:</strong>
+- Stores bare fields (<code>V_F0_</code>, <code>R_d_</code>, …) instead of a <code>Params params_</code> aggregate. Cosmetic but breaks codegen.
+- Uses <code>Qrr</code> / <code>Erec_shape</code> for switching energy where MOSFET/IGBT use <code>Eon_25</code>/<code>Eoff_25</code>/<code>I_ref</code>/<code>V_ref</code>/<code>Esw_tc</code>. Both are physically correct but tooling that aggregates "switching energy across all switches" has to special-case the diode.
+- <code>R_th_ja</code> defaults to 25 K/W (line 72), not 0 — thermal is ON by default for the diode but OFF for MOSFET/IGBT.</p>
+<p><strong>Convergence gap (single-line fix):</strong> <code>event_hysteresis_ = 1e-2 V</code> (line 653) — at 10 mV, ESL ringing on a 400 V bus regularly exceeds the band and the diode chatters every Newton iteration. <strong>Bump default to 50 mV.</strong></p>
+<h3 id="14-idealswitch-voltagecontrolledswitch-minor-uniformity-outliers">1.4 IdealSwitch + VoltageControlledSwitch — minor uniformity outliers<a class="headerlink" href="#14-idealswitch-voltagecontrolledswitch-minor-uniformity-outliers" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>IdealSwitch</code> has <em>no</em> thermal binding, <em>no</em> <code>Params + name</code> constructor, <code>g_on = 1e6</code> default (three orders tighter than MOSFET).</li>
+<li><code>VCSwitch</code> has <code>event_hysteresis_ = 1e-9 V</code> (line 268) — 10⁷ tighter than the rest of the family. <strong>Bump to 1e-3 V for consistency.</strong></li>
+</ul>
+<h3 id="15-cross-switch-uniformity-matrix">1.5 Cross-switch uniformity matrix<a class="headerlink" href="#15-cross-switch-uniformity-matrix" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th style="text-align: center;">MOSFET</th>
+<th style="text-align: center;">IGBT</th>
+<th style="text-align: center;">Diode</th>
+<th style="text-align: center;">IdealSw</th>
+<th style="text-align: center;">VCSw</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Params + name</code> ctor</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>R_th_ja</code> + <code>T_amb</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>accumulate_loss</code> (trapezoidal)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>Eon_25 + Eoff_25 + Esw_tc</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ (Qrr)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Auto-promote to Ideal</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>C_oss</code> / <code>C_j</code> auto-default</td>
+<td style="text-align: center;">10 nF</td>
+<td style="text-align: center;">20 nF</td>
+<td style="text-align: center;">tiered</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>*_user_set()</code> flag</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>set_switching_mode</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><code>event_hysteresis</code> default (V)</td>
+<td style="text-align: center;">1e-2</td>
+<td style="text-align: center;">1e-2</td>
+<td style="text-align: center;">1e-2</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;"><strong>1e-9</strong></td>
+</tr>
+<tr>
+<td>Norton-shifted ON-stamp</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td>Body / antiparallel diode</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-passives-magnetics">2. Passives &amp; Magnetics<a class="headerlink" href="#2-passives-magnetics" title="Permanent link">&para;</a></h2>
+<h3 id="21-resistor-capacitor-inductor-the-gold-standard">2.1 Resistor / Capacitor / Inductor — the gold standard<a class="headerlink" href="#21-resistor-capacitor-inductor-the-gold-standard" title="Permanent link">&para;</a></h3>
+<p><code>resistor.hpp</code> (189 LOC), <code>capacitor.hpp</code> (250 LOC), <code>inductor.hpp</code> (235 LOC).
+<strong>Uniformity 5/5</strong> — same <code>Params</code> POD shape, same <code>accumulate_loss(x, dt)</code>
+signature, same thermal accessor block. Trapezoidal companion stamps are
+textbook-correct. <code>history_initialized_</code> flag (cap line 218, inductor line 205)
+correctly arms BDF1 fallback on the first step from initial conditions.</p>
+<p><strong>Ahead of PSIM</strong> because PSIM's stock R/C/L has no thermal model. <strong>Datasheet
+usability 4/5</strong> — missing voltage/current ratings, ESL on cap, saturation
+current on inductor.</p>
+<h3 id="22-transformer-the-1-fidelity-gap">2.2 Transformer — the #1 fidelity gap<a class="headerlink" href="#22-transformer-the-1-fidelity-gap" title="Permanent link">&para;</a></h3>
+<p><code>transformer.hpp</code> (122 LOC). <strong>Ideal-only — <code>Params::magnetizing_inductance</code>
+exists but is never read in <code>stamp_impl</code>.</strong> No leakage, no winding resistance,
+no saturation, no core loss. Line 82 has a literal placeholder
+<code>G.coeffRef(br_s, br_s) += 0.0</code> — the secondary branch row appears incomplete.</p>
+<p><strong>The shocker:</strong> the math IS there.
+<code>core/include/pulsim/v1/magnetic/saturable_transformer.hpp</code> (168 LOC) ships a
+multi-winding saturable transformer with <code>λ_m</code> state, per-winding leakage, and
+core-loss integration. <strong>It's just not wired to a <code>components/</code> device
+wrapper.</strong></p>
+<p>This is the highest-ROI fidelity fix in the audit: hooking the existing
+<code>magnetic/saturable_transformer.hpp</code> into a new <code>SaturableTransformer</code> device
+variant (mirroring how <code>HysteresisInductorDevice</code> wraps
+<code>magnetic/hysteresis_inductor.hpp</code>) costs maybe 200 LOC + a Python binding.</p>
+<h3 id="23-hysteresisinductor-half-finished">2.3 HysteresisInductor — half-finished<a class="headerlink" href="#23-hysteresisinductor-half-finished" title="Permanent link">&para;</a></h3>
+<p><code>hysteresis_inductor_device.hpp</code> (179 LOC). Jiles-Atherton state advances
+(line 130) but the MNA stamp uses a <strong>constant</strong> <code>L_eff</code> (line 104). So
+hysteresis is <em>tracked</em> but not in the loop. Plus no <code>accumulate_loss</code> /
+<code>total_energy()</code> integration with the unified loss pipeline.</p>
+<p><strong>Fix.</strong> Recompute <code>L_eff = ∂B/∂H · A·N²/path</code> at the current J-A operating
+point each Newton step. PLECS's "Saturable Inductor" does exactly this — call
+the math object's incremental-permeability accessor and re-stamp.</p>
+<h3 id="24-steinmetz-core-loss-exists-but-disconnected">2.4 Steinmetz core loss — exists, but disconnected<a class="headerlink" href="#24-steinmetz-core-loss-exists-but-disconnected" title="Permanent link">&para;</a></h3>
+<p><code>magnetic/bh_curve.hpp</code> (lines 198–280) implements both <strong>Steinmetz</strong>
+(<code>P = k_h · f · B^α + k_e · f² · B²</code>) <strong>and iGSE</strong> (improved generalized
+Steinmetz for non-sinusoidal flux — better than PSIM stock). Neither is
+exposed through the device-level <code>accumulate_loss</code> path. <code>Inductor.hpp</code>'s
+header comment (lines 33–36) explicitly acknowledges the gap.</p>
+<p><strong>Fix.</strong> Add <code>InductorParams::k_h</code>, <code>α</code>, <code>β</code> (Steinmetz triplet) +
+<code>core_volume</code> + <code>effective_area</code> and wire the iGSE accumulator from
+<code>magnetic/bh_curve.hpp</code> into <code>inductor.hpp::accumulate_loss</code>.</p>
+<h3 id="25-passive-uniformity-matrix">2.5 Passive uniformity matrix<a class="headerlink" href="#25-passive-uniformity-matrix" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th style="text-align: center;">R</th>
+<th style="text-align: center;">C</th>
+<th style="text-align: center;">L</th>
+<th style="text-align: center;">Xfmr</th>
+<th style="text-align: center;">HystL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Params + name</code> ctor</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><code>R_th_ja</code> + <code>T_amb</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Parasitic (TCR / ESR / DCR)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>accumulate_loss</code> + family quartet</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>history_initialized_</code> IC guard</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Saturation / B-H in stamp</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Voltage / current rating field</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Polarity flag</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-motors">3. Motors<a class="headerlink" href="#3-motors" title="Permanent link">&para;</a></h2>
+<h3 id="31-per-motor-fidelity">3.1 Per-motor fidelity<a class="headerlink" href="#31-per-motor-fidelity" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>PMSM</strong> (302 LOC) — <strong>best in class.</strong> Stationary-frame stamping with
+  <code>L_s = (L_d + L_q)/2</code> average + proper salient dq torque
+  <code>τ_em = 1.5·p·(ψ_pm·i_q + (L_d − L_q)·i_d·i_q)</code>. Shortcut for high-saliency
+  IPM (electrical dynamics use the average L) but exact for SPM. <strong>Gap:</strong> no
+  cogging torque, no saturation <code>L_d(i_d)</code>, no iron-loss resistor <code>R_c</code>.</li>
+<li><strong>InductionMotor (3φ)</strong> (372 LOC) — proper Krause αβ-frame with rotor flux
+  <code>ψ_r</code> as state and <code>σ·L_s</code> transient leakage in the per-phase stamp. <strong>Gap:</strong>
+  no skin-effect / deep-bar <code>R_r(slip)</code> — under-estimates DOL start torque on
+  motors &gt; 50 kW. Forward-Euler on <code>ψ_r</code> should be trapezoidal (cross-coupling
+  <code>ω_e · ψ_rβ</code> is the dominant rate at high slip).</li>
+<li><strong>BLDC</strong> (317 LOC) — pure trapezoidal back-EMF, energy-balance torque. Clean
+  but no Hall sensor outputs and no back-EMF shape parameter (PSIM has both).</li>
+<li><strong>DCMotor</strong> (178 LOC) — permanent-magnet equivalent only. <strong>No field-winding
+  variants</strong> (separately-excited, shunt, series, compound) — that's the gap vs
+  PSIM's "DC Machine" which exposes <code>i_f, R_f, L_f, L_af(i_f)</code>.</li>
+<li><strong>Single-phase PSC</strong> (262 LOC) — pure PSC. No CSCR (Capacitor-Start-
+  Capacitor-Run), no centrifugal switch, no symmetrical-components
+  decomposition into forward + backward fields (so the textbook torque dip
+  near synchronous speed isn't visible). Forward-Euler on <code>V_cap</code> introduces
+  a half-step phase lag — should be trapezoidal.</li>
+</ul>
+<h3 id="32-motor-uniformity-matrix">3.2 Motor uniformity matrix<a class="headerlink" href="#32-motor-uniformity-matrix" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field / Method</th>
+<th style="text-align: center;">DC</th>
+<th style="text-align: center;">PMSM</th>
+<th style="text-align: center;">BLDC</th>
+<th style="text-align: center;">IM(3φ)</th>
+<th style="text-align: center;">1φIM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>omega</code> accessor</td>
+<td style="text-align: center;">✅(1)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><code>theta</code> accessor</td>
+<td style="text-align: center;">✅(1)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><code>tau_em</code> accessor</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅(2)</td>
+</tr>
+<tr>
+<td><code>R_th_ja</code> winding thermal</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Circuit <code>&lt;motor&gt;_omega(name)</code></td>
+<td style="text-align: center;"><strong>❌</strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>Mechanical port (auto-shaft)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Quadratic load coefficient</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅ (via math)</td>
+</tr>
+<tr>
+<td>Coulomb friction</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><code>b</code> vs <code>b_friction</code> naming</td>
+<td style="text-align: center;"><code>b</code></td>
+<td style="text-align: center;"><code>b_friction</code></td>
+<td style="text-align: center;"><code>b_friction</code></td>
+<td style="text-align: center;"><code>b_friction</code></td>
+<td style="text-align: center;"><code>b_friction</code></td>
+</tr>
+<tr>
+<td><code>R_a</code> vs <code>R_s</code> vs <code>Rs</code> naming</td>
+<td style="text-align: center;"><code>R_a</code></td>
+<td style="text-align: center;"><code>Rs</code></td>
+<td style="text-align: center;"><code>R_s</code></td>
+<td style="text-align: center;"><code>R_s</code></td>
+<td style="text-align: center;"><code>R_s_main/aux</code></td>
+</tr>
+</tbody>
+</table>
+<p>(1) DC uses <code>omega()</code> / <code>theta()</code> not <code>omega_m()</code> / <code>theta_m()</code>.
+(2) PSC uses <code>electromagnetic_torque()</code> not <code>tau_em()</code>.</p>
+<p><strong>No motor has winding thermal binding</strong> — every other power device does.
+That's the most glaring family-wide gap.</p>
+<h3 id="33-motor-convergence-gaps">3.3 Motor convergence gaps<a class="headerlink" href="#33-motor-convergence-gaps" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>High-slip start on InductionMotor</strong> — forward-Euler on ψ_r at <code>dt = 100 µs</code>
+  is barely stable when <code>ω_e · ψ_r</code> cross-coupling is ~314 rad/s. Replace with
+  trapezoidal (one fixed-point iteration).</li>
+<li><strong>PMSM with sub-µH L_s</strong> — high-frequency surface-magnet machines need
+  <code>l_s_safe = max(L_s, 1e-9)</code> guard in the companion conductance (line ~154).</li>
+<li><strong><code>V_cap</code> forward-Euler in 1φ PSC</strong> at start — phase-shift instability
+  during inrush. One-line fix: trapezoidal averaging.</li>
+</ul>
+<hr />
+<h2 id="4-top-10-prioritized-improvements">4. Top 10 Prioritized Improvements<a class="headerlink" href="#4-top-10-prioritized-improvements" title="Permanent link">&para;</a></h2>
+<p>Ranked by <strong>user-visible impact × inverse cost</strong>. Each item lists scope and
+estimated effort.</p>
+<ol>
+<li><strong>Wire <code>magnetic/saturable_transformer.hpp</code> into a <code>SaturableTransformer</code>
+   device variant.</strong> Single largest fidelity gap. Math exists. ~200 LOC + py
+   binding + Catch2 test. <strong>2 days.</strong></li>
+<li><strong>Add Norton-shift V_CE_sat to IGBT stamp.</strong> Mirror diode's
+   <code>i = g·(v − V_F0)</code> pattern with <code>V_CE_sat</code> and <code>R_CE_on</code> (both already in
+   Params). Eliminates the 5 mV-instead-of-1.5 V fidelity bug. ~30 LOC + test.
+   <strong>Half day.</strong></li>
+<li><strong>Stamp <code>J(n_gate, n_gate) += g_gate_leak ≈ 1e-9</code> on MOSFET + IGBT.</strong>
+   Anchors floating-gate node, eliminates singularity at deep cutoff. ~10 LOC
+   per device. <strong>2 hours.</strong></li>
+<li><strong>Add body diode opt-in flag to MOSFET + IGBT (parallel to VSI's
+   <code>add_body_diodes</code>).</strong> Solves synchronous-rect reverse conduction. ~50 LOC.
+   <strong>Half day.</strong></li>
+<li><strong>Reduce smooth-blend <code>κ</code> from 50 → 20 (or clamp <code>sigma_g ≥ 1e-30</code>).</strong>
+   Prevents float underflow in deep cutoff. Trade-off: transition window
+   widens from ~120 mV to ~300 mV (still narrow vs PWM amplitude). <strong>1 hour.</strong></li>
+<li><strong>Bump diode <code>event_hysteresis_</code> default from 10 mV to 50 mV</strong> (and align
+   <code>VCSwitch</code> from 1 nV to 1 mV). Eliminates threshold chatter on noisy buses.
+   <strong>15 minutes.</strong></li>
+<li><strong>Steinmetz / iGSE core loss on <code>Inductor</code> + new <code>SaturableTransformer</code>.</strong>
+   Math exists in <code>magnetic/bh_curve.hpp</code>. ~100 LOC of integration. <strong>1 day.</strong></li>
+<li><strong>Trapezoidal integration on <code>ψ_r</code> (InductionMotor) and <code>V_cap</code> (1φ PSC).</strong>
+   Two one-line fixes that improve high-slip start convergence. <strong>1 hour.</strong></li>
+<li><strong>Add <code>R_th_winding_to_ambient</code> + <code>T_winding</code> to all 5 motor families.</strong>
+   Mirror the diode/MOSFET thermal pattern. R_s and R_r' scale with T_winding
+   so over-rated start pulses warm up the winding. ~30 LOC per motor. <strong>1
+   day.</strong></li>
+<li><strong>Add a <code>Circuit::couple_shaft(motor_name, mechanical_name,
+    gear_ratio=1.0)</code> declarative API</strong> so users don't have to manually do
+    <code>mech.set_tau_input(motor.tau_em()); motor.set_tau_load(mech.reaction())</code>
+    each step. Wire <code>motors::GearBox::reflect_load</code> (currently dead code).
+    ~30 LOC. <strong>Half day.</strong></li>
+</ol>
+<p><strong>Total estimated effort for the full list: ~9 days of focused C++ work</strong>, of
+which items 1, 2, 3 alone account for the bulk of the fidelity / convergence
+deficit vs PSIM/PLECS.</p>
+<hr />
+<h2 id="5-unification-gaps-cross-cutting">5. Unification Gaps (cross-cutting)<a class="headerlink" href="#5-unification-gaps-cross-cutting" title="Permanent link">&para;</a></h2>
+<h3 id="51-params-name-constructor">5.1 <code>Params + name</code> constructor<a class="headerlink" href="#51-params-name-constructor" title="Permanent link">&para;</a></h3>
+<p>Missing on: <code>Transformer</code>, <code>VoltageSource</code>, <code>CurrentSource</code>, <code>IdealSwitch</code>,
+<code>VCSwitch</code>. Adopt everywhere so builders/templates pass a single struct.</p>
+<h3 id="52-thermal-binding-r_th_ja-t_amb">5.2 Thermal binding (<code>R_th_ja</code>, <code>T_amb</code>)<a class="headerlink" href="#52-thermal-binding-r_th_ja-t_amb" title="Permanent link">&para;</a></h3>
+<p>Present: every passive (R/C/L), every switching device (MOSFET/IGBT/Diode).
+Missing: <strong>every motor</strong>, <code>Transformer</code>, <code>HysteresisInductor</code>, <code>IdealSwitch</code>,
+<code>VCSwitch</code>. The motors are the biggest miss — winding thermal model is the
+standard PSIM/PLECS expectation.</p>
+<h3 id="53-_user_set-flag-for-auto-defaulted-parasitics">5.3 <code>*_user_set()</code> flag for auto-defaulted parasitics<a class="headerlink" href="#53-_user_set-flag-for-auto-defaulted-parasitics" title="Permanent link">&para;</a></h3>
+<p>Present on the three switching devices that have an in-ctor auto-default for
+<code>C_oss</code> / <code>C_j</code>. Should extend to <strong>every</strong> in-ctor auto-default in the
+codebase (e.g. <code>Capacitor.ESR</code> defaulting to 0, <code>Inductor.DCR</code> defaulting to
+0 — these are technically opt-in, not defaulted, but the pattern should be
+consistent).</p>
+<h3 id="54-accumulate_loss-family-quartet">5.4 <code>accumulate_loss</code> family quartet<a class="headerlink" href="#54-accumulate_loss-family-quartet" title="Permanent link">&para;</a></h3>
+<p><code>total_energy</code> / <code>peak_power</code> / <code>average_power</code> /
+<code>steady_state_junction_temperature</code> — present on R/C/L/Diode/MOSFET/IGBT. NOT
+present on <code>Transformer</code>, <code>HysteresisInductor</code>, any motor, <code>IdealSwitch</code>,
+<code>VCSwitch</code>. Promote to a <code>ThermalLossMixin</code> CRTP base (the three passive
+implementations are line-for-line identical) and adopt across the family.</p>
+<h3 id="55-stamp-convention">5.5 Stamp convention<a class="headerlink" href="#55-stamp-convention" title="Permanent link">&para;</a></h3>
+<p>MOSFET/IGBT use Norton-companion residual <code>f -= i_eq</code>. Diode/VCSwitch use
+standard form <code>f += i_sw</code>. Both correct but mixed conventions are a
+regression hazard — pick one and migrate.</p>
+<h3 id="56-field-naming">5.6 Field naming<a class="headerlink" href="#56-field-naming" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>R_a</code> (DC motor) vs <code>R_s</code> (BLDC/IM) vs <code>Rs</code> (PMSM) vs <code>R_s_main/aux</code> (1φ).</li>
+<li><code>b</code> (DC motor) vs <code>b_friction</code> (everyone else).</li>
+<li><code>omega()</code> / <code>theta()</code> (DC) vs <code>omega_m()</code> / <code>theta_m()</code> (PMSM/BLDC/IM).</li>
+<li><code>tau_em()</code> (PMSM/BLDC/IM) vs <code>electromagnetic_torque()</code> (1φ PSC).</li>
+</ul>
+<p>Pick one convention per field and migrate the rest. The BLDC motor's naming
+(<code>R_s</code>, <code>L_s</code>, <code>K_e_peak</code>, <code>b_friction</code>, <code>friction_coulomb</code>, <code>tau_load_const</code>,
+<code>tau_load_quad_coeff</code>, <code>omega_m</code>, <code>theta_m</code>, <code>tau_em</code>) is the most complete —
+<strong>use BLDC as the template the other motors converge to.</strong></p>
+<hr />
+<h2 id="6-solver-side-levers-already-in-place">6. Solver-Side Levers Already in Place<a class="headerlink" href="#6-solver-side-levers-already-in-place" title="Permanent link">&para;</a></h2>
+<p>Worth noting that the solver layer already has hooks the model layer can lean
+on harder:</p>
+<ul>
+<li><strong><code>ModelRegularizationOptions</code></strong> (<code>simulation.hpp:106-123</code>) — already defines
+  per-device-class <code>g_off_min</code> floors (<code>mosfet_g_off_min = 1e-7</code>,
+  <code>diode_g_off_min = 1e-9</code>, etc.). Today it's gated on <code>apply_only_in_recovery
+  = true</code>. <strong>A more aggressive default — apply at first Newton step, not just
+  retry — would mask the floating-gate singularity automatically.</strong> No code
+  change needed; just flip the default.</li>
+<li><strong><code>BackendTelemetry.simultaneous_event_groups</code></strong> (<code>simulation.hpp:158</code>) was
+  recently added to count steps where ≥ 2 device commutations are coalesced
+  into a single atomic Newton solve. This is exactly the diagnostic needed
+  for the 3φ inverter case — combined with <code>pwl_event_bisections</code>, we can
+  measure how often event coalescing is needed and what % of steps need it.</li>
+<li><strong><code>auto_parasitics</code></strong> pre-flight already exists and works. Extending it to
+  detect "switch → R → L → return" patterns (not just switch → L directly)
+  would auto-fix VSI-style topologies without forcing users to call
+  <code>set_mosfet_C_oss</code> manually.</li>
+</ul>
+<hr />
+<h2 id="7-what-this-means-for-convergence">7. What This Means for Convergence<a class="headerlink" href="#7-what-this-means-for-convergence" title="Permanent link">&para;</a></h2>
+<p>The four highest-leverage convergence-side improvements <strong>don't change any
+physics</strong> — they're numerical hardening:</p>
+<ol>
+<li>Gate-row anchoring on MOSFET / IGBT (item 3 above).</li>
+<li><code>κ = 20</code> (or <code>sigma_g</code> clamp) on the smooth blend.</li>
+<li>Aggressive <code>g_off_min</code> floor (flip <code>apply_only_in_recovery</code> default).</li>
+<li>Trapezoidal on <code>ψ_r</code> and <code>V_cap</code> (motor side).</li>
+</ol>
+<p>Combined, these eliminate the failure modes we've hit during the
+<code>boost-pfc-auto-parasitics</code> work: V_pole = 0 stuck (gate floating), Behavioral
+MOSFET conducting at cutoff (sigma_g underflow), threshold chatter (event
+hysteresis), motor start-up instability (FE on flux state).</p>
+<p>The fidelity improvements (saturable transformer, IGBT Norton-shift, body
+diodes) are independent of these — they don't help convergence but they're
+what users compare against PSIM/PLECS waveforms.</p>
+<hr />
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../convergence-tuning-guide/">Convergence Tuning Guide</a> — practical
+  recipes for the convergence failures cited in §1 (Behavioral cutoff,
+  PWL Ideal threshold flicker, motor flux integration).</li>
+<li><a href="../electrothermal-workflow/">Electrothermal Workflow</a> — the existing
+  YAML-level configuration for thermal coupling on switching devices.
+  Motor + transformer thermal binding (recommendation §5.2) extends
+  this surface.</li>
+<li><a href="../pwl-switching-migration/">PWL Switching Engine</a> — design notes on
+  the segment-state-space resolution that the gate-anchoring +
+  <code>g_off_min</code> recommendations build on top of.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../pwl-switching-migration/" class="md-footer__link md-footer__link--prev" aria-label="Previous: PWL Switching Engine">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                PWL Switching Engine
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../convergence-tuning-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: Convergence Tuning">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Convergence Tuning
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+    
+  </body>
+</html>
