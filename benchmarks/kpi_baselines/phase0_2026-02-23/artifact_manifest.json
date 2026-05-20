@@ -1,7 +1,7 @@
 {
   "schema_version": "pulsim-kpi-baseline-manifest-v1",
-  "baseline_id": "phase0_2026-02-23",
-  "captured_at_utc": "2026-02-23T10:27:20Z",
+  "baseline_id": "phase0_2026-05-19_rebaseline",
+  "captured_at_utc": "2026-05-19T23:20:00Z",
   "files": [
     {
       "path": "benchmarks/phase8_artifacts/benchmarks/results.json",

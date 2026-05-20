@@ -300,18 +300,26 @@ jobs:
 
       - name: Capture coverage (core sources only)
         run: |
+          # `--ignore-errors source,unused,empty,inconsistent` tolerates
+          # the FetchContent-built Catch2 headers that lcov sometimes
+          # can't resolve to a source file. Those entries get filtered
+          # out anyway by the `--remove ... '*/Catch2/*'` step below,
+          # so any unresolvable include just gets dropped instead of
+          # failing the whole job. Same for yaml-cpp / Eigen.
           lcov --capture \
             --directory build-cov \
             --output-file coverage_raw.info \
             --gcov-tool gcov-13 \
-            --no-external
+            --no-external \
+            --ignore-errors source,unused,empty,inconsistent
           lcov --remove coverage_raw.info \
             '*/tests/*' \
             '*/FetchContent/*' \
             '*/yaml-cpp/*' \
             '*/Catch2/*' \
             '*/eigen/*' \
-            --output-file coverage.info
+            --output-file coverage.info \
+            --ignore-errors source,unused,empty,inconsistent
           lcov --list coverage.info
 
       - name: Upload to Codecov
