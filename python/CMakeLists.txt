@@ -89,19 +89,16 @@ set_target_properties(_pulsim PROPERTIES
 # ModuleNotFoundError at import time (the source __init__.py imports
 # frequency_analysis, templates, codegen, fmu, sweep at module load).
 #
-# Top-level .py and .pyi files: enumerated explicitly so a missing copy is
-# obvious in the diff. Submodules (codegen, fmu, sweep): copied via a
-# glob+loop pattern; if you add a file to those directories, re-run cmake
-# to pick it up.
+# Top-level .py and .pyi files: glob-discovered so new modules ship
+# without a manual edit. snubber.py shipped broken because the old
+# explicit list missed it; the install rule at the bottom of this
+# file uses the same glob pattern to stay in sync.
 
-set(_pulsim_top_level_files
-    pulsim/__init__.py
-    pulsim/__init__.pyi
-    pulsim/_pulsim.pyi
-    pulsim/netlist.py
-    pulsim/signal_evaluator.py
-    pulsim/frequency_analysis.py
-    pulsim/templates.py
+file(GLOB _pulsim_top_level_files
+    LIST_DIRECTORIES false
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.pyi
 )
 foreach(_pulsim_file IN LISTS _pulsim_top_level_files)
     configure_file(
