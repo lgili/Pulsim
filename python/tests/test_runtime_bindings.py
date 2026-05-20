@@ -323,6 +323,10 @@ components:
 
 
 def test_yaml_parser_rejects_unsupported_thermal_component_enablement() -> None:
+    # close-electrothermal-loop-and-promote-thermal-traits Phase 3
+    # added thermal support to resistor / capacitor / inductor / diode.
+    # Sources (voltage / current / sine / pwm) remain non-thermal — use
+    # one of those to trigger the unsupported-thermal-component error.
     content = """
 schema: pulsim-v1
 version: 1
@@ -330,8 +334,8 @@ simulation:
   tstop: 1e-4
   dt: 1e-6
 components:
-  - type: resistor
-    name: R1
+  - type: voltage_source
+    name: V1
     nodes: [in, 0]
     value: 10
     thermal:
