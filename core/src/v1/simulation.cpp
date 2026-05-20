@@ -688,6 +688,45 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     transient_services_ =
         make_default_transient_service_registry(circuit_, options_, newton_solver_);
 
+    // boost-pfc-bridge-runaway diagnostic: warn when the user's `dt`
+    // is coarse relative to the fastest PWM period in the circuit.
+    // Below ~T_sw/20 the BDF1 integrator accumulates phase error at
+    // each switching event, and for boost-style topologies (L in
+    // series with the MOSFET) that error compounds period over period
+    // into a runaway `I_L` (observed up to thousands of A) with V_sw
+    // pushed outside the bus rails. The fix at the user level is just
+    // to refine dt; we warn here so the symptom doesn't get blamed on
+    // the controller. Suppressed when options_.dt is non-positive
+    // (variable-step request — the timestep controller takes over).
+    if (options_.dt > 0.0) {
+        Real shortest_T_sw = std::numeric_limits<Real>::infinity();
+        for (const auto& device : circuit_.devices()) {
+            std::visit([&](const auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (std::is_same_v<T, PWMVoltageSource>) {
+                    const Real f = dev.frequency();
+                    if (f > Real{0}) {
+                        shortest_T_sw = std::min(shortest_T_sw, Real{1.0} / f);
+                    }
+                }
+            }, device);
+        }
+        if (std::isfinite(shortest_T_sw)) {
+            const Real ratio = options_.dt / shortest_T_sw;
+            if (ratio > Real{0.05}) {       // dt > T_sw / 20
+                std::fprintf(stderr,
+                    "[pulsim] WARNING: dt = %.2g s is coarse vs fastest PWM "
+                    "period T_sw = %.2g s (dt/T_sw = %.3f, recommended ≤ 0.025).\n"
+                    "  Boost-style topologies (L in series with the MOSFET) can "
+                    "develop an I_L runaway with BDF1 at this resolution. "
+                    "Set opts.dt ≤ T_sw / 40 for stable switching numerics.\n",
+                    static_cast<double>(options_.dt),
+                    static_cast<double>(shortest_T_sw),
+                    static_cast<double>(ratio));
+            }
+        }
+    }
+
     // Ensure timestep controller limits align with simulation options
     auto cfg = options_.timestep_config;
     cfg.dt_min = options_.dt_min;
