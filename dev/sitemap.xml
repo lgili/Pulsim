@@ -13,6 +13,10 @@
          <lastmod>2026-05-20</lastmod>
     </url>
     <url>
+         <loc>https://lgili.github.io/Pulsim/latest/architecture-review-v1/</loc>
+         <lastmod>2026-05-20</lastmod>
+    </url>
+    <url>
          <loc>https://lgili.github.io/Pulsim/latest/automatic-differentiation/</loc>
          <lastmod>2026-05-20</lastmod>
     </url>
@@ -178,6 +182,14 @@
     </url>
     <url>
          <loc>https://lgili.github.io/Pulsim/latest/archive/numerical-modes-audit-2026-05/</loc>
+         <lastmod>2026-05-20</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/pulsim-v2/</loc>
+         <lastmod>2026-05-20</lastmod>
+    </url>
+    <url>
+         <loc>https://lgili.github.io/Pulsim/latest/pulsim-v2/layer0-numeric-and-sparse/</loc>
          <lastmod>2026-05-20</lastmod>
     </url>
 </urlset>
