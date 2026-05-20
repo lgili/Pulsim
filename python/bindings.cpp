@@ -3288,15 +3288,25 @@ void init_v2_module(py::module_& v2) {
             return sim.run_transient(x0);
         }, py::arg("x0"), "Run transient simulation with explicit initial state")
         // Closed-loop pattern: take a Python callback invoked after every
-        // accepted timestep. The callback receives (t, state_dict). It may
-        // read state, run a controller (PI / dq / ACMC / whatever) and
-        // call back into the circuit via `set_pwm_duty(name, value)` or
-        // `set_pmsm_foc_references(...)` to close the loop. The GIL is
-        // released around the C++ integration loop; the callback's
-        // re-entry into pybind11 is GIL-safe because we cache `is_none()`
-        // checks at the top and acquire the GIL inside the per-step
-        // callback wrapper. See `run_transient_streaming` for the parallel
-        // implementation of the same architecture against a free function.
+        // accepted timestep. The callback receives `(t, state_dict, state_array)`:
+        //
+        //   - `t` : current simulation time (s)
+        //   - `state_dict` : `{"V(<node_name>)": float}` for every named
+        //     electrical node — convenient look-up by name.
+        //   - `state_array` : numpy view of the FULL state vector
+        //     `[node_voltages..., branch_currents...]`. Use this to read
+        //     branch currents (inductor current, voltage-source current,
+        //     etc.) — needed for cascaded ACMC and similar inner-current
+        //     loops. Index into it via `circuit.num_nodes() + branch_idx`.
+        //
+        // The callback may call back into the circuit via
+        // `set_pwm_duty(name, value)`, `set_pmsm_foc_references(...)`,
+        // etc. to close the loop. The GIL is released around the C++
+        // integration loop; the callback's re-entry into pybind11 is
+        // GIL-safe because we cache `is_none()` at the top and acquire
+        // the GIL inside the per-step callback wrapper. See
+        // `run_transient_streaming` for the parallel implementation of
+        // the same architecture against a free function.
         .def("run_transient", [](Simulator& sim, const Vector& x0,
                                   Circuit& circuit,
                                   py::object data_callback) {
@@ -3317,7 +3327,12 @@ void init_v2_module(py::module_& v2) {
                         sd[py::str("V(" + node_names[i] + ")")] =
                             state[static_cast<Index>(i)];
                     }
-                    data_callback(t, sd);
+                    // Pass the full state vector as a numpy array (copy)
+                    // so the callback can read branch currents at
+                    // `state[num_nodes + branch_idx]` for inner-current
+                    // loops. pybind11 auto-converts Eigen::Vector into a
+                    // numpy 1D array via the eigen.h header.
+                    data_callback(t, sd, state);
                 } catch (...) {
                     // Swallow callback exceptions so they don't kill the
                     // C++ integration loop; user can detect via missing
