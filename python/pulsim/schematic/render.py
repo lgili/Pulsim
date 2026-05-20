@@ -286,8 +286,54 @@ def render(
         )
 
     backend = os.environ.get("PULSIM_SCHEMATIC_BACKEND", "netlistsvg").strip().lower()
-    if backend not in ("netlistsvg", "elk", "spring"):
+    if backend not in ("netlistsvg", "python_native", "elk", "spring"):
         backend = "netlistsvg"
+
+    if backend == "python_native":
+        # Phase 1 of `add-python-schematic-renderer`: native Python renderer
+        # that reuses elk_bridge.js for layout and composes the SVG without
+        # invoking the netlistsvg Node subprocess. Default stays on
+        # netlistsvg until Phase 5 flips the switch.
+        from .native_backend import render_native
+        if fmt == "svg":
+            if position_hints:
+                raise NotImplementedError(
+                    "position hints are tracked for Phase 2/3 of "
+                    "`add-python-schematic-renderer` and not yet wired into "
+                    "the python_native backend."
+                )
+            return render_native(circuit, out_path)
+        # PNG / PDF / JPG: render SVG first then convert via rsvg-convert.
+        with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as tmp:
+            svg_tmp = Path(tmp.name)
+        try:
+            render_native(circuit, svg_tmp)
+            if fmt == "png":
+                _svg_to_png(svg_tmp, out_path)
+            else:
+                rsvg = shutil.which("rsvg-convert")
+                if not rsvg:
+                    raise ImportError(
+                        f"PNG/PDF/JPG output from the python_native backend "
+                        f"requires `rsvg-convert`. Save as .svg instead, or "
+                        f"install librsvg. Requested format: {fmt!r}"
+                    )
+                subprocess.run(
+                    [rsvg, "-f", fmt, "-w", "1400", str(svg_tmp), "-o", str(out_path)],
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+            if not out_path.exists() or out_path.stat().st_size == 0:
+                raise RuntimeError(
+                    f"python_native + conversion produced no output at {out_path}"
+                )
+            return out_path
+        finally:
+            try:
+                svg_tmp.unlink()
+            except OSError:
+                pass
 
     if backend == "netlistsvg":
         if fmt == "svg":
