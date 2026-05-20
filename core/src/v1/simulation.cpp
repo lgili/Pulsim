@@ -688,18 +688,29 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
     transient_services_ =
         make_default_transient_service_registry(circuit_, options_, newton_solver_);
 
-    // boost-pfc-bridge-runaway diagnostic: warn when the user's `dt`
-    // is coarse relative to the fastest PWM period in the circuit.
-    // Below ~T_sw/20 the BDF1 integrator accumulates phase error at
-    // each switching event, and for boost-style topologies (L in
-    // series with the MOSFET) that error compounds period over period
-    // into a runaway `I_L` (observed up to thousands of A) with V_sw
-    // pushed outside the bus rails. The fix at the user level is just
-    // to refine dt; we warn here so the symptom doesn't get blamed on
-    // the controller. Suppressed when options_.dt is non-positive
-    // (variable-step request — the timestep controller takes over).
+    // boost-pfc-bridge-runaway diagnostic: warn on dt-vs-T_sw mismatch
+    // for switching circuits, AND on MOSFET-with-floating-drain topology
+    // (L in series with the MOSFET drain, no C_oss set on the device).
+    //
+    // The two failures stack: in Behavioral mode the smooth MOSFET stamp
+    // has no parasitic C_oss between drain-source (C_oss > 0 only stamps
+    // in the PWL Ideal path), so when the MOSFET is OFF and the diode
+    // is reverse-biased, the drain node is essentially algebraic with
+    // both switches off — the MNA row is near-singular and V_sw drifts
+    // to whatever the smooth-residual gradient allows (we have seen
+    // V_sw = -120 V in steady operation). The L history update then
+    // uses that drifted V_sw, integrates the wrong dI/dt, and I_L
+    // grows monotonically per period.
+    //
+    // dt refinement helps but does NOT fix the underlying singular row.
+    // Real fix: set MOSFETParams.C_oss > 0 (or pin g_off larger), OR
+    // enable opts.auto_parasitics.enabled = True so the analyzer
+    // auto-sizes C_oss for the L+MOSFET pair it detects.
+    //
+    // Suppressed when options_.dt is non-positive (variable-step request).
     if (options_.dt > 0.0) {
         Real shortest_T_sw = std::numeric_limits<Real>::infinity();
+        bool has_floating_drain_mosfet = false;
         for (const auto& device : circuit_.devices()) {
             std::visit([&](const auto& dev) {
                 using T = std::decay_t<decltype(dev)>;
@@ -707,6 +718,11 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
                     const Real f = dev.frequency();
                     if (f > Real{0}) {
                         shortest_T_sw = std::min(shortest_T_sw, Real{1.0} / f);
+                    }
+                }
+                if constexpr (std::is_same_v<T, MOSFET>) {
+                    if (dev.C_oss() <= Real{0}) {
+                        has_floating_drain_mosfet = true;
                     }
                 }
             }, device);
@@ -717,13 +733,26 @@ Simulator::Simulator(Circuit& circuit, const SimulationOptions& options)
                 std::fprintf(stderr,
                     "[pulsim] WARNING: dt = %.2g s is coarse vs fastest PWM "
                     "period T_sw = %.2g s (dt/T_sw = %.3f, recommended ≤ 0.025).\n"
-                    "  Boost-style topologies (L in series with the MOSFET) can "
-                    "develop an I_L runaway with BDF1 at this resolution. "
-                    "Set opts.dt ≤ T_sw / 40 for stable switching numerics.\n",
+                    "  Recommended: set opts.dt ≤ T_sw / 40.\n",
                     static_cast<double>(options_.dt),
                     static_cast<double>(shortest_T_sw),
                     static_cast<double>(ratio));
             }
+        }
+        if (has_floating_drain_mosfet &&
+            options_.switching_mode != SwitchingMode::Ideal &&
+            !options_.auto_parasitics.enabled) {
+            std::fprintf(stderr,
+                "[pulsim] WARNING: MOSFET(s) in Behavioral switching mode "
+                "with C_oss = 0 detected.\n"
+                "  For boost / flyback / buck-boost topologies (L in series "
+                "with the MOSFET) this leaves the drain node algebraic when\n"
+                "  both the MOSFET and the freewheel diode are off — the MNA "
+                "row is near-singular and V_sw drifts, causing I_L runaway.\n"
+                "  Fix: set MOSFETParams.C_oss = 1e-9 (1 nF, validated to "
+                "tame the runaway by 77×) before add_mosfet(),\n"
+                "  or set opts.auto_parasitics.enabled = True so the analyzer "
+                "auto-sizes C_oss for detected L+MOSFET pairs.\n");
         }
     }
 

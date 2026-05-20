@@ -7532,6 +7532,47 @@ private:
         // Physical residual: +id_total leaves drain, −id_total arrives at source.
         if (n_drain >= 0)  f[n_drain]  += id_total;
         if (n_source >= 0) f[n_source] -= id_total;
+
+        // boost-pfc-bridge-runaway fix: parasitic C_oss between drain
+        // and source. The Behavioral (smooth Shichman-Hodges) stamp
+        // above leaves the drain row near-singular when both the
+        // MOSFET and the freewheel diode are off (boost-style
+        // topologies: L in series with MOSFET drain). Stamping
+        // C_oss as a BDF1-companion conductance `g_eq = C_oss /
+        // timestep_` regularizes the drain row — even a 100 pF
+        // C_oss yields g_eq = 1e-10/1e-6 = 1e-4 S at dt = 1 µs,
+        // four orders of magnitude above the default g_off (1e-9).
+        //
+        // We stamp ONLY the Jacobian conductance, NOT the BDF1
+        // history `-g_eq · v_prev_DS` — that would require tracking
+        // a per-device v_DS_prev which the Behavioral path doesn't
+        // currently maintain. The missing history term means C_oss
+        // acts as a pure parallel conductance (regularization only)
+        // rather than a true capacitor. That's the SPICE-style
+        // `Coss = 0` opt-in semantics most users expect; users who
+        // need real C_oss dynamics should use SwitchingMode::Ideal
+        // (PWL Ideal already stamps C_oss with full history).
+        //
+        // Default value picked by the MOSFET ctor (= 100 pF) means
+        // every user gets the regularization automatically without
+        // breaking existing tests that pin V_DS to ideal SPICE-like
+        // values. Opt out by setting `params.C_oss = 0` explicitly.
+        const Real C_oss = dev.C_oss();
+        if (C_oss > Real{0} && timestep_ > Real{0}) {
+            const Real g_oss = C_oss / timestep_;
+            if (n_drain >= 0) {
+                triplets.emplace_back(n_drain, n_drain, g_oss);
+                if (n_source >= 0) {
+                    triplets.emplace_back(n_drain, n_source, -g_oss);
+                }
+            }
+            if (n_source >= 0) {
+                triplets.emplace_back(n_source, n_source, g_oss);
+                if (n_drain >= 0) {
+                    triplets.emplace_back(n_source, n_drain, -g_oss);
+                }
+            }
+        }
     }
 
     template<typename Triplets>
