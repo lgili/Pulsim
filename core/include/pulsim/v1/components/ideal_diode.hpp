@@ -697,7 +697,13 @@ struct device_traits<IdealDiode> {
     static constexpr bool is_linear = false;  // Nonlinear in Behavioral; PWL otherwise
     static constexpr bool is_dynamic = false;
     static constexpr bool has_loss_model = true;
-    static constexpr bool has_thermal_model = false;
+    // close-electrothermal-loop-and-promote-thermal-traits Phase 2.1:
+    // IdealDiode exposes R_th_ja, T_amb, T_j_, set_T_j_init,
+    // junction_temperature(), steady_state_junction_temperature(),
+    // and V_F0_at_Tj() — i.e. the entire thermal-model surface that
+    // MOSFET / IGBT use. The trait flip enrolls IdealDiode in the
+    // DefaultThermalService's closed electrothermal loop.
+    static constexpr bool has_thermal_model = true;
     static constexpr bool supports_pwl = true;
     static constexpr std::size_t jacobian_size = 4;
 };

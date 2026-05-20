@@ -227,8 +227,13 @@ struct device_traits<Inductor> {
     static constexpr std::size_t num_internal_nodes = 0;
     static constexpr bool is_linear = true;
     static constexpr bool is_dynamic = true;
-    static constexpr bool has_loss_model = false;
-    static constexpr bool has_thermal_model = false;
+    // close-electrothermal-loop-and-promote-thermal-traits Phase 2.3:
+    // Inductor exposes DCR + DCR_at_Tj() (winding-resistance loss),
+    // R_th_ja, T_amb, T_j_, set_T_j_init, junction_temperature(). The
+    // accumulator at runtime_circuit.hpp:4812-4814 already integrates
+    // I²·DCR_at_Tj() per step — now DCR_at_Tj() sees T_j(t).
+    static constexpr bool has_loss_model = true;
+    static constexpr bool has_thermal_model = true;
     static constexpr std::size_t jacobian_size = 4;
 };
 

@@ -242,8 +242,13 @@ struct device_traits<Capacitor> {
     static constexpr std::size_t num_internal_nodes = 0;
     static constexpr bool is_linear = true;
     static constexpr bool is_dynamic = true;
-    static constexpr bool has_loss_model = false;
-    static constexpr bool has_thermal_model = false;
+    // close-electrothermal-loop-and-promote-thermal-traits Phase 2.4:
+    // Capacitor exposes ESR + ESR_at_Tj() (ripple-current loss),
+    // R_th_ja, T_amb, T_j_, set_T_j_init, junction_temperature(). The
+    // accumulator at runtime_circuit.hpp:4786-4788 already integrates
+    // I²·ESR_at_Tj() per step — now ESR_at_Tj() sees T_j(t).
+    static constexpr bool has_loss_model = true;
+    static constexpr bool has_thermal_model = true;
     static constexpr std::size_t jacobian_size = 4;
 };
 

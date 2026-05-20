@@ -182,7 +182,12 @@ struct device_traits<Resistor> {
     static constexpr bool is_linear = true;
     static constexpr bool is_dynamic = false;
     static constexpr bool has_loss_model = true;  // Conduction loss = I²R
-    static constexpr bool has_thermal_model = false;
+    // close-electrothermal-loop-and-promote-thermal-traits Phase 2.2:
+    // Resistor exposes R_th_ja, T_amb, T_j_, set_T_j_init,
+    // junction_temperature(), and R_at_Tj() — the full thermal-model
+    // surface. Joining the closed loop means R_at_Tj() now sees T_j(t)
+    // instead of the static T_amb.
+    static constexpr bool has_thermal_model = true;
     static constexpr std::size_t jacobian_size = 4;  // 2x2 contribution
 };
 

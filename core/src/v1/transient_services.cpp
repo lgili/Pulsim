@@ -1153,12 +1153,42 @@ public:
 
         for (std::size_t i = 0; i < devices.size(); ++i) {
             bool supports_thermal = false;
+            // close-electrothermal-loop-and-promote-thermal-traits Phase 2:
+            // distinguish "always-active" thermal devices (semiconductors:
+            // MOSFET, IGBT — historically enrolled by default to mirror
+            // PSIM/PLECS auto-thermal) from "opt-in" thermal devices
+            // (passives: Diode, Resistor, Inductor, Capacitor — newly
+            // trait-promoted, but their thermal effect only kicks in
+            // when the user explicitly configures them, preserving
+            // backward compatibility for existing circuits).
+            bool opt_in_only = false;
             std::visit([&](const auto& dev) {
                 using T = std::decay_t<decltype(dev)>;
                 supports_thermal = device_traits<T>::has_thermal_model;
+                if constexpr (std::is_same_v<T, IdealDiode> ||
+                              std::is_same_v<T, Resistor>   ||
+                              std::is_same_v<T, Inductor>   ||
+                              std::is_same_v<T, Capacitor>) {
+                    opt_in_only = true;
+                }
             }, devices[i]);
 
             if (!supports_thermal) {
+                continue;
+            }
+
+            // For opt-in-only devices, require an explicit
+            // thermal_devices[name] entry. This preserves the legacy
+            // contract where unconfigured passives stay outside the
+            // thermal pipeline. Semiconductors continue to enroll by
+            // default so that existing electrothermal benchmarks see
+            // identical behaviour.
+            bool has_explicit_config = false;
+            if (i < conns.size()) {
+                has_explicit_config =
+                    options_.thermal_devices.count(conns[i].name) > 0;
+            }
+            if (opt_in_only && !has_explicit_config) {
                 continue;
             }
 
@@ -1233,6 +1263,7 @@ public:
         }
 
         refresh_scales();
+        push_T_j_into_devices();
     }
 
     [[nodiscard]] ThermalServiceSummary finalize() const override {
@@ -1297,6 +1328,37 @@ private:
             thermal_scale_[i] = compute_scale(states_[i]);
         }
         circuit_.set_device_temperature_scales(thermal_scale_);
+    }
+
+    // close-electrothermal-loop-and-promote-thermal-traits Phase 1.1:
+    // push the integrated T_i(t) back into each participating device's
+    // internal T_j_ via set_T_j_init. Concept-gated so devices that don't
+    // expose the setter (motors, magnetics, sources today) compile away
+    // to no-op. Future motor/magnetics thermal pipelines add set_T_j_init
+    // and join this loop without re-touching the dispatch.
+    //
+    // Before this change, devices' T_j_ was only mutated by external
+    // user calls to set_T_j_init() and was effectively frozen at T_amb
+    // for the whole simulation — making the closed-loop scale_i feedback
+    // path correct in the STAMP but wrong in the LOSS path (because
+    // accumulate_loss reads Rds_on_at_Tj() / V_F0_at_Tj() etc. which
+    // read the stale T_j_). With this dispatch, the loss path now sees
+    // the same T_i(t) the stamp does. mosfet_junction_temperature(name),
+    // diode_junction_temperature(name), etc. now reflect the integrated
+    // T_j(t) instead of the static T_amb.
+    void push_T_j_into_devices() {
+        auto& devices = circuit_.devices_mutable();
+        for (std::size_t i = 0; i < states_.size() && i < devices.size(); ++i) {
+            const auto& state = states_[i];
+            if (!state.enabled) continue;
+            const Real T_j_new = state.temperature;
+            std::visit([T_j_new](auto& dev) {
+                using T = std::decay_t<decltype(dev)>;
+                if constexpr (requires(T& d, Real v) { d.set_T_j_init(v); }) {
+                    dev.set_T_j_init(T_j_new);
+                }
+            }, devices[i]);
+        }
     }
 
     Circuit& circuit_;
