@@ -86,10 +86,20 @@ parse_switching_mode_node(const YAML::Node& node,
 }
 
 [[nodiscard]] bool component_type_supports_thermal(const std::string& canonical_type) {
+    // close-electrothermal-loop-and-promote-thermal-traits Phase 3:
+    // mirror the C++ side trait surface — the new opt-in passives
+    // (diode, resistor, inductor, capacitor) now accept the same
+    // thermal-block schema as MOSFET / IGBT / BJT, completing the
+    // YAML→Circuit→DefaultThermalService→Circuit closed loop for
+    // every device family with `has_thermal_model = true`.
     return canonical_type == "mosfet" ||
            canonical_type == "igbt" ||
            canonical_type == "bjt_npn" ||
-           canonical_type == "bjt_pnp";
+           canonical_type == "bjt_pnp" ||
+           canonical_type == "diode" ||
+           canonical_type == "resistor" ||
+           canonical_type == "inductor" ||
+           canonical_type == "capacitor";
 }
 
 std::string with_diag_code(const std::string& code, const std::string& message) {

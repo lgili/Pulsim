@@ -425,12 +425,66 @@ components:
 
 TEST_CASE("YAML parser rejects thermal enablement on unsupported components",
           "[v1][yaml][thermal][capability]") {
+    // close-electrothermal-loop-and-promote-thermal-traits Phase 3 flipped
+    // the YAML `thermal:` block allow-list to accept passives (resistor,
+    // inductor, capacitor) and ideal diodes alongside the
+    // semiconductors (mosfet / igbt / bjt_*). The old test that locked
+    // in the rejection of `resistor + thermal` no longer reflects the
+    // current contract.
+    //
+    // Updated contract: thermal blocks are accepted on every device with
+    // `device_traits::has_thermal_model = true`. The rejection path
+    // still fires for device types WITHOUT that trait — e.g. a
+    // `voltage_source` or `current_source`. So this test now uses a
+    // `voltage_source` to exercise the still-active rejection path.
     const std::string yaml = R"(schema: pulsim-v1
 version: 1
 simulation:
   tstop: 1e-4
   dt: 1e-6
 components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: { type: dc, value: 5.0 }
+    thermal:
+      enabled: true
+      rth: 0.5
+      cth: 0.1
+  - type: resistor
+    name: R1
+    nodes: [in, 0]
+    value: 10
+)";
+
+    parser::YamlParser parser;
+    parser.load_string(yaml);
+
+    REQUIRE_FALSE(parser.errors().empty());
+    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
+                      [](const std::string& err) {
+                          return err.find("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT") != std::string::npos;
+                      }));
+}
+
+TEST_CASE("YAML parser accepts thermal blocks on passives and diodes "
+          "(close-electrothermal-loop-and-promote-thermal-traits Phase 3)",
+          "[v1][yaml][thermal][electrothermal_closure]") {
+    // Companion to the rejection test above. Verifies the new contract:
+    // resistors, inductors, capacitors, and diodes accept the same
+    // `thermal:` block schema as mosfet / igbt / bjt_*. The C++ side
+    // already supports per-device thermal config on these devices;
+    // this test locks in the YAML route to the same machinery.
+    const std::string yaml = R"(schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-4
+  dt: 1e-6
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [in, 0]
+    waveform: { type: dc, value: 12.0 }
   - type: resistor
     name: R1
     nodes: [in, 0]
@@ -443,12 +497,7 @@ components:
 
     parser::YamlParser parser;
     parser.load_string(yaml);
-
-    REQUIRE_FALSE(parser.errors().empty());
-    CHECK(std::any_of(parser.errors().begin(), parser.errors().end(),
-                      [](const std::string& err) {
-                          return err.find("PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT") != std::string::npos;
-                      }));
+    REQUIRE(parser.errors().empty());
 }
 
 TEST_CASE("YAML parser maps fallback policy controls", "[v1][yaml][fallback]") {
