@@ -170,6 +170,7 @@ if(PULSIM_BUILD_TESTS)
         tests/test_igbt_vce_sat_stamp.cpp
         tests/test_body_diode.cpp
         tests/test_motor_winding_thermal.cpp
+        tests/test_electrothermal_loop_closure.cpp
     )
 
     target_link_libraries(pulsim_simulation_tests
