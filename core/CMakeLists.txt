@@ -231,6 +231,30 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer0_tests)
 
     # =============================================================================
+    # pulsim_v2_layer1_tests — pulsim-v2-topology-and-switch-enumeration
+    # =============================================================================
+    # Layer 1 = topology (graph + switch combinatorics). Depends only
+    # on Layer 0 (numeric types) — compile-time enforced via header
+    # includes.
+    add_executable(pulsim_v2_layer1_tests
+        tests/v2/layer1/test_main.cpp
+        tests/v2/layer1/test_graph.cpp
+        tests/v2/layer1/test_switch_state.cpp
+        tests/v2/layer1/test_enumerator.cpp
+        tests/v2/layer1/test_node_equivalence.cpp
+        tests/v2/layer1/test_key.cpp
+    )
+    target_link_libraries(pulsim_v2_layer1_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer1_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer1_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 
