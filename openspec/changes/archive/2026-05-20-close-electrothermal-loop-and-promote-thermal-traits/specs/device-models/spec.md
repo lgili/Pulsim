@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Device Trait `has_thermal_model` Reflects Actual Wiring
 

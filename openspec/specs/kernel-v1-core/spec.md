@@ -626,3 +626,32 @@ that emit a `#pragma message` deprecation warning.
 - **AND** the compiler emits a `#pragma message` indicating the
   deprecated path
 
+### Requirement: Thermal-Service Dispatch Order
+
+The `DefaultThermalService::commit_accepted_segment` SHALL execute the
+following ordered sub-steps per accepted simulation step:
+
+1. Integrate `T_i(t)` via the Euler update
+   `T_i ← T_i + dt·(P_i·R_th_i − (T_i − T_amb_i))/τ_i` for every device
+   with `has_thermal_model == true`.
+2. Compute `scale_i = clamp(1 + α_i·(T_i − T_ref_i), 0.05, 4)` for the
+   same devices.
+3. Push `scale_i` into the stamp via
+   `circuit_.set_device_temperature_scales(scale_i)`.
+4. Push `T_i` into the device-internal `T_j_` via `set_T_j_init(T_i)`
+   for every device that exposes the setter.
+5. Mirror `T_i`, `peak_T_i`, `avg_T_i` into the
+   `thermal_summary.device_temperatures[i]` accumulator.
+
+Steps (1)-(3) preserve the existing closed loop on the stamp side.
+Step (4) is the new sub-step this proposal adds. Step (5) is unchanged
+and SHALL continue to reflect the post-step `T_i` value.
+
+#### Scenario: Dispatch order is deterministic across runs
+
+- **GIVEN** the same circuit + options run twice in succession
+- **WHEN** the dispatch executes
+- **THEN** the per-step `T_i`, `scale_i`, and device-internal `T_j_`
+  values SHALL match between the two runs bit-for-bit (no random
+  ordering, no map iteration order leak).
+

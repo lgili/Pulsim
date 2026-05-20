@@ -140,3 +140,63 @@ The library SHALL provide importers for SPICE `.lib` files, PLECS `.xml` files (
 - **THEN** the importer extracts Rds_on, Vth, Coss(Vds), body-diode params
 - **AND** the user can review/edit before saving as catalog YAML
 
+### Requirement: YAML Thermal Block Accepts Passive + Diode Devices
+
+The YAML parser SHALL accept a `thermal_devices` block entry for any
+device type whose `device_traits::has_thermal_model == true`. Today
+(pre-change) the parser allow-list is restricted to `mosfet`, `igbt`,
+and the `bjt_*` family (`yaml_parser.cpp:88-93`). The allow-list MUST
+be extended to include `diode`, `resistor`, `inductor`, `capacitor`.
+
+The accepted keys per entry are:
+- `R_th_ja` (K/W) — required when the entry is present
+- `T_amb` (°C) — defaults to the device's construction T_amb
+- `T_j_init` (°C) — defaults to T_amb
+- `cth` (J/K) — thermal capacitance, defaults to a sensible value
+  per device class (matches the C++ default in
+  `ThermalDeviceConfig::cth`)
+- `temp_ref` (°C) — reference temperature for `alpha`
+- `alpha` (1/K) — temperature coefficient of the temperature-scaled
+  parameter
+
+Unknown keys inside the entry MUST trigger a `ParseError` with a
+message naming the offending key.
+
+#### Scenario: YAML resistor thermal block parses cleanly
+
+- **GIVEN** a YAML file with:
+  ```yaml
+  components:
+    - type: resistor
+      name: R_load
+      nodes: [out, 0]
+      value: 10
+  simulation:
+    thermal:
+      enable: true
+      ambient: 25
+    thermal_devices:
+      R_load:
+        R_th_ja: 50
+        T_amb: 25
+        T_j_init: 30
+  ```
+- **WHEN** the YAML parser loads the file
+- **THEN** the resulting Circuit SHALL have one `Resistor` with
+  `params.R_th_ja == 50`, `params.T_amb == 25`, and
+  `T_j_init == 30` (verifiable via
+  `circuit.resistor_junction_temperature("R_load")`)
+- **AND** the resulting `SimulationOptions::thermal_devices` SHALL
+  contain a `"R_load"` entry with the same values
+- **AND** parsing SHALL succeed without errors or warnings.
+
+#### Scenario: YAML thermal block on a non-thermal device type errors out
+
+- **GIVEN** a YAML file with `thermal_devices` entry for a `vsource`
+  (which has `has_thermal_model = false`)
+- **WHEN** the parser encounters the entry
+- **THEN** the parser SHALL emit a `ParseError` naming the device
+  type and explaining that thermal config is not supported for it
+- **AND** the parser SHALL NOT silently ignore the block (silent
+  ignore would be confusing for the user).
+
