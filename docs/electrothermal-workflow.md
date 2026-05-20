@@ -4,16 +4,72 @@ This guide shows the supported way to configure and consume electrothermal simul
 
 ## Thermal-Capable Components
 
-`component.thermal.enabled: true` is accepted only for these canonical component types:
+`component.thermal.enabled: true` is accepted on every device whose
+`device_traits::has_thermal_model = true`. As of the
+`close-electrothermal-loop-and-promote-thermal-traits` change
+(May 2026):
+
+**Always-enrolled (semiconductors)** — these enrol in the thermal
+service whenever `simulation.thermal.enabled: true`, even without a
+per-device `thermal:` block:
 
 - `mosfet` (aliases: `m`, `nmos`, `pmos`)
 - `igbt` (alias: `q`)
 - `bjt_npn` (aliases: `bjtnpn`, `bjt-npn`)
 - `bjt_pnp` (aliases: `bjtpnp`, `bjt-pnp`)
 
-If thermal is enabled on unsupported components (for example `resistor`), parsing fails with:
+**Opt-in (passives + ideal diode)** — these are trait-enabled but
+require an explicit per-device `thermal:` block (or a C++
+`opts.thermal_devices[name] = ThermalDeviceConfig{...}` entry) to
+join the loop. This preserves backward compatibility for existing
+circuits that didn't expect resistors / inductors / capacitors /
+diodes in the thermal pipeline:
+
+- `diode`
+- `resistor`
+- `inductor`
+- `capacitor`
+
+If thermal is enabled on a device type with `has_thermal_model =
+false` (e.g. `voltage_source`, `current_source`, `transformer`,
+motors), parsing fails with:
 
 - `PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT`
+
+## Closed Electrothermal Loop
+
+Once a device is enrolled, the simulator integrates a per-device
+`T_i(t)` via the lumped Foster ODE
+
+    T_i(t+dt) = T_i + dt · (P_i · R_th_i - (T_i - T_amb_i)) / (R_th_i · C_th_i)
+
+After each accepted simulation step, the integrated `T_i(t)` is
+pushed BACK into the device's internal `T_j_` via
+`set_T_j_init()`. The device's temperature-corrected accessors
+(`Rds_on_at_Tj`, `V_ce_sat_at_Tj`, `V_F0_at_Tj`, `R_at_Tj`,
+`DCR_at_Tj`, `ESR_at_Tj`) then read the same `T_i(t)` that the
+stamp's `scale_i = clamp(1 + α · (T_i - T_ref), 0.05, 4)` feedback
+uses. **Stamp path and loss path stay in sync at every step.**
+
+Consequences:
+
+- **`<dev>_junction_temperature(name)` reflects the integrated
+  `T_j(t)`** instead of staying frozen at `T_amb`. Available on
+  mosfet / igbt / diode / resistor / inductor / capacitor.
+- **Loss computation honours `T_j(t)`.** Conduction losses
+  integrated by `accumulate_loss(...)` use the `R_at_Tj` /
+  `DCR_at_Tj` / etc. values at the current T_j, so the steady-state
+  conduction loss self-consistently includes the temperature
+  feedback.
+- **`<dev>_steady_state_junction_temperature(name)` predicts the
+  asymptotic T_j** from the accumulated `P_avg + R_th_ja`. Use this
+  for sanity checks or to converge a multi-pass electrothermal
+  fixed-point iteration:
+    1. Run the simulation.
+    2. Read `<dev>_steady_state_junction_temperature(name)`.
+    3. Call `set_<dev>_T_j(name, T_ss)` to seed the next pass.
+    4. Re-run. Convergence usually within 2-3 passes for
+       continuous-conduction topologies.
 
 ## Global Thermal Block (`simulation.thermal`)
 
