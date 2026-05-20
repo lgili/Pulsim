@@ -926,6 +926,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#closed-electrothermal-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      Closed Electrothermal Loop
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#global-thermal-block-simulationthermal" class="md-nav__link">
     <span class="md-ellipsis">
       Global Thermal Block (simulation.thermal)
@@ -1812,6 +1821,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#closed-electrothermal-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      Closed Electrothermal Loop
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#global-thermal-block-simulationthermal" class="md-nav__link">
     <span class="md-ellipsis">
       Global Thermal Block (simulation.thermal)
@@ -1917,16 +1935,70 @@
 <h1 id="electrothermal-workflow">Electrothermal Workflow<a class="headerlink" href="#electrothermal-workflow" title="Permanent link">&para;</a></h1>
 <p>This guide shows the supported way to configure and consume electrothermal simulations in PulsimCore.</p>
 <h2 id="thermal-capable-components">Thermal-Capable Components<a class="headerlink" href="#thermal-capable-components" title="Permanent link">&para;</a></h2>
-<p><code>component.thermal.enabled: true</code> is accepted only for these canonical component types:</p>
+<p><code>component.thermal.enabled: true</code> is accepted on every device whose
+<code>device_traits::has_thermal_model = true</code>. As of the
+<code>close-electrothermal-loop-and-promote-thermal-traits</code> change
+(May 2026):</p>
+<p><strong>Always-enrolled (semiconductors)</strong> — these enrol in the thermal
+service whenever <code>simulation.thermal.enabled: true</code>, even without a
+per-device <code>thermal:</code> block:</p>
 <ul>
 <li><code>mosfet</code> (aliases: <code>m</code>, <code>nmos</code>, <code>pmos</code>)</li>
 <li><code>igbt</code> (alias: <code>q</code>)</li>
 <li><code>bjt_npn</code> (aliases: <code>bjtnpn</code>, <code>bjt-npn</code>)</li>
 <li><code>bjt_pnp</code> (aliases: <code>bjtpnp</code>, <code>bjt-pnp</code>)</li>
 </ul>
-<p>If thermal is enabled on unsupported components (for example <code>resistor</code>), parsing fails with:</p>
+<p><strong>Opt-in (passives + ideal diode)</strong> — these are trait-enabled but
+require an explicit per-device <code>thermal:</code> block (or a C++
+<code>opts.thermal_devices[name] = ThermalDeviceConfig{...}</code> entry) to
+join the loop. This preserves backward compatibility for existing
+circuits that didn't expect resistors / inductors / capacitors /
+diodes in the thermal pipeline:</p>
+<ul>
+<li><code>diode</code></li>
+<li><code>resistor</code></li>
+<li><code>inductor</code></li>
+<li><code>capacitor</code></li>
+</ul>
+<p>If thermal is enabled on a device type with <code>has_thermal_model =
+false</code> (e.g. <code>voltage_source</code>, <code>current_source</code>, <code>transformer</code>,
+motors), parsing fails with:</p>
 <ul>
 <li><code>PULSIM_YAML_E_THERMAL_UNSUPPORTED_COMPONENT</code></li>
+</ul>
+<h2 id="closed-electrothermal-loop">Closed Electrothermal Loop<a class="headerlink" href="#closed-electrothermal-loop" title="Permanent link">&para;</a></h2>
+<p>Once a device is enrolled, the simulator integrates a per-device
+<code>T_i(t)</code> via the lumped Foster ODE</p>
+<div class="highlight"><pre><span></span><code>T_i(t+dt) = T_i + dt · (P_i · R_th_i - (T_i - T_amb_i)) / (R_th_i · C_th_i)
+</code></pre></div>
+<p>After each accepted simulation step, the integrated <code>T_i(t)</code> is
+pushed BACK into the device's internal <code>T_j_</code> via
+<code>set_T_j_init()</code>. The device's temperature-corrected accessors
+(<code>Rds_on_at_Tj</code>, <code>V_ce_sat_at_Tj</code>, <code>V_F0_at_Tj</code>, <code>R_at_Tj</code>,
+<code>DCR_at_Tj</code>, <code>ESR_at_Tj</code>) then read the same <code>T_i(t)</code> that the
+stamp's <code>scale_i = clamp(1 + α · (T_i - T_ref), 0.05, 4)</code> feedback
+uses. <strong>Stamp path and loss path stay in sync at every step.</strong></p>
+<p>Consequences:</p>
+<ul>
+<li><strong><code>&lt;dev&gt;_junction_temperature(name)</code> reflects the integrated
+  <code>T_j(t)</code></strong> instead of staying frozen at <code>T_amb</code>. Available on
+  mosfet / igbt / diode / resistor / inductor / capacitor.</li>
+<li><strong>Loss computation honours <code>T_j(t)</code>.</strong> Conduction losses
+  integrated by <code>accumulate_loss(...)</code> use the <code>R_at_Tj</code> /
+  <code>DCR_at_Tj</code> / etc. values at the current T_j, so the steady-state
+  conduction loss self-consistently includes the temperature
+  feedback.</li>
+<li><strong><code>&lt;dev&gt;_steady_state_junction_temperature(name)</code> predicts the
+  asymptotic T_j</strong> from the accumulated <code>P_avg + R_th_ja</code>. Use this
+  for sanity checks or to converge a multi-pass electrothermal
+  fixed-point iteration:<ol>
+<li>Run the simulation.</li>
+<li>Read <code>&lt;dev&gt;_steady_state_junction_temperature(name)</code>.</li>
+<li>Call <code>set_&lt;dev&gt;_T_j(name, T_ss)</code> to seed the next pass.</li>
+<li>Re-run. Convergence usually within 2-3 passes for
+   continuous-conduction topologies.</li>
+</ol>
+</li>
 </ul>
 <h2 id="global-thermal-block-simulationthermal">Global Thermal Block (<code>simulation.thermal</code>)<a class="headerlink" href="#global-thermal-block-simulationthermal" title="Permanent link">&para;</a></h2>
 <p>Use <code>simulation.thermal</code> to define ambient and defaults:</p>
