@@ -142,15 +142,16 @@ install(TARGETS _pulsim
     LIBRARY DESTINATION pulsim
 )
 
-install(FILES
-    pulsim/__init__.py
-    pulsim/__init__.pyi
-    pulsim/_pulsim.pyi
-    pulsim/netlist.py
-    pulsim/signal_evaluator.py
-    pulsim/frequency_analysis.py
-    pulsim/templates.py
-    pulsim/snubber.py
+# Auto-discover all top-level .py / .pyi files in pulsim/ so we don't
+# silently forget new modules (snubber.py shipped broken because it
+# wasn't added to the explicit FILES list when it landed in f1b6a86).
+file(GLOB _pulsim_top_files
+    LIST_DIRECTORIES false
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/*.pyi
+)
+install(FILES ${_pulsim_top_files}
     DESTINATION pulsim
 )
 
