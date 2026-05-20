@@ -24,6 +24,28 @@ target_link_libraries(pulsim_core
 add_library(pulsim::core ALIAS pulsim_core)
 
 # =============================================================================
+# pulsim::v2 — bootstrap-pulsim-v2-kernel (Layer 0+)
+# =============================================================================
+# Header-only v2 namespace. Coexists with pulsim_core (v1); zero
+# coupling. Built layer by layer:
+#   Layer 0 (this commit): numeric/ + sparse/
+#   Layer 1 (next OpenSpec): topology/
+#   Layer 2: models/
+#   ...
+add_library(pulsim_v2 INTERFACE)
+target_include_directories(pulsim_v2
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+target_compile_features(pulsim_v2 INTERFACE cxx_std_23)
+target_link_libraries(pulsim_v2
+    INTERFACE
+        Eigen3::Eigen
+)
+add_library(pulsim::v2 ALIAS pulsim_v2)
+
+# =============================================================================
 # Compiled pulsim library (Circuit, Simulator, MNA, etc.)
 # =============================================================================
 add_library(pulsim STATIC
@@ -185,6 +207,28 @@ if(PULSIM_BUILD_TESTS)
     endif()
 
     catch_discover_tests(pulsim_simulation_tests)
+
+    # =============================================================================
+    # pulsim_v2_layer0_tests — bootstrap-pulsim-v2-kernel
+    # =============================================================================
+    # Layer 0 tests live in a separate binary so v2 can be developed
+    # bottom-up with zero v1 coupling. Each future layer (1, 2, 3,
+    # ...) gets its own test executable.
+    add_executable(pulsim_v2_layer0_tests
+        tests/v2/layer0/test_main.cpp
+        tests/v2/layer0/test_numeric_types.cpp
+        tests/v2/layer0/test_sparse_matrix.cpp
+        tests/v2/layer0/test_sparse_solver.cpp
+    )
+    target_link_libraries(pulsim_v2_layer0_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer0_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer0_tests)
 
     # =============================================================================
     # Custom test targets for convenience
