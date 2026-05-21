@@ -15,23 +15,34 @@ and v2, runs the same simulation, and reports wall-clock.
 
 ### Release build (`-O3 -DNDEBUG`)
 
-| Scenario             |   v1 (ms) |   v2 (ms) | speedup |
-|----------------------|----------:|----------:|--------:|
-| S1: V_dc + R         |     2.677 |     0.293 |   9.1×  |
-| S2: RC charging      |    14.476 |     2.283 |   6.3×  |
+| Scenario                  |   v1 (ms) |   v2 (ms) | speedup |
+|---------------------------|----------:|----------:|--------:|
+| S1: V_dc + R              |     2.919 |     0.297 |   9.8×  |
+| S2: RC charging           |    14.925 |     1.956 |   7.6×  |
+| **S3: Half-wave rectifier** | **3.863** | **0.304** | **12.7×** |
 
 ### Debug build (`-O0 -g`)
 
-| Scenario             |   v1 (ms) |   v2 (ms) | speedup |
-|----------------------|----------:|----------:|--------:|
-| S1: V_dc + R         |    21.550 |     4.812 |   4.5×  |
-| S2: RC charging      |   148.647 |    50.233 |   3.0×  |
+| Scenario                  |   v1 (ms) |   v2 (ms) | speedup |
+|---------------------------|----------:|----------:|--------:|
+| S1: V_dc + R              |    22.483 |     4.678 |   4.8×  |
+| S2: RC charging           |   151.867 |    50.974 |   3.0×  |
+| **S3: Half-wave rectifier** | **49.229** | **7.146** | **6.9×** |
 
-**Both modes confirm the architectural claim**: v2's PWL
-cache is faster on these scenarios. The speedup is more
-pronounced in Release mode because v2's tighter inner loop
-(no Newton iteration overhead for linear circuits) benefits
-disproportionately from inlining and vectorization.
+**All scenarios confirm the architectural claim**: v2's
+PWL cache is measurably faster than v1's per-step refactor.
+
+The biggest win is on the **switching scenario (S3)** —
+exactly the architectural prediction. Each zero-crossing
+of the AC source toggles the diode's on/off state:
+- v1 refactors the MNA matrix at every commutation.
+- v2 just picks the OTHER pre-factored cached segment
+  via `cache.lookup(mask)` — essentially free.
+
+Release mode amplifies all speedups because v2's tighter
+inner loop (no Newton iteration overhead for linear
+circuits, no per-step factor work) benefits more from
+inlining and vectorization.
 
 ## What the benchmarks measure
 
@@ -91,17 +102,37 @@ Vin (5V) ─── R (1kΩ) ─── n1 ─── C (1µF) ─── gnd
   (or per group of steps depending on event detection).
 - v2's win is the per-step refactor cost saved.
 
+### S3 — Half-wave rectifier (switching!)
+
+```
+V_sine(60Hz, 10V) ── diode ── n1 ── R (10Ω) ── gnd
+```
+
+- `dt = 50 µs`, `t_end = 33.3 ms` → ~666 steps over 2 cycles.
+- 1 switching diode that auto-commutates 4× (once per
+  zero-crossing).
+- v2 enumerates **2 cached segments** (diode ON vs OFF)
+  at build time. Each commutation is a `cache.lookup`
+  + back-substitution — essentially free.
+- v1 refactors the MNA matrix at each commutation event.
+- This is the scenario v2 was DESIGNED for: switching
+  topology + repeated commutations.
+
+The **12.7× Release speedup on S3** is the architectural
+claim made concrete.
+
 ## What V0 deliberately does NOT measure
 
-- **Switching scenarios (rectifier, PWM)**: V0 ships only
-  linear scenarios because v1's diode + event-iteration
-  setup differs from v2's `BranchKind::Switch` +
-  `DiodeEventState`, and a careful schema mapping is
-  needed to keep the comparison fair. Expected speedup on
-  switching is HIGHER than on these linear cases (v2's
-  pre-factored cache means switch transitions are free —
-  just pick the other cached factor). V1 adds these
-  scenarios.
+- **PWM chopper / controlled switch scenario**: v1's
+  `add_switch` requires external `set_switch_state` calls
+  between solver steps, which would need a custom run
+  loop to interleave with `run_transient`. The diode
+  scenario (S3) already proves the architectural point;
+  adding PWM is V1.
+- **Larger circuits**: V0 keeps circuits small (1-3
+  nodes) for reproducibility. Speedup may scale further
+  with circuit size; V1 adds RC-ladder / dense topology
+  cases.
 - **Memory footprint**: V0 is wall-clock only.
 - **Statistical rigor** (multiple runs, mean ± stddev):
   V0 measures a single run. Catch2's `BENCHMARK` macro

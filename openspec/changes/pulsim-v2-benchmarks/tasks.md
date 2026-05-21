@@ -8,17 +8,14 @@
 
 - [x] 2.1 S1: V_dc + R (linear sanity).
 - [x] 2.2 S2: RC charging (dynamic, no switches).
-- [ ] 2.3 S3: Half-wave rectifier — DEFERRED to V1 (v1
-      diode + event-iteration setup needs a careful
-      schema mapping to be a fair comparison).
-- [ ] 2.4 S4: PWM chopper — DEFERRED to V1 (same
-      reason).
-
-For each shipped:
-- Build the same circuit in v1 and v2.
-- Wall-clock measure the time-stepping loop.
-- INFO a markdown table row with (v1_ms, v2_ms, speedup).
-- Sanity-assert that final node voltages match.
+- [x] 2.3 S3: Half-wave rectifier (1 switching diode).
+- [ ] 2.4 S4: PWM chopper — DEFERRED to V1 (v1's
+      `add_switch` needs external `set_switch_state`
+      calls between solver steps, which doesn't compose
+      cleanly with `run_transient` — a fair comparison
+      would require a custom step-by-step run loop. S3
+      already proves the architectural point with the
+      diode auto-commutation pattern).
 
 ## Phase 3 — Docs (~0.1 days)
 
@@ -33,19 +30,22 @@ For each shipped:
 
 ## Measured results
 
-### Release build
-| Scenario        | v1 (ms) | v2 (ms) | speedup |
-|-----------------|--------:|--------:|--------:|
-| S1: V_dc + R    |   2.677 |   0.293 |   9.1×  |
-| S2: RC charging |  14.476 |   2.283 |   6.3×  |
+### Release build (`-O3 -DNDEBUG`)
+| Scenario                |  v1 (ms) |  v2 (ms) | speedup |
+|-------------------------|---------:|---------:|--------:|
+| S1: V_dc + R            |    2.919 |    0.297 |   9.8×  |
+| S2: RC charging         |   14.925 |    1.956 |   7.6×  |
+| S3: Half-wave rectifier |    3.863 |    0.304 |  12.7×  |
 
-### Debug build
-| Scenario        | v1 (ms) | v2 (ms) | speedup |
-|-----------------|--------:|--------:|--------:|
-| S1: V_dc + R    |  21.550 |   4.812 |   4.5×  |
-| S2: RC charging | 148.647 |  50.233 |   3.0×  |
+### Debug build (`-O0 -g`)
+| Scenario                |  v1 (ms) |  v2 (ms) | speedup |
+|-------------------------|---------:|---------:|--------:|
+| S1: V_dc + R            |   22.483 |    4.678 |   4.8×  |
+| S2: RC charging         |  151.867 |   50.974 |   3.0×  |
+| S3: Half-wave rectifier |   49.229 |    7.146 |   6.9×  |
 
-Both modes confirm the architectural claim: v2's PWL
-state-space cache is measurably faster than v1's per-step
-refactor path on these linear scenarios. Switching
-scenarios (where v2's cache REALLY shines) are V1 add-ons.
+**S3's 12.7× Release speedup is the architectural claim
+made concrete**: pre-factored cached segments mean
+switch commutations are essentially free for v2, while
+v1 refactors at every event. The biggest win is on the
+scenario v2 was DESIGNED for.
