@@ -18,14 +18,17 @@
 #include "pulsim/v2/models/capacitor.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
+#include "pulsim/v2/models/switched_diode.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 namespace pulsim::v2::pwl {
 
@@ -40,6 +43,7 @@ public:
         Switch        = 2,
         Capacitor     = 3,  // trap companion (Layer 4 V1)
         Inductor      = 4,  // trap companion (Layer 4 V1)
+        Diode         = 5,  // SwitchedDiode (Layer 5 V2)
     };
 
     struct SwitchParams {
@@ -84,6 +88,18 @@ public:
         // index = num_nodes + num_sources + relative_offset.
         inductor_branch_var_id_[branch_id] =
             static_cast<Index>(num_inductors_++);
+    }
+
+    /// Register a SwitchedDiode. The branch MUST have been added
+    /// to the graph with `BranchKind::Switch` (the diode IS a
+    /// switch from the topology's perspective). Default V_th = 0
+    /// for a perfectly ideal diode; pass 0.7 for a Si-behavioral
+    /// model.
+    void add_diode(Index branch_id, Real g_on, Real g_off,
+                    Real V_th = Real{0}) {
+        entries_[branch_id] = Entry{
+            models::SwitchedDiode::Params{g_on, g_off, V_th}};
+        diode_branches_.push_back(branch_id);
     }
 
     // -------- Lookups -------------------------------------------------------
@@ -147,6 +163,27 @@ public:
                 std::to_string(branch_id) + " is not an Inductor");
         }
         return std::get<models::Inductor::Params>(entry);
+    }
+
+    [[nodiscard]] const models::SwitchedDiode::Params&
+    diode_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<models::SwitchedDiode::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::diode_params: branch " +
+                std::to_string(branch_id) + " is not a Diode");
+        }
+        return std::get<models::SwitchedDiode::Params>(entry);
+    }
+
+    /// Iterate diode branch ids in insertion (= branch) order.
+    [[nodiscard]] std::span<const Index> diode_branches() const noexcept {
+        return std::span<const Index>{diode_branches_.data(),
+                                       diode_branches_.size()};
+    }
+
+    [[nodiscard]] Size num_diodes() const noexcept {
+        return diode_branches_.size();
     }
 
     // -------- State-vector layout helpers -----------------------------------
@@ -225,7 +262,8 @@ private:
                                 models::VoltageSource::Params,
                                 SwitchParams,
                                 models::Capacitor::Params,
-                                models::Inductor::Params>;
+                                models::Inductor::Params,
+                                models::SwitchedDiode::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -260,6 +298,11 @@ private:
     // The absolute index = num_nodes + num_sources + relative_offset.
     std::unordered_map<Index, Index> inductor_branch_var_id_;
     Size num_inductors_ = 0;
+
+    // Diode branches in insertion order. Layer 5 V2's
+    // DiodeEventState iterates this list to build per-diode
+    // tracking entries.
+    std::vector<Index> diode_branches_;
 };
 
 }  // namespace pulsim::v2::pwl

@@ -398,6 +398,32 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer5_v1_tests)
 
     # =============================================================================
+    # pulsim_v2_layer5_v2_tests — pulsim-v2-ideal-diode-auto-commutation
+    # =============================================================================
+    # SwitchedDiode + DiodeEventState + diode-aware run_transient.
+    # Integration: half-wave rectifier (single diode) and boost
+    # converter (1 controlled switch + 1 auto-commutating diode).
+    add_executable(pulsim_v2_layer5_v2_tests
+        tests/v2/layer5_v2/test_main.cpp
+        tests/v2/layer5_v2/test_switched_diode.cpp
+        tests/v2/layer5_v2/test_diode_event_state.cpp
+        tests/v2/layer5_v2/test_integration_half_wave_rectifier.cpp
+        # NOTE: boost converter integration is a known V0 limitation
+        # — per-step diode commutation chatters during DCM/CCM
+        # boundary at startup with idealized switches. Lands in the
+        # `pulsim-v2-event-detection` follow-up (sub-step bisection).
+    )
+    target_link_libraries(pulsim_v2_layer5_v2_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer5_v2_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer5_v2_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 

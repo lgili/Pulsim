@@ -32,6 +32,7 @@
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/cache.hpp"
 #include "pulsim/v2/pwl/device_pool.hpp"
+#include "pulsim/v2/pwl/diode_event_state.hpp"
 #include "pulsim/v2/pwl/history_state.hpp"
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
@@ -42,6 +43,27 @@
 #include <stdexcept>
 
 namespace pulsim::v2::solver {
+
+// -----------------------------------------------------------------------------
+// combine_masks — overlay diode bits on top of the user mask.
+//
+// Returns a new mask where every bit i = (diode_owned.get(i) ?
+// diode.get(i) : user.get(i)). Used by Layer 5 V2 to merge the
+// user's switch_fn output with the diode auto-state.
+// -----------------------------------------------------------------------------
+[[nodiscard]] inline topology::SwitchStateMask combine_masks(
+    const topology::SwitchStateMask& user,
+    const topology::SwitchStateMask& diode,
+    const topology::SwitchStateMask& diode_owned) noexcept {
+    // user, diode, diode_owned must all be the same width.
+    const std::uint64_t owned = diode_owned.bits();
+    const std::uint64_t merged =
+        (user.bits()  & ~owned) |     // keep user bits where diode doesn't own
+        (diode.bits() &  owned);      // overlay diode bits where it does
+    topology::SwitchStateMask out(user.size());
+    out.set_bits(merged);
+    return out;
+}
 
 // -----------------------------------------------------------------------------
 // Callback type aliases.
@@ -197,6 +219,11 @@ inline SimulationResult run_transient(
     pwl::HistoryState history{graph, pool};
     history.reset();   // explicit (constructor already zeroes)
 
+    pwl::DiodeEventState diodes{graph, pool};
+    diodes.reset();
+    const auto diode_owned = diodes.diode_owned_bits();
+    const bool has_diodes = diodes.num_diodes() > 0;
+
     Vector b_extra(static_cast<Index>(state_size));
 
     if (cache.dt() > Real{0}) {
@@ -225,14 +252,22 @@ inline SimulationResult run_transient(
                 b_extra += b_extra_fn(t);
             }
 
-            // 3. Switch state at THIS step.
-            const auto mask = switch_fn(t);
+            // 3. Switch state at THIS step. Overlay diode bits if
+            //    any diodes are present.
+            auto mask = switch_fn(t);
+            if (has_diodes) {
+                const auto diode_mask = diodes.current_diode_mask();
+                mask = combine_masks(mask, diode_mask, diode_owned);
+            }
 
             // 4. Cached solve — Layer 4's PLECS-style hot path.
             cache.solve(mask, b_extra, x);
 
-            // 5. Update history for the next iteration.
+            // 5. Update history + diode state for the next iter.
             history.update_from_state(x, opts.dt);
+            if (has_diodes) {
+                diodes.update_from_state(x);
+            }
 
             // 6. Record.
             result.times.push_back(t);
@@ -243,20 +278,30 @@ inline SimulationResult run_transient(
         //
         // No dynamic devices → cache.solve gives the DC operating
         // point for the requested switch state. Each sample is an
-        // independent solve; "IC = 0 at t_start" is not meaningful
-        // since the static answer at t_start IS the cache.solve
-        // result for the t_start switch state.
+        // independent solve. Diode auto-commutation still applies
+        // if there are any diodes in the circuit.
         const Vector zero_b_extra = Vector::Zero(state_size);
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
-            const auto mask = switch_fn(t);
+
+            auto mask = switch_fn(t);
+            if (has_diodes) {
+                const auto diode_mask = diodes.current_diode_mask();
+                mask = combine_masks(mask, diode_mask, diode_owned);
+            }
+
             if (b_extra_fn) {
                 const Vector b_ex = b_extra_fn(t);
                 cache.solve(mask, b_ex, x);
             } else {
                 cache.solve(mask, zero_b_extra, x);
             }
+
+            if (has_diodes) {
+                diodes.update_from_state(x);
+            }
+
             result.times.push_back(t);
             result.states.push_back(x);
         }

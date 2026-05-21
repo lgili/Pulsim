@@ -137,9 +137,22 @@ inline void assemble_segment(const topology::Graph& graph,
             break;
         }
         case topology::BranchKind::Switch: {
+            // The topological `Switch` kind covers both
+            // user-controlled `IdealSwitch` and auto-commutating
+            // `SwitchedDiode`. Use the pool's StoredKind to fetch
+            // the right (g_on, g_off).
             const bool closed = mask.get(switch_idx);
-            const Real g_on  = pool.switch_g_on(branch.id);
-            const Real g_off = pool.switch_g_off(branch.id);
+            Real g_on  = Real{0};
+            Real g_off = Real{0};
+            const auto k = pool.kind_of(branch.id);
+            if (k == DevicePool::StoredKind::Diode) {
+                const auto& p = pool.diode_params(branch.id);
+                g_on  = p.g_on;
+                g_off = p.g_off;
+            } else {
+                g_on  = pool.switch_g_on(branch.id);
+                g_off = pool.switch_g_off(branch.id);
+            }
             stamping::stamp_switch_fixed(J, b, x, coord, closed,
                                           g_on, g_off);
             ++switch_idx;
