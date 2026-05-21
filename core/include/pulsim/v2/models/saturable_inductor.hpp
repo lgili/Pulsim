@@ -49,39 +49,28 @@ struct SaturableInductor {
     struct Params {
         Real L_0       = Real{1e-3};   // [H] unsaturated inductance
         Real I_sat     = Real{1.0};    // [A] saturation current
-        Real n_exp     = Real{2.0};    // [-] saturation curve sharpness (>= 1)
-        // Smoothing floor: minimum effective L to keep Jacobian
-        // well-conditioned at very high i_L. Typically a few %% of L_0.
+        // The smoothing exponent is FIXED at n=2 (Atan-shape),
+        // the canonical SMPS-magnetics curve. This keeps the
+        // model AD-friendly (no pow needed — just (i/I_sat)²).
+        // Smoothing floor: minimum effective L at high |i|.
         Real L_residual = Real{0};    // [H] (0 = no floor)
     };
 
     static constexpr topology::BranchKind kind =
         topology::BranchKind::Nonlinear;
-    // The "branch" is from→to (like a regular inductor). The
-    // current i_L is the controlling state — but for AD purposes
-    // we model L(i) as a function of a single scalar input.
-    static constexpr Size num_terminals = 1;   // input: i_L (current)
+    static constexpr Size num_terminals = 1;
     static constexpr bool is_linear = false;
 
-    /// Effective inductance L(i) as a smooth function of the
-    /// instantaneous current. Templated for AD: returns either
-    /// Real (forward) or ADRealN<1> (Jacobian) depending on `S`.
+    /// Effective inductance L(i) = L_residual +
+    /// (L_0 − L_residual) / (1 + (i/I_sat)²)
     ///
-    /// Terminal convention: v[0] = i_L (the magnetising current).
-    /// Despite the name `current`, this is `L(i)` — the model's
-    /// "output" is the effective inductance, not a branch current.
-    /// The refresh helper handles the trap-rule integration.
+    /// Atan-shape saturation. C¹ smooth. Symmetric in i.
     template <numeric::FloatingPoint S>
     [[nodiscard]] static S current(
         const S* v, const Params& p) noexcept {
-        using std::pow;
-        using std::abs;
         const S i_L = v[0];
-        // L(i) = L_residual + (L_0 - L_residual) / (1 + (|i|/I_sat)^n)
-        // This guarantees L → L_residual >= 0 for large |i|, and
-        // L → L_0 for small |i|.
-        const S abs_ratio = abs(i_L) / p.I_sat;
-        const S denom = S{1} + pow(abs_ratio, p.n_exp);
+        const S ratio = i_L / p.I_sat;
+        const S denom = S{1} + ratio * ratio;
         const S delta_L = p.L_0 - p.L_residual;
         return p.L_residual + delta_L / denom;
     }

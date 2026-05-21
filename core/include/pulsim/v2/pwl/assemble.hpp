@@ -209,11 +209,27 @@ inline void assemble_segment(const topology::Graph& graph,
             ++switch_idx;
             break;
         }
-        case topology::BranchKind::Nonlinear:
-            // Still deliberately skipped — per-segment Newton on top
-            // of the cached factor lands in
-            // `pulsim-v2-nonlinear-segment-newton`.
+        case topology::BranchKind::Nonlinear: {
+            // V17: Saturable inductors live as Nonlinear
+            // branches but use the inductor branch-var
+            // numbering. Their constraint row would be
+            // ALL-ZERO in the linear assembly (the Newton
+            // refresh stamps everything per-iteration),
+            // which makes KLU's factorisation fail. Add a
+            // tiny "G_min" diagonal here so the cache builds;
+            // the Newton refresh's stamping dwarfs G_min in
+            // the combined Jacobian.
+            const auto src_kind = pool.kind_of(branch.id);
+            if (src_kind ==
+                    DevicePool::StoredKind::SaturableInductor) {
+                const Index branch_var_id =
+                    pool.branch_var_id_for_inductor(
+                        branch.id, graph);
+                J.coeffRef(branch_var_id, branch_var_id) +=
+                    Real{1e-12};
+            }
             break;
+        }
         }
     }
 

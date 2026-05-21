@@ -63,6 +63,7 @@ public:
         MosfetLevel1      = 11, // Layer 2 V13 (SH1 nonlinear MOSFET)
         IgbtLevel1        = 12, // Layer 2 V14 (linear-conduction IGBT)
         VCVS              = 13, // Layer 2 V15 (voltage-controlled voltage source)
+        SaturableInductor = 14, // Layer 2 V17 (nonlinear L(i) inductor)
     };
 
     struct SwitchParams {
@@ -243,6 +244,30 @@ public:
         return it->second;
     }
 
+    /// Register a SaturableInductor (V17). Like a regular
+    /// inductor, it adds a branch-current unknown to the
+    /// state vector (numbered in the same `num_inductors_`
+    /// sequence). The branch MUST be added with
+    /// `BranchKind::Nonlinear` in the graph — assemble skips
+    /// it, and `refresh_saturable_inductors` stamps the
+    /// nonlinear trap-rule constraint per Newton iteration.
+    void add_saturable_inductor(
+        Index branch_id,
+        models::SaturableInductor::Params p) {
+        entries_[branch_id] = Entry{p};
+        // Piggy-back on the inductor numbering — saturable
+        // and linear inductors share the same state-vector
+        // segment.
+        inductor_branch_var_id_[branch_id] =
+            static_cast<Index>(num_inductors_++);
+        saturable_inductor_branches_.push_back(branch_id);
+    }
+
+    [[nodiscard]] const std::vector<Index>&
+    saturable_inductor_branches() const noexcept {
+        return saturable_inductor_branches_;
+    }
+
     /// Register a 3-terminal IGBT Level 1 (Layer 2 V14).
     /// `branch_id` is the collector→emitter Nonlinear branch;
     /// `gate_node_id` is the gate's node index. Layer 4 V14's
@@ -391,6 +416,20 @@ public:
                 " is not a MosfetLevel1");
         }
         return std::get<models::MosfetLevel1::Params>(entry);
+    }
+
+    [[nodiscard]] const models::SaturableInductor::Params&
+    saturable_inductor_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<
+                models::SaturableInductor::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::saturable_inductor_params: "
+                "branch " + std::to_string(branch_id) +
+                " is not a SaturableInductor");
+        }
+        return std::get<
+            models::SaturableInductor::Params>(entry);
     }
 
     [[nodiscard]] const models::VCVS::Params&
@@ -566,7 +605,8 @@ private:
                                 models::PulseVoltageSource::Params,
                                 models::MosfetLevel1::Params,
                                 models::IgbtLevel1::Params,
-                                models::VCVS::Params>;
+                                models::VCVS::Params,
+                                models::SaturableInductor::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -621,6 +661,12 @@ private:
     // references for the sense inputs.
     std::unordered_map<Index, std::pair<Index, Index>>
         vcvs_input_nodes_;
+
+    // Layer 2 V17: SaturableInductor branches, in insertion
+    // order. Used by the Newton refresh + history tracker to
+    // iterate just the saturable inductors without scanning
+    // every Nonlinear branch.
+    std::vector<Index> saturable_inductor_branches_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the

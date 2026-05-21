@@ -35,7 +35,9 @@
 #include "pulsim/v2/pwl/device_pool.hpp"
 #include "pulsim/v2/pwl/diode_event_state.hpp"
 #include "pulsim/v2/pwl/history_state.hpp"
+#include "pulsim/v2/pwl/nonlinear_refresh_saturable_inductor.hpp"
 #include "pulsim/v2/pwl/nonlinear_solve.hpp"
+#include "pulsim/v2/pwl/saturable_inductor_history.hpp"
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
 #include "pulsim/v2/sources/pulse_b_extra.hpp"
@@ -256,6 +258,105 @@ inline SimulationResult run_transient(
     pwl::HistoryState history{graph, pool};
     history.reset();   // explicit (constructor already zeroes)
 
+    // V17: saturable inductors carry their own (i_L, V_L)_old
+    // history, since they need it in the Newton refresh (not
+    // just as a pre-computed b_extra). Initialise to zero.
+    pwl::SaturableInductorHistory sat_history;
+    sat_history.init(graph, pool);
+    const bool has_saturable = !sat_history.empty();
+
+    // V17: shared dt that the saturable-inductor refresh
+    // reads each iteration. Updated when sub-step correction
+    // splits dt into dt1 + dt2.
+    Real refresh_dt = opts.dt;
+
+    // V17: if any saturable inductors are present, wrap the
+    // user's nl_refresh with our additive saturable
+    // stamping. The user-supplied refresh runs first (it
+    // zero-clears + stamps diodes/MOSFETs/IGBTs); we then
+    // ADD the saturable inductor contributions on top.
+    pwl::NonlinearRefreshFn nl_refresh_effective = nl_refresh;
+    if (has_saturable) {
+        nl_refresh_effective =
+            [user_refresh = nl_refresh, &sat_history,
+             &refresh_dt](const Vector& x,
+                            sparse::Matrix& J_nl,
+                            Vector& f_nl,
+                            const topology::Graph& g,
+                            const pwl::DevicePool& p)
+                -> Real {
+                Real max_i = Real{0};
+                if (user_refresh) {
+                    max_i = user_refresh(x, J_nl, f_nl, g, p);
+                } else {
+                    if (J_nl.rows() > 0) J_nl.setZero();
+                    if (f_nl.size() > 0) f_nl.setZero();
+                }
+                // Additive saturable-inductor stamping.
+                for (const auto& e : sat_history.entries()) {
+                    const Real v_from =
+                        stamping::read_node_voltage(x, e.from);
+                    const Real v_to =
+                        stamping::read_node_voltage(x, e.to);
+                    const Real i_L_new = x[e.branch_var_id];
+                    const models::ModelInputs<
+                            models::SaturableInductor> iv{
+                        i_L_new};
+                    const auto [L_eff, partials] =
+                        models::evaluate_current_and_jacobian<
+                            models::SaturableInductor>(
+                                iv, e.params);
+                    const Real dL_di = partials[0];
+                    const Real two_over_dt =
+                        Real{2} / refresh_dt;
+                    const Real two_L_over_dt =
+                        two_over_dt * L_eff;
+                    const Real di = i_L_new - e.i_L_old;
+                    const Real R_row =
+                        (v_from - v_to) + e.V_L_old -
+                        two_L_over_dt * di;
+                    const bool from_active =
+                        stamping::node_is_active(e.from);
+                    const bool to_active =
+                        stamping::node_is_active(e.to);
+                    if (from_active)
+                        f_nl[e.from] += i_L_new;
+                    if (to_active)
+                        f_nl[e.to]   -= i_L_new;
+                    f_nl[e.branch_var_id] += R_row;
+                    if (from_active) {
+                        J_nl.coeffRef(
+                            e.branch_var_id, e.from)
+                            += Real{1};
+                    }
+                    if (to_active) {
+                        J_nl.coeffRef(
+                            e.branch_var_id, e.to)
+                            -= Real{1};
+                    }
+                    const Real dR_di_L =
+                        -two_L_over_dt -
+                        two_over_dt * di * dL_di;
+                    J_nl.coeffRef(
+                        e.branch_var_id, e.branch_var_id)
+                        += dR_di_L;
+                    if (from_active) {
+                        J_nl.coeffRef(
+                            e.from, e.branch_var_id)
+                            += Real{1};
+                    }
+                    if (to_active) {
+                        J_nl.coeffRef(
+                            e.to, e.branch_var_id)
+                            -= Real{1};
+                    }
+                    max_i = std::max(
+                        max_i, std::abs(i_L_new));
+                }
+                return max_i;
+            };
+    }
+
     pwl::DiodeEventState diodes{graph, pool};
     diodes.reset();
     const auto diode_owned = diodes.diode_owned_bits();
@@ -383,10 +484,10 @@ inline SimulationResult run_transient(
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
                 }
-                if (nl_refresh) {
+                if (nl_refresh_effective) {
                     const auto& seg = cache.lookup(mask);
                     x = pwl::solve_with_newton_b_extra(
-                        seg, nl_refresh, graph, pool,
+                        seg, nl_refresh_effective, graph, pool,
                         /*x_init=*/x, b_extra,
                         opts.max_newton_iterations,
                         opts.tol_newton_dx,
@@ -503,6 +604,9 @@ inline SimulationResult run_transient(
                         cache.solve_at(
                             mask_pre, dt1, be_total_1, x);
                         history.update_from_state(x, dt1);
+                        if (has_saturable) {
+                            sat_history.update_from_state(x);
+                        }
                     }
 
                     // Apply commutation events directly from
@@ -562,6 +666,9 @@ inline SimulationResult run_transient(
                         cache.solve_at(
                             mask_post, dt2, be_total_2, x);
                         history.update_from_state(x, dt2);
+                        if (has_saturable) {
+                            sat_history.update_from_state(x);
+                        }
                     }
                     corrected = true;
                 }
@@ -576,6 +683,9 @@ inline SimulationResult run_transient(
             //    the substep correction already advanced it).
             if (!corrected) {
                 history.update_from_state(x, opts.dt);
+                if (has_saturable) {
+                    sat_history.update_from_state(x);
+                }
             }
 
             // 6. Record. event_iteration_count = iters - 1 (the
@@ -632,10 +742,10 @@ inline SimulationResult run_transient(
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
                 }
-                if (nl_refresh) {
+                if (nl_refresh_effective) {
                     const auto& seg = cache.lookup(mask);
                     x = pwl::solve_with_newton_b_extra(
-                        seg, nl_refresh, graph, pool,
+                        seg, nl_refresh_effective, graph, pool,
                         /*x_init=*/x, b_extra_user,
                         opts.max_newton_iterations,
                         opts.tol_newton_dx,

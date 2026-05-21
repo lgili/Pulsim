@@ -502,6 +502,39 @@ public:
         return *this;
     }
 
+    /// Layer 2 V17: SaturableInductor — nonlinear L(i) device
+    /// integrated via Newton refresh. The branch is added as
+    /// `BranchKind::Nonlinear`; assemble skips it, and the
+    /// Newton refresh stamps the nonlinear trap-rule
+    /// constraint per iteration.
+    ///
+    /// Required call sequence in run_transient:
+    ///   * Pass `enable_nonlinear_refresh=True` (or wire
+    ///     `make_combined_nonlinear_refresh(history, dt)`
+    ///     manually for non-Python callers).
+    ///   * History is automatically initialized + updated by
+    ///     the solver when the circuit contains saturable
+    ///     inductors.
+    CircuitBuilder& add_saturable_inductor(
+        std::string /*name*/,
+        std::string from, std::string to,
+        Real L_0, Real I_sat,
+        Real L_residual = Real{0}) {
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = graph_.add_branch(
+            from_idx, to_idx,
+            topology::BranchKind::Nonlinear);
+        pool_.add_saturable_inductor(
+            b_id,
+            models::SaturableInductor::Params{
+                .L_0 = L_0,
+                .I_sat = I_sat,
+                .L_residual = L_residual,
+            });
+        return *this;
+    }
+
     /// Layer 2 V16: N-winding transformer (2 ≤ N ≤ 6). Each
     /// winding is added as a regular `Inductor` branch, and
     /// the N·(N−1)/2 pair-wise couplings are registered with

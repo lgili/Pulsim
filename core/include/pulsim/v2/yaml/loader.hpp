@@ -204,6 +204,14 @@ inline void load_device(
             require_string(dev, idx, type, "in_neg"),
             require_string(dev, idx, type, "out"),
             real_or(dev, "gain", Real{1e5}));
+    } else if (type == "saturable_inductor") {
+        b.add_saturable_inductor(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "L_0"),
+            require_real(dev, idx, type, "I_sat"),
+            real_or(dev, "L_residual", Real{0}));
     } else if (type == "igbt_level1") {
         b.add_igbt_level1(
             name,
