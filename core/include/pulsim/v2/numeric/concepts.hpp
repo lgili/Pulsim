@@ -24,7 +24,9 @@
 namespace pulsim::v2::numeric {
 
 // -----------------------------------------------------------------------------
-// FloatingPoint — satisfied by Real and by any standard floating-point.
+// FloatingPoint — satisfied by Real, by any standard floating-point,
+// AND by any type that opts in via the `is_ad_scalar_v` customization
+// point.
 //
 // Layer 2 device-current functions are constrained on this concept:
 //
@@ -33,10 +35,19 @@ namespace pulsim::v2::numeric {
 //
 // The SAME function compiles for double (call-site, tests) AND for the
 // AD scalar (Jacobian extraction). No manual derivative path needed.
+//
+// `is_ad_scalar_v<T>` defaults to false. Layer 2's `ad::ADRealN<N>`
+// specializes it to true so device models accept AD scalars without
+// any other Layer 0 change.
 // -----------------------------------------------------------------------------
+
+template <typename T>
+inline constexpr bool is_ad_scalar_v = false;
+
 template <typename T>
 concept FloatingPoint = std::floating_point<T> ||
-                       std::is_same_v<std::remove_cv_t<T>, Real>;
+                       std::is_same_v<std::remove_cv_t<T>, Real> ||
+                       is_ad_scalar_v<std::remove_cv_t<T>>;
 
 // -----------------------------------------------------------------------------
 // IndexLike — signed integer at least 32 bits wide.
