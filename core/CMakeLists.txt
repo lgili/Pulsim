@@ -279,6 +279,30 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer2_tests)
 
     # =============================================================================
+    # pulsim_v2_layer3_tests — pulsim-v2-generic-stamping-pipeline
+    # =============================================================================
+    # Layer 3 = generic stamping pipeline. Depends on Layers 0 + 1 + 2.
+    # ONE templated stamper for every DeviceModel — the v1 four-stamp
+    # duplication is structurally impossible here.
+    add_executable(pulsim_v2_layer3_tests
+        tests/v2/layer3/test_main.cpp
+        tests/v2/layer3/test_branch_coord.cpp
+        tests/v2/layer3/test_stamp_device.cpp
+        tests/v2/layer3/test_stamp_voltage_source.cpp
+        tests/v2/layer3/test_stamp_switch.cpp
+        tests/v2/layer3/test_integration_vrgnd.cpp
+    )
+    target_link_libraries(pulsim_v2_layer3_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer3_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer3_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 
