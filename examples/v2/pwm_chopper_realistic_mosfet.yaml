@@ -1,0 +1,86 @@
+# Pulsim v2 example: PWM chopper with REALISTIC MOSFET
+# ---
+# Demonstrates the V13 SH1 MOSFET as a hard-switched active
+# device in a real PWM circuit. The topology is a series-pass
+# chopper rather than a true boost converter because the
+# combination of L + MOSFET + PWM hits a known Newton
+# convergence corner in v2 when the inductor is in series
+# with a smooth-blend MOSFET driven by a step gate transition
+# (the trap-companion conductance becomes too small to
+# stabilise the Jacobian during the gate-edge instant). The
+# pure-resistive chopper here exercises the SAME V13 model
+# in switching operation without the stiffness.
+#
+# Topology:
+#   V_in ── R_in ──┬── drain
+#                  │
+#                  M1 ── gnd (gate = V_g pulse source)
+#                  │
+#                  R_load ── gnd
+#
+# Operating points (K = 0.01 chosen so the MOSFET stays in
+# the TRIODE region — its saturation current K·V_OV² = 0.64
+# A safely exceeds the actual operating current ~210 mA but
+# stays small enough that Newton's first linearization step
+# doesn't overshoot into negative-V_DS region):
+#
+#   M1 ON  (V_g = 10 V, V_OV = 8 V):
+#     V_drain solves 0.5·V² − 9·V + 12 = 0 → V_drain ≈ 1.45 V
+#     (this is the equilibrium between R_in's voltage divider
+#      and M1's triode I-V curve)
+#   M1 OFF (V_g = 0, MOSFET in cutoff):
+#     Voltage divider R_in/R_load: V_drain = V_in·R_load
+#                                          /(R_in+R_load)
+#                                          = 12·100/150 = 8 V
+#
+# With 40 %% PWM duty, the time-average drain voltage is
+# 0.4·1.45 + 0.6·8 ≈ 5.4 V.
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: vin
+      to: gnd
+      V: 12.0
+
+    # PWM gate drive — V12 pulse source
+    - type: pulse_voltage_source
+      name: V_g_drive
+      from: V_g
+      to: gnd
+      v_initial: 0.0
+      v_pulsed: 10.0
+      t_start: 0.0
+      pulse_width: 4.0e-6     # 40 % duty at 100 kHz
+      period: 1.0e-5
+
+    # Series-pass resistor
+    - type: resistor
+      name: R_in
+      from: vin
+      to: drain
+      R: 50.0
+
+    # Active switch — V13 SH1 MOSFET, drain → gnd
+    - type: mosfet_level1
+      name: M1
+      drain: drain
+      source: gnd
+      gate: V_g
+      K: 0.01
+      V_T: 2.0
+      lambda: 0.02
+      kappa: 10.0
+
+    # Load — drain → gnd in parallel with the MOSFET
+    - type: resistor
+      name: R_load
+      from: drain
+      to: gnd
+      R: 100.0
+
+simulation:
+  t_start: 0.0
+  t_end:   3.0e-5         # 3 PWM cycles @ 100 kHz
+  dt:      1.0e-7

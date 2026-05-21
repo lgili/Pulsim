@@ -533,6 +533,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/showcases/test_three_phase_diode_rectifier_open_loop.cpp  # V11
         tests/v2/showcases/test_rlc_step_response.cpp           # V12
         tests/v2/showcases/test_common_source_amplifier.cpp     # V13
+        tests/v2/showcases/test_pwm_chopper_realistic_mosfet.cpp # V13 SMPS
     )
     target_link_libraries(pulsim_v2_showcase_tests
         PRIVATE
