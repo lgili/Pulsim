@@ -472,6 +472,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_v2_layer5_v4_tests
         tests/v2/layer5_v4/test_main.cpp
         tests/v2/layer5_v4/test_integration_smooth_rectifier.cpp
+        tests/v2/layer5_v4/test_globalized_rectifier.cpp
     )
     target_link_libraries(pulsim_v2_layer5_v4_tests
         PRIVATE

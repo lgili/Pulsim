@@ -320,7 +320,8 @@ inline SimulationResult run_transient(
                         /*x_init=*/x, b_extra,
                         opts.max_newton_iterations,
                         opts.tol_newton_dx,
-                        opts.tol_newton_res);
+                        opts.tol_newton_res,
+                        opts.enable_newton_line_search);
                 } else {
                     cache.solve(mask, b_extra, x);
                 }
@@ -379,7 +380,8 @@ inline SimulationResult run_transient(
                         /*x_init=*/x, b_extra_user,
                         opts.max_newton_iterations,
                         opts.tol_newton_dx,
-                        opts.tol_newton_res);
+                        opts.tol_newton_res,
+                        opts.enable_newton_line_search);
                 } else {
                     cache.solve(mask, b_extra_user, x);
                 }

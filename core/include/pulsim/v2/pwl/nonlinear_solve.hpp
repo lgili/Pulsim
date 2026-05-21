@@ -75,7 +75,8 @@ using NonlinearRefreshFn = std::function<
     const Vector& b_extra,
     Size max_iters = Size{50},
     Real tol_dx  = Real{1e-9},
-    Real tol_res = Real{1e-9}) {
+    Real tol_res = Real{1e-9},
+    bool enable_line_search = false) {
     const Size n = seg.state_size;
     Vector x = x_init;
     if (static_cast<Size>(x.size()) != n) {
@@ -130,16 +131,45 @@ using NonlinearRefreshFn = std::function<
         Vector neg_f = -f_combined;
         solver->solve(neg_f, dx);
 
-        // 5. Update x.
-        x += dx;
+        // 5. Update x. Plain Newton uses α = 1. When line
+        //    search is enabled, we backtrack α until the
+        //    residual norm decreases (or fall back to α = 1
+        //    if no smaller α reduces it).
+        (void)nl_residual_norm;   // diagnostic only
+        Real alpha = Real{1};
+        if (enable_line_search) {
+            const Real baseline_norm =
+                f_combined.lpNorm<Eigen::Infinity>();
+            sparse::Matrix J_nl_trial(static_cast<Index>(n),
+                                       static_cast<Index>(n));
+            Vector f_nl_trial = Vector::Zero(static_cast<Index>(n));
+            bool accepted = false;
+            for (Size bt = 0; bt < Size{8}; ++bt) {
+                const Vector x_trial = x + alpha * dx;
+                (void)refresh(x_trial, J_nl_trial, f_nl_trial,
+                               graph, pool);
+                const Vector f_trial =
+                    seg.J * x_trial + seg.b_constant +
+                    b_extra + f_nl_trial;
+                if (f_trial.lpNorm<Eigen::Infinity>() <
+                        baseline_norm) {
+                    accepted = true;
+                    break;
+                }
+                alpha *= Real{0.5};
+            }
+            if (!accepted) {
+                alpha = Real{1};   // fall back to plain Newton
+            }
+        }
+        x += alpha * dx;
 
         // 6. Convergence check. We use the MNA residual norm
         //    `||f_combined||_inf` only — `nl_residual_norm`
         //    (returned by the refresh) is the magnitude of the
         //    device CURRENTS, not a residual, and at convergence
         //    the currents are typically O(mA-A), not zero.
-        (void)nl_residual_norm;   // diagnostic only
-        last_dx_norm  = dx.lpNorm<Eigen::Infinity>();
+        last_dx_norm  = (alpha * dx).lpNorm<Eigen::Infinity>();
         last_res_norm = f_combined.lpNorm<Eigen::Infinity>();
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             return x;

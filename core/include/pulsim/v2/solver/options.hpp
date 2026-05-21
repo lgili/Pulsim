@@ -57,6 +57,13 @@ struct SimulationOptions {
     /// Default 1e-9.
     Real tol_newton_res = Real{1e-9};
 
+    /// Enable backtracking line search inside Newton
+    /// (Layer 4 V4 / globalization). When `false` (default),
+    /// plain Newton is used. When `true`, each Newton iteration
+    /// halves the step size up to 8 times if the full step
+    /// would increase the residual norm.
+    bool enable_newton_line_search = false;
+
     [[nodiscard]] bool valid() const noexcept {
         // All three values must be finite (no NaN, no infinity).
         if (!std::isfinite(t_start) || !std::isfinite(t_end) ||
