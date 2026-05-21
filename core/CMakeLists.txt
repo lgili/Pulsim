@@ -296,6 +296,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/sources/test_spwm_pair_fn.cpp           # Layer 2 V7
         tests/v2/sources/test_three_phase_spwm_fn.cpp    # Layer 2 V8
         tests/v2/sources/test_phase_shift_full_bridge_fn.cpp  # V9
+        tests/v2/sources/test_combined_switch_fn.cpp     # Layer 2 V10
     )
     target_link_libraries(pulsim_v2_sources_tests
         PRIVATE

@@ -36,6 +36,7 @@
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
 #include "pulsim/v2/solver/run_transient.hpp"
+#include "pulsim/v2/sources/combined_switch_fn.hpp"
 #include "pulsim/v2/sources/dead_time_pwm_pair_fn.hpp"
 #include "pulsim/v2/sources/phase_shift_full_bridge_fn.hpp"
 #include "pulsim/v2/sources/pwm_switch_fn.hpp"
@@ -467,6 +468,15 @@ void init_module(py::module_& m) {
             &sources::ThreePhaseLegIndices::hs_c)
         .def_readwrite("ls_c",
             &sources::ThreePhaseLegIndices::ls_c);
+
+    m.def("make_combined_switch_fn",
+        &sources::make_combined_switch_fn,
+        py::arg("num_switches"), py::arg("fns"),
+        "Compose multiple SwitchScheduleFn callbacks into a "
+        "single one whose mask is the bitwise OR of all "
+        "sub-masks. Useful for combining e.g. a primary-"
+        "side PWM helper with a sync-rectifier helper "
+        "where each drives different switch indices.");
 
     m.def("make_phase_shift_full_bridge_fn",
         &sources::make_phase_shift_full_bridge_fn,

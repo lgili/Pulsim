@@ -536,6 +536,41 @@ def test_make_phase_shift_full_bridge_fn_anti_phase() -> None:
         assert m.get(1) == m.get(2)   # A_LS ≡ B_HS
 
 
+def test_make_combined_switch_fn_disjoint_bits() -> None:
+    """Layer 2 V10 — compose two pair helpers driving
+    disjoint bit groups; both must contribute to the
+    combined mask."""
+    pair_a = p.make_dead_time_pwm_pair_fn(
+        frequency=1.0, duty=0.5,
+        hs_switch_idx=0, ls_switch_idx=1,
+        num_switches=4, dead_time=0.0)
+    pair_b = p.make_dead_time_pwm_pair_fn(
+        frequency=1.0, duty=0.5,
+        hs_switch_idx=2, ls_switch_idx=3,
+        num_switches=4, dead_time=0.0,
+        phase=0.5)   # half-cycle offset
+    combo = p.make_combined_switch_fn(
+        num_switches=4, fns=[pair_a, pair_b])
+
+    for k in range(100):
+        t = (k + 0.1) * 2.0 / 100.0
+        m = combo(t)
+        a = pair_a(t)
+        b = pair_b(t)
+        for i in range(4):
+            assert m.get(i) == (a.get(i) or b.get(i))
+
+
+def test_make_combined_switch_fn_empty_list() -> None:
+    """Layer 2 V10 — empty fns list returns an all-OFF mask
+    of the requested size."""
+    sw = p.make_combined_switch_fn(num_switches=4, fns=[])
+    m = sw(0.5)
+    assert m.size == 4
+    for i in range(4):
+        assert m.get(i) is False
+
+
 def test_make_pwm_switch_fn_phase_and_edge_cases() -> None:
     """Layer 2 V5 — helper handles phase offset, duty=0/1,
     and frequency=0 the same way the C++ helper does."""
