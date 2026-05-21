@@ -1,17 +1,19 @@
 # Pulsim v2 example: half-wave rectifier
 # ---
 # V_sine(60 Hz, 10 V amplitude) → diode → R_load → GND.
-# The voltage-source baseline is 0 V; the actual sinusoidal
-# value is overlaid via `b_extra_fn` at runtime (see the
-# Python / C++ runner).
+# Uses the V11 first-class SineVoltageSource (no b_extra_fn
+# overlay needed at runtime).
 
 circuit:
   devices:
-    - type: voltage_source
+    - type: sine_voltage_source
       name: Vin
       from: n0
       to: gnd
-      V: 0.0          # modulated via b_extra_fn at runtime
+      v_dc: 0.0
+      v_amplitude: 10.0
+      frequency: 60.0
+      phase: 0.0
 
     - type: diode
       name: D1

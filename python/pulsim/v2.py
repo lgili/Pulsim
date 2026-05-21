@@ -101,6 +101,11 @@ def simulate(
     enable_nonlinear_refresh: Optional[bool] = None,
     max_newton_iterations: int = 0,
     max_event_iterations: int = 0,
+    tol_newton_dx: Optional[float] = None,
+    tol_newton_res: Optional[float] = None,
+    enable_newton_line_search: Optional[bool] = None,
+    enable_newton_lm: Optional[bool] = None,
+    enable_substep_state_correction: Optional[bool] = None,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -162,6 +167,16 @@ def simulate(
         opts.max_newton_iterations = max_newton_iterations
     if max_event_iterations > 0:
         opts.max_event_iterations = max_event_iterations
+    if tol_newton_dx is not None:
+        opts.tol_newton_dx = tol_newton_dx
+    if tol_newton_res is not None:
+        opts.tol_newton_res = tol_newton_res
+    if enable_newton_line_search is not None:
+        opts.enable_newton_line_search = enable_newton_line_search
+    if enable_newton_lm is not None:
+        opts.enable_newton_lm = enable_newton_lm
+    if enable_substep_state_correction is not None:
+        opts.enable_substep_state_correction = enable_substep_state_correction
 
     # Default switch_fn: all switches closed.
     if switch_fn is None:

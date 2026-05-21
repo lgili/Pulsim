@@ -1,32 +1,20 @@
 #!/usr/bin/env python3
-"""End-to-end buck-converter runner — the v2 SMPS showcase.
+"""Buck converter — 24 V → ~12 V at 5 Ω load, 100 kHz / 50 % PWM.
 
-Loads `examples/v2/buck.yaml`, drives Q1 with a 100 kHz / 50 %
-PWM signal, runs `run_transient`, and prints steady-state
-output-voltage statistics.
+   Vin ── Q1 (HS MOSFET + body diode) ── sw ──┬── L ── vout
+                                              │
+                                              D_FW (sw → gnd)
 
-The buck topology:
+Steady-state V_out ≈ V_in · D = 24 · 0.5 = 12 V (minus small
+R_on + diode-drop losses).
 
-    Vin (24V)
-       │
-       ├── Q1 (high-side MOSFET, body diode included)
-       │     │
-       │     └── sw ────────[D_FW]──── gnd
-       │     │
-       │     └── L(100µH) ── vout
-       │                       │
-       │                       ├── Cout(47µF) ── gnd
-       │                       │
-       │                       └── R_load(5Ω) ── gnd
-
-Analytical steady-state V_out = V_in · D = 24 V · 0.5 = 12 V
-(minus small R_on + IR losses).
+Demonstrates the canonical SMPS pattern: switch + free-wheel
+diode + LC filter + load. The PWM driver uses
+`make_pwm_switch_fn` (Layer 2 V5).
 """
 
 from __future__ import annotations
 
-import math
-import os
 from pathlib import Path
 
 import numpy as np
@@ -34,102 +22,95 @@ import numpy as np
 import pulsim.v2 as p
 
 
-def main() -> None:
-    # Resolve YAML path relative to this script.
-    script_dir = Path(__file__).resolve().parent
-    yaml_path = script_dir.parent / "buck.yaml"
-    if not yaml_path.exists():
-        raise SystemExit(f"missing YAML: {yaml_path}")
+USE_YAML = True
+F_PWM = 100e3
+DUTY  = 0.50
 
-    print(f"Loading {yaml_path} ...")
+
+def load_from_yaml() -> tuple[p.CircuitBuilder, float, float, float]:
+    yaml_path = Path(__file__).resolve().parent.parent / "buck.yaml"
     loaded = p.load_yaml_file(str(yaml_path))
-    print(f"  num_branches = {loaded.builder.num_branches}")
-    print(f"  dt = {loaded.options.dt} s")
-    print(f"  t_end = {loaded.options.t_end} s")
+    return (loaded.builder,
+            loaded.options.t_start,
+            loaded.options.t_end,
+            loaded.options.dt)
 
-    # Build the PWL state-space cache.
-    cache = p.PwlStateSpaceCache(
-        loaded.builder.graph, loaded.builder.pool)
-    cache.build(loaded.options.dt)
-    print("  cache built ✓")
 
-    # PWM parameters: 100 kHz, 50 % duty cycle.
-    f_sw = 100e3
-    T_sw = 1.0 / f_sw
-    duty = 0.5
+def build_from_python() -> tuple[p.CircuitBuilder, float, float, float]:
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_mosfet_with_body_diode("Q1", "vin", "sw",
+                                   R_on=1e-3, R_off=1e9, V_F=0.7)
+    b.add_diode    ("D_FW", "gnd",  "sw",   1e3, 1e-9, V_th=0.7)
+    b.add_inductor ("L1",   "sw",   "vout", 100e-6)
+    b.add_capacitor("Cout", "vout", "gnd",  47e-6)
+    b.add_resistor ("R_L",  "vout", "gnd",  5.0)
+    return b, 0.0, 5.0e-3, 1.0e-7
 
-    # How many switches does the cache enumerate? We need
-    # this to construct correctly-sized SwitchStateMask
-    # objects (the cache only has segments at the right
-    # bit width).
-    num_switches = loaded.builder.graph.num_switches
 
-    def switch_fn(t: float) -> p.SwitchStateMask:
-        phase = math.fmod(t, T_sw) / T_sw
-        # Build a mask with `num_switches` bits.
-        # Bit 0 = Q1 (the MOSFET); the auto-commutating
-        # diodes (Q1 body diode + D_FW) are at higher
-        # bits and managed by DiodeEventState at runtime.
-        m = p.SwitchStateMask(num_switches)
-        if phase < duty:
-            m.set(0, True)   # Q1 ON
-        return m
+def main() -> None:
+    if USE_YAML:
+        builder, t_start, t_end, dt = load_from_yaml()
+    else:
+        builder, t_start, t_end, dt = build_from_python()
+    print(f"  authoring mode: {'YAML' if USE_YAML else 'Python builder'}")
+    print(f"  num_branches:   {builder.num_branches}")
+    print(f"  num_switches:   {builder.graph.num_switches}")
+    print(f"  t_end/dt:       {t_end*1e3:.2f} ms / {dt*1e9:.0f} ns")
 
-    # Run the transient.
-    print("Running transient ...")
-    result = p.run_transient(
-        cache, loaded.builder.graph, loaded.builder.pool,
-        loaded.options, switch_fn=switch_fn)
-    print(f"  {result.num_steps()} samples")
+    # PWM driver — Q1 (MOSFET switch) is the FIRST inserted switch (bit 0).
+    # The body diode + D_FW occupy the remaining bits; they are auto-
+    # commutated by the diode-event system inside run_transient.
+    pwm = p.make_pwm_switch_fn(
+        frequency=F_PWM, duty=DUTY,
+        switch_idx=0,
+        num_switches=builder.graph.num_switches,
+        phase=0.0,
+    )
 
-    # Locate vout.
-    vout_idx = loaded.builder.node_id_of("vout")
+    res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start,
+                      switch_fn=pwm)
+    print(f"  samples: {res.num_steps()}")
+
+    vout_idx = builder.node_id_of("vout")
+    sw_idx   = builder.node_id_of("sw")
+    times = np.asarray(res.times) * 1e3   # ms
+    v_out = np.array([s[vout_idx] for s in res.states])
+    v_sw  = np.array([s[sw_idx]   for s in res.states])
 
     # Steady-state stats over the last 10 % of samples.
-    k_start = int(0.9 * result.num_steps())
-    v_out_samples = np.array([
-        result.states[k][vout_idx]
-        for k in range(k_start, result.num_steps())
-    ])
+    k_skip = int(0.9 * res.num_steps())
+    v_mean   = v_out[k_skip:].mean()
+    v_ripple = float(np.ptp(v_out[k_skip:]))
+    v_target = 24.0 * DUTY
+    print(f"  V_out DC ≈ {v_mean:.3f} V (target {v_target:.1f}, "
+          f"ripple {v_ripple*1000:.1f} mV pp)")
 
-    v_in = 24.0   # from buck.yaml
-    v_target = v_in * duty
-
-    print()
-    print("===== Steady-state V_out =====")
-    print(f"  Mean:     {v_out_samples.mean():.3f} V")
-    # numpy 2.0 removed `ndarray.ptp()`; use the
-    # functional form.
-    ripple = np.ptp(v_out_samples)
-    print(f"  Ripple:   {ripple:.3f} V (p-p)")
-    print(f"  Target:   {v_target:.3f} V  (= V_in · D)")
-    print(f"  Error:    {abs(v_out_samples.mean() - v_target):.3f} V")
-
-    # Optional: plot V_out if matplotlib is available.
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print()
-        print("(install matplotlib to see a V_out vs time "
-              "plot)")
+        print("(install matplotlib to see the waveform plot)")
         return
 
-    times = np.array(result.times)
-    vouts = np.array([result.states[k][vout_idx]
-                      for k in range(result.num_steps())])
-    plt.figure(figsize=(10, 4))
-    plt.plot(times * 1e3, vouts, lw=0.8)
-    plt.axhline(v_target, color="r", ls="--",
-                label=f"target ({v_target:.1f} V)")
-    plt.xlabel("time [ms]")
-    plt.ylabel("V_out [V]")
-    plt.title("Buck converter — open-loop 100 kHz @ 50% duty")
-    plt.legend()
-    plt.grid(alpha=0.3)
+    fig, (ax_sw, ax_out) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    ax_sw.plot(times, v_sw, color="tab:purple", lw=0.6, alpha=0.7)
+    ax_sw.set_ylabel("V_sw [V]")
+    ax_sw.set_title(f"Buck converter — {F_PWM/1e3:.0f} kHz, "
+                     f"{DUTY*100:.0f}% duty")
+    ax_sw.grid(alpha=0.3)
+
+    ax_out.plot(times, v_out, color="tab:blue", lw=0.8)
+    ax_out.axhline(v_target, color="r", ls="--", lw=0.8,
+                    label=f"target ({v_target:.1f} V)")
+    ax_out.set_xlabel("time [ms]")
+    ax_out.set_ylabel("V_out [V]")
+    ax_out.legend(loc="lower right"); ax_out.grid(alpha=0.3)
+
     plt.tight_layout()
-    out = script_dir / "run_buck_output.png"
+    out = Path(__file__).resolve().parent / "output" / "buck.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out, dpi=120)
-    print(f"Plot written to: {out}")
+    print(f"  plot → {out}")
 
 
 if __name__ == "__main__":

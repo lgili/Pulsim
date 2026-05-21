@@ -264,6 +264,18 @@ void init_module(py::module_& m) {
               py::arg("to"), py::arg("L_henries"),
               py::return_value_policy::reference,
               "Add a linear inductor. L in henries.")
+        .def("add_saturable_inductor",
+              &builder::CircuitBuilder::add_saturable_inductor,
+              py::arg("name"), py::arg("from"),
+              py::arg("to"),
+              py::arg("L_0"), py::arg("I_sat"),
+              py::arg("L_residual") = 0.0,
+              py::return_value_policy::reference,
+              "Add a V17 nonlinear saturable inductor: the "
+              "small-signal inductance is L_0 at i=0 and "
+              "drops smoothly toward L_residual as |i| → I_sat. "
+              "Requires Newton refresh — `simulate()` enables "
+              "it automatically.")
         .def("add_diode",
               &builder::CircuitBuilder::add_diode,
               py::arg("name"), py::arg("anode"),
