@@ -35,6 +35,7 @@
 #include "pulsim/v2/pwl/device_pool.hpp"
 #include "pulsim/v2/pwl/diode_event_state.hpp"
 #include "pulsim/v2/pwl/history_state.hpp"
+#include "pulsim/v2/pwl/nonlinear_solve.hpp"
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
 #include "pulsim/v2/topology/graph.hpp"
@@ -182,7 +183,8 @@ inline SimulationResult run_transient(
     const SimulationOptions& opts,
     const SwitchScheduleFn& switch_fn,
     const BExtraFn& b_extra_fn = {},
-    bool start_from_dc_op = false) {
+    bool start_from_dc_op = false,
+    const pwl::NonlinearRefreshFn& nl_refresh = {}) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -297,6 +299,10 @@ inline SimulationResult run_transient(
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable
             //    or max_iters hit.
+            //
+            // If `nl_refresh` was supplied, the inner solve uses
+            // Newton (with the trap-companion `b_extra`); else
+            // it's the cached linear solve.
             Size iters = 0;
             bool flipped = false;
             do {
@@ -307,7 +313,17 @@ inline SimulationResult run_transient(
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
                 }
-                cache.solve(mask, b_extra, x);
+                if (nl_refresh) {
+                    const auto& seg = cache.lookup(mask);
+                    x = pwl::solve_with_newton_b_extra(
+                        seg, nl_refresh, graph, pool,
+                        /*x_init=*/x, b_extra,
+                        opts.max_newton_iterations,
+                        opts.tol_newton_dx,
+                        opts.tol_newton_res);
+                } else {
+                    cache.solve(mask, b_extra, x);
+                }
                 flipped = has_diodes &&
                           diodes.update_from_state(x);
                 ++iters;
@@ -356,7 +372,17 @@ inline SimulationResult run_transient(
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
                 }
-                cache.solve(mask, b_extra_user, x);
+                if (nl_refresh) {
+                    const auto& seg = cache.lookup(mask);
+                    x = pwl::solve_with_newton_b_extra(
+                        seg, nl_refresh, graph, pool,
+                        /*x_init=*/x, b_extra_user,
+                        opts.max_newton_iterations,
+                        opts.tol_newton_dx,
+                        opts.tol_newton_res);
+                } else {
+                    cache.solve(mask, b_extra_user, x);
+                }
                 flipped = has_diodes &&
                           diodes.update_from_state(x);
                 ++iters;

@@ -55,21 +55,24 @@ using NonlinearRefreshFn = std::function<
          const topology::Graph& graph,
          const DevicePool& pool)>;
 
-/// Newton-iterated solve on top of a cached PwlSegment.
+/// Newton-iterated solve on top of a cached PwlSegment, with an
+/// explicit `b_extra` vector. This overload composes with the
+/// trap-companion history contributions from Layer 4 V1: at
+/// step n+1 the caller passes `b_extra = history_compute(...)`,
+/// and the residual is `J_lin·x + (b_constant + b_extra) + g(x)`.
 ///
 /// For linear-only circuits (`refresh` returns 0 and stamps
 /// nothing), the loop exits after 1 iteration with a result
-/// identical to `cache.solve` (single triangular solve on the
-/// pre-factored J_lin).
+/// identical to `cache.solve(mask, b_extra, x)`.
 ///
-/// Throws `std::runtime_error` on non-convergence with the last
-/// `||dx||_∞` and `||residual||_∞` in the message.
-[[nodiscard]] inline Vector solve_with_newton(
+/// Throws `std::runtime_error` on non-convergence.
+[[nodiscard]] inline Vector solve_with_newton_b_extra(
     const PwlSegment& seg,
     const NonlinearRefreshFn& refresh,
     const topology::Graph& graph,
     const DevicePool& pool,
     const Vector& x_init,
+    const Vector& b_extra,
     Size max_iters = Size{50},
     Real tol_dx  = Real{1e-9},
     Real tol_res = Real{1e-9}) {
@@ -105,9 +108,10 @@ using NonlinearRefreshFn = std::function<
         }
         sparse::compress_in_place(J_combined);
 
-        // 3. Build combined f(x) = J_lin·x + b_constant + f_nl.
+        // 3. Build combined f(x) = J_lin·x + (b_constant +
+        //    b_extra) + f_nl.
         Vector f_combined =
-            seg.J * x + seg.b_constant + f_nl;
+            seg.J * x + seg.b_constant + b_extra + f_nl;
 
         // 4. Solve J · dx = -f.
         auto solver = sparse::make_default_solver();
@@ -149,6 +153,24 @@ using NonlinearRefreshFn = std::function<
         std::to_string(last_dx_norm) +
         ", ||residual||_inf = " +
         std::to_string(last_res_norm) + ")");
+}
+
+/// Layer 4 V3 entry point — Newton without trap-companion
+/// history (b_extra = 0). Delegates to the b_extra overload.
+[[nodiscard]] inline Vector solve_with_newton(
+    const PwlSegment& seg,
+    const NonlinearRefreshFn& refresh,
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    const Vector& x_init,
+    Size max_iters = Size{50},
+    Real tol_dx  = Real{1e-9},
+    Real tol_res = Real{1e-9}) {
+    const Vector zero_b_extra =
+        Vector::Zero(static_cast<Index>(seg.state_size));
+    return solve_with_newton_b_extra(
+        seg, refresh, graph, pool, x_init, zero_b_extra,
+        max_iters, tol_dx, tol_res);
 }
 
 /// Convenience: no-op refresh function for linear-only systems.

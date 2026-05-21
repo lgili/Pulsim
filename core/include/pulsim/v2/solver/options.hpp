@@ -39,6 +39,24 @@ struct SimulationOptions {
     /// Set to 0 to disable iteration (V2 behaviour).
     Size max_event_iterations = Size{16};
 
+    // ---- Newton (Layer 5 V4) ----------------------------------------
+    //
+    // When `run_transient` is called with a non-empty
+    // `NonlinearRefreshFn`, each step's inner solve becomes
+    // Newton-iterated. These fields control the inner Newton loop.
+
+    /// Max Newton iterations per step. Default 50 — comfortable
+    /// for the smooth-blend IdealDiode and other PE-typical
+    /// nonlinearities.
+    Size max_newton_iterations = Size{50};
+
+    /// Newton convergence tolerance on ||dx||_inf. Default 1e-9.
+    Real tol_newton_dx = Real{1e-9};
+
+    /// Newton convergence tolerance on ||residual||_inf.
+    /// Default 1e-9.
+    Real tol_newton_res = Real{1e-9};
+
     [[nodiscard]] bool valid() const noexcept {
         // All three values must be finite (no NaN, no infinity).
         if (!std::isfinite(t_start) || !std::isfinite(t_end) ||

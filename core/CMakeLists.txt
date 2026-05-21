@@ -464,6 +464,26 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer4_v3_tests)
 
     # =============================================================================
+    # pulsim_v2_layer5_v4_tests — pulsim-v2-newton-in-run-transient
+    # =============================================================================
+    # Newton iteration wired into the run_transient loop.
+    # Integration: half-wave rectifier with smooth-blend
+    # (AD-driven) IdealDiode + warm-started Newton per step.
+    add_executable(pulsim_v2_layer5_v4_tests
+        tests/v2/layer5_v4/test_main.cpp
+        tests/v2/layer5_v4/test_integration_smooth_rectifier.cpp
+    )
+    target_link_libraries(pulsim_v2_layer5_v4_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer5_v4_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer5_v4_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 
