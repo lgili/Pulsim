@@ -131,14 +131,25 @@ inline void assemble_segment(const topology::Graph& graph,
             break;
         }
         case topology::BranchKind::Source: {
-            // The topological `Source` kind covers both
-            // VoltageSource and CurrentSource. Dispatch on
-            // the pool's StoredKind.
+            // The topological `Source` kind covers
+            // VoltageSource, CurrentSource, AND
+            // PWMVoltageSource (a time-varying voltage
+            // source). Dispatch on the pool's StoredKind.
             const auto src_kind = pool.kind_of(branch.id);
             if (src_kind == DevicePool::StoredKind::CurrentSource) {
                 const auto& p =
                     pool.current_source_params(branch.id);
                 stamping::stamp_current_source(b, coord, p.I);
+            } else if (src_kind ==
+                       DevicePool::StoredKind::PWMVoltageSource) {
+                // Structurally a VoltageSource with V=0
+                // baseline. The time-varying PWM value is
+                // overlaid via b_extra at runtime by
+                // run_transient's PWM pass.
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                stamping::stamp_voltage_source(J, b, x, coord,
+                                                branch_var_id, Real{0});
             } else {
                 const auto& p = pool.voltage_source_params(branch.id);
                 const Index branch_var_id =

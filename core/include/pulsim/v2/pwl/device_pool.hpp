@@ -20,6 +20,7 @@
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/current_source.hpp"
+#include "pulsim/v2/models/pwm_voltage_source.hpp"
 #include "pulsim/v2/models/switched_diode.hpp"
 #include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
@@ -41,14 +42,15 @@ public:
     // `Entry` so that `Entry::index()` casts directly to
     // `StoredKind`.
     enum class StoredKind {
-        Resistor       = 0,
-        VoltageSource  = 1,
-        Switch         = 2,
-        Capacitor      = 3,  // trap companion (Layer 4 V1)
-        Inductor       = 4,  // trap companion (Layer 4 V1)
-        Diode          = 5,  // SwitchedDiode (Layer 5 V2)
-        NonlinearDiode = 6,  // models::IdealDiode (Newton, Layer 4 V3)
-        CurrentSource  = 7,  // Layer 2 V3 (no branch-current unknown)
+        Resistor          = 0,
+        VoltageSource     = 1,
+        Switch            = 2,
+        Capacitor         = 3,  // trap companion (Layer 4 V1)
+        Inductor          = 4,  // trap companion (Layer 4 V1)
+        Diode             = 5,  // SwitchedDiode (Layer 5 V2)
+        NonlinearDiode    = 6,  // models::IdealDiode (Newton, Layer 4 V3)
+        CurrentSource     = 7,  // Layer 2 V3 (no branch-current unknown)
+        PWMVoltageSource  = 8,  // Layer 2 V4 (time-varying voltage source)
     };
 
     struct SwitchParams {
@@ -128,6 +130,25 @@ public:
         entries_[branch_id] = Entry{p};
     }
 
+    /// Register a PWM voltage source (Layer 2 V4).
+    /// Structurally identical to a VoltageSource (uses the
+    /// same branch-var bookkeeping); the time-varying value
+    /// is overlaid on `b_extra` at runtime by
+    /// `run_transient`'s built-in PWM pass.
+    /// The branch MUST be added with `BranchKind::Source`
+    /// in the graph; assemble.hpp dispatches on the pool's
+    /// StoredKind and stamps it like a 0V baseline source.
+    void add_pwm_voltage_source(
+        Index branch_id,
+        models::PWMVoltageSource::Params p) {
+        entries_[branch_id] = Entry{p};
+        // PWM sources DO add a branch-current unknown
+        // (just like VoltageSource), and they live in the
+        // same `i_src` row layout.
+        source_branch_var_id_[branch_id] =
+            static_cast<Index>(num_sources_++);
+    }
+
     // -------- Layer 2 V2: transformer (coupled inductors) ------------------
     //
     // Couplings are PAIRS of already-added inductor branches.
@@ -199,6 +220,19 @@ public:
                 std::to_string(branch_id) + " is not a CurrentSource");
         }
         return std::get<models::CurrentSource::Params>(entry);
+    }
+
+    [[nodiscard]] const models::PWMVoltageSource::Params&
+    pwm_voltage_source_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<
+                models::PWMVoltageSource::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::pwm_voltage_source_params: "
+                "branch " + std::to_string(branch_id) +
+                " is not a PWMVoltageSource");
+        }
+        return std::get<models::PWMVoltageSource::Params>(entry);
     }
 
     [[nodiscard]] Real switch_g_on(Index branch_id) const {
@@ -342,7 +376,8 @@ private:
                                 models::Inductor::Params,
                                 models::SwitchedDiode::Params,
                                 models::IdealDiode::Params,
-                                models::CurrentSource::Params>;
+                                models::CurrentSource::Params,
+                                models::PWMVoltageSource::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);

@@ -130,6 +130,19 @@ void init_module(py::module_& m) {
               "+ terminal) into the external circuit, "
               "back to `to`. Does NOT add a branch-current "
               "unknown — the current is fixed at I.")
+        .def("add_pwm_voltage_source",
+              &builder::CircuitBuilder::add_pwm_voltage_source,
+              py::arg("name"), py::arg("from"),
+              py::arg("to"),
+              py::arg("v_high"), py::arg("v_low"),
+              py::arg("frequency"), py::arg("duty"),
+              py::arg("phase") = 0.0,
+              py::return_value_policy::reference,
+              "Add a PWM voltage source. Square wave "
+              "between v_high and v_low at `frequency` "
+              "with `duty` ∈ [0, 1] cycle. The time-"
+              "varying value is automatically overlaid by "
+              "run_transient — no b_extra_fn lambda needed.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
               py::arg("name"), py::arg("from"),

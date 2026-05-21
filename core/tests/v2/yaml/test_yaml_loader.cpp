@@ -42,6 +42,33 @@ circuit:
                 .V == Approx(5.0));
 }
 
+TEST_CASE("YAML loader: pwm_voltage_source round-trip",
+          "[v2][layer8][yaml]") {
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: pwm_voltage_source
+      name: VPWM
+      from: n0
+      to: gnd
+      v_high: 24.0
+      v_low: 0.0
+      frequency: 100000.0
+      duty: 0.5
+)YAML";
+    auto loaded = yaml::load_string(yaml);
+    REQUIRE(loaded.builder.num_branches() == 1);
+    REQUIRE(loaded.builder.pool().kind_of(0) ==
+              DevicePool::StoredKind::PWMVoltageSource);
+    const auto& p =
+        loaded.builder.pool().pwm_voltage_source_params(0);
+    REQUIRE(p.v_high == Approx(24.0));
+    REQUIRE(p.v_low == Approx(0.0));
+    REQUIRE(p.frequency == Approx(100e3));
+    REQUIRE(p.duty == Approx(0.5));
+    REQUIRE(p.phase == Approx(0.0));   // default
+}
+
 TEST_CASE("YAML loader: current_source round-trip",
           "[v2][layer8][yaml]") {
     const std::string yaml = R"YAML(

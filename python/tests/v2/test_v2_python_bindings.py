@@ -291,6 +291,37 @@ def test_add_igbt_from_python() -> None:
 # -----------------------------------------------------------------------------
 
 
+def test_add_pwm_voltage_source_mean_matches_duty() -> None:
+    """Layer 2 V4 — PWM source. Mean output over a full
+    cycle should equal v_high · duty (assuming v_low=0)."""
+    b = p.CircuitBuilder()
+    b.add_pwm_voltage_source(
+        "VPWM", "n0", "gnd",
+        v_high=24.0, v_low=0.0,
+        frequency=100e3, duty=0.5)
+    b.add_resistor("R_L", "n0", "gnd", 10.0)
+
+    dt = 1e-8
+    T = 1e-5
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build(dt)
+
+    opts = p.SimulationOptions(
+        t_start=0.0, t_end=5.0 * T, dt=dt)
+    mask = p.SwitchStateMask(0)
+    res = p.run_transient(
+        cache, b.graph, b.pool, opts,
+        switch_fn=lambda t: mask)
+
+    # Mean over the last full cycle.
+    k_start = res.num_steps() - int(T / dt)
+    samples = [res.states[k][0]
+               for k in range(k_start, res.num_steps())]
+    mean = sum(samples) / len(samples)
+    # v_high · duty = 24 · 0.5 = 12 V.
+    assert abs(mean - 12.0) < 0.5
+
+
 def test_add_current_source_from_python() -> None:
     """Layer 2 V3 — CurrentSource device model."""
     b = p.CircuitBuilder()

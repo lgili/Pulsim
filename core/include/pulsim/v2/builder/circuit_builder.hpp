@@ -25,6 +25,7 @@
 #include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
+#include "pulsim/v2/models/pwm_voltage_source.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
@@ -62,6 +63,42 @@ public:
             topology::BranchKind::Source);
         pool_.add_voltage_source(
             b_id, models::VoltageSource::Params{V});
+        return *this;
+    }
+
+    /// Add a PWM voltage source (Layer 2 V4) — a square-
+    /// wave switching between `v_high` and `v_low` at the
+    /// given `frequency` and `duty` cycle.
+    ///
+    /// Eliminates the common SMPS pattern of writing a
+    /// custom `b_extra_fn(t)` lambda for PWM gate drives.
+    /// `run_transient` automatically overlays the PWM
+    /// value at each timestep.
+    ///
+    /// Parameters:
+    ///   v_high     [V]  output during ON portion
+    ///   v_low      [V]  output during OFF portion
+    ///   frequency  [Hz] switching frequency
+    ///   duty       [-]  ON-time fraction ∈ [0, 1]
+    ///   phase      [s]  start-of-cycle offset (default 0)
+    CircuitBuilder& add_pwm_voltage_source(
+        std::string /*name*/, std::string from,
+        std::string to, Real v_high, Real v_low,
+        Real frequency, Real duty,
+        Real phase = Real{0}) {
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = graph_.add_branch(
+            from_idx, to_idx,
+            topology::BranchKind::Source);
+        pool_.add_pwm_voltage_source(
+            b_id, models::PWMVoltageSource::Params{
+                .v_high     = v_high,
+                .v_low      = v_low,
+                .frequency  = frequency,
+                .duty       = duty,
+                .phase      = phase,
+            });
         return *this;
     }
 

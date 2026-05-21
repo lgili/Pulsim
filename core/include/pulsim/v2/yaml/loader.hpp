@@ -148,6 +148,16 @@ inline void load_device(
             require_string(dev, idx, type, "from"),
             require_string(dev, idx, type, "to"),
             require_real(dev, idx, type, "I"));
+    } else if (type == "pwm_voltage_source") {
+        b.add_pwm_voltage_source(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "v_high"),
+            require_real(dev, idx, type, "v_low"),
+            require_real(dev, idx, type, "frequency"),
+            require_real(dev, idx, type, "duty"),
+            real_or(dev, "phase", Real{0}));
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -232,9 +242,10 @@ inline void load_device(
             "yaml::load: device " + device_label(dev, idx) +
             " has unknown type '" + type + "'. Supported "
             "types: voltage_source, current_source, "
-            "resistor, capacitor, inductor, diode, "
-            "nonlinear_diode, switch, mosfet, "
-            "mosfet_with_body_diode, igbt, transformer");
+            "pwm_voltage_source, resistor, capacitor, "
+            "inductor, diode, nonlinear_diode, switch, "
+            "mosfet, mosfet_with_body_diode, igbt, "
+            "transformer");
     }
 }
 

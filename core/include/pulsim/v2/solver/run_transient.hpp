@@ -38,6 +38,7 @@
 #include "pulsim/v2/pwl/nonlinear_solve.hpp"
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
+#include "pulsim/v2/sources/pwm_b_extra.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 
@@ -349,7 +350,13 @@ inline SimulationResult run_transient(
             const Vector b_extra_user = b_extra_fn
                 ? b_extra_fn(t)
                 : Vector::Zero(state_size);
-            b_extra = b_extra_history + b_extra_user;
+
+            // 3. Built-in PWM sources (Layer 2 V4).
+            const Vector b_extra_pwm =
+                sources::compute_pwm_b_extra(pool, graph, t);
+
+            b_extra = b_extra_history + b_extra_user +
+                      b_extra_pwm;
 
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable
@@ -472,8 +479,11 @@ inline SimulationResult run_transient(
                             : Vector::Zero(state_size);
                         const Vector be_hist_1 =
                             history.compute_b_extra(dt1);
+                        const Vector be_pwm_1 =
+                            sources::compute_pwm_b_extra(
+                                pool, graph, t_est);
                         const Vector be_total_1 =
-                            be_hist_1 + be_user_1;
+                            be_hist_1 + be_user_1 + be_pwm_1;
                         cache.solve_at(
                             mask_pre, dt1, be_total_1, x);
                         history.update_from_state(x, dt1);
@@ -520,8 +530,11 @@ inline SimulationResult run_transient(
                             : Vector::Zero(state_size);
                         const Vector be_hist_2 =
                             history.compute_b_extra(dt2);
+                        const Vector be_pwm_2 =
+                            sources::compute_pwm_b_extra(
+                                pool, graph, t);
                         const Vector be_total_2 =
-                            be_hist_2 + be_user_2;
+                            be_hist_2 + be_user_2 + be_pwm_2;
                         cache.solve_at(
                             mask_post, dt2, be_total_2, x);
                         history.update_from_state(x, dt2);
@@ -568,9 +581,17 @@ inline SimulationResult run_transient(
             // sign-change check will exclude it from events.
             const Vector x_prev = x;
 
-            const Vector b_extra_user = b_extra_fn
+            const Vector b_extra_user_only = b_extra_fn
                 ? b_extra_fn(t)
                 : zero_b_extra;
+            // Built-in PWM sources (Layer 2 V4) — applies
+            // on the static path too, since PWM is time-
+            // varying even when no caps/inductors are
+            // present.
+            const Vector b_extra_pwm =
+                sources::compute_pwm_b_extra(pool, graph, t);
+            const Vector b_extra_user = b_extra_user_only +
+                                          b_extra_pwm;
 
             Size iters = 0;
             bool flipped = false;
