@@ -27,6 +27,7 @@
 #include "pulsim/v2/models/capacitor.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/numeric/dense.hpp"
+#include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/device_pool.hpp"
 #include "pulsim/v2/stamping/branch_coord.hpp"
@@ -56,6 +57,18 @@ struct HistoryEntry {
     Real i_prev = Real{0};
     // Cached params (avoid pool lookup on the hot path).
     Real C_or_L;   // farads (Capacitor) or henries (Inductor)
+};
+
+/// Layer 2 V2 — pre-resolved transformer coupling for the
+/// history-cross-term pass. Caches the inductor entries'
+/// state-vector row indices and offsets into `entries_` so
+/// `compute_b_extra` doesn't need to search at runtime.
+struct TransformerCouplingResolved {
+    Index p_row;       // p inductor's constraint-row idx
+    Index s_row;       // s inductor's constraint-row idx
+    Size  p_entry_idx; // index into HistoryState::entries_
+    Size  s_entry_idx;
+    models::TwoWindingTransformer::Params params;
 };
 
 class HistoryState {
@@ -89,6 +102,26 @@ public:
                 e.C_or_L    = pool.inductor_params(branch.id).L;
                 entries_.push_back(e);
             }
+        }
+
+        // Layer 2 V2: resolve transformer couplings into
+        // (p_row, s_row, p_entry_idx, s_entry_idx) tuples
+        // for fast access during compute_b_extra.
+        const auto& couplings = pool.transformer_couplings();
+        transformer_couplings_resolved_.reserve(couplings.size());
+        for (const auto& tc : couplings) {
+            TransformerCouplingResolved tcr{};
+            tcr.params = tc.params;
+            tcr.p_row = pool.branch_var_id_for_inductor(
+                tc.primary_branch_id, graph);
+            tcr.s_row = pool.branch_var_id_for_inductor(
+                tc.secondary_branch_id, graph);
+            // Find entry indices by branch id.
+            tcr.p_entry_idx = find_entry_idx_(
+                tc.primary_branch_id);
+            tcr.s_entry_idx = find_entry_idx_(
+                tc.secondary_branch_id);
+            transformer_couplings_resolved_.push_back(tcr);
         }
     }
 
@@ -145,6 +178,26 @@ public:
                 b_extra[e.inductor_branch_var_id] +=
                     two_L_over_dt * i_hist_L;
             }
+        }
+
+        // Layer 2 V2: transformer cross-coupling history.
+        // For each coupling, add `(2M/dt) · i_other_prev` to
+        // each winding's constraint row.
+        for (const auto& tcr :
+             transformer_couplings_resolved_) {
+            if (tcr.p_entry_idx >= entries_.size() ||
+                tcr.s_entry_idx >= entries_.size()) {
+                continue;   // misregistered coupling — skip
+            }
+            const Real cross =
+                models::TwoWindingTransformer::cross_dt(
+                    tcr.params, dt);
+            const Real i_p_prev =
+                entries_[tcr.p_entry_idx].i_prev;
+            const Real i_s_prev =
+                entries_[tcr.s_entry_idx].i_prev;
+            b_extra[tcr.p_row] += cross * i_s_prev;
+            b_extra[tcr.s_row] += cross * i_p_prev;
         }
         return b_extra;
     }
@@ -243,8 +296,21 @@ public:
     }
 
 private:
+    Size find_entry_idx_(Index branch_id) const {
+        for (Size i = 0; i < entries_.size(); ++i) {
+            if (entries_[i].branch_id == branch_id) {
+                return i;
+            }
+        }
+        // Caller misused the API (registered a coupling on
+        // a non-inductor branch). Index out of range.
+        return entries_.size();
+    }
+
     Size state_size_;
     std::vector<HistoryEntry> entries_;
+    std::vector<TransformerCouplingResolved>
+        transformer_couplings_resolved_;
 };
 
 }  // namespace pulsim::v2::pwl

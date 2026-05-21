@@ -25,6 +25,7 @@
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
+#include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/device_pool.hpp"
@@ -224,6 +225,52 @@ public:
                             std::move(emitter),
                             Real{1} / R_on,
                             Real{1} / R_off);
+    }
+
+    /// Layer 2 V2 — two-winding linear transformer.
+    /// Adds two coupled inductor branches:
+    ///   * primary  (p_from → p_to)  with L_p
+    ///   * secondary (s_from → s_to) with L_s
+    ///   * mutual inductance M = k · √(L_p · L_s)
+    /// Default k = 1 (ideal coupling, no leakage). For real
+    /// transformers use k ∈ [0.9, 0.99] to model leakage.
+    /// k = 0 makes the two windings independent (no
+    /// transformer action — useful for testing).
+    ///
+    /// The transformer requires the cache to be built with
+    /// dt > 0 (dynamic path); on the static path (dt = 0)
+    /// the coupling has no effect and the inductors behave
+    /// as open circuits, matching the standalone inductor
+    /// model.
+    CircuitBuilder& add_transformer(
+        std::string name,
+        std::string p_from, std::string p_to,
+        std::string s_from, std::string s_to,
+        Real L_p, Real L_s, Real k = Real{1}) {
+        const Index p_from_idx = resolve_node_(p_from);
+        const Index p_to_idx   = resolve_node_(p_to);
+        const Index s_from_idx = resolve_node_(s_from);
+        const Index s_to_idx   = resolve_node_(s_to);
+
+        const Index p_branch = graph_.add_branch(
+            p_from_idx, p_to_idx,
+            topology::BranchKind::PassiveLinear);
+        pool_.add_inductor(
+            p_branch, models::Inductor::Params{L_p});
+
+        const Index s_branch = graph_.add_branch(
+            s_from_idx, s_to_idx,
+            topology::BranchKind::PassiveLinear);
+        pool_.add_inductor(
+            s_branch, models::Inductor::Params{L_s});
+
+        pool_.add_transformer_coupling(
+            p_branch, s_branch,
+            models::TwoWindingTransformer::Params{
+                .L_p = L_p, .L_s = L_s, .k = k});
+
+        (void)name;
+        return *this;
     }
 
     // -------- Accessors ----------------------------------------------------

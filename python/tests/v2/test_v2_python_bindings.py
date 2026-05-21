@@ -284,6 +284,35 @@ def test_add_igbt_from_python() -> None:
     assert b.num_branches == 1
 
 
+# -----------------------------------------------------------------------------
+# Layer 2 V2 — transformer
+# -----------------------------------------------------------------------------
+
+
+def test_add_transformer_from_python() -> None:
+    """add_transformer creates two coupled inductors."""
+    b = p.CircuitBuilder()
+    b.add_transformer("T1", "p+", "p-", "s+", "s-",
+                       L_p=1e-3, L_s=4e-3, k=1.0)
+    assert b.num_branches == 2   # 2 inductor branches
+
+
+def test_transformer_topology_builds_and_factors() -> None:
+    """Build a simple primary+secondary topology with a
+    transformer + resistors. Should factorize."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 10.0)
+    b.add_transformer("T1", "vin", "gnd",
+                       "sec", "sec_gnd",
+                       L_p=1e-3, L_s=1e-3, k=0.95)
+    b.add_resistor("Rsg", "sec_gnd", "gnd", 1e-6)
+    b.add_resistor("R_L", "sec", "sec_gnd", 10.0)
+
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build(dt=1e-7)
+    # No exception => KLU factorization succeeded.
+
+
 def test_buck_topology_via_mosfet_helper() -> None:
     """End-to-end builder smoke test: a buck topology
     via the MOSFET helper should produce the expected

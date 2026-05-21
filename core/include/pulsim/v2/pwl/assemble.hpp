@@ -23,6 +23,7 @@
 //                b_extra at solve time.
 
 #include "pulsim/v2/models/resistor.hpp"
+#include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
 #include "pulsim/v2/numeric/dense.hpp"
 #include "pulsim/v2/numeric/types.hpp"
@@ -163,6 +164,34 @@ inline void assemble_segment(const topology::Graph& graph,
             // of the cached factor lands in
             // `pulsim-v2-nonlinear-segment-newton`.
             break;
+        }
+    }
+
+    // ----- Layer 2 V2: transformer cross-coupling pass ---------------------
+    //
+    // For each registered (primary, secondary) inductor pair,
+    // add the mutual-inductance cross-terms to J:
+    //   J[p_row, s_col] += -(2M/dt)
+    //   J[s_row, p_col] += -(2M/dt)
+    //
+    // This runs AFTER per-branch stamping so each inductor's
+    // self-inductance diagonal is already in place. Skipped
+    // when dt == 0 (static path — couplings have no static
+    // contribution; transformers behave as open circuits at
+    // DC, matching the inductor's static path).
+    if (dt > Real{0}) {
+        for (const auto& tc : pool.transformer_couplings()) {
+            const Index p_row =
+                pool.branch_var_id_for_inductor(
+                    tc.primary_branch_id, graph);
+            const Index s_row =
+                pool.branch_var_id_for_inductor(
+                    tc.secondary_branch_id, graph);
+            const Real cross =
+                models::TwoWindingTransformer::cross_dt(
+                    tc.params, dt);
+            J.coeffRef(p_row, s_row) += -cross;
+            J.coeffRef(s_row, p_row) += -cross;
         }
     }
 }

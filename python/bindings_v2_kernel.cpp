@@ -183,6 +183,19 @@ void init_module(py::module_& m) {
               "(collector → emitter). Defaults: "
               "R_on=10mΩ, R_off=1GΩ. No anti-parallel "
               "diode by default.")
+        .def("add_transformer",
+              &builder::CircuitBuilder::add_transformer,
+              py::arg("name"),
+              py::arg("p_from"), py::arg("p_to"),
+              py::arg("s_from"), py::arg("s_to"),
+              py::arg("L_p"), py::arg("L_s"),
+              py::arg("k") = 1.0,
+              py::return_value_policy::reference,
+              "Add a two-winding linear transformer. "
+              "Creates two coupled inductors with "
+              "mutual inductance M = k·√(L_p·L_s). "
+              "k=1 (default) for ideal coupling; "
+              "k∈[0.9, 0.99] for realistic leakage.")
         .def_property_readonly("graph",
               &builder::CircuitBuilder::graph,
               py::return_value_policy::reference_internal,

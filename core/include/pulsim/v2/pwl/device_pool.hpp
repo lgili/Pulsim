@@ -20,6 +20,7 @@
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/switched_diode.hpp"
+#include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/topology/graph.hpp"
@@ -111,6 +112,34 @@ public:
     void add_nonlinear_diode(Index branch_id,
                               models::IdealDiode::Params p) {
         entries_[branch_id] = Entry{p};
+    }
+
+    // -------- Layer 2 V2: transformer (coupled inductors) ------------------
+    //
+    // Couplings are PAIRS of already-added inductor branches.
+    // The cross-term stamping happens in `assemble.hpp` AFTER
+    // the per-branch loop completes (so the self-inductance
+    // diagonals are already in place); same for the history
+    // contribution in `HistoryState::compute_b_extra`.
+
+    struct TransformerCoupling {
+        Index primary_branch_id;
+        Index secondary_branch_id;
+        models::TwoWindingTransformer::Params params;
+    };
+
+    void add_transformer_coupling(
+        Index primary_branch_id,
+        Index secondary_branch_id,
+        const models::TwoWindingTransformer::Params& p) {
+        transformer_couplings_.push_back(
+            TransformerCoupling{primary_branch_id,
+                                  secondary_branch_id, p});
+    }
+
+    [[nodiscard]] const std::vector<TransformerCoupling>&
+    transformer_couplings() const noexcept {
+        return transformer_couplings_;
     }
 
     // -------- Lookups -------------------------------------------------------
@@ -327,6 +356,11 @@ private:
     // DiodeEventState iterates this list to build per-diode
     // tracking entries.
     std::vector<Index> diode_branches_;
+
+    // Layer 2 V2: transformer coupling registry. Each entry
+    // pairs two already-added inductor branches with the
+    // coupling parameters (L_p, L_s, k → M).
+    std::vector<TransformerCoupling> transformer_couplings_;
 };
 
 }  // namespace pulsim::v2::pwl
