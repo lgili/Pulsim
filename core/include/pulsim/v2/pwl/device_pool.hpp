@@ -15,6 +15,8 @@
 // `add_*` method + one new `StoredKind` variant + one Layer 4
 // dispatch arm in `assemble_segment`.
 
+#include "pulsim/v2/models/capacitor.hpp"
+#include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
 #include "pulsim/v2/numeric/types.hpp"
@@ -29,7 +31,16 @@ namespace pulsim::v2::pwl {
 
 class DevicePool {
 public:
-    enum class StoredKind { Resistor, VoltageSource, Switch };
+    // The enum values MUST match the order of alternatives in
+    // `Entry` so that `Entry::index()` casts directly to
+    // `StoredKind`.
+    enum class StoredKind {
+        Resistor      = 0,
+        VoltageSource = 1,
+        Switch        = 2,
+        Capacitor     = 3,  // trap companion (Layer 4 V1)
+        Inductor      = 4,  // trap companion (Layer 4 V1)
+    };
 
     struct SwitchParams {
         Real g_on;
@@ -53,6 +64,26 @@ public:
 
     void add_switch(Index branch_id, Real g_on, Real g_off) {
         entries_[branch_id] = Entry{SwitchParams{g_on, g_off}};
+    }
+
+    // Dynamic devices — see models/{capacitor,inductor}.hpp for the
+    // trap-companion math. Both register with Layer 4 V1 as
+    // `kind == PassiveLinear` branches; assemble dispatches on the
+    // pool's `StoredKind`.
+    void add_capacitor(Index branch_id,
+                        models::Capacitor::Params p) {
+        entries_[branch_id] = Entry{p};
+    }
+
+    void add_inductor(Index branch_id,
+                       models::Inductor::Params p) {
+        entries_[branch_id] = Entry{p};
+        // Inductors add a branch-current unknown (analogous to
+        // voltage sources). The relative offset is "this inductor's
+        // position among inductors". The absolute state-vector
+        // index = num_nodes + num_sources + relative_offset.
+        inductor_branch_var_id_[branch_id] =
+            static_cast<Index>(num_inductors_++);
     }
 
     // -------- Lookups -------------------------------------------------------
@@ -96,6 +127,28 @@ public:
         return switch_params_at(branch_id).g_off;
     }
 
+    [[nodiscard]] const models::Capacitor::Params&
+    capacitor_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<models::Capacitor::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::capacitor_params: branch " +
+                std::to_string(branch_id) + " is not a Capacitor");
+        }
+        return std::get<models::Capacitor::Params>(entry);
+    }
+
+    [[nodiscard]] const models::Inductor::Params&
+    inductor_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<models::Inductor::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::inductor_params: branch " +
+                std::to_string(branch_id) + " is not an Inductor");
+        }
+        return std::get<models::Inductor::Params>(entry);
+    }
+
     // -------- State-vector layout helpers -----------------------------------
 
     /// Returns the absolute state-vector index of the branch-current
@@ -120,14 +173,59 @@ public:
         return num_sources_;
     }
 
+    /// Absolute state-vector index for an inductor's branch-current
+    /// unknown. Throws if the branch is not registered as an
+    /// Inductor.
+    ///
+    /// Layout (left to right):
+    ///   [v_0 .. v_{N-1}]  [i_src_0 .. i_src_{M-1}]  [i_L_0 .. i_L_{K-1}]
+    ///                                                ^
+    ///                                                this region
+    ///
+    /// Absolute index = num_nodes + num_voltage_sources + relative_offset.
+    [[nodiscard]] Index branch_var_id_for_inductor(
+        Index branch_id, const topology::Graph& graph) const {
+        const auto it = inductor_branch_var_id_.find(branch_id);
+        if (it == inductor_branch_var_id_.end()) {
+            throw std::out_of_range(
+                "DevicePool::branch_var_id_for_inductor: branch " +
+                std::to_string(branch_id) + " is not an Inductor");
+        }
+        return static_cast<Index>(graph.num_nodes()) +
+               static_cast<Index>(num_sources_) + it->second;
+    }
+
+    [[nodiscard]] Size num_inductors() const noexcept {
+        return num_inductors_;
+    }
+
+    /// Total count of dynamic devices (Capacitor + Inductor). Used
+    /// by Layer 5's HistoryState to size itself.
+    [[nodiscard]] Size num_dynamic_branches() const noexcept {
+        Size n = 0;
+        for (const auto& [_, entry] : entries_) {
+            if (std::holds_alternative<models::Capacitor::Params>(entry) ||
+                std::holds_alternative<models::Inductor::Params>(entry)) {
+                ++n;
+            }
+        }
+        return n;
+    }
+
     [[nodiscard]] Size state_size(const topology::Graph& graph) const noexcept {
-        return static_cast<Size>(graph.num_nodes()) + num_sources_;
+        return static_cast<Size>(graph.num_nodes()) + num_sources_ +
+               num_inductors_;
     }
 
 private:
+    // The alternative order is locked to `StoredKind`: index 0 is
+    // Resistor, 1 is VoltageSource, … — `kind_of` casts the variant
+    // index directly to StoredKind, so DO NOT reorder.
     using Entry = std::variant<models::Resistor::Params,
                                 models::VoltageSource::Params,
-                                SwitchParams>;
+                                SwitchParams,
+                                models::Capacitor::Params,
+                                models::Inductor::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -156,6 +254,12 @@ private:
     // graph.num_nodes() at lookup time.
     std::unordered_map<Index, Index> source_branch_var_id_;
     Size num_sources_ = 0;
+
+    // Inductors live AFTER sources in the state vector:
+    //   [v_0 .. v_{N-1}]  [i_src_0 .. i_src_{M-1}]  [i_L_0 .. i_L_{K-1}]
+    // The absolute index = num_nodes + num_sources + relative_offset.
+    std::unordered_map<Index, Index> inductor_branch_var_id_;
+    Size num_inductors_ = 0;
 };
 
 }  // namespace pulsim::v2::pwl

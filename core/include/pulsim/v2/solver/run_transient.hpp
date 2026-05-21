@@ -31,8 +31,11 @@
 #include "pulsim/v2/numeric/dense.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/cache.hpp"
+#include "pulsim/v2/pwl/device_pool.hpp"
+#include "pulsim/v2/pwl/history_state.hpp"
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
+#include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 
 #include <functional>
@@ -127,6 +130,136 @@ inline SimulationResult run_transient(
         // disturbing the recorded sample.
         result.times.push_back(t);
         result.states.push_back(x);
+    }
+
+    return result;
+}
+
+// -----------------------------------------------------------------------------
+// V1 overload — history-aware transient with Capacitor / Inductor
+// support.
+//
+// Differences vs the V0 overload above:
+//   * Takes `const Graph&` + `const DevicePool&` instead of an
+//     explicit `state_size` — state size is derived from
+//     `pool.state_size(graph)`.
+//   * Constructs an internal `HistoryState` and updates it after
+//     each cache.solve.
+//   * Validates `cache.dt() == opts.dt`. A mismatched cache would
+//     silently produce wrong numbers — the throw catches it
+//     up-front.
+//   * For circuits with no Capacitor/Inductor, the behaviour is
+//     bit-identical to the V0 overload (HistoryState has zero
+//     entries, compute_b_extra returns the zero vector).
+// -----------------------------------------------------------------------------
+inline SimulationResult run_transient(
+    const pwl::PwlStateSpaceCache& cache,
+    const topology::Graph& graph,
+    const pwl::DevicePool& pool,
+    const SimulationOptions& opts,
+    const SwitchScheduleFn& switch_fn,
+    const BExtraFn& b_extra_fn = {}) {
+
+    // ---- Input validation ---------------------------------------------
+    if (!opts.valid()) {
+        throw std::invalid_argument(
+            "run_transient: SimulationOptions are not valid "
+            "(check t_start < t_end, dt > 0, all finite)");
+    }
+    if (!switch_fn) {
+        throw std::invalid_argument(
+            "run_transient: switch_fn callback is required");
+    }
+    // The cache's dt must match opts.dt. If the user built the
+    // cache for a different dt, the trap companion's g_eq is wrong
+    // and the solution silently drifts. Catch up-front.
+    //
+    // Tolerance: 0 (exact match required). The user controls both
+    // values, so they can synchronise them precisely.
+    if (cache.dt() > Real{0} && cache.dt() != opts.dt) {
+        throw std::invalid_argument(
+            "run_transient: cache.dt() does not match opts.dt; "
+            "rebuild the cache with the same dt the simulation "
+            "will use");
+    }
+    const Size state_size = pool.state_size(graph);
+    if (state_size == 0) {
+        throw std::invalid_argument(
+            "run_transient: pool.state_size(graph) is 0");
+    }
+
+    // ---- Pre-allocate ---------------------------------------------------
+    const Size n_steps = opts.expected_step_count();
+    SimulationResult result;
+    result.reserve(n_steps);
+
+    Vector x = Vector::Zero(state_size);
+    pwl::HistoryState history{graph, pool};
+    history.reset();   // explicit (constructor already zeroes)
+
+    Vector b_extra(static_cast<Index>(state_size));
+
+    if (cache.dt() > Real{0}) {
+        // ----------- DYNAMIC PATH ---------------------------------------
+        //
+        // Trap rule semantics: at the start of iteration k, `x` is the
+        // state at time t_k. cache.solve advances it to x at t_{k+1}.
+        // To make recorded `(t, x)` pairs match the physical state at
+        // that time, we record the IC at t = t_start as sample 0, then
+        // each subsequent solve produces the sample at t = t_start +
+        // k·dt for k = 1..N-1.
+        result.times.push_back(opts.t_start);
+        result.states.push_back(x);   // IC (all-zero for V0/V1)
+
+        for (Size k = 1; k < n_steps; ++k) {
+            const Real t = opts.t_start +
+                            static_cast<Real>(k) * opts.dt;
+
+            // 1. History from previous step (already updated below
+            //    at the end of the previous iteration, or zero on
+            //    the very first solve when k = 1).
+            b_extra = history.compute_b_extra(opts.dt);
+
+            // 2. Optional user-supplied b_extra(t).
+            if (b_extra_fn) {
+                b_extra += b_extra_fn(t);
+            }
+
+            // 3. Switch state at THIS step.
+            const auto mask = switch_fn(t);
+
+            // 4. Cached solve — Layer 4's PLECS-style hot path.
+            cache.solve(mask, b_extra, x);
+
+            // 5. Update history for the next iteration.
+            history.update_from_state(x, opts.dt);
+
+            // 6. Record.
+            result.times.push_back(t);
+            result.states.push_back(x);
+        }
+    } else {
+        // ----------- STATIC PATH ----------------------------------------
+        //
+        // No dynamic devices → cache.solve gives the DC operating
+        // point for the requested switch state. Each sample is an
+        // independent solve; "IC = 0 at t_start" is not meaningful
+        // since the static answer at t_start IS the cache.solve
+        // result for the t_start switch state.
+        const Vector zero_b_extra = Vector::Zero(state_size);
+        for (Size k = 0; k < n_steps; ++k) {
+            const Real t = opts.t_start +
+                            static_cast<Real>(k) * opts.dt;
+            const auto mask = switch_fn(t);
+            if (b_extra_fn) {
+                const Vector b_ex = b_extra_fn(t);
+                cache.solve(mask, b_ex, x);
+            } else {
+                cache.solve(mask, zero_b_extra, x);
+            }
+            result.times.push_back(t);
+            result.states.push_back(x);
+        }
     }
 
     return result;

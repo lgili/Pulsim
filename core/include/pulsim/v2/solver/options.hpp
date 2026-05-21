@@ -52,16 +52,22 @@ struct SimulationOptions {
     /// loop visits k = 0, 1, …, N - 1 with t = t_start + k · dt
     /// and the last sample is the largest k such that
     /// `t_start + k · dt <= t_end`.
+    ///
+    /// FP robustness: when `(t_end - t_start)` should be an exact
+    /// multiple of dt (the common case for user-friendly sims),
+    /// floating-point can produce values like 499.99999999999983
+    /// instead of 500.0. We add a tiny tolerance before floor so
+    /// borderline cases land on the intended integer.
     [[nodiscard]] Size expected_step_count() const noexcept {
         if (!valid()) {
             return 0;
         }
         const Real span = t_end - t_start;
-        // floor(span/dt) + 1 — the "+1" counts the t_start sample.
-        // Use std::floor + integer cast to defend against tiny FP
-        // overshoot at the last step.
-        const Real n_real = std::floor(span / dt) + Real{1};
-        return static_cast<Size>(n_real);
+        // Number of FULL dt steps that fit in [t_start, t_end]. We
+        // pad against tiny FP rounding (≈ 1 ULP) so that
+        // mathematically-exact integer ratios don't lose a sample.
+        const Real ratio = span / dt + Real{1e-9};
+        return static_cast<Size>(std::floor(ratio)) + 1;
     }
 };
 

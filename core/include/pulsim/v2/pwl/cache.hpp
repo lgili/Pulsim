@@ -41,22 +41,27 @@ public:
                         const DevicePool& pool) noexcept
         : graph_{graph}, pool_{pool} {}
 
-    /// Build all 2^N segments and pre-factorize each.
+    /// Build all 2^N segments and pre-factorize each (V1 dt-aware).
+    ///
+    /// `dt > 0` enables dynamic-device stamping (Capacitor /
+    /// Inductor trap companion). `dt = 0` (or the no-arg overload)
+    /// skips dynamic devices and produces a V0-identical static
+    /// build.
+    ///
+    /// Calling build(dt) twice with different dt CLEARs and
+    /// rebuilds every factor (the matrix is dt-dependent).
     ///
     /// Time:   O(2^N · (assemble + analyze + factorize))
     /// Memory: O(2^N · (nnz(J) + nnz(L) + nnz(U)))
-    ///
-    /// For N <= 16 segments (65k entries) on a typical PE circuit
-    /// this finishes in well under a second and uses < 100 MB.
-    /// V1 will add lazy build-on-first-lookup for larger N.
-    void build() {
+    void build(Real dt) {
+        dt_ = dt;
         segments_.clear();
         const Size num_switches = graph_.num_switches();
         sparse::Matrix J;
         Vector b;
         for (auto mask :
              topology::enumerate_switch_states(num_switches)) {
-            assemble_segment(graph_, pool_, mask, J, b);
+            assemble_segment(graph_, pool_, mask, dt, J, b);
             sparse::compress_in_place(J);
 
             auto solver = sparse::make_default_solver();
@@ -82,6 +87,15 @@ public:
             segments_.emplace(mask, std::move(seg));
         }
     }
+
+    /// V0 backwards-compat overload — static-only build (dt = 0).
+    /// Caps and Inductors are silently skipped.
+    void build() { build(Real{0}); }
+
+    /// Currently-built dt. Returns 0 for static-only builds.
+    /// Layer 5's run_transient checks this against opts.dt and
+    /// throws on mismatch.
+    [[nodiscard]] Real dt() const noexcept { return dt_; }
 
     /// O(1) segment lookup. Throws if the mask wasn't built (which
     /// only happens if the caller passes a SwitchStateMask of the
@@ -125,6 +139,7 @@ private:
     const DevicePool& pool_;
     std::unordered_map<topology::SwitchStateMask, PwlSegment>
         segments_;
+    Real dt_ = Real{0};   // 0 = static-only build (V0)
 };
 
 }  // namespace pulsim::v2::pwl

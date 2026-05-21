@@ -350,6 +350,53 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer5_tests)
 
     # =============================================================================
+    # pulsim_v2_layer4_v1_tests — pulsim-v2-trapezoidal-companion (Layer 4 V1)
+    # =============================================================================
+    # Capacitor + Inductor with the trap companion model. Cache
+    # becomes dt-aware. Static-only V0 behaviour preserved via the
+    # dt=0 path.
+    add_executable(pulsim_v2_layer4_v1_tests
+        tests/v2/layer4_v1/test_main.cpp
+        tests/v2/layer4_v1/test_capacitor.cpp
+        tests/v2/layer4_v1/test_inductor.cpp
+        tests/v2/layer4_v1/test_device_pool_dynamic.cpp
+        tests/v2/layer4_v1/test_stamp_companion.cpp
+        tests/v2/layer4_v1/test_dt_aware_cache.cpp
+    )
+    target_link_libraries(pulsim_v2_layer4_v1_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer4_v1_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer4_v1_tests)
+
+    # =============================================================================
+    # pulsim_v2_layer5_v1_tests — pulsim-v2-trapezoidal-companion (Layer 5 V1)
+    # =============================================================================
+    # HistoryState + run_transient extended for dynamic devices.
+    # Integration: RC charging, RL ramp, RLC ringdown.
+    add_executable(pulsim_v2_layer5_v1_tests
+        tests/v2/layer5_v1/test_main.cpp
+        tests/v2/layer5_v1/test_history_state.cpp
+        tests/v2/layer5_v1/test_run_transient_history.cpp
+        tests/v2/layer5_v1/test_integration_rc.cpp
+        tests/v2/layer5_v1/test_integration_rl.cpp
+        tests/v2/layer5_v1/test_integration_rlc.cpp
+    )
+    target_link_libraries(pulsim_v2_layer5_v1_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer5_v1_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer5_v1_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 
