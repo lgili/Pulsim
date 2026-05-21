@@ -125,6 +125,19 @@ class Circuit:
     def num_components(self) -> int: ...
     def components(self) -> List["ComponentDescriptor"]: ...
     def node_position_hint(self, node_id: int) -> Optional[str]: ...
+    # Component position hints (add-python-schematic-renderer Phase 2).
+    def set_position(
+        self,
+        name: str,
+        *,
+        layer: Optional[int] = ...,
+        slot: Optional[int] = ...,
+        x: Optional[float] = ...,
+        y: Optional[float] = ...,
+    ) -> None: ...
+    def position_hint(self, name: str) -> Optional["PositionHint"]: ...
+    def position_hints(self) -> Dict[str, "PositionHint"]: ...
+    def num_position_hints(self) -> int: ...
     @staticmethod
     def mixed_domain_phase_order() -> List[str]: ...
     def execute_mixed_domain_step(self, x: List[float], time: float) -> "MixedDomainStepResult": ...
@@ -138,6 +151,18 @@ class ComponentDescriptor:
     kind: str
     nodes: List[int]
     params: Dict[str, float]
+
+class PositionHint:
+    """Read-only schematic placement hint for one component.
+
+    Either or both of `(layer, slot)` and `(x, y)` may be set; at least
+    one is required at the kernel boundary (Circuit.set_position rejects
+    a fully-empty hint).
+    """
+    layer: Optional[int]
+    slot: Optional[int]
+    x: Optional[float]
+    y: Optional[float]
 
 class VirtualComponent:
     type: str

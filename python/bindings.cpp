@@ -1411,6 +1411,41 @@ void init_v2_module(py::module_& v2) {
             return "<ComponentDescriptor name='" + d.name + "' kind='" + d.kind + "'>";
         });
 
+    // -------------------------------------------------------------------------
+    // PositionHint (add-python-schematic-renderer Phase 2)
+    // -------------------------------------------------------------------------
+    py::class_<PositionHint>(v2, "PositionHint",
+        "User-supplied placement intent for a component, consumed by "
+        "`pulsim.schematic` to override the layout engine's automatic "
+        "placement. Has NO effect on simulation. Either or both of "
+        "(layer, slot) and (x, y) may be set; at least one MUST be set.")
+        .def_readonly("layer", &PositionHint::layer,
+                      "Semantic column index (0-based, monotonic left→right). None if not set.")
+        .def_readonly("slot", &PositionHint::slot,
+                      "Semantic row index within the layer (0-based, top→down). None if not set.")
+        .def_readonly("x", &PositionHint::x,
+                      "Absolute X coordinate in renderer units (mm-equivalent). None if not set.")
+        .def_readonly("y", &PositionHint::y,
+                      "Absolute Y coordinate in renderer units (mm-equivalent). None if not set.")
+        .def("__repr__", [](const PositionHint& h) {
+            std::string out = "<PositionHint ";
+            bool first = true;
+            auto append = [&](const char* k, const auto& opt) {
+                if (!opt.has_value()) return;
+                if (!first) out += " ";
+                out += k;
+                out += "=";
+                out += std::to_string(*opt);
+                first = false;
+            };
+            append("layer", h.layer);
+            append("slot", h.slot);
+            append("x", h.x);
+            append("y", h.y);
+            out += ">";
+            return out;
+        });
+
     // =========================================================================
     // Runtime Circuit Builder (Phase 3)
     // =========================================================================
@@ -1461,6 +1496,38 @@ void init_v2_module(py::module_& v2) {
              "Classify a node as one of "
              "'ground' | 'source_pos' | 'source_neg' | 'load' | 'internal'. "
              "Returns None for node IDs outside the circuit.")
+        // Component position hints (add-python-schematic-renderer Phase 2)
+        .def("set_position",
+             [](Circuit& c, std::string_view name,
+                std::optional<int> layer, std::optional<int> slot,
+                std::optional<Real> x, std::optional<Real> y) {
+                 c.set_position(name, layer, slot, x, y);
+             },
+             py::arg("name"),
+             py::arg("layer") = py::none(),
+             py::arg("slot")  = py::none(),
+             py::arg("x")     = py::none(),
+             py::arg("y")     = py::none(),
+             "Set or replace the schematic placement hint for a named component. "
+             "At least one of (layer, slot) or (x, y) MUST be set. Hints have no "
+             "effect on simulation; they are consumed by `pulsim.schematic.render`.")
+        .def("position_hint",
+             [](const Circuit& c, std::string_view name) -> py::object {
+                 auto h = c.position_hint(name);
+                 if (!h) return py::none();
+                 return py::cast(*h);
+             },
+             py::arg("name"),
+             "Return the placement hint for a named component, or None if no hint is set.")
+        .def("position_hints",
+             [](const Circuit& c) {
+                 return c.position_hints();
+             },
+             "Snapshot dict of every placement hint set on the circuit, keyed by "
+             "component name. Mutating the returned dict does not affect the circuit.")
+        .def("num_position_hints",
+             &Circuit::num_position_hints,
+             "Number of placement hints currently set (convenience accessor for tests).")
         // Device addition
         .def("add_resistor",
              py::overload_cast<const std::string&, Index, Index, Real>(
