@@ -1786,6 +1786,11 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
              "turns_ratio", "ratio", "magnetizing_inductance", "lm",
              "target_component", "target_device", "target", "operation", "channels", "inputs", "outputs",
              "x", "y", "num", "den", "delay", "sample_period",
+             // add-python-schematic-renderer Phase 2: optional per-component
+             // schematic placement hint, e.g. `position: {layer: 0, slot: 1}`
+             // or `position: {x: 200.0, y: 80.0}`. Has no effect on
+             // simulation — consumed by `pulsim.schematic.render(...)`.
+             "position",
              "trip_current", "trip_time", "trip", "rating", "blow_i2t", "i2t",
              "pickup_current", "dropout_current", "pickup_voltage", "dropout_voltage",
              "contact_resistance", "off_resistance", "target_component_no", "target_component_nc",
@@ -1873,6 +1878,62 @@ void YamlParser::parse_yaml(const std::string& content, Circuit& circuit, Simula
             nodes = parse_nodes(comp["nodes"], name, errors_);
             if (nodes.empty()) continue;
             if (!validate_node_count(type, nodes, errors_, name)) continue;
+        }
+
+        // ----------------------------------------------------------------
+        // Optional schematic position hint (add-python-schematic-renderer
+        // Phase 2). Schema:
+        //   position: { layer: 0, slot: 1 }   # semantic grid form
+        //   position: { x: 200.0, y: 80.0 }   # absolute form
+        // Either or both forms are accepted. An empty/malformed position
+        // map (no recognized keys) is reported via diagnostics but does
+        // NOT abort component creation — the hint is dropped and the
+        // device is still added to the circuit.
+        // ----------------------------------------------------------------
+        if (comp["position"]) {
+            const YAML::Node pos = comp["position"];
+            if (!pos.IsMap()) {
+                push_warning(warnings_, kDiagInvalidParameter,
+                             "Component '" + name +
+                             "' has non-map `position`; ignoring.");
+            } else {
+                std::optional<int>  hint_layer;
+                std::optional<int>  hint_slot;
+                std::optional<Real> hint_x;
+                std::optional<Real> hint_y;
+                try {
+                    if (pos["layer"]) hint_layer = pos["layer"].as<int>();
+                    if (pos["slot"])  hint_slot  = pos["slot"].as<int>();
+                    if (pos["x"])     hint_x     = pos["x"].as<Real>();
+                    if (pos["y"])     hint_y     = pos["y"].as<Real>();
+                } catch (const YAML::Exception& e) {
+                    push_error(errors_, kDiagInvalidParameter,
+                               "Component '" + name +
+                               "' has invalid `position` value: " + e.what());
+                    hint_layer.reset();
+                    hint_slot.reset();
+                    hint_x.reset();
+                    hint_y.reset();
+                }
+                if (hint_layer || hint_slot || hint_x || hint_y) {
+                    try {
+                        circuit.set_position(name, hint_layer, hint_slot,
+                                             hint_x, hint_y);
+                    } catch (const std::invalid_argument& e) {
+                        // set_position throws on a fully-empty hint, which
+                        // we've already filtered out above — this branch
+                        // is defensive only.
+                        push_error(errors_, kDiagInvalidParameter,
+                                   "Component '" + name +
+                                   "' position rejected: " + e.what());
+                    }
+                } else {
+                    push_warning(warnings_, kDiagInvalidParameter,
+                                 "Component '" + name +
+                                 "' has `position:` with no recognized keys "
+                                 "(expected layer/slot or x/y); ignoring.");
+                }
+            }
         }
 
         const YAML::Node comp_view = comp;

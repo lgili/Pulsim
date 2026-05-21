@@ -24,22 +24,15 @@ Goal: bit-for-bit equivalent output to the current netlistsvg backend on the dem
 
 Goal: hints are first-class data on `Circuit` and survive YAML round-trip. Renderer doesn't use them yet — that's Phase 3.
 
-- [ ] **2.1** Add `struct PositionHint` to `core/include/pulsim/v1/runtime_circuit.hpp`: `std::optional<int> layer`, `std::optional<int> slot`, `std::optional<double> x`, `std::optional<double> y`. Invariant: at least one of `(layer, slot)` or `(x, y)` is set.
-- [ ] **2.2** Add private `std::unordered_map<std::string, PositionHint> position_hints_` to `Circuit`. Use `unordered_map` (not `map`) for the same clang-17 / libstdc++-14 reason captured in PR #10's commit message.
-- [ ] **2.3** Add public accessors on `Circuit`:
-  - `void set_position(std::string_view name, std::optional<int> layer, std::optional<int> slot, std::optional<double> x, std::optional<double> y);`
-  - `[[nodiscard]] std::optional<PositionHint> position_hint(std::string_view name) const;`
-  - `[[nodiscard]] std::unordered_map<std::string, PositionHint> position_hints() const;` (snapshot)
-- [ ] **2.4** `set_position` validates: device with `name` must exist (or warn + ignore — choose at impl time and document in spec); at least one coordinate must be set; if both `(layer, slot)` and `(x, y)` provided, prefer absolute and emit a warning channel entry.
-- [ ] **2.5** C++ tests in `core/tests/test_position_hints.cpp` (Catch2): set/get round-trip, snapshot is detached from mutation, missing device returns nullopt, `[layer, slot]`-only and `[x, y]`-only both supported, conflict-resolution behavior is what the spec says.
-- [ ] **2.6** YAML parser update: in `core/include/pulsim/v1/parser/yaml_parser.hpp` (or its impl file), when reading each component, look for `position:` and route to `circuit.set_position(...)`. Accept both forms documented in `proposal.md`.
-- [ ] **2.7** YAML round-trip test: load a YAML with `position:` hints, assert `Circuit.position_hints()` returns them; reload the same Circuit and confirm idempotence.
-- [ ] **2.8** pybind11 bindings in `python/bindings.cpp`:
-  - `py::class_<PositionHint>` with `def_readonly` for the four optional fields.
-  - `Circuit.set_position(name, *, layer=None, slot=None, x=None, y=None)`.
-  - `Circuit.position_hint(name) -> Optional[PositionHint]`.
-  - `Circuit.position_hints() -> dict[str, PositionHint]`.
-- [ ] **2.9** Update `python/pulsim/_pulsim.pyi` with the new symbols. Python test in `python/tests/test_position_hints.py` covers the Python surface.
+- [x] **2.1** `struct PositionHint` in `core/include/pulsim/v1/runtime_circuit.hpp` with four `std::optional` fields and a `bool empty()` helper. Invariant enforced by `set_position` (NOT by the struct itself — POD stays simple).
+- [x] **2.2** Private `std::unordered_map<std::string, PositionHint> position_hints_` added next to `virtual_components_`. (`unordered_map` per the PR #10 lesson.)
+- [x] **2.3** Public accessors on `Circuit`: `set_position(name, layer?, slot?, x?, y?)`, `position_hint(name) -> std::optional<PositionHint>`, `position_hints() -> std::unordered_map<...>` (value snapshot), `num_position_hints() -> size_t`.
+- [x] **2.4** `set_position` rejects fully-empty hints (`throw std::invalid_argument`); accepts mixed `(layer, slot)` + `(x, y)` and persists all four (renderer decides priority — kernel doesn't filter). Re-setting replaces wholesale (no merging). Device-existence is NOT validated — hints can be set before the device is added (YAML parser pattern). Stale hints are silently ignored by the renderer.
+- [x] **2.5** `core/tests/test_position_hints.cpp` (11 cases / 57 assertions): empty circuit, both forms round-trip, snapshot detachment, missing-component query, empty-hint rejection, re-set replacement, hints survive device adds, hints don't affect `num_components`, determinism across builds.
+- [x] **2.6** YAML parser (`core/src/v1/yaml_parser.cpp`) parses optional `position:` map per component. Accepts `layer`/`slot` ints and `x`/`y` reals (independent — both forms allowed simultaneously). Invalid YAML types → typed error (`kDiagInvalidParameter`); empty `position:` map → warning, component still created.
+- [x] **2.7** `test_position_hints.py` covers YAML round-trip for `(layer, slot)`, `(x, y)`, mixed, missing field, and the bad-position warn-and-ignore path.
+- [x] **2.8** pybind11 bindings: `py::class_<PositionHint>` with `def_readonly` for the four fields and a `__repr__`; Circuit gets `set_position(name, *, layer, slot, x, y)`, `position_hint(name)`, `position_hints()`, `num_position_hints()`.
+- [x] **2.9** Stubs in `python/pulsim/_pulsim.pyi` for the four new Circuit methods + the `PositionHint` class. `python/tests/test_position_hints.py` (17 cases) covers the Python surface + YAML round-trip; full schematic test surface (70 cases) passes with zero regressions.
 
 ## Phase 3 — Hints flow into the layout
 

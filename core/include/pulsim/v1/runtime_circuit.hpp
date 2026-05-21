@@ -129,6 +129,31 @@ enum class NodeRole {
     Internal,
 };
 
+/// User-supplied placement intent for a component, consumed by the
+/// schematic renderer to override the layout engine's automatic
+/// placement. Either the semantic grid form `(layer, slot)` or the
+/// absolute form `(x, y)` (or both) may be set; the renderer
+/// translates `(layer, slot)` to absolute coordinates using its own
+/// grid metric, then forwards absolute coordinates as ELK position
+/// constraints. Hints have NO effect on simulation — they live on the
+/// Circuit purely so they survive YAML round-trips and are queryable
+/// by GUI consumers via `Circuit::position_hints()`.
+///
+/// Invariant: at least one of `(layer, slot)` or `(x, y)` is set.
+/// `Circuit::set_position` rejects fully-empty hints at the kernel
+/// boundary.
+struct PositionHint {
+    std::optional<int> layer;
+    std::optional<int> slot;
+    std::optional<Real> x;
+    std::optional<Real> y;
+
+    [[nodiscard]] bool empty() const noexcept {
+        return !layer.has_value() && !slot.has_value()
+            && !x.has_value() && !y.has_value();
+    }
+};
+
 /// Non-electrical components tracked by the mixed-domain runtime graph.
 /// These nodes do not stamp MNA matrices directly.
 struct VirtualComponent {
@@ -1379,6 +1404,71 @@ public:
         }
         if (is_load) return NodeRole::Load;
         return NodeRole::Internal;
+    }
+
+    // =========================================================================
+    // Component Position Hints (add-python-schematic-renderer Phase 2)
+    // =========================================================================
+    //
+    // Hints persist user-supplied placement intent on the Circuit so they
+    // survive YAML round-trips, are queryable by GUIs, and are forwarded
+    // to the schematic renderer as ELK position constraints. They have NO
+    // effect on simulation.
+    //
+    // Storage uses unordered_map (NOT map) for the same reason captured in
+    // commit 04fb8ba: clang-17 + libstdc++-14 on Ubuntu 24.04 hits a
+    // `std::forward_as_tuple` instantiation bug whenever `std::map<string, ...>`
+    // sees `operator[]` from the PULSIM_BUILD_PYTHON build path.
+
+    /// Set or replace the placement hint for a named component.
+    ///
+    /// At least one of `(layer, slot)` or `(x, y)` MUST be set. Calls
+    /// where all four optionals are empty are rejected. If a hint
+    /// already exists for the same name, this call replaces it
+    /// wholesale.
+    ///
+    /// The component name does NOT have to match an already-added
+    /// device — hints can be set before the device is added (useful for
+    /// YAML parsers that read the position field as they construct the
+    /// Circuit). Stale hints (referring to never-added devices) are
+    /// silently ignored by the renderer.
+    void set_position(std::string_view name,
+                      std::optional<int> layer = std::nullopt,
+                      std::optional<int> slot = std::nullopt,
+                      std::optional<Real> x = std::nullopt,
+                      std::optional<Real> y = std::nullopt) {
+        PositionHint hint{layer, slot, x, y};
+        if (hint.empty()) {
+            throw std::invalid_argument(
+                "Circuit::set_position requires at least one of "
+                "(layer, slot) or (x, y) to be set");
+        }
+        position_hints_.insert_or_assign(std::string{name}, hint);
+    }
+
+    /// Return the hint for a named component, or nullopt if unset.
+    [[nodiscard]] std::optional<PositionHint>
+    position_hint(std::string_view name) const {
+        auto it = position_hints_.find(std::string{name});
+        if (it == position_hints_.end()) return std::nullopt;
+        return it->second;
+    }
+
+    /// Snapshot every hint currently set on the circuit.
+    ///
+    /// The returned map is a *copy* — mutating the original Circuit
+    /// (further `set_position` calls) does not affect the snapshot.
+    /// Insertion order is NOT preserved (unordered_map); GUI consumers
+    /// that need stable ordering should sort by component name on the
+    /// consumer side.
+    [[nodiscard]] std::unordered_map<std::string, PositionHint>
+    position_hints() const {
+        return position_hints_;
+    }
+
+    /// Number of hints currently set. Convenience accessor for tests.
+    [[nodiscard]] std::size_t num_position_hints() const noexcept {
+        return position_hints_.size();
     }
 
     /// Canonical mixed-domain phase order used by the runtime scheduler.
@@ -6533,6 +6623,11 @@ private:
     /// (compressor-models feature.)
     std::unordered_map<std::string, loads::CompressorLoad> compressor_loads_;
     std::vector<VirtualComponent> virtual_components_;
+    /// Per-component placement hints for the schematic renderer
+    /// (add-python-schematic-renderer Phase 2). NOT simulation state —
+    /// purely a side-channel for layout / GUI tooling. See the
+    /// `set_position` / `position_hint` / `position_hints` accessors.
+    std::unordered_map<std::string, PositionHint> position_hints_;
     std::unordered_map<std::string, Real> virtual_signal_state_;
     std::unordered_map<std::string, Real> virtual_last_input_;
     std::unordered_map<std::string, Real> virtual_last_time_;
