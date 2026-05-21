@@ -41,7 +41,6 @@
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 
-#include <cstdio>
 #include <functional>
 #include <stdexcept>
 
@@ -358,7 +357,8 @@ inline SimulationResult run_transient(
                         opts.max_newton_iterations,
                         opts.tol_newton_dx,
                         opts.tol_newton_res,
-                        opts.enable_newton_line_search);
+                        opts.enable_newton_line_search,
+                        opts.enable_newton_lm);
                 } else {
                     cache.solve(mask, b_extra, x);
                 }
@@ -456,7 +456,8 @@ inline SimulationResult run_transient(
                         opts.max_newton_iterations,
                         opts.tol_newton_dx,
                         opts.tol_newton_res,
-                        opts.enable_newton_line_search);
+                        opts.enable_newton_line_search,
+                        opts.enable_newton_lm);
                 } else {
                     cache.solve(mask, b_extra_user, x);
                 }

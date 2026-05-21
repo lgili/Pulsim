@@ -64,6 +64,14 @@ struct SimulationOptions {
     /// would increase the residual norm.
     bool enable_newton_line_search = false;
 
+    /// Enable Levenberg-Marquardt damping (Layer 4 V5). Solves
+    /// `(J + λ·I) · dx = -f` with adaptive λ — grows on
+    /// rejected steps, shrinks on accepted ones. Handles
+    /// stiffer problems than plain line search (the κ=20
+    /// sinusoidal rectifier, etc.). Takes precedence over
+    /// line search when both are enabled.
+    bool enable_newton_lm = false;
+
     [[nodiscard]] bool valid() const noexcept {
         // All three values must be finite (no NaN, no infinity).
         if (!std::isfinite(t_start) || !std::isfinite(t_end) ||

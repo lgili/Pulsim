@@ -76,7 +76,8 @@ using NonlinearRefreshFn = std::function<
     Size max_iters = Size{50},
     Real tol_dx  = Real{1e-9},
     Real tol_res = Real{1e-9},
-    bool enable_line_search = false) {
+    bool enable_line_search = false,
+    bool enable_lm = false) {
     const Size n = seg.state_size;
     Vector x = x_init;
     if (static_cast<Size>(x.size()) != n) {
@@ -87,6 +88,14 @@ using NonlinearRefreshFn = std::function<
                          static_cast<Index>(n));
     Vector f_nl = Vector::Zero(static_cast<Index>(n));
     Vector dx;
+
+    // Levenberg-Marquardt damping state.
+    Real lm_lambda = Real{1e-6};
+    constexpr Real lm_min    = Real{1e-12};
+    constexpr Real lm_max    = Real{1e8};
+    constexpr Real lm_shrink = Real{0.5};
+    constexpr Real lm_grow   = Real{10};
+    constexpr Size lm_max_attempts = Size{30};
 
     Real last_dx_norm  = std::numeric_limits<Real>::infinity();
     Real last_res_norm = std::numeric_limits<Real>::infinity();
@@ -114,52 +123,137 @@ using NonlinearRefreshFn = std::function<
         Vector f_combined =
             seg.J * x + seg.b_constant + b_extra + f_nl;
 
-        // 4. Solve J · dx = -f.
-        auto solver = sparse::make_default_solver();
-        if (!solver->analyze(J_combined)) {
-            throw std::runtime_error(
-                "solve_with_newton: combined matrix is "
-                "structurally singular at iter " +
-                std::to_string(iter));
-        }
-        if (!solver->factorize(J_combined)) {
-            throw std::runtime_error(
-                "solve_with_newton: combined matrix is "
-                "numerically singular at iter " +
-                std::to_string(iter));
-        }
-        Vector neg_f = -f_combined;
-        solver->solve(neg_f, dx);
-
-        // 5. Update x. Plain Newton uses α = 1. When line
-        //    search is enabled, we backtrack α until the
-        //    residual norm decreases (or fall back to α = 1
-        //    if no smaller α reduces it).
         (void)nl_residual_norm;   // diagnostic only
+        const Real baseline_norm =
+            f_combined.lpNorm<Eigen::Infinity>();
+
+        // 4. Solve for `dx`. The strategy depends on which
+        //    globalization is active:
+        //      * Plain Newton (default): solve J · dx = -f once,
+        //        accept α = 1.
+        //      * Line search: solve once with α = 1, backtrack
+        //        α if residual worsens.
+        //      * LM: build J_lm = J + λ·I, solve, accept-and-
+        //        shrink-λ if residual drops, else grow λ and
+        //        retry.
         Real alpha = Real{1};
-        if (enable_line_search) {
-            const Real baseline_norm =
-                f_combined.lpNorm<Eigen::Infinity>();
+        if (enable_lm) {
+            // LM inner loop. Acceptance uses the L2 norm of f
+            // (the natural LM objective ||f||₂²) since the
+            // infinity norm can plateau when the worst residual
+            // row is stable.
+            const Real baseline_l2 = f_combined.norm();
+            // Early-exit: if the baseline residual is already
+            // at convergence, return immediately. Otherwise LM
+            // would try to "improve" a near-zero residual and
+            // fail by definition.
+            if (baseline_norm < tol_res) {
+                last_dx_norm  = Real{0};
+                last_res_norm = baseline_norm;
+                return x;
+            }
             sparse::Matrix J_nl_trial(static_cast<Index>(n),
                                        static_cast<Index>(n));
             Vector f_nl_trial = Vector::Zero(static_cast<Index>(n));
             bool accepted = false;
-            for (Size bt = 0; bt < Size{8}; ++bt) {
-                const Vector x_trial = x + alpha * dx;
+            for (Size attempt = 0;
+                 attempt < lm_max_attempts;
+                 ++attempt) {
+                // Build J_lm = J_combined + λ·I by copying and
+                // bumping the diagonal.
+                sparse::Matrix J_lm = J_combined;
+                for (Index i = 0; i < J_lm.rows(); ++i) {
+                    J_lm.coeffRef(i, i) += lm_lambda;
+                }
+                sparse::compress_in_place(J_lm);
+                auto lm_solver = sparse::make_default_solver();
+                if (!lm_solver->analyze(J_lm) ||
+                    !lm_solver->factorize(J_lm)) {
+                    // Singular at this λ — grow and retry.
+                    lm_lambda *= lm_grow;
+                    if (lm_lambda > lm_max) {
+                        throw std::runtime_error(
+                            "solve_with_newton (LM): factor "
+                            "failed at λ = " +
+                            std::to_string(lm_lambda));
+                    }
+                    continue;
+                }
+                Vector lm_neg_f = -f_combined;
+                lm_solver->solve(lm_neg_f, dx);
+                const Vector x_trial = x + dx;
                 (void)refresh(x_trial, J_nl_trial, f_nl_trial,
                                graph, pool);
                 const Vector f_trial =
                     seg.J * x_trial + seg.b_constant +
                     b_extra + f_nl_trial;
-                if (f_trial.lpNorm<Eigen::Infinity>() <
-                        baseline_norm) {
+                // Accept when the trial residual is no worse
+                // than the baseline (with a tiny tolerance for
+                // FP noise — near-converged residuals can
+                // differ in the lowest bits between iterations).
+                if (f_trial.norm() <= baseline_l2 * Real{1.0001}) {
+                    // Accept; shrink λ.
                     accepted = true;
+                    lm_lambda = std::max(lm_lambda * lm_shrink,
+                                          lm_min);
                     break;
                 }
-                alpha *= Real{0.5};
+                // Reject; grow λ.
+                lm_lambda *= lm_grow;
+                if (lm_lambda > lm_max) {
+                    throw std::runtime_error(
+                        "solve_with_newton (LM): λ exceeded "
+                        "limit at iter " +
+                        std::to_string(iter));
+                }
             }
             if (!accepted) {
-                alpha = Real{1};   // fall back to plain Newton
+                throw std::runtime_error(
+                    "solve_with_newton (LM): "
+                    "no improving step at iter " +
+                    std::to_string(iter));
+            }
+        } else {
+            // Plain Newton + optional line search.
+            auto solver = sparse::make_default_solver();
+            if (!solver->analyze(J_combined)) {
+                throw std::runtime_error(
+                    "solve_with_newton: combined matrix is "
+                    "structurally singular at iter " +
+                    std::to_string(iter));
+            }
+            if (!solver->factorize(J_combined)) {
+                throw std::runtime_error(
+                    "solve_with_newton: combined matrix is "
+                    "numerically singular at iter " +
+                    std::to_string(iter));
+            }
+            Vector neg_f = -f_combined;
+            solver->solve(neg_f, dx);
+
+            if (enable_line_search) {
+                sparse::Matrix J_nl_trial(static_cast<Index>(n),
+                                           static_cast<Index>(n));
+                Vector f_nl_trial =
+                    Vector::Zero(static_cast<Index>(n));
+                bool accepted = false;
+                for (Size bt = 0; bt < Size{8}; ++bt) {
+                    const Vector x_trial = x + alpha * dx;
+                    (void)refresh(x_trial, J_nl_trial, f_nl_trial,
+                                   graph, pool);
+                    const Vector f_trial =
+                        seg.J * x_trial + seg.b_constant +
+                        b_extra + f_nl_trial;
+                    if (f_trial.lpNorm<Eigen::Infinity>() <
+                            baseline_norm) {
+                        accepted = true;
+                        break;
+                    }
+                    alpha *= Real{0.5};
+                }
+                if (!accepted) {
+                    alpha = Real{1};
+                }
             }
         }
         x += alpha * dx;
