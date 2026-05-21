@@ -31,6 +31,14 @@ struct SimulationOptions {
     Real t_end   = Real{0};
     Real dt      = Real{0};
 
+    /// Per-step event-iteration cap. After each cache.solve,
+    /// Layer 5 V2.1 re-solves with the updated diode state until
+    /// it stabilises OR this many iterations have run.
+    ///
+    /// Default 16 — comfortable for typical PE workloads.
+    /// Set to 0 to disable iteration (V2 behaviour).
+    Size max_event_iterations = Size{16};
+
     [[nodiscard]] bool valid() const noexcept {
         // All three values must be finite (no NaN, no infinity).
         if (!std::isfinite(t_start) || !std::isfinite(t_end) ||

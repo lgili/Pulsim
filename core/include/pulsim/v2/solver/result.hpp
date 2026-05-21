@@ -30,6 +30,17 @@ struct SimulationResult {
     std::vector<Real>   times;
     std::vector<Vector> states;
 
+    /// Per-step count of how many `cache.solve` invocations were
+    /// needed before the diode state stabilised. Parallel to
+    /// `times` and `states`. Zero means "first solve was already
+    /// consistent" (no diode flips, or no diodes in the circuit
+    /// at all).
+    ///
+    /// Diagnostic only — Layer 5 V2.1 populates it when diodes
+    /// are present; otherwise it's left empty (Layer 5 V0/V1
+    /// behaviour).
+    std::vector<Size> event_iteration_count;
+
     [[nodiscard]] Size num_steps() const noexcept {
         return times.size();
     }
@@ -38,11 +49,12 @@ struct SimulationResult {
         return times.empty();
     }
 
-    /// Pre-allocate space for `n` samples on both internal
+    /// Pre-allocate space for `n` samples on all internal
     /// vectors. Does NOT change `num_steps()` — capacity only.
     void reserve(Size n) {
         times.reserve(n);
         states.reserve(n);
+        event_iteration_count.reserve(n);
     }
 };
 

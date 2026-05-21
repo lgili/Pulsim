@@ -408,10 +408,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer5_v2/test_switched_diode.cpp
         tests/v2/layer5_v2/test_diode_event_state.cpp
         tests/v2/layer5_v2/test_integration_half_wave_rectifier.cpp
-        # NOTE: boost converter integration is a known V0 limitation
-        # — per-step diode commutation chatters during DCM/CCM
-        # boundary at startup with idealized switches. Lands in the
-        # `pulsim-v2-event-detection` follow-up (sub-step bisection).
+        tests/v2/layer5_v2/test_integration_boost.cpp   # V2.1 fix
     )
     target_link_libraries(pulsim_v2_layer5_v2_tests
         PRIVATE

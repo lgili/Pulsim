@@ -226,6 +226,10 @@ inline SimulationResult run_transient(
 
     Vector b_extra(static_cast<Index>(state_size));
 
+    // Event-iteration cap. 0 disables iteration entirely
+    // (matching Layer 5 V2 behaviour for regression testing).
+    const Size max_iters = opts.max_event_iterations;
+
     if (cache.dt() > Real{0}) {
         // ----------- DYNAMIC PATH ---------------------------------------
         //
@@ -236,74 +240,101 @@ inline SimulationResult run_transient(
         // each subsequent solve produces the sample at t = t_start +
         // k·dt for k = 1..N-1.
         result.times.push_back(opts.t_start);
-        result.states.push_back(x);   // IC (all-zero for V0/V1)
+        result.states.push_back(x);                       // IC
+        result.event_iteration_count.push_back(0);        // IC is trivial
 
         for (Size k = 1; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
 
-            // 1. History from previous step (already updated below
-            //    at the end of the previous iteration, or zero on
-            //    the very first solve when k = 1).
-            b_extra = history.compute_b_extra(opts.dt);
+            // 1. History from previous step.
+            const Vector b_extra_history =
+                history.compute_b_extra(opts.dt);
 
             // 2. Optional user-supplied b_extra(t).
-            if (b_extra_fn) {
-                b_extra += b_extra_fn(t);
+            const Vector b_extra_user = b_extra_fn
+                ? b_extra_fn(t)
+                : Vector::Zero(state_size);
+            b_extra = b_extra_history + b_extra_user;
+
+            // 3. Event-iteration loop. Solve, update diode state,
+            //    re-solve if any diode flipped. Stop when stable
+            //    or max_iters hit.
+            Size iters = 0;
+            bool flipped = false;
+            do {
+                auto mask = switch_fn(t);
+                if (has_diodes) {
+                    const auto diode_mask =
+                        diodes.current_diode_mask();
+                    mask = combine_masks(mask, diode_mask,
+                                          diode_owned);
+                }
+                cache.solve(mask, b_extra, x);
+                flipped = has_diodes &&
+                          diodes.update_from_state(x);
+                ++iters;
+            } while (flipped && iters < max_iters);
+
+            if (flipped) {
+                throw std::runtime_error(
+                    "run_transient: event-iteration limit "
+                    "reached without convergence at t = " +
+                    std::to_string(t) + "; raise "
+                    "max_event_iterations or reduce dt");
             }
 
-            // 3. Switch state at THIS step. Overlay diode bits if
-            //    any diodes are present.
-            auto mask = switch_fn(t);
-            if (has_diodes) {
-                const auto diode_mask = diodes.current_diode_mask();
-                mask = combine_masks(mask, diode_mask, diode_owned);
-            }
-
-            // 4. Cached solve — Layer 4's PLECS-style hot path.
-            cache.solve(mask, b_extra, x);
-
-            // 5. Update history + diode state for the next iter.
+            // 4. Commit history for the next step.
             history.update_from_state(x, opts.dt);
-            if (has_diodes) {
-                diodes.update_from_state(x);
-            }
 
-            // 6. Record.
+            // 5. Record. event_iteration_count = iters - 1 (the
+            //    first iteration always runs; the count is the
+            //    number of EXTRA solves caused by diode flips).
             result.times.push_back(t);
             result.states.push_back(x);
+            result.event_iteration_count.push_back(iters - 1);
         }
     } else {
         // ----------- STATIC PATH ----------------------------------------
         //
         // No dynamic devices → cache.solve gives the DC operating
-        // point for the requested switch state. Each sample is an
-        // independent solve. Diode auto-commutation still applies
-        // if there are any diodes in the circuit.
+        // point for the requested switch state. Diode iteration
+        // still applies.
         const Vector zero_b_extra = Vector::Zero(state_size);
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
 
-            auto mask = switch_fn(t);
-            if (has_diodes) {
-                const auto diode_mask = diodes.current_diode_mask();
-                mask = combine_masks(mask, diode_mask, diode_owned);
-            }
+            const Vector b_extra_user = b_extra_fn
+                ? b_extra_fn(t)
+                : zero_b_extra;
 
-            if (b_extra_fn) {
-                const Vector b_ex = b_extra_fn(t);
-                cache.solve(mask, b_ex, x);
-            } else {
-                cache.solve(mask, zero_b_extra, x);
-            }
+            Size iters = 0;
+            bool flipped = false;
+            do {
+                auto mask = switch_fn(t);
+                if (has_diodes) {
+                    const auto diode_mask =
+                        diodes.current_diode_mask();
+                    mask = combine_masks(mask, diode_mask,
+                                          diode_owned);
+                }
+                cache.solve(mask, b_extra_user, x);
+                flipped = has_diodes &&
+                          diodes.update_from_state(x);
+                ++iters;
+            } while (flipped && iters < max_iters);
 
-            if (has_diodes) {
-                diodes.update_from_state(x);
+            if (flipped) {
+                throw std::runtime_error(
+                    "run_transient: event-iteration limit "
+                    "reached without convergence at t = " +
+                    std::to_string(t));
             }
 
             result.times.push_back(t);
             result.states.push_back(x);
+            result.event_iteration_count.push_back(iters - 1);
         }
     }
 
