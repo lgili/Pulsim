@@ -171,14 +171,35 @@ void init_module(py::module_& m) {
               py::arg("v_initial"), py::arg("v_pulsed"),
               py::arg("t_start"), py::arg("pulse_width"),
               py::arg("period") = 0.0,
+              py::arg("rise_time") = 0.0,
+              py::arg("fall_time") = 0.0,
               py::return_value_policy::reference,
               "Add a pulse / step voltage source. Output "
               "is v_initial for t < t_start, v_pulsed for "
-              "t ∈ [t_start, t_start + pulse_width), then "
-              "back to v_initial. If `period > 0`, the pulse "
-              "repeats every `period` seconds. Useful for "
-              "step-response tests, clock signals, and "
-              "transient kicks.")
+              "t ∈ [t_start + rise_time, t_start + rise + "
+              "pulse_width), with optional linear ramps "
+              "rise_time / fall_time (SPICE-style PULSE). "
+              "If period > 0, repeats. Default rise/fall = 0 "
+              "→ instantaneous transition (V12 backward "
+              "compat).")
+        .def("add_igbt_level1",
+              &builder::CircuitBuilder::add_igbt_level1,
+              py::arg("name"),
+              py::arg("collector"), py::arg("emitter"),
+              py::arg("gate"),
+              py::arg("V_CE_sat") = 1.5,
+              py::arg("R_CE_sat") = 0.05,
+              py::arg("V_T")      = 5.0,
+              py::arg("kappa")    = 10.0,
+              py::return_value_policy::reference,
+              "Add a 3-terminal IGBT Level 1 (linear-"
+              "conduction model with cutoff sigmoid). "
+              "Collector-emitter is a Nonlinear branch; "
+              "gate is an ideal voltage reference (no gate "
+              "current). On-state I_C = (V_CE-V_CE_sat) / "
+              "R_CE_sat. Use `run_transient(..., enable_"
+              "nonlinear_refresh=True)` to stamp the "
+              "device per Newton iteration.")
         .def("add_mosfet_level1",
               &builder::CircuitBuilder::add_mosfet_level1,
               py::arg("name"),

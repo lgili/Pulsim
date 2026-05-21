@@ -1,0 +1,77 @@
+# Pulsim v2 example: boost converter with REALISTIC MOSFET
+# ---
+# Same boost as boost_realistic_igbt.yaml but using the V13
+# SH1 MOSFET. The V14 PulseVoltageSource rise_time trick
+# (ramping the gate over multiple timesteps) is the key
+# that makes Newton converge through the gate edge — the
+# original V13.2 attempt failed because the abrupt gate
+# step pushed Newton into the spurious V_DS<0 regime.
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: vin
+      to: gnd
+      V: 12.0
+
+    # Ramped PWM gate drive — 2 µs rise/fall (the
+    # continuation-in-time trick).
+    - type: pulse_voltage_source
+      name: V_g_drive
+      from: V_g
+      to: gnd
+      v_initial: 0.0
+      v_pulsed: 10.0
+      t_start: 5.0e-6
+      pulse_width: 2.0e-6
+      period: 1.0e-5
+      rise_time: 2.0e-6
+      fall_time: 2.0e-6
+
+    - type: inductor
+      name: L_boost
+      from: vin
+      to: sw
+      L: 100.0e-6
+
+    - type: diode
+      name: D_boost
+      anode: sw
+      cathode: vout
+      g_on: 1.0e3
+      g_off: 1.0e-9
+      V_th: 0.5
+
+    # Active switch — V13 SH1 MOSFET. K=0.05 chosen so the
+    # saturation current K·V_OV² ≈ 3 A is comparable to the
+    # actual operating I_L (~1.7 A), preventing Newton's
+    # linearisation from overshooting on the gate edge.
+    # R_DS_ON ≈ 1/(2·0.05·8) ≈ 1.25 Ω — large but trades off
+    # against Newton stability.
+    - type: mosfet_level1
+      name: M1
+      drain: sw
+      source: gnd
+      gate: V_g
+      K: 0.05
+      V_T: 2.0
+      lambda: 0.02
+      kappa: 15.0
+
+    - type: capacitor
+      name: C_out
+      from: vout
+      to: gnd
+      C: 100.0e-6
+
+    - type: resistor
+      name: R_load
+      from: vout
+      to: gnd
+      R: 20.0
+
+simulation:
+  t_start: 0.0
+  t_end:   5.0e-3
+  dt:      1.0e-7

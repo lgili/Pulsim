@@ -74,6 +74,40 @@ TEST_CASE("PulseVoltageSource — periodic mode wraps correctly",
     REQUIRE(PulseVoltageSource::value_at(p, 9.0)  == 0.0);
 }
 
+TEST_CASE("PulseVoltageSource — rise/fall ramps interpolate linearly",
+          "[v2][layer2_v12][pulse_voltage_source][unit]") {
+    // V_initial=0, V_pulsed=10, t_start=0, pulse_width=1s,
+    // rise_time=0.5s, fall_time=0.5s. Total active = 2s.
+    PulseVoltageSource::Params p{
+        .v_initial = 0.0, .v_pulsed = 10.0,
+        .t_start = 0.0, .pulse_width = 1.0,
+        .period = 0.0,
+        .rise_time = 0.5, .fall_time = 0.5};
+    // During rise: linearly interpolate.
+    REQUIRE(PulseVoltageSource::value_at(p, 0.0)  == Approx(0.0));
+    REQUIRE(PulseVoltageSource::value_at(p, 0.25) == Approx(5.0));
+    REQUIRE(PulseVoltageSource::value_at(p, 0.5)  == Approx(10.0));
+    // During hold.
+    REQUIRE(PulseVoltageSource::value_at(p, 1.0)  == Approx(10.0));
+    REQUIRE(PulseVoltageSource::value_at(p, 1.49) == Approx(10.0));
+    // During fall.
+    REQUIRE(PulseVoltageSource::value_at(p, 1.75) == Approx(5.0));
+    // After fall.
+    REQUIRE(PulseVoltageSource::value_at(p, 2.5)  == Approx(0.0));
+}
+
+TEST_CASE("PulseVoltageSource — rise_time=0 preserves V12 behavior",
+          "[v2][layer2_v12][pulse_voltage_source][unit]") {
+    // Backwards-compat: no ramp → instantaneous step.
+    PulseVoltageSource::Params p{
+        .v_initial = 0.0, .v_pulsed = 5.0,
+        .t_start = 1.0, .pulse_width = 2.0};
+    REQUIRE(PulseVoltageSource::value_at(p, 0.5) == Approx(0.0));
+    REQUIRE(PulseVoltageSource::value_at(p, 1.0) == Approx(5.0));
+    REQUIRE(PulseVoltageSource::value_at(p, 2.5) == Approx(5.0));
+    REQUIRE(PulseVoltageSource::value_at(p, 3.5) == Approx(0.0));
+}
+
 TEST_CASE("PulseVoltageSource — negative-going pulse",
           "[v2][layer2_v12][pulse_voltage_source][unit]") {
     PulseVoltageSource::Params p{

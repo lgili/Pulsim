@@ -1,0 +1,96 @@
+# Pulsim v2 example: boost converter with REALISTIC IGBT
+# ---
+# Real boost SMPS topology using:
+#   * V14 IGBT Level 1 as the active switch (linear-
+#     conduction physics, no spurious negative-V_CE root
+#     unlike SH1 MOSFET)
+#   * V14 PulseVoltageSource with `rise_time` — ramps the
+#     gate over multiple timesteps so Newton converges
+#     smoothly through the transition (the "continuation in
+#     time" trick that resolves the V13 boost convergence
+#     corner)
+#   * Smooth-blend nonlinear_diode for the freewheel diode
+#     (avoids SwitchedDiode event-mask coupling with the
+#     IGBT's Newton refresh)
+#
+# Topology:
+#   V_in ─ L ─┬─ D ─┬─ vout ─ C ─ gnd
+#              │     │       │
+#              │     │       └─ R_load ─ gnd
+#              │     │
+#              T1 ──┘ (T1 collector = sw, emitter = gnd, gate = V_g)
+#
+# Boost equation (ideal): V_out = V_in / (1 − D) ≈ 12/0.6 = 20 V.
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: vin
+      to: gnd
+      V: 12.0
+
+    # PWM gate drive with 1 µs rise/fall ramps.
+    # This is the "pseudo-transient continuation in time"
+    # workaround: ramping the gate over 10 timesteps (at
+    # dt=100 ns) lets Newton converge smoothly through the
+    # turn-on instead of jumping from V_GE=0 to V_GE=10 in
+    # a single timestep.
+    - type: pulse_voltage_source
+      name: V_g_drive
+      from: V_g
+      to: gnd
+      v_initial: 0.0
+      v_pulsed: 10.0
+      t_start: 5.0e-6
+      pulse_width: 2.0e-6        # 2 µs at v_pulsed
+      period: 1.0e-5             # 100 kHz, D_eff ≈ 0.4
+      rise_time: 2.0e-6          # 2 µs ramp up (slower → kinder to Newton)
+      fall_time: 2.0e-6          # 2 µs ramp down
+
+    - type: inductor
+      name: L_boost
+      from: vin
+      to: sw
+      L: 100.0e-6
+
+    # Freewheel diode — SwitchedDiode auto-commutated by
+    # the event detection system. Decouples cleanly from
+    # the IGBT's Newton refresh (different stamping path).
+    - type: diode
+      name: D_boost
+      anode: sw
+      cathode: vout
+      g_on: 1.0e3
+      g_off: 1.0e-9
+      V_th: 0.5
+
+    # Active switch — V14 IGBT Level 1. Linear conduction
+    # means no spurious root in the I-V; Newton is well-
+    # behaved.
+    - type: igbt_level1
+      name: T1
+      collector: sw
+      emitter: gnd
+      gate: V_g
+      V_CE_sat: 1.0
+      R_CE_sat: 0.02
+      V_T: 5.0
+      kappa: 15.0
+
+    - type: capacitor
+      name: C_out
+      from: vout
+      to: gnd
+      C: 100.0e-6
+
+    - type: resistor
+      name: R_load
+      from: vout
+      to: gnd
+      R: 20.0
+
+simulation:
+  t_start: 0.0
+  t_end:   5.0e-3
+  dt:      1.0e-7

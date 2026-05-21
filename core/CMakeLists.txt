@@ -273,6 +273,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer2/test_sine_voltage_source.cpp # Layer 2 V11
         tests/v2/layer2/test_pulse_voltage_source.cpp # Layer 2 V12
         tests/v2/layer2/test_mosfet_level1.cpp        # Layer 2 V13
+        tests/v2/layer2/test_igbt_level1.cpp          # Layer 2 V14
     )
     target_link_libraries(pulsim_v2_layer2_tests
         PRIVATE
@@ -534,6 +535,8 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/showcases/test_rlc_step_response.cpp           # V12
         tests/v2/showcases/test_common_source_amplifier.cpp     # V13
         tests/v2/showcases/test_pwm_chopper_realistic_mosfet.cpp # V13 SMPS
+        tests/v2/showcases/test_boost_realistic_igbt.cpp         # V14 boost (IGBT)
+        tests/v2/showcases/test_boost_realistic_mosfet_v14.cpp   # V14 boost (MOSFET)
     )
     target_link_libraries(pulsim_v2_showcase_tests
         PRIVATE

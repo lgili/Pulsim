@@ -176,7 +176,9 @@ inline void load_device(
             require_real(dev, idx, type, "v_pulsed"),
             real_or(dev, "t_start", Real{0}),
             require_real(dev, idx, type, "pulse_width"),
-            real_or(dev, "period", Real{0}));
+            real_or(dev, "period", Real{0}),
+            real_or(dev, "rise_time", Real{0}),
+            real_or(dev, "fall_time", Real{0}));
     } else if (type == "mosfet_level1") {
         b.add_mosfet_level1(
             name,
@@ -187,6 +189,16 @@ inline void load_device(
             require_real(dev, idx, type, "V_T"),
             real_or(dev, "lambda", Real{0.02}),
             real_or(dev, "kappa",  Real{15.0}));
+    } else if (type == "igbt_level1") {
+        b.add_igbt_level1(
+            name,
+            require_string(dev, idx, type, "collector"),
+            require_string(dev, idx, type, "emitter"),
+            require_string(dev, idx, type, "gate"),
+            real_or(dev, "V_CE_sat", Real{1.5}),
+            real_or(dev, "R_CE_sat", Real{0.05}),
+            real_or(dev, "V_T",      Real{5.0}),
+            real_or(dev, "kappa",    Real{10.0}));
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -275,7 +287,7 @@ inline void load_device(
             "pulse_voltage_source, resistor, capacitor, "
             "inductor, diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
-            "igbt, transformer");
+            "igbt, igbt_level1, transformer");
     }
 }
 

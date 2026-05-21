@@ -25,6 +25,7 @@
 #include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
+#include "pulsim/v2/models/igbt_level1.hpp"
 #include "pulsim/v2/models/mosfet_level1.hpp"
 #include "pulsim/v2/models/pulse_voltage_source.hpp"
 #include "pulsim/v2/models/pwm_voltage_source.hpp"
@@ -163,6 +164,39 @@ public:
         return *this;
     }
 
+    /// Add a 3-terminal IGBT Level 1 (Layer 2 V14). Same
+    /// architectural pattern as `add_mosfet_level1`. The
+    /// collector→emitter is a Nonlinear branch; gate is a
+    /// node reference (no gate current — ideal gate).
+    ///   V_CE_sat    [V] saturation voltage (knee)
+    ///   R_CE_sat    [Ω] on-state slope resistance
+    ///   V_T         [V] gate threshold
+    ///   kappa       [1/V] cutoff sigmoid sharpness
+    CircuitBuilder& add_igbt_level1(
+        std::string /*name*/,
+        std::string collector, std::string emitter,
+        std::string gate,
+        Real V_CE_sat = Real{1.5},
+        Real R_CE_sat = Real{0.05},
+        Real V_T      = Real{5.0},
+        Real kappa    = Real{10.0}) {
+        const Index c_idx = resolve_node_(collector);
+        const Index e_idx = resolve_node_(emitter);
+        const Index g_idx = resolve_node_(gate);
+        const Index b_id = graph_.add_branch(
+            c_idx, e_idx,
+            topology::BranchKind::Nonlinear);
+        pool_.add_igbt_level1(
+            b_id, g_idx,
+            models::IgbtLevel1::Params{
+                .V_CE_sat = V_CE_sat,
+                .R_CE_sat = R_CE_sat,
+                .V_T      = V_T,
+                .kappa    = kappa,
+            });
+        return *this;
+    }
+
     /// Add a pulse / step voltage source (Layer 2 V12).
     ///   v_initial    [V] baseline (before & between pulses)
     ///   v_pulsed     [V] level during the pulse window
@@ -174,7 +208,9 @@ public:
         std::string to,
         Real v_initial, Real v_pulsed,
         Real t_start, Real pulse_width,
-        Real period = Real{0}) {
+        Real period    = Real{0},
+        Real rise_time = Real{0},
+        Real fall_time = Real{0}) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = graph_.add_branch(
@@ -187,6 +223,8 @@ public:
                 .t_start     = t_start,
                 .pulse_width = pulse_width,
                 .period      = period,
+                .rise_time   = rise_time,
+                .fall_time   = fall_time,
             });
         return *this;
     }

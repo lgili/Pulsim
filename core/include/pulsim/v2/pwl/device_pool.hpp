@@ -17,6 +17,7 @@
 
 #include "pulsim/v2/models/capacitor.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
+#include "pulsim/v2/models/igbt_level1.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/mosfet_level1.hpp"
 #include "pulsim/v2/models/resistor.hpp"
@@ -57,6 +58,7 @@ public:
         SineVoltageSource = 9,  // Layer 2 V11 (AC voltage source)
         PulseVoltageSource = 10, // Layer 2 V12 (pulse / step source)
         MosfetLevel1      = 11, // Layer 2 V13 (SH1 nonlinear MOSFET)
+        IgbtLevel1        = 12, // Layer 2 V14 (linear-conduction IGBT)
     };
 
     struct SwitchParams {
@@ -208,6 +210,31 @@ public:
         return it->second;
     }
 
+    /// Register a 3-terminal IGBT Level 1 (Layer 2 V14).
+    /// `branch_id` is the collector→emitter Nonlinear branch;
+    /// `gate_node_id` is the gate's node index. Layer 4 V14's
+    /// `refresh_igbts_level1` stamps the 6 Jacobian entries
+    /// per device per Newton iteration.
+    void add_igbt_level1(
+        Index branch_id, Index gate_node_id,
+        models::IgbtLevel1::Params p) {
+        entries_[branch_id] = Entry{p};
+        igbt_level1_gate_node_id_[branch_id] = gate_node_id;
+    }
+
+    [[nodiscard]] Index
+    igbt_level1_gate_node(Index branch_id) const {
+        const auto it =
+            igbt_level1_gate_node_id_.find(branch_id);
+        if (it == igbt_level1_gate_node_id_.end()) {
+            throw std::out_of_range(
+                "DevicePool::igbt_level1_gate_node: "
+                "branch " + std::to_string(branch_id) +
+                " is not an IgbtLevel1");
+        }
+        return it->second;
+    }
+
     // -------- Layer 2 V2: transformer (coupled inductors) ------------------
     //
     // Couplings are PAIRS of already-added inductor branches.
@@ -331,6 +358,19 @@ public:
                 " is not a MosfetLevel1");
         }
         return std::get<models::MosfetLevel1::Params>(entry);
+    }
+
+    [[nodiscard]] const models::IgbtLevel1::Params&
+    igbt_level1_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<
+                models::IgbtLevel1::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::igbt_level1_params: branch " +
+                std::to_string(branch_id) +
+                " is not an IgbtLevel1");
+        }
+        return std::get<models::IgbtLevel1::Params>(entry);
     }
 
     [[nodiscard]] Real switch_g_on(Index branch_id) const {
@@ -478,7 +518,8 @@ private:
                                 models::PWMVoltageSource::Params,
                                 models::SineVoltageSource::Params,
                                 models::PulseVoltageSource::Params,
-                                models::MosfetLevel1::Params>;
+                                models::MosfetLevel1::Params,
+                                models::IgbtLevel1::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -524,6 +565,10 @@ private:
     // itself lives in `entries_` as a `MosfetLevel1::Params`
     // entry; the gate node is a separate associative lookup.
     std::unordered_map<Index, Index> mosfet_level1_gate_node_id_;
+
+    // Layer 2 V14: IGBT Level 1 — same gate-node lookup
+    // pattern as MOSFET. The branch is collector→emitter.
+    std::unordered_map<Index, Index> igbt_level1_gate_node_id_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the

@@ -24,6 +24,7 @@
 // of this device.)
 
 #include "pulsim/v2/models/device_model.hpp"
+#include "pulsim/v2/models/igbt_level1.hpp"
 #include "pulsim/v2/models/mosfet_level1.hpp"
 #include "pulsim/v2/numeric/dense.hpp"
 #include "pulsim/v2/numeric/types.hpp"
@@ -121,6 +122,75 @@ inline Real refresh_mosfets_level1(
     return max_abs_i;
 }
 
+/// Stamp the SH1 Igbt Level 1 contribution analogous to
+/// the MOSFET refresh. Linear-conduction model — Newton
+/// handles it cleanly (no spurious roots).
+inline Real refresh_igbts_level1(
+    const Vector& x,
+    sparse::Matrix& J_nl,
+    Vector& f_nl,
+    const topology::Graph& graph,
+    const DevicePool& pool) {
+    if (J_nl.rows() > 0) J_nl.setZero();
+    if (f_nl.size() > 0) f_nl.setZero();
+    Real max_abs_i = Real{0};
+    for (Index b_id = 0;
+         b_id < graph.num_branches(); ++b_id) {
+        const auto& branch = graph.branch(b_id);
+        if (branch.kind != topology::BranchKind::Nonlinear) {
+            continue;
+        }
+        if (pool.kind_of(branch.id) !=
+                DevicePool::StoredKind::IgbtLevel1) {
+            continue;
+        }
+        const auto& p = pool.igbt_level1_params(branch.id);
+        const Index gate_node =
+            pool.igbt_level1_gate_node(branch.id);
+        const Index collector = branch.from;
+        const Index emitter   = branch.to;
+        const Index gate      = gate_node;
+
+        const Real v_c = stamping::read_node_voltage(x, collector);
+        const Real v_e = stamping::read_node_voltage(x, emitter);
+        const Real v_g = stamping::read_node_voltage(x, gate);
+
+        const models::ModelInputs<models::IgbtLevel1> v_term{
+            v_c, v_e, v_g};
+        const auto [i, partials] =
+            models::evaluate_current_and_jacobian<
+                models::IgbtLevel1>(v_term, p);
+
+        const bool c_active = stamping::node_is_active(collector);
+        const bool e_active = stamping::node_is_active(emitter);
+        const bool g_active = stamping::node_is_active(gate);
+
+        if (c_active) f_nl[collector] += i;
+        if (e_active) f_nl[emitter]   -= i;
+
+        if (c_active) {
+            J_nl.coeffRef(collector, collector) += partials[0];
+            if (e_active) {
+                J_nl.coeffRef(collector, emitter) += partials[1];
+            }
+            if (g_active) {
+                J_nl.coeffRef(collector, gate) += partials[2];
+            }
+        }
+        if (e_active) {
+            if (c_active) {
+                J_nl.coeffRef(emitter, collector) -= partials[0];
+            }
+            J_nl.coeffRef(emitter, emitter) -= partials[1];
+            if (g_active) {
+                J_nl.coeffRef(emitter, gate) -= partials[2];
+            }
+        }
+        max_abs_i = std::max(max_abs_i, std::abs(i));
+    }
+    return max_abs_i;
+}
+
 /// Combined refresh that runs both the smooth-blend
 /// IdealDiode and SH1 MOSFET stampers in a single pass.
 /// Useful as a drop-in `NonlinearRefreshFn` when a circuit
@@ -183,6 +253,61 @@ make_combined_diode_mosfet_refresh() {
                     }
                     J_nl.coeffRef(coord.to, coord.to) -=
                         partials[1];
+                }
+                max_abs_i =
+                    std::max(max_abs_i, std::abs(i));
+            } else if (kind ==
+                    DevicePool::StoredKind::IgbtLevel1) {
+                // Inline the IGBT pass — linear-conduction
+                // physics, simple Jacobian stamping.
+                const auto& p =
+                    pool.igbt_level1_params(branch.id);
+                const Index collector = branch.from;
+                const Index emitter   = branch.to;
+                const Index gate      =
+                    pool.igbt_level1_gate_node(branch.id);
+                const Real v_c =
+                    stamping::read_node_voltage(x, collector);
+                const Real v_e =
+                    stamping::read_node_voltage(x, emitter);
+                const Real v_g =
+                    stamping::read_node_voltage(x, gate);
+                const models::ModelInputs<models::IgbtLevel1>
+                    v_term{v_c, v_e, v_g};
+                const auto [i, partials] =
+                    models::evaluate_current_and_jacobian<
+                        models::IgbtLevel1>(v_term, p);
+                const bool c_active =
+                    stamping::node_is_active(collector);
+                const bool e_active =
+                    stamping::node_is_active(emitter);
+                const bool g_active =
+                    stamping::node_is_active(gate);
+                if (c_active) f_nl[collector] += i;
+                if (e_active) f_nl[emitter]   -= i;
+                if (c_active) {
+                    J_nl.coeffRef(collector, collector) +=
+                        partials[0];
+                    if (e_active) {
+                        J_nl.coeffRef(collector, emitter) +=
+                            partials[1];
+                    }
+                    if (g_active) {
+                        J_nl.coeffRef(collector, gate) +=
+                            partials[2];
+                    }
+                }
+                if (e_active) {
+                    if (c_active) {
+                        J_nl.coeffRef(emitter, collector) -=
+                            partials[0];
+                    }
+                    J_nl.coeffRef(emitter, emitter) -=
+                        partials[1];
+                    if (g_active) {
+                        J_nl.coeffRef(emitter, gate) -=
+                            partials[2];
+                    }
                 }
                 max_abs_i =
                     std::max(max_abs_i, std::abs(i));

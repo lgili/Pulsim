@@ -51,8 +51,15 @@ struct PulseVoltageSource {
         Real v_initial   = Real{0};     // [V] baseline
         Real v_pulsed    = Real{1};     // [V] during pulse
         Real t_start     = Real{0};     // [s] first-pulse delay
-        Real pulse_width = Real{1e-3};  // [s] pulse duration
+        Real pulse_width = Real{1e-3};  // [s] pulse duration (at v_pulsed level)
         Real period      = Real{0};     // [s] 0 = single-shot
+        // SPICE-style rise/fall ramps (Layer 2 V14). Default 0
+        // = instantaneous transition (matches V12 behavior).
+        // `pulse_width` is the time spent AT v_pulsed,
+        // excluding the rise/fall ramps. Total period must
+        // be > rise_time + pulse_width + fall_time.
+        Real rise_time   = Real{0};     // [s] linear ramp 0 → v_pulsed
+        Real fall_time   = Real{0};     // [s] linear ramp v_pulsed → 0
     };
 
     static constexpr topology::BranchKind kind =
@@ -63,24 +70,46 @@ struct PulseVoltageSource {
     static constexpr bool needs_branch_unknown = true;
 
     /// Instantaneous output value at simulation time t.
-    /// Returns v_initial outside the pulse window(s),
-    /// v_pulsed inside.
+    /// SPICE PULSE-style with optional rise/fall ramps:
+    ///   * t < t_start:                           v_initial
+    ///   * 0 ≤ phase < rise_time:                 ramp up
+    ///   * rise_time ≤ phase < rise+width:        v_pulsed
+    ///   * rise+width ≤ phase < rise+width+fall:  ramp down
+    ///   * phase ≥ rise+width+fall (single-shot): v_initial
+    /// When period > 0, `phase` wraps into [0, period).
     [[nodiscard]] static Real value_at(
         const Params& p, Real t) noexcept {
         if (t < p.t_start) {
             return p.v_initial;
         }
-        const Real elapsed = t - p.t_start;
+        Real elapsed = t - p.t_start;
         if (p.period > Real{0}) {
-            // Periodic mode: wrap elapsed into [0, period).
-            Real phase = std::fmod(elapsed, p.period);
-            if (phase < Real{0}) phase += p.period;
-            return (phase < p.pulse_width) ? p.v_pulsed
-                                             : p.v_initial;
+            elapsed = std::fmod(elapsed, p.period);
+            if (elapsed < Real{0}) elapsed += p.period;
         }
-        // Single-shot mode: pulse just once.
-        return (elapsed < p.pulse_width) ? p.v_pulsed
-                                            : p.v_initial;
+        // Rising ramp.
+        if (p.rise_time > Real{0} &&
+                elapsed < p.rise_time) {
+            const Real frac = elapsed / p.rise_time;
+            return p.v_initial +
+                   (p.v_pulsed - p.v_initial) * frac;
+        }
+        // Steady at v_pulsed.
+        const Real t_after_rise = elapsed - p.rise_time;
+        if (t_after_rise < p.pulse_width) {
+            return p.v_pulsed;
+        }
+        // Falling ramp.
+        if (p.fall_time > Real{0}) {
+            const Real t_into_fall =
+                t_after_rise - p.pulse_width;
+            if (t_into_fall < p.fall_time) {
+                const Real frac = t_into_fall / p.fall_time;
+                return p.v_pulsed +
+                       (p.v_initial - p.v_pulsed) * frac;
+            }
+        }
+        return p.v_initial;
     }
 };
 
