@@ -421,6 +421,28 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer5_v2_tests)
 
     # =============================================================================
+    # pulsim_v2_layer4_v2_tests — pulsim-v2-dc-operating-point
+    # =============================================================================
+    # DC operating-point computation + HistoryState/DiodeEventState
+    # seeding. Layer 5 V3 run_transient extended with
+    # start_from_dc_op flag.
+    add_executable(pulsim_v2_layer4_v2_tests
+        tests/v2/layer4_v2/test_main.cpp
+        tests/v2/layer4_v2/test_dc_assemble.cpp
+        tests/v2/layer4_v2/test_seeding.cpp
+        tests/v2/layer4_v2/test_integration_rc_dc_op.cpp
+    )
+    target_link_libraries(pulsim_v2_layer4_v2_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer4_v2_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer4_v2_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 

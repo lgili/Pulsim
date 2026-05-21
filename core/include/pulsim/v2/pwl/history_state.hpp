@@ -191,6 +191,27 @@ public:
         }
     }
 
+    /// Seed each entry from a DC operating-point state vector
+    /// `dc_x`. Sets:
+    ///   Capacitor: v_prev = v_C from dc_x, i_prev = 0
+    ///   Inductor:  v_prev = 0,             i_prev = i_L from dc_x
+    /// Used by Layer 5 V3's `start_from_dc_op = true` path.
+    void seed_from_dc_op(const Vector& dc_x) {
+        for (auto& e : entries_) {
+            const Real v_from = stamping::read_node_voltage(dc_x, e.from);
+            const Real v_to   = stamping::read_node_voltage(dc_x, e.to);
+            const Real v_new  = v_from - v_to;
+            if (e.kind == DevicePool::StoredKind::Capacitor) {
+                e.v_prev = v_new;
+                e.i_prev = Real{0};
+            } else {
+                // Inductor
+                e.v_prev = Real{0};
+                e.i_prev = dc_x[e.inductor_branch_var_id];
+            }
+        }
+    }
+
     /// Diagnostic accessor.
     [[nodiscard]] const std::vector<HistoryEntry>& entries() const noexcept {
         return entries_;

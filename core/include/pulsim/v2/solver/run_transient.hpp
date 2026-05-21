@@ -31,6 +31,7 @@
 #include "pulsim/v2/numeric/dense.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/cache.hpp"
+#include "pulsim/v2/pwl/dc_assemble.hpp"
 #include "pulsim/v2/pwl/device_pool.hpp"
 #include "pulsim/v2/pwl/diode_event_state.hpp"
 #include "pulsim/v2/pwl/history_state.hpp"
@@ -180,7 +181,8 @@ inline SimulationResult run_transient(
     const pwl::DevicePool& pool,
     const SimulationOptions& opts,
     const SwitchScheduleFn& switch_fn,
-    const BExtraFn& b_extra_fn = {}) {
+    const BExtraFn& b_extra_fn = {},
+    bool start_from_dc_op = false) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -224,6 +226,39 @@ inline SimulationResult run_transient(
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
 
+    // ---- DC operating-point pre-charge (Layer 5 V3) ------------------
+    //
+    // When the user requests `start_from_dc_op = true`, compute
+    // the DC steady-state at t_start's switch configuration,
+    // iterate diode consistency at the DC system, and seed
+    // HistoryState + DiodeEventState from the DC solution.
+    // Sample 0 becomes the DC state vector instead of zero.
+    if (start_from_dc_op) {
+        const Size dc_max_iters =
+            opts.max_event_iterations > 0
+                ? opts.max_event_iterations
+                : Size{16};
+        Size iters = 0;
+        bool flipped = false;
+        do {
+            auto mask = switch_fn(opts.t_start);
+            if (has_diodes) {
+                mask = combine_masks(mask,
+                                      diodes.current_diode_mask(),
+                                      diode_owned);
+            }
+            x = pwl::compute_dc_op(graph, pool, mask);
+            flipped = has_diodes && diodes.update_from_state(x);
+            ++iters;
+        } while (flipped && iters < dc_max_iters);
+        if (flipped) {
+            throw std::runtime_error(
+                "run_transient: DC operating-point event "
+                "iteration did not converge at t_start");
+        }
+        history.seed_from_dc_op(x);
+    }
+
     Vector b_extra(static_cast<Index>(state_size));
 
     // Event-iteration cap. 0 disables iteration entirely
@@ -239,9 +274,11 @@ inline SimulationResult run_transient(
         // that time, we record the IC at t = t_start as sample 0, then
         // each subsequent solve produces the sample at t = t_start +
         // k·dt for k = 1..N-1.
+        // Sample 0: zero IC (V0/V1/V2.1 default) OR DC OP (V3
+        // when start_from_dc_op=true; x was overwritten above).
         result.times.push_back(opts.t_start);
-        result.states.push_back(x);                       // IC
-        result.event_iteration_count.push_back(0);        // IC is trivial
+        result.states.push_back(x);
+        result.event_iteration_count.push_back(0);
 
         for (Size k = 1; k < n_steps; ++k) {
             const Real t = opts.t_start +
