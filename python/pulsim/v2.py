@@ -50,6 +50,7 @@ from ._pulsim.v2_kernel import (  # type: ignore[import-not-found]
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
     make_dead_time_pwm_pair_fn,
+    make_spwm_pair_fn,
 )
 
 __all__ = [
@@ -68,6 +69,7 @@ __all__ = [
     "load_yaml_file",
     "make_pwm_switch_fn",
     "make_dead_time_pwm_pair_fn",
+    "make_spwm_pair_fn",
 ]
 
 __version__ = "0.1.0"

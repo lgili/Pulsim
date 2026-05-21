@@ -38,6 +38,7 @@
 #include "pulsim/v2/solver/run_transient.hpp"
 #include "pulsim/v2/sources/dead_time_pwm_pair_fn.hpp"
 #include "pulsim/v2/sources/pwm_switch_fn.hpp"
+#include "pulsim/v2/sources/spwm_pair_fn.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 #include "pulsim/v2/yaml/loader.hpp"
@@ -421,6 +422,22 @@ void init_module(py::module_& m) {
         "commutation. Shoot-through is prevented by "
         "construction (HS and LS are never both ON). Other "
         "switch bits stay OFF.");
+
+    m.def("make_spwm_pair_fn",
+        &sources::make_spwm_pair_fn,
+        py::arg("carrier_frequency"),
+        py::arg("modulation_frequency"),
+        py::arg("modulation_index"),
+        py::arg("hs_switch_idx"), py::arg("ls_switch_idx"),
+        py::arg("num_switches"), py::arg("dead_time"),
+        py::arg("carrier_phase") = 0.0,
+        py::arg("modulation_phase") = 0.0,
+        "Build a SwitchScheduleFn driving a HS/LS half-"
+        "bridge with naturally-sampled SPWM: instantaneous "
+        "duty = 0.5 + 0.5·M·sin(2π·f_mod·t + φ_mod). "
+        "Symmetric `dead_time` is inserted at each "
+        "commutation; shoot-through is impossible by "
+        "construction.");
 
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,

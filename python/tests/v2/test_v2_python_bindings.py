@@ -429,6 +429,41 @@ def test_make_dead_time_pwm_pair_fn_phase_balance() -> None:
     assert abs(ls_frac - ((1.0 - duty) - dt_dead)) < 5e-3
 
 
+def test_make_spwm_pair_fn_no_shoot_through() -> None:
+    """Layer 2 V7 — SPWM pair helper is shoot-through-free
+    across a modulation cycle."""
+    sw = p.make_spwm_pair_fn(
+        carrier_frequency=10e3, modulation_frequency=50.0,
+        modulation_index=0.9,
+        hs_switch_idx=0, ls_switch_idx=1,
+        num_switches=2, dead_time=100e-9)
+    for k in range(2000):
+        t = (k + 0.317) * 0.02 / 2000.0   # 20 ms span
+        m = sw(t)
+        assert not (m.get(0) and m.get(1)), \
+            f"shoot-through @ t={t}"
+
+
+def test_make_spwm_pair_fn_M_zero_matches_constant_duty() -> None:
+    """Layer 2 V7 — with M=0 the SPWM helper is bit-for-bit
+    identical to make_dead_time_pwm_pair_fn(duty=0.5)."""
+    f_c = 1000.0
+    dt_dead = 1e-5
+    sw_spwm = p.make_spwm_pair_fn(
+        carrier_frequency=f_c, modulation_frequency=50.0,
+        modulation_index=0.0,
+        hs_switch_idx=0, ls_switch_idx=1,
+        num_switches=2, dead_time=dt_dead)
+    sw_const = p.make_dead_time_pwm_pair_fn(
+        frequency=f_c, duty=0.5,
+        hs_switch_idx=0, ls_switch_idx=1,
+        num_switches=2, dead_time=dt_dead)
+    for k in range(200):
+        t = (k + 0.1) * (5.0 / f_c) / 200.0
+        assert sw_spwm(t).get(0) == sw_const(t).get(0)
+        assert sw_spwm(t).get(1) == sw_const(t).get(1)
+
+
 def test_make_pwm_switch_fn_phase_and_edge_cases() -> None:
     """Layer 2 V5 — helper handles phase offset, duty=0/1,
     and frequency=0 the same way the C++ helper does."""

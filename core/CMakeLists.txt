@@ -293,6 +293,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/sources/test_main.cpp
         tests/v2/sources/test_pwm_switch_fn.cpp
         tests/v2/sources/test_dead_time_pwm_pair_fn.cpp  # Layer 2 V6
+        tests/v2/sources/test_spwm_pair_fn.cpp           # Layer 2 V7
     )
     target_link_libraries(pulsim_v2_sources_tests
         PRIVATE
