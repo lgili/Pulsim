@@ -303,6 +303,29 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer3_tests)
 
     # =============================================================================
+    # pulsim_v2_layer4_tests — pulsim-v2-pwl-state-space-cache
+    # =============================================================================
+    # Layer 4 = the PLECS-killer PWL state-space cache. Depends on
+    # all lower layers (0/1/2/3).
+    add_executable(pulsim_v2_layer4_tests
+        tests/v2/layer4/test_main.cpp
+        tests/v2/layer4/test_device_pool.cpp
+        tests/v2/layer4/test_segment.cpp
+        tests/v2/layer4/test_assemble.cpp
+        tests/v2/layer4/test_cache.cpp
+        tests/v2/layer4/test_integration_chopper.cpp
+    )
+    target_link_libraries(pulsim_v2_layer4_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer4_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer4_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 
