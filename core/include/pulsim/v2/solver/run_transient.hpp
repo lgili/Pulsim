@@ -383,7 +383,8 @@ inline SimulationResult run_transient(
                                       diodes.current_diode_mask(),
                                       diode_owned);
             }
-            x = pwl::compute_dc_op(graph, pool, mask);
+            x = pwl::compute_dc_op(graph, pool, mask,
+                                    opts.t_start);
             flipped = has_diodes && diodes.update_from_state(x);
             ++iters;
         } while (flipped && iters < dc_max_iters);

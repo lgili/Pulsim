@@ -323,6 +323,24 @@ public:
 
     // -------- Lookups -------------------------------------------------------
 
+    /// Proposal #3.4 ergonomics: scan the pool to see if any
+    /// device requires Newton (smooth-blend diode, SH1 MOSFET,
+    /// Level 1 IGBT, or saturable inductor). Used by the
+    /// Python `simulate()` wrapper to auto-enable the
+    /// nonlinear-refresh pass.
+    [[nodiscard]] bool has_nonlinear_devices() const noexcept {
+        for (const auto& [branch_id, entry] : entries_) {
+            const auto k = static_cast<StoredKind>(entry.index());
+            if (k == StoredKind::NonlinearDiode ||
+                k == StoredKind::MosfetLevel1   ||
+                k == StoredKind::IgbtLevel1     ||
+                k == StoredKind::SaturableInductor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     [[nodiscard]] StoredKind kind_of(Index branch_id) const {
         const auto it = entries_.find(branch_id);
         if (it == entries_.end()) {

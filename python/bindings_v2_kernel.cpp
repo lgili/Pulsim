@@ -229,6 +229,7 @@ void init_module(py::module_& m) {
               py::arg("K"), py::arg("V_T"),
               py::arg("lambda_") = 0.02,
               py::arg("kappa")   = 15.0,
+              py::arg("with_body_diode") = false,
               py::return_value_policy::reference,
               "Add a 3-terminal SH1 MOSFET (Shichman-Hodges "
               "Level 1). Cutoff/triode/saturation regions "
@@ -237,11 +238,14 @@ void init_module(py::module_& m) {
               "channel-length modulation, kappa [1/V] sigmoid "
               "sharpness. Drain → source is a Nonlinear "
               "branch; gate is a node reference (no gate "
-              "current — ideal gate). Call `run_transient` "
-              "with `nl_refresh=make_combined_diode_mosfet_"
-              "refresh()` (or pass `refresh_mosfets_level1` "
-              "directly) so the Newton loop stamps the "
-              "MOSFET each iteration.")
+              "current — ideal gate). Set "
+              "`with_body_diode=True` (proposal #3.1) to "
+              "also add an anti-parallel SwitchedDiode "
+              "(source→drain) — needed for inductive-load "
+              "switching to keep V_DS bounded. Call "
+              "`run_transient` with "
+              "`enable_nonlinear_refresh=True` so the Newton "
+              "loop stamps the MOSFET each iteration.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
               py::arg("name"), py::arg("from"),
@@ -377,7 +381,15 @@ void init_module(py::module_& m) {
 
     py::class_<pwl::DevicePool>(m, "DevicePool",
         "Pulsim v2 device parameter pool. Build via "
-        "CircuitBuilder; access via builder.pool.");
+        "CircuitBuilder; access via builder.pool.")
+        .def("has_nonlinear_devices",
+              &pwl::DevicePool::has_nonlinear_devices,
+              "Return True if any registered branch is a "
+              "smooth-blend IdealDiode, SH1 MOSFET, Level 1 "
+              "IGBT, or saturable inductor (i.e. requires "
+              "Newton iteration). Used by the Python "
+              "`simulate()` wrapper to auto-enable the "
+              "nonlinear-refresh pass.");
 
     // ---- PwlStateSpaceCache ----------------------------------------------
     py::class_<pwl::PwlStateSpaceCache>(m, "PwlStateSpaceCache",

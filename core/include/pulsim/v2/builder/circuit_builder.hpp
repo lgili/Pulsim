@@ -149,7 +149,8 @@ public:
         std::string gate,
         Real K, Real V_T,
         Real lambda = Real{0.02},
-        Real kappa  = Real{15.0}) {
+        Real kappa  = Real{15.0},
+        bool with_body_diode = false) {
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         const Index gate_idx   = resolve_node_(gate);
@@ -162,6 +163,21 @@ public:
                 .K = K, .V_T = V_T,
                 .lambda = lambda, .kappa = kappa,
             });
+        // V18 ergonomics: optional anti-parallel body diode
+        // (real MOSFETs have one physically). Conducts when
+        // V_drain < V_source − V_F, clamping V_DS to ~−0.5V.
+        // Required to keep Newton out of the spurious-V_DS<0
+        // root of the SH1 triode polynomial during transient
+        // events (e.g. inductive loads during dead-time).
+        if (with_body_diode) {
+            const Index body_b = graph_.add_branch(
+                source_idx, drain_idx,
+                topology::BranchKind::Switch);
+            pool_.add_diode(body_b,
+                /*g_on=*/Real{1e3},
+                /*g_off=*/Real{1e-9},
+                /*V_th=*/Real{0.5});
+        }
         return *this;
     }
 
