@@ -37,6 +37,22 @@
 // `kappa` (1/V) controls sigmoid sharpness. Typical: 10–50.
 // Too sharp → Newton struggles at the transition; too soft →
 // sub-threshold leakage bleeds into the saturation regime.
+//
+// REVERSE CONDUCTION CAVEAT: the raw triode polynomial
+//   K·(2·V_OV·V_DS − V_DS²)
+// is a DOWNWARD parabola in V_DS that goes negative for both
+// V_DS < 0 and V_DS > 2·V_OV. The β sigmoid handles the
+// upper boundary by blending to i_sat. The LOWER boundary
+// (V_DS < 0) is NOT handled by the model — Newton can land
+// on this spurious root during big linearisation steps when
+// e.g. a series-L forces V_drain below V_source briefly.
+//
+// The fix is at the TOPOLOGY level: add an explicit anti-
+// parallel body diode (anode = source, cathode = drain) in
+// the user's circuit. Real MOSFETs have this physically; for
+// SH1 it must be added explicitly. The diode clamps V_DS to
+// approximately −V_F (small negative), keeping the MOSFET in
+// its well-behaved positive-V_DS regime.
 
 #include "pulsim/v2/ad/ad_scalar.hpp"
 #include "pulsim/v2/numeric/concepts.hpp"
