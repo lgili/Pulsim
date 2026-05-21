@@ -272,6 +272,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer2/test_pwm_voltage_source.cpp  # Layer 2 V4
         tests/v2/layer2/test_sine_voltage_source.cpp # Layer 2 V11
         tests/v2/layer2/test_pulse_voltage_source.cpp # Layer 2 V12
+        tests/v2/layer2/test_mosfet_level1.cpp        # Layer 2 V13
     )
     target_link_libraries(pulsim_v2_layer2_tests
         PRIVATE

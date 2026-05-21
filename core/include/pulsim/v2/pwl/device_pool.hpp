@@ -18,6 +18,7 @@
 #include "pulsim/v2/models/capacitor.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
+#include "pulsim/v2/models/mosfet_level1.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/pulse_voltage_source.hpp"
@@ -55,6 +56,7 @@ public:
         PWMVoltageSource  = 8,  // Layer 2 V4 (time-varying voltage source)
         SineVoltageSource = 9,  // Layer 2 V11 (AC voltage source)
         PulseVoltageSource = 10, // Layer 2 V12 (pulse / step source)
+        MosfetLevel1      = 11, // Layer 2 V13 (SH1 nonlinear MOSFET)
     };
 
     struct SwitchParams {
@@ -179,6 +181,33 @@ public:
             static_cast<Index>(num_sources_++);
     }
 
+    /// Register a 3-terminal SH1 MOSFET (Layer 2 V13). The
+    /// `branch_id` is the drain→source `BranchKind::Nonlinear`
+    /// branch; `gate_node_id` is the gate's node index in the
+    /// graph (looked up by `read_node_voltage` during the
+    /// Newton refresh). Layer 4 V13's
+    /// `refresh_mosfets_level1` stamps the 6 Jacobian entries
+    /// per device per Newton iteration.
+    void add_mosfet_level1(
+        Index branch_id, Index gate_node_id,
+        models::MosfetLevel1::Params p) {
+        entries_[branch_id] = Entry{p};
+        mosfet_level1_gate_node_id_[branch_id] = gate_node_id;
+    }
+
+    [[nodiscard]] Index
+    mosfet_level1_gate_node(Index branch_id) const {
+        const auto it =
+            mosfet_level1_gate_node_id_.find(branch_id);
+        if (it == mosfet_level1_gate_node_id_.end()) {
+            throw std::out_of_range(
+                "DevicePool::mosfet_level1_gate_node: "
+                "branch " + std::to_string(branch_id) +
+                " is not a MosfetLevel1");
+        }
+        return it->second;
+    }
+
     // -------- Layer 2 V2: transformer (coupled inductors) ------------------
     //
     // Couplings are PAIRS of already-added inductor branches.
@@ -289,6 +318,19 @@ public:
                 " is not a PulseVoltageSource");
         }
         return std::get<models::PulseVoltageSource::Params>(entry);
+    }
+
+    [[nodiscard]] const models::MosfetLevel1::Params&
+    mosfet_level1_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<
+                models::MosfetLevel1::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::mosfet_level1_params: branch " +
+                std::to_string(branch_id) +
+                " is not a MosfetLevel1");
+        }
+        return std::get<models::MosfetLevel1::Params>(entry);
     }
 
     [[nodiscard]] Real switch_g_on(Index branch_id) const {
@@ -435,7 +477,8 @@ private:
                                 models::CurrentSource::Params,
                                 models::PWMVoltageSource::Params,
                                 models::SineVoltageSource::Params,
-                                models::PulseVoltageSource::Params>;
+                                models::PulseVoltageSource::Params,
+                                models::MosfetLevel1::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -475,6 +518,12 @@ private:
     // DiodeEventState iterates this list to build per-diode
     // tracking entries.
     std::vector<Index> diode_branches_;
+
+    // Layer 2 V13: MOSFET Level 1 — extra storage for the
+    // gate node id per drain→source branch. The branch
+    // itself lives in `entries_` as a `MosfetLevel1::Params`
+    // entry; the gate node is a separate associative lookup.
+    std::unordered_map<Index, Index> mosfet_level1_gate_node_id_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the

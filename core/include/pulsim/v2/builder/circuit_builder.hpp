@@ -25,6 +25,7 @@
 #include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
+#include "pulsim/v2/models/mosfet_level1.hpp"
 #include "pulsim/v2/models/pulse_voltage_source.hpp"
 #include "pulsim/v2/models/pwm_voltage_source.hpp"
 #include "pulsim/v2/models/sine_voltage_source.hpp"
@@ -126,6 +127,38 @@ public:
                 .v_amplitude = v_amplitude,
                 .frequency   = frequency,
                 .phase       = phase,
+            });
+        return *this;
+    }
+
+    /// Add a 3-terminal SH1 MOSFET (Layer 2 V13). The drain-
+    /// source path is a `BranchKind::Nonlinear` branch; the
+    /// gate is just a node reference (no current flow on
+    /// Level 1 — ideal gate). Newton stamps both the drain-
+    /// source and drain-gate Jacobian off-diagonals.
+    ///
+    ///   K           [A/V²] transconductance parameter
+    ///   V_T         [V]    threshold voltage
+    ///   lambda      [1/V]  channel-length modulation
+    ///   kappa       [1/V]  cutoff-region sigmoid sharpness
+    CircuitBuilder& add_mosfet_level1(
+        std::string /*name*/,
+        std::string drain, std::string source,
+        std::string gate,
+        Real K, Real V_T,
+        Real lambda = Real{0.02},
+        Real kappa  = Real{15.0}) {
+        const Index drain_idx  = resolve_node_(drain);
+        const Index source_idx = resolve_node_(source);
+        const Index gate_idx   = resolve_node_(gate);
+        const Index b_id = graph_.add_branch(
+            drain_idx, source_idx,
+            topology::BranchKind::Nonlinear);
+        pool_.add_mosfet_level1(
+            b_id, gate_idx,
+            models::MosfetLevel1::Params{
+                .K = K, .V_T = V_T,
+                .lambda = lambda, .kappa = kappa,
             });
         return *this;
     }
