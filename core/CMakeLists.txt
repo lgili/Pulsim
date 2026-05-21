@@ -517,6 +517,32 @@ if(PULSIM_BUILD_TESTS)
     )
 
     # =============================================================================
+    # pulsim_v2_benchmarks — pulsim-v2-benchmarks (Layer 10)
+    # =============================================================================
+    # Head-to-head v1 vs v2 wall-clock benchmarks. Links
+    # BOTH pulsim::pulsim (v1) and pulsim::v2 to enable
+    # side-by-side comparisons in the same binary.
+    add_executable(pulsim_v2_benchmarks
+        tests/v2/benchmarks/test_main.cpp
+        tests/v2/benchmarks/test_v1_vs_v2.cpp
+    )
+    target_link_libraries(pulsim_v2_benchmarks
+        PRIVATE
+            pulsim::pulsim   # v1: Circuit + Simulator
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_benchmarks)
+    endif()
+    # Benchmarks are NOT registered as ctest tests — they
+    # report measurements via INFO/std::cerr and are run on
+    # demand. Run manually:
+    #   ./build/core/pulsim_v2_benchmarks
+    # (Adding them to ctest would slow down regular test
+    # runs without adding regression value.)
+
+    # =============================================================================
     # pulsim_v2_layer4_v2_tests — pulsim-v2-dc-operating-point
     # =============================================================================
     # DC operating-point computation + HistoryState/DiodeEventState
