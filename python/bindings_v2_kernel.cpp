@@ -36,6 +36,7 @@
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
 #include "pulsim/v2/solver/run_transient.hpp"
+#include "pulsim/v2/sources/pwm_switch_fn.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 #include "pulsim/v2/yaml/loader.hpp"
@@ -388,6 +389,24 @@ void init_module(py::module_& m) {
         &yaml::load_file, py::arg("path"),
         "Parse a YAML circuit description from disk. "
         "Returns LoadedCircuit(builder, options).");
+
+    // ---- PWM switch_fn helper (Layer 2 V5) -------------------------------
+    //
+    // SMPS users no longer need to write `lambda t: ...`
+    // boilerplate for the SWITCH side of PWM. The helper
+    // returns a Python callable produced by std::function ⇒
+    // py::function conversion; it can be passed directly as
+    // `switch_fn=` to `run_transient`.
+    m.def("make_pwm_switch_fn",
+        &sources::make_pwm_switch_fn,
+        py::arg("frequency"), py::arg("duty"),
+        py::arg("switch_idx"), py::arg("num_switches"),
+        py::arg("phase") = 0.0,
+        "Build a SwitchScheduleFn that toggles `switch_idx` "
+        "ON during the first `duty · T` fraction of each "
+        "period (T = 1 / frequency) and OFF for the rest. "
+        "All other switch bits stay OFF. Returns a Python "
+        "callable usable as `switch_fn=` in run_transient.");
 
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,

@@ -282,6 +282,28 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer2_tests)
 
     # =============================================================================
+    # pulsim_v2_sources_tests — pulsim-v2-source-helpers (Layer 2 V5+)
+    # =============================================================================
+    # Standalone target for `sources/` helpers — currently
+    # `make_pwm_switch_fn` (Layer 2 V5). These are pure
+    # builders that produce SwitchScheduleFn / b_extra
+    # callbacks; they live outside the device-model layer
+    # because they don't introduce branches.
+    add_executable(pulsim_v2_sources_tests
+        tests/v2/sources/test_main.cpp
+        tests/v2/sources/test_pwm_switch_fn.cpp
+    )
+    target_link_libraries(pulsim_v2_sources_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_sources_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_sources_tests)
+
+    # =============================================================================
     # pulsim_v2_layer3_tests — pulsim-v2-generic-stamping-pipeline
     # =============================================================================
     # Layer 3 = generic stamping pipeline. Depends on Layers 0 + 1 + 2.
@@ -497,6 +519,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_v2_showcase_tests
         tests/v2/showcases/test_main.cpp
         tests/v2/showcases/test_buck_open_loop.cpp
+        tests/v2/showcases/test_flyback_open_loop.cpp  # Layer 2 V5
     )
     target_link_libraries(pulsim_v2_showcase_tests
         PRIVATE

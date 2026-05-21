@@ -350,6 +350,83 @@ def test_add_transformer_from_python() -> None:
     assert b.num_branches == 2   # 2 inductor branches
 
 
+def test_make_pwm_switch_fn_from_python() -> None:
+    """Layer 2 V5 — make_pwm_switch_fn drives a switched
+    resistor end-to-end via run_transient, no lambda needed
+    for the switch side."""
+    V_src = 10.0
+    R     = 100.0
+    f_sw  = 50e3
+    duty  = 0.4
+
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "n1", "gnd", V_src)
+    b.add_switch("S1", "n1", "n2", g_on=1e3, g_off=1e-9)
+    b.add_resistor("R1", "n2", "gnd", R)
+
+    dt   = 1e-7
+    T_sw = 1.0 / f_sw
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build(dt)
+
+    opts = p.SimulationOptions(
+        t_start=0.0, t_end=5.0 * T_sw, dt=dt)
+    n_sw = b.graph.num_switches
+    assert n_sw == 1
+
+    sw_fn = p.make_pwm_switch_fn(
+        frequency=f_sw, duty=duty,
+        switch_idx=0, num_switches=n_sw)
+
+    res = p.run_transient(
+        cache, b.graph, b.pool, opts,
+        switch_fn=sw_fn)
+    assert res.num_steps() > 100
+
+    # Fraction of samples with n2 ≈ V_src (i.e., switch ON).
+    n_on = sum(
+        1 for k in range(res.num_steps())
+        if abs(res.states[k][1] - V_src) < 0.5)
+    frac_on = n_on / res.num_steps()
+    assert abs(frac_on - duty) < 0.02
+
+
+def test_make_pwm_switch_fn_phase_and_edge_cases() -> None:
+    """Layer 2 V5 — helper handles phase offset, duty=0/1,
+    and frequency=0 the same way the C++ helper does."""
+    # 50 % duty, no phase: bit 0 ON in first half of cycle.
+    sw = p.make_pwm_switch_fn(
+        frequency=1.0, duty=0.5,
+        switch_idx=0, num_switches=1)
+    assert sw(0.0).get(0) is True
+    assert sw(0.25).get(0) is True
+    assert sw(0.5).get(0) is False    # boundary exclusive
+    assert sw(0.75).get(0) is False
+    assert sw(1.0).get(0) is True     # cycle wraps
+
+    # Duty=0 → always OFF.
+    sw0 = p.make_pwm_switch_fn(1.0, 0.0, 0, 1)
+    assert sw0(0.0).get(0) is False
+    assert sw0(0.5).get(0) is False
+
+    # Duty=1 → always ON.
+    sw1 = p.make_pwm_switch_fn(1.0, 1.0, 0, 1)
+    assert sw1(0.0).get(0) is True
+    assert sw1(0.99).get(0) is True
+
+    # Frequency=0 → flat OFF (degenerate, no /0).
+    sw_dead = p.make_pwm_switch_fn(0.0, 0.5, 0, 1)
+    assert sw_dead(0.0).get(0) is False
+    assert sw_dead(1e6).get(0) is False
+
+    # Only target switch toggles.
+    sw3 = p.make_pwm_switch_fn(1.0, 0.5, 1, 3)
+    m_on = sw3(0.1)
+    assert m_on.get(0) is False
+    assert m_on.get(1) is True
+    assert m_on.get(2) is False
+
+
 # -----------------------------------------------------------------------------
 # Layer 8 — YAML loader
 # -----------------------------------------------------------------------------

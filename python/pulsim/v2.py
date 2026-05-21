@@ -47,6 +47,8 @@ from ._pulsim.v2_kernel import (  # type: ignore[import-not-found]
     LoadedCircuit,
     load_yaml_string,
     load_yaml_file,
+    # Source helpers (Layer 2 V5+).
+    make_pwm_switch_fn,
 )
 
 __all__ = [
@@ -63,6 +65,7 @@ __all__ = [
     "LoadedCircuit",
     "load_yaml_string",
     "load_yaml_file",
+    "make_pwm_switch_fn",
 ]
 
 __version__ = "0.1.0"
