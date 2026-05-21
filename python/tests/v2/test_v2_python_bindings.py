@@ -249,3 +249,58 @@ def test_graph_accessor() -> None:
     g = b.graph
     assert g.num_nodes == 2          # n0, n1
     assert g.num_branches == 3       # 1 source + 2 resistors
+
+
+# -----------------------------------------------------------------------------
+# Layer 2 V1 — power-device convenience methods
+# -----------------------------------------------------------------------------
+
+
+def test_add_mosfet_from_python() -> None:
+    b = p.CircuitBuilder()
+    b.add_mosfet("Q1", "drain", "source")    # all defaults
+    assert b.num_branches == 1
+
+
+def test_add_mosfet_with_body_diode_from_python() -> None:
+    b = p.CircuitBuilder()
+    b.add_mosfet_with_body_diode("Q1", "drain", "source")
+    assert b.num_branches == 2   # switch + body diode
+
+
+def test_add_mosfet_custom_R_on() -> None:
+    b = p.CircuitBuilder()
+    b.add_mosfet("Q1", "drain", "source",
+                  R_on=2e-3, R_off=1e9)
+    # We can't trivially reach pool.switch_g_on from Python
+    # in V0 (DevicePool is opaque), but we can verify the
+    # branch count + the call succeeded.
+    assert b.num_branches == 1
+
+
+def test_add_igbt_from_python() -> None:
+    b = p.CircuitBuilder()
+    b.add_igbt("T1", "C", "E")    # all defaults
+    assert b.num_branches == 1
+
+
+def test_buck_topology_via_mosfet_helper() -> None:
+    """End-to-end builder smoke test: a buck topology
+    via the MOSFET helper should produce the expected
+    branch count and not crash on cache.build()."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_mosfet_with_body_diode("Q1", "vin", "sw")
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9, V_th=0.7)
+    b.add_inductor("L1", "sw", "vout", 100e-6)
+    b.add_capacitor("Cout", "vout", "gnd", 47e-6)
+    b.add_resistor("R_L", "vout", "gnd", 10.0)
+
+    # Should be: source + (switch + body diode) + free-
+    # wheeling diode + L + C + R = 7 branches.
+    assert b.num_branches == 7
+
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build(dt=1e-7)
+    # No exception means the topology + parameters are
+    # consistent enough for KLU factorization.

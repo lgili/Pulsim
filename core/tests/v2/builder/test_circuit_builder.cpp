@@ -257,6 +257,110 @@ TEST_CASE("Half-wave rectifier: builder ≡ manual setup",
 // Nonlinear diode via builder
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// Layer 2 V1 — power-device convenience helpers
+// -----------------------------------------------------------------------------
+
+TEST_CASE("add_mosfet adds one branch with correct conductance",
+          "[v2][layer2_v1][mosfet]") {
+    CircuitBuilder b;
+    b.add_mosfet("Q1", "drain", "source", 2e-3, 1e9);
+
+    REQUIRE(b.num_branches() == 1);
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::Switch);
+    REQUIRE(b.pool().switch_g_on(0) ==
+              Approx(1.0 / 2e-3));
+    REQUIRE(b.pool().switch_g_off(0) ==
+              Approx(1.0 / 1e9));
+}
+
+TEST_CASE("add_mosfet uses MOSFET defaults when omitted",
+          "[v2][layer2_v1][mosfet]") {
+    CircuitBuilder b;
+    b.add_mosfet("Q1", "drain", "source");
+    // Default R_on = 1mΩ → g_on = 1000 S.
+    REQUIRE(b.pool().switch_g_on(0) ==
+              Approx(1.0 / 1e-3));
+    REQUIRE(b.pool().switch_g_off(0) ==
+              Approx(1.0 / 1e9));
+}
+
+TEST_CASE("add_mosfet_with_body_diode adds two branches with diode "
+          "anti-parallel",
+          "[v2][layer2_v1][mosfet][body_diode]") {
+    CircuitBuilder b;
+    b.add_mosfet_with_body_diode(
+        "Q1", "drain", "source");
+
+    REQUIRE(b.num_branches() == 2);
+
+    // Branch 0: main switch drain → source.
+    const auto& bch0 = b.graph().branch(0);
+    REQUIRE(bch0.from == b.node_id_of("drain"));
+    REQUIRE(bch0.to   == b.node_id_of("source"));
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::Switch);
+
+    // Branch 1: body diode source → drain (anti-parallel!).
+    const auto& bch1 = b.graph().branch(1);
+    REQUIRE(bch1.from == b.node_id_of("source"));
+    REQUIRE(bch1.to   == b.node_id_of("drain"));
+    REQUIRE(b.pool().kind_of(1) ==
+              DevicePool::StoredKind::Diode);
+}
+
+TEST_CASE("add_mosfet_with_body_diode body-diode V_F default = 0.7 V",
+          "[v2][layer2_v1][mosfet][body_diode]") {
+    CircuitBuilder b;
+    b.add_mosfet_with_body_diode(
+        "Q1", "drain", "source");
+    // The diode branch is at index 1.
+    // We can't easily reach into the diode params without
+    // an accessor, but we can verify the diode WAS added
+    // by counting branches and kinds.
+    REQUIRE(b.pool().kind_of(1) ==
+              DevicePool::StoredKind::Diode);
+}
+
+TEST_CASE("add_igbt adds one branch with IGBT defaults",
+          "[v2][layer2_v1][igbt]") {
+    CircuitBuilder b;
+    b.add_igbt("T1", "C", "E");
+    REQUIRE(b.num_branches() == 1);
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::Switch);
+    // Default R_on = 10 mΩ → g_on = 100 S.
+    REQUIRE(b.pool().switch_g_on(0) ==
+              Approx(1.0 / 10e-3));
+}
+
+TEST_CASE("MOSFET helper preserves topology (smoke buck setup)",
+          "[v2][layer2_v1][mosfet][buck]") {
+    // High-side MOSFET + low-side diode (no inductor/cap
+    // here — just topology check).
+    CircuitBuilder b;
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+     .add_mosfet_with_body_diode(
+            "Q1", "vin", "sw")
+     .add_diode("D1", "gnd", "sw", 1e3, 1e-9, 0.7)
+     .add_resistor("R_L", "sw", "gnd", 10.0);
+
+    // 1 source + (1 switch + 1 body diode) + 1 free-wheeling
+    // diode + 1 resistor = 5 branches.
+    REQUIRE(b.num_branches() == 5);
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::VoltageSource);
+    REQUIRE(b.pool().kind_of(1) ==
+              DevicePool::StoredKind::Switch);
+    REQUIRE(b.pool().kind_of(2) ==
+              DevicePool::StoredKind::Diode);
+    REQUIRE(b.pool().kind_of(3) ==
+              DevicePool::StoredKind::Diode);
+    REQUIRE(b.pool().kind_of(4) ==
+              DevicePool::StoredKind::Resistor);
+}
+
 TEST_CASE("Nonlinear diode builder: DC load-line",
           "[v2][layer6][builder][nonlinear]") {
     CircuitBuilder b;

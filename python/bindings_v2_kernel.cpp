@@ -147,6 +147,42 @@ void init_module(py::module_& m) {
               py::return_value_policy::reference,
               "Add a controlled switch (driven by switch_fn "
               "at simulation time).")
+        // ---- Layer 2 V1: power-device helpers ----
+        .def("add_mosfet",
+              &builder::CircuitBuilder::add_mosfet,
+              py::arg("name"), py::arg("drain"),
+              py::arg("source"),
+              py::arg("R_on") = 1e-3,
+              py::arg("R_off") = 1e9,
+              py::return_value_policy::reference,
+              "Add an n-channel power MOSFET as a "
+              "controlled switch (drain → source). "
+              "Defaults: R_on=1mΩ, R_off=1GΩ.")
+        .def("add_mosfet_with_body_diode",
+              &builder::CircuitBuilder::add_mosfet_with_body_diode,
+              py::arg("name"), py::arg("drain"),
+              py::arg("source"),
+              py::arg("R_on") = 1e-3,
+              py::arg("R_off") = 1e9,
+              py::arg("V_F") = 0.7,
+              py::arg("g_on_diode") = 1e3,
+              py::arg("g_off_diode") = 1e-9,
+              py::return_value_policy::reference,
+              "Add an n-channel power MOSFET WITH "
+              "intrinsic anti-parallel body diode. Adds "
+              "TWO branches: switch (drain→source) + "
+              "diode (source→drain).")
+        .def("add_igbt",
+              &builder::CircuitBuilder::add_igbt,
+              py::arg("name"), py::arg("collector"),
+              py::arg("emitter"),
+              py::arg("R_on") = 10e-3,
+              py::arg("R_off") = 1e9,
+              py::return_value_policy::reference,
+              "Add an IGBT as a controlled switch "
+              "(collector → emitter). Defaults: "
+              "R_on=10mΩ, R_off=1GΩ. No anti-parallel "
+              "diode by default.")
         .def_property_readonly("graph",
               &builder::CircuitBuilder::graph,
               py::return_value_policy::reference_internal,

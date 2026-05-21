@@ -150,6 +150,82 @@ public:
         return *this;
     }
 
+    // -------- Power-device convenience helpers (Layer 2 V1) -----------------
+    //
+    // SMPS-realistic shorthands. They map to existing
+    // primitives (`add_switch`, `add_diode`) but accept
+    // user-friendly ohms / volts and pick sensible
+    // defaults so a buck/boost/flyback prototype works
+    // without parameter tuning.
+
+    /// Add an n-channel power MOSFET as a single
+    /// controlled switch (drain → source). No body diode.
+    /// Defaults: R_on = 1 mΩ, R_off = 1 GΩ (typical for
+    /// modern Si MOSFETs in SMPS applications).
+    CircuitBuilder& add_mosfet(
+        std::string name, std::string drain,
+        std::string source,
+        Real R_on  = Real{1e-3},
+        Real R_off = Real{1e9}) {
+        return add_switch(std::move(name),
+                            std::move(drain),
+                            std::move(source),
+                            Real{1} / R_on,
+                            Real{1} / R_off);
+    }
+
+    /// Add an n-channel power MOSFET WITH its intrinsic
+    /// anti-parallel body diode. Adds two branches:
+    ///   1. switch (drain → source) with R_on / R_off
+    ///   2. SwitchedDiode (source → drain) with V_F drop
+    ///      that conducts during freewheeling intervals
+    /// Defaults model a typical Si MOSFET: R_on = 1 mΩ,
+    /// R_off = 1 GΩ, body-diode V_F = 0.7 V.
+    CircuitBuilder& add_mosfet_with_body_diode(
+        std::string name, std::string drain,
+        std::string source,
+        Real R_on        = Real{1e-3},
+        Real R_off       = Real{1e9},
+        Real V_F         = Real{0.7},
+        Real g_on_diode  = Real{1e3},
+        Real g_off_diode = Real{1e-9}) {
+        const Index drain_idx  = resolve_node_(drain);
+        const Index source_idx = resolve_node_(source);
+        // Main switch (drain → source).
+        const Index b_switch = graph_.add_branch(
+            drain_idx, source_idx,
+            topology::BranchKind::Switch);
+        pool_.add_switch(b_switch,
+                          Real{1} / R_on,
+                          Real{1} / R_off);
+        // Body diode (source → drain — anti-parallel).
+        const Index b_body = graph_.add_branch(
+            source_idx, drain_idx,
+            topology::BranchKind::Switch);
+        pool_.add_diode(b_body, g_on_diode,
+                          g_off_diode, V_F);
+        (void)name;
+        return *this;
+    }
+
+    /// Add an IGBT as a single controlled switch
+    /// (collector → emitter). No anti-parallel diode —
+    /// discrete IGBTs typically don't include one; the
+    /// user wires `add_diode(...)` separately if needed.
+    /// Defaults: R_on = 10 mΩ, R_off = 1 GΩ (typical for
+    /// IGBT modules).
+    CircuitBuilder& add_igbt(
+        std::string name, std::string collector,
+        std::string emitter,
+        Real R_on  = Real{10e-3},
+        Real R_off = Real{1e9}) {
+        return add_switch(std::move(name),
+                            std::move(collector),
+                            std::move(emitter),
+                            Real{1} / R_on,
+                            Real{1} / R_off);
+    }
+
     // -------- Accessors ----------------------------------------------------
 
     [[nodiscard]] const topology::Graph& graph() const noexcept {
