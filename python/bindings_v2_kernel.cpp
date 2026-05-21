@@ -644,7 +644,8 @@ void init_module(py::module_& m) {
            SwitchScheduleFn switch_fn,
            BExtraFn b_extra_fn,
            bool start_from_dc_op,
-           bool enable_nonlinear_refresh) {
+           bool enable_nonlinear_refresh,
+           StepObserverFn step_observer) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
@@ -653,16 +654,23 @@ void init_module(py::module_& m) {
             return run_transient(cache, graph, pool, opts,
                                   switch_fn, b_extra_fn,
                                   start_from_dc_op,
-                                  nl_refresh);
+                                  nl_refresh,
+                                  step_observer);
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
         py::arg("b_extra_fn") = BExtraFn{},
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = false,
+        py::arg("step_observer") = StepObserverFn{},
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
-        "to b_constant at each step. Set "
+        "to b_constant at each step. `step_observer(t, x)` "
+        "(optional) is a void callback fired at the start "
+        "of every step BEFORE switch_fn/b_extra_fn evaluate "
+        "— use it to update Python-side controller state "
+        "(PI, comparator, etc.) so the next switch_fn call "
+        "reads the new duty. Set "
         "`enable_nonlinear_refresh=True` for circuits "
         "with smooth-blend IdealDiode / SH1 MOSFET "
         "branches (constructs the refresh inside the "

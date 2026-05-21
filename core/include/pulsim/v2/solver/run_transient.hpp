@@ -116,6 +116,22 @@ using SwitchScheduleFn =
 
 using BExtraFn = std::function<Vector(Real)>;
 
+/// State-aware observer invoked at the START of every step,
+/// BEFORE `switch_fn(t)` and `b_extra_fn(t)` are evaluated.
+/// Receives `(t_k, x_{k-1})` — the time of the upcoming solve
+/// and the most recently computed state vector. Side-effect
+/// only: the observer typically mutates Python-side controller
+/// state (e.g. a PIController) that the user's
+/// `switch_fn` / `b_extra_fn` then reads to close the loop.
+///
+/// For sample 0 (the initial condition), the observer is
+/// called with `x_prev = x` (the IC itself — either zero or
+/// the DC operating point depending on `start_from_dc_op`),
+/// so a discrete-time PI controller can prime its filter at
+/// the correct initial output.
+using StepObserverFn =
+    std::function<void(Real, const Vector&)>;
+
 // -----------------------------------------------------------------------------
 // run_transient — the V0 transient simulation entry point.
 //
@@ -136,7 +152,8 @@ inline SimulationResult run_transient(
     Size state_size,
     const SimulationOptions& opts,
     const SwitchScheduleFn& switch_fn,
-    const BExtraFn& b_extra_fn = {}) {
+    const BExtraFn& b_extra_fn = {},
+    const StepObserverFn& step_observer = {}) {
 
     // ---- Input validation -------------------------------------------------
     if (!opts.valid()) {
@@ -174,6 +191,13 @@ inline SimulationResult run_transient(
     // switching.
     for (Size k = 0; k < n_steps; ++k) {
         const Real t = opts.t_start + static_cast<Real>(k) * opts.dt;
+
+        // State-aware observer fires first so user-side
+        // controllers can update before `switch_fn(t)` reads
+        // the new duty / mask.
+        if (step_observer) {
+            step_observer(t, x);
+        }
 
         const auto mask = switch_fn(t);
 
@@ -219,7 +243,8 @@ inline SimulationResult run_transient(
     const SwitchScheduleFn& switch_fn,
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
-    const pwl::NonlinearRefreshFn& nl_refresh = {}) {
+    const pwl::NonlinearRefreshFn& nl_refresh = {},
+    const StepObserverFn& step_observer = {}) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -417,6 +442,13 @@ inline SimulationResult run_transient(
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
 
+        // Prime the observer with the initial condition so a
+        // discrete-time PI / sampler / lookup-table sees the
+        // true starting state at t_start.
+        if (step_observer) {
+            step_observer(opts.t_start, x);
+        }
+
         for (Size k = 1; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
@@ -427,6 +459,14 @@ inline SimulationResult run_transient(
             // commutation timing (Layer 5 V2.2) and state
             // correction (Layer 5 V3).
             const Vector x_prev = x;
+
+            // State-aware observer fires BEFORE `switch_fn(t)`
+            // so the user can update a Python-side PI / sampler /
+            // comparator with `x_prev` and have `switch_fn(t)`
+            // read the new duty / mask.
+            if (step_observer) {
+                step_observer(t, x_prev);
+            }
             // V3 snapshots — taken regardless of whether
             // correction fires (cheap; vectors are small per
             // dynamic-branch). Restored only if a commutation
@@ -715,6 +755,12 @@ inline SimulationResult run_transient(
             // current x as a degenerate snapshot — the
             // sign-change check will exclude it from events.
             const Vector x_prev = x;
+
+            // State-aware observer fires before switch_fn(t) so
+            // discrete-time controllers can update.
+            if (step_observer) {
+                step_observer(t, x_prev);
+            }
 
             const Vector b_extra_user_only = b_extra_fn
                 ? b_extra_fn(t)

@@ -63,6 +63,16 @@ from ._pulsim.v2_kernel import (  # type: ignore[import-not-found]
     make_combined_switch_fn,
 )
 
+from .v2_control import (
+    PIController,
+    PIDController,
+    Comparator,
+    RateLimiter,
+    SampleHold,
+    FirstOrderLowPass,
+    LookupTable1D,
+)
+
 __all__ = [
     "CircuitBuilder",
     "Graph",
@@ -86,6 +96,14 @@ __all__ = [
     "make_combined_switch_fn",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
+    # Closed-loop control building blocks (Phase 2).
+    "PIController",
+    "PIDController",
+    "Comparator",
+    "RateLimiter",
+    "SampleHold",
+    "FirstOrderLowPass",
+    "LookupTable1D",
 ]
 
 
@@ -97,6 +115,7 @@ def simulate(
     t_start: float = 0.0,
     switch_fn: Optional[Callable[[float], SwitchStateMask]] = None,
     b_extra_fn: Optional[Callable[[float], "list[float]"]] = None,
+    step_observer: Optional[Callable[[float, "object"], None]] = None,
     start_from_dc_op: bool = False,
     enable_nonlinear_refresh: Optional[bool] = None,
     max_newton_iterations: int = 0,
@@ -199,6 +218,8 @@ def simulate(
     }
     if b_extra_fn is not None:
         kwargs["b_extra_fn"] = b_extra_fn
+    if step_observer is not None:
+        kwargs["step_observer"] = step_observer
 
     return run_transient(
         cache, builder.graph, builder.pool, opts, **kwargs,
