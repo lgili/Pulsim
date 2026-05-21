@@ -488,6 +488,35 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_yaml_tests)
 
     # =============================================================================
+    # pulsim_v2_showcase_tests — pulsim-v2-smps-showcase (Layer 9)
+    # =============================================================================
+    # End-to-end SMPS showcase: load YAML, drive PWM switch_fn,
+    # verify steady-state V_out matches analytical buck math.
+    add_executable(pulsim_v2_showcase_tests
+        tests/v2/showcases/test_main.cpp
+        tests/v2/showcases/test_buck_open_loop.cpp
+    )
+    target_link_libraries(pulsim_v2_showcase_tests
+        PRIVATE
+            pulsim::v2
+            yaml-cpp::yaml-cpp
+            Catch2::Catch2WithMain
+    )
+    # Expose the examples/v2 dir to the test binary via
+    # an env var so test runs from any working directory.
+    target_compile_definitions(pulsim_v2_showcase_tests
+        PRIVATE
+            PULSIM_REPO_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples/v2"
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_showcase_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_showcase_tests
+        PROPERTIES
+            ENVIRONMENT "PULSIM_EXAMPLES_DIR=${CMAKE_SOURCE_DIR}/examples/v2"
+    )
+
+    # =============================================================================
     # pulsim_v2_layer4_v2_tests — pulsim-v2-dc-operating-point
     # =============================================================================
     # DC operating-point computation + HistoryState/DiodeEventState

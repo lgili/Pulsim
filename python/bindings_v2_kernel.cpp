@@ -55,9 +55,23 @@ void init_module(py::module_& m) {
     // ---- SwitchStateMask -------------------------------------------------
     py::class_<topology::SwitchStateMask>(m, "SwitchStateMask",
         "Bit-vector identifying the on/off state of every "
-        "switching branch. Constructed from an integer; "
-        "bit `i` set means switch i is ON.")
-        .def(py::init<std::uint64_t>(), py::arg("bits") = 0)
+        "switching branch. Construct with the total number "
+        "of switches the cache enumerates (use "
+        "`graph.num_switches`); then call `.set(i, True)` "
+        "to flip individual bits.")
+        .def(py::init<Size>(), py::arg("num_switches") = 0)
+        .def("set",
+              [](topology::SwitchStateMask& self,
+                 Size i, bool v) { self.set(i, v); },
+              py::arg("i"), py::arg("v"),
+              "Set switch `i` to state `v` (True=ON).")
+        .def("get",
+              &topology::SwitchStateMask::get,
+              py::arg("i"),
+              "Return True if switch `i` is ON.")
+        .def_property_readonly("size",
+              &topology::SwitchStateMask::size,
+              "Number of switches in this mask.")
         .def("to_string",
               &topology::SwitchStateMask::to_string)
         .def("__repr__",
@@ -226,6 +240,12 @@ void init_module(py::module_& m) {
               &topology::Graph::num_nodes)
         .def_property_readonly("num_branches",
               &topology::Graph::num_branches)
+        .def_property_readonly("num_switches",
+              &topology::Graph::num_switches,
+              "Count of branches with kind = Switch — "
+              "this is the bit-width the PWL cache "
+              "enumerates over. Use it as the argument "
+              "to SwitchStateMask(num_switches).")
         // ground() is a static method on the C++ side
         // (returns a compile-time sentinel). Expose it as
         // a CALLABLE method on the Python instance for
