@@ -61,6 +61,7 @@ endif()
 pybind11_add_module(_pulsim
     NO_EXTRAS
     bindings.cpp
+    bindings_v2_kernel.cpp
 )
 
 target_link_libraries(_pulsim

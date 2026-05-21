@@ -4674,7 +4674,24 @@ void init_v2_module(py::module_& v2) {
 // Module Registration
 // =============================================================================
 
+// Forward declaration of the new v2-kernel submodule
+// initialiser. The implementation lives in
+// `python/bindings_v2_kernel.cpp`.
+namespace pulsim_v2_kernel_bindings {
+    void init_module(pybind11::module_& m);
+}
+
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "PulsimCore High-Performance Circuit Simulation (C++ extension)";
     init_v2_module(m);
+
+    // New v2 kernel (PWL state-space cache, trapezoidal
+    // companion, Newton + builder) — exposed under
+    // `_pulsim.v2_kernel`.
+    auto v2_kernel = m.def_submodule(
+        "v2_kernel",
+        "Pulsim v2 architectural kernel: PWL state-space "
+        "cache, trapezoidal companion, Newton-iterated "
+        "diodes, CircuitBuilder.");
+    pulsim_v2_kernel_bindings::init_module(v2_kernel);
 }
