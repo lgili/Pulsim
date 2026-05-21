@@ -1,0 +1,56 @@
+# Pulsim v2 example: 2nd-order RLC step response
+# ---
+# Drives a series RLC network with a 10 V step (delayed by
+# 100 µs so the pre-pulse baseline is visible) and observes
+# the underdamped ringing on the capacitor.
+#
+# Topology:
+#   Vstep ── L ── R ── C ── gnd
+#
+# Component values chosen for clear underdamped ringing:
+#   L = 100 µH, C = 100 µF, R = 0.1 Ω
+#   ω_n = 1/√(LC) = 10 000 rad/s = 1591 Hz
+#   ζ   = (R/2)·√(C/L) = 0.05·√(1) = 0.05 (lightly damped)
+#   ω_d = ω_n·√(1-ζ²) ≈ 9987 rad/s
+#   T_osc = 2π/ω_d ≈ 629 µs
+#
+# Expected:
+#   V_C(t) = V_step · (1 − e^(−ζ·ω_n·t)·(cos(ω_d·t)
+#                       + (ζ/√(1−ζ²)) · sin(ω_d·t)))
+#   Peak overshoot ≈ exp(−π·ζ/√(1−ζ²)) · V_step ≈ 8.5 V
+#   above the final 10 V → peak ≈ 18.5 V at t ≈ π/ω_d ≈ 314 µs
+#   after the step. Settling time ≈ 4/(ζ·ω_n) = 8 ms.
+
+circuit:
+  devices:
+    - type: pulse_voltage_source
+      name: Vstep
+      from: in
+      to: gnd
+      v_initial: 0.0
+      v_pulsed: 10.0
+      t_start: 1.0e-4       # delay 100 µs so baseline is visible
+      pulse_width: 1.0      # huge → stays high for the whole sim
+
+    - type: inductor
+      name: L
+      from: in
+      to: lr_mid
+      L: 1.0e-4              # 100 µH
+
+    - type: resistor
+      name: R
+      from: lr_mid
+      to: vc
+      R: 0.1                 # 0.1 Ω → ζ ≈ 0.05
+
+    - type: capacitor
+      name: C
+      from: vc
+      to: gnd
+      C: 1.0e-4              # 100 µF
+
+simulation:
+  t_start: 0.0
+  t_end:   3.0e-3            # 3 ms ≈ 5 oscillations + partial settle
+  dt:      5.0e-7            # 0.5 µs → ~1260 samples per oscillation
