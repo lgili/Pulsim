@@ -117,4 +117,83 @@ inline Real refresh_smooth_diodes(
     return max_abs_i;
 }
 
+/// Layer 4 V8 — returns a NonlinearRefreshFn that stamps
+/// smooth-blend IdealDiode contributions using `kappa_override`
+/// instead of each diode's pool-stored kappa. Other params
+/// (V_F0, R_d, G_off) come from the pool unchanged.
+///
+/// Used by `continuation_solve` to ramp kappa from "easy"
+/// (smooth) to "hard" (target) progressively. Each step warm-
+/// starts from the previous, guiding Newton through the
+/// residual landscape past local minima.
+[[nodiscard]] inline NonlinearRefreshFn
+make_kappa_override_refresh(Real kappa_override) {
+    return [kappa_override](const Vector& x,
+                              sparse::Matrix& J_nl,
+                              Vector& f_nl,
+                              const topology::Graph& graph,
+                              const DevicePool& pool) -> Real {
+        if (J_nl.rows() > 0) J_nl.setZero();
+        if (f_nl.size() > 0) f_nl.setZero();
+
+        Real max_abs_i = Real{0};
+
+        for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+            const auto& branch = graph.branch(b_id);
+            if (branch.kind != topology::BranchKind::Nonlinear) {
+                continue;
+            }
+            const auto kind = pool.kind_of(branch.id);
+            if (kind != DevicePool::StoredKind::NonlinearDiode) {
+                continue;
+            }
+            const auto& pool_p =
+                pool.nonlinear_diode_params(branch.id);
+            const models::IdealDiode::Params p_override{
+                .V_F0  = pool_p.V_F0,
+                .R_d   = pool_p.R_d,
+                .G_off = pool_p.G_off,
+                .kappa = kappa_override,
+            };
+
+            const stamping::BranchCoord coord{
+                branch.from, branch.to, branch.id};
+            const Real v_from =
+                stamping::read_node_voltage(x, coord.from);
+            const Real v_to =
+                stamping::read_node_voltage(x, coord.to);
+            const models::ModelInputs<models::IdealDiode> v_term{
+                v_from, v_to};
+
+            const auto [i, partials] =
+                models::evaluate_current_and_jacobian<
+                    models::IdealDiode>(v_term, p_override);
+
+            const bool from_active =
+                stamping::node_is_active(coord.from);
+            const bool to_active =
+                stamping::node_is_active(coord.to);
+
+            if (from_active) f_nl[coord.from] += i;
+            if (to_active)   f_nl[coord.to]   -= i;
+
+            if (from_active) {
+                J_nl.coeffRef(coord.from, coord.from) += partials[0];
+                if (to_active) {
+                    J_nl.coeffRef(coord.from, coord.to) += partials[1];
+                }
+            }
+            if (to_active) {
+                if (from_active) {
+                    J_nl.coeffRef(coord.to, coord.from) -= partials[0];
+                }
+                J_nl.coeffRef(coord.to, coord.to) -= partials[1];
+            }
+
+            max_abs_i = std::max(max_abs_i, std::abs(i));
+        }
+        return max_abs_i;
+    };
+}
+
 }  // namespace pulsim::v2::pwl

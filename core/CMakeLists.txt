@@ -478,6 +478,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer5_v4/test_integration_smooth_rectifier.cpp
         tests/v2/layer5_v4/test_globalized_rectifier.cpp
         tests/v2/layer5_v4/test_lm_rectifier.cpp        # V5 LM
+        tests/v2/layer5_v4/test_continuation_rectifier.cpp  # V8 continuation
     )
     target_link_libraries(pulsim_v2_layer5_v4_tests
         PRIVATE
