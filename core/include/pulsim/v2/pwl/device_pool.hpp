@@ -20,6 +20,7 @@
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/current_source.hpp"
+#include "pulsim/v2/models/pulse_voltage_source.hpp"
 #include "pulsim/v2/models/pwm_voltage_source.hpp"
 #include "pulsim/v2/models/sine_voltage_source.hpp"
 #include "pulsim/v2/models/switched_diode.hpp"
@@ -53,6 +54,7 @@ public:
         CurrentSource     = 7,  // Layer 2 V3 (no branch-current unknown)
         PWMVoltageSource  = 8,  // Layer 2 V4 (time-varying voltage source)
         SineVoltageSource = 9,  // Layer 2 V11 (AC voltage source)
+        PulseVoltageSource = 10, // Layer 2 V12 (pulse / step source)
     };
 
     struct SwitchParams {
@@ -166,6 +168,17 @@ public:
             static_cast<Index>(num_sources_++);
     }
 
+    /// Register a pulse / step voltage source (Layer 2 V12).
+    /// Same architectural pattern as PWM/Sine: V=0 baseline
+    /// + b_extra overlay at runtime.
+    void add_pulse_voltage_source(
+        Index branch_id,
+        models::PulseVoltageSource::Params p) {
+        entries_[branch_id] = Entry{p};
+        source_branch_var_id_[branch_id] =
+            static_cast<Index>(num_sources_++);
+    }
+
     // -------- Layer 2 V2: transformer (coupled inductors) ------------------
     //
     // Couplings are PAIRS of already-added inductor branches.
@@ -263,6 +276,19 @@ public:
                 " is not a SineVoltageSource");
         }
         return std::get<models::SineVoltageSource::Params>(entry);
+    }
+
+    [[nodiscard]] const models::PulseVoltageSource::Params&
+    pulse_voltage_source_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<
+                models::PulseVoltageSource::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::pulse_voltage_source_params: "
+                "branch " + std::to_string(branch_id) +
+                " is not a PulseVoltageSource");
+        }
+        return std::get<models::PulseVoltageSource::Params>(entry);
     }
 
     [[nodiscard]] Real switch_g_on(Index branch_id) const {
@@ -408,7 +434,8 @@ private:
                                 models::IdealDiode::Params,
                                 models::CurrentSource::Params,
                                 models::PWMVoltageSource::Params,
-                                models::SineVoltageSource::Params>;
+                                models::SineVoltageSource::Params,
+                                models::PulseVoltageSource::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);

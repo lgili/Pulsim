@@ -167,6 +167,16 @@ inline void load_device(
             require_real(dev, idx, type, "v_amplitude"),
             require_real(dev, idx, type, "frequency"),
             real_or(dev, "phase", Real{0}));
+    } else if (type == "pulse_voltage_source") {
+        b.add_pulse_voltage_source(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            real_or(dev, "v_initial", Real{0}),
+            require_real(dev, idx, type, "v_pulsed"),
+            real_or(dev, "t_start", Real{0}),
+            require_real(dev, idx, type, "pulse_width"),
+            real_or(dev, "period", Real{0}));
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -252,9 +262,10 @@ inline void load_device(
             " has unknown type '" + type + "'. Supported "
             "types: voltage_source, current_source, "
             "pwm_voltage_source, sine_voltage_source, "
-            "resistor, capacitor, inductor, diode, "
-            "nonlinear_diode, switch, mosfet, "
-            "mosfet_with_body_diode, igbt, transformer");
+            "pulse_voltage_source, resistor, capacitor, "
+            "inductor, diode, nonlinear_diode, switch, "
+            "mosfet, mosfet_with_body_diode, igbt, "
+            "transformer");
     }
 }
 

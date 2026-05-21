@@ -95,6 +95,34 @@ circuit:
     REQUIRE(p.phase == Approx(0.5));
 }
 
+TEST_CASE("YAML loader: pulse_voltage_source round-trip",
+          "[v2][layer8][yaml]") {
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: pulse_voltage_source
+      name: Vpulse
+      from: n0
+      to: gnd
+      v_initial: 0.0
+      v_pulsed: 5.0
+      t_start: 1.0e-3
+      pulse_width: 2.0e-3
+      period: 10.0e-3
+)YAML";
+    auto loaded = yaml::load_string(yaml);
+    REQUIRE(loaded.builder.num_branches() == 1);
+    REQUIRE(loaded.builder.pool().kind_of(0) ==
+              DevicePool::StoredKind::PulseVoltageSource);
+    const auto& p =
+        loaded.builder.pool().pulse_voltage_source_params(0);
+    REQUIRE(p.v_initial == Approx(0.0));
+    REQUIRE(p.v_pulsed == Approx(5.0));
+    REQUIRE(p.t_start == Approx(1e-3));
+    REQUIRE(p.pulse_width == Approx(2e-3));
+    REQUIRE(p.period == Approx(10e-3));
+}
+
 TEST_CASE("YAML loader: current_source round-trip",
           "[v2][layer8][yaml]") {
     const std::string yaml = R"YAML(

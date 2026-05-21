@@ -25,6 +25,7 @@
 #include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
+#include "pulsim/v2/models/pulse_voltage_source.hpp"
 #include "pulsim/v2/models/pwm_voltage_source.hpp"
 #include "pulsim/v2/models/sine_voltage_source.hpp"
 #include "pulsim/v2/models/resistor.hpp"
@@ -125,6 +126,34 @@ public:
                 .v_amplitude = v_amplitude,
                 .frequency   = frequency,
                 .phase       = phase,
+            });
+        return *this;
+    }
+
+    /// Add a pulse / step voltage source (Layer 2 V12).
+    ///   v_initial    [V] baseline (before & between pulses)
+    ///   v_pulsed     [V] level during the pulse window
+    ///   t_start      [s] delay before first pulse fires
+    ///   pulse_width  [s] duration of each pulse
+    ///   period       [s] repetition period; 0 → single-shot
+    CircuitBuilder& add_pulse_voltage_source(
+        std::string /*name*/, std::string from,
+        std::string to,
+        Real v_initial, Real v_pulsed,
+        Real t_start, Real pulse_width,
+        Real period = Real{0}) {
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = graph_.add_branch(
+            from_idx, to_idx,
+            topology::BranchKind::Source);
+        pool_.add_pulse_voltage_source(
+            b_id, models::PulseVoltageSource::Params{
+                .v_initial   = v_initial,
+                .v_pulsed    = v_pulsed,
+                .t_start     = t_start,
+                .pulse_width = pulse_width,
+                .period      = period,
             });
         return *this;
     }

@@ -163,6 +163,21 @@ void init_module(py::module_& m) {
               "run_transient — no b_extra_fn lambda needed. "
               "Used for AC mains analysis, rectifier "
               "studies, audio-amp testing.")
+        .def("add_pulse_voltage_source",
+              &builder::CircuitBuilder::add_pulse_voltage_source,
+              py::arg("name"), py::arg("from"),
+              py::arg("to"),
+              py::arg("v_initial"), py::arg("v_pulsed"),
+              py::arg("t_start"), py::arg("pulse_width"),
+              py::arg("period") = 0.0,
+              py::return_value_policy::reference,
+              "Add a pulse / step voltage source. Output "
+              "is v_initial for t < t_start, v_pulsed for "
+              "t ∈ [t_start, t_start + pulse_width), then "
+              "back to v_initial. If `period > 0`, the pulse "
+              "repeats every `period` seconds. Useful for "
+              "step-response tests, clock signals, and "
+              "transient kicks.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
               py::arg("name"), py::arg("from"),

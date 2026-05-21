@@ -342,6 +342,44 @@ def test_add_current_source_from_python() -> None:
     assert abs(res.states[-1][0] - 10.0) < 1e-6
 
 
+def test_add_pulse_voltage_source_step_charges_rc() -> None:
+    """Layer 2 V12 — pulse source step-charges an RC circuit
+    matching V_C(t) = V · (1 − e^(−t/τ))."""
+    import math
+    V = 10.0
+    R = 1000.0
+    C = 1.0e-6
+    tau = R * C   # 1 ms
+
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source(
+        "Vstep", "n0", "gnd",
+        v_initial=0.0, v_pulsed=V,
+        t_start=0.0, pulse_width=1.0)
+    b.add_resistor("R", "n0", "vc", R)
+    b.add_capacitor("C", "vc", "gnd", C)
+
+    dt = 1e-6
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build(dt)
+    opts = p.SimulationOptions(
+        t_start=0.0, t_end=5.0 * tau, dt=dt)
+    mask = p.SwitchStateMask(0)
+    res = p.run_transient(
+        cache, b.graph, b.pool, opts,
+        switch_fn=lambda t: mask)
+
+    vc_idx = b.node_id_of("vc")
+    # Sample at 1τ, 2τ, 3τ.
+    for k_tau in (1, 2, 3):
+        t_check = k_tau * tau
+        idx = int(t_check / dt)
+        v_sim = res.states[idx][vc_idx]
+        v_exp = V * (1.0 - math.exp(-t_check / tau))
+        assert abs(v_sim - v_exp) < 0.05, \
+            f"At {k_tau}τ: sim={v_sim}, exp={v_exp}"
+
+
 def test_add_sine_voltage_source_drives_resistor() -> None:
     """Layer 2 V11 — sine source driving a resistor: node
     voltage tracks the analytical sine wave."""

@@ -38,6 +38,7 @@
 #include "pulsim/v2/pwl/nonlinear_solve.hpp"
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
+#include "pulsim/v2/sources/pulse_b_extra.hpp"
 #include "pulsim/v2/sources/pwm_b_extra.hpp"
 #include "pulsim/v2/sources/sine_b_extra.hpp"
 #include "pulsim/v2/topology/graph.hpp"
@@ -352,14 +353,18 @@ inline SimulationResult run_transient(
                 ? b_extra_fn(t)
                 : Vector::Zero(state_size);
 
-            // 3. Built-in PWM (V4) + sine (V11) sources.
+            // 3. Built-in PWM (V4) + sine (V11) + pulse
+            //    (V12) sources.
             const Vector b_extra_pwm =
                 sources::compute_pwm_b_extra(pool, graph, t);
             const Vector b_extra_sine =
                 sources::compute_sine_b_extra(pool, graph, t);
+            const Vector b_extra_pulse =
+                sources::compute_pulse_b_extra(pool, graph, t);
 
             b_extra = b_extra_history + b_extra_user +
-                      b_extra_pwm + b_extra_sine;
+                      b_extra_pwm + b_extra_sine +
+                      b_extra_pulse;
 
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable
@@ -488,9 +493,13 @@ inline SimulationResult run_transient(
                         const Vector be_sine_1 =
                             sources::compute_sine_b_extra(
                                 pool, graph, t_est);
+                        const Vector be_pulse_1 =
+                            sources::compute_pulse_b_extra(
+                                pool, graph, t_est);
                         const Vector be_total_1 =
                             be_hist_1 + be_user_1 +
-                            be_pwm_1 + be_sine_1;
+                            be_pwm_1 + be_sine_1 +
+                            be_pulse_1;
                         cache.solve_at(
                             mask_pre, dt1, be_total_1, x);
                         history.update_from_state(x, dt1);
@@ -543,9 +552,13 @@ inline SimulationResult run_transient(
                         const Vector be_sine_2 =
                             sources::compute_sine_b_extra(
                                 pool, graph, t);
+                        const Vector be_pulse_2 =
+                            sources::compute_pulse_b_extra(
+                                pool, graph, t);
                         const Vector be_total_2 =
                             be_hist_2 + be_user_2 +
-                            be_pwm_2 + be_sine_2;
+                            be_pwm_2 + be_sine_2 +
+                            be_pulse_2;
                         cache.solve_at(
                             mask_post, dt2, be_total_2, x);
                         history.update_from_state(x, dt2);
@@ -595,16 +608,19 @@ inline SimulationResult run_transient(
             const Vector b_extra_user_only = b_extra_fn
                 ? b_extra_fn(t)
                 : zero_b_extra;
-            // Built-in PWM (V4) + sine (V11) sources —
-            // apply on the static path too, since both are
-            // time-varying even without caps/inductors.
+            // Built-in PWM (V4) + sine (V11) + pulse (V12)
+            // sources — apply on the static path too, since
+            // all are time-varying even without caps/Ls.
             const Vector b_extra_pwm =
                 sources::compute_pwm_b_extra(pool, graph, t);
             const Vector b_extra_sine =
                 sources::compute_sine_b_extra(pool, graph, t);
+            const Vector b_extra_pulse =
+                sources::compute_pulse_b_extra(pool, graph, t);
             const Vector b_extra_user = b_extra_user_only +
                                           b_extra_pwm +
-                                          b_extra_sine;
+                                          b_extra_sine +
+                                          b_extra_pulse;
 
             Size iters = 0;
             bool flipped = false;
