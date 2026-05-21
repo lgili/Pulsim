@@ -464,6 +464,46 @@ def test_make_spwm_pair_fn_M_zero_matches_constant_duty() -> None:
         assert sw_spwm(t).get(1) == sw_const(t).get(1)
 
 
+def test_make_three_phase_spwm_fn_shoot_through_free() -> None:
+    """Layer 2 V8 — 3-phase VSI helper: no shoot-through on
+    any of the 3 legs."""
+    legs = p.ThreePhaseLegIndices(0, 1, 2, 3, 4, 5)
+    sw = p.make_three_phase_spwm_fn(
+        carrier_frequency=10e3, modulation_frequency=50.0,
+        modulation_index=0.9, legs=legs,
+        num_switches=6, dead_time=100e-9)
+    for k in range(3000):
+        t = (k + 0.317) * 0.04 / 3000.0
+        m = sw(t)
+        ab = m.get(0) and m.get(1)
+        bb = m.get(2) and m.get(3)
+        cc = m.get(4) and m.get(5)
+        assert not ab and not bb and not cc, \
+            f"shoot-through @ t={t} (A={ab} B={bb} C={cc})"
+
+
+def test_make_three_phase_spwm_fn_120_degree_rotation() -> None:
+    """Layer 2 V8 — at ωt = π/2 with M=0.8: leg A peaks (HS
+    ON), legs B/C are below 0.5 duty (LS ON). Sampled at
+    t_cycle = T_c/2 inside the appropriate carrier period."""
+    legs = p.ThreePhaseLegIndices(0, 1, 2, 3, 4, 5)
+    f_c = 1000.0
+    f_m = 50.0
+    sw = p.make_three_phase_spwm_fn(
+        carrier_frequency=f_c, modulation_frequency=f_m,
+        modulation_index=0.8, legs=legs,
+        num_switches=6, dead_time=0.0)
+    T_c = 1.0 / f_c
+    t = 1.0 / (4.0 * f_m) + T_c * 0.5
+    m = sw(t)
+    assert m.get(0) is True   # HS_A
+    assert m.get(1) is False
+    assert m.get(2) is False
+    assert m.get(3) is True   # LS_B
+    assert m.get(4) is False
+    assert m.get(5) is True   # LS_C
+
+
 def test_make_pwm_switch_fn_phase_and_edge_cases() -> None:
     """Layer 2 V5 — helper handles phase offset, duty=0/1,
     and frequency=0 the same way the C++ helper does."""

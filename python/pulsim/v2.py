@@ -51,6 +51,8 @@ from ._pulsim.v2_kernel import (  # type: ignore[import-not-found]
     make_pwm_switch_fn,
     make_dead_time_pwm_pair_fn,
     make_spwm_pair_fn,
+    ThreePhaseLegIndices,
+    make_three_phase_spwm_fn,
 )
 
 __all__ = [
@@ -70,6 +72,8 @@ __all__ = [
     "make_pwm_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
+    "ThreePhaseLegIndices",
+    "make_three_phase_spwm_fn",
 ]
 
 __version__ = "0.1.0"

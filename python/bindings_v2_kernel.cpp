@@ -39,6 +39,7 @@
 #include "pulsim/v2/sources/dead_time_pwm_pair_fn.hpp"
 #include "pulsim/v2/sources/pwm_switch_fn.hpp"
 #include "pulsim/v2/sources/spwm_pair_fn.hpp"
+#include "pulsim/v2/sources/three_phase_spwm_fn.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 #include "pulsim/v2/yaml/loader.hpp"
@@ -438,6 +439,49 @@ void init_module(py::module_& m) {
         "Symmetric `dead_time` is inserted at each "
         "commutation; shoot-through is impossible by "
         "construction.");
+
+    // ---- 3-phase VSI helper (Layer 2 V8) ---------------------------------
+    py::class_<sources::ThreePhaseLegIndices>(m,
+        "ThreePhaseLegIndices",
+        "Switch-index assignment for the 6 power devices "
+        "of a 3-phase 2-level VSI. Caller must add the "
+        "switches in the same order to the CircuitBuilder.")
+        .def(py::init([](Size hs_a, Size ls_a,
+                           Size hs_b, Size ls_b,
+                           Size hs_c, Size ls_c) {
+            return sources::ThreePhaseLegIndices{
+                hs_a, ls_a, hs_b, ls_b, hs_c, ls_c};
+        }), py::arg("hs_a"), py::arg("ls_a"),
+            py::arg("hs_b"), py::arg("ls_b"),
+            py::arg("hs_c"), py::arg("ls_c"))
+        .def_readwrite("hs_a",
+            &sources::ThreePhaseLegIndices::hs_a)
+        .def_readwrite("ls_a",
+            &sources::ThreePhaseLegIndices::ls_a)
+        .def_readwrite("hs_b",
+            &sources::ThreePhaseLegIndices::hs_b)
+        .def_readwrite("ls_b",
+            &sources::ThreePhaseLegIndices::ls_b)
+        .def_readwrite("hs_c",
+            &sources::ThreePhaseLegIndices::hs_c)
+        .def_readwrite("ls_c",
+            &sources::ThreePhaseLegIndices::ls_c);
+
+    m.def("make_three_phase_spwm_fn",
+        &sources::make_three_phase_spwm_fn,
+        py::arg("carrier_frequency"),
+        py::arg("modulation_frequency"),
+        py::arg("modulation_index"),
+        py::arg("legs"),
+        py::arg("num_switches"),
+        py::arg("dead_time"),
+        py::arg("modulation_phase") = 0.0,
+        py::arg("carrier_phase") = 0.0,
+        "Build a SwitchScheduleFn driving a 3-phase 2-level "
+        "VSI with SPWM: common carrier, sine modulation "
+        "references at 0°/-120°/-240° on legs A/B/C, "
+        "symmetric dead-time. Shoot-through prevented on "
+        "every leg by construction.");
 
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,
