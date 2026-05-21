@@ -80,4 +80,9 @@ __all__ = [
     "make_combined_switch_fn",
 ]
 
+# Note: SineVoltageSource (Layer 2 V11) is exposed as a
+# CircuitBuilder method `add_sine_voltage_source`; there's
+# no separate Python-side params class — pass v_dc,
+# v_amplitude, frequency, phase as keyword args.
+
 __version__ = "0.1.0"

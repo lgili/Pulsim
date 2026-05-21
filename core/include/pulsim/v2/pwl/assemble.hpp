@@ -150,6 +150,14 @@ inline void assemble_segment(const topology::Graph& graph,
                     pool.branch_var_id_for_source(branch.id, graph);
                 stamping::stamp_voltage_source(J, b, x, coord,
                                                 branch_var_id, Real{0});
+            } else if (src_kind ==
+                       DevicePool::StoredKind::SineVoltageSource) {
+                // V11: same V=0 baseline pattern; sine
+                // value comes from b_extra each step.
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                stamping::stamp_voltage_source(J, b, x, coord,
+                                                branch_var_id, Real{0});
             } else {
                 const auto& p = pool.voltage_source_params(branch.id);
                 const Index branch_var_id =

@@ -149,6 +149,20 @@ void init_module(py::module_& m) {
               "with `duty` ∈ [0, 1] cycle. The time-"
               "varying value is automatically overlaid by "
               "run_transient — no b_extra_fn lambda needed.")
+        .def("add_sine_voltage_source",
+              &builder::CircuitBuilder::add_sine_voltage_source,
+              py::arg("name"), py::arg("from"),
+              py::arg("to"),
+              py::arg("v_dc"), py::arg("v_amplitude"),
+              py::arg("frequency"), py::arg("phase") = 0.0,
+              py::return_value_policy::reference,
+              "Add a sinusoidal AC voltage source. Output "
+              "is v_dc + v_amplitude·sin(2π·f·t + φ). "
+              "`phase` is in RADIANS. The time-varying "
+              "value is automatically overlaid by "
+              "run_transient — no b_extra_fn lambda needed. "
+              "Used for AC mains analysis, rectifier "
+              "studies, audio-amp testing.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
               py::arg("name"), py::arg("from"),

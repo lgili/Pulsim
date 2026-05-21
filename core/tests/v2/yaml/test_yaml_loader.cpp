@@ -69,6 +69,32 @@ circuit:
     REQUIRE(p.phase == Approx(0.0));   // default
 }
 
+TEST_CASE("YAML loader: sine_voltage_source round-trip",
+          "[v2][layer8][yaml]") {
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: sine_voltage_source
+      name: Vac
+      from: n0
+      to: gnd
+      v_dc: 0.0
+      v_amplitude: 220.0
+      frequency: 50.0
+      phase: 0.5
+)YAML";
+    auto loaded = yaml::load_string(yaml);
+    REQUIRE(loaded.builder.num_branches() == 1);
+    REQUIRE(loaded.builder.pool().kind_of(0) ==
+              DevicePool::StoredKind::SineVoltageSource);
+    const auto& p =
+        loaded.builder.pool().sine_voltage_source_params(0);
+    REQUIRE(p.v_dc == Approx(0.0));
+    REQUIRE(p.v_amplitude == Approx(220.0));
+    REQUIRE(p.frequency == Approx(50.0));
+    REQUIRE(p.phase == Approx(0.5));
+}
+
 TEST_CASE("YAML loader: current_source round-trip",
           "[v2][layer8][yaml]") {
     const std::string yaml = R"YAML(

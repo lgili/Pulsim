@@ -342,6 +342,44 @@ def test_add_current_source_from_python() -> None:
     assert abs(res.states[-1][0] - 10.0) < 1e-6
 
 
+def test_add_sine_voltage_source_drives_resistor() -> None:
+    """Layer 2 V11 — sine source driving a resistor: node
+    voltage tracks the analytical sine wave."""
+    import math
+    V_amp = 10.0
+    f_ac  = 60.0
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source(
+        "Vac", "n0", "gnd",
+        v_dc=0.0, v_amplitude=V_amp, frequency=f_ac)
+    b.add_resistor("R", "n0", "gnd", 100.0)
+
+    dt = 1e-5
+    T_ac = 1.0 / f_ac
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build(dt)
+
+    opts = p.SimulationOptions(
+        t_start=0.0, t_end=3.0 * T_ac, dt=dt)
+    mask = p.SwitchStateMask(0)
+    res = p.run_transient(
+        cache, b.graph, b.pool, opts,
+        switch_fn=lambda t: mask)
+
+    # Check the last cycle tracks the sine analytically.
+    err = 0.0
+    n = 0
+    for k in range(res.num_steps()):
+        t = res.times[k]
+        v_sim = res.states[k][0]
+        v_exp = V_amp * math.sin(2.0 * math.pi * f_ac * t)
+        err += (v_sim - v_exp) ** 2
+        n += 1
+    rms = (err / n) ** 0.5
+    assert rms < V_amp * 0.01, \
+        f"RMS error {rms} V too large vs amplitude {V_amp} V"
+
+
 def test_add_transformer_from_python() -> None:
     """add_transformer creates two coupled inductors."""
     b = p.CircuitBuilder()

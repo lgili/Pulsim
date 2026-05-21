@@ -270,6 +270,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer2/test_ideal_diode.cpp
         tests/v2/layer2/test_current_source.cpp   # Layer 2 V3
         tests/v2/layer2/test_pwm_voltage_source.cpp  # Layer 2 V4
+        tests/v2/layer2/test_sine_voltage_source.cpp # Layer 2 V11
     )
     target_link_libraries(pulsim_v2_layer2_tests
         PRIVATE

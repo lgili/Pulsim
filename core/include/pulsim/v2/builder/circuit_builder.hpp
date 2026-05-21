@@ -26,6 +26,7 @@
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/pwm_voltage_source.hpp"
+#include "pulsim/v2/models/sine_voltage_source.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
@@ -98,6 +99,32 @@ public:
                 .frequency  = frequency,
                 .duty       = duty,
                 .phase      = phase,
+            });
+        return *this;
+    }
+
+    /// Add a sinusoidal AC voltage source (Layer 2 V11).
+    ///   v_dc         [V]   DC offset
+    ///   v_amplitude  [V]   peak amplitude of sine wave
+    ///   frequency    [Hz]  fundamental frequency
+    ///   phase        [rad] phase angle (default 0)
+    /// Output: v(t) = v_dc + v_amplitude · sin(2π·f·t + φ).
+    CircuitBuilder& add_sine_voltage_source(
+        std::string /*name*/, std::string from,
+        std::string to,
+        Real v_dc, Real v_amplitude,
+        Real frequency, Real phase = Real{0}) {
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = graph_.add_branch(
+            from_idx, to_idx,
+            topology::BranchKind::Source);
+        pool_.add_sine_voltage_source(
+            b_id, models::SineVoltageSource::Params{
+                .v_dc        = v_dc,
+                .v_amplitude = v_amplitude,
+                .frequency   = frequency,
+                .phase       = phase,
             });
         return *this;
     }

@@ -21,6 +21,7 @@
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/pwm_voltage_source.hpp"
+#include "pulsim/v2/models/sine_voltage_source.hpp"
 #include "pulsim/v2/models/switched_diode.hpp"
 #include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
@@ -51,6 +52,7 @@ public:
         NonlinearDiode    = 6,  // models::IdealDiode (Newton, Layer 4 V3)
         CurrentSource     = 7,  // Layer 2 V3 (no branch-current unknown)
         PWMVoltageSource  = 8,  // Layer 2 V4 (time-varying voltage source)
+        SineVoltageSource = 9,  // Layer 2 V11 (AC voltage source)
     };
 
     struct SwitchParams {
@@ -149,6 +151,21 @@ public:
             static_cast<Index>(num_sources_++);
     }
 
+    /// Register a sinusoidal AC voltage source (Layer 2 V11).
+    /// Structurally identical to a VoltageSource — the time-
+    /// varying sine value is overlaid via `b_extra` at
+    /// runtime by `run_transient`'s built-in AC pass. The
+    /// branch MUST be added with `BranchKind::Source` in
+    /// the graph; assemble.hpp dispatches on StoredKind and
+    /// stamps it as a 0 V baseline source.
+    void add_sine_voltage_source(
+        Index branch_id,
+        models::SineVoltageSource::Params p) {
+        entries_[branch_id] = Entry{p};
+        source_branch_var_id_[branch_id] =
+            static_cast<Index>(num_sources_++);
+    }
+
     // -------- Layer 2 V2: transformer (coupled inductors) ------------------
     //
     // Couplings are PAIRS of already-added inductor branches.
@@ -233,6 +250,19 @@ public:
                 " is not a PWMVoltageSource");
         }
         return std::get<models::PWMVoltageSource::Params>(entry);
+    }
+
+    [[nodiscard]] const models::SineVoltageSource::Params&
+    sine_voltage_source_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<
+                models::SineVoltageSource::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::sine_voltage_source_params: "
+                "branch " + std::to_string(branch_id) +
+                " is not a SineVoltageSource");
+        }
+        return std::get<models::SineVoltageSource::Params>(entry);
     }
 
     [[nodiscard]] Real switch_g_on(Index branch_id) const {
@@ -377,7 +407,8 @@ private:
                                 models::SwitchedDiode::Params,
                                 models::IdealDiode::Params,
                                 models::CurrentSource::Params,
-                                models::PWMVoltageSource::Params>;
+                                models::PWMVoltageSource::Params,
+                                models::SineVoltageSource::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
