@@ -342,6 +342,38 @@ def test_add_current_source_from_python() -> None:
     assert abs(res.states[-1][0] - 10.0) < 1e-6
 
 
+def test_add_mosfet_level1_common_source_dc() -> None:
+    """Layer 2 V13 — drive a common-source amplifier via
+    Python: V_DD=10V, R_D=5kΩ, M1(K=1e-3, V_T=2), V_GS=3V.
+    Newton must converge to V_drain ≈ 4.55 V."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("VDD", "vdd", "gnd", 10.0)
+    b.add_resistor("R_D", "vdd", "drain", 5000.0)
+    b.add_voltage_source("VGS_src", "vgs", "gnd", 3.0)
+    b.add_mosfet_level1(
+        "M1", drain="drain", source="gnd", gate="vgs",
+        K=1.0e-3, V_T=2.0)
+
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build()
+
+    opts = p.SimulationOptions(
+        t_start=0.0, t_end=0.1, dt=0.01)
+    opts.max_newton_iterations = 100
+    mask = p.SwitchStateMask(0)
+
+    res = p.run_transient(
+        cache, b.graph, b.pool, opts,
+        switch_fn=lambda t: mask,
+        enable_nonlinear_refresh=True)
+
+    drain_idx = b.node_id_of("drain")
+    v_drain = res.states[res.num_steps() - 1][drain_idx]
+    # Self-consistent operating point: V_drain ≈ 4.55 V.
+    assert abs(v_drain - 4.55) < 0.15, \
+        f"V_drain = {v_drain}, expected ~4.55"
+
+
 def test_add_pulse_voltage_source_step_charges_rc() -> None:
     """Layer 2 V12 — pulse source step-charges an RC circuit
     matching V_C(t) = V · (1 − e^(−t/τ))."""

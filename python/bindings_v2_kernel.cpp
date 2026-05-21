@@ -33,6 +33,7 @@
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/cache.hpp"
 #include "pulsim/v2/pwl/device_pool.hpp"
+#include "pulsim/v2/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
 #include "pulsim/v2/solver/run_transient.hpp"
@@ -178,6 +179,27 @@ void init_module(py::module_& m) {
               "repeats every `period` seconds. Useful for "
               "step-response tests, clock signals, and "
               "transient kicks.")
+        .def("add_mosfet_level1",
+              &builder::CircuitBuilder::add_mosfet_level1,
+              py::arg("name"),
+              py::arg("drain"), py::arg("source"),
+              py::arg("gate"),
+              py::arg("K"), py::arg("V_T"),
+              py::arg("lambda_") = 0.02,
+              py::arg("kappa")   = 15.0,
+              py::return_value_policy::reference,
+              "Add a 3-terminal SH1 MOSFET (Shichman-Hodges "
+              "Level 1). Cutoff/triode/saturation regions "
+              "blended via sigmoid for C¹-smooth Newton "
+              "convergence. K [A/V²], V_T [V], lambda_ [1/V] "
+              "channel-length modulation, kappa [1/V] sigmoid "
+              "sharpness. Drain → source is a Nonlinear "
+              "branch; gate is a node reference (no gate "
+              "current — ideal gate). Call `run_transient` "
+              "with `nl_refresh=make_combined_diode_mosfet_"
+              "refresh()` (or pass `refresh_mosfets_level1` "
+              "directly) so the Newton loop stamps the "
+              "MOSFET each iteration.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
               py::arg("name"), py::arg("from"),
@@ -539,6 +561,15 @@ void init_module(py::module_& m) {
         "symmetric dead-time. Shoot-through prevented on "
         "every leg by construction.");
 
+    // Note on `nl_refresh`: pybind11's std::function adapter
+    // routes the callback through Python, which serialises
+    // the sparse-matrix argument BY VALUE. The C++ refresh
+    // function mutates J_nl/f_nl in place, but those
+    // mutations are lost across the Python boundary.
+    // Workaround: expose a boolean flag that tells the
+    // Python binding to construct + use the C++ refresh
+    // directly (no Python roundtrip). For custom refresh
+    // logic, drop down to the C++ API.
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,
            const topology::Graph& graph,
@@ -546,18 +577,31 @@ void init_module(py::module_& m) {
            const SimulationOptions& opts,
            SwitchScheduleFn switch_fn,
            BExtraFn b_extra_fn,
-           bool start_from_dc_op) {
+           bool start_from_dc_op,
+           bool enable_nonlinear_refresh) {
+            pwl::NonlinearRefreshFn nl_refresh{};
+            if (enable_nonlinear_refresh) {
+                nl_refresh =
+                    pwl::make_combined_diode_mosfet_refresh();
+            }
             return run_transient(cache, graph, pool, opts,
                                   switch_fn, b_extra_fn,
-                                  start_from_dc_op);
+                                  start_from_dc_op,
+                                  nl_refresh);
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
         py::arg("b_extra_fn") = BExtraFn{},
         py::arg("start_from_dc_op") = false,
+        py::arg("enable_nonlinear_refresh") = false,
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
-        "to b_constant at each step.");
+        "to b_constant at each step. Set "
+        "`enable_nonlinear_refresh=True` for circuits "
+        "with smooth-blend IdealDiode / SH1 MOSFET "
+        "branches (constructs the refresh inside the "
+        "binding to avoid Python-roundtrip aliasing of "
+        "sparse-matrix references).");
 }
 
 }  // namespace pulsim_v2_kernel_bindings

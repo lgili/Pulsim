@@ -95,6 +95,36 @@ circuit:
     REQUIRE(p.phase == Approx(0.5));
 }
 
+TEST_CASE("YAML loader: mosfet_level1 round-trip",
+          "[v2][layer8][yaml]") {
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: mosfet_level1
+      name: M1
+      drain: drain
+      source: gnd
+      gate: vgs
+      K: 2.0e-3
+      V_T: 1.5
+      lambda: 0.04
+      kappa: 25.0
+)YAML";
+    auto loaded = yaml::load_string(yaml);
+    REQUIRE(loaded.builder.num_branches() == 1);
+    REQUIRE(loaded.builder.pool().kind_of(0) ==
+              DevicePool::StoredKind::MosfetLevel1);
+    const auto& p =
+        loaded.builder.pool().mosfet_level1_params(0);
+    REQUIRE(p.K == Approx(2e-3));
+    REQUIRE(p.V_T == Approx(1.5));
+    REQUIRE(p.lambda == Approx(0.04));
+    REQUIRE(p.kappa == Approx(25.0));
+    // Gate node must be distinct from drain/source.
+    REQUIRE(loaded.builder.pool().mosfet_level1_gate_node(0) ==
+              loaded.builder.node_id_of("vgs"));
+}
+
 TEST_CASE("YAML loader: pulse_voltage_source round-trip",
           "[v2][layer8][yaml]") {
     const std::string yaml = R"YAML(
