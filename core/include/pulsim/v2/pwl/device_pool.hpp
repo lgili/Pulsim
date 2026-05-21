@@ -16,6 +16,7 @@
 // dispatch arm in `assemble_segment`.
 
 #include "pulsim/v2/models/capacitor.hpp"
+#include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/switched_diode.hpp"
@@ -38,12 +39,13 @@ public:
     // `Entry` so that `Entry::index()` casts directly to
     // `StoredKind`.
     enum class StoredKind {
-        Resistor      = 0,
-        VoltageSource = 1,
-        Switch        = 2,
-        Capacitor     = 3,  // trap companion (Layer 4 V1)
-        Inductor      = 4,  // trap companion (Layer 4 V1)
-        Diode         = 5,  // SwitchedDiode (Layer 5 V2)
+        Resistor       = 0,
+        VoltageSource  = 1,
+        Switch         = 2,
+        Capacitor      = 3,  // trap companion (Layer 4 V1)
+        Inductor       = 4,  // trap companion (Layer 4 V1)
+        Diode          = 5,  // SwitchedDiode (Layer 5 V2)
+        NonlinearDiode = 6,  // models::IdealDiode (Newton, Layer 4 V3)
     };
 
     struct SwitchParams {
@@ -100,6 +102,15 @@ public:
         entries_[branch_id] = Entry{
             models::SwitchedDiode::Params{g_on, g_off, V_th}};
         diode_branches_.push_back(branch_id);
+    }
+
+    /// Register a smooth-blend nonlinear diode (the Shockley-
+    /// flavoured `models::IdealDiode`). The branch MUST have been
+    /// added with `BranchKind::Nonlinear`. Layer 4 V3's Newton
+    /// loop stamps it per iteration via `refresh_smooth_diodes`.
+    void add_nonlinear_diode(Index branch_id,
+                              models::IdealDiode::Params p) {
+        entries_[branch_id] = Entry{p};
     }
 
     // -------- Lookups -------------------------------------------------------
@@ -174,6 +185,18 @@ public:
                 std::to_string(branch_id) + " is not a Diode");
         }
         return std::get<models::SwitchedDiode::Params>(entry);
+    }
+
+    [[nodiscard]] const models::IdealDiode::Params&
+    nonlinear_diode_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<models::IdealDiode::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::nonlinear_diode_params: branch " +
+                std::to_string(branch_id) +
+                " is not a NonlinearDiode");
+        }
+        return std::get<models::IdealDiode::Params>(entry);
     }
 
     /// Iterate diode branch ids in insertion (= branch) order.
@@ -263,7 +286,8 @@ private:
                                 SwitchParams,
                                 models::Capacitor::Params,
                                 models::Inductor::Params,
-                                models::SwitchedDiode::Params>;
+                                models::SwitchedDiode::Params,
+                                models::IdealDiode::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);

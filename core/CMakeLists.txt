@@ -443,6 +443,27 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer4_v2_tests)
 
     # =============================================================================
+    # pulsim_v2_layer4_v3_tests — pulsim-v2-nonlinear-segment-newton
+    # =============================================================================
+    # Newton iteration on top of the cached LINEAR factor for
+    # circuits with BranchKind::Nonlinear devices (real diodes,
+    # future MOSFETs, etc.).
+    add_executable(pulsim_v2_layer4_v3_tests
+        tests/v2/layer4_v3/test_main.cpp
+        tests/v2/layer4_v3/test_nonlinear_solve.cpp
+        tests/v2/layer4_v3/test_diode_load_line.cpp
+    )
+    target_link_libraries(pulsim_v2_layer4_v3_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer4_v3_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer4_v3_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 
