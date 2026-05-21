@@ -37,6 +37,7 @@
 #include "pulsim/v2/solver/result.hpp"
 #include "pulsim/v2/solver/run_transient.hpp"
 #include "pulsim/v2/sources/dead_time_pwm_pair_fn.hpp"
+#include "pulsim/v2/sources/phase_shift_full_bridge_fn.hpp"
 #include "pulsim/v2/sources/pwm_switch_fn.hpp"
 #include "pulsim/v2/sources/spwm_pair_fn.hpp"
 #include "pulsim/v2/sources/three_phase_spwm_fn.hpp"
@@ -466,6 +467,22 @@ void init_module(py::module_& m) {
             &sources::ThreePhaseLegIndices::hs_c)
         .def_readwrite("ls_c",
             &sources::ThreePhaseLegIndices::ls_c);
+
+    m.def("make_phase_shift_full_bridge_fn",
+        &sources::make_phase_shift_full_bridge_fn,
+        py::arg("switching_frequency"),
+        py::arg("phase_shift"),
+        py::arg("leg_a_hs_idx"), py::arg("leg_a_ls_idx"),
+        py::arg("leg_b_hs_idx"), py::arg("leg_b_ls_idx"),
+        py::arg("num_switches"), py::arg("dead_time"),
+        py::arg("carrier_phase") = 0.0,
+        "Build a SwitchScheduleFn driving a phase-shift "
+        "full-bridge: two HS/LS half-bridge legs at 50 %% "
+        "duty each, with leg B lagging leg A by "
+        "`phase_shift` radians. φ=0 → synchronous (no power); "
+        "φ=π → anti-phase (full ±V_bus square wave on "
+        "v_AB). Used by ZVS full-bridge, DAB, and resonant "
+        "LLC converters.");
 
     m.def("make_three_phase_spwm_fn",
         &sources::make_three_phase_spwm_fn,

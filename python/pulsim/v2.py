@@ -53,6 +53,7 @@ from ._pulsim.v2_kernel import (  # type: ignore[import-not-found]
     make_spwm_pair_fn,
     ThreePhaseLegIndices,
     make_three_phase_spwm_fn,
+    make_phase_shift_full_bridge_fn,
 )
 
 __all__ = [
@@ -74,6 +75,7 @@ __all__ = [
     "make_spwm_pair_fn",
     "ThreePhaseLegIndices",
     "make_three_phase_spwm_fn",
+    "make_phase_shift_full_bridge_fn",
 ]
 
 __version__ = "0.1.0"

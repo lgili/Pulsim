@@ -504,6 +504,38 @@ def test_make_three_phase_spwm_fn_120_degree_rotation() -> None:
     assert m.get(5) is True   # LS_C
 
 
+def test_make_phase_shift_full_bridge_fn_synchronous_legs() -> None:
+    """Layer 2 V9 — at φ=0 the two legs of the full bridge
+    are bit-for-bit synchronous; v_AB ≡ 0."""
+    import math
+    sw = p.make_phase_shift_full_bridge_fn(
+        switching_frequency=1000.0, phase_shift=0.0,
+        leg_a_hs_idx=0, leg_a_ls_idx=1,
+        leg_b_hs_idx=2, leg_b_ls_idx=3,
+        num_switches=4, dead_time=0.0)
+    for k in range(200):
+        t = (k + 0.1) * 5e-3 / 200.0
+        m = sw(t)
+        assert m.get(0) == m.get(2)   # A_HS ≡ B_HS
+        assert m.get(1) == m.get(3)   # A_LS ≡ B_LS
+
+
+def test_make_phase_shift_full_bridge_fn_anti_phase() -> None:
+    """Layer 2 V9 — at φ=π leg B is the mirror of leg A;
+    v_AB is a full ±V_bus square wave."""
+    import math
+    sw = p.make_phase_shift_full_bridge_fn(
+        switching_frequency=1000.0, phase_shift=math.pi,
+        leg_a_hs_idx=0, leg_a_ls_idx=1,
+        leg_b_hs_idx=2, leg_b_ls_idx=3,
+        num_switches=4, dead_time=0.0)
+    for k in range(200):
+        t = (k + 0.1) * 5e-3 / 200.0
+        m = sw(t)
+        assert m.get(0) == m.get(3)   # A_HS ≡ B_LS
+        assert m.get(1) == m.get(2)   # A_LS ≡ B_HS
+
+
 def test_make_pwm_switch_fn_phase_and_edge_cases() -> None:
     """Layer 2 V5 — helper handles phase offset, duty=0/1,
     and frequency=0 the same way the C++ helper does."""
