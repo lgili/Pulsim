@@ -217,6 +217,31 @@ public:
         return entries_;
     }
 
+    // ----- Layer 5 V3: snapshot/restore for substep correction -----
+    //
+    // `snapshot()` returns a deep copy of the per-device
+    // history entries (`v_prev`, `i_prev`, …). `restore(snap)`
+    // overwrites the internal state from such a snapshot.
+    //
+    // Used by run_transient's substep correction path: before
+    // taking a step, snapshot the history; if the step turns
+    // out to contain a commutation event, restore and redo as
+    // two sub-steps.
+    //
+    // Round-trip invariant: `restore(snapshot())` is a no-op.
+    [[nodiscard]] std::vector<HistoryEntry> snapshot() const {
+        return entries_;
+    }
+
+    void restore(const std::vector<HistoryEntry>& snap) {
+        // We do not enforce snap.size() == entries_.size()
+        // because callers always pair snapshot/restore on the
+        // same HistoryState instance; mismatch indicates a
+        // programmer error that's better caught by the
+        // subsequent compute_b_extra mismatched-size aborts.
+        entries_ = snap;
+    }
+
 private:
     Size state_size_;
     std::vector<HistoryEntry> entries_;

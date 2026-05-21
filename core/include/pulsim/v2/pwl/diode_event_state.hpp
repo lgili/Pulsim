@@ -30,6 +30,8 @@
 #include "pulsim/v2/topology/switch_state.hpp"
 
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pulsim::v2::pwl {
@@ -142,6 +144,40 @@ public:
     void reset() noexcept {
         for (auto& d : diodes_) {
             d.is_on = false;
+        }
+    }
+
+    // ----- Layer 5 V3: snapshot/restore for substep correction -----
+    //
+    // `snapshot_on_bits()` returns the current `is_on` flag for
+    // every registered diode, in registration order.
+    // `restore_on_bits(bits)` overwrites the flags from such a
+    // snapshot. The bit-vector size MUST match the number of
+    // diodes; mismatch throws `std::invalid_argument`.
+    //
+    // Used by run_transient's substep correction path: before a
+    // step, snapshot the diode bits; if a commutation event is
+    // detected mid-step, restore and redo as two sub-steps with
+    // the original pre-event mask, then update normally.
+    [[nodiscard]] std::vector<bool> snapshot_on_bits() const {
+        std::vector<bool> bits;
+        bits.reserve(diodes_.size());
+        for (const auto& d : diodes_) {
+            bits.push_back(d.is_on);
+        }
+        return bits;
+    }
+
+    void restore_on_bits(const std::vector<bool>& bits) {
+        if (bits.size() != diodes_.size()) {
+            throw std::invalid_argument(
+                "DiodeEventState::restore_on_bits: size "
+                "mismatch — expected " +
+                std::to_string(diodes_.size()) + ", got " +
+                std::to_string(bits.size()));
+        }
+        for (Size i = 0; i < diodes_.size(); ++i) {
+            diodes_[i].is_on = bits[i];
         }
     }
 

@@ -72,6 +72,22 @@ struct SimulationOptions {
     /// line search when both are enabled.
     bool enable_newton_lm = false;
 
+    /// Layer 5 V3 — sub-step state correction.
+    ///
+    /// When `true` AND `cache.dt() > 0` (dynamic path), each
+    /// time step that detects a commutation event mid-step
+    /// is RETROACTIVELY split into two sub-steps at the
+    /// estimated event time `t_est`. Sub-step 1 uses the
+    /// pre-event mask and `cache.solve_at(mask_pre, dt₁, …)`
+    /// (Layer 4 V7's auxiliary-dt solve). Sub-step 2 uses
+    /// the post-event mask and `cache.solve_at(mask_post,
+    /// dt₂, …)`. The result eliminates the single-shot
+    /// commutation wobble visible at coarse dt.
+    ///
+    /// V0 corrects ONLY the first detected event per step.
+    /// Default `false` to preserve V2.2 behaviour.
+    bool enable_substep_state_correction = false;
+
     [[nodiscard]] bool valid() const noexcept {
         // All three values must be finite (no NaN, no infinity).
         if (!std::isfinite(t_start) || !std::isfinite(t_end) ||

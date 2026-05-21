@@ -319,8 +319,27 @@ inline SimulationResult run_transient(
                                  static_cast<Real>(k - 1) * opts.dt;
 
             // Snapshot the state at t_prev for sub-step
-            // commutation timing (Layer 5 V2.2).
+            // commutation timing (Layer 5 V2.2) and state
+            // correction (Layer 5 V3).
             const Vector x_prev = x;
+            // V3 snapshots — taken regardless of whether
+            // correction fires (cheap; vectors are small per
+            // dynamic-branch). Restored only if a commutation
+            // event is detected AND
+            // enable_substep_state_correction is true.
+            const auto history_snap = history.snapshot();
+            const std::vector<bool> diodes_snap =
+                has_diodes ? diodes.snapshot_on_bits()
+                            : std::vector<bool>{};
+            // Pre-event mask: what mask we'd use BEFORE any
+            // diode flip during this step. Captured before
+            // event iteration runs.
+            topology::SwitchStateMask mask_pre = switch_fn(t);
+            if (has_diodes) {
+                mask_pre = combine_masks(
+                    mask_pre, diodes.current_diode_mask(),
+                    diode_owned);
+            }
 
             // 1. History from previous step.
             const Vector b_extra_history =
@@ -375,7 +394,14 @@ inline SimulationResult run_transient(
                     "max_event_iterations or reduce dt");
             }
 
-            // 4. Sub-step commutation timing (Layer 5 V2.2).
+            // 4. Sub-step commutation timing (Layer 5 V2.2) +
+            //    state correction (Layer 5 V3).
+            //
+            // Detect zero-crossing events for diode signals
+            // and (if enabled) retroactively split the step
+            // into two sub-steps at the first detected
+            // event's t_est.
+            std::vector<CommutationEvent> step_events;
             if (has_diodes) {
                 for (const auto& e : diodes.entries()) {
                     const Real v_a_prev =
@@ -395,17 +421,125 @@ inline SimulationResult run_transient(
 
                     const Real t_est = interp_commutation_time(
                         t_prev, t, s_prev, s_curr);
-                    result.commutation_events.push_back(
-                        CommutationEvent{
-                            .t_estimated = t_est,
-                            .branch_id   = e.branch_id,
-                            .new_state   = e.is_on,
-                        });
+                    step_events.push_back(CommutationEvent{
+                        .t_estimated = t_est,
+                        .branch_id   = e.branch_id,
+                        .new_state   = e.is_on,
+                    });
                 }
             }
 
-            // 5. Commit history for the next step.
-            history.update_from_state(x, opts.dt);
+            // Apply V3 sub-step correction if enabled AND an
+            // event was detected. V0 corrects only the FIRST
+            // event (sort to pick earliest if multiple).
+            // Minimum sub-step duration as a fraction of the
+            // main dt. Events landing within this fraction of
+            // either step boundary are NOT corrected — the
+            // trap-companion's `g_eq = 2C/dt` becomes
+            // ill-conditioned at tiny dt, and the boundary
+            // events offer no accuracy benefit anyway (the
+            // shorter sub-step is essentially a single point).
+            //
+            // 1% of dt is conservative: for dt = 200 µs that
+            // means events within the first/last 2 µs are
+            // skipped.
+            const Real substep_min_dt = opts.dt * Real{0.01};
+            bool corrected = false;
+            if (opts.enable_substep_state_correction &&
+                !step_events.empty()) {
+                // Find earliest event in the step.
+                Real t_est = step_events.front().t_estimated;
+                for (const auto& ev : step_events) {
+                    if (ev.t_estimated < t_est) {
+                        t_est = ev.t_estimated;
+                    }
+                }
+                const Real dt1 = t_est - t_prev;
+                const Real dt2 = opts.dt - dt1;
+                if (dt1 > substep_min_dt &&
+                    dt2 > substep_min_dt) {
+                    // Roll back to pre-step state.
+                    x = x_prev;
+                    history.restore(history_snap);
+                    if (has_diodes) {
+                        diodes.restore_on_bits(diodes_snap);
+                    }
+
+                    // Sub-step 1: pre-event mask, dt1.
+                    {
+                        const Vector be_user_1 = b_extra_fn
+                            ? b_extra_fn(t_est)
+                            : Vector::Zero(state_size);
+                        const Vector be_hist_1 =
+                            history.compute_b_extra(dt1);
+                        const Vector be_total_1 =
+                            be_hist_1 + be_user_1;
+                        cache.solve_at(
+                            mask_pre, dt1, be_total_1, x);
+                        history.update_from_state(x, dt1);
+                    }
+
+                    // Apply commutation events directly from
+                    // V2.2's detection (don't rely on
+                    // `update_from_state` to re-decide — at the
+                    // exact zero-crossing both v_diode and
+                    // i_diode are near the threshold, and the
+                    // SwitchedDiode decision may keep the
+                    // pre-event state).
+                    if (has_diodes) {
+                        std::vector<bool> post_event_bits =
+                            diodes_snap;
+                        const auto entries = diodes.entries();
+                        for (const auto& ev : step_events) {
+                            for (Size i = 0;
+                                 i < entries.size(); ++i) {
+                                if (entries[i].branch_id ==
+                                    ev.branch_id) {
+                                    post_event_bits[i] =
+                                        ev.new_state;
+                                    break;
+                                }
+                            }
+                        }
+                        diodes.restore_on_bits(
+                            post_event_bits);
+                    }
+
+                    // Sub-step 2: post-event mask, dt2.
+                    {
+                        topology::SwitchStateMask mask_post =
+                            switch_fn(t);
+                        if (has_diodes) {
+                            mask_post = combine_masks(
+                                mask_post,
+                                diodes.current_diode_mask(),
+                                diode_owned);
+                        }
+                        const Vector be_user_2 = b_extra_fn
+                            ? b_extra_fn(t)
+                            : Vector::Zero(state_size);
+                        const Vector be_hist_2 =
+                            history.compute_b_extra(dt2);
+                        const Vector be_total_2 =
+                            be_hist_2 + be_user_2;
+                        cache.solve_at(
+                            mask_post, dt2, be_total_2, x);
+                        history.update_from_state(x, dt2);
+                    }
+                    corrected = true;
+                }
+            }
+
+            // Record diagnostic events from this step.
+            for (const auto& ev : step_events) {
+                result.commutation_events.push_back(ev);
+            }
+
+            // 5. Commit history for the next step (skipped if
+            //    the substep correction already advanced it).
+            if (!corrected) {
+                history.update_from_state(x, opts.dt);
+            }
 
             // 6. Record. event_iteration_count = iters - 1 (the
             //    first iteration always runs; the count is the
