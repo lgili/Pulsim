@@ -27,6 +27,7 @@
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/igbt_level1.hpp"
 #include "pulsim/v2/models/mosfet_level1.hpp"
+#include "pulsim/v2/models/vcvs.hpp"
 #include "pulsim/v2/models/pulse_voltage_source.hpp"
 #include "pulsim/v2/models/pwm_voltage_source.hpp"
 #include "pulsim/v2/models/sine_voltage_source.hpp"
@@ -162,6 +163,42 @@ public:
                 .lambda = lambda, .kappa = kappa,
             });
         return *this;
+    }
+
+    /// Add a 4-terminal VCVS (Layer 2 V15):
+    ///   V(out_pos) − V(out_neg) = gain · (V(in_pos) − V(in_neg))
+    /// Use a high gain (e.g. 1e5) plus negative feedback for
+    /// an ideal-op-amp approximation.
+    CircuitBuilder& add_vcvs(
+        std::string /*name*/,
+        std::string in_pos,  std::string in_neg,
+        std::string out_pos, std::string out_neg,
+        Real gain) {
+        const Index inp_idx = resolve_node_(in_pos);
+        const Index inn_idx = resolve_node_(in_neg);
+        const Index outp_idx = resolve_node_(out_pos);
+        const Index outn_idx = resolve_node_(out_neg);
+        const Index b_id = graph_.add_branch(
+            outp_idx, outn_idx,
+            topology::BranchKind::Source);
+        pool_.add_vcvs(
+            b_id, inp_idx, inn_idx,
+            models::VCVS::Params{.gain = gain});
+        return *this;
+    }
+
+    /// Add an IDEAL OP-AMP: high-gain VCVS with single-ended
+    /// output (out_neg = gnd). Default gain = 10⁵ (≈ open-
+    /// loop typical for compensated devices). Combine with
+    /// negative feedback to enforce the "virtual short"
+    /// V_in_pos ≈ V_in_neg.
+    CircuitBuilder& add_op_amp_ideal(
+        std::string /*name*/,
+        std::string in_pos, std::string in_neg,
+        std::string out,
+        Real gain = Real{1e5}) {
+        return add_vcvs(/*name=*/"", in_pos, in_neg,
+                          out, /*out_neg=*/"gnd", gain);
     }
 
     /// Add a 3-terminal IGBT Level 1 (Layer 2 V14). Same

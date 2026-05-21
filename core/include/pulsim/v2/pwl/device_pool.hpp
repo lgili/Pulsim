@@ -27,6 +27,7 @@
 #include "pulsim/v2/models/sine_voltage_source.hpp"
 #include "pulsim/v2/models/switched_diode.hpp"
 #include "pulsim/v2/models/transformer.hpp"
+#include "pulsim/v2/models/vcvs.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/topology/graph.hpp"
@@ -59,6 +60,7 @@ public:
         PulseVoltageSource = 10, // Layer 2 V12 (pulse / step source)
         MosfetLevel1      = 11, // Layer 2 V13 (SH1 nonlinear MOSFET)
         IgbtLevel1        = 12, // Layer 2 V14 (linear-conduction IGBT)
+        VCVS              = 13, // Layer 2 V15 (voltage-controlled voltage source)
     };
 
     struct SwitchParams {
@@ -206,6 +208,35 @@ public:
                 "DevicePool::mosfet_level1_gate_node: "
                 "branch " + std::to_string(branch_id) +
                 " is not a MosfetLevel1");
+        }
+        return it->second;
+    }
+
+    /// Register a 4-terminal VCVS (Layer 2 V15).
+    /// `branch_id` is the output branch (out_pos→out_neg);
+    /// `in_pos_node` and `in_neg_node` are the sense-input
+    /// node indices. Adds a branch-current unknown like a
+    /// regular VoltageSource. Stamped LINEARLY by assemble —
+    /// no Newton refresh needed.
+    void add_vcvs(
+        Index branch_id, Index in_pos_node,
+        Index in_neg_node,
+        models::VCVS::Params p) {
+        entries_[branch_id] = Entry{p};
+        source_branch_var_id_[branch_id] =
+            static_cast<Index>(num_sources_++);
+        vcvs_input_nodes_[branch_id] =
+            std::pair<Index, Index>{in_pos_node, in_neg_node};
+    }
+
+    [[nodiscard]] std::pair<Index, Index>
+    vcvs_input_nodes(Index branch_id) const {
+        const auto it = vcvs_input_nodes_.find(branch_id);
+        if (it == vcvs_input_nodes_.end()) {
+            throw std::out_of_range(
+                "DevicePool::vcvs_input_nodes: branch " +
+                std::to_string(branch_id) +
+                " is not a VCVS");
         }
         return it->second;
     }
@@ -358,6 +389,19 @@ public:
                 " is not a MosfetLevel1");
         }
         return std::get<models::MosfetLevel1::Params>(entry);
+    }
+
+    [[nodiscard]] const models::VCVS::Params&
+    vcvs_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<
+                models::VCVS::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::vcvs_params: branch " +
+                std::to_string(branch_id) +
+                " is not a VCVS");
+        }
+        return std::get<models::VCVS::Params>(entry);
     }
 
     [[nodiscard]] const models::IgbtLevel1::Params&
@@ -519,7 +563,8 @@ private:
                                 models::SineVoltageSource::Params,
                                 models::PulseVoltageSource::Params,
                                 models::MosfetLevel1::Params,
-                                models::IgbtLevel1::Params>;
+                                models::IgbtLevel1::Params,
+                                models::VCVS::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -569,6 +614,11 @@ private:
     // Layer 2 V14: IGBT Level 1 — same gate-node lookup
     // pattern as MOSFET. The branch is collector→emitter.
     std::unordered_map<Index, Index> igbt_level1_gate_node_id_;
+
+    // Layer 2 V15: VCVS — per-branch (in_pos, in_neg) node
+    // references for the sense inputs.
+    std::unordered_map<Index, std::pair<Index, Index>>
+        vcvs_input_nodes_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the

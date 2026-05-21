@@ -189,6 +189,21 @@ inline void load_device(
             require_real(dev, idx, type, "V_T"),
             real_or(dev, "lambda", Real{0.02}),
             real_or(dev, "kappa",  Real{15.0}));
+    } else if (type == "vcvs") {
+        b.add_vcvs(
+            name,
+            require_string(dev, idx, type, "in_pos"),
+            require_string(dev, idx, type, "in_neg"),
+            require_string(dev, idx, type, "out_pos"),
+            require_string(dev, idx, type, "out_neg"),
+            require_real(dev, idx, type, "gain"));
+    } else if (type == "op_amp_ideal") {
+        b.add_op_amp_ideal(
+            name,
+            require_string(dev, idx, type, "in_pos"),
+            require_string(dev, idx, type, "in_neg"),
+            require_string(dev, idx, type, "out"),
+            real_or(dev, "gain", Real{1e5}));
     } else if (type == "igbt_level1") {
         b.add_igbt_level1(
             name,
@@ -287,7 +302,8 @@ inline void load_device(
             "pulse_voltage_source, resistor, capacitor, "
             "inductor, diode, nonlinear_diode, switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
-            "igbt, igbt_level1, transformer");
+            "igbt, igbt_level1, vcvs, op_amp_ideal, "
+            "transformer");
     }
 }
 

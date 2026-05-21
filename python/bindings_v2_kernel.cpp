@@ -182,6 +182,27 @@ void init_module(py::module_& m) {
               "If period > 0, repeats. Default rise/fall = 0 "
               "→ instantaneous transition (V12 backward "
               "compat).")
+        .def("add_vcvs",
+              &builder::CircuitBuilder::add_vcvs,
+              py::arg("name"),
+              py::arg("in_pos"),  py::arg("in_neg"),
+              py::arg("out_pos"), py::arg("out_neg"),
+              py::arg("gain"),
+              py::return_value_policy::reference,
+              "Add a voltage-controlled voltage source: "
+              "V(out_pos) - V(out_neg) = gain · (V(in_pos) "
+              "- V(in_neg)). Linear device — no Newton "
+              "refresh needed.")
+        .def("add_op_amp_ideal",
+              &builder::CircuitBuilder::add_op_amp_ideal,
+              py::arg("name"),
+              py::arg("in_pos"), py::arg("in_neg"),
+              py::arg("out"),
+              py::arg("gain") = 1e5,
+              py::return_value_policy::reference,
+              "Add an ideal op-amp (single-ended output to "
+              "gnd, high gain). Combine with negative "
+              "feedback to enforce V_in_pos ≈ V_in_neg.")
         .def("add_igbt_level1",
               &builder::CircuitBuilder::add_igbt_level1,
               py::arg("name"),

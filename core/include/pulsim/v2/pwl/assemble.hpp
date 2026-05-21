@@ -34,6 +34,7 @@
 #include "pulsim/v2/stamping/stamp_current_source.hpp"
 #include "pulsim/v2/stamping/stamp_device.hpp"
 #include "pulsim/v2/stamping/stamp_switch.hpp"
+#include "pulsim/v2/stamping/stamp_vcvs.hpp"
 #include "pulsim/v2/stamping/stamp_voltage_source.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
@@ -165,6 +166,18 @@ inline void assemble_segment(const topology::Graph& graph,
                     pool.branch_var_id_for_source(branch.id, graph);
                 stamping::stamp_voltage_source(J, b, x, coord,
                                                 branch_var_id, Real{0});
+            } else if (src_kind ==
+                       DevicePool::StoredKind::VCVS) {
+                // V15: voltage-controlled voltage source.
+                // Constraint row references the sense inputs.
+                const auto& vp = pool.vcvs_params(branch.id);
+                const auto [in_pos, in_neg] =
+                    pool.vcvs_input_nodes(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                stamping::stamp_vcvs(J, b, x, coord,
+                                       in_pos, in_neg,
+                                       branch_var_id, vp.gain);
             } else {
                 const auto& p = pool.voltage_source_params(branch.id);
                 const Index branch_var_id =

@@ -1,0 +1,109 @@
+# Pulsim v2 example: Linear-regulator (LDO) with op-amp feedback
+# ---
+# CLASSIC analog control loop: V_in (12V unregulated) drives
+# a MOSFET pass element whose gate is controlled by an ideal
+# op-amp. The op-amp's "+" input sees a reference voltage; the
+# "−" input sees a resistor-divider sample of V_out. The
+# closed loop forces:
+#
+#   V_out · R2/(R1+R2) = V_ref
+#   V_out = V_ref · (R1 + R2) / R2
+#
+# Design point:
+#   V_in = 12 V, V_ref = 2.5 V, R1 = 10 kΩ, R2 = 5 kΩ
+#   → V_out = 2.5 · 15/5 = 7.5 V
+#   I_load = V_out / R_load = 7.5 / 50 = 150 mA
+#
+# Topology:
+#   V_in ── M1 (pass element, drain) ── V_out ─┬─ R_L ── gnd
+#                                              │
+#                              V_out ── R1 ── fb ── R2 ── gnd
+#                                              │
+#                                              op-amp's "−"
+#                              V_ref ────────── op-amp's "+"
+#                              op-amp output ── M1's gate
+#
+# The MOSFET acts as a controlled current valve. The op-amp's
+# high gain drives the loop until V_fb = V_ref, which forces
+# V_out to the target.
+#
+# Note: M1's gate is driven by the op-amp's output (ideal
+# VCVS with single-ended output to gnd). For the loop to be
+# stable, the MOSFET must operate in saturation (high V_DS,
+# moderate V_GS). At V_GS ≈ 4-5 V (= op-amp output), V_OV =
+# 2-3 V, giving the necessary headroom.
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: V_in
+      from: vin
+      to: gnd
+      V: 12.0
+
+    - type: voltage_source
+      name: V_ref
+      from: vref
+      to: gnd
+      V: 2.5
+
+    # Op-amp: + = V_ref, − = feedback, output → MOSFET gate.
+    # Modest gain (100) chosen to keep Newton step bounded
+    # during cold start (V_fb=0 initially → high-gain op-amp
+    # would demand kV-range gate drive). The closed loop's
+    # static-error is 1/(1 + gain · β) ≈ 3 %% with β = R2/(R1+R2);
+    # acceptable LDO precision for the demo.
+    - type: op_amp_ideal
+      name: U1
+      in_pos: vref
+      in_neg: fb
+      out: vgate
+      gain: 100.0
+
+    # Pass MOSFET — V13 SH1 nonlinear. Source-follower style:
+    # drain = V_in, source = V_out. The op-amp drives the
+    # gate; as V_out tries to rise above the target, V_GS
+    # drops, M1 throttles back.
+    - type: mosfet_level1
+      name: M1
+      drain: vin
+      source: vout
+      gate: vgate
+      K: 0.1
+      V_T: 2.0
+      lambda: 0.02
+      kappa: 15.0
+
+    # Feedback divider.
+    - type: resistor
+      name: R1
+      from: vout
+      to: fb
+      R: 10000.0
+
+    - type: resistor
+      name: R2
+      from: fb
+      to: gnd
+      R: 5000.0
+
+    # Output load.
+    - type: resistor
+      name: R_load
+      from: vout
+      to: gnd
+      R: 50.0
+
+    # G_min: small bleed on vgate to keep matrix well-
+    # conditioned (op-amp output has very high impedance
+    # without a load path).
+    - type: resistor
+      name: R_gmin_gate
+      from: vgate
+      to: gnd
+      R: 1.0e6
+
+simulation:
+  t_start: 0.0
+  t_end:   2.0e-3
+  dt:      1.0e-5
