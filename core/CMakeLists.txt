@@ -385,6 +385,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer5_v1/test_integration_rc.cpp
         tests/v2/layer5_v1/test_integration_rl.cpp
         tests/v2/layer5_v1/test_integration_rlc.cpp
+        tests/v2/layer5_v1/test_integration_buck.cpp
     )
     target_link_libraries(pulsim_v2_layer5_v1_tests
         PRIVATE
