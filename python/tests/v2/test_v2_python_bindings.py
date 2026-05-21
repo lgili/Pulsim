@@ -391,6 +391,44 @@ def test_make_pwm_switch_fn_from_python() -> None:
     assert abs(frac_on - duty) < 0.02
 
 
+def test_make_dead_time_pwm_pair_fn_no_shoot_through() -> None:
+    """Layer 2 V6 — complementary HS/LS helper is shoot-
+    through-free across a dense sample of duty / dt combos."""
+    for duty in (0.1, 0.5, 0.9):
+        for dt_dead in (0.0, 1e-2, 5e-2):
+            sw = p.make_dead_time_pwm_pair_fn(
+                frequency=1.0, duty=duty,
+                hs_switch_idx=0, ls_switch_idx=1,
+                num_switches=2, dead_time=dt_dead)
+            for k in range(200):
+                t = (k + 0.317) / 25.0
+                m = sw(t)
+                assert not (m.get(0) and m.get(1)), \
+                    f"shoot-through @ duty={duty} dt={dt_dead}"
+
+
+def test_make_dead_time_pwm_pair_fn_phase_balance() -> None:
+    """Layer 2 V6 — average ON times match duty - dt/T."""
+    T = 1.0
+    duty = 0.6
+    dt_dead = 0.05
+    sw = p.make_dead_time_pwm_pair_fn(
+        frequency=1.0/T, duty=duty,
+        hs_switch_idx=0, ls_switch_idx=1,
+        num_switches=2, dead_time=dt_dead)
+    N = 20_000
+    hs_on = sum(1 for k in range(N)
+                if sw((k + 0.5) * T / N).get(0))
+    ls_on = sum(1 for k in range(N)
+                if sw((k + 0.5) * T / N).get(1))
+    hs_frac = hs_on / N
+    ls_frac = ls_on / N
+    # HS on fraction ≈ duty - dt/T = 0.55.
+    assert abs(hs_frac - (duty - dt_dead)) < 5e-3
+    # LS on fraction ≈ (1-duty) - dt/T = 0.35.
+    assert abs(ls_frac - ((1.0 - duty) - dt_dead)) < 5e-3
+
+
 def test_make_pwm_switch_fn_phase_and_edge_cases() -> None:
     """Layer 2 V5 — helper handles phase offset, duty=0/1,
     and frequency=0 the same way the C++ helper does."""

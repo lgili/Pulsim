@@ -36,6 +36,7 @@
 #include "pulsim/v2/solver/options.hpp"
 #include "pulsim/v2/solver/result.hpp"
 #include "pulsim/v2/solver/run_transient.hpp"
+#include "pulsim/v2/sources/dead_time_pwm_pair_fn.hpp"
 #include "pulsim/v2/sources/pwm_switch_fn.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
@@ -407,6 +408,19 @@ void init_module(py::module_& m) {
         "period (T = 1 / frequency) and OFF for the rest. "
         "All other switch bits stay OFF. Returns a Python "
         "callable usable as `switch_fn=` in run_transient.");
+
+    m.def("make_dead_time_pwm_pair_fn",
+        &sources::make_dead_time_pwm_pair_fn,
+        py::arg("frequency"), py::arg("duty"),
+        py::arg("hs_switch_idx"), py::arg("ls_switch_idx"),
+        py::arg("num_switches"), py::arg("dead_time"),
+        py::arg("phase") = 0.0,
+        "Build a SwitchScheduleFn driving a complementary "
+        "HS/LS half-bridge pair at `frequency` with `duty` "
+        "and symmetric `dead_time` inserted at each "
+        "commutation. Shoot-through is prevented by "
+        "construction (HS and LS are never both ON). Other "
+        "switch bits stay OFF.");
 
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,
