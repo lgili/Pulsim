@@ -291,6 +291,26 @@ def test_add_igbt_from_python() -> None:
 # -----------------------------------------------------------------------------
 
 
+def test_add_current_source_from_python() -> None:
+    """Layer 2 V3 — CurrentSource device model."""
+    b = p.CircuitBuilder()
+    b.add_current_source("Ibias", "n0", "gnd", 0.01)
+    b.add_resistor("R1", "n0", "gnd", 1000.0)
+
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build()
+
+    opts = p.SimulationOptions(t_start=0.0,
+                                t_end=1e-4, dt=1e-5)
+    mask = p.SwitchStateMask(0)
+    res = p.run_transient(
+        cache, b.graph, b.pool, opts,
+        switch_fn=lambda t: mask)
+    # I = 10 mA → R = 1 kΩ → v_n0 = +10 V
+    # (EE convention: I flows OUT of `from` into circuit)
+    assert abs(res.states[-1][0] - 10.0) < 1e-6
+
+
 def test_add_transformer_from_python() -> None:
     """add_transformer creates two coupled inductors."""
     b = p.CircuitBuilder()

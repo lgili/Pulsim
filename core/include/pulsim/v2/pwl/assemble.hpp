@@ -31,6 +31,7 @@
 #include "pulsim/v2/sparse/matrix.hpp"
 #include "pulsim/v2/stamping/branch_coord.hpp"
 #include "pulsim/v2/stamping/stamp_companion.hpp"
+#include "pulsim/v2/stamping/stamp_current_source.hpp"
 #include "pulsim/v2/stamping/stamp_device.hpp"
 #include "pulsim/v2/stamping/stamp_switch.hpp"
 #include "pulsim/v2/stamping/stamp_voltage_source.hpp"
@@ -130,11 +131,21 @@ inline void assemble_segment(const topology::Graph& graph,
             break;
         }
         case topology::BranchKind::Source: {
-            const auto& p = pool.voltage_source_params(branch.id);
-            const Index branch_var_id =
-                pool.branch_var_id_for_source(branch.id, graph);
-            stamping::stamp_voltage_source(J, b, x, coord,
-                                            branch_var_id, p.V);
+            // The topological `Source` kind covers both
+            // VoltageSource and CurrentSource. Dispatch on
+            // the pool's StoredKind.
+            const auto src_kind = pool.kind_of(branch.id);
+            if (src_kind == DevicePool::StoredKind::CurrentSource) {
+                const auto& p =
+                    pool.current_source_params(branch.id);
+                stamping::stamp_current_source(b, coord, p.I);
+            } else {
+                const auto& p = pool.voltage_source_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                stamping::stamp_voltage_source(J, b, x, coord,
+                                                branch_var_id, p.V);
+            }
             break;
         }
         case topology::BranchKind::Switch: {

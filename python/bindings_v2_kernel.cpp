@@ -120,6 +120,16 @@ void init_module(py::module_& m) {
               py::arg("to"), py::arg("V"),
               py::return_value_policy::reference,
               "Add a DC voltage source. V in volts.")
+        .def("add_current_source",
+              &builder::CircuitBuilder::add_current_source,
+              py::arg("name"), py::arg("from"),
+              py::arg("to"), py::arg("I"),
+              py::return_value_policy::reference,
+              "Add a DC current source. I in amperes. "
+              "EE convention: I flows OUT of `from` (the "
+              "+ terminal) into the external circuit, "
+              "back to `to`. Does NOT add a branch-current "
+              "unknown — the current is fixed at I.")
         .def("add_resistor",
               &builder::CircuitBuilder::add_resistor,
               py::arg("name"), py::arg("from"),

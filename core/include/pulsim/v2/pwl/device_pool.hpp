@@ -19,6 +19,7 @@
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
+#include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/switched_diode.hpp"
 #include "pulsim/v2/models/transformer.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
@@ -47,6 +48,7 @@ public:
         Inductor       = 4,  // trap companion (Layer 4 V1)
         Diode          = 5,  // SwitchedDiode (Layer 5 V2)
         NonlinearDiode = 6,  // models::IdealDiode (Newton, Layer 4 V3)
+        CurrentSource  = 7,  // Layer 2 V3 (no branch-current unknown)
     };
 
     struct SwitchParams {
@@ -114,6 +116,18 @@ public:
         entries_[branch_id] = Entry{p};
     }
 
+    /// Register a constant DC current source (Layer 2 V3).
+    /// Unlike VoltageSource, CurrentSource does NOT add a
+    /// branch-current unknown — the current is fixed at I,
+    /// so it only contributes to the b_constant KCL terms.
+    /// The branch MUST be added with `BranchKind::Source`
+    /// in the graph (same as VoltageSource); assemble.hpp
+    /// dispatches on the pool's StoredKind.
+    void add_current_source(Index branch_id,
+                              models::CurrentSource::Params p) {
+        entries_[branch_id] = Entry{p};
+    }
+
     // -------- Layer 2 V2: transformer (coupled inductors) ------------------
     //
     // Couplings are PAIRS of already-added inductor branches.
@@ -174,6 +188,17 @@ public:
                 std::to_string(branch_id) + " is not a VoltageSource");
         }
         return std::get<models::VoltageSource::Params>(entry);
+    }
+
+    [[nodiscard]] const models::CurrentSource::Params&
+    current_source_params(Index branch_id) const {
+        const auto& entry = entry_at(branch_id);
+        if (!std::holds_alternative<models::CurrentSource::Params>(entry)) {
+            throw std::out_of_range(
+                "DevicePool::current_source_params: branch " +
+                std::to_string(branch_id) + " is not a CurrentSource");
+        }
+        return std::get<models::CurrentSource::Params>(entry);
     }
 
     [[nodiscard]] Real switch_g_on(Index branch_id) const {
@@ -316,7 +341,8 @@ private:
                                 models::Capacitor::Params,
                                 models::Inductor::Params,
                                 models::SwitchedDiode::Params,
-                                models::IdealDiode::Params>;
+                                models::IdealDiode::Params,
+                                models::CurrentSource::Params>;
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);

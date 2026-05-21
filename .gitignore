@@ -8,6 +8,7 @@ build-ci/
 build_ad/
 build_py/
 docs/_build/
+build_release/
 
 site/
 cmake-build-*/

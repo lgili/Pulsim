@@ -142,6 +142,12 @@ inline void load_device(
             require_string(dev, idx, type, "from"),
             require_string(dev, idx, type, "to"),
             require_real(dev, idx, type, "V"));
+    } else if (type == "current_source") {
+        b.add_current_source(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            require_real(dev, idx, type, "I"));
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -225,10 +231,10 @@ inline void load_device(
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) +
             " has unknown type '" + type + "'. Supported "
-            "types: voltage_source, resistor, capacitor, "
-            "inductor, diode, nonlinear_diode, switch, "
-            "mosfet, mosfet_with_body_diode, igbt, "
-            "transformer");
+            "types: voltage_source, current_source, "
+            "resistor, capacitor, inductor, diode, "
+            "nonlinear_diode, switch, mosfet, "
+            "mosfet_with_body_diode, igbt, transformer");
     }
 }
 

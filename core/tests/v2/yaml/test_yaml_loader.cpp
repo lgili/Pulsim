@@ -42,6 +42,26 @@ circuit:
                 .V == Approx(5.0));
 }
 
+TEST_CASE("YAML loader: current_source round-trip",
+          "[v2][layer8][yaml]") {
+    const std::string yaml = R"YAML(
+circuit:
+  devices:
+    - type: current_source
+      name: Ibias
+      from: n0
+      to: gnd
+      I: 0.01
+)YAML";
+    auto loaded = yaml::load_string(yaml);
+    REQUIRE(loaded.builder.num_branches() == 1);
+    REQUIRE(loaded.builder.pool().kind_of(0) ==
+              DevicePool::StoredKind::CurrentSource);
+    REQUIRE(loaded.builder.pool()
+                .current_source_params(0)
+                .I == Approx(0.01));
+}
+
 TEST_CASE("YAML loader: resistor round-trip (R in ohms → G = 1/R)",
           "[v2][layer8][yaml]") {
     const std::string yaml = R"YAML(

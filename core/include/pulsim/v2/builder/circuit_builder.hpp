@@ -22,6 +22,7 @@
 //   * Case-sensitive for non-ground names.
 
 #include "pulsim/v2/models/capacitor.hpp"
+#include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
@@ -61,6 +62,33 @@ public:
             topology::BranchKind::Source);
         pool_.add_voltage_source(
             b_id, models::VoltageSource::Params{V});
+        return *this;
+    }
+
+    /// Add a constant DC current source (Layer 2 V3).
+    /// `I` (amperes) flows FROM `from` TO `to`. Positive `I`
+    /// means conventional current direction.
+    ///
+    /// Unlike voltage sources, current sources do NOT add a
+    /// branch-current unknown to the state vector — the
+    /// current is fixed at I. Useful for bias currents,
+    /// photovoltaic models, dq-frame stator excitation,
+    /// Norton equivalents, etc.
+    ///
+    /// For TIME-VARYING current (e.g. sinusoidal injection),
+    /// use this with `I = 0` baseline and modulate via
+    /// `b_extra_fn(t)` — same pattern as time-varying
+    /// VoltageSource.
+    CircuitBuilder& add_current_source(
+        std::string /*name*/, std::string from,
+        std::string to, Real I) {
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = graph_.add_branch(
+            from_idx, to_idx,
+            topology::BranchKind::Source);
+        pool_.add_current_source(
+            b_id, models::CurrentSource::Params{I});
         return *this;
     }
 
