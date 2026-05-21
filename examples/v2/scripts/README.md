@@ -53,6 +53,38 @@ call shown in [`docs/v2/api-reference.md`](../../../docs/v2/api-reference.md).
 | `run_phase_shift_full_bridge.py` | ZVS phase-shift full-bridge isolated DC-DC | 4-switch FB + transformer + bridge rectifier |
 | `run_ldo_with_opamp.py` | Linear regulator with op-amp feedback (12 V → 7.5 V) | V15 op-amp + V13 MOSFET |
 
+## Closed-loop showcases + stress tests
+
+These use the `step_observer(t, x)` kernel callback + the
+`pulsim.v2_control` block library (PIController, etc.):
+
+| Script | What it simulates | Stress |
+|---|---|---|
+| `run_buck_closed_loop.py` | Buck w/ PI voltage loop + setpoint step | Cache + commutation |
+| `run_boost_closed_loop.py` | Boost w/ PI, shows RHPZ undershoot on setpoint step | RHPZ + Newton |
+| `run_flyback_closed_loop.py` | Isolated flyback CL — transformer + commutation | All of the above + iso |
+| `run_boost_saturable_closed_loop.py` | Saturable boost CL — i_L pushes 264 A through saturation | V17 Newton + PI |
+| `run_three_phase_dq_closed_loop.py` | 3-φ VSI, abc-dq xform, two PI on i_d / i_q | 12 switches + dq + 2 PIs |
+| `run_pfc_boost_closed_loop.py` | Single-phase PFC: AC mains → bridge → boost, cascaded V+I PIs | 5 diodes commuting + cascade |
+| `run_adversarial_sweep.py` | 9 parametric variants (dt=1ns, Ki=1e6, Kp<0, …) | Find kernel bugs |
+
+The adversarial sweep summary at last run:
+
+```
+case                                       dt      Kp        Ki    v_out
+baseline (sane)                        100ns   0.050     800.0   10.937
+dt = 1 ns (tiny)                         1ns   0.050     800.0    0.205
+dt = 50 µs (>Nyquist)                50000ns   0.050     800.0   15.178
+Ki = 1e6 (huge)                        100ns   0.050 1000000.0   12.119
+Kp=0 (pure I)                          100ns   0.000    1000.0   14.336
+Ki=0 (pure P)                          100ns  10.000       0.0   11.930
+Kp<0 (positive feedback)               100ns  -0.100    -200.0    1.199
+start_from_dc_op=True                  100ns   0.050     800.0   11.912
+substep correction ON                  100ns   0.050     800.0   10.937
+```
+
+All 9 cases completed without crashes (✓).
+
 ## How to run one
 
 From the repo root:

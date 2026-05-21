@@ -401,7 +401,26 @@ void init_module(py::module_& m) {
               "IGBT, or saturable inductor (i.e. requires "
               "Newton iteration). Used by the Python "
               "`simulate()` wrapper to auto-enable the "
-              "nonlinear-refresh pass.");
+              "nonlinear-refresh pass.")
+        .def("branch_var_id_for_inductor",
+              &pwl::DevicePool::branch_var_id_for_inductor,
+              py::arg("branch_id"), py::arg("graph"),
+              "Resolve the state-vector index for an inductor "
+              "(or saturable inductor) branch's i_L unknown. "
+              "Throws if `branch_id` is not registered as an "
+              "inductor.")
+        .def("branch_var_id_for_source",
+              &pwl::DevicePool::branch_var_id_for_source,
+              py::arg("branch_id"), py::arg("graph"),
+              "Resolve the state-vector index for a voltage-"
+              "source branch's i_source unknown (also works "
+              "for PWM/Sine/Pulse/VCVS sources, since they "
+              "share the same branch-var numbering).")
+        .def("state_size",
+              &pwl::DevicePool::state_size,
+              py::arg("graph"),
+              "Total state-vector size for this pool + graph "
+              "(= num_active_nodes + num_sources + num_inductors).");
 
     // ---- PwlStateSpaceCache ----------------------------------------------
     py::class_<pwl::PwlStateSpaceCache>(m, "PwlStateSpaceCache",
