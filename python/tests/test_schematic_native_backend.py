@@ -381,6 +381,92 @@ def test_render_no_hints_matches_phase1_baseline(tmp_path: Path) -> None:
     assert out_noh.read_bytes() == out_again.read_bytes()
 
 
+# ---------------------------------------------------------------------------
+# Phase 4: topology-aware auto-hints
+# ---------------------------------------------------------------------------
+
+
+def test_auto_hints_empty_for_rc_no_topology() -> None:
+    """An RC circuit doesn't match any recognizer → no auto-hints."""
+    from pulsim.schematic.native_backend import _auto_hints
+
+    ckt = _build_rc_circuit()
+    assert _auto_hints(ckt, {}) == {}
+
+
+def test_auto_hints_half_bridge() -> None:
+    """The half-bridge example matches the recognizer; auto-hints stack
+    Q_hi above Q_lo (slot 0 / slot 1) in the same layer."""
+    from pulsim.schematic.native_backend import _auto_hints, LAYER_PX, SLOT_PX
+
+    if not HB_YAML.exists():
+        pytest.skip("half_bridge_pwm.yaml fixture not available")
+    parser = ps.YamlParser(ps.YamlParserOptions())
+    ckt, _ = parser.load(str(HB_YAML))
+    auto = _auto_hints(ckt, {})
+    assert "S_hi" in auto and "S_lo" in auto
+    s_hi = auto["S_hi"]
+    s_lo = auto["S_lo"]
+    # Same layer (column).
+    assert s_hi[0] == s_lo[0]
+    # S_hi is above S_lo (smaller Y).
+    assert s_hi[1] < s_lo[1]
+    # And the gap is SLOT_PX (one row).
+    assert s_lo[1] - s_hi[1] == SLOT_PX
+
+
+def test_auto_hints_bridge_rectifier_diamond() -> None:
+    """A 4-diode AC→DC bridge matches the recognizer; auto-hints form a
+    2×2 diamond (D1 top-left, D3 top-right, D2/D4 below them)."""
+    from pulsim.schematic.native_backend import _auto_hints, LAYER_PX, SLOT_PX
+
+    ckt = ps.Circuit()
+    ac_a    = ckt.add_node("ac_a")
+    ac_b    = ckt.add_node("ac_b")
+    dc_pos  = ckt.add_node("dc_pos")
+    gnd     = ckt.ground()  # dc_neg
+    # Pulsim diode pin order: [anode, cathode].
+    ckt.add_diode("D1", ac_a, dc_pos)
+    ckt.add_diode("D3", ac_b, dc_pos)
+    ckt.add_diode("D2", gnd,  ac_a)
+    ckt.add_diode("D4", gnd,  ac_b)
+    auto = _auto_hints(ckt, {})
+    # All four diodes must be hinted in a 2-layer × 2-slot grid.
+    assert {"D1", "D2", "D3", "D4"} <= set(auto.keys())
+    layers = {auto[name][0] for name in ("D1", "D2", "D3", "D4")}
+    slots  = {auto[name][1] for name in ("D1", "D2", "D3", "D4")}
+    assert layers == {0.0, LAYER_PX}
+    assert slots  == {0.0, SLOT_PX}
+
+
+def test_auto_hints_skip_user_hinted_components() -> None:
+    """When the user pins a component manually, the auto-layer
+    skips that component (user wins by priority)."""
+    from pulsim.schematic.native_backend import _auto_hints, _resolve_hints, LAYER_PX
+
+    if not HB_YAML.exists():
+        pytest.skip("half_bridge_pwm.yaml fixture not available")
+    parser = ps.YamlParser(ps.YamlParserOptions())
+    ckt, _ = parser.load(str(HB_YAML))
+    # User overrides S_hi to a far-right position.
+    ckt.set_position("S_hi", x=999.0, y=999.0)
+    resolved = _resolve_hints(ckt)
+    # User hint wins.
+    assert resolved["S_hi"] == (999.0, 999.0)
+    # S_lo still gets the auto-hint (slot below the canonical S_hi spot).
+    assert "S_lo" in resolved
+    assert resolved["S_lo"] != (999.0, 999.0)
+
+
+def test_resolve_hints_no_recognizers_no_user_hints_returns_empty() -> None:
+    """The fast path: an RC with no hints and no recognizer match yields
+    an empty dict so the un-hinted code path stays bit-identical to Phase 1."""
+    from pulsim.schematic.native_backend import _resolve_hints
+
+    ckt = _build_rc_circuit()
+    assert _resolve_hints(ckt) == {}
+
+
 def test_yaml_position_hints_flow_through_to_render(tmp_path: Path) -> None:
     """YAML `position:` fields end up on the rendered SVG."""
     from pulsim.schematic.native_backend import LAYER_PX, SLOT_PX

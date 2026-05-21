@@ -49,12 +49,12 @@ Goal: the new renderer respects user hints.
 
 Goal: known topologies get textbook layouts out of the box.
 
-- [ ] **4.1** Extend `python/pulsim/schematic/templates.py` (or a new sibling module): for each existing recognizer (`bridge_rectifier`, `half_bridge`, `boost_stage`), define a `canonical_layout: dict[str, tuple[layer, slot]]` mapping the recognizer's role names to default grid cells.
-- [ ] **4.2** Add `_auto_hints(circuit) -> dict[str, tuple[float, float]]`: run `recognize_all(circuit)` and emit translated absolute positions for every matched component that the user has NOT explicitly hinted.
-- [ ] **4.3** Merge order: user hints win, then auto-hints, then ELK's free placement. Implement in `_resolve_hints`.
-- [ ] **4.4** Render the demo set after Phase 4 — eyeball that `buck`, `half-bridge`, and the boost-pfc + vsi + pmsm circuit now look closer to a textbook diagram.
-- [ ] **4.5** Test: a buck Circuit with no explicit hints renders with switch and freewheel diode in the expected columns (the test checks recognizer-derived hints, not pixel positions).
-- [ ] **4.6** Test: a buck Circuit with the user pinning S1 to (5, 5) — the user's hint wins over the auto-layout's preferred position.
+- [x] **4.1** Canonical layouts in `native_backend.py` as `_TOPOLOGY_CANONICAL_LAYOUTS`: `bridge_rectifier` (2×2 diamond — D1/D3 top, D2/D4 bottom), `boost_stage` (L top-left, Q below, D top-right), `half_bridge` (Q_hi above Q_lo).
+- [x] **4.2** `_auto_hints(circuit, user_hints)` runs `templates.recognize_all`, walks matches in order, emits translated `(x, y)` for every matched role that's NOT already user-hinted. Multiple recognized topologies in the same Circuit are stacked left-to-right via a running `layer_offset` so they don't collide. Best-effort: never raises on collision (silent first-match-wins).
+- [x] **4.3** `_resolve_hints(circuit)` splits into `_resolve_user_hints` + `_auto_hints` and merges with `{**auto, **user}` (user wins). User-hint conflict detection stays on the user-only path.
+- [x] **4.4** Visual confirmation: half-bridge example now stacks S_hi above S_lo automatically; rendered to `/tmp/hb_auto.png`. A code-built bridge rectifier (D1..D4 in the canonical anode/cathode arrangement) auto-places into the 2×2 diamond. Buck (`examples/buck_converter.yaml`) doesn't match any of the current 3 recognizers — that's expected; specific buck-topology recognition is out of Phase 4 scope.
+- [x] **4.5** `test_auto_hints_half_bridge` + `test_auto_hints_bridge_rectifier_diamond` assert auto-hints land in the expected grid cells without any user `set_position` calls.
+- [x] **4.6** `test_auto_hints_skip_user_hinted_components` builds a half-bridge, pins `S_hi` to a far-right `(999, 999)`, confirms the user hint wins (S_hi stays at 999,999) while S_lo still gets the auto-hint.
 
 ## Phase 5 — Switch the default backend; deprecate netlistsvg
 

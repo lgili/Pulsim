@@ -168,23 +168,48 @@ LAYER_PX = 120.0
 SLOT_PX  = 80.0
 
 
-def _resolve_hints(circuit: Any) -> dict[str, tuple[float, float]]:
-    """Translate every position hint on ``circuit`` into absolute coords.
+# Topology-aware auto-layout table (Phase 4). Each entry maps the
+# template_id emitted by `templates.recognize_all` to a
+# ``role -> (layer, slot)`` grid for the textbook arrangement of that
+# topology. Recognizer roles come from `RecognizedTemplate.role_to_component`.
+#
+# Conventions:
+#   - Layer 0 is the leftmost column (input side).
+#   - Slot 0 is the topmost row.
+#   - Sub-circuits are translated by `_auto_hints` so multiple matched
+#     topologies don't collide horizontally on the canvas.
+_TOPOLOGY_CANONICAL_LAYOUTS: dict[str, dict[str, tuple[int, int]]] = {
+    # Bridge rectifier — classic diamond:
+    #   D1 (ac_a → dc_pos) top-left, D3 (ac_b → dc_pos) top-right,
+    #   D2 (dc_neg → ac_a) bottom-left, D4 (dc_neg → ac_b) bottom-right.
+    "bridge_rectifier": {
+        "D1": (0, 0),
+        "D3": (1, 0),
+        "D2": (0, 1),
+        "D4": (1, 1),
+    },
+    # Boost stage — input inductor L, switch Q to ground, output diode D:
+    #   L on top row (dc_in → sw_node), Q below it (sw_node → gnd),
+    #   D on top row, one column to the right (sw_node → vout).
+    "boost_stage": {
+        "L": (0, 0),
+        "Q": (1, 1),
+        "D": (2, 0),
+    },
+    # Half-bridge — two switches in series, high-side on top:
+    "half_bridge": {
+        "Q_hi": (0, 0),
+        "Q_lo": (0, 1),
+    },
+}
 
-    Returns a dict mapping component name -> ``(x, y)`` in renderer
-    units. The translation rule (in priority order):
 
-      1. If both `(x, y)` and `(layer, slot)` are set, absolute coords
-         win (the layer/slot are silently ignored — the user explicitly
-         pinned an absolute position).
-      2. `(x, y)` only → passed through.
-      3. `(layer, slot)` only → ``(layer * LAYER_PX, slot * SLOT_PX)``.
-      4. Partial semantic hints (only `layer` or only `slot`) → the
-         missing axis defaults to 0.
+def _resolve_user_hints(circuit: Any) -> dict[str, tuple[float, float]]:
+    """Translate user-supplied position hints into absolute coords.
 
-    Two hints resolving to the same absolute coords are reported as a
-    deterministic error so the user gets a clear message instead of
-    overlapping symbols in the rendered SVG.
+    Same translation rules as the public `_resolve_hints` (see its
+    docstring); this helper is the user-only half — the topology-aware
+    autohints layer on top via `_auto_hints` in `_resolve_hints`.
     """
     if not hasattr(circuit, "position_hints"):
         return {}
@@ -194,17 +219,13 @@ def _resolve_hints(circuit: Any) -> dict[str, tuple[float, float]]:
     resolved: dict[str, tuple[float, float]] = {}
     seen_coords: dict[tuple[float, float], str] = {}
     for name, hint in raw.items():
-        # Absolute coords (with or without semantic) take priority.
         if hint.x is not None and hint.y is not None:
             xy = (float(hint.x), float(hint.y))
         elif hint.layer is not None or hint.slot is not None:
             layer = float(hint.layer) if hint.layer is not None else 0.0
-            slot = float(hint.slot) if hint.slot is not None else 0.0
+            slot  = float(hint.slot)  if hint.slot  is not None else 0.0
             xy = (layer * LAYER_PX, slot * SLOT_PX)
         else:
-            # Malformed hint (kernel would have rejected this, but be
-            # defensive — `position_hints()` is a snapshot and could in
-            # principle disagree with `set_position`'s invariant).
             continue
         if xy in seen_coords:
             raise ValueError(
@@ -215,6 +236,86 @@ def _resolve_hints(circuit: Any) -> dict[str, tuple[float, float]]:
         seen_coords[xy] = name
         resolved[name] = xy
     return resolved
+
+
+def _auto_hints(
+    circuit: Any,
+    user_hints: dict[str, tuple[float, float]],
+) -> dict[str, tuple[float, float]]:
+    """Emit topology-aware auto-placement hints for recognized sub-circuits.
+
+    Runs the same `templates.recognize_all` recognizers used by the
+    legacy backends over `circuit.components()`. For every matched
+    template that has a canonical layout, emit `(x, y)` hints for the
+    matched components — but only for components the user has NOT
+    explicitly hinted (user wins by priority).
+
+    Multiple matched topologies in the same Circuit are stacked left-to-
+    right so they don't collide: each subsequent match starts at a
+    layer-offset that's two layers past the rightmost layer of the
+    previous match. Components shared between two matches are placed by
+    the FIRST match only (recognizers are deterministic by name order).
+
+    Auto-hints are best-effort; they never raise on conflict (user
+    hints already validate that). When no recognizer matches, returns
+    an empty dict and the renderer falls through to free ELK layout.
+    """
+    try:
+        from .templates import recognize_all
+    except ImportError:
+        return {}
+
+    components = list(circuit.components())
+    if not components:
+        return {}
+
+    try:
+        matches = recognize_all(components)
+    except Exception:
+        # Recognizers should be pure / total, but be defensive — never
+        # let a topology bug break rendering for a normal circuit.
+        return {}
+
+    auto: dict[str, tuple[float, float]] = {}
+    layer_offset = 0
+    for match in matches:
+        layout = _TOPOLOGY_CANONICAL_LAYOUTS.get(match.template_id)
+        if not layout:
+            continue
+        for role, comp_name in match.role_to_component.items():
+            if comp_name in user_hints or comp_name in auto:
+                # User hints + first-match wins for cross-template sharing.
+                continue
+            rel_layer, slot = layout.get(role, (0, 0))
+            abs_layer = rel_layer + layer_offset
+            auto[comp_name] = (abs_layer * LAYER_PX, slot * SLOT_PX)
+        # Shift the next matched topology rightward by (max rel layer + 2).
+        max_layer = max(l for (l, _) in layout.values())
+        layer_offset += max_layer + 2
+
+    return auto
+
+
+def _resolve_hints(circuit: Any) -> dict[str, tuple[float, float]]:
+    """Translate every position hint on ``circuit`` into absolute coords.
+
+    Two layers, merged with user priority:
+
+      1. ``_resolve_user_hints`` — user-supplied hints from
+         `Circuit.set_position(...)` / YAML `position:` field.
+         Conflicts (two user hints on the same coords) raise
+         `ValueError`.
+      2. ``_auto_hints`` — topology-aware auto-placement for
+         recognized sub-circuits (bridge rectifier, boost stage,
+         half-bridge, …). Skips components the user has already
+         hinted; never raises on collision.
+
+    Returns the merged dict with user hints overriding auto-hints.
+    """
+    user = _resolve_user_hints(circuit)
+    auto = _auto_hints(circuit, user)
+    # User wins on overlap; auto fills the gaps.
+    return {**auto, **user}
 
 
 def _build_elk_graph(
