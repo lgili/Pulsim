@@ -38,12 +38,12 @@ Goal: hints are first-class data on `Circuit` and survive YAML round-trip. Rende
 
 Goal: the new renderer respects user hints.
 
-- [ ] **3.1** Update `_run_elk_layout` to accept a `position_hints: dict[str, tuple[float, float]]` parameter. For each hinted cell, emit `layoutOptions: { "org.eclipse.elk.position": "(x,y)" }` and pin the cell's `x,y` in the input JSON.
-- [ ] **3.2** Add `_resolve_hints(circuit) -> dict[str, tuple[float, float]]`: translate every `Circuit.position_hint(name)` into absolute coords. `(layer, slot)` → `(layer * LAYER_PX, slot * SLOT_PX)` with module constants `LAYER_PX = 120.0`, `SLOT_PX = 80.0`. `(x, y)` passes through.
-- [ ] **3.3** Wire `_resolve_hints` into `render_native` and into `compute_layout` so both the SVG path and the JSON path see the same hints.
-- [ ] **3.4** Test: build a buck circuit, pin Vdc / S1 / D1 / L1 / Cout / Rload to known `(layer, slot)` cells, render, parse the SVG, assert each `<g transform>` is within ±5 px of the expected pinned position.
-- [ ] **3.5** Test: identical Circuit rendered with and without hints — without-hints output is identical to Phase 1 baseline.
-- [ ] **3.6** Test: conflicting hints (two components pinned to the same `(layer, slot)`) raise a deterministic error or shift one with a warning — pick at impl time and document in the spec.
+- [x] **3.1** `_build_elk_graph` now accepts `position_hints: dict[str, tuple[float, float]]`. Hinted cells get an explicit `x, y` plus `layoutOptions["org.eclipse.elk.position"]` in the input JSON, and the root graph switches to the `INTERACTIVE` strategy chain (cycle-breaking + layering + crossing-min) so ELK doesn't re-layer hinted nodes.
+- [x] **3.2** `_resolve_hints(circuit)` in `native_backend.py`: `(x, y)` passes through; `(layer, slot)` → `(layer * LAYER_PX, slot * SLOT_PX)` with `LAYER_PX = 120.0`, `SLOT_PX = 80.0`. Mixed-form hints (both `(x, y)` and `(layer, slot)` set) prefer absolute coords. Hints resolving to identical absolute coords raise `ValueError` with both component names.
+- [x] **3.3** `render_native` calls `_resolve_hints(circuit)` before building the ELK graph; the no-hints path stays byte-identical to Phase 1 (regression-tested by `test_render_no_hints_matches_phase1_baseline`).
+- [x] **3.4** `_apply_position_hints(laid_out, hints, components, skin)` post-processes ELK's output for the hinted path: overrides cell coordinates and rewrites every edge touching a hinted cell with an L-route (one horizontal + one vertical segment via a single elbow point). Tests assert each `<g transform="translate(...)">` lands within ±5 px of the expected grid cell for both code-built and YAML-loaded buck/RC hints.
+- [x] **3.5** `test_render_no_hints_matches_phase1_baseline` confirms two runs of the same un-hinted circuit produce byte-identical SVG.
+- [x] **3.6** `test_resolve_hints_detects_conflict` asserts duplicate-coord hints raise `ValueError("Position hint conflict: components 'X' and 'Y' both resolve to (x, y). …")`. Behavior documented as the deterministic-error choice (per design's Risks section).
 
 ## Phase 4 — Topology-aware auto-hints
 

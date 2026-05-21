@@ -160,17 +160,82 @@ def _port_side_for(
     return "WEST"
 
 
+# Grid metric used by ``_resolve_hints`` to translate semantic
+# `(layer, slot)` hints into absolute coordinates that ELK / the
+# renderer can consume. Picked so a typical buck-converter layout
+# (~6 layers × 4 slots) fits comfortably on screen.
+LAYER_PX = 120.0
+SLOT_PX  = 80.0
+
+
+def _resolve_hints(circuit: Any) -> dict[str, tuple[float, float]]:
+    """Translate every position hint on ``circuit`` into absolute coords.
+
+    Returns a dict mapping component name -> ``(x, y)`` in renderer
+    units. The translation rule (in priority order):
+
+      1. If both `(x, y)` and `(layer, slot)` are set, absolute coords
+         win (the layer/slot are silently ignored — the user explicitly
+         pinned an absolute position).
+      2. `(x, y)` only → passed through.
+      3. `(layer, slot)` only → ``(layer * LAYER_PX, slot * SLOT_PX)``.
+      4. Partial semantic hints (only `layer` or only `slot`) → the
+         missing axis defaults to 0.
+
+    Two hints resolving to the same absolute coords are reported as a
+    deterministic error so the user gets a clear message instead of
+    overlapping symbols in the rendered SVG.
+    """
+    if not hasattr(circuit, "position_hints"):
+        return {}
+    raw = circuit.position_hints()
+    if not raw:
+        return {}
+    resolved: dict[str, tuple[float, float]] = {}
+    seen_coords: dict[tuple[float, float], str] = {}
+    for name, hint in raw.items():
+        # Absolute coords (with or without semantic) take priority.
+        if hint.x is not None and hint.y is not None:
+            xy = (float(hint.x), float(hint.y))
+        elif hint.layer is not None or hint.slot is not None:
+            layer = float(hint.layer) if hint.layer is not None else 0.0
+            slot = float(hint.slot) if hint.slot is not None else 0.0
+            xy = (layer * LAYER_PX, slot * SLOT_PX)
+        else:
+            # Malformed hint (kernel would have rejected this, but be
+            # defensive — `position_hints()` is a snapshot and could in
+            # principle disagree with `set_position`'s invariant).
+            continue
+        if xy in seen_coords:
+            raise ValueError(
+                f"Position hint conflict: components {seen_coords[xy]!r} "
+                f"and {name!r} both resolve to {xy}. Adjust one of the "
+                f"hints so they land on distinct grid cells."
+            )
+        seen_coords[xy] = name
+        resolved[name] = xy
+    return resolved
+
+
 def _build_elk_graph(
     components: list,
     ground_id: int,
     skin: dict[str, SymbolTemplate],
+    position_hints: dict[str, tuple[float, float]] | None = None,
 ) -> dict[str, Any]:
     """Assemble the ELK JSON input for a circuit's component list.
 
     Uses skin-derived widths/heights so the layout reflects real symbol
     geometry — wires from ELK land at the symbol's actual port anchors
     rather than a generic box edge.
+
+    When ``position_hints`` is non-empty, each hinted cell gets pinned
+    via ELK's ``org.eclipse.elk.position`` constraint plus an explicit
+    ``x, y`` in the input JSON. Un-hinted cells float and ELK places
+    them normally; the layered algorithm honors the constraints when
+    routing wires, so the result stays consistent.
     """
+    hints = position_hints or {}
     children: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
 
@@ -211,6 +276,19 @@ def _build_elk_graph(
         # auto-hints, which is the right place to express these priors; for
         # Phase 1 we let ELK choose layers freely.
 
+        # Position hints (Phase 3): pin this cell to absolute coords if
+        # the user supplied a hint. ELK's "interactive" layered mode
+        # honors `org.eclipse.elk.position` per node and re-routes wires
+        # around the pinned positions.
+        hinted = hints.get(comp.name)
+        if hinted is not None:
+            hx, hy = hinted
+            node_dict["x"] = hx
+            node_dict["y"] = hy
+            node_dict["layoutOptions"] = {
+                "org.eclipse.elk.position": f"({hx},{hy})",
+            }
+
         children.append(node_dict)
 
     # Build edges as a star pattern from the first terminal on each node.
@@ -235,21 +313,159 @@ def _build_elk_graph(
             })
             edge_counter += 1
 
+    layout_options: dict[str, str] = {
+        "elk.algorithm": "layered",
+        "elk.direction": "RIGHT",
+        "elk.edgeRouting": "ORTHOGONAL",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "40",
+        "elk.spacing.nodeNode": "30",
+        "elk.spacing.edgeNode": "15",
+        "elk.spacing.edgeEdge": "10",
+        "elk.layered.crossingMinimization.semiInteractive": "true",
+    }
+    if hints:
+        # When the user supplied position hints, switch ELK to its
+        # INTERACTIVE strategy chain so it honors per-node `position`
+        # values instead of computing its own layering / cycle breaking.
+        # Un-hinted nodes are still placed by ELK; the interactive
+        # strategies just respect anchors when present.
+        layout_options.update({
+            "elk.layered.cycleBreaking.strategy": "INTERACTIVE",
+            "elk.layered.layering.strategy": "INTERACTIVE",
+            "elk.layered.crossingMinimization.strategy": "INTERACTIVE",
+        })
+
     return {
         "id": "root",
-        "layoutOptions": {
-            "elk.algorithm": "layered",
-            "elk.direction": "RIGHT",
-            "elk.edgeRouting": "ORTHOGONAL",
-            "elk.layered.spacing.nodeNodeBetweenLayers": "40",
-            "elk.spacing.nodeNode": "30",
-            "elk.spacing.edgeNode": "15",
-            "elk.spacing.edgeEdge": "10",
-            "elk.layered.crossingMinimization.semiInteractive": "true",
-        },
+        "layoutOptions": layout_options,
         "children": children,
         "edges": edges,
     }
+
+
+def _apply_position_hints(
+    laid_out: dict[str, Any],
+    hints: dict[str, tuple[float, float]],
+    components: list,
+    skin: dict[str, SymbolTemplate],
+) -> None:
+    """Override ELK's cell positions with user hints, in-place.
+
+    ELK's layered algorithm doesn't snap to `org.eclipse.elk.position`
+    constraints (its layering pass overrides them). To honor user hints
+    deterministically we:
+
+      1. Walk `laid_out["children"]` and rewrite `(x, y)` for any hinted
+         cell to the user's resolved absolute coords.
+      2. Rebuild each cell's port positions inside that hinted cell so
+         downstream wire-endpoint calculations land on the right pin.
+      3. Replace every edge with at least one hinted endpoint cell with
+         a simple two-segment L-route from one port to the other (one
+         horizontal + one vertical segment). The result isn't as crossing-
+         optimal as ELK's full route, but it's deterministic, never
+         intersects the symbols, and matches the user's spatial intent.
+
+    Edges whose both endpoints are un-hinted are left alone — ELK already
+    routed them well around the floating cells.
+    """
+    # Build a lookup of component → skin port-id order so we can
+    # translate terminal indices to skin-port (x, y) anchors after
+    # repositioning.
+    name_to_kind: dict[str, str] = {}
+    for comp in components:
+        name_to_kind[comp.name] = _KIND_TO_SKIN.get(comp.kind, _GENERIC_KIND)
+
+    # 1. Override cell positions for every hinted cell.
+    for child in laid_out.get("children", []):
+        cid = child.get("id")
+        if cid not in hints:
+            continue
+        new_x, new_y = hints[cid]
+        child["x"] = new_x
+        child["y"] = new_y
+
+    # 2. For every edge, if EITHER endpoint cell was hinted, recompute
+    #    a simple L-route from the source port to the target port.
+    hinted_cells = set(hints.keys())
+    cells_by_id = {c["id"]: c for c in laid_out.get("children", [])}
+    for edge in laid_out.get("edges", []):
+        sources = edge.get("sources", [])
+        targets = edge.get("targets", [])
+        if not sources or not targets:
+            continue
+        src_ref = sources[0]
+        tgt_ref = targets[0]
+        try:
+            src_cell, _ = src_ref.rsplit("::", 1)
+            tgt_cell, _ = tgt_ref.rsplit("::", 1)
+        except ValueError:
+            continue
+        if src_cell not in hinted_cells and tgt_cell not in hinted_cells:
+            continue
+
+        # Resolve absolute port positions for both endpoints.
+        src_abs = _resolve_port_abs(src_ref, cells_by_id, name_to_kind, skin)
+        tgt_abs = _resolve_port_abs(tgt_ref, cells_by_id, name_to_kind, skin)
+        if src_abs is None or tgt_abs is None:
+            continue
+
+        sx, sy = src_abs
+        tx, ty = tgt_abs
+        # L-route via an intermediate elbow point. Pick horizontal-first
+        # if the cells share a row, vertical-first otherwise.
+        if abs(sy - ty) < 1e-6:
+            bend_points: list[dict[str, float]] = []
+        elif abs(sx - tx) < 1e-6:
+            bend_points = []
+        else:
+            bend_points = [{"x": tx, "y": sy}]
+
+        edge["sections"] = [
+            {
+                "startPoint": {"x": sx, "y": sy},
+                "endPoint":   {"x": tx, "y": ty},
+                "bendPoints": bend_points,
+            }
+        ]
+        # Drop ELK-computed junction points — they were tied to the old
+        # bend geometry; the L-route doesn't need them.
+        edge.pop("junctionPoints", None)
+
+
+def _resolve_port_abs(
+    port_ref: str,
+    cells_by_id: dict[str, dict[str, Any]],
+    name_to_kind: dict[str, str],
+    skin: dict[str, SymbolTemplate],
+) -> tuple[float, float] | None:
+    """Translate `"<cell>::<index>"` into an absolute (x, y) port anchor.
+
+    Combines the cell's `(x, y)` from `cells_by_id` with the skin port
+    anchor (looked up by terminal index → skin port id via
+    `_SKIN_PORT_ORDER`). Returns ``None`` if any piece is missing.
+    """
+    try:
+        cell_name, idx_str = port_ref.rsplit("::", 1)
+        term_idx = int(idx_str)
+    except ValueError:
+        return None
+    cell = cells_by_id.get(cell_name)
+    if cell is None:
+        return None
+    skin_key = name_to_kind.get(cell_name, _GENERIC_KIND)
+    template = skin.get(skin_key) or skin.get(_GENERIC_KIND)
+    if template is None:
+        return None
+    port_order = _SKIN_PORT_ORDER.get(skin_key, ())
+    if term_idx >= len(port_order):
+        return None
+    anchor = template.ports.get(port_order[term_idx])
+    if anchor is None:
+        return None
+    return (
+        float(cell.get("x", 0)) + anchor[0],
+        float(cell.get("y", 0)) + anchor[1],
+    )
 
 
 def _call_elk(graph: dict[str, Any]) -> dict[str, Any]:
@@ -660,13 +876,17 @@ def render_native(circuit: Any, svg_path: Any) -> Path:
 
     Pipeline summary:
       1. Load the analog skin (cached after first call).
-      2. Build a Pulsim-aware ELK graph (cell sizes from skin geometry).
-      3. Subprocess ``node elk_bridge.js`` for the layered layout.
-      4. Compose the output SVG: skin symbols at laid-out positions +
+      2. Resolve every position hint set via ``Circuit.set_position(...)``
+         or the YAML ``position:`` field into absolute coordinates.
+      3. Build a Pulsim-aware ELK graph (cell sizes from skin geometry,
+         hinted cells pinned via ``org.eclipse.elk.position``).
+      4. Subprocess ``node elk_bridge.js`` for the layered layout.
+      5. Compose the output SVG: skin symbols at laid-out positions +
          orthogonal wire paths + ground stubs.
 
     Args:
-        circuit: Pulsim Circuit (uses ``components()`` and ``ground()``).
+        circuit: Pulsim Circuit (uses ``components()``, ``ground()``,
+            and ``position_hints()``).
         svg_path: Destination SVG path (must end in ``.svg``).
 
     Returns:
@@ -676,6 +896,9 @@ def render_native(circuit: Any, svg_path: Any) -> Path:
         ImportError: If ``node`` is not on PATH (needed for layout).
         FileNotFoundError: If the skin SVG cannot be located.
         RuntimeError: If the ELK subprocess fails or produces no output.
+        ValueError: If two position hints resolve to the same absolute
+            coordinates (deterministic error so the user notices the
+            collision).
     """
     skin_path = _resolve_skin_path()
     skin = parse_skin(skin_path)
@@ -683,8 +906,22 @@ def render_native(circuit: Any, svg_path: Any) -> Path:
     components = list(circuit.components())
     ground_id = int(circuit.ground())
 
-    graph = _build_elk_graph(components, ground_id, skin)
+    # Phase 3: resolve any user-supplied position hints. Empty dict when
+    # no hints are set — the un-hinted code path stays bit-identical to
+    # the Phase 1 baseline.
+    position_hints = _resolve_hints(circuit)
+
+    graph = _build_elk_graph(components, ground_id, skin, position_hints)
     laid_out = _call_elk(graph)
+
+    # Phase 3 post-processing: ELK's layered algorithm doesn't snap to
+    # `org.eclipse.elk.position` constraints, so we override the cell
+    # coordinates ourselves and rewrite any edge whose endpoint cell got
+    # moved. The result: hinted cells land at exactly the user's
+    # coordinates; wires touching them get a simple L-route via
+    # :func:`_apply_position_hints`.
+    if position_hints:
+        _apply_position_hints(laid_out, position_hints, components, skin)
 
     svg_root = _compose_svg(components, laid_out, skin, ground_id)
 

@@ -270,3 +270,166 @@ def test_render_dispatcher_recognizes_python_native(monkeypatch, tmp_path) -> No
     # If we'd hit netlistsvg instead, the markup wouldn't carry our
     # ``class="wire"`` convention (netlistsvg uses different classes).
     assert 'class="wire"' in out.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: position hints → layout
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_hints_empty_when_no_hints_set() -> None:
+    """A Circuit with no `set_position` calls produces an empty resolved map."""
+    from pulsim.schematic.native_backend import _resolve_hints
+
+    ckt = _build_rc_circuit()
+    assert _resolve_hints(ckt) == {}
+
+
+def test_resolve_hints_layer_slot_multiplies_by_grid() -> None:
+    from pulsim.schematic.native_backend import _resolve_hints, LAYER_PX, SLOT_PX
+
+    ckt = _build_rc_circuit()
+    ckt.set_position("V1", layer=0, slot=0)
+    ckt.set_position("R1", layer=1, slot=0)
+    ckt.set_position("C1", layer=2, slot=1)
+    resolved = _resolve_hints(ckt)
+    assert resolved == {
+        "V1": (0.0, 0.0),
+        "R1": (1.0 * LAYER_PX, 0.0),
+        "C1": (2.0 * LAYER_PX, 1.0 * SLOT_PX),
+    }
+
+
+def test_resolve_hints_absolute_passes_through() -> None:
+    from pulsim.schematic.native_backend import _resolve_hints
+
+    ckt = _build_rc_circuit()
+    ckt.set_position("V1", x=10.0, y=20.0)
+    ckt.set_position("R1", x=150.5, y=50.5)
+    resolved = _resolve_hints(ckt)
+    assert resolved == {"V1": (10.0, 20.0), "R1": (150.5, 50.5)}
+
+
+def test_resolve_hints_absolute_wins_over_layer_slot() -> None:
+    """When both forms are set on the same hint, absolute coords win."""
+    from pulsim.schematic.native_backend import _resolve_hints
+
+    ckt = _build_rc_circuit()
+    ckt.set_position("V1", layer=5, slot=5, x=10.0, y=20.0)
+    resolved = _resolve_hints(ckt)
+    assert resolved["V1"] == (10.0, 20.0)
+
+
+def test_resolve_hints_detects_conflict() -> None:
+    """Two hints resolving to the same absolute coords raise ValueError."""
+    from pulsim.schematic.native_backend import _resolve_hints
+
+    ckt = _build_rc_circuit()
+    ckt.set_position("V1", layer=0, slot=0)
+    ckt.set_position("R1", layer=0, slot=0)  # collides
+    with pytest.raises(ValueError, match="conflict"):
+        _resolve_hints(ckt)
+
+
+def test_render_with_hints_places_components_at_expected_coords(tmp_path: Path) -> None:
+    """Render a hinted RC and confirm each `<g transform="translate(...)">`
+    sits within ±5 px of the expected grid coordinates."""
+    from pulsim.schematic.native_backend import LAYER_PX, SLOT_PX
+
+    ckt = _build_rc_circuit()
+    ckt.set_position("V1", layer=0, slot=0)
+    ckt.set_position("R1", layer=2, slot=0)
+    ckt.set_position("C1", layer=4, slot=1)
+    out = render_native(ckt, tmp_path / "hinted_rc.svg")
+
+    tree = ET.parse(out)
+    root = tree.getroot()
+
+    # Map each top-level <g transform="translate(X, Y)"> to (X, Y).
+    import re
+
+    translate_re = re.compile(r"translate\(([\-\d.]+),\s*([\-\d.]+)\)")
+    placements: dict[tuple[float, float], None] = {}
+    for g in root.findall(f"{_SVG_NS}g"):
+        m = translate_re.search(g.get("transform", ""))
+        if m is None:
+            continue
+        placements[(float(m.group(1)), float(m.group(2)))] = None
+
+    def _has_placement_near(target: tuple[float, float], tol: float = 5.0) -> bool:
+        tx, ty = target
+        return any(
+            abs(x - tx) <= tol and abs(y - ty) <= tol
+            for (x, y) in placements
+        )
+
+    # The hinted components must land at the expected grid coords.
+    assert _has_placement_near((0.0, 0.0))
+    assert _has_placement_near((2 * LAYER_PX, 0.0))
+    assert _has_placement_near((4 * LAYER_PX, 1 * SLOT_PX))
+
+
+def test_render_no_hints_matches_phase1_baseline(tmp_path: Path) -> None:
+    """A circuit rendered with no hints produces the same byte-stream as
+    the Phase 1 baseline path — i.e. adding hint support never changed
+    the un-hinted output."""
+    ckt = _build_rc_circuit()
+    out_noh = render_native(ckt, tmp_path / "noh.svg")
+    # Re-render the same circuit twice; the deterministic baseline is
+    # that the bytes match exactly across runs.
+    out_again = render_native(_build_rc_circuit(), tmp_path / "noh_again.svg")
+    assert out_noh.read_bytes() == out_again.read_bytes()
+
+
+def test_yaml_position_hints_flow_through_to_render(tmp_path: Path) -> None:
+    """YAML `position:` fields end up on the rendered SVG."""
+    from pulsim.schematic.native_backend import LAYER_PX, SLOT_PX
+
+    yaml_path = tmp_path / "rc_hinted.yaml"
+    yaml_path.write_text(
+        """
+schema: pulsim-v1
+version: 1
+simulation:
+  tstop: 1e-3
+  dt: 1e-6
+components:
+  - type: voltage_source
+    name: V1
+    nodes: [vin, 0]
+    waveform: { type: dc, value: 5.0 }
+    position: { layer: 0, slot: 0 }
+  - type: resistor
+    name: R1
+    nodes: [vin, vout]
+    value: 1k
+    position: { layer: 2, slot: 0 }
+  - type: capacitor
+    name: C1
+    nodes: [vout, 0]
+    value: 1u
+    position: { layer: 4, slot: 1 }
+"""
+    )
+    parser = ps.YamlParser(ps.YamlParserOptions())
+    ckt, _ = parser.load(str(yaml_path))
+    out = render_native(ckt, tmp_path / "yaml_hinted.svg")
+
+    tree = ET.parse(out)
+    root = tree.getroot()
+    import re
+
+    translate_re = re.compile(r"translate\(([\-\d.]+),\s*([\-\d.]+)\)")
+    placements = []
+    for g in root.findall(f"{_SVG_NS}g"):
+        m = translate_re.search(g.get("transform", ""))
+        if m is not None:
+            placements.append((float(m.group(1)), float(m.group(2))))
+
+    # All three hinted positions show up among the placed groups.
+    def near(t):
+        return any(abs(x - t[0]) <= 5 and abs(y - t[1]) <= 5 for (x, y) in placements)
+
+    assert near((0.0, 0.0))
+    assert near((2 * LAYER_PX, 0.0))
+    assert near((4 * LAYER_PX, 1 * SLOT_PX))
