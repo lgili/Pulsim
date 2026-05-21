@@ -522,7 +522,8 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_v2_showcase_tests
         tests/v2/showcases/test_main.cpp
         tests/v2/showcases/test_buck_open_loop.cpp
-        tests/v2/showcases/test_flyback_open_loop.cpp  # Layer 2 V5
+        tests/v2/showcases/test_flyback_open_loop.cpp           # V5
+        tests/v2/showcases/test_three_phase_inverter_open_loop.cpp  # V8
     )
     target_link_libraries(pulsim_v2_showcase_tests
         PRIVATE

@@ -1,0 +1,154 @@
+# Pulsim v2 example: 3-phase 2-level voltage-source inverter
+# ---
+# 300 V DC bus → 3 half-bridge legs (each with HS + LS MOSFET
+# and anti-parallel body diodes) → balanced 3-φ Y-connected
+# RL load (R=5Ω + L=5mH per phase, simplified motor stator).
+#
+# Topology per leg:
+#   vbus ──┬── HS_<X> ── mid_<X> ── LS_<X> ── gnd
+#          │      ‖                    ‖
+#          └── D_HS_<X> (mid→vbus)   D_LS_<X> (gnd→mid)
+#
+# Body diodes are ESSENTIAL: during dead-time both controlled
+# switches are off and the load inductance traps current — a
+# diode provides the freewheel path. Without them the
+# inductor current produces gigavolt spikes across the open
+# switches.
+#
+# Switch insertion order matters: ALL 6 controlled MOSFETs
+# come first (indices 0-5), then the 6 body diodes (indices
+# 6-11, auto-commutated by the diode-event system). The
+# user's ThreePhaseLegIndices wires {0, 1, 2, 3, 4, 5} to
+# HS_A / LS_A / HS_B / LS_B / HS_C / LS_C.
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vbus
+      from: vbus
+      to: gnd
+      V: 300.0
+
+    # ============ Controlled switches (idx 0..5) ============
+    - type: switch
+      name: HS_A
+      from: vbus
+      to: mid_a
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: LS_A
+      from: mid_a
+      to: gnd
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: HS_B
+      from: vbus
+      to: mid_b
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: LS_B
+      from: mid_b
+      to: gnd
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: HS_C
+      from: vbus
+      to: mid_c
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: LS_C
+      from: mid_c
+      to: gnd
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    # ============ Body diodes (idx 6..11, auto-commutated) ============
+    # D_HS_<X>: anti-parallel to HS_<X> (mid → vbus when V_mid > V_bus).
+    # D_LS_<X>: anti-parallel to LS_<X> (gnd → mid when V_mid < 0).
+    - type: diode
+      name: D_HS_A
+      anode: mid_a
+      cathode: vbus
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_LS_A
+      anode: gnd
+      cathode: mid_a
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_HS_B
+      anode: mid_b
+      cathode: vbus
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_LS_B
+      anode: gnd
+      cathode: mid_b
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_HS_C
+      anode: mid_c
+      cathode: vbus
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_LS_C
+      anode: gnd
+      cathode: mid_c
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    # ============ Y-connected RL load (motor stator) ============
+    - type: resistor
+      name: R_a
+      from: mid_a
+      to: ra_lend
+      R: 5.0
+    - type: inductor
+      name: L_a
+      from: ra_lend
+      to: n
+      L: 5.0e-3
+
+    - type: resistor
+      name: R_b
+      from: mid_b
+      to: rb_lend
+      R: 5.0
+    - type: inductor
+      name: L_b
+      from: rb_lend
+      to: n
+      L: 5.0e-3
+
+    - type: resistor
+      name: R_c
+      from: mid_c
+      to: rc_lend
+      R: 5.0
+    - type: inductor
+      name: L_c
+      from: rc_lend
+      to: n
+      L: 5.0e-3
+
+    # Tie neutral to gnd via tiny resistor for a return path.
+    - type: resistor
+      name: R_neutral
+      from: n
+      to: gnd
+      R: 1.0e-3
+
+simulation:
+  t_start: 0.0
+  t_end:   3.0e-2     # 30 ms = 1.5 fundamental cycles @ 50 Hz
+  dt:      2.0e-7     # 0.2 µs → 250 samples / 20 kHz carrier
