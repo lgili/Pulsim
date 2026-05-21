@@ -136,15 +136,59 @@ public:
         return segments_.size();
     }
 
+    /// Multi-dt cache (Layer 4 V7). Solves with a dt that MAY
+    /// be different from the primary `this->dt()`. Builds the
+    /// (mask, dt) factor on demand in an auxiliary cache the
+    /// first time each pair is seen.
+    ///
+    /// When `dt == this->dt()`, this delegates to the primary
+    /// `solve(mask, b_extra, x)` (same fast path).
+    void solve_at(const topology::SwitchStateMask& mask,
+                   Real dt,
+                   const Vector& b_extra,
+                   Vector& x) const {
+        if (dt == dt_) {
+            solve(mask, b_extra, x);
+            return;
+        }
+        auto& bucket = alt_segments_[dt];
+        auto it = bucket.find(mask);
+        if (it == bucket.end()) {
+            PwlSegment seg =
+                const_cast<PwlStateSpaceCache*>(this)
+                    ->make_segment(mask, dt);
+            auto inserted_it =
+                bucket.emplace(mask, std::move(seg)).first;
+            it = inserted_it;
+        }
+        const PwlSegment& seg = it->second;
+        Vector rhs = -(seg.b_constant + b_extra);
+        seg.solver->solve(rhs, x);
+    }
+
+    /// Number of distinct auxiliary-dt values currently in
+    /// the multi-dt cache.
+    [[nodiscard]] Size num_alt_dt_values() const noexcept {
+        return alt_segments_.size();
+    }
+
+    /// Number of segments factored at the given auxiliary dt
+    /// (0 if `dt` has no cached segments).
+    [[nodiscard]] Size num_alt_segments_at(Real dt) const noexcept {
+        const auto it = alt_segments_.find(dt);
+        return it == alt_segments_.end() ? 0 : it->second.size();
+    }
+
 private:
-    /// Build a single segment's matrix + factor and insert
-    /// into `segments_`. Used by both eager `build()` (called
-    /// in a loop over all 2^N masks) and lazy on-demand
-    /// `lookup()` (called per mask as it's first seen).
-    void build_one_segment(const topology::SwitchStateMask& mask) {
+    /// Build a fresh segment at the given `(mask, dt)` pair and
+    /// return it by move. The factor is assembled + analysed +
+    /// factorised; the caller decides which cache map to drop
+    /// it into.
+    [[nodiscard]] PwlSegment make_segment(
+        const topology::SwitchStateMask& mask, Real dt) {
         sparse::Matrix J;
         Vector b;
-        assemble_segment(graph_, pool_, mask, dt_, J, b);
+        assemble_segment(graph_, pool_, mask, dt, J, b);
         sparse::compress_in_place(J);
 
         auto solver = sparse::make_default_solver();
@@ -164,7 +208,14 @@ private:
         seg.b_constant = std::move(b);
         seg.solver = std::move(solver);
         seg.state_size = pool_.state_size(graph_);
-        segments_.emplace(mask, std::move(seg));
+        return seg;
+    }
+
+    /// Insert a primary-cache segment at the current dt.
+    /// Eager `build()` calls in a loop; lazy `lookup()` on
+    /// demand.
+    void build_one_segment(const topology::SwitchStateMask& mask) {
+        segments_.emplace(mask, make_segment(mask, dt_));
     }
 
     const topology::Graph& graph_;
@@ -173,6 +224,13 @@ private:
         segments_;
     Real dt_ = Real{0};   // 0 = static-only build (V0)
     bool lazy_mode_ = false;
+
+    // Layer 4 V7: auxiliary multi-dt cache for sub-step
+    // bisection state correction (`solve_at`). Keyed first by
+    // dt then by mask. `mutable` so `solve_at` (const) can
+    // populate on demand.
+    mutable std::unordered_map<Real, std::unordered_map<
+        topology::SwitchStateMask, PwlSegment>> alt_segments_;
 };
 
 }  // namespace pulsim::v2::pwl
