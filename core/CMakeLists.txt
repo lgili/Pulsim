@@ -326,6 +326,30 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer4_tests)
 
     # =============================================================================
+    # pulsim_v2_layer5_tests — pulsim-v2-solver-and-events
+    # =============================================================================
+    # Layer 5 = the time-stepping orchestrator. Wraps Layer 4's
+    # cache.solve(...) in a fixed-dt loop with user-supplied switch
+    # schedule + optional b_extra(t) callback. Depends on all lower
+    # layers (0/1/2/3/4).
+    add_executable(pulsim_v2_layer5_tests
+        tests/v2/layer5/test_main.cpp
+        tests/v2/layer5/test_options.cpp
+        tests/v2/layer5/test_result.cpp
+        tests/v2/layer5/test_run_transient.cpp
+        tests/v2/layer5/test_integration_chopper_pwm.cpp
+    )
+    target_link_libraries(pulsim_v2_layer5_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_layer5_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_layer5_tests)
+
+    # =============================================================================
     # Custom test targets for convenience
     # =============================================================================
 
