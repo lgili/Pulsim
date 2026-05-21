@@ -26,6 +26,18 @@
 
 namespace pulsim::v2::solver {
 
+/// Layer 5 V2.2 — sub-step commutation timing diagnostic.
+/// `t_estimated` is the linear-interpolated zero crossing of the
+/// watched signal (i_diode for ON → OFF, v_diode − V_th for
+/// OFF → ON) between two grid points. The state vectors
+/// themselves remain at the dt grid; only the COMMUTATION
+/// timestamp is sub-step accurate.
+struct CommutationEvent {
+    Real  t_estimated;
+    Index branch_id;
+    bool  new_state;
+};
+
 struct SimulationResult {
     std::vector<Real>   times;
     std::vector<Vector> states;
@@ -40,6 +52,12 @@ struct SimulationResult {
     /// are present; otherwise it's left empty (Layer 5 V0/V1
     /// behaviour).
     std::vector<Size> event_iteration_count;
+
+    /// Layer 5 V2.2 — list of estimated commutation times for
+    /// every diode flip detected during the simulation. Ordered
+    /// by `t_estimated`. Empty if no diodes are in the circuit
+    /// or no flips occurred.
+    std::vector<CommutationEvent> commutation_events;
 
     [[nodiscard]] Size num_steps() const noexcept {
         return times.size();

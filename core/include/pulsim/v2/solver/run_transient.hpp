@@ -41,6 +41,7 @@
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 
+#include <cstdio>
 #include <functional>
 #include <stdexcept>
 
@@ -65,6 +66,36 @@ namespace pulsim::v2::solver {
     topology::SwitchStateMask out(user.size());
     out.set_bits(merged);
     return out;
+}
+
+// -----------------------------------------------------------------------------
+// interp_commutation_time — linear-interpolated zero crossing
+// of the watched signal between t_prev and t_curr.
+//
+// Watched signal:
+//   OFF → ON: v_diode − V_th    (was negative at prev, ≥ 0 at curr)
+//   ON → OFF: i_diode            (was positive at prev, ≤ 0 at curr)
+//
+// If the two endpoints have the same sign (no real zero
+// crossing), returns t_curr (the dt-grid time — the V0
+// fallback).
+// -----------------------------------------------------------------------------
+[[nodiscard]] inline Real interp_commutation_time(
+    Real t_prev, Real t_curr,
+    Real s_prev, Real s_curr) noexcept {
+    // Same sign → no crossing in the interval; clamp.
+    if (s_prev * s_curr > Real{0}) {
+        return t_curr;
+    }
+    const Real denom = s_prev - s_curr;
+    if (std::abs(denom) < std::numeric_limits<Real>::min()) {
+        return t_curr;
+    }
+    const Real frac = s_prev / denom;   // ∈ [0, 1] when signs differ
+    const Real t_star = t_prev + (t_curr - t_prev) * frac;
+    if (t_star < t_prev) return t_prev;
+    if (t_star > t_curr) return t_curr;
+    return t_star;
 }
 
 // -----------------------------------------------------------------------------
@@ -285,6 +316,12 @@ inline SimulationResult run_transient(
         for (Size k = 1; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
+            const Real t_prev = opts.t_start +
+                                 static_cast<Real>(k - 1) * opts.dt;
+
+            // Snapshot the state at t_prev for sub-step
+            // commutation timing (Layer 5 V2.2).
+            const Vector x_prev = x;
 
             // 1. History from previous step.
             const Vector b_extra_history =
@@ -338,10 +375,39 @@ inline SimulationResult run_transient(
                     "max_event_iterations or reduce dt");
             }
 
-            // 4. Commit history for the next step.
+            // 4. Sub-step commutation timing (Layer 5 V2.2).
+            if (has_diodes) {
+                for (const auto& e : diodes.entries()) {
+                    const Real v_a_prev =
+                        stamping::read_node_voltage(x_prev, e.from);
+                    const Real v_k_prev =
+                        stamping::read_node_voltage(x_prev, e.to);
+                    const Real v_d_prev = v_a_prev - v_k_prev;
+                    const Real v_a_curr =
+                        stamping::read_node_voltage(x, e.from);
+                    const Real v_k_curr =
+                        stamping::read_node_voltage(x, e.to);
+                    const Real v_d_curr = v_a_curr - v_k_curr;
+
+                    const Real s_prev = v_d_prev - e.V_th;
+                    const Real s_curr = v_d_curr - e.V_th;
+                    if (s_prev * s_curr >= Real{0}) continue;
+
+                    const Real t_est = interp_commutation_time(
+                        t_prev, t, s_prev, s_curr);
+                    result.commutation_events.push_back(
+                        CommutationEvent{
+                            .t_estimated = t_est,
+                            .branch_id   = e.branch_id,
+                            .new_state   = e.is_on,
+                        });
+                }
+            }
+
+            // 5. Commit history for the next step.
             history.update_from_state(x, opts.dt);
 
-            // 5. Record. event_iteration_count = iters - 1 (the
+            // 6. Record. event_iteration_count = iters - 1 (the
             //    first iteration always runs; the count is the
             //    number of EXTRA solves caused by diode flips).
             result.times.push_back(t);
@@ -358,6 +424,15 @@ inline SimulationResult run_transient(
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
+            const Real t_prev = k > 0
+                ? (opts.t_start +
+                    static_cast<Real>(k - 1) * opts.dt)
+                : opts.t_start;
+            // Sub-step bisection snapshot (Layer 5 V2.2). At
+            // k=0 we don't have a prev step; just use the
+            // current x as a degenerate snapshot — the
+            // sign-change check will exclude it from events.
+            const Vector x_prev = x;
 
             const Vector b_extra_user = b_extra_fn
                 ? b_extra_fn(t)
@@ -395,6 +470,35 @@ inline SimulationResult run_transient(
                     "run_transient: event-iteration limit "
                     "reached without convergence at t = " +
                     std::to_string(t));
+            }
+
+            // Sub-step bisection on the static path too.
+            if (has_diodes && k > 0) {
+                for (const auto& e : diodes.entries()) {
+                    const Real v_a_prev =
+                        stamping::read_node_voltage(x_prev, e.from);
+                    const Real v_k_prev =
+                        stamping::read_node_voltage(x_prev, e.to);
+                    const Real v_d_prev = v_a_prev - v_k_prev;
+                    const Real v_a_curr =
+                        stamping::read_node_voltage(x, e.from);
+                    const Real v_k_curr =
+                        stamping::read_node_voltage(x, e.to);
+                    const Real v_d_curr = v_a_curr - v_k_curr;
+
+                    const Real s_prev = v_d_prev - e.V_th;
+                    const Real s_curr = v_d_curr - e.V_th;
+                    if (s_prev * s_curr >= Real{0}) continue;
+
+                    const Real t_est = interp_commutation_time(
+                        t_prev, t, s_prev, s_curr);
+                    result.commutation_events.push_back(
+                        CommutationEvent{
+                            .t_estimated = t_est,
+                            .branch_id   = e.branch_id,
+                            .new_state   = e.is_on,
+                        });
+                }
             }
 
             result.times.push_back(t);

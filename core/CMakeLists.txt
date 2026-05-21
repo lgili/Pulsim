@@ -410,6 +410,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer5_v2/test_diode_event_state.cpp
         tests/v2/layer5_v2/test_integration_half_wave_rectifier.cpp
         tests/v2/layer5_v2/test_integration_boost.cpp   # V2.1 fix
+        tests/v2/layer5_v2/test_commutation_events.cpp  # V2.2 substep
     )
     target_link_libraries(pulsim_v2_layer5_v2_tests
         PRIVATE

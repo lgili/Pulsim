@@ -29,6 +29,7 @@
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
 
+#include <span>
 #include <vector>
 
 namespace pulsim::v2::pwl {
@@ -117,14 +118,9 @@ public:
         return changed;
     }
 
-    /// Reset all diodes to OFF.
-    void reset() noexcept {
-        for (auto& d : diodes_) {
-            d.is_on = false;
-        }
-    }
-
-private:
+    /// Public DiodeEntry layout for Layer 5 V2.2's sub-step
+    /// commutation timing. Layer 5 reads the entries to compute
+    /// the watched signal at the pre/post-step states.
     struct DiodeEntry {
         Index branch_id;
         Size  switch_idx;
@@ -136,6 +132,20 @@ private:
         bool  is_on;
     };
 
+    [[nodiscard]] std::span<const DiodeEntry>
+    entries() const noexcept {
+        return std::span<const DiodeEntry>{
+            diodes_.data(), diodes_.size()};
+    }
+
+    /// Reset all diodes to OFF.
+    void reset() noexcept {
+        for (auto& d : diodes_) {
+            d.is_on = false;
+        }
+    }
+
+private:
     Size num_switches_;
     std::vector<DiodeEntry> diodes_;
 };
