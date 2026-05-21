@@ -1,0 +1,174 @@
+# Pulsim v2 example: ZVS phase-shift full-bridge isolated DC-DC
+# ---
+# 100 V DC bus → 4-MOSFET full bridge with body diodes →
+# series leakage L + 2:1 transformer → 4-diode bridge
+# rectifier → LC output filter → 10 Ω load.
+#
+# Topology:
+#                ┌── HS_A ──┬── LS_A ──┐
+#  vbus ──┬──────┤           mid_a     │
+#         │      │   (body diodes      ├── L_leak ──┐
+#         │      │    parallel)        │            │
+#         │      └── HS_B ──┬── LS_B ──┘            │
+#         │                  mid_b ─────────────────┤
+#         │                                          ▼
+#  gnd ───┴──── (LS legs to gnd, anti-parallel       │
+#                body diodes mid→vbus / gnd→mid)     │
+#                                                     │
+#                                          T1 (Np:Ns = 2:1)
+#                                          ▼ primary
+#                                          ▼ secondary
+#                              ┌── D1 ─── rect_pos ── L_out ── vout
+#                       sec_a ─┤                                 │
+#                              └── D3 ─── rect_neg ─── C_out ────┤
+#                                                                 │
+#                              ┌── D2 ─── rect_pos                R_load
+#                       sec_b ─┤                                  │
+#                              └── D4 ─── rect_neg ───────────────┘
+#                                                                 │
+#                                                                gnd
+#
+# Switch ordering (CRITICAL for ThreePhaseLegIndices /
+# make_phase_shift_full_bridge_fn arg layout):
+#   idx 0..3 : controlled MOSFETs (HS_A, LS_A, HS_B, LS_B)
+#   idx 4..7 : body diodes      (D_HS_A, D_LS_A, D_HS_B, D_LS_B)
+#   idx 8..11: bridge rectifier (D1, D2, D3, D4)
+# Total switches = 12; user drives 0..3 via the V9 helper.
+#
+# At φ=π/2 (90° phase shift), the secondary sees a pulse
+# pattern with D_eff = 0.5, so V_out ≈ V_bus·(Ns/Np)·D_eff
+# = 100·0.5·0.5 = 25 V (minus diode drops + losses).
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vbus
+      from: vbus
+      to: gnd
+      V: 100.0
+
+    # ============ Controlled MOSFETs (idx 0..3) ============
+    - type: switch
+      name: HS_A
+      from: vbus
+      to: mid_a
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: LS_A
+      from: mid_a
+      to: gnd
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: HS_B
+      from: vbus
+      to: mid_b
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: switch
+      name: LS_B
+      from: mid_b
+      to: gnd
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    # ============ Body diodes (idx 4..7) ============
+    - type: diode
+      name: D_HS_A
+      anode: mid_a
+      cathode: vbus
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_LS_A
+      anode: gnd
+      cathode: mid_a
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_HS_B
+      anode: mid_b
+      cathode: vbus
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D_LS_B
+      anode: gnd
+      cathode: mid_b
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    # ============ Leakage L + transformer (2:1) ============
+    - type: inductor
+      name: L_leak
+      from: mid_a
+      to: pri_pos
+      L: 1.0e-6   # 1 µH leakage
+    - type: transformer
+      name: T1
+      p_from: pri_pos
+      p_to:   mid_b
+      s_from: sec_pos
+      s_to:   sec_neg
+      L_p: 40.0e-6     # 40 µH primary magnetizing
+      L_s: 10.0e-6     # 10 µH secondary → N=2:1
+      k:   0.99
+
+    # ============ Bridge rectifier (idx 8..11) ============
+    - type: diode
+      name: D1
+      anode: sec_pos
+      cathode: rect_pos
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D2
+      anode: sec_neg
+      cathode: rect_pos
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D3
+      anode: rect_neg
+      cathode: sec_pos
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D4
+      anode: rect_neg
+      cathode: sec_neg
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    # ============ LC output filter + load ============
+    - type: inductor
+      name: L_out
+      from: rect_pos
+      to: vout
+      L: 100.0e-6   # 100 µH output inductor
+    - type: capacitor
+      name: C_out
+      from: vout
+      to: rect_neg
+      C: 100.0e-6   # 100 µF output cap
+    - type: resistor
+      name: R_load
+      from: vout
+      to: rect_neg
+      R: 10.0
+
+    # Secondary reference to gnd (small ohmic link gives
+    # the simulator a return path; in a real isolated
+    # supply this would be replaced by the load's chassis
+    # reference).
+    - type: resistor
+      name: R_iso
+      from: rect_neg
+      to: gnd
+      R: 1.0e-3
+
+simulation:
+  t_start: 0.0
+  t_end:   2.0e-3      # 2 ms — enough for LC filter to settle
+  dt:      2.0e-8      # 20 ns → 500 samples / 100 kHz carrier
