@@ -1,0 +1,90 @@
+# Pulsim v2 example: boost converter with SATURABLE inductor
+# ---
+# Same topology as `boost_realistic_igbt.yaml` but with a
+# saturable boost inductor (V17). When the inductor current
+# approaches I_sat, the effective inductance drops sharply —
+# the same physical mechanism that real flybacks rely on for
+# peak-current limiting and that engineers must DESIGN
+# AROUND in boost converters (or core saturation will cause
+# catastrophic over-current).
+#
+# Topology:
+#   V_in ── L_sat ──┬─ D_boost ──┬─ vout ── C ─ gnd
+#                    │            │       │
+#                    │            │       └─ R_load ─ gnd
+#                    │
+#                    T1 ──── gnd  (IGBT collector=sw, emitter=gnd)
+#
+# Saturable inductor params:
+#   L_0     = 100 µH  (unsaturated, like the V14 boost)
+#   I_sat   = 1.5 A   (knee — below operating-point I_L ≈ 1.7 A)
+#   L_residual = 1 µH (deep-saturation floor)
+#
+# Expected: V_out is LOWER than the linear-L case because the
+# inductor saturates above I_sat ≈ 1.5 A and effectively
+# behaves like a smaller L during peaks — less energy storage,
+# less boost. This is exactly the engineering warning.
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: vin
+      to: gnd
+      V: 12.0
+
+    - type: pulse_voltage_source
+      name: V_g_drive
+      from: V_g
+      to: gnd
+      v_initial: 0.0
+      v_pulsed: 10.0
+      t_start: 5.0e-6
+      pulse_width: 2.0e-6
+      period: 1.0e-5
+      rise_time: 2.0e-6
+      fall_time: 2.0e-6
+
+    # V17: SATURABLE boost inductor.
+    - type: saturable_inductor
+      name: L_boost
+      from: vin
+      to: sw
+      L_0: 100.0e-6
+      I_sat: 1.5
+      L_residual: 1.0e-6
+
+    - type: diode
+      name: D_boost
+      anode: sw
+      cathode: vout
+      g_on: 1.0e3
+      g_off: 1.0e-9
+      V_th: 0.5
+
+    - type: igbt_level1
+      name: T1
+      collector: sw
+      emitter: gnd
+      gate: V_g
+      V_CE_sat: 1.0
+      R_CE_sat: 0.02
+      V_T: 5.0
+      kappa: 15.0
+
+    - type: capacitor
+      name: C_out
+      from: vout
+      to: gnd
+      C: 100.0e-6
+
+    - type: resistor
+      name: R_load
+      from: vout
+      to: gnd
+      R: 20.0
+
+simulation:
+  t_start: 0.0
+  t_end:   5.0e-3
+  dt:      1.0e-7

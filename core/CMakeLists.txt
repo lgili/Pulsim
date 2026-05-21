@@ -289,6 +289,25 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_layer2_tests)
 
     # =============================================================================
+    # pulsim_v2_analysis_tests — pulsim-v2-core-loss (Layer 11 V18)
+    # =============================================================================
+    # Post-process analysis modules: Steinmetz core-loss estimator,
+    # future AC sweep / Bode plot machinery.
+    add_executable(pulsim_v2_analysis_tests
+        tests/v2/analysis/test_main.cpp
+        tests/v2/analysis/test_core_loss.cpp
+    )
+    target_link_libraries(pulsim_v2_analysis_tests
+        PRIVATE
+            pulsim::v2
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_analysis_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_analysis_tests)
+
+    # =============================================================================
     # pulsim_v2_sources_tests — pulsim-v2-source-helpers (Layer 2 V5+)
     # =============================================================================
     # Standalone target for `sources/` helpers — currently
@@ -541,6 +560,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/showcases/test_boost_realistic_igbt.cpp         # V14 boost (IGBT)
         tests/v2/showcases/test_boost_realistic_mosfet_v14.cpp   # V14 boost (MOSFET)
         tests/v2/showcases/test_ldo_with_opamp.cpp               # V15 LDO + op-amp
+        tests/v2/showcases/test_boost_saturable_inductor.cpp     # V18 saturable boost
     )
     target_link_libraries(pulsim_v2_showcase_tests
         PRIVATE
