@@ -275,6 +275,8 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/layer2/test_mosfet_level1.cpp        # Layer 2 V13
         tests/v2/layer2/test_igbt_level1.cpp          # Layer 2 V14
         tests/v2/layer2/test_vcvs.cpp                 # Layer 2 V15
+        tests/v2/layer2/test_saturable_inductor.cpp   # Layer 2 V16
+        tests/v2/layer2/test_multi_winding_transformer.cpp  # Layer 2 V16
     )
     target_link_libraries(pulsim_v2_layer2_tests
         PRIVATE

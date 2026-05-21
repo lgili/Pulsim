@@ -20,6 +20,8 @@
 #include "pulsim/v2/models/igbt_level1.hpp"
 #include "pulsim/v2/models/inductor.hpp"
 #include "pulsim/v2/models/mosfet_level1.hpp"
+#include "pulsim/v2/models/multi_winding_transformer.hpp"
+#include "pulsim/v2/models/saturable_inductor.hpp"
 #include "pulsim/v2/models/resistor.hpp"
 #include "pulsim/v2/models/current_source.hpp"
 #include "pulsim/v2/models/pulse_voltage_source.hpp"

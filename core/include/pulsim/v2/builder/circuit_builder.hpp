@@ -502,6 +502,67 @@ public:
         return *this;
     }
 
+    /// Layer 2 V16: N-winding transformer (2 ≤ N ≤ 6). Each
+    /// winding is added as a regular `Inductor` branch, and
+    /// the N·(N−1)/2 pair-wise couplings are registered with
+    /// the existing `transformer_couplings_` mechanism — a
+    /// multi-winding transformer is mathematically equivalent
+    /// to all pair-wise 2-winding couplings between its
+    /// windings.
+    ///
+    /// `windings` is a list of `(from_node, to_node, L_i)`
+    /// tuples. `k_ij` is the full N×N coupling matrix (only
+    /// the upper triangle is read; diagonal entries are
+    /// ignored). Defaults to k_ij = 1 for all off-diagonals
+    /// if `k_matrix` is empty.
+    struct WindingSpec {
+        std::string from;
+        std::string to;
+        Real L;
+    };
+
+    CircuitBuilder& add_multi_winding_transformer(
+        std::string /*name*/,
+        const std::vector<WindingSpec>& windings,
+        const std::vector<std::vector<Real>>& k_matrix = {}) {
+        const Size N = windings.size();
+        if (N < 2 || N > 6) {
+            throw std::invalid_argument(
+                "add_multi_winding_transformer: N must be in [2, 6]");
+        }
+        // Add each winding as a regular inductor branch.
+        std::vector<Index> branch_ids;
+        branch_ids.reserve(N);
+        for (const auto& w : windings) {
+            const Index from_idx = resolve_node_(w.from);
+            const Index to_idx   = resolve_node_(w.to);
+            const Index b = graph_.add_branch(
+                from_idx, to_idx,
+                topology::BranchKind::PassiveLinear);
+            pool_.add_inductor(
+                b, models::Inductor::Params{w.L});
+            branch_ids.push_back(b);
+        }
+        // Register all pair-wise 2-winding couplings.
+        for (Size i = 0; i < N; ++i) {
+            for (Size j = i + 1; j < N; ++j) {
+                Real k_ij = Real{1};   // default tight coupling
+                if (!k_matrix.empty() &&
+                        i < k_matrix.size() &&
+                        j < k_matrix[i].size()) {
+                    k_ij = k_matrix[i][j];
+                }
+                pool_.add_transformer_coupling(
+                    branch_ids[i], branch_ids[j],
+                    models::TwoWindingTransformer::Params{
+                        .L_p = windings[i].L,
+                        .L_s = windings[j].L,
+                        .k   = k_ij});
+            }
+        }
+        return *this;
+    }
+
     // -------- Accessors ----------------------------------------------------
 
     [[nodiscard]] const topology::Graph& graph() const noexcept {
