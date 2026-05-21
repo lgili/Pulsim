@@ -1,24 +1,26 @@
 """Schematic rendering with pluggable backends.
 
-Default backend is **netlistsvg** (Phase 4F) — production schematic
-renderer built on ELK + a purpose-tuned analog SVG skin. Produces
-textbook-quality output (proper resistor / capacitor / inductor / diode
-/ voltage-source / ground symbols + orthogonal Manhattan wires) for any
-circuit topology netlistsvg knows about. Switching devices that aren't
-in the analog skin (MOSFET/IGBT/vcswitch) currently render as labeled
-generic boxes; a follow-up change (``add-pulsim-analog-skin``) extends
-the SVG skin with proper symbols for those.
+Default backend is **python_native** (`add-python-schematic-renderer`
+Phase 5) — pure-Python composition over the existing analog SVG skin,
+with elkjs called only for layout. Honors user-supplied position hints
+(`Circuit.set_position(...)`, YAML `position:`) and applies topology-
+aware auto-layouts for recognized sub-circuits (bridge rectifier,
+boost stage, half-bridge).
 
 Other backends available via ``PULSIM_SCHEMATIC_BACKEND`` env var:
 
-    netlistsvg  (default)  — netlistsvg CLI + analog skin
-    elk                    — ELK layered + schemdraw symbols (in-tree)
-    spring                 — legacy force-directed + templates + schemdraw
+    python_native  (default)  — pure-Python renderer + elkjs layout
+    netlistsvg     (legacy)   — netlistsvg CLI + analog skin
+                                 (emits DeprecationWarning; scheduled
+                                 for removal in a future release once
+                                 the native path has soaked)
+    elk                       — ELK layered + schemdraw symbols
+    spring                    — legacy force-directed + templates
 
-The ELK and spring backends produce a :class:`SchematicLayout` which is
-still useful when a GUI wants component coordinates. netlistsvg owns the
-layout internally; if a layout object is needed under netlistsvg, fall
-back to ELK by setting the env var.
+The `elk` and `spring` backends produce a :class:`SchematicLayout`
+which is still useful when a GUI wants component coordinates. The
+default native backend exposes the same layout via
+``compute_layout(circuit)``.
 """
 
 from __future__ import annotations
@@ -285,15 +287,33 @@ def render(
             f"expected one of {sorted(_SUPPORTED_FORMATS)}"
         )
 
-    backend = os.environ.get("PULSIM_SCHEMATIC_BACKEND", "netlistsvg").strip().lower()
+    raw_backend = os.environ.get("PULSIM_SCHEMATIC_BACKEND", "").strip().lower()
+    # Phase 5: the default is now python_native. Unset env var → native.
+    backend = raw_backend or "python_native"
     if backend not in ("netlistsvg", "python_native", "elk", "spring"):
-        backend = "netlistsvg"
+        backend = "python_native"
+
+    # Deprecation warning when the user explicitly selects netlistsvg.
+    # Only fires on explicit opt-in — the unset / native paths stay
+    # silent so existing tooling doesn't flood logs after the switch.
+    if raw_backend == "netlistsvg":
+        import warnings
+        warnings.warn(
+            "The 'netlistsvg' schematic backend is deprecated and will be "
+            "removed in a future release. The default (python_native) "
+            "produces equivalent output without the Node-side netlistsvg "
+            "subprocess. Set PULSIM_SCHEMATIC_BACKEND=python_native (or "
+            "leave it unset) to silence this warning.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     if backend == "python_native":
-        # Phase 1 of `add-python-schematic-renderer`: native Python renderer
-        # that reuses elk_bridge.js for layout and composes the SVG without
-        # invoking the netlistsvg Node subprocess. Default stays on
-        # netlistsvg until Phase 5 flips the switch.
+        # `add-python-schematic-renderer` (Phases 1-4): pure-Python
+        # renderer that reuses `elk_bridge.js` for layout. Hints (user
+        # via `Circuit.set_position` / YAML `position:` + topology
+        # auto-layouts) flow into ELK as constraints, then a
+        # post-process layer overrides cell positions deterministically.
         from .native_backend import render_native
         if fmt == "svg":
             if position_hints:

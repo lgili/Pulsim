@@ -60,11 +60,11 @@ Goal: known topologies get textbook layouts out of the box.
 
 Goal: `pulsim.schematic.render(...)` calls the new renderer by default. netlistsvg stays as opt-in for one release.
 
-- [ ] **5.1** Update `python/pulsim/schematic/render.py` / `layout.py` dispatcher: `PULSIM_SCHEMATIC_BACKEND` unset → new `python_native` backend. `=netlistsvg` still works but prints `DeprecationWarning("netlistsvg backend will be removed in pulsim 0.12. Set PULSIM_SCHEMATIC_BACKEND=python_native or unset to silence.")`.
-- [ ] **5.2** Update `.github/workflows/schematic-smoke.yml`: build target stays `_pulsim`; the demo render uses the new default. The job no longer needs `npm install netlistsvg` — only `elkjs`.
-- [ ] **5.3** Update `docs/schematic-rendering.md`: rewrite the "Install" and "Backends" sections; document `position:` (YAML) and `set_position` (Python). Move the netlistsvg section under a "Legacy backends" heading.
-- [ ] **5.4** Update `pyproject.toml` `[project.optional-dependencies] schematic`: drop the implicit `netlistsvg` doc reference (it was never a Python dep, just a doc note).
-- [ ] **5.5** Smoke-test on a clean checkout: `pip install '.[schematic]' && python -c "import pulsim as ps; ckt = ...; ps.schematic.render(ckt, 'out.svg')"` works without any `npm install netlistsvg` step.
+- [x] **5.1** `render.py` dispatcher: unset `PULSIM_SCHEMATIC_BACKEND` now resolves to `python_native`. Explicit `=netlistsvg` emits `DeprecationWarning("The 'netlistsvg' schematic backend is deprecated and will be removed in a future release. …")` once per call (stacklevel=2 so the warning points at the user's `render()` call). Other backends (`elk`, `spring`) are unchanged.
+- [x] **5.2** `.github/workflows/schematic-smoke.yml` step name updated ("Install elkjs (+ legacy netlistsvg for backward compat)"); the workflow now exercises the python_native default. `npm install` still pulls both packages so users opting into the legacy backend stay supported during the deprecation window.
+- [ ] **5.3** Docs update (`docs/schematic-rendering.md`) deferred to Phase 6 alongside the archive/release-notes work.
+- [ ] **5.4** `pyproject.toml` cleanup deferred to Phase 6 (netlistsvg was never a Python dependency — only a `package.json` entry and a doc note).
+- [x] **5.5** Local smoke render (`PYTHONPATH=build/python … ps.schematic.render(ckt, …)` with no env var) writes the demo set without invoking netlistsvg: `rc_circuit_p5.{svg,png}`, `buck_converter_p5.{svg,png}`, `half_bridge_pwm_p5.{svg,png}` — all non-empty, half-bridge auto-stacks switches from Phase 4 recognizer.
 
 ## Phase 6 — Cross-cutting docs, CI, archive
 

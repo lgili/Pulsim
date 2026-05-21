@@ -66,7 +66,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy
 
-      - name: Install netlistsvg + elkjs
+      - name: Install elkjs (+ legacy netlistsvg for backward compat)
+        # The Phase 5 default is python_native — only elkjs is actually
+        # required at runtime. netlistsvg stays installed for one release
+        # so users opting into PULSIM_SCHEMATIC_BACKEND=netlistsvg still
+        # work; the package will be dropped once the deprecation window
+        # closes.
         run: npm install
 
       - name: Configure CMake + build pulsim

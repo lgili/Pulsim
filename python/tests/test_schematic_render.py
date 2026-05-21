@@ -189,8 +189,12 @@ def test_schematic_top_level_is_lazy_importable() -> None:
 import os  # noqa: E402 — module-level guard kept next to its skipif
 
 _NETLISTSVG_DEFAULT = pytest.mark.skipif(
-    os.environ.get("PULSIM_SCHEMATIC_BACKEND", "netlistsvg").lower() != "netlistsvg",
-    reason="Analog-skin symbol tests apply only to the netlistsvg backend.",
+    # add-python-schematic-renderer Phase 5: the unset default flipped
+    # from netlistsvg → python_native. These tests assert netlistsvg-only
+    # markup (s:type attribute survives into the output); they only run
+    # when the user explicitly selects the legacy backend.
+    os.environ.get("PULSIM_SCHEMATIC_BACKEND", "python_native").lower() != "netlistsvg",
+    reason="Analog-skin `s:type` markup tests apply only to the netlistsvg backend.",
 )
 
 
