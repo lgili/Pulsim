@@ -38,6 +38,7 @@
 #include "pulsim/v2/solver/run_transient.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
+#include "pulsim/v2/yaml/loader.hpp"
 
 namespace py = pybind11;
 
@@ -319,6 +320,32 @@ void init_module(py::module_& m) {
     // overload for V0 — Python users wanting nonlinear
     // refresh can use the AD-stack via direct C++ at this
     // stage (V1 add-on).
+    // ---- YAML loader (Layer 8) -------------------------------------------
+    py::class_<yaml::LoadedCircuit>(m, "LoadedCircuit",
+        "Result of `load_yaml_*`: a populated "
+        "`CircuitBuilder` + `SimulationOptions`.")
+        // `builder` is move-only (Graph has deleted copy)
+        // so we expose by-reference. The LoadedCircuit
+        // OWNS the builder; this view stays valid as
+        // long as the LoadedCircuit lives.
+        .def_property_readonly("builder",
+            [](yaml::LoadedCircuit& self)
+                -> builder::CircuitBuilder& {
+                return self.builder;
+            },
+            py::return_value_policy::reference_internal)
+        .def_readwrite("options",
+                        &yaml::LoadedCircuit::options);
+
+    m.def("load_yaml_string",
+        &yaml::load_string, py::arg("yaml_text"),
+        "Parse a YAML circuit description from an in-memory "
+        "string. Returns LoadedCircuit(builder, options).");
+    m.def("load_yaml_file",
+        &yaml::load_file, py::arg("path"),
+        "Parse a YAML circuit description from disk. "
+        "Returns LoadedCircuit(builder, options).");
+
     m.def("run_transient",
         [](const pwl::PwlStateSpaceCache& cache,
            const topology::Graph& graph,

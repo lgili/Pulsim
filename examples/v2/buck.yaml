@@ -1,0 +1,58 @@
+# Pulsim v2 example: synchronous buck converter
+# ---
+# 24 V → buck → ~12 V at 5 Ω load.
+#
+# Topology:
+#   Vin → Q1 (high-side MOSFET w/ body diode) → sw
+#   sw  → D1 (low-side freewheeling diode) → gnd
+#   sw  → L → vout → Cout || R_load → gnd
+#
+# The user supplies a `switch_fn(t)` at runtime that drives
+# Q1's gate (e.g. a 100 kHz PWM with 50% duty for ~12 V out).
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: vin
+      to: gnd
+      V: 24.0
+
+    - type: mosfet_with_body_diode
+      name: Q1
+      drain: vin
+      source: sw
+      R_on: 1.0e-3
+      R_off: 1.0e9
+      V_F: 0.7
+
+    - type: diode
+      name: D_FW
+      anode: gnd
+      cathode: sw
+      g_on: 1.0e3
+      g_off: 1.0e-9
+      V_th: 0.7
+
+    - type: inductor
+      name: L1
+      from: sw
+      to: vout
+      L: 100.0e-6
+
+    - type: capacitor
+      name: Cout
+      from: vout
+      to: gnd
+      C: 47.0e-6
+
+    - type: resistor
+      name: R_L
+      from: vout
+      to: gnd
+      R: 5.0
+
+simulation:
+  t_start: 0.0
+  t_end: 5.0e-3
+  dt: 1.0e-7

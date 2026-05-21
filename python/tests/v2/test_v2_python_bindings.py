@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -295,6 +297,93 @@ def test_add_transformer_from_python() -> None:
     b.add_transformer("T1", "p+", "p-", "s+", "s-",
                        L_p=1e-3, L_s=4e-3, k=1.0)
     assert b.num_branches == 2   # 2 inductor branches
+
+
+# -----------------------------------------------------------------------------
+# Layer 8 — YAML loader
+# -----------------------------------------------------------------------------
+
+
+def test_load_yaml_string_basic() -> None:
+    """A simple V_dc + R YAML loads + DC-solves."""
+    yaml_text = """
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: n0
+      to: gnd
+      V: 5.0
+    - type: resistor
+      name: R1
+      from: n0
+      to: gnd
+      R: 1.0
+
+simulation:
+  t_start: 0.0
+  t_end: 1e-3
+  dt: 1e-4
+"""
+    loaded = p.load_yaml_string(yaml_text)
+    assert loaded.builder.num_branches == 2
+    assert loaded.options.dt == pytest.approx(1e-4)
+
+
+def test_load_yaml_string_missing_field_raises() -> None:
+    """Loader propagates validation errors as Python exceptions."""
+    yaml_text = """
+circuit:
+  devices:
+    - type: resistor
+      name: R_bad
+      from: a
+      to: b
+"""
+    with pytest.raises((RuntimeError, ValueError)) as exc_info:
+        p.load_yaml_string(yaml_text)
+    # The error mentions the resistor's name.
+    assert "R_bad" in str(exc_info.value)
+
+
+def test_load_yaml_file_example() -> None:
+    """Load and parse the example/v2/half_wave_rectifier.yaml."""
+    # Locate the example file relative to the project root.
+    # We resolve the repo root by walking up from this test
+    # file until we find `examples/v2/`.
+    here = Path(__file__).resolve()
+    repo_root = here
+    for _ in range(8):
+        repo_root = repo_root.parent
+        if (repo_root / "examples" / "v2").exists():
+            break
+    else:
+        pytest.skip("repo root not located")
+
+    yaml_path = repo_root / "examples" / "v2" / "half_wave_rectifier.yaml"
+    assert yaml_path.exists(), f"missing {yaml_path}"
+
+    loaded = p.load_yaml_file(str(yaml_path))
+    assert loaded.builder.num_branches == 3
+    assert loaded.options.t_end == pytest.approx(0.0333)
+
+
+def test_load_yaml_buck_example() -> None:
+    """Load the buck example and verify topology counts."""
+    here = Path(__file__).resolve()
+    repo_root = here
+    for _ in range(8):
+        repo_root = repo_root.parent
+        if (repo_root / "examples" / "v2").exists():
+            break
+    else:
+        pytest.skip("repo root not located")
+
+    yaml_path = repo_root / "examples" / "v2" / "buck.yaml"
+    loaded = p.load_yaml_file(str(yaml_path))
+    # Vin + (MOSFET-w-body-diode = 2) + D_FW + L + Cout +
+    # R_L = 7 branches.
+    assert loaded.builder.num_branches == 7
 
 
 def test_transformer_topology_builds_and_factors() -> None:

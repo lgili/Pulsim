@@ -1,0 +1,71 @@
+# Pulsim v2 example: isolated flyback converter
+# ---
+# 48 V → flyback → 12 V at 5 Ω load.
+#
+# Topology:
+#   Vin → primary (T1: L_p=100µH, L_s=25µH, k=0.95)
+#   primary's "sw" end → Q1 (low-side MOSFET) → gnd
+#   secondary's "sec_anode" → D1 → vout
+#   vout || Cout || R_L → secondary's ground reference
+#
+# The user supplies switch_fn(t) for Q1 (typical: 100 kHz
+# PWM with 50% duty cycle for a 24V output target).
+
+circuit:
+  devices:
+    - type: voltage_source
+      name: Vin
+      from: vin
+      to: gnd
+      V: 48.0
+
+    - type: mosfet
+      name: Q1
+      drain: sw
+      source: gnd
+      R_on: 1.0e-2
+      R_off: 1.0e9
+
+    - type: transformer
+      name: T1
+      p_from: vin
+      p_to: sw
+      s_from: sec_anode
+      s_to: sec_neg
+      L_p: 100.0e-6
+      L_s: 25.0e-6
+      k: 0.95
+
+    - type: diode
+      name: D1
+      anode: sec_anode
+      cathode: vout
+      g_on: 1.0e3
+      g_off: 1.0e-9
+      V_th: 0.7
+
+    - type: capacitor
+      name: Cout
+      from: vout
+      to: sec_neg
+      C: 100.0e-6
+
+    - type: resistor
+      name: R_L
+      from: vout
+      to: sec_neg
+      R: 5.0
+
+    # Tie secondary reference to primary ground via small
+    # ohmic link (optical-isolation in a real circuit; for
+    # the simulator this just provides a return path).
+    - type: resistor
+      name: Rgnd
+      from: sec_neg
+      to: gnd
+      R: 1.0e-6
+
+simulation:
+  t_start: 0.0
+  t_end: 2.0e-4
+  dt: 1.0e-8

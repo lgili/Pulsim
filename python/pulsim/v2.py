@@ -43,6 +43,10 @@ from ._pulsim.v2_kernel import (  # type: ignore[import-not-found]
     run_transient,
     # Smooth-blend nonlinear diode params (Layer 4 V3).
     IdealDiodeParams,
+    # YAML loader (Layer 8).
+    LoadedCircuit,
+    load_yaml_string,
+    load_yaml_file,
 )
 
 __all__ = [
@@ -56,6 +60,9 @@ __all__ = [
     "CommutationEvent",
     "run_transient",
     "IdealDiodeParams",
+    "LoadedCircuit",
+    "load_yaml_string",
+    "load_yaml_file",
 ]
 
 __version__ = "0.1.0"

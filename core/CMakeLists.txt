@@ -468,6 +468,26 @@ if(PULSIM_BUILD_TESTS)
     catch_discover_tests(pulsim_v2_builder_tests)
 
     # =============================================================================
+    # pulsim_v2_yaml_tests — pulsim-v2-yaml-parser (Layer 8)
+    # =============================================================================
+    # YAML circuit loader: parses a YAML file into a
+    # CircuitBuilder + SimulationOptions.
+    add_executable(pulsim_v2_yaml_tests
+        tests/v2/yaml/test_main.cpp
+        tests/v2/yaml/test_yaml_loader.cpp
+    )
+    target_link_libraries(pulsim_v2_yaml_tests
+        PRIVATE
+            pulsim::v2
+            yaml-cpp::yaml-cpp
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_v2_yaml_tests)
+    endif()
+    catch_discover_tests(pulsim_v2_yaml_tests)
+
+    # =============================================================================
     # pulsim_v2_layer4_v2_tests — pulsim-v2-dc-operating-point
     # =============================================================================
     # DC operating-point computation + HistoryState/DiodeEventState
