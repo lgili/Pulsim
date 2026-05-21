@@ -1,0 +1,129 @@
+# Pulsim v2 example: 3-phase 6-pulse diode bridge rectifier
+# ---
+# 3 sinusoidal phase sources (V11 SineVoltageSource) feed a
+# full-wave 3-φ diode bridge → C-R DC output.
+#
+# Each phase: V_peak = 100 V at 50 Hz, 120° apart:
+#   V_a(t) = 100·sin(ωt)
+#   V_b(t) = 100·sin(ωt − 2π/3)
+#   V_c(t) = 100·sin(ωt − 4π/3)
+#
+# Topology:
+#                ┌── D1 ──┬─ vdc_p ─ R_load ─┐
+#       a ───────┤        │                   │
+#                └── D4 ──┤                   │
+#                ┌── D3 ──┘   vdc_p ─ C_out ─ ┤
+#       b ───────┤        │                   │
+#                └── D6 ──┤                   │
+#                ┌── D5 ──┘                   │
+#       c ───────┤                            │
+#                └── D2 ─── vdc_n ────────────┘
+#
+#   Upper bridge diodes (D1, D3, D5): anode = phase,
+#                                      cathode = vdc_p
+#   Lower bridge diodes (D4, D6, D2): anode = vdc_n,
+#                                      cathode = phase
+#
+# Expected steady-state V_dc on the load:
+#   V_dc = (3·√6/π) · V_phase_peak ≈ 2.34 · 100 ≈ 234 V
+#   minus ~1.4 V (two diode forward drops on the conducting
+#   pair at any time) → ~232 V real.
+#
+# Ripple frequency: 6·f_line = 300 Hz.
+
+circuit:
+  devices:
+    # ============ 3 phase sources (Y-connected to gnd) ============
+    - type: sine_voltage_source
+      name: V_a
+      from: a
+      to: gnd
+      v_dc: 0.0
+      v_amplitude: 100.0
+      frequency: 50.0
+      phase: 0.0
+    - type: sine_voltage_source
+      name: V_b
+      from: b
+      to: gnd
+      v_dc: 0.0
+      v_amplitude: 100.0
+      frequency: 50.0
+      phase: -2.0943951023931953   # -2π/3 rad
+    - type: sine_voltage_source
+      name: V_c
+      from: c
+      to: gnd
+      v_dc: 0.0
+      v_amplitude: 100.0
+      frequency: 50.0
+      phase: -4.1887902047863905   # -4π/3 rad
+
+    # ============ 6-diode bridge rectifier ============
+    # Upper bridge: phase → vdc_p
+    - type: diode
+      name: D1
+      anode: a
+      cathode: vdc_p
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D3
+      anode: b
+      cathode: vdc_p
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D5
+      anode: c
+      cathode: vdc_p
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    # Lower bridge: vdc_n → phase
+    - type: diode
+      name: D4
+      anode: vdc_n
+      cathode: a
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D6
+      anode: vdc_n
+      cathode: b
+      g_on: 1.0e3
+      g_off: 1.0e-9
+    - type: diode
+      name: D2
+      anode: vdc_n
+      cathode: c
+      g_on: 1.0e3
+      g_off: 1.0e-9
+
+    # ============ DC bus filter + load ============
+    - type: capacitor
+      name: C_out
+      from: vdc_p
+      to: vdc_n
+      C: 1.0e-3      # 1000 µF
+    - type: resistor
+      name: R_load
+      from: vdc_p
+      to: vdc_n
+      R: 100.0       # 100 Ω → ~2.3 A DC load
+
+    # vdc_n needs a high-impedance path to gnd for KCL
+    # closure, but it MUST be able to swing to ~−V_phase_peak
+    # when the lower bridge conducts. A LOW R_ref would short
+    # vdc_n to gnd and prevent the bridge from rectifying;
+    # use a large R_ref instead.
+    - type: resistor
+      name: R_ref
+      from: vdc_n
+      to: gnd
+      R: 1.0e6
+
+simulation:
+  t_start: 0.0
+  t_end:   0.80        # 800 ms = 40 fundamental cycles (8 τ_RC)
+  dt:      2.0e-5      # 20 µs → 1000 samples / 50 Hz cycle

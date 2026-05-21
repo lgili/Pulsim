@@ -528,6 +528,7 @@ if(PULSIM_BUILD_TESTS)
         tests/v2/showcases/test_flyback_open_loop.cpp           # V5
         tests/v2/showcases/test_three_phase_inverter_open_loop.cpp  # V8
         tests/v2/showcases/test_phase_shift_full_bridge_open_loop.cpp  # V9
+        tests/v2/showcases/test_three_phase_diode_rectifier_open_loop.cpp  # V11
     )
     target_link_libraries(pulsim_v2_showcase_tests
         PRIVATE
