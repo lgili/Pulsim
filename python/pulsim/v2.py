@@ -162,6 +162,14 @@ from .v2_snubber import (
     predict_overshoot,
     recommend_snubber,
 )
+from .v2_thermal import (
+    FosterStage,
+    fit_foster_from_zth,
+    predict_zth_curve,
+    compute_temperature,
+    add_foster_network,
+    make_thermal_observer,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -263,6 +271,13 @@ __all__ = [
     "SnubberRecommendation",
     "predict_overshoot",
     "recommend_snubber",
+    # Thermal Foster networks + electro-thermal co-sim (Phase C.1).
+    "FosterStage",
+    "fit_foster_from_zth",
+    "predict_zth_curve",
+    "compute_temperature",
+    "add_foster_network",
+    "make_thermal_observer",
 ]
 
 

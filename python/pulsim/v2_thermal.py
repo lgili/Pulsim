@@ -1,0 +1,347 @@
+"""Pulsim v2 — thermal Foster networks + electro-thermal co-simulation.
+
+Junction-temperature tracking for power devices, in two flavours:
+
+1. **Post-processing** — given a power-dissipation trace P(t) and a
+   Foster ``Z_th(t)`` model (a sum of exponentials), compute the
+   junction-temperature rise ``ΔT_j(t)`` by direct convolution.
+   Useful when you already have an electrical-only simulation result
+   and want a quick thermal characterisation:
+
+       T_j_trace = p.compute_temperature(times, p_loss_trace, stages,
+                                            T_amb_C=25.0)
+
+2. **Live co-simulation** — embed the Foster network as ordinary
+   v2 R/C devices in the same `CircuitBuilder` as the electrical
+   circuit, and inject the instantaneous power dissipation via a
+   `step_observer` + `b_extra_fn` pair. Junction temperature is
+   then just another node voltage you can read at each step:
+
+       p.add_foster_network(builder, stages,
+                              junction_node="T_j",
+                              ambient_node="T_amb",
+                              T_amb_C=25.0)
+       observer, b_extra = p.make_thermal_observer(
+           builder, mosfet_branch=q1_branch,
+           junction_node="T_j", T_amb_C=25.0)
+
+The Foster RC ladder is the standard SPICE-compatible representation
+of a device's transient thermal impedance ``Z_th(t)``. Each stage
+has a thermal resistance ``R_th_i [K/W]`` and a time constant
+``τ_i = R_th_i · C_th_i [s]``. The corresponding ``Z_th(t)`` is
+
+    Z_th(t) = Σ R_th_i · (1 − exp(−t / τ_i))
+
+For unit conversion convenience this module uses the standard
+"temperature = voltage" / "power = current" analogy:
+  * R_th [K/W] → resistance [Ω]
+  * C_th [J/K] → capacitance [F]
+  * T [°C]   → node voltage [V]
+  * P [W]    → injected current [A]
+
+…so the existing v2 transient solver runs the thermal network with
+no special handling.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+import numpy as np
+
+
+__all__ = [
+    "FosterStage",
+    "fit_foster_from_zth",
+    "predict_zth_curve",
+    "compute_temperature",
+    "add_foster_network",
+    "make_thermal_observer",
+]
+
+
+# =============================================================================
+# Foster-stage dataclass
+# =============================================================================
+
+@dataclass
+class FosterStage:
+    """One Foster pole: a parallel R_th // C_th block.
+
+    Time constant ``τ = R_th · C_th`` is the more intuitive parameter
+    when fitting from a Z_th(t) datasheet curve, so both are stored.
+    """
+    R_th_K_per_W: float       # thermal resistance, K/W
+    tau_s: float              # time constant, s
+
+    @property
+    def C_th_J_per_K(self) -> float:
+        return self.tau_s / max(self.R_th_K_per_W, 1e-30)
+
+
+# =============================================================================
+# Foster fitting + prediction
+# =============================================================================
+
+def predict_zth_curve(t: np.ndarray,
+                          stages) -> np.ndarray:
+    """Predict ``Z_th(t)`` from a list of FosterStage.
+
+    Sum-of-exponentials:
+        Z_th(t) = Σ R_th_i · (1 − exp(−t / τ_i))
+    """
+    t = np.asarray(t, dtype=float)
+    z = np.zeros_like(t)
+    for s in stages:
+        z += s.R_th_K_per_W * (1.0 - np.exp(-t / s.tau_s))
+    return z
+
+
+def fit_foster_from_zth(t_samples,
+                            zth_samples,
+                            n_stages: int = 3,
+                            tau_init=None,
+                            n_iter: int = 30,
+                            ) -> list:
+    """Fit a Foster network to a measured / datasheet Z_th(t) curve.
+
+    Uses alternating optimization:
+      1. Fix τ, solve for R via linear least-squares (the inner
+         problem is linear once τ is known).
+      2. For each pole, take a small log-step in τ that reduces the
+         squared residual (numerical gradient).
+      3. Repeat `n_iter` times.
+
+    This gives a much better fit than a single lstsq with fixed τ —
+    typically converges to ≤ 1 % max error after ~20 iterations on
+    smooth datasheet curves.
+
+    Parameters
+    ----------
+    t_samples
+        Times (s) of the Z_th measurements. Must be strictly positive.
+    zth_samples
+        Z_th values (K/W) at those times.
+    n_stages
+        Number of Foster stages.
+    tau_init
+        Optional list of initial time constants. Defaults to log-
+        spaced from `t_samples.min()` to `t_samples.max()`.
+    n_iter
+        Number of alternating fit iterations. Set to 0 to get the
+        single-shot lstsq result (fast but less accurate).
+
+    Returns
+    -------
+    list[FosterStage]
+        The fitted Foster ladder.
+    """
+    t = np.asarray(t_samples, dtype=float)
+    z = np.asarray(zth_samples, dtype=float)
+    if t.shape != z.shape:
+        raise ValueError(
+            "t_samples and zth_samples must have the same shape")
+
+    if tau_init is None:
+        tau_init = np.geomspace(t.min(), t.max(), n_stages)
+    taus = np.asarray(tau_init, dtype=float)
+    if len(taus) != n_stages:
+        raise ValueError("tau_init must have length n_stages")
+
+    def solve_R_for_tau(taus_arr):
+        A = 1.0 - np.exp(-np.outer(t, 1.0 / taus_arr))
+        R, *_ = np.linalg.lstsq(A, z, rcond=None)
+        return np.maximum(R, 0.0)
+
+    def residual(taus_arr, R_arr):
+        z_model = (1.0 - np.exp(-np.outer(t, 1.0 / taus_arr))) @ R_arr
+        return float(np.sum((z - z_model)**2))
+
+    R_th = solve_R_for_tau(taus)
+    err = residual(taus, R_th)
+
+    # Coordinate descent on log(τ_k) — perturb each pole by ±step in
+    # log-space and keep whichever reduces the residual.
+    step = 0.3  # log-space step (≈ ×1.35)
+    for _ in range(n_iter):
+        improved = False
+        for k in range(n_stages):
+            for sign in (+1.0, -1.0):
+                taus_try = taus.copy()
+                taus_try[k] *= math.exp(sign * step)
+                R_try = solve_R_for_tau(taus_try)
+                err_try = residual(taus_try, R_try)
+                if err_try < err * 0.999:
+                    taus = taus_try
+                    R_th = R_try
+                    err = err_try
+                    improved = True
+                    break
+        if not improved:
+            step *= 0.5
+            if step < 1e-4:
+                break
+
+    return [FosterStage(R_th_K_per_W=float(r), tau_s=float(tau))
+              for r, tau in zip(R_th, taus)]
+
+
+# =============================================================================
+# Post-processing convolution
+# =============================================================================
+
+def compute_temperature(t: np.ndarray,
+                            p_loss: np.ndarray,
+                            stages,
+                            T_amb_C: float = 25.0) -> np.ndarray:
+    """Convolve P(t) with Z_th(t) to get ΔT_j(t), then add T_amb.
+
+    Uses the standard Foster decomposition: for each pole
+    (R_th, τ), the per-step update is the discrete-time IIR
+    ``T_i[n+1] = α_i · T_i[n] + R_th · (1 − α_i) · P[n+1]`` with
+    α_i = exp(−dt / τ_i), then T_j = Σ T_i. Assumes a uniform dt
+    inferred from `t` — for non-uniform sampling, interpolate first.
+    """
+    t = np.asarray(t, dtype=float)
+    p = np.asarray(p_loss, dtype=float)
+    if t.shape != p.shape:
+        raise ValueError("t and p_loss must have the same shape")
+    if len(t) < 2:
+        raise ValueError("need at least 2 samples")
+    dt = float(t[1] - t[0])
+    # Per-pole IIR state.
+    state = np.zeros(len(stages))
+    T_out = np.zeros_like(p)
+    for n in range(len(p)):
+        delta = 0.0
+        for i, s in enumerate(stages):
+            alpha = math.exp(-dt / s.tau_s)
+            state[i] = alpha * state[i] + \
+                          s.R_th_K_per_W * (1.0 - alpha) * p[n]
+            delta += state[i]
+        T_out[n] = T_amb_C + delta
+    return T_out
+
+
+# =============================================================================
+# Foster network as an embedded sub-circuit
+# =============================================================================
+
+def add_foster_network(builder,
+                          stages,
+                          *,
+                          junction_node: str = "T_j",
+                          ambient_node: str = "T_amb",
+                          T_amb_C: float = 25.0,
+                          name_prefix: str = "Th") -> None:
+    """Embed a Foster RC ladder into an existing CircuitBuilder.
+
+    Adds, in order:
+      * A DC voltage source from `ambient_node` to gnd at value
+        `T_amb_C` (so node voltage = absolute temperature in °C).
+      * For each Foster stage, a parallel R_th // C_th block in
+        cascade between `ambient_node` and `junction_node`. Each
+        stage's intermediate node is named
+        ``"{name_prefix}_stage_{k}"``.
+
+    Power injection: at runtime, push a current of magnitude P_loss
+    [A as W] into `junction_node` via `b_extra_fn` (see
+    :func:`make_thermal_observer`).
+
+    Notes
+    -----
+    The Foster ladder is *physically* a series of R-parallel-C
+    blocks between the heat source and ambient. The implementation
+    here uses voltage-source units (V ↔ °C) and current-source units
+    (A ↔ W), which means R values are in K/W and C values in J/K —
+    numerically identical to ohms and farads from the solver's POV.
+    """
+    n = len(stages)
+    if n == 0:
+        raise ValueError("at least one Foster stage required")
+    # Ambient reference.
+    builder.add_voltage_source(f"{name_prefix}_amb",
+                                  ambient_node, "gnd", float(T_amb_C))
+    # Build the cascade: ambient → stage_0 → stage_1 → … → junction.
+    # Each stage is R || C between consecutive nodes.
+    prev = ambient_node
+    for k, s in enumerate(stages):
+        if k == n - 1:
+            curr = junction_node
+        else:
+            curr = f"{name_prefix}_stage_{k}"
+        builder.add_resistor(f"{name_prefix}_R{k}",
+                                prev, curr,
+                                float(s.R_th_K_per_W))
+        builder.add_capacitor(f"{name_prefix}_C{k}",
+                                  curr, ambient_node,
+                                  float(s.C_th_J_per_K))
+        prev = curr
+
+
+def make_thermal_observer(builder,
+                              *,
+                              junction_node: str,
+                              power_fn,
+                              ambient_node: str = "T_amb",
+                              T_amb_C: float = 25.0):
+    """Return a ``(step_observer, b_extra_fn)`` pair that drives the
+    embedded thermal network from runtime power dissipation.
+
+    Parameters
+    ----------
+    builder
+        The CircuitBuilder that ALREADY has the Foster network added
+        via :func:`add_foster_network`.
+    junction_node
+        Name of the junction node (same name passed to
+        :func:`add_foster_network`).
+    power_fn
+        Callable ``power_fn(t, x) -> P_W`` returning the
+        instantaneous power dissipation. Typical implementation:
+        ``lambda t, x: (x[i_idx]**2) * R_DS_ON_value`` for a MOSFET.
+    ambient_node
+        Same name passed to :func:`add_foster_network`.
+    T_amb_C
+        Same value passed to :func:`add_foster_network`. Used to
+        compute T_j = T_amb_C + ΔT.
+
+    Returns
+    -------
+    (step_observer, b_extra_fn)
+        Both should be passed to ``simulate(...)``. The observer
+        captures the latest computed P_loss in a closure; the
+        b_extra_fn reads that closure to inject the current at each
+        step.
+    """
+    state_size = builder.pool.state_size(builder.graph)
+    j_idx = builder.node_id_of(junction_node)
+
+    latest = {"P": 0.0}
+
+    def step_observer(t, x):
+        latest["P"] = float(power_fn(t, x))
+
+    def b_extra_fn(t):
+        out = [0.0] * state_size
+        # Inject the current at the junction node — current source
+        # of value P (W) entering the node from outside the network.
+        # Convention: positive entry in `b` adds to the right-hand
+        # side of node-`i`'s KCL row; for a current source flowing
+        # INTO node i we add +I to b[i]. The kernel's residual is
+        # J·x + b = 0, so adding +I to b[i] means node i sees an
+        # external current of −I being injected; we want +I (power
+        # heats the junction → raises its voltage), so set b[i] = −I.
+        out[j_idx] = -latest["P"]
+        return out
+
+    def read_T_j(x) -> float:
+        """Convenience: read T_j (°C) from a state vector."""
+        return float(x[j_idx])
+
+    # Attach the reader as an attribute on the observer for ergonomic
+    # access during post-processing.
+    step_observer.read_T_j = read_T_j  # type: ignore[attr-defined]
+
+    return step_observer, b_extra_fn
