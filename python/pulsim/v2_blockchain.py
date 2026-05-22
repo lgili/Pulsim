@@ -260,22 +260,47 @@ class MixedDomainBlockChain:
         return switch_fn
 
     def make_multi_pwm_switch_fn(self, channels,
-                                       *, num_switches: int):
-        """Same as `make_pwm_switch_fn` but for N channels driving N
-        switches. `channels` is a sequence of channel names mapped to
-        switch indices 0..N-1.
+                                       *, num_switches: int,
+                                       switch_indices=None):
+        """Build a `switch_fn(t)` that drives multiple switches from
+        the chain's channels.
 
-        Returns a switch_fn that sets bit i high iff channels[i] > 0.5.
+        Parameters
+        ----------
+        channels
+            Sequence of channel names whose values (>0.5 = ON) drive
+            the corresponding switch bit.
+        num_switches
+            Total switch count in the circuit (from
+            ``builder.graph.num_switches``).
+        switch_indices
+            Optional sequence of integer switch indices, parallel to
+            ``channels``. If omitted, channels[i] drives bit i (the
+            default). When the circuit contains PWL diodes (each
+            counted as a switch with internal event tracking), pass
+            explicit indices to avoid setting diode bits.
+
+        Returns
+        -------
+        Callable[[float], SwitchStateMask]
+            A switch_fn suitable for ``simulate(switch_fn=...)``.
         """
         from . import v2 as _v2_mod
         chan_list = list(channels)
+        if switch_indices is None:
+            idx_list = list(range(len(chan_list)))
+        else:
+            idx_list = [int(i) for i in switch_indices]
+            if len(idx_list) != len(chan_list):
+                raise ValueError(
+                    "switch_indices must be parallel to channels")
 
         def switch_fn(t):  # noqa: ARG001 — t is part of the switch_fn contract
             del t
             m = _v2_mod.SwitchStateMask(num_switches)
-            for i, ch in enumerate(chan_list):
+            for ch, idx in zip(chan_list, idx_list):
                 if self.channels.get(ch, 0.0) > 0.5:
-                    m.set(i, True)
+                    m.set(idx, True)
             return m
 
         return switch_fn

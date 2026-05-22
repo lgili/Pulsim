@@ -50,46 +50,71 @@ V_DC      = 48.0
 F_PWM     = 20e3
 T_PWM     = 1.0 / F_PWM
 DT        = 5e-7
-T_END     = 30e-3
+T_END     = 80e-3            # ~4 electrical cycles at 50 Hz
 R_PHASE   = 0.5
 L_PHASE   = 200e-6
-F_ELEC    = 50.0           # electrical frequency (rotor at 50 Hz electrical)
+F_ELEC    = 50.0
 W_ELEC    = 2 * math.pi * F_ELEC
-I_Q_REF   = 5.0            # target q-axis current (~ torque command)
+I_Q_REF   = 5.0
 
 # PI current-loop tuning (per-axis):
-#   plant pole: ω_p = R/L = 2500 rad/s
-#   target crossover: ω_c = 1000 rad/s (well below switching)
-#   PI zero at the plant pole cancels it:
-#     Kp = L · ω_c = 0.2  (since L = 200 µH, ω_c = 1000)
-#     Ki = R · ω_c = 500
+#   plant: 1/(R + sL)  →  pole at s = -R/L = -2500 rad/s
+#   target closed-loop bandwidth: ω_c = 5000 rad/s (800 Hz)
+#   PI zero at the plant pole cancels it (Kp/Ki = L/R)
+#     Kp = L · ω_c = 1.0
+#     Ki = R · ω_c = 2500
 KP_I  = 0.2
 KI_I  = 500.0
 
 
 def build_plant() -> p.CircuitBuilder:
-    """3-phase RL inverter — DC link + 3 half-bridges + RL load.
+    """3-phase 2-level VSI driving a Y-connected RL motor model.
 
-    Simplest practical layout:
-      V_DC ── HS_a ── leg_a ── L_a ── R_a ──┐
-                                              ├── neutral (gnd)
-      V_DC ── HS_b ── leg_b ── L_b ── R_b ──┤
-                                              │
-      V_DC ── HS_c ── leg_c ── L_c ── R_c ──┘
-      (LS switches not modelled — assume idealised half-bridge)
+    Per phase: full half-bridge with HS + LS + body diodes on each.
+    The three RL phases share a FLOATING star-point ('neutral') — NOT
+    tied to gnd. This is the standard motor convention: only the line-
+    to-line / dq differences contain energy. With neutral floating,
+    the common-mode V_DC/2 bias on each leg cancels out and the dq
+    controller sees only the desired sinusoidal differential voltages.
+
+         V_DC ──┬─[HS_x ║ D_HS_x]── leg_x ──┐
+                │                              │
+                │                              L_x
+                │                              │
+                │                              R_x
+                │                              │
+                │                            neutral (floating)
+                │                              │
+         gnd ──[LS_x ║ D_LS_x]── leg_x ───────┘
+
+    Switch indices 0..5 follow add-order: HS_a, LS_a, HS_b, LS_b,
+    HS_c, LS_c. A small leakage R_leak from neutral to gnd is added
+    to avoid a singular MNA system (pure floating neutral leaves
+    the neutral row rank-deficient).
     """
     b = p.CircuitBuilder()
     b.add_voltage_source("Vdc", "vdc", "gnd", V_DC)
 
-    # 3 high-side switches feeding 3 phase inductors → resistors → neutral
     for phase in ("a", "b", "c"):
-        sw_name = f"HS_{phase}"
         leg_node = f"leg_{phase}"
         l_to_r   = f"r_{phase}_in"
-        b.add_switch(sw_name, "vdc", leg_node,
+        # HS: vdc → leg, body diode anti-parallel from leg → vdc.
+        b.add_switch(f"HS_{phase}", "vdc", leg_node,
                        g_on=1e3, g_off=1e-9)
+        b.add_diode(f"D_HS_{phase}", leg_node, "vdc",
+                      g_on=1e3, g_off=1e-9, V_th=0.7)
+        # LS: leg → gnd, body diode anti-parallel from gnd → leg.
+        b.add_switch(f"LS_{phase}", leg_node, "gnd",
+                       g_on=1e3, g_off=1e-9)
+        b.add_diode(f"D_LS_{phase}", "gnd", leg_node,
+                      g_on=1e3, g_off=1e-9, V_th=0.7)
+        # Phase RL connected to floating neutral.
         b.add_inductor(f"L_{phase}", leg_node, l_to_r, L_PHASE)
-        b.add_resistor(f"R_{phase}", l_to_r, "gnd", R_PHASE)
+        b.add_resistor(f"R_{phase}", l_to_r, "neutral", R_PHASE)
+
+    # Leakage path: 1 MΩ from neutral to gnd — keeps the MNA
+    # matrix non-singular without injecting meaningful current.
+    b.add_resistor("R_leak", "neutral", "gnd", 1.0e6)
 
     return b
 
@@ -114,17 +139,26 @@ def main() -> None:
                 output="theta_elec")
 
     # ---- Measurement chain: i_a/i_b/i_c → Clarke → Park ------------------
-    # We don't have node-level current probes; emulate by measuring the
-    # resistor terminal voltages (V_R = R · I) since V_neutral = 0.
-    # Use the resistor "input" node since one end of R is at gnd.
+    # i_x = (V_{r_x_in} − V_neutral) / R_x. With a floating neutral the
+    # subtraction is essential; using just V_{r_x_in} would include the
+    # common-mode bias from the floating star-point.
+    chain.add("v_n_a_diff", p.Subtract(),
+                inputs=dict(a="r_a_in", b="neutral"),
+                output="v_n_a")
+    chain.add("v_n_b_diff", p.Subtract(),
+                inputs=dict(a="r_b_in", b="neutral"),
+                output="v_n_b")
+    chain.add("v_n_c_diff", p.Subtract(),
+                inputs=dict(a="r_c_in", b="neutral"),
+                output="v_n_c")
     chain.add("i_a", p.Gain(k=1.0/R_PHASE),
-                inputs=dict(x="r_a_in"),
+                inputs=dict(x="channel:v_n_a"),
                 output="i_a")
     chain.add("i_b", p.Gain(k=1.0/R_PHASE),
-                inputs=dict(x="r_b_in"),
+                inputs=dict(x="channel:v_n_b"),
                 output="i_b")
     chain.add("i_c", p.Gain(k=1.0/R_PHASE),
-                inputs=dict(x="r_c_in"),
+                inputs=dict(x="channel:v_n_c"),
                 output="i_c")
     chain.add("clarke", p.ClarkeTransform(),
                 inputs=dict(a="channel:i_a", b="channel:i_b",
@@ -160,24 +194,49 @@ def main() -> None:
                               v_beta="channel:v_beta"),
                 output=("d_a", "d_b", "d_c"))
 
-    # ---- 3 PWM generators ------------------------------------------------
+    # ---- 3 PWM generators (one HS gate per phase; LS is complement) -----
     chain.add("pwm_a", p.PwmGenerator(frequency=F_PWM),
                 inputs=dict(duty="channel:d_a", t="time"),
-                output="gate_a")
-    chain.add("pwm_b", p.PwmGenerator(frequency=F_PWM, phase=1/3),
+                output="gate_hs_a")
+    chain.add("pwm_b", p.PwmGenerator(frequency=F_PWM),
                 inputs=dict(duty="channel:d_b", t="time"),
-                output="gate_b")
-    chain.add("pwm_c", p.PwmGenerator(frequency=F_PWM, phase=2/3),
+                output="gate_hs_b")
+    chain.add("pwm_c", p.PwmGenerator(frequency=F_PWM),
                 inputs=dict(duty="channel:d_c", t="time"),
-                output="gate_c")
+                output="gate_hs_c")
+
+    # Complementary LS gates (no dead-time for simplicity — body diodes
+    # handle any shoot-through gracefully).
+    class Complement:
+        def reset(self): pass
+        def update(self, x): return 1.0 - x
+    chain.add("ls_a", Complement(),
+                inputs=dict(x="channel:gate_hs_a"),
+                output="gate_ls_a")
+    chain.add("ls_b", Complement(),
+                inputs=dict(x="channel:gate_hs_b"),
+                output="gate_ls_b")
+    chain.add("ls_c", Complement(),
+                inputs=dict(x="channel:gate_hs_c"),
+                output="gate_ls_c")
 
     # -------------------------------------------------------------------------
     # Wire to simulate()
     # -------------------------------------------------------------------------
     observe   = chain.make_step_observer(builder, dt=DT)
+    # Switch ordering in the builder (each phase adds HS, D_HS, LS,
+    # D_LS in that order — 4 switches per phase, 12 total):
+    #   0  HS_a    1  D_HS_a   2  LS_a    3  D_LS_a
+    #   4  HS_b    5  D_HS_b   6  LS_b    7  D_LS_b
+    #   8  HS_c    9  D_HS_c  10  LS_c   11  D_LS_c
+    # The chain drives only the transistor bits; the body-diode bits
+    # are managed by the kernel's event tracker.
     switch_fn = chain.make_multi_pwm_switch_fn(
-        ["gate_a", "gate_b", "gate_c"],
+        ["gate_hs_a", "gate_ls_a",
+          "gate_hs_b", "gate_ls_b",
+          "gate_hs_c", "gate_ls_c"],
         num_switches=num_switches,
+        switch_indices=[0, 2, 4, 6, 8, 10],
     )
 
     print(f"  FOC motor drive — closed-loop dq current control:")
@@ -200,10 +259,12 @@ def main() -> None:
     ra_idx = builder.node_id_of("r_a_in")
     rb_idx = builder.node_id_of("r_b_in")
     rc_idx = builder.node_id_of("r_c_in")
+    n_idx  = builder.node_id_of("neutral")
     states = np.asarray(res.states)
-    i_a = states[:, ra_idx] / R_PHASE
-    i_b = states[:, rb_idx] / R_PHASE
-    i_c = states[:, rc_idx] / R_PHASE
+    v_n = states[:, n_idx]
+    i_a = (states[:, ra_idx] - v_n) / R_PHASE
+    i_b = (states[:, rb_idx] - v_n) / R_PHASE
+    i_c = (states[:, rc_idx] - v_n) / R_PHASE
 
     # Compute i_d, i_q from the recorded waveforms.
     theta_arr = W_ELEC * times
