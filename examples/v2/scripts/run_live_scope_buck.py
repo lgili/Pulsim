@@ -62,35 +62,38 @@ def main() -> None:
     chain.add("pwm", p.PwmGenerator(frequency=F_PWM),
                 inputs=dict(duty="channel:duty", t="time"),
                 output="gate")
+    # IMPORTANT: build the kernel-side chain FIRST so the native
+    # switch_fn below can reference the underlying C++ chain.
     chain_observer = chain.make_step_observer(b, dt=DT,
                                                     use_kernel=True)
+    # ``use_kernel=True`` runs the PWM-gate-to-switch dispatch in C++
+    # — no GIL per kernel step. Saves ~20 µs/step for high step rates.
     sw_fn = chain.make_pwm_switch_fn("gate",
                                           num_switches=b.graph.num_switches,
-                                          switch_idx=0)
+                                          switch_idx=0,
+                                          use_kernel=True)
 
-    # Streaming setup. With dt=100 ns, downsample=100 → 1 sample
-    # every 10 µs sent to the GUI (100 kHz visual rate — way more
-    # than the human eye can use). batch_size=50 ⇒ flush every 5 ms
-    # of sim time. Very smooth even at high sim throughput.
-    stream = p.LiveStream(batch_size=50, max_queue=400,
-                              downsample=100)
-
-    # Compose the step_observer: the chain's observer + the stream's.
-    def combined_observer(t, x):
-        chain_observer(t, x)
-        stream.step_observer(t, x)
+    # Native ring-buffer streaming. The kernel writes (t, x) samples
+    # directly into a numpy array shared with Python at the decimated
+    # rate (decimate=100 ⇒ one sample every 10 µs of sim time → 100
+    # kHz visual stream). No Python callback in the kernel hot loop:
+    # the chain runs as C++ (use_kernel=True above) and the ring push
+    # happens in C++ right after. Capacity 1M slots covers 10 s of
+    # visual history.
+    stream = p.NativeLiveStream(capacity=1_000_000, decimate=100)
 
     def run_sim():
-        try:
-            return p.simulate(
-                b, t_end=T_END, dt=DT,
-                switch_fn=sw_fn,
-                step_observer=combined_observer,
-                should_continue=stream.should_continue,
-                max_event_iterations=8,
-            )
-        finally:
-            stream.flush_pending()
+        # Pass the chain observer as step_observer so simulate()
+        # routes through `run_transient_with_chain` AND wires the
+        # native ring buffer into the C++ kernel — zero Python in
+        # the per-step hot path.
+        return p.simulate(
+            b, t_end=T_END, dt=DT,
+            switch_fn=sw_fn,
+            step_observer=chain_observer,
+            live_stream=stream,
+            max_event_iterations=8,
+        )
 
     print(f"  Buck V_in={V_IN}V → V_out target {V_REF}V "
           f"(closed-loop PI)")
@@ -108,7 +111,7 @@ def main() -> None:
     scope = p.LiveScope(b, stream,
                             panels=["Voltage", "Current", "Control"],
                             window_seconds=2.0,
-                            update_hz=30.0,
+                            update_hz=60.0,
                             title="Pulsim — Buck CL live")
     scope.add_node_voltage("vin",  panel="Voltage", color="#4e79a7")
     scope.add_node_voltage("vout", panel="Voltage", color="#f28e2b")
@@ -127,9 +130,11 @@ def main() -> None:
     stream.stop()
     sim_thread.join(timeout=2.0)
     print(f"\n  Done.")
-    print(f"    samples received: {stream.n_steps_received}")
-    print(f"    batches emitted:  {stream.n_batches_emitted}")
-    print(f"    batches dropped:  {stream.n_batches_dropped}")
+    print(f"    samples received: {stream.n_steps_received:,}")
+    print(f"    samples kept    : {stream.n_steps_kept:,} "
+          f"(decimate={stream._decimate})")
+    print(f"    samples dropped : {stream.n_batches_dropped:,} "
+          f"(ring overflow)")
 
 
 if __name__ == "__main__":

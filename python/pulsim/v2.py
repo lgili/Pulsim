@@ -208,7 +208,7 @@ from .v2_spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
-from .v2_stream import LiveStream
+from .v2_stream import LiveStream, NativeLiveStream
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -361,6 +361,7 @@ __all__ = [
     "spice_to_builder",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
+    "NativeLiveStream",
 ]
 
 if _HAS_SCOPE:
@@ -388,6 +389,7 @@ def simulate(
     progress: "bool | int | str" = False,
     initial_state=None,
     should_continue=None,
+    live_stream=None,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -539,6 +541,24 @@ def simulate(
     # wrap. Saves ~10-30 % wall time on chains > 5 blocks.
     cxx_chain = getattr(step_observer, "_cxx_chain", None) \
                   if step_observer is not None else None
+
+    # NativeLiveStream — needs to attach to the kernel's state-vector
+    # size before run; it also requires the chain path so the kernel
+    # has somewhere to insert the ring-push in C++.
+    native_stream_attached = False
+    if live_stream is not None and getattr(
+            live_stream, "is_native", False):
+        state_size = builder.pool.state_size(builder.graph)
+        if not live_stream.attached:
+            live_stream.attach(state_size)
+        native_stream_attached = True
+        if cxx_chain is None:
+            raise ValueError(
+                "simulate(): live_stream is a NativeLiveStream but "
+                "no C++ chain was found on step_observer. Build the "
+                "observer with `chain.make_step_observer(use_kernel="
+                "True)` so the ring can be pushed entirely from C++.")
+
     if cxx_chain is not None:
         from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
         chain_dt = getattr(step_observer, "_chain_dt", dt)
@@ -553,6 +573,8 @@ def simulate(
             kwargs["initial_state"] = initial_state
         if should_continue is not None:
             kwargs["should_continue"] = should_continue
+        if native_stream_attached:
+            kwargs["live_ring"] = live_stream.native_ring
         res = _k.run_transient_with_chain(
             cache, builder.graph, builder.pool, opts,
             chain=cxx_chain, chain_dt=chain_dt,
