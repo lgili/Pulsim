@@ -1004,6 +1004,40 @@ void init_module(py::module_& m) {
             "Use together with make_step_observer when the chain "
             "has motor blocks that inject back-EMF / current "
             "values per step.")
+        .def("record_channel", &BlockChain::record_channel,
+            py::arg("name"), py::arg("reserve_n") = 0,
+            "Register a channel name for per-step logging. After "
+            "simulate() returns, fetch the trace via "
+            "get_channel_history(name).")
+        .def("get_channel_history",
+            [](const BlockChain& self, const std::string& name) {
+                const auto& vec = self.get_channel_history(name);
+                // Return as a 1-D numpy array (copy).
+                py::array_t<Real> arr(vec.size());
+                if (!vec.empty()) {
+                    std::memcpy(arr.mutable_data(), vec.data(),
+                                  vec.size() * sizeof(Real));
+                }
+                return arr;
+            }, py::arg("name"),
+            "Return the recorded history of `name` as a 1-D numpy "
+            "array. Returns an empty array if the channel wasn't "
+            "registered via record_channel().")
+        .def("get_recording_times",
+            [](const BlockChain& self) {
+                const auto& vec = self.get_recording_times();
+                py::array_t<Real> arr(vec.size());
+                if (!vec.empty()) {
+                    std::memcpy(arr.mutable_data(), vec.data(),
+                                  vec.size() * sizeof(Real));
+                }
+                return arr;
+            },
+            "Return the parallel time vector — one entry per "
+            "recorded step. Same length as each channel history.")
+        .def("clear_recordings", &BlockChain::clear_recordings,
+            "Clear all recorded histories (keeps the registered "
+            "names). Call between simulations to get a fresh trace.")
         .def("set_b_extra",
             [](BlockChain& self, Index idx, Real value) {
                 // No public accessor — go through ctx; the user

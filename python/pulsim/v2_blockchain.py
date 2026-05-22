@@ -227,6 +227,13 @@ class MixedDomainBlockChain:
                     self.channels[ch] = v
             else:
                 self.channels[spec.output] = result
+        # Channel recording (Python fallback path).
+        recorded = getattr(self, "_recorded_names", None)
+        if recorded:
+            self._py_recording_times.append(float(t))
+            for name in recorded:
+                self._py_history[name].append(
+                    float(self.channels.get(name, 0.0)))
 
     # -------- callback factories ------------------------------------------
 
@@ -521,6 +528,64 @@ class MixedDomainBlockChain:
         if self._cxx_chain is not None:
             return self._cxx_chain.get_channel(channel)
         return self.channels.get(channel, default)
+
+    # -------- channel logging --------------------------------------------
+
+    def record_channel(self, name: str, reserve_n: int = 0) -> None:
+        """Register a channel name for per-step logging.
+
+        After ``simulate(...)`` returns, fetch the trace via
+        ``get_channel_history(name)``. Works with both C++ and
+        Python backends.
+
+        Parameters
+        ----------
+        name
+            Channel name to record (must be written by some block).
+        reserve_n
+            Hint for the expected number of samples (the number of
+            simulation steps). Pre-allocates internal buffers for
+            efficient appending — defaults to 0 (grow as needed).
+        """
+        # Both paths: queue the name + reservation. The actual recording
+        # happens inside the C++ chain (when active) or via a Python
+        # fallback observer (when not).
+        if not hasattr(self, "_recorded_names"):
+            self._recorded_names = []
+            self._py_history: dict[str, list] = {}
+            self._py_recording_times: list = []
+        if name not in self._recorded_names:
+            self._recorded_names.append(name)
+            self._py_history[name] = []
+        if self._cxx_chain is not None:
+            self._cxx_chain.record_channel(name, int(reserve_n))
+
+    def get_channel_history(self, name: str):
+        """Return the recorded history of `name` as a numpy array.
+        Empty if not registered via :meth:`record_channel`."""
+        import numpy as np
+        if self._cxx_chain is not None:
+            return self._cxx_chain.get_channel_history(name)
+        return np.asarray(getattr(self, "_py_history", {}).get(name, []),
+                            dtype=float)
+
+    def get_recording_times(self):
+        """Return the parallel time vector for the recorded channel
+        histories."""
+        import numpy as np
+        if self._cxx_chain is not None:
+            return self._cxx_chain.get_recording_times()
+        return np.asarray(getattr(self, "_py_recording_times", []),
+                            dtype=float)
+
+    def clear_recordings(self) -> None:
+        """Clear all recorded histories (keeps registered names)."""
+        if self._cxx_chain is not None:
+            self._cxx_chain.clear_recordings()
+        if hasattr(self, "_py_history"):
+            for k in self._py_history:
+                self._py_history[k] = []
+            self._py_recording_times = []
 
 
 # =============================================================================

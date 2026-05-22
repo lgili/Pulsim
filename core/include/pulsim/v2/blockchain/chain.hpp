@@ -168,13 +168,15 @@ public:
         }
     }
 
-    /// Reset all block states, clear channels, clear b_extra map.
+    /// Reset all block states, clear channels, clear b_extra map,
+    /// clear recorded histories.
     void reset() {
         for (auto& r : resets_) {
             r();
         }
         ctx_.channels.clear();
         b_extra_map_.clear();
+        clear_recordings();
     }
 
     /// Evaluate every block in insertion order.
@@ -186,6 +188,52 @@ public:
         for (auto& b : blocks_) {
             b(ctx_);
         }
+        // After all blocks have run, snapshot any recorded channels.
+        if (!recordings_.empty()) {
+            recording_times_.push_back(t);
+            for (auto& [name, history] : recordings_) {
+                auto it = ctx_.channels.find(name);
+                history.push_back(it == ctx_.channels.end() ?
+                                     Real{0} : it->second);
+            }
+        }
+    }
+
+    /// Register a channel for per-step logging. After `simulate(...)`
+    /// returns, fetch the recorded values via `get_channel_history`.
+    /// Idempotent — calling twice for the same name is harmless.
+    /// Pre-allocates the history vector based on `reserve_n` for
+    /// efficient appending (caller can pass `simulate` step count).
+    void record_channel(const std::string& name,
+                            std::size_t reserve_n = 0) {
+        auto& vec = recordings_[name];
+        if (reserve_n > 0 && vec.capacity() < reserve_n) {
+            vec.reserve(reserve_n);
+        }
+    }
+
+    /// Retrieve the recorded history for a channel (empty if the
+    /// channel wasn't registered).
+    [[nodiscard]] const std::vector<Real>& get_channel_history(
+        const std::string& name) const {
+        static const std::vector<Real> empty{};
+        auto it = recordings_.find(name);
+        return (it == recordings_.end()) ? empty : it->second;
+    }
+
+    /// Retrieve the per-recording time vector (parallel to every
+    /// channel history). Empty if no channels were recorded.
+    [[nodiscard]] const std::vector<Real>& get_recording_times() const noexcept {
+        return recording_times_;
+    }
+
+    /// Clear all recorded history (but keep the registered names).
+    /// Call between simulations if you want a fresh trace.
+    void clear_recordings() noexcept {
+        for (auto& [_, vec] : recordings_) {
+            vec.clear();
+        }
+        recording_times_.clear();
     }
 
     /// Return a Vector of length `state_size` carrying the current
@@ -261,6 +309,13 @@ private:
     // updates "its" entry every step; entries not touched keep
     // their last value).
     std::unordered_map<Index, Real> b_extra_map_;
+
+    // Per-step channel logging — registered via record_channel().
+    // Each step() appends the current channel value to the matching
+    // history vector. The parallel `recording_times_` records t at
+    // each snapshot for plotting.
+    std::unordered_map<std::string, std::vector<Real>> recordings_;
+    std::vector<Real> recording_times_;
 };
 
 
