@@ -142,6 +142,11 @@ from .v2_adaptive import (
     AdaptiveResult,
     run_transient_adaptive,
 )
+from .v2_sweep import (
+    SweepResult,
+    sweep,
+    monte_carlo,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -226,6 +231,10 @@ __all__ = [
     # Adaptive (variable-step) transient driver (Phase B.1).
     "AdaptiveResult",
     "run_transient_adaptive",
+    # Parameter sweep + Monte Carlo (Phase E.3).
+    "SweepResult",
+    "sweep",
+    "monte_carlo",
 ]
 
 
