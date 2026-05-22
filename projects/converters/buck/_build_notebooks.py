@@ -548,19 +548,25 @@ print()
 print("(2) DC gains:")
 print(f"    Gvd(0)  = {Gvd_closed.num[0] / Gvd_closed.den[2]:8.4f}  (expect V_g = {params.V_g:.4f})")
 print(f"    Gvg(0)  = {Gvg.num[0] / Gvg.den[2]:8.4f}  (expect D   = {params.D:.4f})")
-print(f"    Zout(0) = {0.0 if abs(Zout.num[1]) < 1e-12 else 'nonzero!':>8s}  (expect 0)")
+zout_dc = "0" if abs(Zout.num[1]) < 1e-12 else f"{Zout.num[1] / Zout.den[2]:.4g}"
+print(f"    Zout(0) = {zout_dc:>8s}  (expect 0)")
 
 # (3) State-space → transfer function round-trip.
-# scipy.signal.ss2tf returns (num, den) for the FIRST input (d̂).
+# scipy.signal.ss2tf returns the numerator as a polynomial of degree
+# (den_degree), zero-padded on the left when the actual numerator has
+# fewer terms. Strip leading near-zeros before comparing with the
+# closed-form numerator (which is a single coefficient for the ideal
+# buck — V_g / (L C)).
 num_from_ss, den_from_ss = signal.ss2tf(A, B, C_mat, D_mat, input=0)
+num_from_ss = np.trim_zeros(num_from_ss.flatten(), trim="f")
 print()
 print("(3) State-space ↔ transfer function round-trip (input 0 = d̂):")
 print(f"    Closed-form numerator   = {Gvd_closed.num}")
-print(f"    From-SS numerator       = {num_from_ss.flatten()}")
+print(f"    From-SS numerator       = {num_from_ss}")
 print(f"    Closed-form denominator = {Gvd_closed.den}")
 print(f"    From-SS denominator     = {den_from_ss}")
 round_trip_ok = (
-    np.allclose(num_from_ss.flatten(), Gvd_closed.num, rtol=1e-10)
+    np.allclose(num_from_ss, Gvd_closed.num, rtol=1e-10)
     and np.allclose(den_from_ss, Gvd_closed.den, rtol=1e-10)
 )
 print(f"    → match: {round_trip_ok}")
