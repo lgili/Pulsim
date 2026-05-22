@@ -210,6 +210,15 @@ from .v2_spice_import import (
 )
 from .v2_stream import LiveStream
 
+# LiveScope is an optional import — only available when pyqtgraph
+# is installed. We tolerate the absence so headless environments
+# still load `pulsim.v2` without complaint.
+try:
+    from .v2_scope import LiveScope
+    _HAS_SCOPE = True
+except ImportError:  # pragma: no cover
+    _HAS_SCOPE = False
+
 __all__ = [
     "CircuitBuilder",
     "Graph",
@@ -353,6 +362,9 @@ __all__ = [
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
 ]
+
+if _HAS_SCOPE:
+    __all__.append("LiveScope")
 
 
 def simulate(
