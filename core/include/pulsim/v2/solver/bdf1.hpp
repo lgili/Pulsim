@@ -269,7 +269,8 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
     const SwitchScheduleFn& switch_fn,
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
-    const StepObserverFn& step_observer = {}) {
+    const StepObserverFn& step_observer = {},
+    const ShouldContinueFn& should_continue = {}) {
 
     if (!opts.valid()) {
         throw std::invalid_argument(
@@ -319,6 +320,13 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
     }
 
     for (Size k = 1; k < n_steps; ++k) {
+        // Cancellation check (matches run_transient's semantics —
+        // checked at top of every step so the kernel exits between
+        // dts cleanly, leaving the partial history intact).
+        if (should_continue && !should_continue()) {
+            break;
+        }
+
         const Real t = opts.t_start +
                           static_cast<Real>(k) * opts.dt;
 

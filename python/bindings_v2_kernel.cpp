@@ -1596,13 +1596,15 @@ void init_module(py::module_& m) {
             SwitchScheduleFn switch_fn,
             BExtraFn b_extra_fn,
             bool start_from_dc_op,
-            StepObserverFn step_observer) {
+            StepObserverFn step_observer,
+            ShouldContinueFn should_continue) {
             SimulationResult result;
             {
                 py::gil_scoped_release rel;
                 result = run_transient_bdf1(
                     builder, opts, switch_fn, b_extra_fn,
-                    start_from_dc_op, step_observer);
+                    start_from_dc_op, step_observer,
+                    should_continue);
             }
             return result;
         },
@@ -1610,6 +1612,7 @@ void init_module(py::module_& m) {
         py::arg("b_extra_fn") = BExtraFn{},
         py::arg("start_from_dc_op") = false,
         py::arg("step_observer") = StepObserverFn{},
+        py::arg("should_continue") = ShouldContinueFn{},
         "BDF1 (implicit Euler) transient simulation. Use when the "
         "trapezoidal path rings on stiff problems — BDF1 is L-stable "
         "(adds artificial damping that kills numerical oscillation). "

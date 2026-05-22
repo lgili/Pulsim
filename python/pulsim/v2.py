@@ -164,11 +164,14 @@ from .v2_snubber import (
 )
 from .v2_thermal import (
     FosterStage,
+    CauerStage,
     fit_foster_from_zth,
     predict_zth_curve,
     compute_temperature,
     add_foster_network,
+    add_cauer_thermal_network,
     make_thermal_observer,
+    ThermalLimitMonitor,
 )
 from .v2_grid import (
     add_three_phase_grid,
@@ -341,13 +344,16 @@ __all__ = [
     "SnubberRecommendation",
     "predict_overshoot",
     "recommend_snubber",
-    # Thermal Foster networks + electro-thermal co-sim (Phase C.1).
+    # Thermal Foster + Cauer networks + electro-thermal co-sim.
     "FosterStage",
+    "CauerStage",
     "fit_foster_from_zth",
     "predict_zth_curve",
     "compute_temperature",
     "add_foster_network",
+    "add_cauer_thermal_network",
     "make_thermal_observer",
+    "ThermalLimitMonitor",
     # Three-phase grid helpers (Phase C.2).
     "add_three_phase_grid",
     "add_three_phase_line_impedance",
@@ -411,13 +417,14 @@ if _HAS_SCOPE:
 def _bdf1_dispatch(_k, builder, opts, switch_fn, *,
                        b_extra_fn=None,
                        start_from_dc_op: bool = False,
-                       step_observer=None):
+                       step_observer=None,
+                       should_continue=None):
     """Call ``_pulsim.v2_kernel.run_transient_bdf1`` with only the
     kwargs it accepts. BDF1 binding has a deliberately small surface
     (builder, opts, switch_fn, b_extra_fn, start_from_dc_op,
-    step_observer) — it doesn't take ``cache``, ``initial_state``,
-    Newton tolerances, etc. Centralising the call here keeps the
-    main ``simulate()`` body readable."""
+    step_observer, should_continue) — it doesn't yet take ``cache``,
+    ``initial_state``, or Newton tolerances. Centralising the call
+    here keeps the main ``simulate()`` body readable."""
     kwargs: dict = {}
     if b_extra_fn is not None:
         kwargs["b_extra_fn"] = b_extra_fn
@@ -425,6 +432,8 @@ def _bdf1_dispatch(_k, builder, opts, switch_fn, *,
         kwargs["start_from_dc_op"] = True
     if step_observer is not None:
         kwargs["step_observer"] = step_observer
+    if should_continue is not None:
+        kwargs["should_continue"] = should_continue
     return _k.run_transient_bdf1(builder, opts, switch_fn, **kwargs)
 
 
@@ -719,7 +728,8 @@ def simulate(
                 _k, builder, opts, switch_fn,
                 b_extra_fn=b_extra_fn,
                 start_from_dc_op=start_from_dc_op,
-                step_observer=step_observer)
+                step_observer=step_observer,
+                should_continue=should_continue)
         else:
             res = _k.run_transient_with_chain(
                 cache, builder.graph, builder.pool, opts,
@@ -748,7 +758,8 @@ def simulate(
                 _k, builder, opts, switch_fn,
                 b_extra_fn=b_extra_fn,
                 start_from_dc_op=start_from_dc_op,
-                step_observer=step_observer)
+                step_observer=step_observer,
+                should_continue=should_continue)
         else:
             res = run_transient(
                 cache, builder.graph, builder.pool, opts, **kwargs,
