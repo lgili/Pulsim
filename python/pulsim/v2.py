@@ -157,6 +157,11 @@ from .v2_kpi import (
     load_baseline,
     save_baseline,
 )
+from .v2_snubber import (
+    SnubberRecommendation,
+    predict_overshoot,
+    recommend_snubber,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -254,6 +259,10 @@ __all__ = [
     "KpiCheckResult",
     "load_baseline",
     "save_baseline",
+    # Snubber advisor (Phase E.8).
+    "SnubberRecommendation",
+    "predict_overshoot",
+    "recommend_snubber",
 ]
 
 
