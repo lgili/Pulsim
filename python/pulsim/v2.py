@@ -110,6 +110,9 @@ from .v2_ac_analysis import (
     run_ac_sweep,
     extract_phasor,
     plot_bode,
+    plot_nyquist,
+    stability_margins,
+    save_freq_response,
 )
 from .v2_discovery import (
     catalog,
@@ -206,6 +209,9 @@ __all__ = [
     "run_ac_sweep",
     "extract_phasor",
     "plot_bode",
+    "plot_nyquist",
+    "stability_margins",
+    "save_freq_response",
     # Discovery helpers (introspect the v2 surface).
     "catalog",
     "example",

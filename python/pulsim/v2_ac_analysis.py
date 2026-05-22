@@ -79,6 +79,9 @@ __all__ = [
     "run_ac_sweep",
     "extract_phasor",
     "plot_bode",
+    "plot_nyquist",
+    "stability_margins",
+    "save_freq_response",
 ]
 
 
@@ -323,3 +326,147 @@ def plot_bode(result: AcSweepResult, *, title: str = "Bode",
     ax_phase.grid(True, which="both", alpha=0.3)
     ax_phase.legend(loc="best")
     return ax_mag, ax_phase
+
+
+# =============================================================================
+# Phase E.9 — frequency analysis polish
+# =============================================================================
+
+def stability_margins(freqs, H):
+    """Compute gain margin (GM, dB) and phase margin (PM, °) from a
+    complex loop-gain frequency response.
+
+    Returns a dict with:
+      * ``f_cross_gain`` — frequency where |H| = 1 (the 0-dB crossover)
+      * ``pm_deg``       — phase margin at f_cross_gain
+      * ``f_cross_180``  — frequency where ∠H crosses ±180°
+      * ``gm_db``        — gain margin at f_cross_180
+
+    Returns NaN for any margin that doesn't exist within the swept
+    range (e.g. ∠H never crosses 180°). For Nyquist stability the
+    typical convention is PM > 30° and GM > 6 dB.
+    """
+    freqs = np.asarray(freqs, dtype=float)
+    H = np.asarray(H, dtype=complex)
+    mag_db = 20.0 * np.log10(np.maximum(np.abs(H), 1e-300))
+    phase = np.unwrap(np.angle(H)) * 180.0 / np.pi
+
+    out = {"f_cross_gain": float("nan"), "pm_deg": float("nan"),
+            "f_cross_180":  float("nan"), "gm_db":  float("nan")}
+
+    # 0-dB crossover — find sign change in mag_db.
+    sign_mag = np.sign(mag_db)
+    zc = np.where(np.diff(sign_mag) < 0)[0]
+    if zc.size > 0:
+        k = int(zc[0])
+        # Linear interp in log-f.
+        frac = -mag_db[k] / (mag_db[k+1] - mag_db[k] + 1e-30)
+        f_g = float(np.exp(np.log(freqs[k]) +
+                              frac * (np.log(freqs[k+1]) -
+                                       np.log(freqs[k]))))
+        phase_at_g = float(phase[k] + frac * (phase[k+1] - phase[k]))
+        out["f_cross_gain"] = f_g
+        # PM = phase + 180° (convention: PM is how far ∠H is above
+        # −180° when |H|=1).
+        out["pm_deg"] = float(phase_at_g + 180.0)
+
+    # 180° crossover — phase crosses ±180° (we look at where the
+    # signed difference to −180 changes sign).
+    target = -180.0
+    delta = phase - target
+    sign_d = np.sign(delta)
+    zc180 = np.where(np.diff(sign_d) != 0)[0]
+    if zc180.size > 0:
+        k = int(zc180[0])
+        frac = -delta[k] / (delta[k+1] - delta[k] + 1e-30)
+        f_180 = float(np.exp(np.log(freqs[k]) +
+                                frac * (np.log(freqs[k+1]) -
+                                         np.log(freqs[k]))))
+        mag_at_180 = float(mag_db[k] + frac *
+                              (mag_db[k+1] - mag_db[k]))
+        out["f_cross_180"] = f_180
+        # GM = −|H| at the −180° crossing (positive when stable).
+        out["gm_db"] = -mag_at_180
+    return out
+
+
+def plot_nyquist(result, *, title: str = "Nyquist",
+                   show_unit_circle: bool = True,
+                   show_critical_point: bool = True,
+                   ax=None):
+    """Render a Nyquist plot from any object with ``H`` (complex
+    array) attribute — i.e. ``AcSweepResult``, ``MnaSweepResult``,
+    or a bare ``(freqs, H)`` tuple.
+    """
+    import matplotlib.pyplot as plt
+
+    if hasattr(result, "H"):
+        H = np.asarray(result.H)
+    else:
+        H = np.asarray(result[1])
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(7, 7))
+
+    ax.plot(H.real, H.imag, "C0-", lw=1.2)
+    ax.plot(H.real[0], H.imag[0], "C0o", ms=8, label="f → 0")
+    ax.plot(H.real[-1], H.imag[-1], "C0s", ms=8, label="f → ∞")
+
+    if show_critical_point:
+        ax.plot([-1], [0], "rx", ms=12, mew=2, label="−1 (critical)")
+    if show_unit_circle:
+        theta = np.linspace(0, 2*np.pi, 200)
+        ax.plot(np.cos(theta), np.sin(theta), "k:", lw=0.5,
+                  alpha=0.5, label="|H| = 1")
+
+    ax.axhline(0, color="k", lw=0.4, alpha=0.5)
+    ax.axvline(0, color="k", lw=0.4, alpha=0.5)
+    ax.set_xlabel("Re{H(jω)}"); ax.set_ylabel("Im{H(jω)}")
+    ax.set_title(title)
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="best", fontsize=9)
+    return ax
+
+
+def save_freq_response(result, path,
+                          *, fmt: str | None = None) -> None:
+    """Save a frequency-response result (AcSweepResult / MnaSweepResult)
+    to disk as CSV or JSON. Format inferred from the extension if
+    `fmt` is None.
+
+    CSV columns: ``freq_hz, mag_db, phase_deg, H_real, H_imag``.
+    JSON: ``{"freqs": [...], "mag_db": [...], "phase_deg": [...],
+              "H_real": [...], "H_imag": [...]}``.
+    """
+    from pathlib import Path
+    path = Path(path)
+    if fmt is None:
+        fmt = path.suffix.lower().lstrip(".")
+    freqs = np.asarray(result.freqs, dtype=float)
+    H = np.asarray(result.H, dtype=complex)
+    mag_db = np.asarray(result.mag_dB, dtype=float)
+    phase_deg = np.asarray(result.phase_deg, dtype=float)
+
+    if fmt == "csv":
+        with open(path, "w") as f:
+            f.write("freq_hz,mag_db,phase_deg,H_real,H_imag\n")
+            for i in range(len(freqs)):
+                f.write(f"{freqs[i]:.10g},{mag_db[i]:.6f},"
+                          f"{phase_deg[i]:.6f},"
+                          f"{H[i].real:.10g},{H[i].imag:.10g}\n")
+    elif fmt == "json":
+        import json
+        data = {
+            "freqs":     freqs.tolist(),
+            "mag_db":    mag_db.tolist(),
+            "phase_deg": phase_deg.tolist(),
+            "H_real":    H.real.tolist(),
+            "H_imag":    H.imag.tolist(),
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+    else:
+        raise ValueError(
+            f"save_freq_response: unsupported format {fmt!r} "
+            f"(use 'csv' or 'json')")
