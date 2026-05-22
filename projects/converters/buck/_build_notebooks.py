@@ -1179,42 +1179,227 @@ If you don't have Pulsim built, this section will skip and the math
 above still stands.
 """))
 
-    cells.append(code(r"""
-try:
-    import pulsim as ps
-    HAVE_PULSIM = True
-except ImportError as exc:
-    print(f"Skipping Pulsim closed-loop validation: {exc}")
-    HAVE_PULSIM = False
+    cells.append(md(r"""
+### 7.1 Switched-model simulation in pure Python
+
+To **prove** the controller actually works on the switching waveform —
+not just the small-signal average — we simulate the closed-loop buck
+in pure Python using:
+
+1. A forward-Euler integration of the switched buck model
+   (ON / OFF state per PWM cycle).
+2. The discretized compensator running once per switching period
+   (sample-and-hold — the same way an MCU would update PWM duty in a
+   digital power supply).
+3. A reference voltage step at $t = t_{step}$ so we can watch the
+   loop respond.
+
+If the K-factor design from §4 is sound, we should see:
+- The output **tracks** $V_{ref}$ at DC (integrator → zero steady-state error).
+- The duty cycle **adjusts** from $D = V_{o}/V_{g}$ to the new value
+  at the new operating point.
+- The transient settles within roughly the analytical settling time
+  from §5.
+- Inductor current rebalances to $V_{ref}/R$.
 """))
 
     cells.append(code(r"""
-if HAVE_PULSIM:
-    # Pulsim's `PIController` is a standalone signal block — its
-    # constructor takes (Kp, Ki, output_min, output_max) only. Wiring
-    # it into a buck transient requires a few helper pieces (comparator,
-    # PWM modulator) whose exact API varies between Pulsim releases.
-    #
-    # Rather than duplicate a fragile recipe here, we print the design
-    # constants the student would plug into whichever closed-loop
-    # template they use (YAML netlist, programmatic Circuit, or one of
-    # the converter templates under `pulsim.templates`).
-    Kp_equiv = Gc.num[1] / Gc.den[0]
-    omega_z_equiv = Gc.num[1] / Gc.num[0]
-    Ki_equiv = Kp_equiv * omega_z_equiv
-    print("Closed-loop hookup constants for the Pulsim `PIController` block")
-    print("(Type-II → PI approximation in the limit ω_p → ∞):")
-    print(f"  Kp        ≈ {Kp_equiv:11.4g}")
-    print(f"  Ki        ≈ {Ki_equiv:11.4g}   (= Kp · ω_z, ω_z = {omega_z_equiv:.1f} rad/s)")
-    print(f"  output_min = 0.0     output_max = 1.0  (duty-cycle bounds)")
-    print()
-    print("To complete the closed-loop validation in Pulsim:")
-    print("  1. Build the open-loop buck (see `build_pulsim_buck` from notebook 1).")
-    print("  2. Add a `Comparator` block emitting v_ref - v_o.")
-    print("  3. Pipe the error into PIController(Kp, Ki, 0.0, 1.0).")
-    print("  4. Use a `ModulatedPwmParams`-driven source for the gate.")
-    print("  5. Run a transient with a step in v_ref; overlay against")
-    print("     the analytical closed-loop step from cell 12 above.")
+def simulate_closed_loop_buck(
+    params,
+    b: np.ndarray,
+    a: np.ndarray,
+    *,
+    t_end: float = 5e-3,
+    t_step: float = 1e-3,
+    v_ref_initial: float = 12.0,
+    v_ref_final: float = 13.0,
+    V_ramp: float = 5.0,
+    samples_per_period: int = 200,
+):
+    '''Forward-Euler switched-buck simulator with a digital compensator.
+
+    States (continuous time, integrated at `dt_sim`):
+        i_L  — inductor current  [A]
+        v_o  — capacitor voltage [V]   (= output voltage)
+
+    The compensator is a discrete-time Direct-Form II Transposed
+    implementation of the Tustin-discretized type-III. It runs once per
+    switching period (sample-and-hold) — same way an MCU's PWM ISR
+    would update duty in firmware.
+
+    Returns a dict of arrays for plotting.
+    '''
+    T_s = 1.0 / params.f_sw
+    dt_sim = T_s / samples_per_period
+    n_steps = int(t_end / dt_sim) + 1
+
+    # Plant state
+    i_L = 0.0
+    v_o = 0.0
+
+    # Compensator state — n states for an n-th order DF-II Transposed
+    n_state = len(a) - 1
+    state = np.zeros(n_state)
+    duty = 0.5
+
+    # Recording arrays — downsampled so plots aren't 100k points each
+    record_every = max(1, samples_per_period // 50)
+    n_rec = n_steps // record_every + 1
+    t_hist = np.zeros(n_rec)
+    v_o_hist = np.zeros(n_rec)
+    i_L_hist = np.zeros(n_rec)
+    duty_hist = np.zeros(n_rec)
+    v_ref_hist = np.zeros(n_rec)
+    rec_idx = 0
+
+    for i in range(n_steps):
+        t = i * dt_sim
+        v_ref = v_ref_initial if t < t_step else v_ref_final
+
+        # Compensator update — once per switching period
+        cycle_pos_int = i % samples_per_period
+        if cycle_pos_int == 0:
+            err = v_ref - v_o
+            # Direct-Form II Transposed update
+            v_c = b[0] * err + state[0]
+            new_state = np.zeros_like(state)
+            for j in range(n_state - 1):
+                new_state[j] = b[j + 1] * err - a[j + 1] * v_c + state[j + 1]
+            new_state[n_state - 1] = b[n_state] * err - a[n_state] * v_c
+            state = new_state
+            duty = float(np.clip(v_c / V_ramp, 0.0, 1.0))
+
+        # PWM: high during first `duty` fraction of each period
+        switch_on = (cycle_pos_int / samples_per_period) < duty
+
+        # Switched buck ODE (forward Euler)
+        v_L = (params.V_g - v_o) if switch_on else (-v_o)   # freewheel via diode
+        i_C = i_L - v_o / params.R
+        i_L += (v_L / params.L) * dt_sim
+        i_L = max(i_L, 0.0)   # ideal diode prevents reverse current → CCM/DCM transition
+        v_o += (i_C / params.C) * dt_sim
+
+        # Record
+        if i % record_every == 0 and rec_idx < n_rec:
+            t_hist[rec_idx] = t
+            v_o_hist[rec_idx] = v_o
+            i_L_hist[rec_idx] = i_L
+            duty_hist[rec_idx] = duty
+            v_ref_hist[rec_idx] = v_ref
+            rec_idx += 1
+
+    return {
+        "t":     t_hist[:rec_idx],
+        "v_o":   v_o_hist[:rec_idx],
+        "i_L":   i_L_hist[:rec_idx],
+        "duty":  duty_hist[:rec_idx],
+        "v_ref": v_ref_hist[:rec_idx],
+    }
+"""))
+
+    cells.append(code(r"""
+# Run the closed-loop simulation: settle for 1 ms at V_ref = 12 V,
+# then step to V_ref = 13 V at t = 1 ms.
+sim = simulate_closed_loop_buck(
+    params,
+    b=b,    # discretized numerator (from cell 16)
+    a=a,    # discretized denominator (from cell 16)
+    t_end=5e-3,
+    t_step=1e-3,
+    v_ref_initial=12.0,
+    v_ref_final=13.0,
+    V_ramp=V_ramp,
+)
+
+print(f"Simulated {len(sim['t'])} recorded samples over {sim['t'][-1] * 1e3:.2f} ms")
+print(f"Pre-step settled V_o (mean 0.8-1.0 ms): "
+      f"{np.mean(sim['v_o'][(sim['t'] > 0.8e-3) & (sim['t'] < 1.0e-3)]):.4f} V "
+      f"(target = 12.0 V)")
+print(f"Post-step settled V_o (mean 4.8-5.0 ms): "
+      f"{np.mean(sim['v_o'][sim['t'] > 4.8e-3]):.4f} V "
+      f"(target = 13.0 V)")
+print(f"Pre-step duty:  {np.mean(sim['duty'][(sim['t'] > 0.8e-3) & (sim['t'] < 1.0e-3)]):.4f}  "
+      f"(expect D₁ = 12/24 = 0.500)")
+print(f"Post-step duty: {np.mean(sim['duty'][sim['t'] > 4.8e-3]):.4f}  "
+      f"(expect D₂ = 13/24 = 0.542)")
+"""))
+
+    cells.append(code(r"""
+# Plot the four key waveforms.
+fig, axs = plt.subplots(4, 1, figsize=(11, 11), sharex=True)
+
+axs[0].plot(sim['t'] * 1e3, sim['v_o'], 'C0', linewidth=1.0, label="$v_o$ (switched)")
+axs[0].plot(sim['t'] * 1e3, sim['v_ref'], 'C3--', linewidth=2.0, label="$v_{ref}$")
+axs[0].axvline(1.0, color='k', linestyle=':', alpha=0.4, label="step")
+axs[0].set_ylabel("Output voltage [V]")
+axs[0].set_title("Closed-loop buck: step in $v_{ref}$ from 12 V → 13 V at $t$ = 1 ms")
+axs[0].legend(loc="lower right")
+
+axs[1].plot(sim['t'] * 1e3, sim['i_L'], 'C1', linewidth=1.0)
+axs[1].axvline(1.0, color='k', linestyle=':', alpha=0.4)
+axs[1].set_ylabel("Inductor current [A]")
+axs[1].axhline(12.0 / params.R, color='k', linestyle=':', alpha=0.3,
+               label=f"pre-step $V_{{ref}}/R$ = {12.0 / params.R:.2f} A")
+axs[1].axhline(13.0 / params.R, color='r', linestyle=':', alpha=0.3,
+               label=f"post-step $V_{{ref}}/R$ = {13.0 / params.R:.2f} A")
+axs[1].legend(loc="lower right")
+
+axs[2].plot(sim['t'] * 1e3, sim['duty'], 'C2', linewidth=1.2)
+axs[2].axvline(1.0, color='k', linestyle=':', alpha=0.4)
+axs[2].axhline(0.5, color='k', linestyle=':', alpha=0.3,
+               label="pre-step D = 0.500")
+axs[2].axhline(13.0 / params.V_g, color='r', linestyle=':', alpha=0.3,
+               label=f"post-step D = {13.0 / params.V_g:.3f}")
+axs[2].set_ylabel("Duty cycle")
+axs[2].legend(loc="lower right")
+
+# Tracking error
+axs[3].plot(sim['t'] * 1e3, sim['v_ref'] - sim['v_o'], 'C4', linewidth=1.0)
+axs[3].axvline(1.0, color='k', linestyle=':', alpha=0.4)
+axs[3].axhline(0, color='k', linestyle=':', alpha=0.3)
+axs[3].set_ylabel("Tracking error\n$v_{ref} - v_o$ [V]")
+axs[3].set_xlabel("Time [ms]")
+
+plt.tight_layout()
+plt.show()
+"""))
+
+    cells.append(code(r"""
+# Closed-loop performance metrics on the step response
+mask_after = sim['t'] > 1.0e-3
+t_after = sim['t'][mask_after] - 1.0e-3
+v_o_after = sim['v_o'][mask_after]
+
+# Peak overshoot above the new reference
+v_o_max = np.max(v_o_after)
+overshoot_pct = (v_o_max - 13.0) / (13.0 - 12.0) * 100
+# Settling time: when |v_o - v_ref| stays < 2 % of step magnitude
+settled = np.abs(v_o_after - 13.0) < 0.02 * (13.0 - 12.0)
+settled_continuous = np.where(~settled)[0]
+settling_idx = settled_continuous[-1] + 1 if len(settled_continuous) > 0 else 0
+settling_ms = t_after[min(settling_idx, len(t_after) - 1)] * 1e3
+# Rise time: 10 % to 90 %
+v_o_10pct = 12.0 + 0.1 * (13.0 - 12.0)
+v_o_90pct = 12.0 + 0.9 * (13.0 - 12.0)
+rise_start_idx = np.argmax(v_o_after >= v_o_10pct)
+rise_end_idx = np.argmax(v_o_after >= v_o_90pct)
+rise_time_ms = (t_after[rise_end_idx] - t_after[rise_start_idx]) * 1e3
+
+print("Closed-loop step-response metrics (V_ref: 12 V → 13 V)")
+print(f"  Rise time  (10% → 90%)   = {rise_time_ms:6.3f} ms")
+print(f"  Peak overshoot           = {overshoot_pct:6.2f} %")
+print(f"  Settling time (±2 %)     = {settling_ms:6.3f} ms")
+print()
+
+# Steady-state regulation: zero error?
+ss_error = 13.0 - np.mean(sim['v_o'][sim['t'] > 4.5e-3])
+print(f"  Steady-state error       = {ss_error * 1e3:+7.2f} mV ({ss_error / 13.0 * 100:+.3f} %)")
+print()
+if abs(ss_error) < 0.01 and overshoot_pct < 30 and settling_ms < 2.0:
+    print("✅  Closed-loop controller PROVEN: tracks reference with < 10 mV DC error,")
+    print(f"    overshoot {overshoot_pct:.1f} %, settles in {settling_ms:.2f} ms.")
+else:
+    print("⚠️   Closed-loop response off-target — revisit f_c or PM in section 4.")
 """))
 
     cells.append(md(r"""
