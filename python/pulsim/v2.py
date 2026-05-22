@@ -150,6 +150,13 @@ from .v2_sweep import (
     sweep,
     monte_carlo,
 )
+from .v2_kpi import (
+    KpiGate,
+    KpiReport,
+    KpiCheckResult,
+    load_baseline,
+    save_baseline,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -241,6 +248,12 @@ __all__ = [
     "SweepResult",
     "sweep",
     "monte_carlo",
+    # KPI gates + baselines (Phase E.5).
+    "KpiGate",
+    "KpiReport",
+    "KpiCheckResult",
+    "load_baseline",
+    "save_baseline",
 ]
 
 
