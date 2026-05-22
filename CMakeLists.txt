@@ -22,7 +22,7 @@ if(APPLE AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED CMAKE_CXX_COMPILER)
     endif()
 endif()
 
-project(pulsim VERSION 0.10.0 LANGUAGES CXX)
+project(pulsim VERSION 1.0.0 LANGUAGES CXX)
 
 # =============================================================================
 # C++ Standard Configuration
@@ -36,14 +36,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Build Options
 # =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
-# v1 tests cover the legacy kernel (``core/include/pulsim/v1``) +
-# devices/features that are NOT migrated to v2 (codegen, FMU,
-# compressor, presets, robustness profiles, MMC templates, …). They
-# still compile against the existing v1 header but no longer block
-# CI by default. Set to ON to maintain v1 alongside v2 during the
-# retirement window; defaults to OFF so the active surface only
-# exercises v2.
-option(PULSIM_BUILD_V1_TESTS "Build legacy v1 C++ tests" OFF)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
 
 # refactor `add-automatic-differentiation`, Phase 2.4: opt-in to the
@@ -693,13 +685,15 @@ endif()
 option(PULSIM_BUILD_BENCHMARKS "Build benchmark targets" OFF)
 
 if(PULSIM_BUILD_BENCHMARKS)
-    # Compile-time benchmark: measure template instantiation time
+    # Compile-time benchmark: measure template instantiation time on the
+    # heaviest v2 test target (layer 5 V4 — Newton in run_transient pulls
+    # the full kernel template tree).
     add_custom_target(benchmark_compile_time
         COMMAND ${CMAKE_COMMAND} -E echo "=== Compile-Time Benchmark ==="
         COMMAND ${CMAKE_COMMAND} -E echo "Cleaning build..."
         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
         COMMAND ${CMAKE_COMMAND} -E echo "Timing full rebuild..."
-        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_tests -- -j1
+        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_v2_layer5_v4_tests -- -j1
         COMMENT "Measuring compile time (single-threaded for consistency)"
     )
 endif()
