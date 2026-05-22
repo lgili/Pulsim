@@ -48,6 +48,11 @@ __all__ = [
     "SampleHold",
     "FirstOrderLowPass",
     "LookupTable1D",
+    # Auto-tuning helpers (Bode-based loop shaping).
+    "tune_pi_from_bode",
+    "loop_gain",
+    "phase_margin_from_loop",
+    "gain_margin_from_loop",
 ]
 
 
@@ -363,3 +368,231 @@ class LookupTable1D:
                 t = (x - self.xs[i]) / (self.xs[i + 1] - self.xs[i])
                 return self.ys[i] + t * (self.ys[i + 1] - self.ys[i])
         return self.ys[-1]
+
+
+# =============================================================================
+# Auto-tuning — Bode-based loop shaping
+# =============================================================================
+
+def _interp_complex_at_freq(freqs, H, f_target):
+    """Linear-interp |H| (dB) and ∠H (deg) at f_target.
+    Returns (|H|_linear, phase_deg).
+    """
+    import math as _math
+    import numpy as _np
+    freqs = _np.asarray(freqs, dtype=float)
+    H = _np.asarray(H, dtype=complex)
+    if f_target <= freqs[0]:
+        return abs(H[0]), _math.degrees(_np.angle(H[0]))
+    if f_target >= freqs[-1]:
+        return abs(H[-1]), _math.degrees(_np.angle(H[-1]))
+    # Bracket.
+    idx = int(_np.searchsorted(freqs, f_target))
+    f0, f1 = freqs[idx - 1], freqs[idx]
+    mag0, mag1 = abs(H[idx - 1]), abs(H[idx])
+    ph0 = _math.degrees(_np.angle(H[idx - 1]))
+    ph1 = _math.degrees(_np.angle(H[idx]))
+    # Phase unwrap across the bracket: if jump > 180°, undo it.
+    if ph1 - ph0 >  180.0: ph1 -= 360.0
+    if ph1 - ph0 < -180.0: ph1 += 360.0
+    # Log-linear in freq, linear in dB / deg.
+    log_f0 = _math.log10(f0)
+    log_f1 = _math.log10(f1)
+    log_ft = _math.log10(f_target)
+    alpha = (log_ft - log_f0) / (log_f1 - log_f0)
+    mag = 10 ** ((1 - alpha) * _math.log10(mag0)
+                  + alpha * _math.log10(mag1))
+    phase = (1 - alpha) * ph0 + alpha * ph1
+    return mag, phase
+
+
+def tune_pi_from_bode(
+    freqs,
+    H,
+    *,
+    f_crossover: float,
+    phase_margin_deg: float = 60.0,
+    output_min: float = -math.inf,
+    output_max: float = math.inf,
+) -> dict:
+    """Auto-tune a PI controller from a measured plant Bode.
+
+    Given the plant frequency response `H(jω)` sampled at `freqs`,
+    choose Kp and Ki such that the closed-loop crossover happens at
+    `f_crossover` Hz with the requested `phase_margin_deg`.
+
+    Math (loop-shaping for PI):
+
+        Plant gain/phase at ω_c:  Mg = |G(jω_c)|, φ_g = ∠G(jω_c)
+        Required PI phase at ω_c: φ_pi = phase_margin - 180° - φ_g
+        For a pure PI: φ_pi must lie in (-90°, 0°). If it doesn't,
+        the design is infeasible (the plant phase at ω_c is too
+        far from -180° + PM); the function falls back to a
+        conservative rule-of-thumb and emits a warning.
+
+        From C(s) = Kp · (1 + 1/(s·τi)):
+            ∠C(jω_c) = arctan(-1/(ω_c·τi)) = φ_pi
+            → τi = -1 / (ω_c · tan(φ_pi))
+            |C(jω_c)| = Kp / cos(φ_pi)
+        For unity loop gain at crossover:
+            Kp · |G(jω_c)| / cos(φ_pi) = 1
+            → Kp = cos(φ_pi) / Mg
+            → Ki = Kp / τi
+
+    Parameters
+    ----------
+    freqs
+        Plant Bode frequencies (Hz), array-like.
+    H
+        Plant complex frequency response sampled at `freqs`.
+    f_crossover
+        Target loop-gain crossover frequency (Hz).
+    phase_margin_deg
+        Target phase margin (degrees). Default 60° — robust
+        general-purpose choice.
+    output_min, output_max
+        Forwarded to the returned PIController so it's ready to
+        use.
+
+    Returns
+    -------
+    dict with keys:
+        Kp, Ki                 — gains
+        controller             — a `PIController` instance ready to use
+        achieved_pm_deg        — the phase margin the controller delivers
+        crossover_hz           — `f_crossover` echoed back
+        plant_mag_at_crossover — |G(jω_c)|
+        plant_phase_at_crossover_deg — ∠G(jω_c)
+        warnings               — list[str] of design notes
+    """
+    import math as _math
+    import numpy as _np
+
+    warnings: list[str] = []
+    omega_c = 2.0 * _math.pi * f_crossover
+    Mg, phi_g = _interp_complex_at_freq(freqs, H, f_crossover)
+
+    # Required PI phase contribution to hit the target PM.
+    phi_pi_deg = phase_margin_deg - 180.0 - phi_g
+
+    # Feasibility: a pure PI can only add phase in (-90°, 0°).
+    if phi_pi_deg >= 0.0 or phi_pi_deg <= -90.0:
+        warnings.append(
+            f"Pure-PI design infeasible at f_c={f_crossover:.1f} Hz "
+            f"with PM={phase_margin_deg}° (need φ_pi={phi_pi_deg:.1f}° "
+            f"∉ (-90°, 0°)). Falling back to a conservative rule of "
+            f"thumb (Kp = 1/Mg, ω_z = ω_c/10)."
+        )
+        Kp = 1.0 / Mg
+        Ki = Kp * omega_c / 10.0
+        # Compute the achieved PM at the original target (likely
+        # not exactly PM_target).
+        # |L(jω_c)| = Kp·sqrt(1 + (Ki/(Kp·ω_c))²)·Mg
+        # ∠L(jω_c) = arctan(-Ki/(Kp·ω_c)) + φ_g
+        wt = Ki / (Kp * omega_c)
+        pm_achieved = 180.0 + _math.degrees(
+            _math.atan(-wt) + _math.radians(phi_g)
+        )
+    else:
+        phi_pi_rad = _math.radians(phi_pi_deg)
+        tau_i = -1.0 / (omega_c * _math.tan(phi_pi_rad))
+        Kp = _math.cos(phi_pi_rad) / Mg
+        Ki = Kp / tau_i
+        pm_achieved = phase_margin_deg  # by construction
+
+    controller = PIController(
+        Kp=Kp, Ki=Ki,
+        output_min=output_min, output_max=output_max,
+    )
+
+    return {
+        "Kp": Kp,
+        "Ki": Ki,
+        "controller": controller,
+        "achieved_pm_deg": pm_achieved,
+        "crossover_hz": f_crossover,
+        "plant_mag_at_crossover": Mg,
+        "plant_phase_at_crossover_deg": phi_g,
+        "warnings": warnings,
+    }
+
+
+def loop_gain(freqs, H_plant, Kp: float, Ki: float):
+    """Compute L(jω) = C(jω) · G(jω) where C is a PI controller.
+
+    Returns an array of complex L values matching `freqs`.
+    """
+    import numpy as _np
+    omega = 2.0 * _np.pi * _np.asarray(freqs, dtype=float)
+    C = Kp + Ki / (1j * omega)
+    H = _np.asarray(H_plant, dtype=complex)
+    return C * H
+
+
+def phase_margin_from_loop(freqs, L) -> float:
+    """Phase margin in degrees from loop gain L(jω).
+
+    PM = 180° + ∠L(jω_c)  where ω_c is the **last** frequency
+    at which |L| crosses 1 from above. Picking the last
+    crossing (= the highest-frequency 0-dB crossover before
+    rolloff) is the convention that matters for stability:
+    earlier crossings may exist due to local peaks in the
+    plant Bode (e.g. an LC resonance), but only the last one
+    determines how close the loop is to encircling −1.
+    Returns +inf if |L| never crosses 1.
+    """
+    import math as _math
+    import numpy as _np
+    freqs = _np.asarray(freqs, dtype=float)
+    L = _np.asarray(L, dtype=complex)
+    mag = _np.abs(L)
+    # Find ALL down-crossings of |L| = 1, take the highest-freq one.
+    crossed = mag[:-1] >= 1.0
+    next_below = mag[1:] < 1.0
+    crossings = _np.where(crossed & next_below)[0]
+    if len(crossings) == 0:
+        return float("inf")
+    i = int(crossings[-1])    # last crossing
+    # Interpolate the crossing freq in log scale.
+    log_f0, log_f1 = _math.log10(freqs[i]), _math.log10(freqs[i + 1])
+    log_m0, log_m1 = _math.log10(mag[i]), _math.log10(mag[i + 1])
+    alpha = (0.0 - log_m0) / (log_m1 - log_m0)   # mag=1 → log_mag=0
+    log_fc = (1 - alpha) * log_f0 + alpha * log_f1
+    f_c = 10 ** log_fc
+    # Interpolate phase at f_c.
+    ph0 = _math.degrees(_np.angle(L[i]))
+    ph1 = _math.degrees(_np.angle(L[i + 1]))
+    if ph1 - ph0 >  180.0: ph1 -= 360.0
+    if ph1 - ph0 < -180.0: ph1 += 360.0
+    log_fc_lin = (log_fc - log_f0) / (log_f1 - log_f0)
+    phase_at_xover = (1 - log_fc_lin) * ph0 + log_fc_lin * ph1
+    return 180.0 + phase_at_xover
+
+
+def gain_margin_from_loop(freqs, L) -> float:
+    """Gain margin in dB from loop gain L(jω).
+
+    GM = -20·log10(|L(jω_180)|) where ω_180 is the first frequency
+    at which ∠L = -180°. Returns +inf if no -180° crossing.
+    """
+    import math as _math
+    import numpy as _np
+    freqs = _np.asarray(freqs, dtype=float)
+    L = _np.asarray(L, dtype=complex)
+    # Unwrap phase before searching.
+    phase = _np.unwrap(_np.angle(L))
+    phase_deg = _np.degrees(phase)
+    # Find the lowest freq at which phase crosses -180°.
+    above = phase_deg[:-1] > -180.0
+    next_below = phase_deg[1:] <= -180.0
+    crossings = _np.where(above & next_below)[0]
+    if len(crossings) == 0:
+        return float("inf")
+    i = int(crossings[0])
+    # Interpolate the crossing.
+    alpha = (-180.0 - phase_deg[i]) / (phase_deg[i + 1] - phase_deg[i])
+    log_f0, log_f1 = _math.log10(freqs[i]), _math.log10(freqs[i + 1])
+    log_f180 = (1 - alpha) * log_f0 + alpha * log_f1
+    log_m0, log_m1 = _math.log10(abs(L[i])), _math.log10(abs(L[i + 1]))
+    log_m180 = (1 - alpha) * log_m0 + alpha * log_m1
+    return -20.0 * log_m180

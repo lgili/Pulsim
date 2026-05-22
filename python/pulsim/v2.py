@@ -71,6 +71,10 @@ from .v2_control import (
     SampleHold,
     FirstOrderLowPass,
     LookupTable1D,
+    tune_pi_from_bode,
+    loop_gain,
+    phase_margin_from_loop,
+    gain_margin_from_loop,
 )
 from .v2_ac_analysis import (
     AcSweepResult,
@@ -110,6 +114,11 @@ __all__ = [
     "SampleHold",
     "FirstOrderLowPass",
     "LookupTable1D",
+    # Auto-tuning helpers (loop-shaping from a measured Bode).
+    "tune_pi_from_bode",
+    "loop_gain",
+    "phase_margin_from_loop",
+    "gain_margin_from_loop",
     # AC small-signal analysis (swept-sine Bode).
     "AcSweepResult",
     "run_ac_sweep",
