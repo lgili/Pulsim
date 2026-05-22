@@ -35,6 +35,7 @@
 #include "pulsim/v2/builder/circuit_builder.hpp"
 #include "pulsim/v2/motors/mechanical.hpp"
 #include "pulsim/v2/motors/motor_adapters.hpp"
+#include "pulsim/v2/thermal/thermal_adapters.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/cache.hpp"
@@ -1285,7 +1286,36 @@ void init_module(py::module_& m) {
             py::arg("psi_pm"), py::arg("pole_pairs"),
             py::arg("phase_inductor_idx"),
             py::arg("bemf_source_idx"),
-            py::arg("omega_channel"), py::arg("theta_channel"));
+            py::arg("omega_channel"), py::arg("theta_channel"))
+
+        // ---- Thermal blocks (Phase C.1 / C++ port) ----
+        .def("add_thermal_power_injection",
+            [](BlockChain& self, InputRef P_ref,
+                Index junction_node_idx, std::string power_channel) {
+                pulsim::v2::thermal::add_thermal_power_injection_to_chain(
+                    self, P_ref, junction_node_idx,
+                    std::move(power_channel));
+            },
+            py::arg("P_ref"), py::arg("junction_node_idx"),
+            py::arg("power_channel") = std::string{},
+            "Inject the dissipated power into the junction node's "
+            "b_extra row. P_ref can be a Const, Channel, or Node "
+            "InputRef. Optionally writes the value to "
+            "`power_channel` for downstream logging / averaging.")
+
+        .def("add_resistive_power_injection",
+            [](BlockChain& self, Real R_ohm, InputRef i_ref,
+                Index junction_node_idx, std::string power_channel) {
+                pulsim::v2::thermal::add_resistive_power_injection_to_chain(
+                    self, R_ohm, i_ref, junction_node_idx,
+                    std::move(power_channel));
+            },
+            py::arg("R_ohm"), py::arg("i_ref"),
+            py::arg("junction_node_idx"),
+            py::arg("power_channel") = std::string{},
+            "Convenience: P = R·I² with single current input. "
+            "Typical use is a MOSFET conduction loss "
+            "(R = R_DS_ON, i = inductor branch current).");
 
     // Helper for make_chain_switch_fn — wires chain channels →
     // SwitchStateMask bits.
