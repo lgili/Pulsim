@@ -109,29 +109,11 @@ foreach(_pulsim_file IN LISTS _pulsim_top_level_files)
     )
 endforeach()
 
-# Submodules: copy every .py inside each directory. A new file requires
-# re-running cmake configure (CMAKE_CONFIGURE_DEPENDS would be heavier).
-# The `schematic` submodule also ships:
-#   - a Node.js bridge script (`elk_bridge.js`) for the ELK layout backend
-#   - SVG skin files (`skin/pulsim_analog.svg`) for the netlistsvg backend
-# Extend the glob to those extensions and to one level of sub-directory
-# (so `schematic/skin/*.svg` gets copied).
-set(_pulsim_submodules codegen fmu sweep schematic)
-foreach(_pulsim_sub IN LISTS _pulsim_submodules)
-    file(GLOB _pulsim_sub_files
-        RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_pulsim_sub}/*.py
-        ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_pulsim_sub}/*.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_pulsim_sub}/*/*.svg
-    )
-    foreach(_pulsim_sub_file IN LISTS _pulsim_sub_files)
-        configure_file(
-            ${CMAKE_CURRENT_SOURCE_DIR}/${_pulsim_sub_file}
-            ${CMAKE_BINARY_DIR}/python/${_pulsim_sub_file}
-            COPYONLY
-        )
-    endforeach()
-endforeach()
+# pulsim 1.0.0 retired every v1-era submodule (codegen, fmu, sweep,
+# schematic). The v2 surface is now flat — all helpers live as
+# top-level ``pulsim/v2_*.py`` modules, picked up by the top-level
+# glob above. If a future v2-native submodule directory lands,
+# re-introduce the per-submodule glob here.
 
 # =============================================================================
 # Install targets
@@ -153,9 +135,7 @@ install(FILES ${_pulsim_top_files}
     DESTINATION pulsim
 )
 
-foreach(_pulsim_sub IN LISTS _pulsim_submodules)
-    install(DIRECTORY pulsim/${_pulsim_sub}/
-        DESTINATION pulsim/${_pulsim_sub}
-        FILES_MATCHING PATTERN "*.py"
-    )
-endforeach()
+# No Python submodule directories remain after the v1 retirement — the
+# install above (top-level ``pulsim/*.py``) covers everything pulsim 1.0.0
+# ships. Re-introduce a per-submodule install loop here when a v2-native
+# directory (e.g. ``pulsim/visualization/``) lands.
