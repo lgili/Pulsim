@@ -72,6 +72,12 @@ from .v2_control import (
     FirstOrderLowPass,
     LookupTable1D,
 )
+from .v2_ac_analysis import (
+    AcSweepResult,
+    run_ac_sweep,
+    extract_phasor,
+    plot_bode,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -104,6 +110,11 @@ __all__ = [
     "SampleHold",
     "FirstOrderLowPass",
     "LookupTable1D",
+    # AC small-signal analysis (swept-sine Bode).
+    "AcSweepResult",
+    "run_ac_sweep",
+    "extract_phasor",
+    "plot_bode",
 ]
 
 

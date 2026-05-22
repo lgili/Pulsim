@@ -68,7 +68,20 @@ These use the `step_observer(t, x)` kernel callback + the
 | `run_pfc_boost_closed_loop.py` | Single-phase PFC: AC mains → bridge → boost, cascaded V+I PIs | 5 diodes commuting + cascade |
 | `run_adversarial_sweep.py` | 9 parametric variants (dt=1ns, Ki=1e6, Kp<0, …) | Find kernel bugs |
 
-The adversarial sweep summary at last run:
+## AC small-signal analysis (Bode sweeps)
+
+| Script | What it measures | Verification |
+|---|---|---|
+| `run_ac_sweep_rc.py` | 1st-order RC low-pass H(jω) = 1/(1+jωRC) | 0.005 dB / 0.7° vs analytical across 4 decades ✓ |
+| `run_ac_sweep_buck.py` | Buck control-to-output G_vd(s) at D_op=0.5 | Phase + shape match analytical; +10 dB offset on \|H\| (real PWM gain > V_in approximation) |
+
+Powered by `pulsim.v2.run_ac_sweep(...)` — swept-sine technique
+(works for any plant the kernel can simulate, including nonlinear
+devices). See `pulsim/v2_ac_analysis.py` for the implementation
+and the `extract_phasor(times, samples, freq)` single-frequency
+DFT primitive.
+
+## Adversarial sweep summary
 
 ```
 case                                       dt      Kp        Ki    v_out
