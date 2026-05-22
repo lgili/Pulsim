@@ -238,6 +238,11 @@ from .v2_fra import (
     FraResult,
     run_fra,
 )
+from .v2_harmonic import (
+    HarmonicAnalysisResult,
+    analyze_harmonics,
+    run_harmonic_balance,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -415,6 +420,10 @@ __all__ = [
     # Frequency Response Analyzer (swept-sine, time-domain).
     "FraResult",
     "run_fra",
+    # Harmonic-balance / harmonic-spectrum analysis.
+    "HarmonicAnalysisResult",
+    "analyze_harmonics",
+    "run_harmonic_balance",
 ]
 
 if _HAS_SCOPE:
