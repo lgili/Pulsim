@@ -227,6 +227,10 @@ from .v2_motor_helpers import (
     FocWiringResult,
     wire_pmsm_foc,
 )
+from .v2_periodic import (
+    PeriodicShootingResult,
+    run_periodic_shooting,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -395,6 +399,9 @@ __all__ = [
     # Motor-control wiring helpers.
     "FocWiringResult",
     "wire_pmsm_foc",
+    # Periodic-steady-state solver (Phase 2 of v1→v2 closure).
+    "PeriodicShootingResult",
+    "run_periodic_shooting",
 ]
 
 if _HAS_SCOPE:
