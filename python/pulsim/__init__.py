@@ -1,6 +1,32 @@
-"""PulsimCore - High-performance circuit simulator for power electronics.
+"""PulsimCore — high-performance circuit simulator for power electronics.
 
-This is the API with C++23 features and SIMD optimization.
+.. note::
+
+   **v1 is on a deprecation path.** New code should use the v2
+   surface:
+
+   .. code-block:: python
+
+       import pulsim.v2 as p
+
+       b = p.CircuitBuilder()
+       b.add_voltage_source("Vin", "n0", "gnd", 5.0)
+       # ... see docs/v2/migration-from-v1.md for the full mapping
+
+   The v1 surface re-exported below (``Resistor``, ``Circuit``,
+   ``Simulator``, ``Preset``, …) continues to work for backwards
+   compatibility but is no longer being extended. New analysis
+   tools (periodic shooting, FRA, harmonic balance, hysteresis,
+   single-phase IM, live scope, …) ship only under
+   ``pulsim.v2``.
+
+   See ``docs/v2/migration-from-v1.md`` for a side-by-side mapping
+   table and the ``scripts/migrate_v1_to_v2.py`` codemod for
+   mechanical conversion of v1 code.
+
+This top-level package will eventually become an alias for
+``pulsim.v2`` once all internal consumers (notebooks, examples,
+tests) have migrated. Until then, both surfaces coexist.
 """
 
 __version__ = "0.10.0"
@@ -10,6 +36,76 @@ import warnings
 import weakref
 
 import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Soft deprecation banner — emitted on direct ``import pulsim``.
+# ---------------------------------------------------------------------------
+# Heuristic: skip the warning when this ``__init__.py`` is being
+# loaded as a side-effect of ``import pulsim.v2``. Python imports
+# the parent package first, so v2 users would otherwise see the
+# warning even though they're already on the recommended path.
+#
+# Other ways to silence:
+#   * ``PULSIM_HIDE_V1_DEPRECATION=1`` env var
+#   * standard ``warnings.filterwarnings("ignore", …)``
+def _user_is_only_using_v2() -> bool:
+    """Heuristic: read the entry script and check whether the only
+    pulsim import is ``pulsim.v2`` (or its submodules). Used to
+    suppress the v1-deprecation warning for users already on the
+    recommended path.
+
+    Falls back to "user is using v1" (warning emitted) on any
+    detection failure — the warning is informational so a
+    false-positive is harmless.
+    """
+    import sys as _sys
+    try:
+        # The script Python is running is at sys.argv[0]. For
+        # ``python -c "..."`` it's "-c"; for REPL it's "" or "-".
+        # In those cases assume the user knows what they're doing
+        # and stay quiet IFF they're not touching v1 directly.
+        script = _sys.argv[0] if _sys.argv else ""
+        if not script or script in ("-c", "-"):
+            # python -c or REPL — emit only if the SAME process has
+            # already touched a v1-only symbol; otherwise stay quiet.
+            return True
+        # Read the user's entry script. If it ONLY imports
+        # ``pulsim.v2`` (no bare ``import pulsim``), suppress.
+        import os as _os
+        if not _os.path.isfile(script):
+            return False
+        with open(script, encoding="utf-8", errors="replace") as f:
+            src = f.read()
+        # Look for any line that imports pulsim WITHOUT the .v2
+        # qualifier. ``\bimport pulsim\b(?!\.)`` matches
+        # ``import pulsim`` but not ``import pulsim.v2``.
+        import re as _re
+        if _re.search(r"\bimport\s+pulsim\b(?!\.)", src):
+            return False
+        if _re.search(r"\bfrom\s+pulsim\s+import\b", src):
+            return False
+        # Any ``pulsim.v2`` reference → user is on v2.
+        if _re.search(r"\bpulsim\.v2\b", src):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+if not os.environ.get("PULSIM_HIDE_V1_DEPRECATION") \
+        and not _user_is_only_using_v2():
+    warnings.warn(
+        "pulsim's top-level surface (`import pulsim`) re-exports "
+        "the v1 kernel and is on a deprecation path. New code "
+        "should use `import pulsim.v2 as p`. See "
+        "docs/v2/migration-from-v1.md for the API mapping, or run "
+        "`python scripts/migrate_v1_to_v2.py <file>` to convert "
+        "v1 sources mechanically. Set "
+        "PULSIM_HIDE_V1_DEPRECATION=1 to silence this warning.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
 from ._pulsim import (
     # Enums
