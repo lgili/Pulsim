@@ -525,13 +525,17 @@ def simulate(
     if enable_newton_lm is not None:
         opts.enable_newton_lm = enable_newton_lm
     # Item 3 — auto-enable sub-step state correction when the circuit
-    # has event-tracked devices (PWL diodes / smooth-blend MOSFETs /
-    # IGBTs / saturable inductors). Pinpoints commutation times within
-    # a dt so the post-event state is on the right side of the switch.
+    # has event-tracked devices: either smooth-blend nonlinear (smooth
+    # IdealDiode / SH1 MOSFET / IGBT L1 / SaturableInductor) OR PWL
+    # diodes (discrete events whose commutation times are state-
+    # dependent — current crossing zero, etc.). Sub-step correction
+    # pinpoints those commutation instants within a dt so the
+    # post-event state is on the right side of the switch.
     # User can still force on/off with an explicit kwarg.
     if enable_substep_state_correction is None:
         enable_substep_state_correction = (
-            builder.pool.has_nonlinear_devices())
+            builder.pool.has_nonlinear_devices()
+            or builder.pool.num_diodes() > 0)
     opts.enable_substep_state_correction = enable_substep_state_correction
 
     # Default switch_fn: all switches closed.

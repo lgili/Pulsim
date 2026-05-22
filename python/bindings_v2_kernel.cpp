@@ -500,6 +500,13 @@ void init_module(py::module_& m) {
               "Newton iteration). Used by the Python "
               "`simulate()` wrapper to auto-enable the "
               "nonlinear-refresh pass.")
+        .def("num_diodes",
+              &pwl::DevicePool::num_diodes,
+              "Count of PWL diodes registered. Each PWL diode\n"
+              "is event-tracked (commutation at state-dependent\n"
+              "times within a dt step), so the Python "
+              "`simulate()` wrapper uses this to auto-enable\n"
+              "sub-step state correction.")
         .def("branch_var_id_for_inductor",
               &pwl::DevicePool::branch_var_id_for_inductor,
               py::arg("branch_id"), py::arg("graph"),
