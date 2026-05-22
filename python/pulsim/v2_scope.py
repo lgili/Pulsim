@@ -195,33 +195,36 @@ class LiveScope:
     def add_node_voltage(self, node_name: str, *,
                             label: Optional[str] = None,
                             color: Optional[str] = None,
-                            panel: Optional[str] = None) -> "LiveScope":
+                            panel: Optional[str] = None,
+                            fmt: str = "{:+8.3f}") -> "LiveScope":
         idx = self.builder.node_id_of(node_name)
         nm = label or f"V({node_name})"
         return self.add_signal(
             nm, lambda t, x, _i=idx: float(x[_i]),
-            color=color, unit="V", panel=panel)
+            color=color, unit="V", panel=panel, fmt=fmt)
 
     def add_branch_current(self, branch_id: int, *,
                                 label: Optional[str] = None,
                                 color: Optional[str] = None,
-                                panel: Optional[str] = None) -> "LiveScope":
+                                panel: Optional[str] = None,
+                                fmt: str = "{:+8.3f}") -> "LiveScope":
         idx = self.builder.pool.branch_var_id_for_inductor(
             branch_id, self.builder.graph)
         nm = label or f"I(branch#{branch_id})"
         return self.add_signal(
             nm, lambda t, x, _i=idx: float(x[_i]),
-            color=color, unit="A", panel=panel)
+            color=color, unit="A", panel=panel, fmt=fmt)
 
     def add_chain_channel(self, chain, name: str, *,
                               label: Optional[str] = None,
                               color: Optional[str] = None,
                               unit: str = "",
-                              panel: Optional[str] = None) -> "LiveScope":
+                              panel: Optional[str] = None,
+                              fmt: str = "{:+8.3f}") -> "LiveScope":
         nm = label or name
         return self.add_signal(
             nm, lambda t, x, _c=chain, _n=name: float(_c.get(_n)),
-            color=color, unit=unit, panel=panel)
+            color=color, unit=unit, panel=panel, fmt=fmt)
 
     # =====================================================================
     # GUI lifecycle
