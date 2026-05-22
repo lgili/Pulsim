@@ -185,6 +185,11 @@ from .v2_magnetic import (
     igse_loss_density,
     core_loss,
 )
+from .v2_switchgear import (
+    add_rc_snubber,
+    make_thyristor_switch_fn,
+    make_fuse_switch_fn,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -306,6 +311,10 @@ __all__ = [
     "steinmetz_loss_density",
     "igse_loss_density",
     "core_loss",
+    # Switchgear & protection (Phase C.4).
+    "add_rc_snubber",
+    "make_thyristor_switch_fn",
+    "make_fuse_switch_fn",
 ]
 
 
