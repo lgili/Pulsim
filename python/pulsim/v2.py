@@ -217,6 +217,12 @@ from .v2_topology import (
     add_three_phase_rl_load,
     add_three_phase_vsi,
 )
+from .v2_losses import (
+    EfficiencyCalculator,
+    LossAccumulator,
+    average_power_at_node,
+    device_loss_summary,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -377,6 +383,11 @@ __all__ = [
     "add_bridge_rectifier",
     "add_three_phase_rl_load",
     "add_three_phase_vsi",
+    # Loss accounting (Phase 1 of v1→v2 closure).
+    "EfficiencyCalculator",
+    "LossAccumulator",
+    "average_power_at_node",
+    "device_loss_summary",
 ]
 
 if _HAS_SCOPE:
