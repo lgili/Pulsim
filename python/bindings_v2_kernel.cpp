@@ -35,6 +35,7 @@
 #include "pulsim/v2/builder/circuit_builder.hpp"
 #include "pulsim/v2/motors/mechanical.hpp"
 #include "pulsim/v2/motors/motor_adapters.hpp"
+#include "pulsim/v2/switchgear/switchgear_adapters.hpp"
 #include "pulsim/v2/thermal/thermal_adapters.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/numeric/types.hpp"
@@ -1315,7 +1316,35 @@ void init_module(py::module_& m) {
             py::arg("power_channel") = std::string{},
             "Convenience: P = R·I² with single current input. "
             "Typical use is a MOSFET conduction loss "
-            "(R = R_DS_ON, i = inductor branch current).");
+            "(R = R_DS_ON, i = inductor branch current).")
+
+        // ---- Switchgear blocks (Phase C.4 / C++ port) ----
+        .def("add_thyristor",
+            [](BlockChain& self, InputRef gate_ref, InputRef current_ref,
+                std::string output_channel, Real i_holding) {
+                pulsim::v2::switchgear::add_thyristor_to_chain(
+                    self, gate_ref, current_ref,
+                    std::move(output_channel), i_holding);
+            },
+            py::arg("gate"), py::arg("current"),
+            py::arg("output_channel"), py::arg("i_holding") = 0.0,
+            "Gate-triggered latching switch. Sets output_channel to "
+            "1.0 when latched ON, 0.0 otherwise. Latches ON when "
+            "gate > 0.5; latches OFF when |current| < i_holding.")
+
+        .def("add_fuse",
+            [](BlockChain& self, InputRef current_ref,
+                Real i2t_threshold, std::string output_channel,
+                bool initial_intact) {
+                pulsim::v2::switchgear::add_fuse_to_chain(
+                    self, current_ref, i2t_threshold,
+                    std::move(output_channel), initial_intact);
+            },
+            py::arg("current"), py::arg("i2t_threshold"),
+            py::arg("output_channel"), py::arg("initial_intact") = true,
+            "Thermal I²t fuse. Integrates i²·dt; opens irreversibly "
+            "when the integral exceeds i2t_threshold (A²·s). "
+            "output_channel: 1.0 intact, 0.0 blown.");
 
     // Helper for make_chain_switch_fn — wires chain channels →
     // SwitchStateMask bits.
