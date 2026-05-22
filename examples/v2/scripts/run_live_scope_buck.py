@@ -103,18 +103,23 @@ def main() -> None:
     sim_thread.start()
 
     # Build + start the scope (blocks until the window closes).
+    # Multi-panel layout: voltages on top, current in the middle,
+    # control signals at the bottom — shared X axis, independent Y.
     scope = p.LiveScope(b, stream,
+                            panels=["Voltage", "Current", "Control"],
                             window_seconds=2.0,
                             update_hz=30.0,
                             title="Pulsim — Buck CL live")
-    scope.add_node_voltage("vin",  color="#888")
-    scope.add_node_voltage("vout", color="#1f77b4")
-    scope.add_branch_current(ind_id, label="I(L1)",
-                                  color="#ff7f0e")
-    scope.add_chain_channel(chain, "duty",
-                                 label="duty (×24 V)", color="#2ca02c")
-    scope.add_chain_channel(chain, "v_filt",
-                                 label="v_filt", color="#9467bd")
+    scope.add_node_voltage("vin",  panel="Voltage", color="#4e79a7")
+    scope.add_node_voltage("vout", panel="Voltage", color="#f28e2b")
+    scope.add_chain_channel(chain, "v_filt", panel="Voltage",
+                                 label="v_filt", unit="V",
+                                 color="#9467bd")
+    scope.add_branch_current(ind_id, panel="Current",
+                                  label="I(L1)", color="#59a14f")
+    scope.add_chain_channel(chain, "duty", panel="Control",
+                                 label="duty", color="#e15759",
+                                 fmt="{:+6.3f}")
 
     scope.start()
 
