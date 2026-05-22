@@ -101,7 +101,8 @@ class VSI3PhaseParams:
     # Output LC filter (per phase, between leg pole and load terminal)
     L_f: float = 1e-3            # filter inductor (H)
     C_f: float = 10e-6           # filter cap, Y-connected (F)
-    R_L: float = 0.0             # filter inductor ESR (Ω) — set non-zero for damping
+    R_L: float = 1.0             # filter inductor ESR (Ω) — realistic at this size +
+                                  # primary damping (drops Q from 10.6 to ~3)
 
     # Switching
     f_sw: float = 20e3           # switching frequency (Hz)
@@ -459,21 +460,31 @@ def simulate_open_loop_svpwm(
 def standalone_voltage_plant(p: VSI3PhaseParams) -> signal.TransferFunction:
     """Plant for the stand-alone voltage loop in the dq frame.
 
-    Within the dq frame, the LC filter loaded by $R_{load}$ looks
-    like a second-order low-pass:
+    Within the dq frame, the LC filter (with inductor ESR $R_L$) loaded
+    by $R_{load}$ looks like a second-order low-pass:
 
-        $G(s) = \\frac{V_d}{d_d \\cdot V_{dc}/2}
-              = \\frac{1/(L_f C_f)}{s^2 + s/(R_{load} C_f) + 1/(L_f C_f)}$
+        $G(s) = \\frac{V_d}{V_{cmd,d}}
+              = \\frac{R_{load}/((L_f + R_L R_{load} C_f) \\, s + R_L + R_{load})}
+                       {\\text{denominator}}$
 
-    DC gain = 1 (the dq-frame modulating signal directly sets the dq
-    voltage at the filter output). $\\omega_n = 1/\\sqrt{L_f C_f}$.
+    More cleanly, the state-space form gives:
 
-    This is exactly the buck's plant — once you're in dq, a 3-phase
-    inverter looks like a buck. That's the magic of dq.
+        $\\dot i_L = (v_{cmd} - v_C - R_L i_L)/L_f$,
+        $\\dot v_C = (i_L - v_C/R_{load})/C_f$
+
+    → $G(s) = R_{load} / (R_{load} L_f C_f s^2 +
+              (R_L R_{load} C_f + L_f) s + R_L + R_{load})$
+
+    Normalized form (divide by $R_L + R_{load}$):
+        DC gain = $R_{load}/(R_L + R_{load})$
+        Damping coefficient $2 \\zeta \\omega_n = (R_L R_{load} C_f + L_f) /
+                                                  (R_{load} L_f C_f)$
     """
     L, C, R = p.L_f, p.C_f, p.R_load
-    num = [1.0 / (L * C)]
-    den = [1.0, 1.0 / (R * C), 1.0 / (L * C)]
+    RL = p.R_L
+    # G(s) = R / (R·L·C·s² + (RL·R·C + L)·s + RL + R)
+    num = [R]
+    den = [R*L*C, RL*R*C + L, RL + R]
     return signal.TransferFunction(num, den)
 
 
@@ -713,7 +724,9 @@ def simulate_closed_loop_gridtie(
             v_qg = float(v_qg_arr[0])
 
             # PI on v_qg → omega correction
-            err_pll = -v_qg  # want v_qg = 0
+            # Sign convention: positive v_qg means PLL lags the grid → speed up PLL.
+            # So drive omega_correction in the SAME direction as v_qg.
+            err_pll = v_qg
             domega = b_pll[0] * err_pll + state_pll[0]
             ns_pll = np.zeros_like(state_pll)
             for j in range(n_state_pll - 1):
