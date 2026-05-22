@@ -35,6 +35,7 @@
 #include "pulsim/v2/builder/circuit_builder.hpp"
 #include "pulsim/v2/motors/mechanical.hpp"
 #include "pulsim/v2/motors/motor_adapters.hpp"
+#include "pulsim/v2/solver/bdf1.hpp"
 #include "pulsim/v2/switchgear/switchgear_adapters.hpp"
 #include "pulsim/v2/thermal/thermal_adapters.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
@@ -1391,6 +1392,28 @@ void init_module(py::module_& m) {
         "Build a switch_fn(t) that sets bit `idx` ON when "
         "`chain.channels[channel_name] > 0.5`. `mapping` is a list "
         "of (channel_name, switch_idx) pairs.");
+
+    // ----- BDF1 (implicit Euler) — Phase B.2 ------------------------------
+    m.def("run_transient_bdf1",
+        [](const builder::CircuitBuilder& builder,
+            const SimulationOptions& opts,
+            SwitchScheduleFn switch_fn,
+            BExtraFn b_extra_fn,
+            bool start_from_dc_op,
+            StepObserverFn step_observer) {
+            return run_transient_bdf1(
+                builder, opts, switch_fn, b_extra_fn,
+                start_from_dc_op, step_observer);
+        },
+        py::arg("builder"), py::arg("opts"), py::arg("switch_fn"),
+        py::arg("b_extra_fn") = BExtraFn{},
+        py::arg("start_from_dc_op") = false,
+        py::arg("step_observer") = StepObserverFn{},
+        "BDF1 (implicit Euler) transient simulation. Use when the "
+        "trapezoidal path rings on stiff problems — BDF1 is L-stable "
+        "(adds artificial damping that kills numerical oscillation). "
+        "Slower than trap because it assembles + factors per step; "
+        "intended for ROBUSTNESS over speed.");
 
     // ----- Fast-path: run_transient that takes a BlockChain DIRECTLY -----
     //
