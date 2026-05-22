@@ -758,8 +758,10 @@ def simulate_closed_loop_ccm(
 
     if warm_start:
         D_nom = 1.0 - V_ac * np.sqrt(2.0) / np.pi / p.V_o  # rough average duty
-        # Steady-state i_ref_amp such that <P_in> = P_o
-        i_ref_amp = 2.0 * p.P_o / (V_g_pk * K_mult)
+        # Steady-state i_ref_amp such that <P_in> = P_o.
+        # <P_in> = K_mult · i_ref_amp · <v_g²> = K_mult · i_ref_amp · V_ac²
+        # → i_ref_amp = P_o / (K_mult · V_ac²)
+        i_ref_amp = p.P_o / (K_mult * V_ac ** 2)
         v_o = v_ref
         i_L = 0.0
         duty = D_nom
