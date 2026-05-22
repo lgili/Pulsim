@@ -209,6 +209,14 @@ from .v2_spice_import import (
     spice_to_builder,
 )
 from .v2_stream import LiveStream, NativeLiveStream
+from .v2_topology import (
+    BridgeRectifierResult,
+    ThreePhaseRLLoadResult,
+    ThreePhaseVsiResult,
+    add_bridge_rectifier,
+    add_three_phase_rl_load,
+    add_three_phase_vsi,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -362,6 +370,13 @@ __all__ = [
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
     "NativeLiveStream",
+    # Composite topology helpers (Phase 1 of v1→v2 closure).
+    "BridgeRectifierResult",
+    "ThreePhaseRLLoadResult",
+    "ThreePhaseVsiResult",
+    "add_bridge_rectifier",
+    "add_three_phase_rl_load",
+    "add_three_phase_vsi",
 ]
 
 if _HAS_SCOPE:
