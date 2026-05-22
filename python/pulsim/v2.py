@@ -234,6 +234,10 @@ from .v2_periodic import (
     PeriodicShootingResult,
     run_periodic_shooting,
 )
+from .v2_fra import (
+    FraResult,
+    run_fra,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -408,6 +412,9 @@ __all__ = [
     # Periodic-steady-state solver (Phase 2 of v1→v2 closure).
     "PeriodicShootingResult",
     "run_periodic_shooting",
+    # Frequency Response Analyzer (swept-sine, time-domain).
+    "FraResult",
+    "run_fra",
 ]
 
 if _HAS_SCOPE:
