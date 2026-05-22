@@ -138,6 +138,10 @@ from .v2_mna_sweep import (
     MnaSweepResult,
     run_mna_sweep,
 )
+from .v2_adaptive import (
+    AdaptiveResult,
+    run_transient_adaptive,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -219,6 +223,9 @@ __all__ = [
     # Fast frequency sweep via impulse-response (v1 parity Phase A.3).
     "MnaSweepResult",
     "run_mna_sweep",
+    # Adaptive (variable-step) transient driver (Phase B.1).
+    "AdaptiveResult",
+    "run_transient_adaptive",
 ]
 
 
@@ -241,6 +248,7 @@ def simulate(
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
     progress: "bool | int | str" = False,
+    initial_state=None,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -396,6 +404,8 @@ def simulate(
         kwargs["b_extra_fn"] = b_extra_fn
     if step_observer is not None:
         kwargs["step_observer"] = step_observer
+    if initial_state is not None:
+        kwargs["initial_state"] = initial_state
 
     res = run_transient(
         cache, builder.graph, builder.pool, opts, **kwargs,

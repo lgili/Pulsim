@@ -668,17 +668,26 @@ void init_module(py::module_& m) {
            BExtraFn b_extra_fn,
            bool start_from_dc_op,
            bool enable_nonlinear_refresh,
-           StepObserverFn step_observer) {
+           StepObserverFn step_observer,
+           py::object initial_state) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
                     pwl::make_combined_diode_mosfet_refresh();
             }
+            // Convert optional initial_state to a Vector pointer.
+            Vector x_init;
+            const Vector* x_init_ptr = nullptr;
+            if (!initial_state.is_none()) {
+                x_init = initial_state.cast<Vector>();
+                x_init_ptr = &x_init;
+            }
             return run_transient(cache, graph, pool, opts,
                                   switch_fn, b_extra_fn,
                                   start_from_dc_op,
                                   nl_refresh,
-                                  step_observer);
+                                  step_observer,
+                                  x_init_ptr);
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
@@ -686,6 +695,7 @@ void init_module(py::module_& m) {
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = false,
         py::arg("step_observer") = StepObserverFn{},
+        py::arg("initial_state") = py::none(),
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "

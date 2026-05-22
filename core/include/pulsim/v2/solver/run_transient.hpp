@@ -244,7 +244,8 @@ inline SimulationResult run_transient(
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
     const pwl::NonlinearRefreshFn& nl_refresh = {},
-    const StepObserverFn& step_observer = {}) {
+    const StepObserverFn& step_observer = {},
+    const Vector* initial_state = nullptr) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -282,6 +283,20 @@ inline SimulationResult run_transient(
     Vector x = Vector::Zero(state_size);
     pwl::HistoryState history{graph, pool};
     history.reset();   // explicit (constructor already zeroes)
+    // Initial-state injection (Phase B.1): if the caller supplies a
+    // non-null `initial_state` vector, copy it into `x` and seed the
+    // trapezoidal history from it. This lets the adaptive driver
+    // chain consecutive `simulate()` segments without restarting at
+    // zero. The seeded values must be self-consistent — typically
+    // the last state from the previous segment.
+    if (initial_state != nullptr) {
+        if (static_cast<Size>(initial_state->size()) != state_size) {
+            throw std::invalid_argument(
+                "run_transient: initial_state size mismatch");
+        }
+        x = *initial_state;
+        history.seed_from_dc_op(x);
+    }
 
     // V17: saturable inductors carry their own (i_L, V_L)_old
     // history, since they need it in the Newton refresh (not
