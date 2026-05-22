@@ -208,6 +208,7 @@ from .v2_spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
+from .v2_stream import LiveStream
 
 __all__ = [
     "CircuitBuilder",
@@ -349,6 +350,8 @@ __all__ = [
     "parse_spice_value",
     "parse_spice_netlist",
     "spice_to_builder",
+    # Live streaming output + cancellation (foundation for GUI scope).
+    "LiveStream",
 ]
 
 
@@ -372,6 +375,7 @@ def simulate(
     enable_substep_state_correction: Optional[bool] = None,
     progress: "bool | int | str" = False,
     initial_state=None,
+    should_continue=None,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -554,6 +558,8 @@ def simulate(
             kwargs["step_observer"] = step_observer
         if initial_state is not None:
             kwargs["initial_state"] = initial_state
+        if should_continue is not None:
+            kwargs["should_continue"] = should_continue
         res = run_transient(
             cache, builder.graph, builder.pool, opts, **kwargs,
         )

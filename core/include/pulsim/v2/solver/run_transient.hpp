@@ -132,6 +132,14 @@ using BExtraFn = std::function<Vector(Real)>;
 using StepObserverFn =
     std::function<void(Real, const Vector&)>;
 
+/// Cancellation callback — invoked at the start of every step.
+/// Returning `false` causes `run_transient` to break the loop and
+/// return whatever it has accumulated so far (so the partial trace
+/// is still useful — e.g. for a live scope that the user stopped).
+/// Returning `true` (or having no callback at all) continues the
+/// simulation as normal.
+using ShouldContinueFn = std::function<bool()>;
+
 // -----------------------------------------------------------------------------
 // run_transient — the V0 transient simulation entry point.
 //
@@ -245,7 +253,8 @@ inline SimulationResult run_transient(
     bool start_from_dc_op = false,
     const pwl::NonlinearRefreshFn& nl_refresh = {},
     const StepObserverFn& step_observer = {},
-    const Vector* initial_state = nullptr) {
+    const Vector* initial_state = nullptr,
+    const ShouldContinueFn& should_continue = {}) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -465,6 +474,12 @@ inline SimulationResult run_transient(
         }
 
         for (Size k = 1; k < n_steps; ++k) {
+            // User-cancellation check (Phase: live scope). Lets a
+            // GUI / external watchdog stop the simulation early
+            // while preserving the partial trace.
+            if (should_continue && !should_continue()) {
+                break;
+            }
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
             const Real t_prev = opts.t_start +

@@ -676,7 +676,8 @@ void init_module(py::module_& m) {
            bool start_from_dc_op,
            bool enable_nonlinear_refresh,
            StepObserverFn step_observer,
-           py::object initial_state) {
+           py::object initial_state,
+           ShouldContinueFn should_continue) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
@@ -694,7 +695,8 @@ void init_module(py::module_& m) {
                                   start_from_dc_op,
                                   nl_refresh,
                                   step_observer,
-                                  x_init_ptr);
+                                  x_init_ptr,
+                                  should_continue);
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
@@ -703,6 +705,7 @@ void init_module(py::module_& m) {
         py::arg("enable_nonlinear_refresh") = false,
         py::arg("step_observer") = StepObserverFn{},
         py::arg("initial_state") = py::none(),
+        py::arg("should_continue") = ShouldContinueFn{},
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
