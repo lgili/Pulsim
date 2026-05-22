@@ -62,16 +62,13 @@ def main() -> None:
     chain.add("pwm", p.PwmGenerator(frequency=F_PWM),
                 inputs=dict(duty="channel:duty", t="time"),
                 output="gate")
-    # IMPORTANT: build the kernel-side chain FIRST so the native
-    # switch_fn below can reference the underlying C++ chain.
-    chain_observer = chain.make_step_observer(b, dt=DT,
-                                                    use_kernel=True)
-    # ``use_kernel=True`` runs the PWM-gate-to-switch dispatch in C++
-    # — no GIL per kernel step. Saves ~20 µs/step for high step rates.
+    # The step_observer compiles the chain to C++ and stashes the
+    # native chain handle. make_pwm_switch_fn below uses it for a
+    # C++-native PWM-gate-to-switch dispatch — no GIL per kernel step.
+    chain_observer = chain.make_step_observer(b, dt=DT)
     sw_fn = chain.make_pwm_switch_fn("gate",
                                           num_switches=b.graph.num_switches,
-                                          switch_idx=0,
-                                          use_kernel=True)
+                                          switch_idx=0)
 
     # Native ring-buffer streaming. The kernel writes (t, x) samples
     # directly into a numpy array shared with Python at the decimated

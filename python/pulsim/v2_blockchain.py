@@ -452,10 +452,15 @@ class MixedDomainBlockChain:
     def make_pwm_switch_fn(self, channel: str, *,
                               num_switches: int,
                               switch_idx: int = 0,
-                              threshold: float = 0.5,
-                              use_kernel: bool = False):
+                              threshold: float = 0.5):
         """Build a `switch_fn(t)` that toggles `switch_idx` based on the
         binary state of `channel` (treats >`threshold` as ON).
+
+        The returned switch_fn runs entirely in C++ — no GIL acquire
+        per kernel step — when the chain has been compiled to C++
+        (which :meth:`make_step_observer` does automatically). For a
+        100 kHz PWM at dt=100 ns this kills ~20 µs/step of GIL
+        handshakes that the equivalent Python code costs.
 
         Parameters
         ----------
@@ -468,29 +473,23 @@ class MixedDomainBlockChain:
             Which switch bit this PWM drives. Default 0.
         threshold
             Channel value comparison threshold. Default 0.5.
-        use_kernel
-            When ``True`` (RECOMMENDED for high step-rate sims feeding
-            a live scope), the returned switch_fn runs entirely in C++
-            with no GIL acquire per kernel step — eliminating ~20 µs
-            of Python overhead per kernel step compared to the default
-            Python path. Requires that this chain was constructed in
-            kernel mode (i.e. ``chain.make_step_observer(use_kernel=
-            True)`` is also active so the underlying C++ chain exists
-            and is the one being stepped by the kernel).
+
+        Notes
+        -----
+        The fast C++ path kicks in only after the C++ chain backend
+        exists. The normal flow ::
+
+            observer = chain.make_step_observer(builder, dt=dt)
+            sw_fn    = chain.make_pwm_switch_fn(channel, …)
+            simulate(builder, …, step_observer=observer, switch_fn=sw_fn)
+
+        does the right thing automatically. If you're driving the
+        chain in Python-only mode (no ``make_step_observer`` call —
+        rare and almost always slower than the C++ path), this
+        method silently falls back to a Python closure.
         """
-        if use_kernel:
-            # Resolve the underlying C++ chain. ``_cxx_chain`` is set
-            # on this object lazily by ``make_step_observer(use_kernel=
-            # True)``. If absent, build it now so the helper still
-            # works when called before the observer.
-            cxx_chain = getattr(self, "_cxx_chain", None)
-            if cxx_chain is None:
-                raise RuntimeError(
-                    "make_pwm_switch_fn(use_kernel=True) requires the "
-                    "chain's C++ backend to be initialised first. Call "
-                    "`chain.make_step_observer(builder, dt=…, "
-                    "use_kernel=True)` BEFORE this method so the "
-                    "underlying CxxBlockChain exists.")
+        cxx_chain = getattr(self, "_cxx_chain", None)
+        if cxx_chain is not None:
             from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
             return _k.make_chain_channel_switch_fn(
                 chain=cxx_chain,
@@ -499,49 +498,50 @@ class MixedDomainBlockChain:
                 switch_idx=switch_idx,
                 threshold=threshold,
             )
-
-        # Default — Python switch_fn.
+        # Python fallback — only reached when the chain wasn't
+        # compiled to C++. Backwards-compat path; do NOT add new
+        # callers, build the chain instead.
         from . import v2 as _v2_mod
         chain_self = self
 
-        def switch_fn(t):  # noqa: ARG001 — t is part of the switch_fn contract
+        def switch_fn(t):  # noqa: ARG001
             del t
             m = _v2_mod.SwitchStateMask(num_switches)
             if chain_self.get(channel, 0.0) > threshold:
                 m.set(switch_idx, True)
             return m
-
         return switch_fn
 
     def make_multi_pwm_switch_fn(self, channels,
                                        *, num_switches: int,
-                                       switch_indices=None):
-        """Build a `switch_fn(t)` that drives multiple switches from
-        the chain's channels.
+                                       switch_indices=None,
+                                       threshold: float = 0.5):
+        """Build a `switch_fn(t)` driving multiple switches from
+        chain channels.
+
+        Like :meth:`make_pwm_switch_fn` but reads N channels and ORs
+        them into a single mask. Used for half-bridge / 3-phase
+        topologies where each switch leg has its own gate signal.
+        Runs entirely in C++ — no GIL per kernel step.
 
         Parameters
         ----------
         channels
-            Sequence of channel names whose values (>0.5 = ON) drive
-            the corresponding switch bit.
+            Sequence of channel names whose values (>`threshold`)
+            drive the corresponding switch bit.
         num_switches
-            Total switch count in the circuit (from
-            ``builder.graph.num_switches``).
+            Total switch count in the circuit
+            (``builder.graph.num_switches``).
         switch_indices
             Optional sequence of integer switch indices, parallel to
-            ``channels``. If omitted, channels[i] drives bit i (the
-            default). When the circuit contains PWL diodes (each
-            counted as a switch with internal event tracking), pass
-            explicit indices to avoid setting diode bits.
-
-        Returns
-        -------
-        Callable[[float], SwitchStateMask]
-            A switch_fn suitable for ``simulate(switch_fn=...)``.
+            ``channels``. If omitted, ``channels[i]`` drives bit ``i``.
+            Pass explicit indices when the circuit contains PWL diodes
+            (each counted as a switch with internal event tracking)
+            to avoid clobbering diode bits.
+        threshold
+            Channel value comparison threshold. Default 0.5.
         """
-        from . import v2 as _v2_mod
-        chan_list = list(channels)
-        chain_self = self
+        chan_list = [str(c) for c in channels]
         if switch_indices is None:
             idx_list = list(range(len(chan_list)))
         else:
@@ -549,15 +549,27 @@ class MixedDomainBlockChain:
             if len(idx_list) != len(chan_list):
                 raise ValueError(
                     "switch_indices must be parallel to channels")
+        cxx_chain = getattr(self, "_cxx_chain", None)
+        if cxx_chain is not None:
+            from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
+            return _k.make_chain_channels_switch_fn(
+                chain=cxx_chain,
+                channel_names=chan_list,
+                num_switches=num_switches,
+                switch_indices=idx_list,
+                threshold=threshold,
+            )
+        # Python fallback (see make_pwm_switch_fn).
+        from . import v2 as _v2_mod
+        chain_self = self
 
-        def switch_fn(t):  # noqa: ARG001 — t is part of the switch_fn contract
+        def switch_fn(t):  # noqa: ARG001
             del t
             m = _v2_mod.SwitchStateMask(num_switches)
             for ch, idx in zip(chan_list, idx_list):
-                if chain_self.get(ch, 0.0) > 0.5:
+                if chain_self.get(ch, 0.0) > threshold:
                     m.set(idx, True)
             return m
-
         return switch_fn
 
     def get(self, channel: str, default: float = 0.0):
