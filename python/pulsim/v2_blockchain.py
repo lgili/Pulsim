@@ -136,6 +136,8 @@ class MixedDomainBlockChain:
         # The Python integer time-step used by step_observer for "dt"
         # input resolution. The user passes it via `make_step_observer(dt=)`.
         self._dt: float = 0.0
+        # C++ chain backend — built on demand by `make_step_observer`.
+        self._cxx_chain = None
 
     # -------- authoring API ------------------------------------------------
 
@@ -228,32 +230,236 @@ class MixedDomainBlockChain:
 
     # -------- callback factories ------------------------------------------
 
-    def make_step_observer(self, builder, *, dt: float
+    def make_step_observer(self, builder, *, dt: float,
+                              use_kernel: bool = True
                               ) -> Callable[[float, Any], None]:
         """Build the `step_observer(t, x)` callback to pass to
-        `simulate(...)`. Binds the chain to `builder` and stashes `dt`
-        for blocks that need it."""
+        `simulate(...)`. Binds the chain to `builder` and stashes
+        `dt` for blocks that need it.
+
+        When ``use_kernel=True`` (default), the entire chain is
+        compiled to the C++ `CxxBlockChain` executor and the step
+        observer is a pure-C++ lambda — no Python roundtrip per
+        simulation step. The closures, channels, and state all live
+        in C++. Falls back to the Python evaluator if any block
+        type isn't (yet) supported by the C++ backend.
+
+        Pass ``use_kernel=False`` to force the Python evaluator
+        (mostly useful for debugging mismatches between the two
+        backends).
+        """
         self.bind(builder)
         self._dt = float(dt)
 
+        if use_kernel:
+            try:
+                self._cxx_chain = self._compile_to_cxx(builder)
+                # Use the C++ chain's step_observer.
+                cxx_observer = self._cxx_chain.make_step_observer(dt)
+                # Tag the returned observer so simulate() knows it
+                # can use run_transient_with_chain() (the kernel
+                # fast path that bypasses the std::function wrap).
+                def observer(t, x):
+                    cxx_observer(t, x)
+                observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
+                observer._chain_dt = float(dt)  # type: ignore[attr-defined]
+                return observer
+            except Exception as exc:  # pragma: no cover — graceful fallback
+                import warnings
+                warnings.warn(
+                    f"BlockChain: C++ backend failed "
+                    f"({type(exc).__name__}: {exc}); falling back to "
+                    f"Python evaluator", stacklevel=2)
+                self._cxx_chain = None
+
+        # Python fallback path.
         def observer(t, x):
             self.update(t, x)
-
         return observer
+
+    # -------- C++ backend compilation -------------------------------------
+
+    def _compile_to_cxx(self, builder):
+        """Translate this Python chain into a `CxxBlockChain`. Each
+        block's parameters are read from the Python POD class via
+        ``getattr``; each InputSource is mapped to ``CxxInputRef``.
+
+        Returns the populated C++ chain. Raises ValueError if any
+        block type isn't (yet) supported.
+        """
+        from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
+        cxx_chain = _k.CxxBlockChain()
+
+        for spec in self.blocks:
+            block = spec.block
+            inputs = spec.inputs
+            output = spec.output
+            cls_name = type(block).__name__
+
+            # Translate inputs. Node references are PRE-RESOLVED here
+            # (the closure inside the C++ chain captures InputRef by
+            # value, so we can't patch the index later via bind_nodes).
+            def ref(name_kw: str):
+                src = inputs[name_kw]
+                if src.kind == "const":
+                    return _k.CxxInputRef.const_value(float(src.value))
+                if src.kind == "channel":
+                    return _k.CxxInputRef.channel(str(src.value))
+                if src.kind == "node":
+                    idx = int(builder.node_id_of(str(src.value)))
+                    return _k.CxxInputRef.node_idx(idx)
+                if src.kind == "time":
+                    return _k.CxxInputRef.time()
+                if src.kind == "dt":
+                    return _k.CxxInputRef.dt()
+                raise ValueError(f"unknown source kind {src.kind}")
+
+            if cls_name == "Gain":
+                cxx_chain.add_gain(k=float(block.k),
+                                      x=ref("x"), output=output)
+            elif cls_name == "Subtract":
+                cxx_chain.add_subtract(a=ref("a"), b=ref("b"),
+                                          output=output)
+            elif cls_name == "Sum":
+                cxx_chain.add_sum(
+                    w0=float(getattr(block, "w0", 1.0)),
+                    w1=float(getattr(block, "w1", 1.0)),
+                    w2=float(getattr(block, "w2", 0.0)),
+                    a=ref("a") if "a" in inputs else
+                       _k.CxxInputRef.const_value(0.0),
+                    b=ref("b") if "b" in inputs else
+                       _k.CxxInputRef.const_value(0.0),
+                    c=ref("c") if "c" in inputs else
+                       _k.CxxInputRef.const_value(0.0),
+                    output=output)
+            elif cls_name == "PIController":
+                cxx_chain.add_pi_controller(
+                    Kp=float(block.Kp), Ki=float(block.Ki),
+                    output_min=float(block.output_min),
+                    output_max=float(block.output_max),
+                    setpoint=ref("setpoint"),
+                    measured=ref("measured"),
+                    dt=ref("dt"),
+                    output=output)
+            elif cls_name == "PIDController":
+                cxx_chain.add_pid_controller(
+                    Kp=float(block.Kp), Ki=float(block.Ki),
+                    Kd=float(block.Kd),
+                    tau_d=float(getattr(block, "tau_d", 0.0)),
+                    output_min=float(block.output_min),
+                    output_max=float(block.output_max),
+                    setpoint=ref("setpoint"),
+                    measured=ref("measured"),
+                    dt=ref("dt"),
+                    output=output)
+            elif cls_name == "FirstOrderLowPass":
+                cxx_chain.add_first_order_lpf(
+                    tau=float(block.tau),
+                    input_value=ref("input_value"),
+                    dt=ref("dt"),
+                    output=output)
+            elif cls_name == "Integrator":
+                cxx_chain.add_integrator(
+                    gain=float(block.gain),
+                    output_min=float(block.output_min),
+                    output_max=float(block.output_max),
+                    x=ref("x"), dt=ref("dt"),
+                    output=output)
+            elif cls_name == "Differentiator":
+                cxx_chain.add_differentiator(
+                    filter_alpha=float(block.filter_alpha),
+                    x=ref("x"), dt=ref("dt"),
+                    output=output)
+            elif cls_name == "Limiter":
+                cxx_chain.add_limiter(
+                    min_v=float(block.min),
+                    max_v=float(block.max),
+                    x=ref("x"), output=output)
+            elif cls_name == "MovingAverageFilter":
+                cxx_chain.add_moving_average(
+                    window=int(block.window),
+                    x=ref("input_value"), output=output)
+            elif cls_name == "PwmGenerator":
+                cxx_chain.add_pwm_generator(
+                    frequency=float(block.frequency),
+                    phase=float(getattr(block, "phase", 0.0)),
+                    duty=ref("duty"), t=ref("t"),
+                    output=output)
+            elif cls_name == "SpaceVectorModulator":
+                if not isinstance(output, (tuple, list)) or len(output) != 3:
+                    raise ValueError("SVM output must be 3-tuple")
+                cxx_chain.add_svm(
+                    v_dc=float(block.v_dc),
+                    v_alpha=ref("v_alpha"), v_beta=ref("v_beta"),
+                    output_a=output[0], output_b=output[1],
+                    output_c=output[2])
+            elif cls_name == "ClarkeTransform":
+                if not isinstance(output, (tuple, list)) or len(output) != 3:
+                    raise ValueError("Clarke output must be 3-tuple")
+                cxx_chain.add_clarke(
+                    a=ref("a"), b=ref("b"), c=ref("c"),
+                    output_alpha=output[0], output_beta=output[1],
+                    output_zero=output[2])
+            elif cls_name == "InverseClarkeTransform":
+                if not isinstance(output, (tuple, list)) or len(output) != 3:
+                    raise ValueError("InverseClarke output must be 3-tuple")
+                zero_ref = ref("zero") if "zero" in inputs \
+                            else _k.CxxInputRef.const_value(0.0)
+                cxx_chain.add_inverse_clarke(
+                    alpha=ref("alpha"), beta=ref("beta"),
+                    zero=zero_ref,
+                    output_a=output[0], output_b=output[1],
+                    output_c=output[2])
+            elif cls_name == "ParkTransform":
+                if not isinstance(output, (tuple, list)) or len(output) != 2:
+                    raise ValueError("Park output must be 2-tuple")
+                cxx_chain.add_park(
+                    alpha=ref("alpha"), beta=ref("beta"),
+                    theta=ref("theta"),
+                    output_d=output[0], output_q=output[1])
+            elif cls_name == "InverseParkTransform":
+                if not isinstance(output, (tuple, list)) or len(output) != 2:
+                    raise ValueError("InverseParkTransform output must be 2-tuple")
+                cxx_chain.add_inverse_park(
+                    d=ref("d"), q=ref("q"), theta=ref("theta"),
+                    output_alpha=output[0], output_beta=output[1])
+            elif cls_name == "PLL":
+                if not isinstance(output, (tuple, list)) or len(output) != 3:
+                    raise ValueError("PLL output must be 3-tuple")
+                cxx_chain.add_pll(
+                    f_nominal=float(block.f_nominal),
+                    Kp=float(block.Kp), Ki=float(block.Ki),
+                    v_alpha=ref("v_alpha"), v_beta=ref("v_beta"),
+                    dt=ref("dt"),
+                    output_theta=output[0], output_omega=output[1],
+                    output_freq=output[2])
+            else:
+                raise ValueError(
+                    f"block type {cls_name!r} not yet supported by "
+                    f"C++ backend")
+
+        # Bind node references.
+        cxx_chain.bind_nodes(builder.node_id_of)
+        return cxx_chain
 
     def make_pwm_switch_fn(self, channel: str, *,
                               num_switches: int,
                               switch_idx: int = 0):
         """Build a `switch_fn(t)` that toggles `switch_idx` based on the
         binary state of `channel` (treats >0.5 as ON). Use for chains
-        whose final block is a PwmGenerator."""
+        whose final block is a PwmGenerator.
+
+        Reads via ``self.get(channel)`` so it works regardless of
+        whether the C++ or Python backend is active.
+        """
         # Import here to avoid a circular import at module load time.
         from . import v2 as _v2_mod
+        chain_self = self
 
         def switch_fn(t):  # noqa: ARG001 — t is part of the switch_fn contract
             del t
             m = _v2_mod.SwitchStateMask(num_switches)
-            if self.channels.get(channel, 0.0) > 0.5:
+            if chain_self.get(channel, 0.0) > 0.5:
                 m.set(switch_idx, True)
             return m
 
@@ -287,6 +493,7 @@ class MixedDomainBlockChain:
         """
         from . import v2 as _v2_mod
         chan_list = list(channels)
+        chain_self = self
         if switch_indices is None:
             idx_list = list(range(len(chan_list)))
         else:
@@ -299,14 +506,20 @@ class MixedDomainBlockChain:
             del t
             m = _v2_mod.SwitchStateMask(num_switches)
             for ch, idx in zip(chan_list, idx_list):
-                if self.channels.get(ch, 0.0) > 0.5:
+                if chain_self.get(ch, 0.0) > 0.5:
                     m.set(idx, True)
             return m
 
         return switch_fn
 
     def get(self, channel: str, default: float = 0.0):
-        """Read the latest value on a channel. Useful for debugging."""
+        """Read the latest value on a channel. Useful for debugging.
+
+        If the C++ backend is active, reads from there; otherwise
+        from the Python-side `channels` dict.
+        """
+        if self._cxx_chain is not None:
+            return self._cxx_chain.get_channel(channel)
         return self.channels.get(channel, default)
 
 
