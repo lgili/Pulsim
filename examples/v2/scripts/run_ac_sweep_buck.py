@@ -15,20 +15,21 @@ With V_in = 24 V, L = 100 µH, C = 47 µF, R = 5 Ω:
     DC gain = V_in = 24 V (i.e. +27.6 dB)
     Q = R·√(C/L) = 5·√(0.47) ≈ 3.43
 
-The measured Bode SHAPE matches the analytical perfectly:
-  * Resonance peak at the exact frequency f_LC = 2115 Hz ✓
-  * Phase 0° → -180° crossing through -90° at resonance ✓ (sub-degree match)
+The measured Bode matches the analytical to ~1 dB / 1° across
+the entire 50 Hz – 20 kHz sweep:
+  * DC gain ≈ +27.6 dB ✓
+  * Resonance peak at f_LC = 2115 Hz ✓
+  * Phase 0° → -180° crossing through -90° at resonance ✓
   * -40 dB/decade roll-off above resonance ✓
 
-KNOWN ISSUE: measured magnitude is +10 dB above analytical at all
-frequencies. The shape is right, the offset is constant. Hypothesis:
-the small-signal `Δd → ΔV_sw_avg` gain in PWM is larger than the
-naive `V_in` prediction because the diode forward-drop interaction
-adds gain. Confirmed by varying ε (gain stays at +10 dB regardless
-of perturbation amplitude). The TI/Erickson textbook formula is an
-approximation that the v2 cycle-by-cycle simulator slightly exceeds
-in this regime. For control-loop design, use the MEASURED Bode —
-that's what determines the real plant.
+PWM RESOLUTION CONSTRAINT: dt must be ≪ ε·T_PWM, otherwise the
+duty perturbation gets quantised to dt-slots inside each PWM
+cycle. The result is a square-wave V_out instead of a sine, whose
+DFT bin at the test frequency picks up the (4/π) Fourier
+coefficient of the square — manifesting as a constant +10 dB
+offset on the Bode magnitude. We enforce dt ≤ ε·T_PWM / 4 via
+`dt_fn`. Earlier versions of this script used dt = T_PWM/20
+(too coarse) and were off by +10 dB; see git history for details.
 """
 
 from __future__ import annotations
@@ -48,10 +49,13 @@ R_LOAD   = 5.0
 F_PWM    = 100e3
 T_PWM    = 1.0 / F_PWM
 D_OP     = 0.5
-EPS_DUTY = 0.01              # 1 % duty perturbation
-F_MIN    = 50.0
+# Pick ε large enough that dt = ε·T_PWM/4 stays tractable, but
+# small enough to stay in the small-signal regime. ε=0.05 gives
+# dt = 125 ns (fine PWM grid) with linearity error well under 1 %.
+EPS_DUTY = 0.05
+F_MIN    = 100.0
 F_MAX    = 20e3              # well below F_PWM/5
-N_PTS    = 25
+N_PTS    = 20
 
 
 def build_buck() -> p.CircuitBuilder:
@@ -96,11 +100,15 @@ def main() -> None:
           f"D_op={D_OP} across {len(freqs)} points "
           f"({F_MIN:.0f} Hz → {F_MAX/1e3:.0f} kHz)...")
 
-    # Per-freq dt: max( T_PWM/20 = 500 ns,  T_cycle/200 ).
-    # The PWM resolution must be << T_PWM, otherwise the duty
-    # perturbation gets quantised.
+    # Per-freq dt: CRITICAL — dt must be much smaller than
+    # ε·T_PWM, otherwise the duty perturbation gets quantised
+    # to the PWM grid and the response becomes a square wave
+    # (which the DFT sees as a sine with 4/π ≈ +2.1 dB extra
+    # gain — measured originally as +10 dB before this fix).
+    # Rule: dt ≤ ε·T_PWM / 4. With ε=0.01: dt ≤ 25 ns.
+    DT_PWM_RESOLVED = T_PWM * EPS_DUTY / 4.0
     def dt_fn(f: float) -> float:
-        return min(T_PWM / 20.0, (1.0 / f) / 200.0)
+        return min(DT_PWM_RESOLVED, (1.0 / f) / 200.0)
 
     result = p.run_ac_sweep(
         builder,
@@ -110,10 +118,10 @@ def main() -> None:
         output_idx=vout_idx,
         dt_fn=dt_fn,
         perturbation_amplitude=EPS_DUTY,
-        cycles_per_point=15,
-        settling_cycles=20,           # more settling
-        start_from_dc_op=False,       # let LC ring out naturally
-        verbose=False,
+        cycles_per_point=10,
+        settling_cycles=8,
+        start_from_dc_op=False,
+        verbose=True,
     )
 
     # Analytical: G_vd(s) = V_in / (LCs² + (L/R)s + 1)

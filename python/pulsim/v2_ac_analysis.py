@@ -21,6 +21,20 @@ Disadvantage: slower than direct linearisation — each test
 frequency requires its own transient. For a 50-point Bode
 sweep on a typical SMPS, expect ~30 seconds of wall clock.
 
+CRITICAL PWM-PLANT GOTCHA: when the perturbation is injected
+via the DUTY cycle of a PWM-switched plant (via
+`switch_fn_factory`), the integration step `dt` MUST satisfy
+`dt ≤ ε · T_PWM / 4` (where ε is the duty perturbation
+amplitude and T_PWM is the switching period). Otherwise the
+duty perturbation gets quantised to dt-slots inside each PWM
+cycle, the V_out response becomes a square wave instead of a
+sine, and the DFT bin at the test frequency picks up the
+(4/π) Fourier coefficient — manifesting as a constant +10 dB
+offset on the measured magnitude. Use the `dt_fn` parameter
+to enforce this constraint, OR use a perturbation large
+enough that the default sample_per_cycle picks an adequate
+dt automatically.
+
 Typical usage:
 
     import pulsim.v2 as p

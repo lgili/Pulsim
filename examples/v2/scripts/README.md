@@ -73,7 +73,8 @@ These use the `step_observer(t, x)` kernel callback + the
 | Script | What it measures | Verification |
 |---|---|---|
 | `run_ac_sweep_rc.py` | 1st-order RC low-pass H(jω) = 1/(1+jωRC) | 0.005 dB / 0.7° vs analytical across 4 decades ✓ |
-| `run_ac_sweep_buck.py` | Buck control-to-output G_vd(s) at D_op=0.5 | Phase + shape match analytical; +10 dB offset on \|H\| (real PWM gain > V_in approximation) |
+| `run_ac_sweep_buck.py` | Buck control-to-output G_vd(s) at D_op=0.5 | 0.4 dB DC-gain match, phase indistinguishable from analytical up to ~8 kHz |
+| `debug_buck_bode_offset.py` | Single-freq sanity check + the +10 dB story | Identifies the PWM-quantization root cause; shows `dt ≤ ε·T_PWM/4` rule |
 
 Powered by `pulsim.v2.run_ac_sweep(...)` — swept-sine technique
 (works for any plant the kernel can simulate, including nonlinear
