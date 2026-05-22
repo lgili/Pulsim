@@ -95,6 +95,11 @@ struct ChainContext {
     Real t = Real{0};
     Real dt = Real{0};
     const Vector* x = nullptr;
+    // Per-step b_extra contributions, keyed by state-vector index.
+    // Motors and other "source-side" blocks set entries here; the
+    // chain's `make_b_extra_fn(state_size)` emits a Vector from
+    // this map on every b_extra_fn(t) call.
+    std::unordered_map<Index, Real>* b_extra = nullptr;
 };
 
 [[nodiscard]] inline Real resolve(const InputRef& ref,
@@ -163,12 +168,13 @@ public:
         }
     }
 
-    /// Reset all block states and clear channels.
+    /// Reset all block states, clear channels, clear b_extra map.
     void reset() {
         for (auto& r : resets_) {
             r();
         }
         ctx_.channels.clear();
+        b_extra_map_.clear();
     }
 
     /// Evaluate every block in insertion order.
@@ -176,9 +182,34 @@ public:
         ctx_.t = t;
         ctx_.dt = dt;
         ctx_.x = x;
+        ctx_.b_extra = &b_extra_map_;
         for (auto& b : blocks_) {
             b(ctx_);
         }
+    }
+
+    /// Return a Vector of length `state_size` carrying the current
+    /// b_extra contributions. Used by the chain's `make_b_extra_fn`.
+    [[nodiscard]] Vector get_b_extra(Size state_size) const {
+        Vector result =
+            Vector::Zero(static_cast<Index>(state_size));
+        for (auto& [idx, value] : b_extra_map_) {
+            if (idx >= 0 && idx < static_cast<Index>(state_size)) {
+                result[idx] = value;
+            }
+        }
+        return result;
+    }
+
+    /// Build the b_extra_fn callback for `simulate(...)` / `run_transient`.
+    /// Use together with `make_step_observer(dt)` when the chain
+    /// has motor blocks or other sources that need to inject
+    /// back-EMF / current values per step.
+    [[nodiscard]] std::function<Vector(Real)>
+    make_b_extra_fn(Size state_size) {
+        return [this, state_size](Real /*t*/) {
+            return this->get_b_extra(state_size);
+        };
     }
 
     /// Read the latest value on a channel (debugging / replay).
@@ -224,6 +255,12 @@ private:
     // Inputs of kind Node, grouped by name, so bind_nodes() can
     // patch all of them in one pass.
     std::unordered_map<std::string, std::vector<InputRef*>> node_refs_;
+    // Per-step b_extra contributions written by motor blocks /
+    // source-injecting devices. Cleared between simulations via
+    // reset() but PERSISTS within a simulation (a motor block
+    // updates "its" entry every step; entries not touched keep
+    // their last value).
+    std::unordered_map<Index, Real> b_extra_map_;
 };
 
 

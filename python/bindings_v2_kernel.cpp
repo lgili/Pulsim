@@ -33,6 +33,8 @@
 #include "pulsim/v2/blockchain/block_adapters.hpp"
 #include "pulsim/v2/blockchain/chain.hpp"
 #include "pulsim/v2/builder/circuit_builder.hpp"
+#include "pulsim/v2/motors/mechanical.hpp"
+#include "pulsim/v2/motors/motor_adapters.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/cache.hpp"
@@ -992,6 +994,23 @@ void init_module(py::module_& m) {
         }, py::arg("dt"),
             "Return a step_observer(t, x) callable that the kernel "
             "uses to invoke the chain each step.")
+        .def("make_b_extra_fn",
+            [](BlockChain& self, Size state_size) {
+                return self.make_b_extra_fn(state_size);
+            }, py::arg("state_size"),
+            "Return a b_extra_fn(t) callable for run_transient. "
+            "Use together with make_step_observer when the chain "
+            "has motor blocks that inject back-EMF / current "
+            "values per step.")
+        .def("set_b_extra",
+            [](BlockChain& self, Index idx, Real value) {
+                // No public accessor — go through ctx; the user
+                // typically sets via motor adapters, not directly.
+                self.channels()["__noop"] = value;  // placeholder
+                (void)idx;
+            }, py::arg("idx"), py::arg("value"),
+            "Diagnostic — directly set a b_extra entry. Most "
+            "users should add motor blocks instead.")
         // ---- block factories — one per BlockType in blocks.hpp ----
         .def("add_gain",
             [](BlockChain& self, Real k, InputRef x, std::string out) {
@@ -1188,7 +1207,85 @@ void init_module(py::module_& m) {
             }, py::arg("f_nominal"), py::arg("Kp"), py::arg("Ki"),
                 py::arg("v_alpha"), py::arg("v_beta"), py::arg("dt"),
                 py::arg("output_theta"), py::arg("output_omega"),
-                py::arg("output_freq"));
+                py::arg("output_freq"))
+
+        // ---- Motor blocks (Phase D / C++ port) ----
+        .def("add_dc_motor",
+            [](BlockChain& self,
+                Real J, Real B, Real T_load,
+                Real R_a, Real L_a, Real Ke, Real Kt,
+                Index armature_branch_var_idx,
+                Index bemf_source_idx,
+                std::string omega_channel,
+                std::string theta_channel) {
+                pulsim::v2::motors::Mechanical mech;
+                mech.J_kgm2 = J;
+                mech.B_Nms_per_rad = B;
+                mech.T_load_Nm = T_load;
+                pulsim::v2::motors::add_dc_motor_to_chain(
+                    self, mech, R_a, L_a, Ke, Kt,
+                    armature_branch_var_idx, bemf_source_idx,
+                    std::move(omega_channel),
+                    std::move(theta_channel));
+            },
+            py::arg("J"), py::arg("B"), py::arg("T_load"),
+            py::arg("R_a"), py::arg("L_a"),
+            py::arg("Ke"), py::arg("Kt"),
+            py::arg("armature_branch_var_idx"),
+            py::arg("bemf_source_idx"),
+            py::arg("omega_channel"), py::arg("theta_channel"))
+
+        .def("add_pmsm",
+            [](BlockChain& self,
+                Real J, Real B, Real T_load,
+                Real R_s, Real L_s, Real psi_pm, int pole_pairs,
+                std::array<Index, 3> phase_inductor_idx,
+                std::array<Index, 3> bemf_source_idx,
+                std::string omega_channel,
+                std::string theta_channel) {
+                pulsim::v2::motors::Mechanical mech;
+                mech.J_kgm2 = J;
+                mech.B_Nms_per_rad = B;
+                mech.T_load_Nm = T_load;
+                pulsim::v2::motors::add_three_phase_motor_to_chain(
+                    self, mech, R_s, L_s, psi_pm, pole_pairs,
+                    pulsim::v2::motors::ThreePhaseBemfShape::Sinusoidal,
+                    phase_inductor_idx, bemf_source_idx,
+                    std::move(omega_channel),
+                    std::move(theta_channel));
+            },
+            py::arg("J"), py::arg("B"), py::arg("T_load"),
+            py::arg("R_s"), py::arg("L_s"),
+            py::arg("psi_pm"), py::arg("pole_pairs"),
+            py::arg("phase_inductor_idx"),
+            py::arg("bemf_source_idx"),
+            py::arg("omega_channel"), py::arg("theta_channel"))
+
+        .def("add_bldc",
+            [](BlockChain& self,
+                Real J, Real B, Real T_load,
+                Real R_s, Real L_s, Real psi_pm, int pole_pairs,
+                std::array<Index, 3> phase_inductor_idx,
+                std::array<Index, 3> bemf_source_idx,
+                std::string omega_channel,
+                std::string theta_channel) {
+                pulsim::v2::motors::Mechanical mech;
+                mech.J_kgm2 = J;
+                mech.B_Nms_per_rad = B;
+                mech.T_load_Nm = T_load;
+                pulsim::v2::motors::add_three_phase_motor_to_chain(
+                    self, mech, R_s, L_s, psi_pm, pole_pairs,
+                    pulsim::v2::motors::ThreePhaseBemfShape::Trapezoidal,
+                    phase_inductor_idx, bemf_source_idx,
+                    std::move(omega_channel),
+                    std::move(theta_channel));
+            },
+            py::arg("J"), py::arg("B"), py::arg("T_load"),
+            py::arg("R_s"), py::arg("L_s"),
+            py::arg("psi_pm"), py::arg("pole_pairs"),
+            py::arg("phase_inductor_idx"),
+            py::arg("bemf_source_idx"),
+            py::arg("omega_channel"), py::arg("theta_channel"));
 
     // Helper for make_chain_switch_fn — wires chain channels →
     // SwitchStateMask bits.
