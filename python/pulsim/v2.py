@@ -177,6 +177,14 @@ from .v2_grid import (
     instantaneous_power_3phase,
     voltage_unbalance_factor,
 )
+from .v2_magnetic import (
+    CoreMaterial,
+    core_material,
+    list_core_materials,
+    steinmetz_loss_density,
+    igse_loss_density,
+    core_loss,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -291,6 +299,13 @@ __all__ = [
     "sequence_components",
     "instantaneous_power_3phase",
     "voltage_unbalance_factor",
+    # Magnetic core-loss models (Phase C.3).
+    "CoreMaterial",
+    "core_material",
+    "list_core_materials",
+    "steinmetz_loss_density",
+    "igse_loss_density",
+    "core_loss",
 ]
 
 
