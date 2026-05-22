@@ -346,12 +346,27 @@ def _make_3phase_motor_observer(builder, motor, *, dt: float,
     bemf = {"v": (0.0, 0.0, 0.0)}
 
     def bemf_shape(theta_e: float, k: int) -> float:
+        """Back-EMF shape for phase k (k=0,1,2 → a,b,c).
+
+        Convention matched to the FOC chain's Park transform:
+          * d-axis aligned with rotor PM flux
+          * q-axis 90° ahead of d in the direction of rotation
+          * Positive i_q with i_d=0 must produce POSITIVE torque
+
+        With the chain's Park matrix
+            [d]   [ cos θ   sin θ]   [α]
+            [q] = [−sin θ   cos θ] · [β]
+        and inverse Clarke α=i_a, β=(i_b−i_c)/√3, a positive i_q
+        appears in phase A as i_a = −sin(θ_e)·i_q. For the power
+        balance P_em = Σ e·i to be POSITIVE in motor mode, the
+        BEMF in phase A must be e_a = −sin(θ_e)·E_peak (i.e. the
+        OPPOSITE sign of the naive +sin form).
+        """
         offset = -2.0 * math.pi / 3.0 * k    # 0, −120°, +120° for k=0,1,2
         if waveform == "sinusoidal":
-            return math.sin(theta_e + offset)
-        # Trapezoidal: flat-top sine — clip a sine at ±1 (simple model).
-        # A more faithful BLDC shape is 120°-conducting trapezoid.
-        s = math.sin(theta_e + offset)
+            return -math.sin(theta_e + offset)
+        # Trapezoidal: same sign convention but with a 120° flat top.
+        s = -math.sin(theta_e + offset)
         # 120°-flat-top: f(θ) = clip(2 sin(θ), -1, +1) gives a
         # roughly trapezoidal shape with flat 60° regions.
         return max(-1.0, min(1.0, 2.0 * s))
