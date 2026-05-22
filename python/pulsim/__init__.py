@@ -8,9 +8,7 @@ retired. The v2 surface is the only supported API.
 
 If you have legacy code:
 
-* Run ``python scripts/migrate_v1_to_v2.py <file>`` for a
-  mechanical conversion of v1 patterns to v2 idiom.
-* Read ``docs/v2/migration-from-v1.md`` for the device / analysis
+* Read ``docs/migration-guide.md`` for the device / analysis
   mapping table.
 * For features that didn't migrate (codegen, FMU export,
   schematic auto-layout, converter templates, ``Preset``,
@@ -98,10 +96,9 @@ def __getattr__(name: str):
             f"pulsim.{name} was a v1 symbol and is no longer "
             f"available (pulsim 1.0.0 removed the legacy kernel). "
             f"Migration hint: {hint}. See "
-            f"docs/v2/migration-from-v1.md for the full mapping, "
-            f"or run scripts/migrate_v1_to_v2.py on your sources.")
+            f"docs/migration-guide.md for the full mapping.")
     raise AttributeError(
         f"module 'pulsim' has no attribute {name!r}. "
         f"pulsim 1.0.0 ships only the v2 surface — try "
         f"``import pulsim.v2`` or check "
-        f"docs/v2/migration-from-v1.md if you're porting v1 code.")
+        f"docs/migration-guide.md if you're porting v1 code.")
