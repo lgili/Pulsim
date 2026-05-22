@@ -128,75 +128,132 @@ def _migrate_text(src: str) -> Tuple[str, List[str]]:
     text = src
     warnings: List[str] = []
 
-    # 1. Rewrite top-level imports.
-    text = re.sub(
-        r"^import\s+pulsim\s+as\s+\w+\s*$",
-        "import pulsim.v2 as p",
-        text, flags=re.MULTILINE)
-    text = re.sub(
-        r"^import\s+pulsim\s*$",
-        "import pulsim.v2 as p",
-        text, flags=re.MULTILINE)
-    # If user did `from pulsim import RuntimeCircuit`, flag it —
-    # the symbol set differs too much for a safe rewrite.
+    # 1. Find the user's chosen alias (`as <name>`) so we can rewrite
+    #    references throughout the file.
+    aliases: List[str] = []
+    for m in re.finditer(
+            r"^import\s+pulsim\s+as\s+(\w+)\s*$",
+            text, re.MULTILINE):
+        aliases.append(m.group(1))
+    # Plain `import pulsim` — the alias is literally `pulsim`.
+    if re.search(r"^import\s+pulsim\s*$", text, re.MULTILINE):
+        aliases.append("pulsim")
+    # Deduplicate.
+    aliases = sorted(set(aliases))
+
+    # Process the file line-by-line so we can SKIP import lines when
+    # doing the alias substitution (otherwise ``pulsim.`` in the
+    # rewritten import line ``import pulsim.v2 as p`` would itself
+    # match the substitution and break to ``import p.v2 as p``).
+    new_lines: List[str] = []
+    for line in text.splitlines():
+        # Rewrite the line ITSELF if it's a pulsim import.
+        rewritten_import = re.sub(
+            r"^(\s*)import\s+pulsim\s+as\s+\w+\s*$",
+            r"\1import pulsim.v2 as p", line)
+        rewritten_import = re.sub(
+            r"^(\s*)import\s+pulsim\s*$",
+            r"\1import pulsim.v2 as p", rewritten_import)
+        if rewritten_import != line:
+            new_lines.append(rewritten_import)
+            continue
+        # NOT an import line — apply alias substitutions on the body.
+        body_line = line
+        for alias in aliases:
+            body_line = re.sub(
+                rf"\b{re.escape(alias)}\.",
+                "p.", body_line)
+        new_lines.append(body_line)
+    text = "\n".join(new_lines)
+
+    # ``from pulsim import X`` — flag, don't rewrite. v1's symbol
+    # set isn't 1:1 with v2.
     if re.search(r"^from\s+pulsim\s+import\b", text, re.MULTILINE):
         warnings.append(
             "TODO[v2-migrate]: `from pulsim import ...` found — "
             "the v1 symbol set doesn't map 1-to-1 to v2. Replace "
             "with `import pulsim.v2 as p`.")
 
-    # 2. RuntimeCircuit() → CircuitBuilder()
+    # 2. RuntimeCircuit() / Circuit() → CircuitBuilder().
     text = re.sub(
-        r"\bps\.RuntimeCircuit\(\s*\)",
+        r"\bp\.RuntimeCircuit\(\s*\)",
         "p.CircuitBuilder()", text)
     text = re.sub(
-        r"\bpulsim\.RuntimeCircuit\(\s*\)",
+        r"\bp\.Circuit\(\s*\)",
         "p.CircuitBuilder()", text)
 
-    # 3. Method-on-circuit → method-on-builder rewrite.
-    # We rename the receiver from `circuit` to `b` only on lines
-    # where it's clearly the builder; pattern: ``<name>.add_*(``,
-    # ``<name>.simulate(``, etc.
-    # For safety, do the rewrite conservatively: only when the
-    # receiver matches ``circuit`` or ``ckt`` (common v1 names).
-    receivers_to_rename = ("circuit", "ckt", "cir")
-    for recv in receivers_to_rename:
-        # Free-function analysis moves: circuit.simulate(...) →
-        # p.simulate(b, ...). Need to inject ``b`` as first arg.
-        for v1_method, v2_call in _ANALYSIS_MOVES.items():
-            pattern = rf"\b{recv}\.{v1_method}\s*\("
-            text = re.sub(
-                pattern,
-                f"{v2_call}(b, ",
-                text)
-        # Free helpers (add_bridge_rectifier etc).
-        for v1_method, v2_call in _FREE_FUNCTION_HELPERS.items():
-            pattern = rf"\b{recv}\.{v1_method}\s*\("
-            text = re.sub(
-                pattern,
-                f"{v2_call}(b, ",
-                text)
-        # Plain pass-through: circuit.add_* → b.add_*
-        for v1_method in _PASSTHROUGH_ADDS:
-            pattern = rf"\b{recv}\.{v1_method}\b"
-            text = re.sub(pattern, f"b.{v1_method}", text)
-        # Variable rename: `circuit = ...` → `b = ...`. Only at
-        # line starts to avoid clobbering substrings.
+    # 2a-prelude. EARLY receiver-normalisation pass: rename any
+    # ``circuit`` / ``ckt`` / ``cir`` receiver in the body of the
+    # file to ``b`` so subsequent method-rewrites can assume the
+    # canonical name. Done here (not in step 3 below) so the
+    # method translations in steps 2c+ match ``b.foo()`` cleanly.
+    for recv in ("circuit", "ckt", "cir"):
+        # Variable assignment.
         text = re.sub(
             rf"^(\s*){recv}\s*=\s*p\.CircuitBuilder\(\)",
             r"\1b = p.CircuitBuilder()",
             text, flags=re.MULTILINE)
-        # General receiver name change — only if NO `b` already
-        # used as an identifier (skip rename to avoid clashes;
-        # leave with original name and flag).
-        if re.search(rf"\b{recv}\b", text):
-            # If `b` is not used as a variable name elsewhere, do
-            # the rename; otherwise flag.
-            if re.search(r"\bb\s*=", text):
-                warnings.append(
-                    f"TODO[v2-migrate]: receiver `{recv}` and "
-                    f"variable `b` both used — manual rename "
-                    f"recommended.")
+        # Method references and bare-identifier usages.
+        text = re.sub(rf"\b{recv}\.", "b.", text)
+        text = re.sub(rf"\b{recv}\b(?=[,\s\)])", "b", text)
+
+    # 2b. Node-handle pattern: v1 used ``in_ = ckt.add_node("in")``
+    # to get an integer node id, then passed it to add_*. v2 just
+    # takes node names as strings directly. Walk the file, find
+    # ``<var> = <recv>.add_node("<name>")`` assignments, record
+    # the (var → name) mapping, replace bare ``<var>`` usages with
+    # the quoted name, and comment out the original add_node line.
+    node_aliases: dict = {}
+    for line in text.splitlines():
+        m = re.match(
+            r"^\s*(\w+)\s*=\s*[\w\.]+\.add_node\(\s*['\"]([^'\"]+)['\"]\s*\)\s*$",
+            line)
+        if m:
+            node_aliases[m.group(1)] = m.group(2)
+    if node_aliases:
+        # Replace bare references with quoted string literals. Use
+        # negative lookbehind/lookahead so we don't reach INTO an
+        # existing string literal (which would yield "" "out" "")
+        # or into a longer identifier (``output`` would catch
+        # ``out``).
+        for var, name in node_aliases.items():
+            text = re.sub(
+                rf"(?<![\w\"\']){re.escape(var)}(?![\w\"\'])",
+                f'"{name}"', text)
+        # Comment out the original add_node assignment lines (these
+        # now look like ``"in" = b.add_node(...)`` after the
+        # substitution above — invalid syntax, so we MUST replace
+        # them with a comment).
+        text = re.sub(
+            r"^(\s*)(\"\w+\"|\w+)\s*=\s*\w+\.add_node\([^)]*\)\s*$",
+            r"\1# [v2-migrate] removed add_node call  "
+            r"(v2 uses node names directly)",
+            text, flags=re.MULTILINE)
+
+    # 2c. Common v1→v2 method translations on the builder.
+    text = re.sub(r"\bb\.ground\(\s*\)", '"gnd"', text)
+    text = re.sub(r"\bb\.num_nodes\(\s*\)", "b.graph.num_nodes", text)
+    text = re.sub(r"\bb\.num_branches\(\s*\)",
+                      "b.graph.num_branches", text)
+    text = re.sub(r"\bb\.node_idx\(", "b.node_id_of(", text)
+
+    # 3. Method-on-builder → v2 equivalent rewrites. By this point
+    # the early receiver-normalisation pass converted every
+    # ``ckt.``/``circuit.``/``cir.`` to ``b.`` — we just translate
+    # the methods that became free functions in v2.
+    # Free-function analysis moves: b.simulate(...) → p.simulate(b, ...)
+    for v1_method, v2_call in _ANALYSIS_MOVES.items():
+        text = re.sub(
+            rf"\bb\.{v1_method}\s*\(",
+            f"{v2_call}(b, ",
+            text)
+    # Free helpers (add_bridge_rectifier etc): b.add_…(...) →
+    # p.add_…(b, ...).
+    for v1_method, v2_call in _FREE_FUNCTION_HELPERS.items():
+        text = re.sub(
+            rf"\bb\.{v1_method}\s*\(",
+            f"{v2_call}(b, ",
+            text)
 
     # 4. Closing arg ``)`` normalization isn't perfect — leave
     # alone (Black will reformat). Patterns like ``p.simulate(b, )``
