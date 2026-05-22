@@ -202,6 +202,12 @@ from .v2_motors import (
     add_bldc,
     make_bldc_observer,
 )
+from .v2_spice_import import (
+    SpiceElement,
+    parse_spice_value,
+    parse_spice_netlist,
+    spice_to_builder,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -338,6 +344,11 @@ __all__ = [
     "make_pmsm_observer",
     "add_bldc",
     "make_bldc_observer",
+    # SPICE netlist import (Phase E.10).
+    "SpiceElement",
+    "parse_spice_value",
+    "parse_spice_netlist",
+    "spice_to_builder",
 ]
 
 
