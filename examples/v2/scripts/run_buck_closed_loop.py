@@ -45,16 +45,26 @@ import pulsim.v2 as p
 V_IN     = 24.0
 V_REF    = 12.0
 F_PWM    = 100e3              # 100 kHz switching
+T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7             # 100 ns step (1000 samples/PWM cycle)
 T_END    = 3.0e-3             # 3 ms total
-T_LOAD_STEP = 1.0e-3          # load step at t = 1 ms
-R_LOAD_PRE  = 5.0             # 5 Ω (heavy load)
-R_LOAD_POST = 50.0            # 50 Ω (light load) — 10× lighter, may go DCM
+T_LOAD_STEP = 1.0e-3          # setpoint step at t = 1 ms (12 V → 14 V)
+R_LOAD_PRE  = 5.0
+R_LOAD_POST = 50.0
 
-# PI tuning (hand-tuned for this plant; deliberately a bit aggressive
-# to force the kernel to handle fast duty swings).
-KP       = 0.05
-KI       = 800.0
+# Tuning analysis:
+#   LC resonance:  ω_LC = 1/√(100µ·47µ) ≈ 2.3 kHz
+#   ζ ≈ 0.15 (lightly damped, R_load = 5 Ω) → 7.5 dB resonance peak
+#   Plant DC gain (duty → V_out) ≈ V_in = 24
+#   Strategy: low-pass-filter the feedback at 500 Hz (τ = 320 µs) so
+#   the PI never sees the LC ring, then tune for crossover ≈ 300 Hz
+#   well below the LC resonance.
+#   With τ_LPF = 320 µs and Kp = 0.025, crossover ≈ 200 Hz, Ki = 200
+#   gives PI-zero at 8 kHz (well above LC — actually above crossover,
+#   so the integrator dominates the low-frequency phase).
+KP       = 0.020
+KI       = 150.0
+TAU_LPF  = 500.0e-6           # 320 Hz cutoff
 DUTY_MIN = 0.05
 DUTY_MAX = 0.95
 
@@ -104,30 +114,30 @@ def main() -> None:
         output_min=DUTY_MIN, output_max=DUTY_MAX,
     )
 
-    # Shared mutable state between step_observer and switch_fn:
-    # [current_duty, current_v_out, current_setpoint, current_error]
-    duty       = [0.50]
-    last_vout  = [0.0]
-    last_err   = [0.0]
+    # Low-pass filter on feedback attenuates the LC resonance peak.
+    lpf = p.FirstOrderLowPass(tau=TAU_LPF)
 
-    # Step in the SETPOINT at t = 1 ms (12 V → 14 V).
-    # This is more controllable than toggling load and produces a
-    # clean closed-loop response we can read in the plot.
+    duty       = [0.50]
+    last_pi_t  = [-1.0]
+
     setpoint_fn = make_setpoint_with_step(
         T_LOAD_STEP, v_pre=V_REF, v_post=V_REF + 2.0,
     )
 
-    # --- Observer: update PI every step ------------------------------------
+    # --- Observer: filter V_out, then sample PI at PWM rate --------------
     def observe(t: float, x) -> None:
-        v_out = float(x[vout_idx])
+        v_out_raw = float(x[vout_idx])
+        # LPF runs every dt to keep its bandwidth ~500 Hz independent
+        # of the PI sample rate.
+        v_out_filt = lpf.update(input_value=v_out_raw, dt=DT)
         sp = setpoint_fn(t)
-        new_duty = pi.update(setpoint=sp, measured=v_out, dt=DT)
-        duty[0] = new_duty
-        last_vout[0] = v_out
-        last_err[0] = sp - v_out
+        if t - last_pi_t[0] >= T_PWM:
+            dt_pi = (t - last_pi_t[0]) if last_pi_t[0] >= 0 else T_PWM
+            duty[0] = pi.update(setpoint=sp, measured=v_out_filt,
+                                  dt=dt_pi)
+            last_pi_t[0] = t
 
     # --- PWM driver: reads the latest duty from the shared list ------------
-    T_PWM = 1.0 / F_PWM
     num_switches = builder.graph.num_switches
 
     def switch_fn(t: float):
@@ -152,23 +162,25 @@ def main() -> None:
     )
     print(f"  samples: {res.num_steps()}")
 
-    # --- Re-run the observer over the recorded samples to recover the
-    # duty history for plotting (we didn't capture it during the sim
-    # because PI is consumed by the observer and overwritten each step).
-    # Instead, just re-derive it post-hoc by replaying the PI on
-    # res.states. This is purely cosmetic — the simulation already
-    # used the live PI state.
+    # Replay observer for duty/error history (post-hoc cosmetic plot).
     pi2 = p.PIController(
         Kp=KP, Ki=KI, output_min=DUTY_MIN, output_max=DUTY_MAX,
     )
+    lpf2 = p.FirstOrderLowPass(tau=TAU_LPF)
     duty_history = np.zeros(res.num_steps())
     error_history = np.zeros(res.num_steps())
+    last_t = [-1.0]
+    d_curr = [0.5]
     for k, (t, st) in enumerate(zip(res.times, res.states)):
-        v_out = float(st[vout_idx])
+        v_out_filt = lpf2.update(input_value=float(st[vout_idx]), dt=DT)
         sp = setpoint_fn(t)
-        d = pi2.update(setpoint=sp, measured=v_out, dt=DT)
-        duty_history[k]  = d
-        error_history[k] = sp - v_out
+        if t - last_t[0] >= T_PWM:
+            dt_pi = (t - last_t[0]) if last_t[0] >= 0 else T_PWM
+            d_curr[0] = pi2.update(setpoint=sp, measured=v_out_filt,
+                                     dt=dt_pi)
+            last_t[0] = t
+        duty_history[k]  = d_curr[0]
+        error_history[k] = sp - v_out_filt
 
     times = np.asarray(res.times) * 1e3   # ms
     v_out_arr = np.array([s[vout_idx] for s in res.states])

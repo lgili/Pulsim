@@ -44,9 +44,15 @@ T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7
 T_END    = 4.0e-3
 
-# Conservative PI tuning — boosts hate aggressive control.
-KP       = 0.005
-KI       = 80.0
+# Boost design point: V_in=12, V_out=20, D=0.4, L=100µH, C=100µF, R=20Ω.
+#   ω_RHPZ = R·(1-D)²/L = 20·0.36/100µH = 72000 rad/s ≈ 11 kHz
+#   ω_LC   = (1-D)/√(LC) = 0.6/√(1e-8) = 6000 rad/s ≈ 1 kHz
+# Crossover must be < ω_RHPZ/3 ≈ 4 kHz; we put it WAY lower (~100 Hz)
+# to stay tractable. LPF at 200 Hz on the feedback dampens the LC
+# resonance.
+KP       = 0.0015
+KI       = 30.0
+TAU_LPF  = 800.0e-6           # 200 Hz cutoff
 DUTY_MIN = 0.10
 DUTY_MAX = 0.80               # cap below 1 so we always commute
 
@@ -78,8 +84,14 @@ def build_plant() -> p.CircuitBuilder:
     return b
 
 
-def make_setpoint_step(t_step: float, v_pre: float, v_post: float):
+def make_setpoint_step(t_step: float, v_pre: float, v_post: float,
+                          soft_start_t: float = 1.0e-3):
+    """Soft-start ramp 0 → v_pre over `soft_start_t`, then step to
+    v_post at `t_step`. The ramp avoids cold-start integrator windup
+    on plants with strong RHPZ behavior."""
     def setpoint(t: float) -> float:
+        if t < soft_start_t:
+            return v_pre * (t / soft_start_t)
         return v_pre if t < t_step else v_post
     return setpoint
 
@@ -95,24 +107,23 @@ def main() -> None:
     pi = p.PIController(
         Kp=KP, Ki=KI,
         output_min=DUTY_MIN, output_max=DUTY_MAX,
-        integrator_state=0.45,   # warm-start near a reasonable duty
+        integrator_state=0.40,   # warm-start at the expected duty
     )
-    duty = [0.45]
+    # LPF on the V_out measurement damps the LC ring before it reaches the PI.
+    lpf = p.FirstOrderLowPass(tau=TAU_LPF)
+    duty = [0.40]
 
     setpoint_fn = make_setpoint_step(T_STEP, V_REF, V_REF_2)
-
-    # PI updates once per PWM PERIOD (not every dt). The kernel
-    # observer fires every dt but we only re-sample at PWM-period
-    # boundaries to mimic a real digital controller.
     last_pi_t = [-1.0]
 
     def observe(t: float, x) -> None:
-        v_out = float(x[vout_idx])
+        v_out_raw = float(x[vout_idx])
+        v_out_filt = lpf.update(input_value=v_out_raw, dt=DT)
         sp = setpoint_fn(t)
-        # Sample-and-update at PWM rate.
         if t - last_pi_t[0] >= T_PWM:
-            duty[0] = pi.update(setpoint=sp, measured=v_out,
-                                 dt=t - last_pi_t[0] if last_pi_t[0] >= 0 else T_PWM)
+            dt_pi = (t - last_pi_t[0]) if last_pi_t[0] >= 0 else T_PWM
+            duty[0] = pi.update(setpoint=sp, measured=v_out_filt,
+                                  dt=dt_pi)
             last_pi_t[0] = t
 
     num_switches = builder.graph.num_switches
@@ -139,20 +150,20 @@ def main() -> None:
     # Replay PI for plotting.
     pi2 = p.PIController(
         Kp=KP, Ki=KI, output_min=DUTY_MIN, output_max=DUTY_MAX,
-        integrator_state=0.45,
+        integrator_state=0.40,
     )
+    lpf2 = p.FirstOrderLowPass(tau=TAU_LPF)
     duty_history = np.zeros(res.num_steps())
     setpoint_history = np.zeros(res.num_steps())
     last_t = [-1.0]
-    d_curr = [0.45]
+    d_curr = [0.40]
     for k, (t, st) in enumerate(zip(res.times, res.states)):
-        v_out = float(st[vout_idx])
+        v_out_filt = lpf2.update(input_value=float(st[vout_idx]), dt=DT)
         sp = setpoint_fn(t)
         if t - last_t[0] >= T_PWM:
-            d_curr[0] = pi2.update(
-                setpoint=sp, measured=v_out,
-                dt=t - last_t[0] if last_t[0] >= 0 else T_PWM,
-            )
+            dt_pi = (t - last_t[0]) if last_t[0] >= 0 else T_PWM
+            d_curr[0] = pi2.update(setpoint=sp, measured=v_out_filt,
+                                      dt=dt_pi)
             last_t[0] = t
         duty_history[k] = d_curr[0]
         setpoint_history[k] = sp

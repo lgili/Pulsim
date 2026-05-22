@@ -47,10 +47,12 @@ L_0         = 100e-6     # 100 µH at low current
 I_SAT       = 1.5        # saturates around 1.5 A
 L_RESIDUAL  = 1e-6       # 1 µH at full saturation (100x drop)
 
-# Conservative PI (saturating L means the plant's small-signal
-# gain is unpredictable).
-KP       = 0.003
-KI       = 60.0
+# Conservative PI: saturating L means the plant's small-signal gain
+# changes dramatically across operating range. Soft-start ramp +
+# LPF + low Ki keep the loop tame.
+KP       = 0.002
+KI       = 80.0
+TAU_LPF  = 400.0e-6
 DUTY_MIN = 0.10
 DUTY_MAX = 0.75
 
@@ -83,8 +85,13 @@ def build_plant() -> p.CircuitBuilder:
     return b
 
 
-def make_setpoint(t_step: float, v1: float, v2: float):
+def make_setpoint(t_step: float, v1: float, v2: float,
+                    soft_start_t: float = 1.0e-3):
+    """Soft-start ramp 0→v1 over `soft_start_t` to limit cold-start
+    inrush through the saturable L."""
     def sp(t: float) -> float:
+        if t < soft_start_t:
+            return v1 * (t / soft_start_t)
         return v1 if t < t_step else v2
     return sp
 
@@ -100,19 +107,21 @@ def main() -> None:
     pi = p.PIController(
         Kp=KP, Ki=KI,
         output_min=DUTY_MIN, output_max=DUTY_MAX,
-        integrator_state=0.40,
+        integrator_state=0.10,
     )
-    duty = [0.40]
+    lpf = p.FirstOrderLowPass(tau=TAU_LPF)
+    duty = [0.10]
     last_pi_t = [-1.0]
 
     setpoint_fn = make_setpoint(T_STEP, V_REF, V_REF_2)
 
     def observe(t: float, x) -> None:
-        v_out = float(x[vout_idx])
+        v_out_filt = lpf.update(input_value=float(x[vout_idx]), dt=DT)
         sp = setpoint_fn(t)
         if t - last_pi_t[0] >= T_PWM:
             dt_pi = (t - last_pi_t[0]) if last_pi_t[0] >= 0 else T_PWM
-            duty[0] = pi.update(setpoint=sp, measured=v_out, dt=dt_pi)
+            duty[0] = pi.update(setpoint=sp, measured=v_out_filt,
+                                  dt=dt_pi)
             last_pi_t[0] = t
 
     num_switches = builder.graph.num_switches
@@ -141,14 +150,15 @@ def main() -> None:
     # Replay PI for plot.
     pi2 = p.PIController(
         Kp=KP, Ki=KI, output_min=DUTY_MIN, output_max=DUTY_MAX,
-        integrator_state=0.40,
+        integrator_state=0.10,
     )
+    lpf2 = p.FirstOrderLowPass(tau=TAU_LPF)
     duty_hist = np.zeros(res.num_steps())
     setpoint_hist = np.zeros(res.num_steps())
     last_t = [-1.0]
-    d_curr = [0.40]
+    d_curr = [0.10]
     for k, (t, st) in enumerate(zip(res.times, res.states)):
-        v_out = float(st[vout_idx])
+        v_out = lpf2.update(input_value=float(st[vout_idx]), dt=DT)
         sp = setpoint_fn(t)
         if t - last_t[0] >= T_PWM:
             dt_pi = (t - last_t[0]) if last_t[0] >= 0 else T_PWM

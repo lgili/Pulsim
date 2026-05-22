@@ -42,20 +42,24 @@ V_BUS_REF   = 200.0           # boost target
 F_PWM       = 100e3
 T_PWM       = 1.0 / F_PWM
 DT          = 5.0e-7          # 0.5 µs → 200 samples/PWM
-T_END       = 80.0e-3         # ~5 AC cycles
-T_LOAD_STEP = 50.0e-3         # add a 2nd load resistor at t = 50 ms
+T_END       = 200.0e-3        # 12 AC cycles → outer loop has time to settle
+T_LOAD_STEP = 50.0e-3         # unused
 
-# Inner current loop — fast.
-KP_I = 0.005
-KI_I = 100.0
+# Inner current loop — tracks |sin| at 120 Hz. Bandwidth must
+# be much higher than that → BW ~ 5 kHz, well below F_PWM/10 = 10 kHz.
+KP_I = 0.01
+KI_I = 500.0
 DUTY_MIN = 0.05
 DUTY_MAX = 0.95
 
-# Outer voltage loop — much slower.
-KP_V = 0.2
-KI_V = 5.0
+# Outer voltage loop — slow enough to NOT respond to 120 Hz bus ripple
+# (BW ~ 10 Hz, two decades below the ripple frequency). The 120 Hz
+# ripple is inherent — only a giant C_bus can shrink it.
+KP_V = 0.05
+KI_V = 2.0
 K_MIN  = 0.1                  # min current-amplitude command [A]
-K_MAX  = 5.0                  # max current-amplitude command [A]
+K_MAX  = 8.0                  # raised to allow more current at heavy load
+TAU_LPF_V = 5.0e-3            # 30 Hz LPF on V_bus measurement
 
 
 def build_plant() -> p.CircuitBuilder:
@@ -105,32 +109,36 @@ def main() -> None:
     # --- Controllers --------------------------------------------------------
     pi_v = p.PIController(Kp=KP_V, Ki=KI_V,
                             output_min=K_MIN, output_max=K_MAX,
-                            integrator_state=1.0)
+                            integrator_state=2.0)   # warm-start at typ. load
     pi_i = p.PIController(Kp=KP_I, Ki=KI_I,
                             output_min=DUTY_MIN, output_max=DUTY_MAX)
+    lpf_v = p.FirstOrderLowPass(tau=TAU_LPF_V)
 
     duty = [0.5]
-    K_amp = [1.0]                 # current-amplitude command
+    K_amp = [2.0]                 # current-amplitude command
 
     last_v_t = [-1.0]
-    V_LOOP_DT = 1.0e-3            # outer loop runs at 1 kHz
+    V_LOOP_DT = 2.0e-3            # outer loop runs at 500 Hz
 
     def observe(t: float, x) -> None:
-        v_bus = float(x[vbus_idx])
+        v_bus_raw = float(x[vbus_idx])
         i_L   = float(x[iL_idx])
         v_ac  = float(x[ac_l_idx])
 
-        # Outer voltage loop: runs at 1 kHz (slow vs current loop).
+        # LPF on bus voltage to attenuate the 120 Hz ripple before
+        # it reaches the outer loop.
+        v_bus_filt = lpf_v.update(input_value=v_bus_raw, dt=DT)
+
+        # Outer voltage loop runs slowly so it doesn't fight the
+        # 120 Hz inherent ripple.
         if t - last_v_t[0] >= V_LOOP_DT:
             dt_v = (t - last_v_t[0]) if last_v_t[0] >= 0 else V_LOOP_DT
             K_amp[0] = pi_v.update(
-                setpoint=V_BUS_REF, measured=v_bus, dt=dt_v,
+                setpoint=V_BUS_REF, measured=v_bus_filt, dt=dt_v,
             )
             last_v_t[0] = t
 
-        # Inner current loop: every step.
-        # Reference current = K_amp · |v_ac| / V_AC_PEAK (normalize so
-        # |sin| amplitude is K_amp).
+        # Inner current loop fires every dt to track |sin| envelope.
         i_ref = K_amp[0] * fabs(v_ac) / V_AC_PEAK
         duty[0] = pi_i.update(setpoint=i_ref, measured=i_L, dt=DT)
 

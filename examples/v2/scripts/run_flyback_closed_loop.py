@@ -36,16 +36,21 @@ import pulsim.v2 as p
 
 
 V_IN     = 48.0
-V_REF    = 24.0
-V_REF_2  = 32.0
-T_STEP   = 1.5e-3
+V_REF    = 20.0               # easier target — D ≈ 0.45
+V_REF_2  = 26.0               # +6V step — D ≈ 0.52
+T_STEP   = 2.0e-3
 F_PWM    = 50e3
 T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7
-T_END    = 3.0e-3
+T_END    = 4.0e-3             # more settling time
 
-KP       = 0.002
-KI       = 50.0
+# Flyback: V_out = V_in · D/(1−D) · (L_s/L_p) = 48 · D/(1−D) · 0.5
+# Target 24 V → D ≈ 0.5; Target 32 V → D ≈ 0.57
+# Plant nonlinear (D in numerator AND denominator).
+# Soft-start setpoint avoids cold-start integrator windup.
+KP       = 0.0008
+KI       = 400.0
+TAU_LPF  = 200.0e-6           # 800 Hz LPF on V_out feedback
 DUTY_MIN = 0.10
 DUTY_MAX = 0.75
 
@@ -67,8 +72,11 @@ def build_plant() -> p.CircuitBuilder:
     return b
 
 
-def make_setpoint(t_step: float, v1: float, v2: float):
+def make_setpoint(t_step: float, v1: float, v2: float,
+                    soft_start_t: float = 0.6e-3):
     def sp(t: float) -> float:
+        if t < soft_start_t:
+            return v1 * (t / soft_start_t)
         return v1 if t < t_step else v2
     return sp
 
@@ -86,17 +94,19 @@ def main() -> None:
         output_min=DUTY_MIN, output_max=DUTY_MAX,
         integrator_state=0.40,
     )
+    lpf = p.FirstOrderLowPass(tau=TAU_LPF)
     duty = [0.40]
     last_pi_t = [-1.0]
 
     setpoint_fn = make_setpoint(T_STEP, V_REF, V_REF_2)
 
     def observe(t: float, x) -> None:
-        v_out = float(x[vout_idx])
+        v_out_filt = lpf.update(input_value=float(x[vout_idx]), dt=DT)
         sp = setpoint_fn(t)
         if t - last_pi_t[0] >= T_PWM:
             dt_pi = t - last_pi_t[0] if last_pi_t[0] >= 0 else T_PWM
-            duty[0] = pi.update(setpoint=sp, measured=v_out, dt=dt_pi)
+            duty[0] = pi.update(setpoint=sp, measured=v_out_filt,
+                                  dt=dt_pi)
             last_pi_t[0] = t
 
     num_switches = builder.graph.num_switches
@@ -124,12 +134,13 @@ def main() -> None:
         Kp=KP, Ki=KI, output_min=DUTY_MIN, output_max=DUTY_MAX,
         integrator_state=0.40,
     )
+    lpf2 = p.FirstOrderLowPass(tau=TAU_LPF)
     duty_history = np.zeros(res.num_steps())
     setpoint_history = np.zeros(res.num_steps())
     last_t = [-1.0]
     d_curr = [0.40]
     for k, (t, st) in enumerate(zip(res.times, res.states)):
-        v_out = float(st[vout_idx])
+        v_out = lpf2.update(input_value=float(st[vout_idx]), dt=DT)
         sp = setpoint_fn(t)
         if t - last_t[0] >= T_PWM:
             dt_pi = t - last_t[0] if last_t[0] >= 0 else T_PWM
