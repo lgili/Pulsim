@@ -170,6 +170,13 @@ from .v2_thermal import (
     add_foster_network,
     make_thermal_observer,
 )
+from .v2_grid import (
+    add_three_phase_grid,
+    add_three_phase_line_impedance,
+    sequence_components,
+    instantaneous_power_3phase,
+    voltage_unbalance_factor,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -278,6 +285,12 @@ __all__ = [
     "compute_temperature",
     "add_foster_network",
     "make_thermal_observer",
+    # Three-phase grid helpers (Phase C.2).
+    "add_three_phase_grid",
+    "add_three_phase_line_impedance",
+    "sequence_components",
+    "instantaneous_power_3phase",
+    "voltage_unbalance_factor",
 ]
 
 
