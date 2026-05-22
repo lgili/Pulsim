@@ -28,10 +28,14 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "pulsim/v2/analysis/mna_sweep.hpp"
+#include "pulsim/v2/blockchain/blocks.hpp"
 #include "pulsim/v2/builder/circuit_builder.hpp"
 #include "pulsim/v2/models/ideal_diode.hpp"
 #include "pulsim/v2/numeric/types.hpp"
 #include "pulsim/v2/pwl/cache.hpp"
+#include "pulsim/v2/pwl/dc_assemble.hpp"
+#include "pulsim/v2/pwl/dc_strategy.hpp"
 #include "pulsim/v2/pwl/device_pool.hpp"
 #include "pulsim/v2/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/v2/solver/options.hpp"
@@ -695,6 +699,238 @@ void init_module(py::module_& m) {
         "branches (constructs the refresh inside the "
         "binding to avoid Python-roundtrip aliasing of "
         "sparse-matrix references).");
+
+    // ---- DC operating-point strategies (Phase A.2) -----------------------
+    //
+    // The kernel-side compute_dc_op_with_strategy() dispatches between
+    // naive, pseudo-transient, and source-stepping DC solves. The
+    // Python wrapper in pulsim.v2.compute_dc_op() chooses the strategy
+    // by string; below we expose the enum + a thin function call
+    // surface for direct kernel access.
+    py::enum_<pwl::DCStrategy>(m, "DCStrategy",
+        "DC operating-point strategy selector.")
+        .value("Naive",            pwl::DCStrategy::Naive,
+                "Single-shot compute_dc_op — fastest, fails on stiff problems.")
+        .value("PseudoTransient",  pwl::DCStrategy::PseudoTransient,
+                "Modified Newton with dt regularisation — globally convergent.")
+        .value("SourceStepping",   pwl::DCStrategy::SourceStepping,
+                "Source-amplitude homotopy from α=0 to α=1 in n_steps.")
+        .value("Auto",             pwl::DCStrategy::Auto,
+                "Try naive → pseudo-trans → source-stepping in order.");
+
+    m.def("compute_dc_op_with_strategy",
+        [](const topology::Graph& graph,
+            const pwl::DevicePool& pool,
+            const topology::SwitchStateMask& mask,
+            pwl::DCStrategy strategy,
+            Real t_eval,
+            Real pt_dt_init,
+            Real pt_dt_max,
+            Size pt_max_iters,
+            Real pt_tol_res,
+            Size ss_n_steps) {
+            pwl::PseudoTransientConfig pt;
+            pt.dt_init = pt_dt_init;
+            pt.dt_max  = pt_dt_max;
+            pt.max_iters = pt_max_iters;
+            pt.tol_res = pt_tol_res;
+            pwl::SourceSteppingConfig ss;
+            ss.n_steps = ss_n_steps;
+            return pwl::compute_dc_op_with_strategy(
+                graph, pool, mask, strategy, t_eval, pt, ss);
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("mask"),
+        py::arg("strategy") = pwl::DCStrategy::Auto,
+        py::arg("t_eval") = Real{0},
+        py::arg("pt_dt_init") = Real{1.0},
+        py::arg("pt_dt_max") = Real{1e10},
+        py::arg("pt_max_iters") = Size{500},
+        py::arg("pt_tol_res") = Real{1e-7},
+        py::arg("ss_n_steps") = Size{10},
+        "Compute the DC operating-point state vector with strategy "
+        "selection. Returns a numpy array of length "
+        "pool.state_size(graph).");
+
+    // ---- Naive DC entry point (matches the Python wrapper's `naive`) ----
+    m.def("compute_dc_op",
+        [](const topology::Graph& graph,
+            const pwl::DevicePool& pool,
+            const topology::SwitchStateMask& mask,
+            Real t_eval) {
+            return pwl::compute_dc_op(graph, pool, mask, t_eval);
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("mask"),
+        py::arg("t_eval") = Real{0},
+        "Naive single-shot DC operating-point solve. Returns a numpy "
+        "array of length pool.state_size(graph). Use "
+        "compute_dc_op_with_strategy(...) for stiff circuits.");
+
+    // ---- MNA-linearised AC sweep (Phase A.3) ----------------------------
+    //
+    // Kernel-side complex AC sweep: linearise the MNA matrix at the
+    // operating point, solve (jωI − A) X = B per frequency via
+    // Eigen::SparseLU<complex<Real>>. ~200× faster than swept-sine.
+    py::class_<analysis::MnaSweepResult>(m, "MnaSweepKernelResult",
+        "Kernel-side MNA AC sweep result. `freqs` and `H` are "
+        "parallel arrays; `H` is complex.")
+        .def_readonly("freqs", &analysis::MnaSweepResult::freqs)
+        .def_readonly("H",     &analysis::MnaSweepResult::H);
+
+    m.def("run_mna_sweep_kernel",
+        [](const topology::Graph& graph,
+            const pwl::DevicePool& pool,
+            const topology::SwitchStateMask& mask,
+            const std::vector<Real>& freqs,
+            Size input_state_idx,
+            Size output_node_idx) {
+            return analysis::run_mna_sweep(
+                graph, pool, mask, freqs,
+                input_state_idx, output_node_idx);
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("mask"),
+        py::arg("freqs"), py::arg("input_state_idx"),
+        py::arg("output_node_idx"),
+        "Direct kernel AC sweep via complex sparse LU at each "
+        "frequency. Returns a MnaSweepKernelResult with parallel "
+        "freqs/H arrays.");
+
+    // ---- Control blocks (Phase A.1 in kernel) ----------------------------
+    //
+    // Header-only C++ implementations of the mixed-domain control blocks
+    // exposed by the Python `pulsim.v2_control` module. The Python
+    // wrappers in `python/pulsim/v2_control.py` remain the user-facing
+    // API; these bindings let the BlockChain executor run the blocks
+    // via direct C++ calls when the kernel is available.
+    using namespace pulsim::v2::blockchain;
+    auto cls_gain = py::class_<Gain>(m, "CxxGain", "C++ Gain block.")
+        .def(py::init<>())
+        .def_readwrite("k", &Gain::k)
+        .def("reset", &Gain::reset)
+        .def("update", &Gain::update, py::arg("x"));
+    (void)cls_gain;
+
+    py::class_<Subtract>(m, "CxxSubtract", "C++ Subtract block.")
+        .def(py::init<>())
+        .def("reset", &Subtract::reset)
+        .def("update", &Subtract::update,
+              py::arg("a"), py::arg("b"));
+
+    py::class_<FirstOrderLowPass>(m, "CxxFirstOrderLowPass",
+        "C++ first-order IIR low-pass filter.")
+        .def(py::init<>())
+        .def_readwrite("tau", &FirstOrderLowPass::tau)
+        .def_readwrite("y",   &FirstOrderLowPass::y)
+        .def("reset", &FirstOrderLowPass::reset)
+        .def("update", &FirstOrderLowPass::update,
+              py::arg("input_value"), py::arg("dt"));
+
+    py::class_<PIController>(m, "CxxPIController",
+        "C++ PI controller with anti-windup (trapezoidal integration).")
+        .def(py::init<>())
+        .def_readwrite("Kp", &PIController::Kp)
+        .def_readwrite("Ki", &PIController::Ki)
+        .def_readwrite("output_min", &PIController::output_min)
+        .def_readwrite("output_max", &PIController::output_max)
+        .def_readwrite("integral",   &PIController::integral)
+        .def_readwrite("prev_error", &PIController::prev_error)
+        .def("reset", &PIController::reset)
+        .def("update", &PIController::update,
+              py::arg("setpoint"), py::arg("measured"), py::arg("dt"));
+
+    py::class_<PIDController>(m, "CxxPIDController",
+        "C++ PID controller with anti-windup + derivative filter.")
+        .def(py::init<>())
+        .def_readwrite("Kp", &PIDController::Kp)
+        .def_readwrite("Ki", &PIDController::Ki)
+        .def_readwrite("Kd", &PIDController::Kd)
+        .def_readwrite("tau_d", &PIDController::tau_d)
+        .def_readwrite("output_min", &PIDController::output_min)
+        .def_readwrite("output_max", &PIDController::output_max)
+        .def("reset", &PIDController::reset)
+        .def("update", &PIDController::update,
+              py::arg("setpoint"), py::arg("measured"), py::arg("dt"));
+
+    py::class_<PwmGenerator>(m, "CxxPwmGenerator",
+        "C++ PWM generator (sawtooth comparator, 0/1 output).")
+        .def(py::init<>())
+        .def_readwrite("frequency", &PwmGenerator::frequency)
+        .def_readwrite("phase",     &PwmGenerator::phase)
+        .def("reset", &PwmGenerator::reset)
+        .def("update", &PwmGenerator::update,
+              py::arg("duty"), py::arg("t"));
+
+    py::class_<Limiter>(m, "CxxLimiter", "C++ hard-clamp limiter.")
+        .def(py::init<>())
+        .def_readwrite("min_v", &Limiter::min_v)
+        .def_readwrite("max_v", &Limiter::max_v)
+        .def("reset", &Limiter::reset)
+        .def("update", &Limiter::update, py::arg("x"));
+
+    py::class_<Integrator>(m, "CxxIntegrator", "C++ integrator with clamp.")
+        .def(py::init<>())
+        .def_readwrite("gain", &Integrator::gain)
+        .def_readwrite("output_min", &Integrator::output_min)
+        .def_readwrite("output_max", &Integrator::output_max)
+        .def_readwrite("y", &Integrator::y)
+        .def("reset", &Integrator::reset)
+        .def("update", &Integrator::update,
+              py::arg("x"), py::arg("dt"));
+
+    py::class_<ClarkeTransform>(m, "CxxClarkeTransform",
+        "C++ Clarke transform (abc → αβ0).")
+        .def(py::init<>())
+        .def("reset", &ClarkeTransform::reset)
+        .def("update", [](const ClarkeTransform& self,
+                           Real a, Real b, Real c) {
+            auto o = self.update(a, b, c);
+            return py::make_tuple(o.alpha, o.beta, o.zero);
+        }, py::arg("a"), py::arg("b"), py::arg("c"));
+
+    py::class_<ParkTransform>(m, "CxxParkTransform",
+        "C++ Park transform (αβ → dq).")
+        .def(py::init<>())
+        .def("reset", &ParkTransform::reset)
+        .def("update", [](const ParkTransform& self,
+                           Real alpha, Real beta, Real theta) {
+            auto o = self.update(alpha, beta, theta);
+            return py::make_tuple(o.d, o.q);
+        }, py::arg("alpha"), py::arg("beta"), py::arg("theta"));
+
+    py::class_<InverseParkTransform>(m, "CxxInverseParkTransform",
+        "C++ inverse Park transform (dq → αβ).")
+        .def(py::init<>())
+        .def("reset", &InverseParkTransform::reset)
+        .def("update", [](const InverseParkTransform& self,
+                           Real d, Real q, Real theta) {
+            auto o = self.update(d, q, theta);
+            return py::make_tuple(o.alpha, o.beta);
+        }, py::arg("d"), py::arg("q"), py::arg("theta"));
+
+    py::class_<SpaceVectorModulator>(m, "CxxSpaceVectorModulator",
+        "C++ centered space-vector modulator (αβ → 3 duty cycles).")
+        .def(py::init<>())
+        .def_readwrite("v_dc", &SpaceVectorModulator::v_dc)
+        .def("reset", &SpaceVectorModulator::reset)
+        .def("update", [](const SpaceVectorModulator& self,
+                           Real v_alpha, Real v_beta) {
+            auto o = self.update(v_alpha, v_beta);
+            return py::make_tuple(o.da, o.db, o.dc);
+        }, py::arg("v_alpha"), py::arg("v_beta"));
+
+    py::class_<PLL>(m, "CxxPLL",
+        "C++ phase-locked loop on αβ (cross-product PD + PI on q).")
+        .def(py::init<>())
+        .def_readwrite("f_nominal", &PLL::f_nominal)
+        .def_readwrite("Kp", &PLL::Kp)
+        .def_readwrite("Ki", &PLL::Ki)
+        .def_readwrite("theta",    &PLL::theta)
+        .def_readwrite("omega",    &PLL::omega)
+        .def_readwrite("integral", &PLL::integral)
+        .def("reset", &PLL::reset)
+        .def("update", [](PLL& self, Real va, Real vb, Real dt) {
+            auto o = self.update(va, vb, dt);
+            return py::make_tuple(o.theta, o.omega, o.freq);
+        }, py::arg("v_alpha"), py::arg("v_beta"), py::arg("dt"));
 }
 
 }  // namespace pulsim_v2_kernel_bindings

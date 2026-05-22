@@ -124,6 +124,20 @@ from .v2_plot import (
     scope_fft,
     compare,
 )
+from .v2_blockchain import (
+    MixedDomainBlockChain,
+    BlockSpec,
+    parse_block_chain,
+)
+from .v2_dc_strategy import (
+    compute_dc_op,
+    PseudoTransientConfig,
+    SourceStepConfig,
+)
+from .v2_mna_sweep import (
+    MnaSweepResult,
+    run_mna_sweep,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -194,6 +208,17 @@ __all__ = [
     "plot_currents",
     "scope_fft",
     "compare",
+    # Mixed-domain block-chain executor (v1 parity Phase A.1 stage 2).
+    "MixedDomainBlockChain",
+    "BlockSpec",
+    "parse_block_chain",
+    # DC operating-point strategies (v1 parity Phase A.2).
+    "compute_dc_op",
+    "PseudoTransientConfig",
+    "SourceStepConfig",
+    # Fast frequency sweep via impulse-response (v1 parity Phase A.3).
+    "MnaSweepResult",
+    "run_mna_sweep",
 ]
 
 
