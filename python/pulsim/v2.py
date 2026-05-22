@@ -82,6 +82,17 @@ from .v2_ac_analysis import (
     extract_phasor,
     plot_bode,
 )
+from .v2_discovery import (
+    catalog,
+    example,
+    tour,
+    list_topologies,
+)
+from .v2_plot import (
+    scope,
+    scope_grid,
+    plot_currents,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -124,6 +135,15 @@ __all__ = [
     "run_ac_sweep",
     "extract_phasor",
     "plot_bode",
+    # Discovery helpers (introspect the v2 surface).
+    "catalog",
+    "example",
+    "tour",
+    "list_topologies",
+    # Plot helpers (one-line waveform + multi-panel).
+    "scope",
+    "scope_grid",
+    "plot_currents",
 ]
 
 
@@ -145,6 +165,7 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
+    progress: "bool | int | str" = False,
 ) -> SimulationResult:
     """Build the PWL cache and run a fixed-dt transient simulation.
 
@@ -229,6 +250,66 @@ def simulate(
     if enable_nonlinear_refresh is None:
         enable_nonlinear_refresh = builder.pool.has_nonlinear_devices()
 
+    # Progress bar via step_observer: print a percentage at
+    # configurable intervals. The user can pass:
+    #   progress=False              — no progress (default)
+    #   progress=True               — auto: print every 10%
+    #   progress=<int>              — print every N%
+    #   progress="bar"              — full ASCII progress bar
+    # If the user also supplied a step_observer, we wrap it.
+    if progress is not False and progress is not None:
+        if progress is True:
+            print_every_pct = 10
+            bar_mode = False
+        elif isinstance(progress, int):
+            print_every_pct = max(1, min(100, progress))
+            bar_mode = False
+        elif isinstance(progress, str) and progress.lower() == "bar":
+            print_every_pct = 1
+            bar_mode = True
+        else:
+            print_every_pct = 10
+            bar_mode = False
+
+        import sys as _sys
+        import time as _time
+        _start = _time.perf_counter()
+        # Mutable state for closure.
+        _last_pct_printed = [-1]
+        _t_total = float(t_end - t_start)
+        _user_observer = step_observer
+
+        def _progress_observer(t, x):
+            if _user_observer is not None:
+                _user_observer(t, x)
+            if _t_total <= 0:
+                return
+            pct = int(100.0 * (t - t_start) / _t_total)
+            # Only print on multiples of print_every_pct, and only
+            # once per multiple (to handle the per-dt observer
+            # cadence).
+            if pct >= _last_pct_printed[0] + print_every_pct:
+                _last_pct_printed[0] = pct - (pct % print_every_pct)
+                elapsed = _time.perf_counter() - _start
+                if bar_mode:
+                    barw = 40
+                    filled = int(barw * pct / 100)
+                    bar = "█" * filled + "░" * (barw - filled)
+                    _sys.stdout.write(
+                        f"\r  [{bar}] {pct:3d}% "
+                        f"  t={t*1e3:.2f} ms  ({elapsed:5.1f}s)"
+                    )
+                    _sys.stdout.flush()
+                else:
+                    _sys.stdout.write(
+                        f"  progress: {pct:3d}%  "
+                        f"t={t*1e3:.2f} ms  "
+                        f"({elapsed:.1f}s)\n"
+                    )
+                    _sys.stdout.flush()
+
+        step_observer = _progress_observer
+
     # Run the transient — match the keyword convention of the
     # raw `run_transient` binding.
     kwargs: dict = {
@@ -241,9 +322,16 @@ def simulate(
     if step_observer is not None:
         kwargs["step_observer"] = step_observer
 
-    return run_transient(
+    res = run_transient(
         cache, builder.graph, builder.pool, opts, **kwargs,
     )
+    # Close the progress bar with a newline if we were in bar mode.
+    if progress is True or (isinstance(progress, str)
+                              and progress.lower() == "bar"):
+        import sys as _sys
+        _sys.stdout.write("\n")
+        _sys.stdout.flush()
+    return res
 
 
 # Note: SineVoltageSource (Layer 2 V11) is exposed as a

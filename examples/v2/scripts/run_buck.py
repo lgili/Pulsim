@@ -68,8 +68,11 @@ def main() -> None:
         phase=0.0,
     )
 
+    # `progress="bar"` shows an animated ASCII bar during the run.
+    # For terse output, use `progress=True` (prints every 10%) or
+    # `progress=False` (silent — default).
     res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start,
-                      switch_fn=pwm)
+                      switch_fn=pwm, progress="bar")
     print(f"  samples: {res.num_steps()}")
 
     vout_idx = builder.node_id_of("vout")
@@ -86,31 +89,17 @@ def main() -> None:
     print(f"  V_out DC ≈ {v_mean:.3f} V (target {v_target:.1f}, "
           f"ripple {v_ripple*1000:.1f} mV pp)")
 
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("(install matplotlib to see the waveform plot)")
-        return
-
-    fig, (ax_sw, ax_out) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    ax_sw.plot(times, v_sw, color="tab:purple", lw=0.6, alpha=0.7)
-    ax_sw.set_ylabel("V_sw [V]")
-    ax_sw.set_title(f"Buck converter — {F_PWM/1e3:.0f} kHz, "
-                     f"{DUTY*100:.0f}% duty")
-    ax_sw.grid(alpha=0.3)
-
-    ax_out.plot(times, v_out, color="tab:blue", lw=0.8)
-    ax_out.axhline(v_target, color="r", ls="--", lw=0.8,
-                    label=f"target ({v_target:.1f} V)")
-    ax_out.set_xlabel("time [ms]")
-    ax_out.set_ylabel("V_out [V]")
-    ax_out.legend(loc="lower right"); ax_out.grid(alpha=0.3)
-
-    plt.tight_layout()
+    # One-liner plot via `p.scope()` — auto-detects node indices,
+    # picks sensible time units, saves to PNG.
     out = Path(__file__).resolve().parent / "output" / "buck.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out, dpi=120)
-    print(f"  plot → {out}")
+    p.scope(
+        builder, res,
+        signals=["sw", "vout"],
+        title=f"Buck converter — {F_PWM/1e3:.0f} kHz, "
+              f"{DUTY*100:.0f}% duty  (target V_out ≈ {v_target:.1f} V)",
+        tight_lw=True,
+        save=out,
+    )
 
 
 if __name__ == "__main__":
