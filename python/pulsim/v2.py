@@ -223,6 +223,10 @@ from .v2_losses import (
     average_power_at_node,
     device_loss_summary,
 )
+from .v2_motor_helpers import (
+    FocWiringResult,
+    wire_pmsm_foc,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -388,6 +392,9 @@ __all__ = [
     "LossAccumulator",
     "average_power_at_node",
     "device_loss_summary",
+    # Motor-control wiring helpers.
+    "FocWiringResult",
+    "wire_pmsm_foc",
 ]
 
 if _HAS_SCOPE:
