@@ -243,6 +243,14 @@ from .v2_harmonic import (
     analyze_harmonics,
     run_harmonic_balance,
 )
+from .v2_hysteresis import (
+    BHLoopResult,
+    JilesAthertonModel,
+    JilesAthertonParams,
+    compute_bh_loop,
+    core_loss_jiles_atherton,
+    reference_material as _ja_reference_material,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -424,6 +432,12 @@ __all__ = [
     "HarmonicAnalysisResult",
     "analyze_harmonics",
     "run_harmonic_balance",
+    # Jiles-Atherton magnetic hysteresis (Phase 2 closure).
+    "BHLoopResult",
+    "JilesAthertonModel",
+    "JilesAthertonParams",
+    "compute_bh_loop",
+    "core_loss_jiles_atherton",
 ]
 
 if _HAS_SCOPE:
