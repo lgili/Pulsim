@@ -36,6 +36,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Build Options
 # =============================================================================
 option(PULSIM_BUILD_TESTS "Build tests" ON)
+# v1 tests cover the legacy kernel (``core/include/pulsim/v1``) +
+# devices/features that are NOT migrated to v2 (codegen, FMU,
+# compressor, presets, robustness profiles, MMC templates, …). They
+# still compile against the existing v1 header but no longer block
+# CI by default. Set to ON to maintain v1 alongside v2 during the
+# retirement window; defaults to OFF so the active surface only
+# exercises v2.
+option(PULSIM_BUILD_V1_TESTS "Build legacy v1 C++ tests" OFF)
 option(PULSIM_BUILD_PYTHON "Build Python bindings" OFF)
 
 # refactor `add-automatic-differentiation`, Phase 2.4: opt-in to the

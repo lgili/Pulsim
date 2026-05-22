@@ -111,13 +111,17 @@ if(PULSIM_BUILD_TESTS)
         tests/test_catalog_phase8_validation.cpp
         tests/test_motor_models.cpp
         tests/test_grid_library.cpp
-        tests/test_robustness_profile.cpp
-        tests/test_preset.cpp
         tests/test_armijo_line_search.cpp
-        tests/test_homotopy_dc.cpp
         tests/test_iterative_refinement.cpp
         tests/test_solver_kind_collapse.cpp
     )
+    # v1-only entries removed from pulsim_tests above:
+    # - test_robustness_profile.cpp — v1 RobustnessProfile (not in v2)
+    # - test_preset.cpp              — v1 Preset enum     (not in v2)
+    # - test_homotopy_dc.cpp         — v1 homotopy DC OP  (v2 uses
+    #                                  pwl::DCStrategy::SourceStepping)
+    # If you need them back during v1 retirement, restore from
+    # git history and gate under ``if(PULSIM_BUILD_V1_TESTS)``.
 
     target_link_libraries(pulsim_tests
         PRIVATE
@@ -135,6 +139,16 @@ if(PULSIM_BUILD_TESTS)
 
     catch_discover_tests(pulsim_tests)
 
+    # =============================================================================
+    # pulsim_simulation_tests — LEGACY v1 SIMULATION SUITE
+    # =============================================================================
+    # ~50 integration tests covering the v1 ``Circuit``+``Simulator``
+    # API, plus power-electronics templates, MMC, compressor load,
+    # presets, etc — i.e. features that did NOT migrate to v2. We
+    # keep them compilable for the v1 retirement window but no
+    # longer build by default; set
+    # ``-DPULSIM_BUILD_V1_TESTS=ON`` to bring them back.
+    if(PULSIM_BUILD_V1_TESTS)
     # Compiled library tests (Circuit, Simulator, power electronics)
     add_executable(pulsim_simulation_tests
         tests/test_main.cpp
@@ -208,6 +222,7 @@ if(PULSIM_BUILD_TESTS)
     endif()
 
     catch_discover_tests(pulsim_simulation_tests)
+    endif()  # PULSIM_BUILD_V1_TESTS — pulsim_simulation_tests gate
 
     # =============================================================================
     # pulsim_v2_layer0_tests — bootstrap-pulsim-v2-kernel
