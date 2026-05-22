@@ -48,6 +48,34 @@ __all__ = [
     "SampleHold",
     "FirstOrderLowPass",
     "LookupTable1D",
+    "MovingAverageFilter",
+    # Math blocks (Phase A.1)
+    "Gain",
+    "Sum",
+    "Subtract",
+    "MathBlock",
+    # Standalone control blocks (Phase A.1)
+    "Integrator",
+    "Differentiator",
+    "TransferFunction",
+    "StateMachine",
+    "OpAmp",
+    # Signal-shaping blocks (Phase A.1)
+    "Limiter",
+    "DelayBlock",
+    # Modulation blocks (Phase A.1)
+    "PwmGenerator",
+    "SpaceVectorModulator",
+    # Transform blocks (Phase A.1)
+    "ClarkeTransform",
+    "InverseClarkeTransform",
+    "ParkTransform",
+    "InverseParkTransform",
+    # Synchronization (Phase A.1)
+    "PLL",
+    # Routing (Phase A.1)
+    "SignalMux",
+    "SignalDemux",
     # Auto-tuning helpers (Bode-based loop shaping).
     "tune_pi_from_bode",
     "loop_gain",
@@ -341,6 +369,535 @@ class FirstOrderLowPass:
             alpha = dt / (self.tau + dt)
             self.state += alpha * (input_value - self.state)
         return self.state
+
+
+# =============================================================================
+# Moving-average filter (exponential moving average — name kept from v1)
+# =============================================================================
+
+@dataclass
+class MovingAverageFilter:
+    """First-order exponential moving average — `y_k = α·y_{k-1} + (1-α)·x_k`.
+
+    Despite the name (kept for v1 parity), this is an exponential filter,
+    NOT a windowed boxcar average. `alpha` is the carry-over coefficient
+    in [0, 1):
+      - α = 0 → no filtering (output = input)
+      - α → 1 → very slow filtering (long memory)
+    """
+
+    alpha: float = 0.9
+    state: float = 0.0
+
+    def reset(self, state: float = 0.0) -> None:
+        self.state = state
+
+    def update(self, *, input_value: float) -> float:
+        self.state = self.alpha * self.state + (1.0 - self.alpha) * input_value
+        return self.state
+
+
+# =============================================================================
+# Phase A.1 — math blocks
+# =============================================================================
+
+@dataclass
+class Gain:
+    """y = k · x. Stateless."""
+    k: float = 1.0
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, x: float) -> float:
+        return self.k * x
+
+
+@dataclass
+class Sum:
+    """N-input weighted sum: y = Σ w_i · x_i.
+
+    `weights` is a tuple of N coefficients. Pass `inputs` as a tuple
+    of the same length to `update`. Default weights of all 1.0 give
+    a plain sum.
+    """
+    weights: tuple = (1.0, 1.0)
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, inputs) -> float:
+        if len(inputs) != len(self.weights):
+            raise ValueError(
+                f"Sum: expected {len(self.weights)} inputs, "
+                f"got {len(inputs)}")
+        return sum(w * x for w, x in zip(self.weights, inputs))
+
+
+@dataclass
+class Subtract:
+    """y = a − b. Stateless."""
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, a: float, b: float) -> float:
+        return a - b
+
+
+@dataclass
+class MathBlock:
+    """Generic 1- or 2-input math op selected by string.
+
+    `op` ∈ {"add", "sub", "mul", "div", "abs", "neg", "sqrt", "pow2"}.
+    `add/sub/mul/div` need both `a` and `b`. `abs/neg/sqrt/pow2` use
+    only `a`.
+    """
+    op: str = "add"
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, a: float, b: float = 0.0) -> float:
+        op = self.op.lower()
+        if op == "add":  return a + b
+        if op == "sub":  return a - b
+        if op == "mul":  return a * b
+        if op == "div":  return a / b if b != 0.0 else 0.0
+        if op == "abs":  return abs(a)
+        if op == "neg":  return -a
+        if op == "sqrt": return math.sqrt(a) if a >= 0 else 0.0
+        if op == "pow2": return a * a
+        raise ValueError(f"MathBlock: unknown op {self.op!r}")
+
+
+# =============================================================================
+# Phase A.1 — standalone control blocks
+# =============================================================================
+
+@dataclass
+class Integrator:
+    """y_k = clamp(y_{k-1} + gain · dt · x_k, output_min, output_max).
+
+    Conditional anti-windup (freezes when output saturates and input
+    pushes further into saturation). Forward-Euler discretization to
+    keep the input-output relationship causal.
+    """
+    gain: float = 1.0
+    output_min: float = -math.inf
+    output_max: float = math.inf
+    state: float = 0.0
+
+    def reset(self, state: float = 0.0) -> None:
+        self.state = state
+
+    def update(self, *, x: float, dt: float) -> float:
+        new = self.state + self.gain * dt * x
+        if new > self.output_max and x > 0:
+            new = self.state          # anti-windup hold
+        elif new < self.output_min and x < 0:
+            new = self.state
+        new = max(self.output_min, min(self.output_max, new))
+        self.state = new
+        return new
+
+
+@dataclass
+class Differentiator:
+    """Filtered backward-difference derivative.
+
+    Raw: d_raw = (x_k − x_{k-1}) / dt
+    IIR: d_k = α · d_raw + (1 − α) · d_{k-1}
+    """
+    alpha: float = 0.2
+    _prev_x: float = field(default=0.0, repr=False)
+    state: float = 0.0
+
+    def reset(self, state: float = 0.0) -> None:
+        self.state = state
+        self._prev_x = 0.0
+
+    def update(self, *, x: float, dt: float) -> float:
+        d_raw = (x - self._prev_x) / dt if dt > 0 else 0.0
+        self.state = self.alpha * d_raw + (1.0 - self.alpha) * self.state
+        self._prev_x = x
+        return self.state
+
+
+@dataclass
+class TransferFunction:
+    """Discrete-time transfer function in direct form II.
+
+    H(z) = Σ b_k · z^-k  /  (1 + Σ a_k · z^-k)
+
+    `num` and `den` are sequences of coefficients in INCREASING powers
+    of z^-1: `num[0]` multiplies the current input, `num[1]` the input
+    one step ago, etc. `den[0]` is the implicit 1 (do NOT include it).
+    """
+    num: tuple = (1.0,)
+    den: tuple = ()
+    _x_hist: list = field(default_factory=list, repr=False)
+    _y_hist: list = field(default_factory=list, repr=False)
+
+    def reset(self) -> None:
+        self._x_hist = []
+        self._y_hist = []
+
+    def update(self, *, x: float) -> float:
+        self._x_hist.insert(0, x)
+        # Keep only what we need.
+        if len(self._x_hist) > len(self.num):
+            self._x_hist = self._x_hist[:len(self.num)]
+        # Compute the numerator contribution.
+        num_part = sum(b * (self._x_hist[i] if i < len(self._x_hist) else 0.0)
+                        for i, b in enumerate(self.num))
+        # Compute the denominator (feedback) contribution.
+        den_part = sum(a * (self._y_hist[i] if i < len(self._y_hist) else 0.0)
+                        for i, a in enumerate(self.den))
+        y = num_part - den_part
+        self._y_hist.insert(0, y)
+        if len(self._y_hist) > len(self.den):
+            self._y_hist = self._y_hist[:max(1, len(self.den))]
+        return y
+
+
+@dataclass
+class StateMachine:
+    """Mealy state machine — mode ∈ {"toggle", "level", "sr_latch"}.
+
+    - "toggle"   : output flips every time `trigger > threshold`
+    - "level"    : output = high_value if input > threshold else low_value
+    - "sr_latch" : two-input latch (S=set, R=reset, both via threshold)
+    """
+    mode: str = "level"
+    threshold: float = 0.5
+    high_value: float = 1.0
+    low_value: float = 0.0
+    state: float = 0.0
+    _trigger_prev: float = field(default=0.0, repr=False)
+
+    def reset(self, state: float = 0.0) -> None:
+        self.state = state
+        self._trigger_prev = 0.0
+
+    def update(self, *, trigger: float = 0.0, set_: float = 0.0,
+                 reset_: float = 0.0) -> float:
+        mode = self.mode.lower()
+        if mode == "toggle":
+            rising_edge = (self._trigger_prev <= self.threshold
+                            and trigger > self.threshold)
+            if rising_edge:
+                self.state = (self.low_value if self.state == self.high_value
+                                else self.high_value)
+            self._trigger_prev = trigger
+        elif mode == "level":
+            self.state = (self.high_value if trigger > self.threshold
+                            else self.low_value)
+        elif mode == "sr_latch":
+            if set_ > self.threshold:
+                self.state = self.high_value
+            elif reset_ > self.threshold:
+                self.state = self.low_value
+        else:
+            raise ValueError(f"StateMachine: unknown mode {self.mode!r}")
+        return self.state
+
+
+@dataclass
+class OpAmp:
+    """Saturating ideal op-amp — y = clamp(gain · (in_pos − in_neg), rails).
+
+    Stateless. Use this when you want a pure software op-amp (no
+    branch-current unknown). The circuit-side VCVS-based op-amp
+    (`add_op_amp_ideal`) is preferred when the op-amp is part of an
+    electrical feedback network.
+    """
+    gain: float = 1e5
+    rail_min: float = -math.inf
+    rail_max: float = math.inf
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, in_pos: float, in_neg: float) -> float:
+        u = self.gain * (in_pos - in_neg)
+        return max(self.rail_min, min(self.rail_max, u))
+
+
+# =============================================================================
+# Phase A.1 — signal-shaping blocks
+# =============================================================================
+
+@dataclass
+class Limiter:
+    """Hard clamp: y = clamp(x, min, max). Stateless."""
+    output_min: float = -math.inf
+    output_max: float = math.inf
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, x: float) -> float:
+        return max(self.output_min, min(self.output_max, x))
+
+
+@dataclass
+class DelayBlock:
+    """FIFO-buffer delay: outputs the input from `samples` updates ago.
+
+    The first `samples` calls return `initial_value` (default 0).
+    """
+    samples: int = 1
+    initial_value: float = 0.0
+    _buf: list = field(default_factory=list, repr=False)
+
+    def reset(self, initial: float | None = None) -> None:
+        v = self.initial_value if initial is None else initial
+        self._buf = [v] * self.samples
+
+    def update(self, *, x: float) -> float:
+        if len(self._buf) != self.samples:
+            self.reset()
+        out = self._buf.pop(0)
+        self._buf.append(x)
+        return out
+
+
+# =============================================================================
+# Phase A.1 — modulation blocks
+# =============================================================================
+
+@dataclass
+class PwmGenerator:
+    """Naturally-sampled PWM modulator — outputs 0/1 based on whether
+    a sawtooth carrier exceeds the input duty command.
+
+    Returns 1.0 while `phase ∈ [0, duty·T)` and 0.0 for the rest of
+    the cycle. The block is purely software (no SwitchStateMask) — use
+    the output as a control signal, drive a `add_voltage_source`'s
+    overlay, or feed it into a higher-level switch_fn.
+    """
+    frequency: float = 100e3
+    phase: float = 0.0          # cycle-relative offset [s]
+    state: float = 0.0
+
+    def reset(self, state: float = 0.0) -> None:
+        self.state = state
+
+    def update(self, *, duty: float, t: float) -> float:
+        T = 1.0 / self.frequency if self.frequency > 0 else math.inf
+        if not math.isfinite(T) or T == 0:
+            self.state = 0.0
+            return 0.0
+        phase01 = math.fmod((t - self.phase) / T, 1.0)
+        if phase01 < 0:
+            phase01 += 1.0
+        self.state = 1.0 if phase01 < duty else 0.0
+        return self.state
+
+
+@dataclass
+class SpaceVectorModulator:
+    """Space-vector PWM (SVM) for a 3-leg VSI.
+
+    Input: αβ-frame reference vector (`v_alpha`, `v_beta`).
+    Output: three duty cycles `d_a`, `d_b`, `d_c` for the upper-leg
+    switches (lower-leg = 1 − d).
+
+    Uses the classical 7-segment SVM ordering with the zero-vector
+    centered (symmetric V0-V7-V0 split). Modulation index up to ≈
+    1.155 (15 % over linear SPWM) before overmodulation.
+
+    Returns a tuple `(d_a, d_b, d_c)`.
+    """
+    v_dc: float = 1.0
+    state: tuple = (0.5, 0.5, 0.5)
+
+    def reset(self, state: tuple = (0.5, 0.5, 0.5)) -> None:
+        self.state = state
+
+    def update(self, *, v_alpha: float, v_beta: float) -> tuple:
+        # Sector identification (1..6).
+        v3 = math.sqrt(3.0)
+        # SVM duty equations — classic min/max-injection form.
+        u_a = v_alpha
+        u_b = (-v_alpha + v3 * v_beta) / 2.0
+        u_c = (-v_alpha - v3 * v_beta) / 2.0
+        # Min/max injection for zero-sequence centering.
+        u_max = max(u_a, u_b, u_c)
+        u_min = min(u_a, u_b, u_c)
+        u_zero = 0.5 * (u_max + u_min)
+        # Final duties (0..1).
+        v_dc = self.v_dc if self.v_dc > 0 else 1.0
+        d_a = 0.5 + (u_a - u_zero) / v_dc
+        d_b = 0.5 + (u_b - u_zero) / v_dc
+        d_c = 0.5 + (u_c - u_zero) / v_dc
+        # Clamp to [0, 1] (overmodulation handling).
+        d_a = max(0.0, min(1.0, d_a))
+        d_b = max(0.0, min(1.0, d_b))
+        d_c = max(0.0, min(1.0, d_c))
+        self.state = (d_a, d_b, d_c)
+        return self.state
+
+
+# =============================================================================
+# Phase A.1 — transform blocks (Clarke, Park, inverses)
+# =============================================================================
+
+@dataclass
+class ClarkeTransform:
+    """abc → αβ0 (power-invariant convention).
+
+    α = (2/3)·(a − b/2 − c/2)
+    β = (2/3)·(√3/2)·(b − c)
+    0 = (1/3)·(a + b + c)
+    """
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, a: float, b: float, c: float) -> tuple:
+        v3 = math.sqrt(3.0)
+        alpha = (2.0 / 3.0) * (a - 0.5 * b - 0.5 * c)
+        beta  = (2.0 / 3.0) * (v3 / 2.0) * (b - c)
+        zero  = (1.0 / 3.0) * (a + b + c)
+        return (alpha, beta, zero)
+
+
+@dataclass
+class InverseClarkeTransform:
+    """αβ0 → abc (inverse of `ClarkeTransform`)."""
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, alpha: float, beta: float,
+                 zero: float = 0.0) -> tuple:
+        v3 = math.sqrt(3.0)
+        a = alpha + zero
+        b = -0.5 * alpha + (v3 / 2.0) * beta + zero
+        c = -0.5 * alpha - (v3 / 2.0) * beta + zero
+        return (a, b, c)
+
+
+@dataclass
+class ParkTransform:
+    """αβ → dq with rotor angle θ.
+
+    d =  α·cos(θ) + β·sin(θ)
+    q = -α·sin(θ) + β·cos(θ)
+    """
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, alpha: float, beta: float,
+                 theta: float) -> tuple:
+        c, s = math.cos(theta), math.sin(theta)
+        d =  alpha * c + beta * s
+        q = -alpha * s + beta * c
+        return (d, q)
+
+
+@dataclass
+class InverseParkTransform:
+    """dq → αβ with rotor angle θ (inverse of `ParkTransform`)."""
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, d: float, q: float,
+                 theta: float) -> tuple:
+        c, s = math.cos(theta), math.sin(theta)
+        alpha = d * c - q * s
+        beta  = d * s + q * c
+        return (alpha, beta)
+
+
+# =============================================================================
+# Phase A.1 — phase-locked loop
+# =============================================================================
+
+@dataclass
+class PLL:
+    """Single-phase / αβ-frame PLL.
+
+    Estimates the angle and frequency of a sinusoidal input. Internal
+    structure: phase-detector (cross-product) → PI controller → VCO.
+
+    Input: αβ pair (`v_alpha`, `v_beta`) from a Clarke transform of
+    the measured signal.
+    Output: estimated angle `theta_hat` in [0, 2π) and estimated
+    frequency `omega_hat`.
+
+    Defaults are tuned for 50/60 Hz AC mains. For motor sensorless
+    control, set `f_nominal` to the expected motor electrical freq.
+    """
+    f_nominal: float = 60.0          # initial guess [Hz]
+    Kp: float = 100.0
+    Ki: float = 1000.0
+    theta_hat: float = 0.0
+    omega_hat: float = field(default=2.0 * math.pi * 60.0, repr=False)
+    _integ: float = field(default=0.0, repr=False)
+
+    def reset(self) -> None:
+        self.theta_hat = 0.0
+        self.omega_hat = 2.0 * math.pi * self.f_nominal
+        self._integ = 0.0
+
+    def update(self, *, v_alpha: float, v_beta: float,
+                 dt: float) -> tuple:
+        # Cross-product phase detector: rotate measured by -θ_hat.
+        # Locked when q-axis = 0.
+        c, s = math.cos(self.theta_hat), math.sin(self.theta_hat)
+        q = -v_alpha * s + v_beta * c
+        # PI controller drives q → 0.
+        self._integ += self.Ki * dt * q
+        domega = self.Kp * q + self._integ
+        self.omega_hat = 2.0 * math.pi * self.f_nominal + domega
+        self.theta_hat += self.omega_hat * dt
+        # Wrap angle.
+        self.theta_hat = math.fmod(self.theta_hat, 2.0 * math.pi)
+        if self.theta_hat < 0:
+            self.theta_hat += 2.0 * math.pi
+        return (self.theta_hat, self.omega_hat)
+
+
+# =============================================================================
+# Phase A.1 — routing blocks (mux / demux)
+# =============================================================================
+
+@dataclass
+class SignalMux:
+    """Selects one of N inputs based on `selector` (integer index).
+
+    Out-of-range selectors return the LAST input. Pass `inputs` as a
+    tuple to each `update()`.
+    """
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, selector: int, inputs) -> float:
+        idx = max(0, min(len(inputs) - 1, int(selector)))
+        return inputs[idx]
+
+
+@dataclass
+class SignalDemux:
+    """Broadcasts one input to N outputs.
+
+    `update()` returns a tuple of length `n_outputs` where ALL entries
+    equal the input — useful as a "fan-out" hint inside YAML chains
+    (Python users can just reuse the variable).
+    """
+    n_outputs: int = 2
+
+    def reset(self) -> None:
+        pass
+
+    def update(self, *, x: float) -> tuple:
+        return tuple(x for _ in range(self.n_outputs))
 
 
 # =============================================================================

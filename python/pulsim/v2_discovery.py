@@ -187,6 +187,93 @@ _CATEGORIES: dict[str, list[_Entry]] = {
         _Entry("LookupTable1D",
                "Sorted x → linearly interpolated y",
                "Soft-start ramps, gain schedules, V/f curves."),
+        _Entry("MovingAverageFilter",
+               "Exponential moving average (α carry-over)",
+               "Cheap smoothing when you don't want a continuous-time τ."),
+    ],
+
+    "Math / signal blocks (v1 parity)": [
+        _Entry("Gain", "y = k · x — stateless scalar multiply",
+               "Scale a measurement or reference."),
+        _Entry("Sum",
+               "N-input weighted sum y = Σ w_i · x_i",
+               "Summing junctions, current summing in multi-phase loops."),
+        _Entry("Subtract", "y = a − b",
+               "Error computation: error = setpoint − measurement."),
+        _Entry("MathBlock",
+               "Generic op ∈ {add, sub, mul, div, abs, neg, sqrt, pow2}",
+               "One-off arithmetic without a custom block."),
+        _Entry("Limiter", "Hard clamp y = clamp(x, min, max)",
+               "Saturate references, gate drive voltages, etc."),
+        _Entry("DelayBlock",
+               "FIFO delay: outputs the input from N samples ago",
+               "Modeling computational delay, transport lag, "
+               "or sample-and-hold offsets."),
+    ],
+
+    "Standalone control blocks (v1 parity)": [
+        _Entry("Integrator",
+               "Discrete integrator gain·dt + anti-windup clamp",
+               "When you need an integrator separate from a full PI "
+               "(e.g. inside a custom compensator)."),
+        _Entry("Differentiator",
+               "Backward-difference + IIR filter",
+               "Adding D action manually or estimating slopes."),
+        _Entry("TransferFunction",
+               "Direct-form II discrete H(z) — numerator + denominator",
+               "Arbitrary digital filter, lead-lag, biquad, notch."),
+        _Entry("StateMachine",
+               "Mealy machine — toggle / level / SR-latch",
+               "Bang-bang controllers, fault state machines, mode logic."),
+        _Entry("OpAmp",
+               "Pure-software saturating op-amp (not a circuit element)",
+               "When you want a behavioural op-amp inside a Python "
+               "block chain (use add_op_amp_ideal for circuit-side)."),
+    ],
+
+    "Modulation blocks (v1 parity)": [
+        _Entry("PwmGenerator",
+               "Software PWM modulator — sawtooth vs duty (output 0/1)",
+               "When you need PWM as a SIGNAL (not a SwitchStateMask "
+               "bit) — e.g. modulating a voltage-source value."),
+        _Entry("SpaceVectorModulator",
+               "Classical 7-segment SVM with zero-vector centering",
+               "3-phase VSI control — higher modulation index than "
+               "naive SPWM."),
+    ],
+
+    "Transform blocks (v1 parity)": [
+        _Entry("ClarkeTransform",
+               "abc → αβ0 (power-invariant convention)",
+               "First stage of dq vector control on 3-phase systems."),
+        _Entry("InverseClarkeTransform",
+               "αβ0 → abc",
+               "Final stage when sending duties back to a 3-leg VSI."),
+        _Entry("ParkTransform",
+               "αβ → dq with rotor angle θ",
+               "Rotate the AC stationary frame into a DC rotor frame."),
+        _Entry("InverseParkTransform",
+               "dq → αβ",
+               "Rotate the control output back to the stationary "
+               "frame before applying to the inverter."),
+    ],
+
+    "Synchronization (v1 parity)": [
+        _Entry("PLL",
+               "Phase-locked loop on αβ — outputs (θ_hat, ω_hat)",
+               "Grid-tie inverter synchronisation, motor sensorless "
+               "rotor-angle estimation."),
+    ],
+
+    "Routing (v1 parity)": [
+        _Entry("SignalMux",
+               "Select one of N inputs based on a selector index",
+               "Switch between control modes (e.g. soft-start ramp → "
+               "PI command at t = T_soft)."),
+        _Entry("SignalDemux",
+               "Broadcast one input to N outputs",
+               "Fan-out hint inside YAML chains (Python users can "
+               "just reuse the variable)."),
     ],
 
     "Auto-tuning + frequency analysis": [

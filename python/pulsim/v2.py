@@ -71,6 +71,35 @@ from .v2_control import (
     SampleHold,
     FirstOrderLowPass,
     LookupTable1D,
+    MovingAverageFilter,
+    # Math
+    Gain,
+    Sum,
+    Subtract,
+    MathBlock,
+    # Standalone control
+    Integrator,
+    Differentiator,
+    TransferFunction,
+    StateMachine,
+    OpAmp,
+    # Signal
+    Limiter,
+    DelayBlock,
+    # Modulation
+    PwmGenerator,
+    SpaceVectorModulator,
+    # Transforms
+    ClarkeTransform,
+    InverseClarkeTransform,
+    ParkTransform,
+    InverseParkTransform,
+    # Sync
+    PLL,
+    # Routing
+    SignalMux,
+    SignalDemux,
+    # Auto-tuning
     tune_pi_from_bode,
     loop_gain,
     phase_margin_from_loop,
@@ -127,6 +156,23 @@ __all__ = [
     "SampleHold",
     "FirstOrderLowPass",
     "LookupTable1D",
+    "MovingAverageFilter",
+    # Math blocks (v1 parity Phase A.1)
+    "Gain", "Sum", "Subtract", "MathBlock",
+    # Standalone control blocks (v1 parity Phase A.1)
+    "Integrator", "Differentiator", "TransferFunction",
+    "StateMachine", "OpAmp",
+    # Signal-shaping (v1 parity Phase A.1)
+    "Limiter", "DelayBlock",
+    # Modulation (v1 parity Phase A.1)
+    "PwmGenerator", "SpaceVectorModulator",
+    # Transforms (v1 parity Phase A.1)
+    "ClarkeTransform", "InverseClarkeTransform",
+    "ParkTransform", "InverseParkTransform",
+    # Sync (v1 parity Phase A.1)
+    "PLL",
+    # Routing (v1 parity Phase A.1)
+    "SignalMux", "SignalDemux",
     # Auto-tuning helpers (loop-shaping from a measured Bode).
     "tune_pi_from_bode",
     "loop_gain",
