@@ -80,18 +80,14 @@ def main() -> None:
     print(f"  t_end/dt:        {t_end*1e3:.2f} ms / {dt*1e9:.0f} ns")
 
     # Single-line simulate(): no switches, no nonlinear devices.
-    res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start)
+    # `progress=True` prints "progress: X%" every 10% of t_end.
+    res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start,
+                       progress=True)
     print(f"  samples: {res.num_steps()}")
 
-    # Indices for the two waveforms we want to plot.
+    # Quick steady-state check via raw state-vector access.
     vc_idx = builder.node_id_of("vc")
-    vin_idx = builder.node_id_of("in")
-
-    times = np.asarray(res.times) * 1e3   # ms
-    v_in  = np.array([s[vin_idx] for s in res.states])
     v_c   = np.array([s[vc_idx]  for s in res.states])
-
-    # Quick steady-state check.
     final_window = v_c[int(0.9 * len(v_c)):]
     print(f"  V_C (last 10% mean) = {final_window.mean():.3f} V "
           f"(target 10.000 V)")
@@ -99,35 +95,16 @@ def main() -> None:
     print(f"  V_C peak overshoot   = {overshoot:.3f} V "
           f"(analytical ≈ 8.5 V)")
 
-    # -------------------------------------------------------------------------
-    # Plot — two subplots: input step and capacitor ringing.
-    # -------------------------------------------------------------------------
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("(install matplotlib to see the waveform plot)")
-        return
-
-    fig, (ax_in, ax_c) = plt.subplots(2, 1, figsize=(10, 6),
-                                       sharex=True)
-    ax_in.plot(times, v_in, color="tab:blue", lw=1.0)
-    ax_in.set_ylabel("V_in [V]")
-    ax_in.set_title("RLC step response — V_step + V_C")
-    ax_in.grid(alpha=0.3)
-
-    ax_c.plot(times, v_c, color="tab:orange", lw=1.0)
-    ax_c.axhline(10.0, color="k", ls="--", lw=0.8,
-                  label="DC target (10 V)")
-    ax_c.set_xlabel("time [ms]")
-    ax_c.set_ylabel("V_C [V]")
-    ax_c.grid(alpha=0.3)
-    ax_c.legend(loc="lower right")
-
-    plt.tight_layout()
+    # One-line plot via `p.scope()` — auto-detects time units,
+    # stacks the two signals on separate y-axes, writes the PNG.
     out = Path(__file__).resolve().parent / "output" / "rlc_step_response.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out, dpi=120)
-    print(f"  plot → {out}")
+    p.scope(
+        builder, res,
+        signals=["in", "vc"],
+        title="RLC step response — V_step + V_C (ζ ≈ 0.05, "
+              "f_d ≈ 1.6 kHz)",
+        save=out,
+    )
 
 
 if __name__ == "__main__":

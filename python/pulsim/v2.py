@@ -92,6 +92,8 @@ from .v2_plot import (
     scope,
     scope_grid,
     plot_currents,
+    scope_fft,
+    compare,
 )
 
 __all__ = [
@@ -144,6 +146,8 @@ __all__ = [
     "scope",
     "scope_grid",
     "plot_currents",
+    "scope_fft",
+    "compare",
 ]
 
 

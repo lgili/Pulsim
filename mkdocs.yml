@@ -119,6 +119,7 @@ nav:
       - 'Tutorial 05 — LDO with Op-Amp': v2/tutorials/05-ldo-feedback.md
       - 'Tutorial 06 — IGBT Boost': v2/tutorials/06-igbt-boost.md
       - API Reference: v2/api-reference.md
+      - UX Helpers (discover, plot, monitor): v2/helpers.md
       - Gotchas: v2/gotchas.md
   - Reference:
       - Components Reference: components-reference.md

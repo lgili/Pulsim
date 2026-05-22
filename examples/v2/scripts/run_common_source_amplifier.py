@@ -63,12 +63,12 @@ def main() -> None:
     # The MOSFET auto-enables Newton refresh via simulate().
     res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start,
                      start_from_dc_op=True,
-                     max_newton_iterations=50)
+                     max_newton_iterations=50,
+                     progress=True)
     print(f"  samples: {res.num_steps()}")
 
     gate_idx  = builder.node_id_of("gate")
     drain_idx = builder.node_id_of("drain")
-    times = np.asarray(res.times) * 1e3   # ms
     v_gate  = np.array([s[gate_idx]  for s in res.states])
     v_drain = np.array([s[drain_idx] for s in res.states])
 
@@ -84,30 +84,15 @@ def main() -> None:
     print(f"  V_drain pp ≈ {v_drain_pp:.3f} V (target ~2.0)")
     print(f"  Av (sim)   ≈ {av:+.2f}  V/V (target -10)")
 
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("(install matplotlib to see the waveform plot)")
-        return
-
-    fig, (ax_g, ax_d) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    ax_g.plot(times, v_gate, color="tab:blue", lw=1.0)
-    ax_g.set_ylabel("V_gate [V]")
-    ax_g.set_title("Common-source amplifier — small-signal AC")
-    ax_g.grid(alpha=0.3)
-
-    ax_d.plot(times, v_drain, color="tab:red", lw=1.0)
-    ax_d.axhline(v_drain_dc, color="k", ls="--", lw=0.8,
-                  label=f"DC bias ({v_drain_dc:.2f} V)")
-    ax_d.set_xlabel("time [ms]")
-    ax_d.set_ylabel("V_drain [V]")
-    ax_d.legend(loc="lower right"); ax_d.grid(alpha=0.3)
-
-    plt.tight_layout()
+    # One-line plot via p.scope().
     out = Path(__file__).resolve().parent / "output" / "common_source_amplifier.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out, dpi=120)
-    print(f"  plot → {out}")
+    p.scope(
+        builder, res,
+        signals=["gate", "drain"],
+        title=f"Common-source amplifier — DC bias {v_drain_dc:.2f} V, "
+              f"Av ≈ {av:+.2f} V/V (target -10)",
+        save=out,
+    )
 
 
 if __name__ == "__main__":

@@ -70,42 +70,27 @@ def main() -> None:
     )
 
     res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start,
-                      switch_fn=pwm)
+                      switch_fn=pwm, progress="bar")
     print(f"  samples: {res.num_steps()}")
 
     vout_idx = builder.node_id_of("vout")
-    sw_idx   = builder.node_id_of("sw")
-    times = np.asarray(res.times) * 1e6   # µs
     v_out = np.array([s[vout_idx] for s in res.states])
-    v_sw  = np.array([s[sw_idx]   for s in res.states])
-
     k_skip = int(0.7 * res.num_steps())
     v_mean   = v_out[k_skip:].mean()
     v_ripple = float(np.ptp(v_out[k_skip:]))
     print(f"  V_out DC ≈ {v_mean:.2f} V (target ~20–25, "
           f"ripple {v_ripple:.2f} V pp)")
 
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("(install matplotlib to see the waveform plot)")
-        return
-
-    fig, (ax_sw, ax_out) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    ax_sw.plot(times, v_sw, color="tab:purple", lw=0.4, alpha=0.7)
-    ax_sw.set_ylabel("V_sw [V]"); ax_sw.grid(alpha=0.3)
-    ax_sw.set_title(f"Flyback converter — 48 V in, {F_PWM/1e3:.0f} kHz, "
-                     f"{DUTY*100:.0f}% duty, 4:1 turns")
-
-    ax_out.plot(times, v_out, color="tab:blue", lw=0.8)
-    ax_out.set_xlabel("time [µs]")
-    ax_out.set_ylabel("V_out [V]"); ax_out.grid(alpha=0.3)
-
-    plt.tight_layout()
+    # One-line plot — sw + vout stacked, tight_lw for dense PWM waveform.
     out = Path(__file__).resolve().parent / "output" / "flyback.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out, dpi=120)
-    print(f"  plot → {out}")
+    p.scope(
+        builder, res,
+        signals=["sw", "vout"],
+        title=f"Flyback converter — 48 V in, {F_PWM/1e3:.0f} kHz, "
+              f"{DUTY*100:.0f}% duty, 4:1 turns",
+        tight_lw=True,
+        save=out,
+    )
 
 
 if __name__ == "__main__":

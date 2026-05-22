@@ -40,6 +40,8 @@ __all__ = [
     "scope",
     "scope_grid",
     "plot_currents",
+    "scope_fft",
+    "compare",
     "_auto_time_units",
 ]
 
@@ -328,6 +330,166 @@ def plot_currents(builder, result, branch_ids: Sequence[int], *,
         ax.plot(times * scale, y, lw=0.8, label=label)
 
     ax.set_xlabel(t_label); ax.set_ylabel("current [A]")
+    ax.grid(True, alpha=0.3); ax.legend(loc="best")
+    if title:
+        ax.set_title(title)
+
+    plt.tight_layout()
+    if save is not None:
+        path = Path(save)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, dpi=120)
+        print(f"  plot → {path}")
+    if show:
+        plt.show()
+    return fig
+
+
+# =============================================================================
+# scope_fft() — FFT of a signal for harmonic analysis
+# =============================================================================
+
+def scope_fft(builder, result, *,
+                signal: str,
+                t_window: tuple[float, float] | None = None,
+                f_max: float | None = None,
+                log_y: bool = True,
+                show_thd: bool = True,
+                f_fundamental: float | None = None,
+                title: str | None = None,
+                save: str | Path | None = None,
+                show: bool = False):
+    """FFT of a node signal — magnitude vs frequency.
+
+    The standard tool for harmonic content / THD analysis. Common
+    uses:
+
+      - Rectifier output: see the line-frequency harmonics
+      - PFC: verify the input current is dominated by the
+        fundamental at the mains frequency
+      - Motor drive: check the line-to-line voltage harmonics
+
+    Returns `(fig, freqs, mag)` where `freqs` and `mag` are the
+    one-sided magnitude spectrum (peak amplitude per bin, after
+    Hann window correction).
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import math
+
+    times = np.asarray(result.times)
+    n = len(times)
+    if n < 4:
+        raise ValueError("scope_fft: need at least 4 samples")
+    dt = float(times[1] - times[0])
+    fs = 1.0 / dt
+
+    idx = _resolve_signal_idx(builder, signal)
+    if idx is None:
+        raise ValueError(f"scope_fft: unknown signal '{signal}'")
+    y = np.array([s[idx] for s in result.states])
+
+    # Default: skip the first 30 % of samples (settling transient).
+    if t_window is None:
+        k0 = int(0.3 * n)
+        k1 = n
+    else:
+        k0 = max(0, int(t_window[0] / dt))
+        k1 = min(n, int(t_window[1] / dt))
+    if k1 - k0 < 4:
+        raise ValueError("scope_fft: window too small")
+    y_w = y[k0:k1]
+    y_w = y_w - y_w.mean()
+    window = np.hanning(len(y_w))
+    cf = 2.0 / window.sum()
+    Y = np.fft.rfft(y_w * window)
+    freqs = np.fft.rfftfreq(len(y_w), d=dt)
+    mag = np.abs(Y) * cf
+
+    if f_max is None:
+        f_max = fs / 2.0
+    mask = freqs <= f_max
+    freqs, mag = freqs[mask], mag[mask]
+
+    thd_txt = ""
+    if show_thd and f_fundamental is not None:
+        df = freqs[1] - freqs[0] if len(freqs) > 1 else 0.0
+        if df > 0:
+            def amp_at(f):
+                k = int(round(f / df))
+                return mag[k] if 0 <= k < len(mag) else 0.0
+            v1 = amp_at(f_fundamental)
+            n_h = int(math.floor(f_max / f_fundamental))
+            harm_sum_sq = sum(amp_at(k * f_fundamental) ** 2
+                                for k in range(2, n_h + 1))
+            if v1 > 0:
+                thd = math.sqrt(harm_sum_sq) / v1
+                thd_txt = f"  THD = {thd*100:.2f} %"
+
+    fig, ax = plt.subplots(figsize=(11, 4.5))
+    if log_y:
+        ax.semilogy(freqs, mag, lw=0.9)
+    else:
+        ax.plot(freqs, mag, lw=0.9)
+    ax.set_xlabel("frequency [Hz]")
+    ax.set_ylabel(f"|FFT({signal})|")
+    ax.grid(True, which="both", alpha=0.3)
+    if f_fundamental is not None:
+        ax.axvline(f_fundamental, color="r", ls=":", lw=0.6,
+                    label=f"f₁ = {f_fundamental:.1f} Hz")
+        ax.legend(loc="best")
+    ax.set_title((title or f"FFT of {signal}") + thd_txt)
+
+    plt.tight_layout()
+    if save is not None:
+        path = Path(save)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(path, dpi=120)
+        print(f"  plot → {path}")
+    if show:
+        plt.show()
+    return fig, freqs, mag
+
+
+# =============================================================================
+# compare() — overlay one signal from multiple SimulationResults
+# =============================================================================
+
+def compare(builder, results: dict, *,
+              signal: str,
+              title: str | None = None,
+              save: str | Path | None = None,
+              show: bool = False):
+    """Overlay `signal` from multiple `SimulationResult` instances.
+
+    `results` is a dict {label: SimulationResult}. All results must
+    have been built against the same `builder` (so the state-vector
+    indices align).
+
+    Useful for parameter sweeps:
+
+        runs = {}
+        for kp in [0.01, 0.05, 0.1]:
+            runs[f"Kp={kp}"] = run_my_sim(kp)
+        p.compare(b, runs, signal="vout", title="Buck — Kp sensitivity")
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    idx = _resolve_signal_idx(builder, signal)
+    if idx is None:
+        raise ValueError(f"compare: unknown signal '{signal}'")
+
+    fig, ax = plt.subplots(figsize=(11, 4.5))
+    first_times = np.asarray(next(iter(results.values())).times)
+    scale, t_label = _auto_time_units(first_times)
+
+    for label, res in results.items():
+        times = np.asarray(res.times) * scale
+        y = np.array([s[idx] for s in res.states])
+        ax.plot(times, y, lw=0.9, label=label)
+
+    ax.set_xlabel(t_label); ax.set_ylabel(signal)
     ax.grid(True, alpha=0.3); ax.legend(loc="best")
     if title:
         ax.set_title(title)

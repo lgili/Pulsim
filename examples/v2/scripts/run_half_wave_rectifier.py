@@ -51,42 +51,42 @@ def main() -> None:
     print(f"  num_branches:   {builder.num_branches}")
     print(f"  t_end/dt:       {t_end*1e3:.2f} ms / {dt*1e6:.1f} µs")
 
-    res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start)
+    # `progress=True` prints the percentage every 10% — useful so the
+    # user knows the sim is alive on long runs.
+    res = p.simulate(builder, t_end=t_end, dt=dt, t_start=t_start,
+                       progress=True)
     print(f"  samples: {res.num_steps()}")
 
     n0_idx = builder.node_id_of("n0")
     n1_idx = builder.node_id_of("n1")
-    times = np.asarray(res.times) * 1e3   # ms
     v_in  = np.array([s[n0_idx] for s in res.states])
     v_out = np.array([s[n1_idx] for s in res.states])
-
     print(f"  v_in  range: [{v_in.min():+.2f}, {v_in.max():+.2f}] V "
           f"(expected ±10)")
     print(f"  v_out range: [{v_out.min():+.2f}, {v_out.max():+.2f}] V "
           f"(expected [0, +10])")
 
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("(install matplotlib to see the waveform plot)")
-        return
+    # One-line scope plot for the time domain.
+    out_dir = Path(__file__).resolve().parent / "output"
+    p.scope(
+        builder, res,
+        signals=["n0", "n1"],
+        title="Half-wave rectifier — V_in (60 Hz sine) → V_out (after diode)",
+        save=out_dir / "half_wave_rectifier.png",
+    )
 
-    fig, (ax_in, ax_out) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    ax_in.plot(times, v_in, color="tab:blue", lw=1.0, label="V_in (60 Hz sine)")
-    ax_in.axhline(0, color="k", lw=0.5)
-    ax_in.set_ylabel("V_in [V]"); ax_in.set_title("Half-wave rectifier")
-    ax_in.legend(loc="upper right"); ax_in.grid(alpha=0.3)
-
-    ax_out.plot(times, v_out, color="tab:green", lw=1.0, label="V_out (after diode)")
-    ax_out.axhline(0, color="k", lw=0.5)
-    ax_out.set_xlabel("time [ms]"); ax_out.set_ylabel("V_out [V]")
-    ax_out.legend(loc="upper right"); ax_out.grid(alpha=0.3)
-
-    plt.tight_layout()
-    out = Path(__file__).resolve().parent / "output" / "half_wave_rectifier.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out, dpi=120)
-    print(f"  plot → {out}")
+    # Bonus: harmonic content of V_out via `p.scope_fft()`. The
+    # half-wave rectified output has rich harmonic content — DC + 60Hz
+    # + 120Hz + 180Hz + ... — useful for showing the FFT helper.
+    p.scope_fft(
+        builder, res,
+        signal="n1",
+        f_max=600.0,
+        f_fundamental=60.0,
+        log_y=False,
+        title="Half-wave rectifier — V_out spectrum",
+        save=out_dir / "half_wave_rectifier_fft.png",
+    )
 
 
 if __name__ == "__main__":
