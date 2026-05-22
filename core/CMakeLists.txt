@@ -42,6 +42,7 @@ target_compile_features(pulsim_v2 INTERFACE cxx_std_23)
 target_link_libraries(pulsim_v2
     INTERFACE
         Eigen3::Eigen
+        yaml-cpp::yaml-cpp
 )
 add_library(pulsim::v2 ALIAS pulsim_v2)
 

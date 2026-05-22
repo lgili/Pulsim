@@ -57,17 +57,17 @@ if(NOT pybind11_FOUND)
     FetchContent_MakeAvailable(pybind11)
 endif()
 
-# Create the Python module (high-performance API)
+# Create the Python module — v2-only since pulsim 1.0.0. The
+# legacy ``bindings.cpp`` (4 697 lines exposing the v1 kernel) was
+# removed when v1 retired; only the v2 kernel bindings remain.
 pybind11_add_module(_pulsim
     NO_EXTRAS
-    bindings.cpp
     bindings_v2_kernel.cpp
 )
 
 target_link_libraries(_pulsim
     PRIVATE
-        pulsim::core
-        pulsim::pulsim
+        pulsim::v2
 )
 if(APPLE)
     target_compile_options(_pulsim PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)

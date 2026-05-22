@@ -1497,3 +1497,22 @@ void init_module(py::module_& m) {
 }
 
 }  // namespace pulsim_v2_kernel_bindings
+
+// =============================================================================
+// Python module entry point
+// =============================================================================
+// Since the v1 ``bindings.cpp`` (where ``PYBIND11_MODULE(_pulsim, ...)`` used
+// to live) was removed in pulsim 1.0.0, we expose the entry point here. The
+// extension is named ``_pulsim`` (matches ``pybind11_add_module(_pulsim …)``
+// in ``python/CMakeLists.txt``); the v2 kernel symbols live under
+// ``_pulsim.v2_kernel`` to keep the import path stable — ``pulsim/v2.py``
+// imports ``from ._pulsim.v2_kernel import …``.
+PYBIND11_MODULE(_pulsim, m) {
+    m.doc() = "Pulsim — power-electronics simulator. v2 kernel only "
+              "(v1 retired in 1.0.0).";
+    auto v2_kernel = m.def_submodule(
+        "v2_kernel",
+        "Pulsim v2 kernel: PWL state-space cache, trapezoidal companion, "
+        "Newton refinement, and the high-level CircuitBuilder API.");
+    pulsim_v2_kernel_bindings::init_module(v2_kernel);
+}
