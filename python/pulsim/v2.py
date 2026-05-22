@@ -190,6 +190,18 @@ from .v2_switchgear import (
     make_thyristor_switch_fn,
     make_fuse_switch_fn,
 )
+from .v2_motors import (
+    Mechanical,
+    DcMotor,
+    PMSM,
+    BLDC,
+    add_dc_motor,
+    make_dc_motor_observer,
+    add_pmsm,
+    make_pmsm_observer,
+    add_bldc,
+    make_bldc_observer,
+)
 
 __all__ = [
     "CircuitBuilder",
@@ -315,6 +327,17 @@ __all__ = [
     "add_rc_snubber",
     "make_thyristor_switch_fn",
     "make_fuse_switch_fn",
+    # Electromechanical motor models (Phase D).
+    "Mechanical",
+    "DcMotor",
+    "PMSM",
+    "BLDC",
+    "add_dc_motor",
+    "make_dc_motor_observer",
+    "add_pmsm",
+    "make_pmsm_observer",
+    "add_bldc",
+    "make_bldc_observer",
 ]
 
 
