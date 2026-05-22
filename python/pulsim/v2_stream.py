@@ -85,10 +85,14 @@ class LiveStream:
     """
 
     def __init__(self, *, batch_size: int = 100,
-                  max_queue: int = 200):
+                  max_queue: int = 200,
+                  downsample: int = 1):
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
+        if downsample < 1:
+            raise ValueError("downsample must be >= 1")
         self.batch_size = int(batch_size)
+        self.downsample = int(downsample)
         self._queue: "queue.Queue[Tuple[np.ndarray, np.ndarray]]" = \
             queue.Queue(maxsize=int(max_queue))
         self._batch_t: List[float] = []
@@ -100,8 +104,11 @@ class LiveStream:
             Callable[[np.ndarray, np.ndarray], None]] = None
         # Stats.
         self._n_steps_received = 0
+        self._n_steps_kept = 0
         self._n_batches_emitted = 0
         self._n_batches_dropped = 0
+        # Downsample counter — appends only when (counter % downsample == 0).
+        self._ds_counter = 0
 
     # ------------------------------------------------------------------
     # Public callbacks passed into simulate(...)
@@ -119,9 +126,14 @@ class LiveStream:
             # NOTE: x is a borrowed reference into the C++ kernel's
             # state vector. We MUST copy it before stashing — the
             # next kernel step would otherwise overwrite our data.
+            self._n_steps_received += 1
+            self._ds_counter += 1
+            if self._ds_counter < self.downsample:
+                return     # skip — downsampling
+            self._ds_counter = 0
             self._batch_t.append(float(t))
             self._batch_x.append(np.asarray(x).copy())
-            self._n_steps_received += 1
+            self._n_steps_kept += 1
             if len(self._batch_t) >= self.batch_size:
                 self._flush()
         return obs
@@ -195,7 +207,13 @@ class LiveStream:
 
     @property
     def n_steps_received(self) -> int:
+        """Total kernel steps observed (before downsampling)."""
         return self._n_steps_received
+
+    @property
+    def n_steps_kept(self) -> int:
+        """Steps actually pushed to the queue (after downsampling)."""
+        return self._n_steps_kept
 
     @property
     def n_batches_emitted(self) -> int:

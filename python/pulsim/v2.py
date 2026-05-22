@@ -551,6 +551,8 @@ def simulate(
             kwargs["b_extra_fn"] = b_extra_fn
         if initial_state is not None:
             kwargs["initial_state"] = initial_state
+        if should_continue is not None:
+            kwargs["should_continue"] = should_continue
         res = _k.run_transient_with_chain(
             cache, builder.graph, builder.pool, opts,
             chain=cxx_chain, chain_dt=chain_dt,

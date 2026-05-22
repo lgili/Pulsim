@@ -68,8 +68,12 @@ def main() -> None:
                                           num_switches=b.graph.num_switches,
                                           switch_idx=0)
 
-    # Streaming setup.
-    stream = p.LiveStream(batch_size=200, max_queue=300)
+    # Streaming setup. With dt=100 ns, downsample=100 → 1 sample
+    # every 10 µs sent to the GUI (100 kHz visual rate — way more
+    # than the human eye can use). batch_size=50 ⇒ flush every 5 ms
+    # of sim time. Very smooth even at high sim throughput.
+    stream = p.LiveStream(batch_size=50, max_queue=400,
+                              downsample=100)
 
     # Compose the step_observer: the chain's observer + the stream's.
     def combined_observer(t, x):

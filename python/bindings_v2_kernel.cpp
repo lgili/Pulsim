@@ -690,13 +690,26 @@ void init_module(py::module_& m) {
                 x_init = initial_state.cast<Vector>();
                 x_init_ptr = &x_init;
             }
-            return run_transient(cache, graph, pool, opts,
-                                  switch_fn, b_extra_fn,
-                                  start_from_dc_op,
-                                  nl_refresh,
-                                  step_observer,
-                                  x_init_ptr,
-                                  should_continue);
+            // RELEASE the GIL during the heavy kernel loop so the
+            // GUI / main thread can run. The std::function callbacks
+            // (step_observer, switch_fn, should_continue) carry
+            // Python objects in their closures; pybind11 will
+            // re-acquire the GIL automatically for each invocation.
+            // We re-acquire the GIL HERE (end of inner scope) BEFORE
+            // the std::function args are destroyed so dec_ref runs
+            // with the GIL held.
+            SimulationResult result;
+            {
+                py::gil_scoped_release rel;
+                result = run_transient(cache, graph, pool, opts,
+                                          switch_fn, b_extra_fn,
+                                          start_from_dc_op,
+                                          nl_refresh,
+                                          step_observer,
+                                          x_init_ptr,
+                                          should_continue);
+            }
+            return result;
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
@@ -1404,9 +1417,14 @@ void init_module(py::module_& m) {
             BExtraFn b_extra_fn,
             bool start_from_dc_op,
             StepObserverFn step_observer) {
-            return run_transient_bdf1(
-                builder, opts, switch_fn, b_extra_fn,
-                start_from_dc_op, step_observer);
+            SimulationResult result;
+            {
+                py::gil_scoped_release rel;
+                result = run_transient_bdf1(
+                    builder, opts, switch_fn, b_extra_fn,
+                    start_from_dc_op, step_observer);
+            }
+            return result;
         },
         py::arg("builder"), py::arg("opts"), py::arg("switch_fn"),
         py::arg("b_extra_fn") = BExtraFn{},
@@ -1434,7 +1452,8 @@ void init_module(py::module_& m) {
            BExtraFn b_extra_fn,
            bool start_from_dc_op,
            bool enable_nonlinear_refresh,
-           py::object initial_state) {
+           py::object initial_state,
+           ShouldContinueFn should_continue) {
             pwl::NonlinearRefreshFn nl_refresh{};
             if (enable_nonlinear_refresh) {
                 nl_refresh =
@@ -1449,12 +1468,18 @@ void init_module(py::module_& m) {
                 x_init = initial_state.cast<Vector>();
                 x_init_ptr = &x_init;
             }
-            return run_transient(cache, graph, pool, opts,
-                                  switch_fn, b_extra_fn,
-                                  start_from_dc_op,
-                                  nl_refresh,
-                                  step_observer,
-                                  x_init_ptr);
+            SimulationResult result;
+            {
+                py::gil_scoped_release rel;
+                result = run_transient(cache, graph, pool, opts,
+                                          switch_fn, b_extra_fn,
+                                          start_from_dc_op,
+                                          nl_refresh,
+                                          step_observer,
+                                          x_init_ptr,
+                                          should_continue);
+            }
+            return result;
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
@@ -1463,6 +1488,7 @@ void init_module(py::module_& m) {
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = false,
         py::arg("initial_state") = py::none(),
+        py::arg("should_continue") = ShouldContinueFn{},
         "Run transient with a BlockChain as the per-step observer. "
         "The chain's step is invoked directly in C++ each step — "
         "no Python interpreter cost per step. Equivalent to "
