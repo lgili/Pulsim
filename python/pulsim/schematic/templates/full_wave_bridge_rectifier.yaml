@@ -1,22 +1,26 @@
 # Full-wave (Graetz) diode bridge rectifier.
 #
-# Diodes are drawn vertical with rotation=180 so the anode (terminal 0)
-# sits at the BOTTOM of each symbol, matching the typical netlist where
-# D.anode is the input current source. The bridge sits in a 2×2 grid:
+# Layout (after Phase 16):
 #
 #                       DC+ rail
 #                ┌──────┬──────┐
-#               D1↑    D3↑       <- cathodes meet at DC+
+#               D1↑    D3↑       <- cathodes meet at DC+ (top rail)
 #                │      │
-#       AC+ ─────┤      ├───── AC-
+#         ac_p ──┤      ├── ac_n
 #                │      │
-#               D2↑    D4↑       <- cathodes meet at AC+/AC-
+#               D2↑    D4↑       <- cathodes meet at ac_p / ac_n
 #                │      │
-#                └──────┴──────┘
-#                       DC- rail (gnd)
+#                └──┬───┴──┐       (D2 / D4 anodes → ground)
+#                   │      │
+#                  Vsin (horizontal, ac_p LEFT — ac_n RIGHT)
 #
-# The AC source sits to the LEFT, feeding the AC+ / AC- mid-rails.
-# Cout and Rload sit to the RIGHT between DC+ and ground.
+# All four diodes vertical with rotation=180 so the anode (pin 0) sits
+# at the BOTTOM (current flows UPWARD through every diode).
+#
+# Vsin sits HORIZONTAL just below the bridge so its two terminals
+# align with the two bridge columns — the AC wires become short
+# vertical L-shapes, no horizontal bus crossing the canvas. Pin 0
+# (ac_p) on the left side, pin 1 (ac_n) on the right side.
 
 name: full_wave_bridge_rectifier
 quality: draft
@@ -24,10 +28,10 @@ canvas:
   width:  240
   height: 160
 slots:
-  source:             { x: 0.10, y: 0.50, rotation: 0   }
+  source:             { x: 0.46, y: 0.85, rotation: 270 }   # Vsin horizontal, below bridge
   rectifier_diode_a:  { x: 0.40, y: 0.30, rotation: 180 }   # D1 upper-left
   rectifier_diode_b:  { x: 0.40, y: 0.70, rotation: 180 }   # D2 lower-left
   rectifier_diode_c:  { x: 0.60, y: 0.30, rotation: 180 }   # D3 upper-right
   rectifier_diode_d:  { x: 0.60, y: 0.70, rotation: 180 }   # D4 lower-right
-  filter_capacitor:   { x: 0.83, y: 0.50, rotation: 0   }
-  load_resistor:      { x: 0.95, y: 0.50, rotation: 0   }
+  filter_capacitor:   { x: 0.83, y: 0.40, rotation: 0   }
+  load_resistor:      { x: 0.95, y: 0.40, rotation: 0   }

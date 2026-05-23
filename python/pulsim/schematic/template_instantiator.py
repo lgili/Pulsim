@@ -452,8 +452,27 @@ def template_layout(
             continue
         if len(terms) < 2:
             continue
-        # Deterministic order — sort by anchor coords.
-        terms_sorted = sorted(terms, key=lambda t: (t[2], t[3]))
+        # Greedy nearest-neighbor traversal: start at the LEXICOGRAPHIC
+        # minimum (deterministic), then repeatedly jump to the nearest
+        # unvisited terminal. Manhattan distance — matches the
+        # orthogonal-L geometry. This avoids the "jump past the middle
+        # terminal" failure mode of pure (x, y) sort, where 3 terminals
+        # on the same column got wired in an order that drew a long
+        # wire THROUGH the body of the middle one.
+        remaining = sorted(terms, key=lambda t: (t[2], t[3]))
+        ordered = [remaining.pop(0)]
+        while remaining:
+            cur = ordered[-1]
+            cx_t, cy_t = cur[2], cur[3]
+            best_i = min(
+                range(len(remaining)),
+                key=lambda i: (
+                    abs(remaining[i][2] - cx_t) + abs(remaining[i][3] - cy_t),
+                    remaining[i][2], remaining[i][3],
+                ),
+            )
+            ordered.append(remaining.pop(best_i))
+        terms_sorted = ordered
         for i in range(len(terms_sorted) - 1):
             a = terms_sorted[i]
             b = terms_sorted[i + 1]
