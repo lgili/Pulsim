@@ -108,6 +108,19 @@ nav:
       - Backend Architecture: backend-architecture.md
       - Getting Started: getting-started.md
       - User Guide: user-guide.md
+  - Pulsim v2 Guide:
+      - Overview: v2/index.md
+      - Getting Started: v2/getting-started.md
+      - Mental Model: v2/mental-model.md
+      - 'Tutorial 01 — RC Charging': v2/tutorials/01-rc-charging.md
+      - 'Tutorial 02 — Buck Converter': v2/tutorials/02-buck-converter.md
+      - 'Tutorial 03 — Isolated Flyback': v2/tutorials/03-flyback-isolated.md
+      - 'Tutorial 04 — Three-Phase VSI': v2/tutorials/04-3phase-vsi.md
+      - 'Tutorial 05 — LDO with Op-Amp': v2/tutorials/05-ldo-feedback.md
+      - 'Tutorial 06 — IGBT Boost': v2/tutorials/06-igbt-boost.md
+      - API Reference: v2/api-reference.md
+      - UX Helpers (discover, plot, monitor): v2/helpers.md
+      - Gotchas: v2/gotchas.md
   - Reference:
       - Components Reference: components-reference.md
       - Control Blocks Reference: control-blocks-reference.md

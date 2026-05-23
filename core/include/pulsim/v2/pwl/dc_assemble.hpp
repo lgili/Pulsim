@@ -19,7 +19,12 @@
 // `compute_dc_op` solves the DC system and returns the state
 // vector. Throws on singular matrices.
 
+#include "pulsim/v2/models/current_source.hpp"
+#include "pulsim/v2/models/pulse_voltage_source.hpp"
+#include "pulsim/v2/models/pwm_voltage_source.hpp"
 #include "pulsim/v2/models/resistor.hpp"
+#include "pulsim/v2/models/sine_voltage_source.hpp"
+#include "pulsim/v2/models/vcvs.hpp"
 #include "pulsim/v2/models/voltage_source.hpp"
 #include "pulsim/v2/numeric/dense.hpp"
 #include "pulsim/v2/numeric/types.hpp"
@@ -27,8 +32,10 @@
 #include "pulsim/v2/sparse/matrix.hpp"
 #include "pulsim/v2/sparse/solver.hpp"
 #include "pulsim/v2/stamping/branch_coord.hpp"
+#include "pulsim/v2/stamping/stamp_current_source.hpp"
 #include "pulsim/v2/stamping/stamp_device.hpp"
 #include "pulsim/v2/stamping/stamp_switch.hpp"
+#include "pulsim/v2/stamping/stamp_vcvs.hpp"
 #include "pulsim/v2/stamping/stamp_voltage_source.hpp"
 #include "pulsim/v2/topology/graph.hpp"
 #include "pulsim/v2/topology/switch_state.hpp"
@@ -77,11 +84,26 @@ inline void stamp_inductor_dc(sparse::Matrix& J, Vector& b,
     J.coeffRef(branch_var_id, branch_var_id) += Real{-1e-12};
 }
 
+/// Build the DC MNA matrix. `t_eval` is the evaluation time
+/// for time-varying sources (PWM / Sine / Pulse): the DC
+/// operating point is computed treating each source as if it
+/// were held at its instantaneous value at t = t_eval. Default
+/// 0 reproduces the historical behaviour for circuits with
+/// only DC sources (VoltageSource / CurrentSource).
+///
+/// Time-varying sources dispatched here:
+///   * VoltageSource      — V = p.V (DC)
+///   * CurrentSource      — I = p.I (DC, no branch unknown)
+///   * PWMVoltageSource   — V = PWMVoltageSource::value_at(p, t_eval)
+///   * SineVoltageSource  — V = SineVoltageSource::value_at(p, t_eval)
+///   * PulseVoltageSource — V = PulseVoltageSource::value_at(p, t_eval)
+///   * VCVS               — linear gain stamp (no time)
 inline void dc_assemble(const topology::Graph& graph,
                          const DevicePool& pool,
                          const topology::SwitchStateMask& mask,
                          sparse::Matrix& J,
-                         Vector& b) {
+                         Vector& b,
+                         Real t_eval = Real{0}) {
     const Size state_size = pool.state_size(graph);
     J = sparse::Matrix(static_cast<Index>(state_size),
                         static_cast<Index>(state_size));
@@ -124,11 +146,69 @@ inline void dc_assemble(const topology::Graph& graph,
             break;
         }
         case topology::BranchKind::Source: {
-            const auto& p = pool.voltage_source_params(branch.id);
-            const Index branch_var_id =
-                pool.branch_var_id_for_source(branch.id, graph);
-            stamping::stamp_voltage_source(J, b, x, coord,
-                                            branch_var_id, p.V);
+            const auto k = pool.kind_of(branch.id);
+            switch (k) {
+            case DevicePool::StoredKind::VoltageSource: {
+                const auto& p = pool.voltage_source_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                stamping::stamp_voltage_source(J, b, x, coord,
+                                                branch_var_id, p.V);
+                break;
+            }
+            case DevicePool::StoredKind::CurrentSource: {
+                const auto& p =
+                    pool.current_source_params(branch.id);
+                stamping::stamp_current_source(b, coord, p.I);
+                break;
+            }
+            case DevicePool::StoredKind::PWMVoltageSource: {
+                const auto& p =
+                    pool.pwm_voltage_source_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                const Real V_t =
+                    models::PWMVoltageSource::value_at(p, t_eval);
+                stamping::stamp_voltage_source(J, b, x, coord,
+                                                branch_var_id, V_t);
+                break;
+            }
+            case DevicePool::StoredKind::SineVoltageSource: {
+                const auto& p =
+                    pool.sine_voltage_source_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                const Real V_t =
+                    models::SineVoltageSource::value_at(p, t_eval);
+                stamping::stamp_voltage_source(J, b, x, coord,
+                                                branch_var_id, V_t);
+                break;
+            }
+            case DevicePool::StoredKind::PulseVoltageSource: {
+                const auto& p =
+                    pool.pulse_voltage_source_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                const Real V_t =
+                    models::PulseVoltageSource::value_at(p, t_eval);
+                stamping::stamp_voltage_source(J, b, x, coord,
+                                                branch_var_id, V_t);
+                break;
+            }
+            case DevicePool::StoredKind::VCVS: {
+                const auto& p = pool.vcvs_params(branch.id);
+                const Index branch_var_id =
+                    pool.branch_var_id_for_source(branch.id, graph);
+                const auto [in_pos, in_neg] =
+                    pool.vcvs_input_nodes(branch.id);
+                stamping::stamp_vcvs(J, b, x, coord,
+                                      in_pos, in_neg,
+                                      branch_var_id, p.gain);
+                break;
+            }
+            default:
+                break;
+            }
             break;
         }
         case topology::BranchKind::Switch: {
@@ -157,10 +237,11 @@ inline void dc_assemble(const topology::Graph& graph,
 
 inline Vector compute_dc_op(const topology::Graph& graph,
                               const DevicePool& pool,
-                              const topology::SwitchStateMask& mask) {
+                              const topology::SwitchStateMask& mask,
+                              Real t_eval = Real{0}) {
     sparse::Matrix J;
     Vector b;
-    dc_assemble(graph, pool, mask, J, b);
+    dc_assemble(graph, pool, mask, J, b, t_eval);
     sparse::compress_in_place(J);
 
     auto solver = sparse::make_default_solver();

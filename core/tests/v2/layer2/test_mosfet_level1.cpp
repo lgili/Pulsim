@@ -248,3 +248,48 @@ TEST_CASE("DevicePool stores MosfetLevel1 params + gate node id",
     REQUIRE(b.pool().mosfet_level1_gate_node(0) !=
             b.node_id_of("source"));
 }
+
+// =============================================================================
+// Proposal #3.1 — add_mosfet_level1 `with_body_diode=true` adds an
+// anti-parallel SwitchedDiode (source→drain).
+// =============================================================================
+
+TEST_CASE("add_mosfet_level1 with_body_diode=true adds anti-parallel diode",
+          "[v2][layer2_v13][mosfet_level1][body_diode]"
+          "[ergonomics][quickwins]") {
+    CircuitBuilder b;
+    b.add_mosfet_level1(
+        "M1", "drain", "source", "gate",
+        /*K=*/1e-3, /*V_T=*/2.0,
+        /*lambda=*/0.02, /*kappa=*/15.0,
+        /*with_body_diode=*/true);
+
+    // 1 SH1 MOSFET branch + 1 body diode branch = 2.
+    REQUIRE(b.num_branches() == 2);
+
+    // Branch 0 — MOSFET (drain→source, Nonlinear).
+    const auto& m = b.graph().branch(0);
+    REQUIRE(m.from == b.node_id_of("drain"));
+    REQUIRE(m.to   == b.node_id_of("source"));
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::MosfetLevel1);
+
+    // Branch 1 — body diode (source→drain, anti-parallel, Switch).
+    const auto& d = b.graph().branch(1);
+    REQUIRE(d.from == b.node_id_of("source"));
+    REQUIRE(d.to   == b.node_id_of("drain"));
+    REQUIRE(b.pool().kind_of(1) ==
+              DevicePool::StoredKind::Diode);
+}
+
+TEST_CASE("add_mosfet_level1 default (no body diode) still adds 1 branch",
+          "[v2][layer2_v13][mosfet_level1][body_diode]"
+          "[ergonomics][quickwins]") {
+    CircuitBuilder b;
+    b.add_mosfet_level1(
+        "M1", "drain", "source", "gate",
+        /*K=*/1e-3, /*V_T=*/2.0);
+    REQUIRE(b.num_branches() == 1);
+    REQUIRE(b.pool().kind_of(0) ==
+              DevicePool::StoredKind::MosfetLevel1);
+}

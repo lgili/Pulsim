@@ -116,6 +116,30 @@ using SwitchScheduleFn =
 
 using BExtraFn = std::function<Vector(Real)>;
 
+/// State-aware observer invoked at the START of every step,
+/// BEFORE `switch_fn(t)` and `b_extra_fn(t)` are evaluated.
+/// Receives `(t_k, x_{k-1})` — the time of the upcoming solve
+/// and the most recently computed state vector. Side-effect
+/// only: the observer typically mutates Python-side controller
+/// state (e.g. a PIController) that the user's
+/// `switch_fn` / `b_extra_fn` then reads to close the loop.
+///
+/// For sample 0 (the initial condition), the observer is
+/// called with `x_prev = x` (the IC itself — either zero or
+/// the DC operating point depending on `start_from_dc_op`),
+/// so a discrete-time PI controller can prime its filter at
+/// the correct initial output.
+using StepObserverFn =
+    std::function<void(Real, const Vector&)>;
+
+/// Cancellation callback — invoked at the start of every step.
+/// Returning `false` causes `run_transient` to break the loop and
+/// return whatever it has accumulated so far (so the partial trace
+/// is still useful — e.g. for a live scope that the user stopped).
+/// Returning `true` (or having no callback at all) continues the
+/// simulation as normal.
+using ShouldContinueFn = std::function<bool()>;
+
 // -----------------------------------------------------------------------------
 // run_transient — the V0 transient simulation entry point.
 //
@@ -136,7 +160,8 @@ inline SimulationResult run_transient(
     Size state_size,
     const SimulationOptions& opts,
     const SwitchScheduleFn& switch_fn,
-    const BExtraFn& b_extra_fn = {}) {
+    const BExtraFn& b_extra_fn = {},
+    const StepObserverFn& step_observer = {}) {
 
     // ---- Input validation -------------------------------------------------
     if (!opts.valid()) {
@@ -174,6 +199,13 @@ inline SimulationResult run_transient(
     // switching.
     for (Size k = 0; k < n_steps; ++k) {
         const Real t = opts.t_start + static_cast<Real>(k) * opts.dt;
+
+        // State-aware observer fires first so user-side
+        // controllers can update before `switch_fn(t)` reads
+        // the new duty / mask.
+        if (step_observer) {
+            step_observer(t, x);
+        }
 
         const auto mask = switch_fn(t);
 
@@ -219,7 +251,10 @@ inline SimulationResult run_transient(
     const SwitchScheduleFn& switch_fn,
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
-    const pwl::NonlinearRefreshFn& nl_refresh = {}) {
+    const pwl::NonlinearRefreshFn& nl_refresh = {},
+    const StepObserverFn& step_observer = {},
+    const Vector* initial_state = nullptr,
+    const ShouldContinueFn& should_continue = {}) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -257,6 +292,20 @@ inline SimulationResult run_transient(
     Vector x = Vector::Zero(state_size);
     pwl::HistoryState history{graph, pool};
     history.reset();   // explicit (constructor already zeroes)
+    // Initial-state injection (Phase B.1): if the caller supplies a
+    // non-null `initial_state` vector, copy it into `x` and seed the
+    // trapezoidal history from it. This lets the adaptive driver
+    // chain consecutive `simulate()` segments without restarting at
+    // zero. The seeded values must be self-consistent — typically
+    // the last state from the previous segment.
+    if (initial_state != nullptr) {
+        if (static_cast<Size>(initial_state->size()) != state_size) {
+            throw std::invalid_argument(
+                "run_transient: initial_state size mismatch");
+        }
+        x = *initial_state;
+        history.seed_from_dc_op(x);
+    }
 
     // V17: saturable inductors carry their own (i_L, V_L)_old
     // history, since they need it in the Newton refresh (not
@@ -383,7 +432,8 @@ inline SimulationResult run_transient(
                                       diodes.current_diode_mask(),
                                       diode_owned);
             }
-            x = pwl::compute_dc_op(graph, pool, mask);
+            x = pwl::compute_dc_op(graph, pool, mask,
+                                    opts.t_start);
             flipped = has_diodes && diodes.update_from_state(x);
             ++iters;
         } while (flipped && iters < dc_max_iters);
@@ -416,7 +466,20 @@ inline SimulationResult run_transient(
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
 
+        // Prime the observer with the initial condition so a
+        // discrete-time PI / sampler / lookup-table sees the
+        // true starting state at t_start.
+        if (step_observer) {
+            step_observer(opts.t_start, x);
+        }
+
         for (Size k = 1; k < n_steps; ++k) {
+            // User-cancellation check (Phase: live scope). Lets a
+            // GUI / external watchdog stop the simulation early
+            // while preserving the partial trace.
+            if (should_continue && !should_continue()) {
+                break;
+            }
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
             const Real t_prev = opts.t_start +
@@ -426,6 +489,14 @@ inline SimulationResult run_transient(
             // commutation timing (Layer 5 V2.2) and state
             // correction (Layer 5 V3).
             const Vector x_prev = x;
+
+            // State-aware observer fires BEFORE `switch_fn(t)`
+            // so the user can update a Python-side PI / sampler /
+            // comparator with `x_prev` and have `switch_fn(t)`
+            // read the new duty / mask.
+            if (step_observer) {
+                step_observer(t, x_prev);
+            }
             // V3 snapshots — taken regardless of whether
             // correction fires (cheap; vectors are small per
             // dynamic-branch). Restored only if a commutation
@@ -714,6 +785,12 @@ inline SimulationResult run_transient(
             // current x as a degenerate snapshot — the
             // sign-change check will exclude it from events.
             const Vector x_prev = x;
+
+            // State-aware observer fires before switch_fn(t) so
+            // discrete-time controllers can update.
+            if (step_observer) {
+                step_observer(t, x_prev);
+            }
 
             const Vector b_extra_user_only = b_extra_fn
                 ? b_extra_fn(t)

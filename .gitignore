@@ -63,6 +63,8 @@ Thumbs.db
 
 # Example PNG outputs (regenerated on each run)
 examples/python/*.png
+examples/v2/scripts/output/
+examples/v2/scripts/run_buck_output.png
 
 # Parity dashboard outputs
 benchmarks/parity_dashboard_out/

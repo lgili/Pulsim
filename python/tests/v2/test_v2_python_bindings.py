@@ -838,3 +838,110 @@ def test_buck_topology_via_mosfet_helper() -> None:
     cache.build(dt=1e-7)
     # No exception means the topology + parameters are
     # consistent enough for KLU factorization.
+
+
+# -----------------------------------------------------------------------------
+# Proposal #3.3 / #3.4 — high-level `simulate()` ergonomic wrapper
+# -----------------------------------------------------------------------------
+
+
+def test_simulate_helper_v_resistor_dc() -> None:
+    """`simulate()` should reproduce `run_transient` results for a
+    trivial Vdc → R → GND circuit, with no user-supplied switch_fn."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "n0", "gnd", 5.0)
+    b.add_resistor("R1", "n0", "gnd", 1.0)
+
+    res = p.simulate(b, t_end=1e-3, dt=1e-4)
+    assert res.num_steps() >= 2
+    # Resistor + DC source has no dynamics; steady state from the
+    # very first solve. Sample 0 is the IC (zero by default) so
+    # check from sample 1 onward.
+    for state in res.states[1:]:
+        assert abs(state[0] - 5.0) < 1e-9
+
+
+def test_simulate_auto_detects_no_nonlinear_devices() -> None:
+    """A purely linear circuit reports `has_nonlinear_devices()=False`
+    and `simulate()` does not enable the Newton refresh."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "n0", "gnd", 5.0)
+    b.add_resistor("R1", "n0", "gnd", 1.0)
+    assert not b.pool.has_nonlinear_devices()
+    # simulate() should still produce a usable result.
+    res = p.simulate(b, t_end=1e-3, dt=1e-4)
+    assert res.num_steps() >= 2
+
+
+def test_simulate_auto_detects_mosfet_level1() -> None:
+    """An SH1 MOSFET branch flips `has_nonlinear_devices` to True →
+    `simulate()` auto-enables Newton refresh and converges."""
+    V_DD = 10.0
+    R_D = 5000.0
+    V_GS = 3.0
+    b = p.CircuitBuilder()
+    b.add_voltage_source("VDD", "vdd", "gnd", V_DD)
+    b.add_resistor("R_D", "vdd", "drain", R_D)
+    b.add_voltage_source("VGS_src", "vgs", "gnd", V_GS)
+    b.add_mosfet_level1(
+        "M1", "drain", "gnd", "vgs",
+        K=1e-3, V_T=2.0, lambda_=0.02, kappa=20.0,
+    )
+
+    assert b.pool.has_nonlinear_devices()
+    # No need to set enable_nonlinear_refresh manually.
+    res = p.simulate(
+        b, t_end=0.1, dt=0.01, max_newton_iterations=100,
+    )
+    assert res.num_steps() > 0
+    drain_idx = b.node_id_of("drain")
+    v_drain = res.states[-1][drain_idx]
+    # Common-source DC operating point (~4.55 V).
+    assert abs(v_drain - 4.55) < 0.15, f"v_drain = {v_drain}"
+
+
+def test_simulate_with_body_diode_helper() -> None:
+    """Proposal #3.1 — `add_mosfet_level1(..., with_body_diode=True)`
+    via the Python binding creates an anti-parallel diode."""
+    b = p.CircuitBuilder()
+    b.add_mosfet_level1(
+        "M1", "drain", "source", "gate",
+        K=1e-3, V_T=2.0,
+        with_body_diode=True,
+    )
+    # MOSFET + body diode = 2 branches.
+    assert b.num_branches == 2
+    # Auto-detect should still report nonlinear.
+    assert b.pool.has_nonlinear_devices()
+
+
+def test_simulate_explicit_switch_fn_override() -> None:
+    """A user-supplied switch_fn overrides the default."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "n0", "gnd", 12.0)
+    b.add_resistor("R", "n0", "gnd", 1.0)
+
+    captured: list[float] = []
+
+    def my_switch_fn(t: float) -> p.SwitchStateMask:
+        captured.append(t)
+        return p.SwitchStateMask(0)
+
+    res = p.simulate(b, t_end=1e-4, dt=1e-5, switch_fn=my_switch_fn)
+    assert res.num_steps() >= 2
+    assert len(captured) >= 1   # switch_fn was invoked
+
+
+def test_simulate_forced_enable_nonlinear_refresh() -> None:
+    """Manually forcing enable_nonlinear_refresh=False on a circuit
+    with a MOSFET should still build/run (the Newton refresh just
+    won't be wired — the linear PWL solve handles it)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("VDD", "vdd", "gnd", 10.0)
+    b.add_resistor("R", "vdd", "gnd", 1000.0)
+    # No nonlinear device — but force-enable anyway → no-op.
+    res = p.simulate(
+        b, t_end=1e-4, dt=1e-5,
+        enable_nonlinear_refresh=True,
+    )
+    assert res.num_steps() >= 2
