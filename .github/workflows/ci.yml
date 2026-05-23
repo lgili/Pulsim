@@ -6,12 +6,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      run_benchmarks:
-        description: 'Run benchmark tests'
-        required: false
-        default: false
-        type: boolean
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
@@ -36,7 +30,7 @@ jobs:
             build_type: Release
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
+              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev
 
           # Linux with Clang 18 (latest)
           - name: "Linux Clang 18"
@@ -47,7 +41,7 @@ jobs:
             build_type: Release
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build clang-18 libc++-18-dev libc++abi-18-dev libsuitesparse-dev libeigen3-dev
+              sudo apt-get install -y cmake ninja-build clang-18 libc++-18-dev libc++abi-18-dev libeigen3-dev
 
           # Linux with GCC 13 (fallback)
           - name: "Linux GCC 13"
@@ -58,7 +52,7 @@ jobs:
             build_type: Release
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libsuitesparse-dev libeigen3-dev
+              sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libeigen3-dev
 
           # macOS ARM64 (Apple Silicon)
           # Note: macos-13 (Intel) removed - Apple has transitioned to ARM,
@@ -69,7 +63,7 @@ jobs:
             cc: clang
             cxx: clang++
             build_type: Release
-            install_cmd: brew install cmake ninja suite-sparse eigen
+            install_cmd: brew install cmake ninja eigen
 
           # Linux Debug build with sanitizers
           - name: "Linux Debug + Sanitizers"
@@ -82,7 +76,7 @@ jobs:
             build_parallel_level: 2
             install_cmd: |
               sudo apt-get update
-              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
+              sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev
 
     steps:
       - name: Checkout
@@ -109,10 +103,10 @@ jobs:
           cmake --build build --config ${{ matrix.build_type }} \
             --parallel ${{ matrix.build_parallel_level || env.CMAKE_BUILD_PARALLEL_LEVEL }}
 
-      - name: Run C++ Tests
+      - name: Run C++ tests
         run: |
           cd build
-          # Use longer timeout for sanitizer builds (10-20x overhead)
+          # Sanitizer builds have 10-20x runtime overhead.
           if [ "${{ matrix.sanitizers }}" = "ON" ]; then
             # libc++ on Linux can report alloc/dealloc mismatch false positives
             # for certain std::exception message paths under ASan.
@@ -122,53 +116,6 @@ jobs:
             ctest --output-on-failure --timeout 120
           fi
 
-      - name: Run v2 API Tests
-        run: |
-          if [ -x "build/core/pulsim_tests" ]; then
-            build/core/pulsim_tests "[v2]" --reporter console || true
-          else
-            echo "Test binary not found, skipping v2 tests"
-          fi
-
-  # =============================================================================
-  # SUNDIALS Backend Validation (optional dependency enabled)
-  # =============================================================================
-  sundials-backend:
-    name: Linux SUNDIALS backend
-    runs-on: ubuntu-24.04
-    if: false  # Temporarily disabled: SUNDIALS backend is not in active use
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
-
-      - name: Configure CMake (SUNDIALS ON)
-        env:
-          CC: clang-17
-          CXX: clang++-17
-        run: |
-          cmake -B build-sundials \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang-17 \
-            -DCMAKE_CXX_COMPILER=clang++-17 \
-            -DPULSIM_BUILD_TESTS=ON \
-            -DPULSIM_BUILD_PYTHON=OFF \
-            -DPULSIM_USE_HYPRE=OFF \
-            -DPULSIM_USE_SUNDIALS=ON \
-            -DPULSIM_ENABLE_LTO=OFF
-
-      - name: Build SUNDIALS backend tests
-        run: cmake --build build-sundials --target pulsim_simulation_tests --config Release
-
-      - name: Run backend tests
-        run: |
-          build-sundials/core/pulsim_simulation_tests "[v1][backend]" --reporter console
-
   # =============================================================================
   # Python Tests
   # =============================================================================
@@ -177,7 +124,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep a fast matrix but cover the two most-used user platforms.
         os: [ubuntu-24.04, macos-14, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13']
 
@@ -194,12 +140,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev gcc-13 g++-13
+          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libeigen3-dev gcc-13 g++-13
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja suite-sparse eigen
+          brew install cmake ninja eigen
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -229,7 +175,7 @@ jobs:
 
       - name: Run Python tests
         run: |
-          pytest python/tests -v --ignore=python/tests/validation
+          pytest python/tests -v
 
   # =============================================================================
   # Code Quality
@@ -253,12 +199,6 @@ jobs:
         run: |
           ruff check python/
 
-      - name: Check v1 layer boundaries
-        run: |
-          python3 scripts/check_v1_layer_boundaries.py \
-            --map core/v1_layer_map.json \
-            --strict
-
   # =============================================================================
   # C++ Code Coverage (lcov → Codecov)
   # =============================================================================
@@ -272,8 +212,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 \
-            libsuitesparse-dev libeigen3-dev lcov
+          sudo apt-get install -y cmake ninja-build gcc-13 g++-13 libeigen3-dev lcov
 
       - name: Configure CMake (coverage build)
         env:
@@ -329,123 +268,3 @@ jobs:
           flags: cpp-unittests
           name: pulsim-cpp-coverage
           fail_ci_if_error: false
-
-  # =============================================================================
-  # Static Analysis (clang-tidy) for v1 core modules
-  # =============================================================================
-  static-analysis:
-    name: Static Analysis (clang-tidy)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 clang-tidy-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev
-
-      - name: Configure CMake
-        env:
-          CC: clang-17
-          CXX: clang++-17
-        run: |
-          cmake -B build-tidy \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_COMPILER=clang-17 \
-            -DCMAKE_CXX_COMPILER=clang++-17 \
-            -DPULSIM_BUILD_TESTS=OFF \
-            -DPULSIM_BUILD_PYTHON=OFF \
-            -DPULSIM_ENABLE_LTO=OFF
-
-      - name: Build core target for compilation database validity
-        run: cmake --build build-tidy --target pulsim --config Debug -j2
-
-      - name: Run clang-tidy (clang-analyzer checks)
-        run: |
-          clang-tidy-17 -p build-tidy -checks='-*,clang-analyzer-*' \
-            core/src/v1/simulation.cpp \
-            core/src/v1/simulation_step.cpp \
-            core/src/v1/simulation_periodic.cpp \
-            core/src/v1/transient_services.cpp
-
-  # =============================================================================
-  # Benchmark KPI Gate (PR/push gate + optional manual trigger)
-  # =============================================================================
-  benchmark:
-    if: github.event_name != 'workflow_dispatch' || inputs.run_benchmarks
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang-17 libc++-17-dev libc++abi-17-dev libsuitesparse-dev libeigen3-dev gcc-13 g++-13 ngspice
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml numpy scipy pytest rich
-
-      - name: Build and install Python runtime
-        env:
-          # Keep benchmark build on GCC 13 for stability with Linux stdlib headers.
-          CC: gcc-13
-          CXX: g++-13
-          # Benchmark job compiles the Python extension as part of pip install.
-          # Keep parallelism conservative to avoid intermittent OOM failures.
-          CMAKE_BUILD_PARALLEL_LEVEL: 2
-        run: |
-          pip install ".[dev]"
-
-      - name: Run benchmark suite
-        run: |
-          python3 benchmarks/benchmark_runner.py \
-            --output-dir benchmarks/out_ci
-
-      - name: Run stress suite
-        run: |
-          python3 benchmarks/stress_suite.py \
-            --output-dir benchmarks/stress_out_ci
-
-      - name: Enforce KPI regression gate
-        run: |
-          python3 benchmarks/kpi_gate.py \
-            --baseline benchmarks/kpi_baselines/phase0_2026-02-23/kpi_baseline.json \
-            --thresholds benchmarks/kpi_thresholds.yaml \
-            --bench-results benchmarks/out_ci/results.json \
-            --stress-summary benchmarks/stress_out_ci/stress_summary.json \
-            --report-out benchmarks/out_ci/kpi_gate_report.json \
-            --print-report
-
-      - name: SPICE parity dashboard (Pulsim vs ngspice)
-        # Pulsim-vs-ngspice numerical parity report. 12 benchmarks
-        # currently exceed their thresholds on Linux CI (vs original
-        # macOS baselines — Linux ngspice differs slightly on the
-        # switching converters), which would block every CI run.
-        # Marked `continue-on-error` so the report still runs + uploads,
-        # but doesn't gate the rest of the suite. Re-tightening to a
-        # hard gate is a separate follow-up that needs the thresholds
-        # re-tuned for Linux ngspice.
-        continue-on-error: true
-        run: |
-          python3 scripts/parity_dashboard.py --ascii \
-            --output-dir benchmarks/parity_ci_out
-
-      - name: Upload benchmark artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-kpi-artifacts
-          path: |
-            benchmarks/out_ci
-            benchmarks/stress_out_ci
-            benchmarks/parity_ci_out

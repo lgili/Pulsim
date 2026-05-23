@@ -257,7 +257,7 @@ def scope_grid(builder, result, *, panels: Sequence[dict],
         # Currents — resolved by branch name.
         for cur_name in panel.get("currents", []):
             try:
-                bid = int(builder.graph.num_branches)   # noop guard
+                int(builder.graph.num_branches)   # noop guard
             except Exception:
                 pass
             # Look up by name → branch_id is tricky from Python today

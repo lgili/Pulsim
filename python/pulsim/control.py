@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 __all__ = [
@@ -1023,7 +1022,6 @@ def tune_pi_from_bode(
         warnings               — list[str] of design notes
     """
     import math as _math
-    import numpy as _np
 
     warnings: list[str] = []
     omega_c = 2.0 * _math.pi * f_crossover
@@ -1115,7 +1113,6 @@ def phase_margin_from_loop(freqs, L) -> float:
     log_m0, log_m1 = _math.log10(mag[i]), _math.log10(mag[i + 1])
     alpha = (0.0 - log_m0) / (log_m1 - log_m0)   # mag=1 → log_mag=0
     log_fc = (1 - alpha) * log_f0 + alpha * log_f1
-    f_c = 10 ** log_fc
     # Interpolate phase at f_c.
     ph0 = _math.degrees(_np.angle(L[i]))
     ph1 = _math.degrees(_np.angle(L[i + 1]))
@@ -1148,8 +1145,6 @@ def gain_margin_from_loop(freqs, L) -> float:
     i = int(crossings[0])
     # Interpolate the crossing.
     alpha = (-180.0 - phase_deg[i]) / (phase_deg[i + 1] - phase_deg[i])
-    log_f0, log_f1 = _math.log10(freqs[i]), _math.log10(freqs[i + 1])
-    log_f180 = (1 - alpha) * log_f0 + alpha * log_f1
     log_m0, log_m1 = _math.log10(abs(L[i])), _math.log10(abs(L[i + 1]))
     log_m180 = (1 - alpha) * log_m0 + alpha * log_m1
     return -20.0 * log_m180

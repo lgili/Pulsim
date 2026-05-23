@@ -26,7 +26,7 @@ public API changes the catalog should be updated alongside it.
 from __future__ import annotations
 
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 __all__ = [
@@ -493,9 +493,9 @@ def catalog(category: str | None = None) -> None:
         for cat_name in _CATEGORIES:
             print(f"    - {cat_name}")
     print()
-    print(f"  Tip: p.example('buck'), p.example('PIController'), "
-          f"p.example('bode')")
-    print(f"       see also p.tour() for a 1-page walkthrough")
+    print("  Tip: p.example('buck'), p.example('PIController'), "
+          "p.example('bode')")
+    print("       see also p.tour() for a 1-page walkthrough")
     print()
 
 

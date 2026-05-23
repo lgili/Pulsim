@@ -8,7 +8,7 @@
 #   ./scripts/setup-linux.sh --help   # Show help
 #
 # This script installs:
-#   Required: Clang 17+, CMake, Ninja, Python 3, SuiteSparse (KLU)
+#   Required: Clang 17+, CMake, Ninja, Python 3
 #   Optional (--full): SUNDIALS, gRPC, protobuf
 #
 # Supports: Ubuntu/Debian, Fedora/RHEL, Arch Linux
@@ -68,7 +68,6 @@ Required dependencies (always installed):
     - CMake 3.20+
     - Ninja build system
     - Python 3.10+
-    - SuiteSparse/KLU (sparse matrix solver for circuits)
 
 Optional dependencies (with --full):
     - SUNDIALS (advanced ODE/DAE solvers)
@@ -156,10 +155,6 @@ install_apt_deps() {
     print_info "Installing build tools..."
     sudo apt-get install -y cmake ninja-build python3 python3-pip python3-venv
 
-    # SuiteSparse (required for KLU)
-    print_info "Installing SuiteSparse..."
-    sudo apt-get install -y libsuitesparse-dev
-
     print_success "Base dependencies installed"
 }
 
@@ -173,10 +168,6 @@ install_dnf_deps() {
     # Build tools
     print_info "Installing build tools..."
     sudo dnf install -y cmake ninja-build python3 python3-pip
-
-    # SuiteSparse (required for KLU)
-    print_info "Installing SuiteSparse..."
-    sudo dnf install -y suitesparse-devel
 
     print_success "Base dependencies installed"
 }
@@ -192,10 +183,6 @@ install_pacman_deps() {
     print_info "Installing build tools..."
     sudo pacman -S --noconfirm cmake ninja python python-pip
 
-    # SuiteSparse (required for KLU)
-    print_info "Installing SuiteSparse..."
-    sudo pacman -S --noconfirm suitesparse
-
     print_success "Base dependencies installed"
 }
 
@@ -209,10 +196,6 @@ install_zypper_deps() {
     # Build tools
     print_info "Installing build tools..."
     sudo zypper install -y cmake ninja python3 python3-pip
-
-    # SuiteSparse (required for KLU)
-    print_info "Installing SuiteSparse..."
-    sudo zypper install -y suitesparse-devel
 
     print_success "Base dependencies installed"
 }
@@ -235,7 +218,7 @@ install_base_deps() {
             ;;
         *)
             print_error "Unsupported package manager: $pkg_manager"
-            print_info "Please install manually: clang-17+, cmake, ninja, python3, libsuitesparse-dev"
+            print_info "Please install manually: clang-17+, cmake, ninja, python3"
             exit 1
             ;;
     esac
@@ -333,8 +316,7 @@ To build PulsimCore:
     cmake --build build
 
 To run tests:
-    cmake --build build --target pulsim_tests
-    ./build/core/pulsim_tests
+    ctest --test-dir build --output-on-failure
 
 For Python development:
     pip install -e .
@@ -367,13 +349,6 @@ verify_installation() {
     command -v cmake &>/dev/null && echo "CMake:       $(cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" || echo "CMake:       not found"
     command -v ninja &>/dev/null && echo "Ninja:       $(ninja --version)" || echo "Ninja:       not found"
     command -v python3 &>/dev/null && echo "Python:      $(python3 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" || echo "Python:      not found"
-
-    # Check SuiteSparse
-    if ldconfig -p 2>/dev/null | grep -q libklu || [[ -f /usr/lib/libklu.so ]] || [[ -f /usr/lib/x86_64-linux-gnu/libklu.so ]]; then
-        echo "SuiteSparse: installed (KLU enabled)"
-    else
-        echo "SuiteSparse: not found"
-    fi
 
     if [[ "${FULL_INSTALL:-false}" == "true" ]]; then
         echo ""

@@ -214,7 +214,7 @@ from .stream import LiveStream
 # is installed. We tolerate the absence so headless environments
 # still load `pulsim` without complaint.
 try:
-    from .scope import LiveScope
+    from .scope import LiveScope  # noqa: F401  (re-exported below via __all__)
     _HAS_SCOPE = True
 except ImportError:  # pragma: no cover
     _HAS_SCOPE = False

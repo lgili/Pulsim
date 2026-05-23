@@ -36,7 +36,6 @@ Usage:
 from __future__ import annotations
 
 import csv
-import statistics
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -563,7 +562,7 @@ class LiveScope:
     def _build_status(self) -> None:
         status_box = QtWidgets.QFrame()
         status_box.setStyleSheet(
-            f"QFrame {{ background: transparent; padding: 0; }}")
+            "QFrame { background: transparent; padding: 0; }")
         sl = QtWidgets.QHBoxLayout(status_box)
         sl.setContentsMargins(4, 0, 4, 0)
         sl.setSpacing(20)

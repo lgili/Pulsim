@@ -90,18 +90,19 @@ p.scope(b, res, signals=["vc"])           # one-liner plot
 - Gotchas: [`docs/gotchas.md`](docs/gotchas.md)
 - 20 runnable scripts: [`examples/scripts/`](examples/scripts/)
 
-## Validation and performance
+## Validation
 
 ```bash
 # Python runtime tests
 PYTHONPATH=build/python pytest python/tests -v
 
-# C++ kernel tests
+# C++ kernel tests (layer-by-layer Catch2 binaries)
 ctest --test-dir build --output-on-failure
-
-# Benchmark suite
-PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py --output-dir benchmarks/out
 ```
+
+Reference CSV traces for the converter showcases live in
+`benchmarks/baselines/`; a 1.0-native regression runner that
+consumes them is not yet wired up.
 
 ## Documentation
 

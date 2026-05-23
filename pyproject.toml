@@ -56,15 +56,6 @@ docs = [
     "mkdocstrings[python]>=1.0",
     "griffe>=2.0",
 ]
-schematic = [
-    # add-schematic-rendering: layout engine + render to SVG/PNG.
-    # networkx powers compute_layout (Phase 2); schemdraw renders to
-    # SVG/PNG (Phase 3). Both are lazy-imported inside the call sites
-    # so `import pulsim.schematic` always succeeds without the extra
-    # installed — only render() / compute_layout() raise ImportError.
-    "networkx>=3.0",
-    "schemdraw>=0.18,<1.0",
-]
 all = [
     "pulsim[jupyter,data,dev]",
 ]
@@ -120,12 +111,9 @@ exclude_lines = [
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
-ignore = ["E501"]
-
-[tool.ruff.lint.per-file-ignores]
-"python/pulsim/remote/*_pb2.py" = ["E402", "F401"]
-"python/pulsim/remote/*_pb2_grpc.py" = ["F401"]
-# Hypothesis property tests use the pytest.importorskip pattern, which
-# requires real imports below the importorskip calls. E402 is the
-# expected idiom there.
-"python/tests/properties/*.py" = ["E402"]
+ignore = [
+    "E501",  # line too long — long URLs/docstrings are deliberate
+    "E701",  # one-line ``if x: do_thing`` — used heavily in control.py
+             # for compact state-machine transitions
+    "E702",  # ``import a; import b`` — used in plot/scope inline imports
+]

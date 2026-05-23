@@ -1,9 +1,8 @@
-"""Layer 7 — Python bindings for v2 (smoke + integration tests)."""
+"""Layer 7 — Python bindings (smoke + integration tests)."""
 
 from __future__ import annotations
 
 import math
-import os
 from pathlib import Path
 
 import numpy as np
@@ -615,7 +614,6 @@ def test_make_three_phase_spwm_fn_120_degree_rotation() -> None:
 def test_make_phase_shift_full_bridge_fn_synchronous_legs() -> None:
     """Layer 2 V9 — at φ=0 the two legs of the full bridge
     are bit-for-bit synchronous; v_AB ≡ 0."""
-    import math
     sw = p.make_phase_shift_full_bridge_fn(
         switching_frequency=1000.0, phase_shift=0.0,
         leg_a_hs_idx=0, leg_a_ls_idx=1,
