@@ -209,6 +209,12 @@ from .spice_import import (
     spice_to_builder,
 )
 from .stream import LiveStream
+from .mmc import (
+    MmcArmAverageParams,
+    MmcArmAverageResult,
+    mmc_arm_average_step,
+    simulate_mmc_arm_average,
+)
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
 # (schemdraw + networkx + cairosvg + anthropic). Importing the
@@ -367,6 +373,12 @@ __all__ = [
     "spice_to_builder",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
+    # Modular Multilevel Converter — L0 average-value arm model
+    # (Phase 20, Sousa 2022 eqs 2.13/2.14).
+    "MmcArmAverageParams",
+    "MmcArmAverageResult",
+    "mmc_arm_average_step",
+    "simulate_mmc_arm_average",
 ]
 
 if _HAS_SCOPE:
