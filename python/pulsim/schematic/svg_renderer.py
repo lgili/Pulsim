@@ -42,10 +42,14 @@ _WIRE_STROKE: str = "#111"
 _GROUND_STROKE: str = "#222"
 _FILL: str = "none"
 _LABEL_FILL: str = "#222"
-_STROKE_WIDTH: float = 1.4
-_WIRE_WIDTH: float = 1.2
-_JUNCTION_R: float = 1.4
-_LABEL_SIZE: float = 4.2
+# Reference: schemdraw / KiCad-style — symbol strokes are noticeably
+# thinner than the body geometry suggests; wires are thinner still so
+# the eye reads "symbol > wire" hierarchy.
+_STROKE_WIDTH: float = 0.9
+_WIRE_WIDTH:   float = 0.65
+_JUNCTION_R:   float = 1.1
+_FILL_BG:      str   = "white"   # mask wires/junctions hidden behind a symbol body
+_LABEL_SIZE: float = 3.8
 _FONT_FAMILY: str = "Helvetica, Arial, sans-serif"
 
 
@@ -85,6 +89,30 @@ def _circle(cx: float, cy: float, r: float, *, stroke: str = _STROKE,
     )
 
 
+def _body_mask(cx: float, cy: float, length: float, width: float,
+               ux: float, uy: float) -> str:
+    """White-fill quadrilateral that masks any wire crossing the body
+    region of a 2-terminal symbol.
+
+    Drawn BEFORE the symbol's body marks so the marks land on top of a
+    clean white background — wires that would otherwise be visible
+    behind the zigzag/coil/triangle are hidden inside the rectangle.
+
+    The quadrilateral is centered on (cx, cy), extends ``length`` along
+    the (ux, uy) lead-axis, and ``width`` perpendicular to it.
+    """
+    px, py = -uy, ux
+    half_l = length / 2.0
+    half_w = width / 2.0
+    p1 = (cx + ux * half_l + px * half_w, cy + uy * half_l + py * half_w)
+    p2 = (cx + ux * half_l - px * half_w, cy + uy * half_l - py * half_w)
+    p3 = (cx - ux * half_l - px * half_w, cy - uy * half_l - py * half_w)
+    p4 = (cx - ux * half_l + px * half_w, cy - uy * half_l + py * half_w)
+    pts = " ".join(f"{_fmt(p[0])},{_fmt(p[1])}" for p in (p1, p2, p3, p4))
+    return (f'<polygon points="{pts}" fill="{_FILL_BG}" '
+            f'stroke="none"/>')
+
+
 def _text(x: float, y: float, content: str, *,
           size: float = _LABEL_SIZE, anchor: str = "middle",
           fill: str = _LABEL_FILL) -> str:
@@ -120,12 +148,12 @@ def _terminal_axis(p0: tuple[float, float], p1: tuple[float, float]
 
 
 def _draw_resistor(p: ComponentPlacement) -> str:
-    """ANSI-style zigzag resistor — 6 alternating peaks.
+    """ANSI-style zigzag resistor — 6 sharp teeth on a clean axis.
 
-    Layout along the lead axis: short stub-in, then 6 triangular
-    teeth (3 up + 3 down alternating perpendicular to axis), then
-    short stub-out. Tooth amplitude = 2 mm, tooth length each = 1.6 mm.
-    Total body length ≈ 10 mm.
+    Layout along the lead axis:  lead → entry-stub → 6 teeth → exit-stub → lead.
+    The body region is masked white BEFORE the zigzag, so any wire
+    routed behind the symbol disappears (the user reported wires
+    "passing through" components).
     """
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
@@ -136,12 +164,12 @@ def _draw_resistor(p: ComponentPlacement) -> str:
         return ""
     ux, uy = dx / length, dy / length
     px, py = -uy, ux
-    body_len = min(10.4, length * 0.7)
-    amp = 1.8
+    body_len = min(10.0, length * 0.62)
+    amp = 1.5
     n_teeth = 6
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     s = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
-    # Build zigzag polyline: walk along axis, alternating ± amp per step.
+    e = (s[0] + ux * body_len, s[1] + uy * body_len)
     step = body_len / (n_teeth + 1)
     pts: list[tuple[float, float]] = [s]
     for i in range(1, n_teeth + 1):
@@ -149,16 +177,18 @@ def _draw_resistor(p: ComponentPlacement) -> str:
         x = s[0] + ux * step * i + px * amp * side
         y = s[1] + uy * step * i + py * amp * side
         pts.append((x, y))
-    e = (s[0] + ux * body_len, s[1] + uy * body_len)
     pts.append(e)
+    mask = _body_mask(mx, my, body_len + 1.0, amp * 2 + 1.0, ux, uy)
     leads = [_line(ax, ay, s[0], s[1]), _line(e[0], e[1], bx, by)]
     body = _polyline(pts)
-    label = _label_outside(p, amp + 5.0)
-    return "<g>" + "".join(leads + [body, label]) + "</g>"
+    label = _label_outside(p, amp + 4.0)
+    return "<g>" + mask + "".join(leads + [body, label]) + "</g>"
 
 
 def _draw_capacitor(p: ComponentPlacement) -> str:
-    """Two parallel plates perpendicular to the lead axis."""
+    """Two parallel plates perpendicular to the lead axis. Plates are
+    thicker than the leads (the schemdraw convention) so the cap reads
+    even at small sizes."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
     bx, by = b.x, b.y
@@ -168,34 +198,31 @@ def _draw_capacitor(p: ComponentPlacement) -> str:
         return ""
     ux, uy = dx / length, dy / length
     px, py = -uy, ux
-    gap = 1.6
-    plate_w = 5.0
+    gap = 1.8
+    plate_w = 6.0
+    plate_stroke = _STROKE_WIDTH * 1.4
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
-    p1a = (mx - ux * gap / 2.0 + px * plate_w / 2.0,
-           my - uy * gap / 2.0 + py * plate_w / 2.0)
-    p1b = (mx - ux * gap / 2.0 - px * plate_w / 2.0,
-           my - uy * gap / 2.0 - py * plate_w / 2.0)
-    p2a = (mx + ux * gap / 2.0 + px * plate_w / 2.0,
-           my + uy * gap / 2.0 + py * plate_w / 2.0)
-    p2b = (mx + ux * gap / 2.0 - px * plate_w / 2.0,
-           my + uy * gap / 2.0 - py * plate_w / 2.0)
-    leads = [
-        _line(ax, ay, mx - ux * gap / 2.0, my - uy * gap / 2.0),
-        _line(mx + ux * gap / 2.0, my + uy * gap / 2.0, bx, by),
-    ]
-    plates = [_line(p1a[0], p1a[1], p1b[0], p1b[1]),
-              _line(p2a[0], p2a[1], p2b[0], p2b[1])]
-    label = _label_outside(p, plate_w / 2.0 + 3.0)
-    return "<g>" + "".join(leads + plates + [label]) + "</g>"
+    mid_a = (mx - ux * gap / 2.0, my - uy * gap / 2.0)
+    mid_b = (mx + ux * gap / 2.0, my + uy * gap / 2.0)
+    p1a = (mid_a[0] + px * plate_w / 2.0, mid_a[1] + py * plate_w / 2.0)
+    p1b = (mid_a[0] - px * plate_w / 2.0, mid_a[1] - py * plate_w / 2.0)
+    p2a = (mid_b[0] + px * plate_w / 2.0, mid_b[1] + py * plate_w / 2.0)
+    p2b = (mid_b[0] - px * plate_w / 2.0, mid_b[1] - py * plate_w / 2.0)
+    mask = _body_mask(mx, my, gap + 2.0, plate_w + 1.0, ux, uy)
+    leads = [_line(ax, ay, mid_a[0], mid_a[1]),
+             _line(mid_b[0], mid_b[1], bx, by)]
+    plates = [_line(p1a[0], p1a[1], p1b[0], p1b[1], width=plate_stroke),
+              _line(p2a[0], p2a[1], p2b[0], p2b[1], width=plate_stroke)]
+    label = _label_outside(p, plate_w / 2.0 + 2.5)
+    return "<g>" + mask + "".join(leads + plates + [label]) + "</g>"
 
 
 def _draw_inductor(p: ComponentPlacement) -> str:
-    """Inductor — four full half-circle bumps along the lead axis,
-    drawn as a single continuous polyline so the SVG joins are
-    smooth.
+    """Inductor — four half-circle bumps along the lead axis, drawn as
+    a single SVG path so the joins are perfectly smooth.
 
-    Body length ≈ 12 mm; each bump radius = 1.5 mm; arc curves to the
-    "above" side of the axis (perpendicular)."""
+    Body length ≈ 12 mm; bump radius = 1.5 mm. The bumps always curve
+    to the same side of the axis (schemdraw convention)."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
     bx, by = b.x, b.y
@@ -204,16 +231,15 @@ def _draw_inductor(p: ComponentPlacement) -> str:
     if length < 1e-6:
         return ""
     ux, uy = dx / length, dy / length
-    body_len = min(12.0, length * 0.65)
+    body_len = min(12.0, length * 0.62)
     n_bumps = 4
     bump_r = body_len / (2 * n_bumps)
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     s = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
     angle_deg = math.degrees(math.atan2(uy, ux))
+    mask = _body_mask(mx, my, body_len + 1.0, bump_r * 2 + 1.5, ux, uy)
     leads = [_line(ax, ay, s[0], s[1]),
              _line(s[0] + ux * body_len, s[1] + uy * body_len, bx, by)]
-    # Single SVG path with N arc segments — sweep=1 keeps every bump
-    # on the same side of the axis (above, perpendicular to ux,uy).
     parts: list[str] = [f"M {_fmt(s[0])} {_fmt(s[1])}"]
     for i in range(n_bumps):
         nx = s[0] + ux * bump_r * 2 * (i + 1)
@@ -228,14 +254,15 @@ def _draw_inductor(p: ComponentPlacement) -> str:
         f'stroke-width="{_fmt(_STROKE_WIDTH)}" '
         f'stroke-linejoin="round"/>'
     )
-    label = _label_outside(p, bump_r + 5.0)
-    return "<g>" + "".join(leads + [body, label]) + "</g>"
+    label = _label_outside(p, bump_r + 4.0)
+    return "<g>" + mask + "".join(leads + [body, label]) + "</g>"
 
 
 def _draw_diode(p: ComponentPlacement) -> str:
-    """Diode: triangle pointing from anode (pin 0) toward cathode (pin 1),
-    followed by a cathode bar perpendicular to the lead axis.
-    """
+    """Diode: filled triangle pointing from anode (pin 0) toward
+    cathode (pin 1), followed by a slightly-thicker cathode bar
+    perpendicular to the lead axis. Filling the triangle (the standard
+    convention) makes the direction unambiguous at any zoom level."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
     bx, by = b.x, b.y
@@ -245,8 +272,9 @@ def _draw_diode(p: ComponentPlacement) -> str:
         return ""
     ux, uy = dx / length, dy / length
     px, py = -uy, ux
-    body_len = min(7.0, length * 0.5)
-    body_w   = 5.0
+    body_len = min(6.5, length * 0.50)
+    body_w   = 5.2
+    bar_stroke = _STROKE_WIDTH * 1.4
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     apex_back = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
     apex_tip  = (mx + ux * body_len / 2.0, my + uy * body_len / 2.0)
@@ -258,12 +286,19 @@ def _draw_diode(p: ComponentPlacement) -> str:
              apex_tip[1] + py * body_w / 2.0)
     bar_b = (apex_tip[0] - px * body_w / 2.0,
              apex_tip[1] - py * body_w / 2.0)
+    mask = _body_mask(mx, my, body_len + 1.0, body_w + 1.0, ux, uy)
     leads = [_line(ax, ay, apex_back[0], apex_back[1]),
              _line(apex_tip[0], apex_tip[1], bx, by)]
-    triangle = _polyline([tri_a, tri_b, apex_tip, tri_a], stroke=_STROKE)
-    bar = _line(bar_a[0], bar_a[1], bar_b[0], bar_b[1])
-    label = _label_outside(p, body_w / 2.0 + 3.0)
-    return "<g>" + "".join(leads + [triangle, bar, label]) + "</g>"
+    tri_pts = " ".join(f"{_fmt(p[0])},{_fmt(p[1])}"
+                       for p in (tri_a, tri_b, apex_tip))
+    triangle = (
+        f'<polygon points="{tri_pts}" fill="{_STROKE}" '
+        f'stroke="{_STROKE}" stroke-width="{_fmt(_STROKE_WIDTH)}" '
+        f'stroke-linejoin="round"/>'
+    )
+    bar = _line(bar_a[0], bar_a[1], bar_b[0], bar_b[1], width=bar_stroke)
+    label = _label_outside(p, body_w / 2.0 + 2.5)
+    return "<g>" + mask + "".join(leads + [triangle, bar, label]) + "</g>"
 
 
 def _draw_voltage_source(p: ComponentPlacement) -> str:
@@ -271,60 +306,58 @@ def _draw_voltage_source(p: ComponentPlacement) -> str:
     return _draw_circle_source(p, label_top="+", label_bot="-")
 
 
+_SOURCE_RADIUS: float = 4.5
+
+
 def _draw_sine_source(p: ComponentPlacement) -> str:
-    """AC sinusoidal source: circle containing a sine wave only — no
-    polarity markers (AC has no fixed polarity)."""
+    """AC sinusoidal source: white-fill circle containing a single sine
+    cycle. No polarity markers (AC has no fixed polarity)."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    r = 5.0
-    body = [_circle(cx, cy, r)]
-    # Sine: cubic-Bezier-feeling polyline approximating one full cycle
-    # spanning the body width. Fine resolution = 12 sample points.
-    span = r * 1.4
-    n = 12
+    r = _SOURCE_RADIUS
+    body = [_circle(cx, cy, r, fill=_FILL_BG)]
+    span = r * 1.3
+    n = 14
     pts: list[tuple[float, float]] = []
     for i in range(n + 1):
         t = i / n
         ang = -math.pi + 2 * math.pi * t
         sx = cx - span / 2.0 + span * t
-        sy = cy + r * 0.5 * math.sin(ang)
+        sy = cy + r * 0.45 * math.sin(ang)
         pts.append((sx, sy))
-    wave = _polyline(pts, width=1.3)
+    wave = _polyline(pts, width=_STROKE_WIDTH * 1.05)
     leads = _source_leads(p, r)
-    label = _label_outside(p, r + 3.0)
+    label = _label_outside(p, r + 2.5)
     return "<g>" + "".join(leads + body + [wave, label]) + "</g>"
 
 
 def _draw_pwm_source(p: ComponentPlacement) -> str:
-    """PWM source: circle containing a square-wave only — drives a
-    switching device, no polarity markers (PWM is typically gate-
-    referenced)."""
+    """PWM source: white-fill circle with a small square-wave inside."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    r = 5.0
-    body = [_circle(cx, cy, r)]
+    r = _SOURCE_RADIUS
+    body = [_circle(cx, cy, r, fill=_FILL_BG)]
     sq = _polyline([
-        (cx - r * 0.7, cy + r * 0.5),
-        (cx - r * 0.3, cy + r * 0.5),
-        (cx - r * 0.3, cy - r * 0.5),
-        (cx + r * 0.1, cy - r * 0.5),
-        (cx + r * 0.1, cy + r * 0.5),
-        (cx + r * 0.5, cy + r * 0.5),
-        (cx + r * 0.5, cy - r * 0.5),
-    ], width=1.3)
+        (cx - r * 0.7, cy + r * 0.45),
+        (cx - r * 0.3, cy + r * 0.45),
+        (cx - r * 0.3, cy - r * 0.45),
+        (cx + r * 0.1, cy - r * 0.45),
+        (cx + r * 0.1, cy + r * 0.45),
+        (cx + r * 0.5, cy + r * 0.45),
+        (cx + r * 0.5, cy - r * 0.45),
+    ], width=_STROKE_WIDTH * 1.05)
     leads = _source_leads(p, r)
-    label = _label_outside(p, r + 3.0)
+    label = _label_outside(p, r + 2.5)
     return "<g>" + "".join(leads + body + [sq, label]) + "</g>"
 
 
 def _draw_pulse_source(p: ComponentPlacement) -> str:
-    """Single-pulse / step source: circle with a single rising-edge
-    pulse glyph inside (distinct from the periodic-PWM square wave)."""
+    """Single-pulse / step source: white-fill circle with a single
+    rising-edge step glyph inside."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    r = 5.0
-    body = [_circle(cx, cy, r)]
-    # ⎍-shaped step (low-high-low): rises once.
+    r = _SOURCE_RADIUS
+    body = [_circle(cx, cy, r, fill=_FILL_BG)]
     pulse = _polyline([
         (cx - r * 0.7, cy + r * 0.4),
         (cx - r * 0.2, cy + r * 0.4),
@@ -332,40 +365,46 @@ def _draw_pulse_source(p: ComponentPlacement) -> str:
         (cx + r * 0.2, cy - r * 0.4),
         (cx + r * 0.2, cy + r * 0.4),
         (cx + r * 0.7, cy + r * 0.4),
-    ], width=1.3)
+    ], width=_STROKE_WIDTH * 1.05)
     leads = _source_leads(p, r)
-    label = _label_outside(p, r + 3.0)
+    label = _label_outside(p, r + 2.5)
     return "<g>" + "".join(leads + body + [pulse, label]) + "</g>"
 
 
 def _draw_current_source(p: ComponentPlacement) -> str:
-    """Current source: circle with arrow."""
+    """Current source: white-fill circle with a single arrow pointing
+    from anode (pin 0) toward cathode (pin 1)."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
     ux, uy = (b.x - a.x), (b.y - a.y)
     n = math.hypot(ux, uy)
     if n > 0:
         ux, uy = ux / n, uy / n
-    r = 4.5
-    body = [_circle(cx, cy, r)]
+    r = _SOURCE_RADIUS
+    body = [_circle(cx, cy, r, fill=_FILL_BG)]
     tail = (cx - ux * r * 0.6, cy - uy * r * 0.6)
     head = (cx + ux * r * 0.6, cy + uy * r * 0.6)
-    arrow = [_line(tail[0], tail[1], head[0], head[1])]
-    # Arrow head: small V at head
     px, py = -uy, ux
-    h1 = (head[0] - ux * 1.5 + px * 1.0, head[1] - uy * 1.5 + py * 1.0)
-    h2 = (head[0] - ux * 1.5 - px * 1.0, head[1] - uy * 1.5 - py * 1.0)
-    arrow.append(_line(head[0], head[1], h1[0], h1[1]))
-    arrow.append(_line(head[0], head[1], h2[0], h2[1]))
+    h1 = (head[0] - ux * 1.4 + px * 0.9, head[1] - uy * 1.4 + py * 0.9)
+    h2 = (head[0] - ux * 1.4 - px * 0.9, head[1] - uy * 1.4 - py * 0.9)
+    arrow = [
+        _line(tail[0], tail[1], head[0], head[1]),
+        _line(head[0], head[1], h1[0], h1[1]),
+        _line(head[0], head[1], h2[0], h2[1]),
+    ]
     leads = _source_leads(p, r)
-    label = _label_outside(p, r + 3.0)
+    label = _label_outside(p, r + 2.5)
     return "<g>" + "".join(leads + body + arrow + [label]) + "</g>"
 
 
 def _draw_switch(p: ComponentPlacement) -> str:
-    """Open-switch symbol: two larger contact dots with a tilted arm
-    pivoting on the first contact and reaching past the second contact
-    (open-position convention)."""
+    """Open-switch symbol: two contact dots and a tilted arm hinged on
+    the first contact, reaching past the second (open-position).
+
+    The arm is constrained to STOP just before the second contact (it
+    used to overshoot by ~30 %, which made it look like it stuck out
+    of the bounding box). Mask under the symbol so wires routed past
+    the body don't shine through."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     ax, ay = a.x, a.y
     bx, by = b.x, b.y
@@ -379,22 +418,21 @@ def _draw_switch(p: ComponentPlacement) -> str:
     mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
     s = (mx - ux * body_len / 2.0, my - uy * body_len / 2.0)
     e = (mx + ux * body_len / 2.0, my + uy * body_len / 2.0)
-    # The open contact arm starts at `s` and reaches just past `e` at
-    # ~30° off the axis (perpendicular component of 35 % of body_len).
-    arm_perp = body_len * 0.35
-    arm_along = body_len * 0.9
+    arm_perp = body_len * 0.30
+    arm_along = body_len * 0.80
     arm_end = (
         s[0] + ux * arm_along + px * arm_perp,
         s[1] + uy * arm_along + py * arm_perp,
     )
+    mask = _body_mask(mx, my, body_len + 1.0, arm_perp * 2 + 2.0, ux, uy)
     leads = [_line(ax, ay, s[0], s[1]), _line(e[0], e[1], bx, by)]
     contact = [
-        _circle(s[0], s[1], 1.5, fill="white"),
-        _circle(e[0], e[1], 1.5, fill="white"),
         _line(s[0], s[1], arm_end[0], arm_end[1]),
+        _circle(s[0], s[1], 1.2, fill="white"),
+        _circle(e[0], e[1], 1.2, fill="white"),
     ]
-    label = _label_outside(p, body_len * 0.5 + 4.0)
-    return "<g>" + "".join(leads + contact + [label]) + "</g>"
+    label = _label_outside(p, body_len * 0.5 + 3.5)
+    return "<g>" + mask + "".join(leads + contact + [label]) + "</g>"
 
 
 def _draw_mosfet(p: ComponentPlacement) -> str:
@@ -527,32 +565,26 @@ def _draw_generic(p: ComponentPlacement) -> str:
 def _draw_circle_source(p: ComponentPlacement, *,
                           label_top: str = "+",
                           label_bot: str = "-") -> str:
-    """Generic circle voltage source with prominent ± markers and a
-    diameter line between them so the polarity reads at a glance."""
+    """Generic circle voltage source with ± markers inside. The circle
+    is filled white so any wire routed behind it is hidden."""
     a, b = p.terminal_anchors[0], p.terminal_anchors[1]
     cx, cy = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    r = 5.0
-    body = [_circle(cx, cy, r)]
-    # Identify the axis (vertical vs horizontal body).
+    r = 4.5
+    body = [_circle(cx, cy, r, fill=_FILL_BG)]
     if abs(a.y - b.y) > abs(a.x - b.x):
-        # Vertical: + at top, − at bottom, separated by a horizontal
-        # line inside the circle.
         marker_offset = r * 0.55
         labels = [
-            _text(cx, cy - marker_offset, label_top,
-                  size=5.5),
-            _text(cx, cy + marker_offset, label_bot,
-                  size=6.5),  # larger so the minus bar is visible
+            _text(cx, cy - marker_offset, label_top, size=4.6),
+            _text(cx, cy + marker_offset, label_bot, size=5.6),
         ]
     else:
-        # Horizontal: + on left, − on right.
         marker_offset = r * 0.55
         labels = [
-            _text(cx - marker_offset, cy, label_top, size=5.5),
-            _text(cx + marker_offset, cy, label_bot, size=6.5),
+            _text(cx - marker_offset, cy, label_top, size=4.6),
+            _text(cx + marker_offset, cy, label_bot, size=5.6),
         ]
     leads = _source_leads(p, r)
-    name_lbl = _label_outside(p, r + 3.0)
+    name_lbl = _label_outside(p, r + 2.5)
     return "<g>" + "".join(leads + body + labels + [name_lbl]) + "</g>"
 
 
