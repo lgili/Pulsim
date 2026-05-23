@@ -375,7 +375,171 @@ void init_module(py::module_& m) {
               &builder::CircuitBuilder::node_id_of,
               py::arg("name"),
               "Return the node index for `name`. Throws if "
-              "the name was never registered.");
+              "the name was never registered.")
+        .def("name_of",
+              [](const builder::CircuitBuilder& self, Index branch_id) {
+                  return std::string(self.name_of(branch_id));
+              },
+              py::arg("branch_id"),
+              "User-supplied component name for `branch_id`, set by "
+              "the `add_*` call. Returns an empty string if the "
+              "branch was never registered or had no name.")
+        .def("components",
+              [](const builder::CircuitBuilder& self) {
+                  // Adapter consumed by `pulsim.schematic` — yields one
+                  // `ComponentDescriptor` per branch added through the
+                  // builder, in insertion order. The descriptor exposes
+                  // the four fields the schematic layout engine needs:
+                  //   .kind   — canonical string (see proposal §2.3)
+                  //   .name   — user-supplied name (or "" if unnamed)
+                  //   .nodes  — list of node IDs in pin order
+                  //   .params — dict[str, float|int] of stored params
+                  py::list out;
+                  const auto& graph = self.graph();
+                  const auto& pool  = self.pool();
+                  const auto n_branches = graph.num_branches();
+                  for (Index bid = 0; bid < n_branches; ++bid) {
+                      const auto& br = graph.branch(bid);
+                      py::dict params;
+                      const char* kind_str = "unknown";
+                      try {
+                          const auto kind = pool.kind_of(bid);
+                          using K = pwl::DevicePool::StoredKind;
+                          switch (kind) {
+                          case K::Resistor: {
+                              kind_str = "resistor";
+                              const auto& p =
+                                  pool.resistor_params(bid);
+                              params["R_ohms"] = Real{1} / p.G;
+                              break;
+                          }
+                          case K::VoltageSource: {
+                              kind_str = "voltage_source";
+                              const auto& p =
+                                  pool.voltage_source_params(bid);
+                              params["V"] = p.V;
+                              break;
+                          }
+                          case K::Switch: {
+                              kind_str = "switch";
+                              params["g_on"]  = pool.switch_g_on(bid);
+                              params["g_off"] = pool.switch_g_off(bid);
+                              break;
+                          }
+                          case K::Capacitor: {
+                              kind_str = "capacitor";
+                              const auto& p =
+                                  pool.capacitor_params(bid);
+                              params["C_farads"] = p.C;
+                              break;
+                          }
+                          case K::Inductor: {
+                              kind_str = "inductor";
+                              const auto& p =
+                                  pool.inductor_params(bid);
+                              params["L_henries"] = p.L;
+                              break;
+                          }
+                          case K::Diode: {
+                              kind_str = "diode";
+                              const auto& p = pool.diode_params(bid);
+                              params["g_on"]  = p.g_on;
+                              params["g_off"] = p.g_off;
+                              params["V_th"]  = p.V_th;
+                              break;
+                          }
+                          case K::NonlinearDiode: {
+                              kind_str = "nonlinear_diode";
+                              // IdealDiode::Params struct varies; just
+                              // expose what schematic needs (none yet).
+                              break;
+                          }
+                          case K::CurrentSource: {
+                              kind_str = "current_source";
+                              const auto& p =
+                                  pool.current_source_params(bid);
+                              params["I"] = p.I;
+                              break;
+                          }
+                          case K::PWMVoltageSource:
+                              kind_str = "pwm_voltage_source"; break;
+                          case K::SineVoltageSource:
+                              kind_str = "sine_voltage_source"; break;
+                          case K::PulseVoltageSource:
+                              kind_str = "pulse_voltage_source"; break;
+                          case K::MosfetLevel1:
+                              kind_str = "mosfet_level1"; break;
+                          case K::IgbtLevel1:
+                              kind_str = "igbt_level1"; break;
+                          case K::VCVS:
+                              kind_str = "vcvs"; break;
+                          case K::SaturableInductor:
+                              kind_str = "saturable_inductor"; break;
+                          }
+                      } catch (const std::exception&) {
+                          // Branch present in graph but not registered
+                          // in pool — unusual, keep "unknown" kind.
+                      }
+                      py::dict desc;
+                      desc["kind"]   = kind_str;
+                      desc["name"]   = std::string(self.name_of(bid));
+                      desc["nodes"]  = py::make_tuple(
+                          static_cast<int>(br.from),
+                          static_cast<int>(br.to));
+                      desc["params"] = params;
+                      desc["branch_id"] = static_cast<int>(bid);
+                      out.append(desc);
+                  }
+                  return out;
+              },
+              "Enumerate every device in the circuit. Returns a list "
+              "of dicts (kind, name, nodes, params, branch_id) in "
+              "insertion order. Consumed by `pulsim.schematic`.")
+        .def("ground",
+              [](const builder::CircuitBuilder& self) {
+                  return self.graph().ground();
+              },
+              "Ground node ID (always -1 in Pulsim's convention). "
+              "Exposed on the builder for the schematic API "
+              "compatibility.")
+        .def("node_position_hint",
+              [](const builder::CircuitBuilder& /*self*/,
+                 Index node_id) {
+                  // V0 stub: return "ground" for ground, "internal"
+                  // for everything else. Phase 4 of the schematic V2
+                  // proposal will refine this.
+                  if (node_id == topology::Graph::ground()) {
+                      return std::string("ground");
+                  }
+                  return std::string("internal");
+              },
+              py::arg("node_id"),
+              "Role hint for `node_id`. V0 returns 'ground' for the "
+              "ground node and 'internal' for all others.")
+        .def("position_hints",
+              [](const builder::CircuitBuilder& self) {
+                  py::dict out;
+                  const auto n = self.graph().num_nodes();
+                  for (Index i = 0; i < n; ++i) {
+                      out[py::int_(i)] = std::string("internal");
+                  }
+                  out[py::int_(topology::Graph::ground())] =
+                      std::string("ground");
+                  return out;
+              },
+              "Dict mapping every node_id used in the circuit to its "
+              "current role hint.");
+
+    // ---- BranchKind enum + Branch struct (for schematic backends
+    //      that want graph-level structural info) -------------------
+    py::enum_<topology::BranchKind>(m, "BranchKind",
+        "Topological category of a branch. Layer 4 enumerates "
+        "over `Switch`-kind branches; the rest are unconditional.")
+        .value("PassiveLinear", topology::BranchKind::PassiveLinear)
+        .value("Source",        topology::BranchKind::Source)
+        .value("Switch",        topology::BranchKind::Switch)
+        .value("Nonlinear",     topology::BranchKind::Nonlinear);
+
 
     // ---- Graph / DevicePool (opaque handles) -----------------------------
     //
@@ -400,7 +564,46 @@ void init_module(py::module_& m) {
         // a CALLABLE method on the Python instance for
         // ergonomic access — pybind11 needs `static`
         // because the C++ free function takes no `this`.
-        .def_static("ground", &topology::Graph::ground);
+        .def_static("ground", &topology::Graph::ground)
+        .def_property_readonly("branches",
+              [](const topology::Graph& self) {
+                  // Lightweight branch enumeration for the schematic
+                  // module. Each entry is a dict (id, from_, to, kind)
+                  // — no need for a custom py::class_ since callers
+                  // just iterate.
+                  py::list out;
+                  const auto n = self.num_branches();
+                  for (Index i = 0; i < n; ++i) {
+                      const auto& br = self.branch(i);
+                      py::dict d;
+                      d["id"]    = static_cast<int>(br.id);
+                      d["from_"] = static_cast<int>(br.from);
+                      d["to"]    = static_cast<int>(br.to);
+                      d["kind"]  = br.kind;
+                      out.append(d);
+                  }
+                  return out;
+              },
+              "List of all branches in insertion order. Each entry "
+              "is a dict {id, from_, to, kind} where `kind` is a "
+              "`BranchKind` enum value.")
+        .def_property_readonly("nodes",
+              [](const topology::Graph& self) {
+                  // Node names + IDs — also useful for schematic
+                  // labelling.
+                  py::list out;
+                  const auto n = self.num_nodes();
+                  for (Index i = 0; i < n; ++i) {
+                      const auto& nd = self.node(i);
+                      py::dict d;
+                      d["id"]   = static_cast<int>(nd.id);
+                      d["name"] = nd.name;
+                      out.append(d);
+                  }
+                  return out;
+              },
+              "List of all nodes in insertion order. Each entry "
+              "is a dict {id, name}.");
 
     py::class_<pwl::DevicePool>(m, "DevicePool",
         "Pulsim device parameter pool. Build via "

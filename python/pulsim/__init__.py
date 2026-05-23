@@ -210,6 +210,12 @@ from .spice_import import (
 )
 from .stream import LiveStream
 
+# Schematic renderer — optional, gated behind `[schematic]` extras
+# (schemdraw + networkx + cairosvg + anthropic). Importing the
+# submodule does NOT require the heavy deps; render/layout calls
+# raise a clear ImportError pointing at the install command.
+from . import schematic  # noqa: F401
+
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
 # still load `pulsim` without complaint.

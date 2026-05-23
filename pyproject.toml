@@ -56,8 +56,14 @@ docs = [
     "mkdocstrings[python]>=1.0",
     "griffe>=2.0",
 ]
+schematic = [
+    "schemdraw>=0.18,<1.0",
+    "networkx>=3.0",
+    "cairosvg>=2.7",      # SVG → PNG (optional; falls back to schemdraw native)
+    "anthropic>=0.34",    # LLM topology classifier (opt-out via env var)
+]
 all = [
-    "pulsim[jupyter,data,dev]",
+    "pulsim[jupyter,data,dev,schematic]",
 ]
 
 [project.urls]

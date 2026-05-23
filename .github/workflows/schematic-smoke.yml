@@ -1,0 +1,114 @@
+name: Schematic smoke render
+
+# Renders the canonical demo set (RC, buck, half-bridge PWM) via the
+# `pulsim.schematic` netlistsvg backend and uploads the SVG + PNG
+# artifacts so reviewers can eyeball the output without running locally.
+#
+# This is a fast, low-risk job: builds the Python wheel, invokes
+# `ps.schematic.render` on three example YAMLs, and stops. Failures
+# point at netlistsvg / analog skin / glyph regressions.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'python/pulsim/schematic/**'
+      - 'python/bindings.cpp'
+      - 'core/include/pulsim/v1/runtime_circuit.hpp'
+      - 'package.json'
+      - 'examples/*.yaml'
+      - '.github/workflows/schematic-smoke.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'python/pulsim/schematic/**'
+      - 'python/bindings.cpp'
+      - 'core/include/pulsim/v1/runtime_circuit.hpp'
+      - 'package.json'
+      - 'examples/*.yaml'
+      - '.github/workflows/schematic-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke-render:
+    name: Render demo schematics
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        # NOTE: gcc-13 (not clang-17) is the known-good toolchain for the
+        # PULSIM_BUILD_PYTHON=ON build on ubuntu-24.04 — the default clang-17
+        # + libstdc++-14 combination hits a `<tuple>` instantiation bug in
+        # `std::unordered_map<std::string, double>` paths reached by
+        # `_pulsim` bindings. The repository's `python-tests` job already
+        # pins gcc-13 for the same reason; we mirror that choice here.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build gcc-13 g++-13 \
+            libsuitesparse-dev libeigen3-dev librsvg2-bin
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python dependencies
+        # `pulsim/__init__.py` imports numpy at module load; the schematic
+        # render path itself does not need scipy/networkx but the package
+        # import must succeed before `pulsim.schematic.render(...)` can
+        # be called.
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy
+
+      - name: Install elkjs (+ legacy netlistsvg for backward compat)
+        # The Phase 5 default is python_native — only elkjs is actually
+        # required at runtime. netlistsvg stays installed for one release
+        # so users opting into PULSIM_SCHEMATIC_BACKEND=netlistsvg still
+        # work; the package will be dropped once the deprecation window
+        # closes.
+        run: npm install
+
+      - name: Configure CMake + build pulsim
+        env:
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-13 \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DPULSIM_BUILD_PYTHON=ON \
+            -DPython3_EXECUTABLE=$(which python3)
+          cmake --build build --target _pulsim -j
+
+      - name: Render demo set
+        run: |
+          mkdir -p build/schematic_demo
+          PYTHONPATH=build/python python3 - <<'PY'
+          import pulsim as ps
+          parser = ps.YamlParser(ps.YamlParserOptions())
+          for yaml_path in (
+              "examples/rc_circuit.yaml",
+              "examples/buck_converter.yaml",
+              "examples/half_bridge_pwm.yaml",
+          ):
+              ckt, _ = parser.load(yaml_path)
+              stem = yaml_path.split("/")[-1].rsplit(".", 1)[0]
+              svg = ps.schematic.render(ckt, f"build/schematic_demo/{stem}.svg")
+              png = ps.schematic.render(ckt, f"build/schematic_demo/{stem}.png")
+              print(f"  {stem}: svg={svg.stat().st_size}B png={png.stat().st_size}B")
+          PY
+
+      - name: Upload schematic artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: schematic-demo
+          path: build/schematic_demo/
+          if-no-files-found: error
+          retention-days: 14

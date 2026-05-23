@@ -67,12 +67,12 @@ public:
     // -------- Add methods --------------------------------------------------
 
     CircuitBuilder& add_voltage_source(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to, Real V) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::Source);
         pool_.add_voltage_source(
             b_id, models::VoltageSource::Params{V});
@@ -95,14 +95,14 @@ public:
     ///   duty       [-]  ON-time fraction ∈ [0, 1]
     ///   phase      [s]  start-of-cycle offset (default 0)
     CircuitBuilder& add_pwm_voltage_source(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to, Real v_high, Real v_low,
         Real frequency, Real duty,
         Real phase = Real{0}) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::Source);
         pool_.add_pwm_voltage_source(
             b_id, models::PWMVoltageSource::Params{
@@ -122,14 +122,14 @@ public:
     ///   phase        [rad] phase angle (default 0)
     /// Output: v(t) = v_dc + v_amplitude · sin(2π·f·t + φ).
     CircuitBuilder& add_sine_voltage_source(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to,
         Real v_dc, Real v_amplitude,
         Real frequency, Real phase = Real{0}) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::Source);
         pool_.add_sine_voltage_source(
             b_id, models::SineVoltageSource::Params{
@@ -152,7 +152,7 @@ public:
     ///   lambda      [1/V]  channel-length modulation
     ///   kappa       [1/V]  cutoff-region sigmoid sharpness
     CircuitBuilder& add_mosfet_level1(
-        std::string_view /*name*/,
+        std::string_view name,
         std::string_view drain, std::string_view source,
         std::string_view gate,
         Real K, Real V_T,
@@ -162,8 +162,8 @@ public:
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         const Index gate_idx   = resolve_node_(gate);
-        const Index b_id = graph_.add_branch(
-            drain_idx, source_idx,
+        const Index b_id = add_branch_(
+            name, drain_idx, source_idx,
             topology::BranchKind::Nonlinear);
         pool_.add_mosfet_level1(
             b_id, gate_idx,
@@ -178,8 +178,9 @@ public:
         // root of the SH1 triode polynomial during transient
         // events (e.g. inductive loads during dead-time).
         if (with_body_diode) {
-            const Index body_b = graph_.add_branch(
-                source_idx, drain_idx,
+            const std::string body_name = std::string{name} + "_body";
+            const Index body_b = add_branch_(
+                body_name, source_idx, drain_idx,
                 topology::BranchKind::Switch);
             pool_.add_diode(body_b,
                 /*g_on=*/Real{1e3},
@@ -194,7 +195,7 @@ public:
     /// Use a high gain (e.g. 1e5) plus negative feedback for
     /// an ideal-op-amp approximation.
     CircuitBuilder& add_vcvs(
-        std::string_view /*name*/,
+        std::string_view name,
         std::string_view in_pos,  std::string_view in_neg,
         std::string_view out_pos, std::string_view out_neg,
         Real gain) {
@@ -202,8 +203,8 @@ public:
         const Index inn_idx = resolve_node_(in_neg);
         const Index outp_idx = resolve_node_(out_pos);
         const Index outn_idx = resolve_node_(out_neg);
-        const Index b_id = graph_.add_branch(
-            outp_idx, outn_idx,
+        const Index b_id = add_branch_(
+            name, outp_idx, outn_idx,
             topology::BranchKind::Source);
         pool_.add_vcvs(
             b_id, inp_idx, inn_idx,
@@ -217,11 +218,11 @@ public:
     /// negative feedback to enforce the "virtual short"
     /// V_in_pos ≈ V_in_neg.
     CircuitBuilder& add_op_amp_ideal(
-        std::string_view /*name*/,
+        std::string_view name,
         std::string_view in_pos, std::string_view in_neg,
         std::string_view out,
         Real gain = Real{1e5}) {
-        return add_vcvs(/*name=*/"", in_pos, in_neg,
+        return add_vcvs(name, in_pos, in_neg,
                           out, /*out_neg=*/"gnd", gain);
     }
 
@@ -234,7 +235,7 @@ public:
     ///   V_T         [V] gate threshold
     ///   kappa       [1/V] cutoff sigmoid sharpness
     CircuitBuilder& add_igbt_level1(
-        std::string_view /*name*/,
+        std::string_view name,
         std::string_view collector, std::string_view emitter,
         std::string_view gate,
         Real V_CE_sat = Real{1.5},
@@ -244,8 +245,8 @@ public:
         const Index c_idx = resolve_node_(collector);
         const Index e_idx = resolve_node_(emitter);
         const Index g_idx = resolve_node_(gate);
-        const Index b_id = graph_.add_branch(
-            c_idx, e_idx,
+        const Index b_id = add_branch_(
+            name, c_idx, e_idx,
             topology::BranchKind::Nonlinear);
         pool_.add_igbt_level1(
             b_id, g_idx,
@@ -265,7 +266,7 @@ public:
     ///   pulse_width  [s] duration of each pulse
     ///   period       [s] repetition period; 0 → single-shot
     CircuitBuilder& add_pulse_voltage_source(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to,
         Real v_initial, Real v_pulsed,
         Real t_start, Real pulse_width,
@@ -274,8 +275,8 @@ public:
         Real fall_time = Real{0}) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::Source);
         pool_.add_pulse_voltage_source(
             b_id, models::PulseVoltageSource::Params{
@@ -305,12 +306,12 @@ public:
     /// `b_extra_fn(t)` — same pattern as time-varying
     /// VoltageSource.
     CircuitBuilder& add_current_source(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to, Real I) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::Source);
         pool_.add_current_source(
             b_id, models::CurrentSource::Params{I});
@@ -318,12 +319,12 @@ public:
     }
 
     CircuitBuilder& add_resistor(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to, Real R_ohms) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::PassiveLinear);
         pool_.add_resistor(
             b_id, models::Resistor::Params{
@@ -332,12 +333,12 @@ public:
     }
 
     CircuitBuilder& add_capacitor(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to, Real C_farads) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::PassiveLinear);
         pool_.add_capacitor(
             b_id, models::Capacitor::Params{C_farads});
@@ -345,12 +346,12 @@ public:
     }
 
     CircuitBuilder& add_inductor(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to, Real L_henries) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::PassiveLinear);
         pool_.add_inductor(
             b_id, models::Inductor::Params{L_henries});
@@ -362,13 +363,13 @@ public:
     /// `BranchKind::Switch` (the diode behaves as a switch
     /// from the topology's perspective).
     CircuitBuilder& add_diode(
-        std::string_view /*name*/, std::string_view anode,
+        std::string_view name, std::string_view anode,
         std::string_view cathode, Real g_on, Real g_off,
         Real V_th = Real{0}) {
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
-        const Index b_id = graph_.add_branch(
-            a_idx, k_idx,
+        const Index b_id = add_branch_(
+            name, a_idx, k_idx,
             topology::BranchKind::Switch);
         pool_.add_diode(b_id, g_on, g_off, V_th);
         return *this;
@@ -378,13 +379,13 @@ public:
     /// AD-driven nonlinear model). The branch uses
     /// `BranchKind::Nonlinear`.
     CircuitBuilder& add_nonlinear_diode(
-        std::string_view /*name*/, std::string_view anode,
+        std::string_view name, std::string_view anode,
         std::string_view cathode,
         models::IdealDiode::Params params) {
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
-        const Index b_id = graph_.add_branch(
-            a_idx, k_idx,
+        const Index b_id = add_branch_(
+            name, a_idx, k_idx,
             topology::BranchKind::Nonlinear);
         pool_.add_nonlinear_diode(b_id, params);
         return *this;
@@ -393,12 +394,12 @@ public:
     /// Add a controlled switch (drives by `switch_fn`
     /// at simulation time).
     CircuitBuilder& add_switch(
-        std::string_view /*name*/, std::string_view from,
+        std::string_view name, std::string_view from,
         std::string_view to, Real g_on, Real g_off) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::Switch);
         pool_.add_switch(b_id, g_on, g_off);
         return *this;
@@ -446,15 +447,16 @@ public:
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         // Main switch (drain → source).
-        const Index b_switch = graph_.add_branch(
-            drain_idx, source_idx,
+        const Index b_switch = add_branch_(
+            name, drain_idx, source_idx,
             topology::BranchKind::Switch);
         pool_.add_switch(b_switch,
                           Real{1} / R_on,
                           Real{1} / R_off);
         // Body diode (source → drain — anti-parallel).
-        const Index b_body = graph_.add_branch(
-            source_idx, drain_idx,
+        const std::string body_name = std::string{name} + "_body";
+        const Index b_body = add_branch_(
+            body_name, source_idx, drain_idx,
             topology::BranchKind::Switch);
         pool_.add_diode(b_body, g_on_diode,
                           g_off_diode, V_F);
@@ -505,14 +507,16 @@ public:
         const Index s_from_idx = resolve_node_(s_from);
         const Index s_to_idx   = resolve_node_(s_to);
 
-        const Index p_branch = graph_.add_branch(
-            p_from_idx, p_to_idx,
+        const std::string p_name = std::string{name} + ".p";
+        const Index p_branch = add_branch_(
+            p_name, p_from_idx, p_to_idx,
             topology::BranchKind::PassiveLinear);
         pool_.add_inductor(
             p_branch, models::Inductor::Params{L_p});
 
-        const Index s_branch = graph_.add_branch(
-            s_from_idx, s_to_idx,
+        const std::string s_name = std::string{name} + ".s";
+        const Index s_branch = add_branch_(
+            s_name, s_from_idx, s_to_idx,
             topology::BranchKind::PassiveLinear);
         pool_.add_inductor(
             s_branch, models::Inductor::Params{L_s});
@@ -540,14 +544,14 @@ public:
     ///     the solver when the circuit contains saturable
     ///     inductors.
     CircuitBuilder& add_saturable_inductor(
-        std::string_view /*name*/,
+        std::string_view name,
         std::string_view from, std::string_view to,
         Real L_0, Real I_sat,
         Real L_residual = Real{0}) {
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
-        const Index b_id = graph_.add_branch(
-            from_idx, to_idx,
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx,
             topology::BranchKind::Nonlinear);
         pool_.add_saturable_inductor(
             b_id,
@@ -579,7 +583,7 @@ public:
     };
 
     CircuitBuilder& add_multi_winding_transformer(
-        std::string_view /*name*/,
+        std::string_view name,
         const std::vector<WindingSpec>& windings,
         const std::vector<std::vector<Real>>& k_matrix = {}) {
         const Size N = windings.size();
@@ -590,11 +594,14 @@ public:
         // Add each winding as a regular inductor branch.
         std::vector<Index> branch_ids;
         branch_ids.reserve(N);
+        Size winding_idx = 0;
         for (const auto& w : windings) {
             const Index from_idx = resolve_node_(w.from);
             const Index to_idx   = resolve_node_(w.to);
-            const Index b = graph_.add_branch(
-                from_idx, to_idx,
+            const std::string winding_name =
+                std::string{name} + ".w" + std::to_string(winding_idx++);
+            const Index b = add_branch_(
+                winding_name, from_idx, to_idx,
                 topology::BranchKind::PassiveLinear);
             pool_.add_inductor(
                 b, models::Inductor::Params{w.L});
@@ -632,6 +639,16 @@ public:
 
     [[nodiscard]] Size num_branches() const noexcept {
         return graph_.num_branches();
+    }
+
+    /// User-supplied name for `branch_id`. Set automatically by every
+    /// `add_*` call; consumed by `schematic_rendering` to label
+    /// components in the rendered SVG. Returns an empty view if the
+    /// branch was never registered.
+    [[nodiscard]] std::string_view name_of(Index branch_id) const {
+        const auto it = branch_names_.find(branch_id);
+        if (it == branch_names_.end()) return std::string_view{};
+        return it->second;
     }
 
     /// Look up a previously-registered node by name. Throws
@@ -690,10 +707,27 @@ private:
         }
     };
 
+    /// Helper used by every `add_*` method: forwards to
+    /// `graph_.add_branch`, then registers the user-supplied
+    /// component name (if any) keyed on the new branch id. The
+    /// schematic renderer consumes these names; the kernel solver
+    /// ignores them. Empty / temporary string_views are stored as
+    /// the empty string so the lookup is uniform.
+    Index add_branch_(std::string_view component_name,
+                      Index from, Index to,
+                      topology::BranchKind kind) {
+        const Index b_id = graph_.add_branch(from, to, kind);
+        if (!component_name.empty()) {
+            branch_names_.emplace(b_id, std::string{component_name});
+        }
+        return b_id;
+    }
+
     topology::Graph                         graph_;
     pwl::DevicePool                         pool_;
     std::unordered_map<std::string, Index,
                         NodeKeyHash, std::equal_to<>> node_map_;
+    numeric::Dictionary<Index, std::string> branch_names_;
 };
 
 }  // namespace pulsim::builder
