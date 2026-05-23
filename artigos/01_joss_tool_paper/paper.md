@@ -13,6 +13,7 @@ tags:
 authors:
   - name: Luiz Carlos Gili
     orcid: 0000-0002-5749-7199
+    corresponding: true
     affiliation: 1
 affiliations:
  - name: Independent Researcher, Brazil
@@ -23,116 +24,157 @@ bibliography: paper.bib
 
 # Summary
 
-`Pulsim` is an open-source power-electronics circuit simulator written
-in C++23 with a Python-first user-facing API. It is designed for fast,
-accurate transient simulation of **switched-mode** converters — buck,
-boost, isolated topologies, three-phase voltage-source inverters,
-multilevel converters such as the Neutral-Point-Clamped (NPC) inverter
-[@Nabae:1981] and the Modular Multilevel Converter (MMC)
-[@Lesnicar:2003] — where the dominant computational cost in
-general-purpose SPICE-like simulators is the repeated re-factorisation
-of the system matrix after every switching event.
+`Pulsim` is an open-source power-electronics circuit simulator with a
+C++23 kernel and a Python-first user-facing API. It is designed for
+fast transient simulation of **switched-mode** converters — buck and
+boost converters, isolated topologies (flyback, forward, half-bridge),
+three-phase voltage-source inverters (VSIs), and multilevel converters
+including the Neutral-Point-Clamped (NPC) inverter [@Nabae:1981] and
+the Modular Multilevel Converter (MMC) [@Lesnicar:2003]. The user
+describes a topology with string-named nodes
+(`b.add_voltage_source("Vin", "vin", "gnd", 24.0)`,
+`b.add_mosfet_with_body_diode(...)`, `b.add_inductor(...)`), provides
+a modulator as a switch-state function, and calls
+`pulsim.simulate(b, t_end, dt, switch_fn=...)`. The same surface
+supports transient analysis, AC small-signal sweeps,
+frequency-response analysis, parameter sweeps, periodic-steady-state
+shooting, and harmonic balance.
 
 `Pulsim`'s central design choice is a **piecewise-linear (PWL)
 state-space cache**: every reachable combination of binary switch and
 diode states is enumerated once at startup, the corresponding linear
-state-space matrices are factored once, and the time-stepper then
-selects the appropriate cached factor at each step in $O(1)$ time.
-This is the same algorithmic strategy that powers commercial tools
-such as PLECS [@Allmendinger:2002] and Simulink/Simscape Power Systems
-[@MathWorks:2024], previously unavailable as a permissively-licensed
-open-source implementation.
+state-space matrices are factored once, and the transient solver then
+indexes the appropriate cached factor at every time step in $O(1)$
+time. The package also ships **ten validated reference projects**
+spanning buck through MMC, each combining an analytical-derivation
+notebook, a closed-loop controller-design notebook, and an *executed*
+Pulsim cross-validation notebook whose waveforms render inline on
+GitHub.
 
 # Statement of need
 
-Researchers and educators working on switched-mode power-electronics
-modelling face a long-standing tooling dilemma:
+Researchers and educators modelling switched-mode power-electronics
+systems face a long-standing tooling dilemma. The dominant
+high-throughput algorithm for these workloads — the PWL state-space
+cache combined with Newton refinement for nonlinear devices — is only
+available in **commercial, closed-source** packages. The two main
+open-source alternatives, the SPICE family and bespoke
+`numpy`/`scipy` scripts, are either too slow for systematic studies
+of multi-cell multilevel converters or too limited to model anything
+beyond ideal-switch toys. The consequence is that reproducible,
+extensible power-electronics simulation work cannot be shared as a
+self-contained code repository; either the dependency is proprietary
+or the simulator must be reimplemented from scratch by each
+researcher.
 
-* **Commercial simulators** such as PLECS [@Allmendinger:2002], PSIM
-  [@Powersim:2024], MATLAB/Simulink with Simscape Power Systems
-  [@MathWorks:2024], and Saber [@SiemensSaber:2024] dominate the
-  industry because they implement the PWL state-space cache + Newton
-  refinement architecture needed for high-throughput simulation of
-  hard-switched converters. They are expensive, closed-source, and
-  hard to extend with novel device models or numerical methods.
+Pulsim's purpose is to close this gap. It provides the same
+algorithmic architecture used by industrial-grade simulators under an
+**MIT licence**, with a header-only C++23 kernel that any team can
+embed and extend, and a Python API tuned for the reproducibility
+conventions of modern computational research.
 
-* **Open-source SPICE-family simulators** (`ngspice`
-  [@Vogt:2020:ngspice], LTspice, Xyce [@Keiter:2020:Xyce]) are
-  general-purpose and rigorous, but their nonlinear Newton-Raphson
-  step is invoked at every commutation event. This makes them
-  one to two orders of magnitude slower than PWL simulators on
-  switching-power-electronics workloads [@Allmendinger:2002].
+# State of the field
 
-* **Educational tools** built around `numpy`/`scipy` (e.g.
-  `pyleecan`, custom forward-Euler scripts) are accessible but
-  generally limited to ideal-switch models, lack the
-  topology-aware caching, and do not scale to multi-cell
-  multilevel converters.
+| Tool | Licence | PWL cache | Open scriptable | Multilevel-converter support |
+|---|---|:---:|:---:|:---:|
+| PLECS [@Allmendinger:2002] | Commercial | ✓ | partial | first-class |
+| PSIM [@Powersim:2024] | Commercial | ✓ | partial | first-class |
+| Simscape Electrical [@MathWorks:2024] | Commercial (MATLAB) | ✓ | partial | first-class |
+| Saber [@SiemensSaber:2024] | Commercial | partial | limited | first-class |
+| ngspice [@Vogt:2020:ngspice] | GPL | ✗ | ✓ | manual |
+| Xyce [@Keiter:2020:Xyce] | GPL | ✗ | ✓ | manual |
+| `numpy` / `scipy` scripts | n/a | ✗ | ✓ | manual |
+| **Pulsim** | **MIT** | **✓** | **✓** | **first-class** |
 
-Pulsim closes this gap by providing the same fast PWL-cache
-architecture under the **MIT license**, with a header-only C++23
-kernel and idiomatic Python bindings. The user describes the topology
-in Python with string-named nodes
-(`b.add_voltage_source("Vin", "vin", "gnd", 24.0)`,
-`b.add_mosfet_with_body_diode(...)`, `b.add_inductor(...)`), supplies
-a switch-state function for the modulator, and calls `pulsim.simulate(b,
-t_end, dt, switch_fn=...)`. The same surface supports transient
-analysis, AC small-signal sweeps, frequency-response analysis (FRA),
-parameter sweeps, periodic-steady-state shooting, and harmonic
-balance.
+PLECS, PSIM, Simscape and Saber implement the PWL cache and are the
+de-facto standard in industry for hard-switched power-electronics
+design, but their proprietary licences exclude their use in fully
+open, reproducible research workflows. The SPICE-family open-source
+simulators (`ngspice`, `LTspice`, Xyce) are mature but use a
+fully-iterated Newton step at every commutation event, which makes
+them one to two orders of magnitude slower than PWL-cache simulators
+on switching workloads [@Allmendinger:2002]. Pulsim is, to the best
+of the author's knowledge, the first permissively-licensed simulator
+that combines the PWL state-space cache, automatic switch + diode
+event detection, optional Newton refinement for nonlinear devices,
+and a Python-first user API in a single package.
 
-Pulsim also ships a library of **ten validated reference projects** —
-buck, boost, buck-boost, flyback, forward, half-bridge, boost PFC,
-three-phase voltage-source inverter, NPC 3-level inverter, and
-single-phase modular multilevel converter — each with an
-analytical-derivation notebook, a closed-loop controller-design
-notebook, and an executed Pulsim cross-validation notebook whose
-figures render directly on GitHub. The reference library acts both as
-end-to-end documentation and as a regression suite that exercises the
-solver on topologies of escalating complexity.
+# Software design
 
-# Functionality
+Three design decisions deserve explicit mention because they are
+trade-offs that shape what Pulsim is good at — and what it is not.
 
-The Python API exposes the following primitives, all forwarded to the
-C++ kernel via `pybind11`:
+**Header-only C++23 kernel.** All of the solver, the device library
+and the state-space cache live in `core/include/pulsim/`. Embedding
+Pulsim in another C++ project is a `target_link_libraries(...
+pulsim::core)` away; no static archive to maintain. The cost is
+longer template-instantiation time at first compile, accepted as a
+fair price for the integration convenience.
 
-* `pulsim.CircuitBuilder` — accepts string node names; methods
-  include `add_resistor`, `add_capacitor`, `add_inductor`,
-  `add_switch`, `add_diode`, `add_nonlinear_diode`,
-  `add_mosfet`, `add_mosfet_with_body_diode`,
-  `add_transformer`, `add_voltage_source`, `add_pulse_voltage_source`,
-  `add_sine_voltage_source`, and `add_current_source`.
-* `pulsim.topology.*` — composite helpers (`add_three_phase_vsi`,
-  `add_three_phase_rl_load`, `add_bridge_rectifier`) for common
-  multi-device sub-circuits.
-* `pulsim.simulate(builder, t_end, dt, switch_fn=...)` — the
-  primary entry point; runs a fixed-step trapezoidal-rule transient
-  with the PWL cache lookup at each step.
-* `pulsim.make_pwm_switch_fn`, `pulsim.make_three_phase_spwm_fn`,
-  `pulsim.make_dead_time_pwm_pair_fn` — switch-function factories
-  for common modulation schemes.
-* `pulsim.MixedDomainBlockChain` — composable control blocks
-  (PI/PID, comparators, rate limiters, op-amps, FOC transforms,
-  thermal observers) that execute at C++ kernel speed.
-* `pulsim.run_ac_sweep`, `pulsim.run_fra`,
-  `pulsim.run_periodic_shooting`, `pulsim.run_harmonic_balance`,
-  `pulsim.sweep`, `pulsim.monte_carlo` — additional analysis
-  drivers.
+**Eager PWL cache enumeration.** The cache pre-factors every reachable
+combination of switch states upfront, giving $O(1)$ time-step cost.
+The trade-off is that the cache size grows as $2^{N_{\text{switches}}}$;
+on the desktop hardware used for this project the practical ceiling
+is around 18 mask bits. Topologies that exceed this — typically full
+three-phase multilevel converters with $N \ge 4$ sub-modules per arm
+— must either model only one phase, or use the smooth-blend
+`add_nonlinear_diode` primitive that does not enter the switch mask.
+This trade-off is documented in the MMC reference project and is
+honestly acknowledged in the user-facing API.
 
-The MMC reference project in particular exercises every layer of the
-stack: 12 controllable switches plus 6 floating capacitors per
-phase leg, multicarrier phase-shifted PWM at the modulator level,
-and a step-observer-driven sort-and-select balancing controller
-[@Saeedifard:2010:MMC] that keeps all sub-module capacitor
-voltages within fractions of a volt of their target through the
-entire simulated run.
+**Modulator decoupled from topology.** The C++ `add_*` primitives
+register only the power-stage components; the PWM modulator is an
+external `switch_fn(t) -> SwitchStateMask` closure that the simulator
+calls at each step. This lets a single `add_three_phase_vsi` helper
+support open-loop SPWM, closed-loop FOC, grid-tie current control,
+and any other modulation scheme without parameter explosion on the
+topology side. Closed-loop control adds an additional
+`step_observer(t, x)` callback that runs at C++ kernel speed via the
+`MixedDomainBlockChain` (no Python-interpreter cost per step).
+
+# Research impact
+
+Pulsim is in its first widely-distributed release (`v1.1.0`,
+2026-05-23) and accompanying citation. Its near-term impact case
+rests on three concrete artefacts that already ship in the repository:
+
+1. The **ten-converter validation library** — buck, boost,
+   buck-boost, flyback, forward, half-bridge, boost PFC, three-phase
+   VSI, NPC 3-level inverter, and single-phase MMC — each with an
+   analytical-derivation notebook, a controller-design notebook, and
+   an *executed* Pulsim cross-validation notebook. These act as both
+   tutorials and as a regression suite that exercises the solver on
+   topologies of escalating complexity.
+2. The **MMC project** is a working demonstration of the canonical
+   sort-and-select capacitor-balancing algorithm
+   [@Saeedifard:2010:MMC] driving an actual switched simulation — to
+   the author's knowledge the first open-source MMC reference
+   implementation paired with an executed simulator.
+3. The **planned downstream publication campaign** includes a
+   conference case study at EPE-ECCE Europe 2026 and a methods paper
+   on the PWL cache architecture in IEEE Open Journal of Power
+   Electronics — both are tracked alongside the source under
+   `artigos/` in the repository.
 
 # Acknowledgements
 
 The author thanks the broader open-source power-electronics
-community — in particular the maintainers of `ngspice`, the
-`scikit-build-core` developers who made the C++/Python build trivial,
-and the early adopters who filed the bug reports that hardened the
-PWL cache. Development was supported by personal time.
+community — in particular the maintainers of `ngspice` and the
+authors of `scikit-build-core` who made the C++/Python build
+straightforward. Development was supported by personal time.
+
+# AI usage disclosure
+
+The draft of this paper was prepared with the assistance of
+Anthropic's *Claude* generative AI (model versions in the
+*Sonnet 4.5*–*Opus 4.7* range, accessed between Mai 2026 and the
+submission date). Claude was used for two purposes: (i) drafting
+initial text from a structured outline supplied by the author, and
+(ii) suggesting comparable-software citations to consider for the
+*State of the field* section. The author reviewed, edited and
+validated every paragraph; every fact, citation, claim of novelty
+and design-trade-off rationale was independently checked against the
+Pulsim source, its commit history, and the cited references. No AI
+tool was used to communicate with JOSS editors or reviewers.
 
 # References

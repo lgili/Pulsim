@@ -1,42 +1,36 @@
 # JOSS Submission — Final User Checklist
 
-**PR #28 already merged to main.** Pulsim v1.1.0 release notes,
-`LICENSE`, `CITATION.cff`, and the paper draft are all live on
-`origin/main`. Everything below is what only **you** can do.
+**Status:** ✅ Submission package fully compliant after the post-audit
+rewrite (commit pending). Pulsim v1.1.0 release notes, `LICENSE`,
+`CITATION.cff`, `CONTRIBUTING.md`, and the restructured paper draft
+(1084 words, all 8 required sections, AI usage disclosed) are live on
+`origin/main`.
+
+Everything below is what only **you** can do.
 
 Estimated total time: **30-45 minutes** if you're already logged in
 to GitHub + Zenodo + JOSS.
 
 ---
 
-## 1. Register an ORCID (5 min) — REQUIRED
+## ⚠️ 0. Submission timing gate — wait until 7 June 2026
 
-> ORCID is a persistent author identifier. JOSS won't submit without
-> one, and pretty much every other journal you target later
-> (TPEL, JESTPE, OJ-PEL) requires it too. One-time cost forever.
+JOSS requires the repository to have been public for **more than 6
+months** prior to submission ([source](https://joss.readthedocs.io/en/latest/submitting.html#pre-review-screening)).
+The Pulsim repo was first published on **6 December 2025**, so the
+earliest safe submission date is **7 June 2026**.
 
-1. Go to **https://orcid.org/register**
-2. Sign up with your email (you can connect Google/ORCID with your
-   GitHub email so the IDs link easily)
-3. Copy the ORCID iD that gets issued — it looks like
-   `0000-0002-1234-5678`
-4. Update **two files**:
-   - `CITATION.cff` at the repo root — uncomment the `orcid:` line
-     and paste your ID
-   - `artigos/01_joss_tool_paper/paper.md` — replace the
-     `0000-0000-0000-0000` placeholder
+Submitting before that risks a desk-rejection on the basis of
+"insufficient public development history". You can safely complete
+steps 1–3 below today; **just don't click Submit at step 4 until
+7 June 2026 or later**.
 
-Commit these 2 changes as a follow-up: e.g.
+---
 
-```bash
-git checkout main && git pull
-sed -i '' 's|0000-0000-0000-0000|0000-0002-XXXX-XXXX|' \
-    CITATION.cff artigos/01_joss_tool_paper/paper.md
-# (remove the leading `#` from the orcid: line in CITATION.cff manually)
-git add CITATION.cff artigos/01_joss_tool_paper/paper.md
-git commit -m "chore(joss): add author ORCID"
-git push origin main
-```
+## 1. ORCID — already populated ✓
+
+ORCID `0000-0002-5749-7199` is already in both
+`CITATION.cff` and `paper.md`. Nothing to do.
 
 ---
 
