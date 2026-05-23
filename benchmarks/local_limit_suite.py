@@ -12,7 +12,7 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import benchmark_runner as br
 
@@ -20,6 +20,30 @@ try:
     import yaml
 except ImportError:  # pragma: no cover - optional dependency
     yaml = None
+
+# Onda 1.5: shared rich-based terminal UI. Same TYPE_CHECKING / try
+# pattern as `benchmark_runner.py` — keeps pyright + runtime happy
+# even when rich (or `_console`) is missing.
+if TYPE_CHECKING:
+    from _console import (  # type: ignore[import-not-found]
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+
+try:
+    from _console import (  # type: ignore[import-not-found]
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+    _HAS_CONSOLE = True
+except ImportError:  # pragma: no cover
+    _HAS_CONSOLE = False
 
 
 @dataclass
@@ -352,6 +376,11 @@ def main() -> int:
     parser.add_argument("--min-completion", type=float, default=0.97)
     parser.add_argument("--max-runtime-s", type=float, default=None)
     parser.add_argument("--list-circuits", action="store_true", help="List benchmark ids and exit")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Disable rich terminal UI (header, progress, table). JSON summary still emitted.",
+    )
     args = parser.parse_args()
 
     if yaml is None:
@@ -363,6 +392,15 @@ def main() -> int:
         )
 
     scenario_filter = _scenario_filter_for_mode(args.mode)
+
+    use_ui = _HAS_CONSOLE and not args.quiet
+    console = _make_console(force_plain=args.quiet) if use_ui else None
+    if console is not None:
+        _print_environment_header(
+            console,
+            title="Pulsim Bench — local-limit",
+            extra={"manifest": str(args.manifest), "mode": args.mode},
+        )
 
     with tempfile.TemporaryDirectory(prefix="pulsim_local_limit_") as tmp_dir:
         tmp_root = Path(tmp_dir)
@@ -378,12 +416,33 @@ def main() -> int:
                 print(f"{benchmark_id}: {difficulty}")
             return 0
 
-        base_results = br.run_benchmarks(
-            manifest_path,
-            args.output_dir,
-            selected=args.only,
-            scenario_filter=scenario_filter,
-        )
+        total = 0
+        if console is not None:
+            try:
+                total = br.count_scenarios(
+                    manifest_path,
+                    selected=args.only,
+                    scenario_filter=scenario_filter,
+                )
+            except Exception:
+                total = 0
+            with _BenchProgress(console, total=total, description="local-limit") as prog:
+                base_results = br.run_benchmarks(
+                    manifest_path,
+                    args.output_dir,
+                    selected=args.only,
+                    scenario_filter=scenario_filter,
+                    progress=prog,
+                )
+                elapsed = prog.elapsed_s
+        else:
+            base_results = br.run_benchmarks(
+                manifest_path,
+                args.output_dir,
+                selected=args.only,
+                scenario_filter=scenario_filter,
+            )
+            elapsed = None
 
     evaluated = _evaluate_results(
         base_results,
@@ -398,14 +457,26 @@ def main() -> int:
     summary = _build_summary(evaluated)
     _write_outputs(args.output_dir, evaluated, summary, args)
 
-    print(json.dumps(summary, indent=2))
+    if console is not None:
+        # `evaluated` is a list of `LocalLimitResult` dataclasses; the
+        # shared printer treats `__dict__` keys directly, so the
+        # standard columns (benchmark_id/scenario/status/runtime_s/...)
+        # resolve naturally.
+        _print_results_table(console, evaluated, title="Local-Limit Results")
+        _print_results_summary(console, evaluated, runtime_s=elapsed)
+        if summary.get("failed", 0) > 0:
+            console.print("[bold red]Top failure reasons[/bold red]:")
+            for reason, count in summary.get("failure_reasons", [])[:10]:
+                console.print(f"  [red]✗[/red] ({count}) [dim]{reason}[/dim]")
+    else:
+        print(json.dumps(summary, indent=2))
+        if summary.get("failed", 0) > 0:
+            print("\nTop failure reasons:")
+            for reason, count in summary.get("failure_reasons", [])[:10]:
+                print(f"- ({count}) {reason}")
 
     if summary.get("failed", 0) > 0:
-        print("\nTop failure reasons:")
-        for reason, count in summary.get("failure_reasons", [])[:10]:
-            print(f"- ({count}) {reason}")
         return 1
-
     return 0
 
 

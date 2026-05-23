@@ -9,9 +9,31 @@ import json
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from benchmark_runner import ScenarioResult, load_yaml, run_benchmarks, yaml
+
+# Onda 1.5: shared rich-based terminal UI.
+if TYPE_CHECKING:
+    from _console import (  # type: ignore[import-not-found]
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+
+try:
+    from _console import (  # type: ignore[import-not-found]
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+    _HAS_CONSOLE = True
+except ImportError:  # pragma: no cover
+    _HAS_CONSOLE = False
 
 STRESS_SCHEMA_VERSION = "pulsim-stress-v1"
 
@@ -204,11 +226,45 @@ def evaluate_tier_results(
     )
 
 
+def count_stress_scenarios(
+    benchmarks_manifest_path: Path,
+    stress_catalog_path: Path,
+    selected_tiers: Optional[Sequence[str]] = None,
+) -> int:
+    """Pre-compute total scenario count across the requested tiers so a
+    progress bar knows its denominator before any work starts."""
+    catalog = load_yaml(stress_catalog_path)
+    tiers = catalog.get("tiers", {})
+    if not isinstance(tiers, dict) or not tiers:
+        return 0
+    base_manifest, benchmark_index = build_benchmark_index(benchmarks_manifest_path)
+    requested = set(selected_tiers) if selected_tiers else None
+    total = 0
+    for tier_name, tier_data in tiers.items():
+        if requested is not None and tier_name not in requested:
+            continue
+        if not isinstance(tier_data, dict):
+            continue
+        cases = tier_data.get("cases", [])
+        if not isinstance(cases, list) or not cases:
+            continue
+        try:
+            tier_manifest = build_tier_manifest(base_manifest, benchmark_index, cases)
+        except Exception:
+            continue
+        for entry in tier_manifest.get("benchmarks", []):
+            scen = entry.get("scenarios", ["default"])
+            if isinstance(scen, list):
+                total += len(scen)
+    return total
+
+
 def run_stress_suite(
     benchmarks_manifest_path: Path,
     stress_catalog_path: Path,
     output_dir: Path,
     selected_tiers: Optional[Sequence[str]] = None,
+    progress: Optional[Any] = None,
 ) -> List[TierRunResult]:
     catalog = load_yaml(stress_catalog_path)
     tiers = catalog.get("tiers", {})
@@ -256,6 +312,7 @@ def run_stress_suite(
                 selected=None,
                 matrix=False,
                 generate_baselines=False,
+                progress=progress,
             )
         finally:
             if tmp_manifest_path is not None:
@@ -359,14 +416,50 @@ def main() -> int:
     parser.add_argument("--catalog", type=Path, default=Path(__file__).with_name("stress_catalog.yaml"))
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/stress_out"))
     parser.add_argument("--tier", action="append", default=None, help="Run only selected tier (repeatable)")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Disable rich terminal UI. JSON summary still emitted.",
+    )
     args = parser.parse_args()
 
-    tier_runs = run_stress_suite(
-        benchmarks_manifest_path=args.benchmarks.resolve(),
-        stress_catalog_path=args.catalog.resolve(),
-        output_dir=args.output_dir,
-        selected_tiers=args.tier,
-    )
+    use_ui = _HAS_CONSOLE and not args.quiet
+    console = _make_console(force_plain=args.quiet) if use_ui else None
+    if console is not None:
+        tiers_label = ",".join(args.tier) if args.tier else "all"
+        _print_environment_header(
+            console,
+            title="Pulsim Bench — stress",
+            extra={"catalog": str(args.catalog), "tiers": tiers_label},
+        )
+
+    elapsed: Optional[float] = None
+    if console is not None:
+        try:
+            total = count_stress_scenarios(
+                args.benchmarks.resolve(),
+                args.catalog.resolve(),
+                selected_tiers=args.tier,
+            )
+        except Exception:
+            total = 0
+        with _BenchProgress(console, total=total, description="stress") as prog:
+            tier_runs = run_stress_suite(
+                benchmarks_manifest_path=args.benchmarks.resolve(),
+                stress_catalog_path=args.catalog.resolve(),
+                output_dir=args.output_dir,
+                selected_tiers=args.tier,
+                progress=prog,
+            )
+            elapsed = prog.elapsed_s
+    else:
+        tier_runs = run_stress_suite(
+            benchmarks_manifest_path=args.benchmarks.resolve(),
+            stress_catalog_path=args.catalog.resolve(),
+            output_dir=args.output_dir,
+            selected_tiers=args.tier,
+        )
+
     write_stress_artifacts(args.output_dir, tier_runs)
 
     summary = {
@@ -375,7 +468,39 @@ def main() -> int:
         "tiers_passed": sum(1 for item in tier_runs if item.evaluation.status == "passed"),
         "tiers_failed": sum(1 for item in tier_runs if item.evaluation.status == "failed"),
     }
-    print(json.dumps(summary, indent=2))
+
+    if console is not None:
+        # Flatten one row per tier with the eval-summary fields the
+        # shared printer recognises (benchmark_id/scenario/status/...).
+        tier_rows = [
+            {
+                "benchmark_id": tr.tier,
+                "scenario": "(tier)",
+                "status": tr.evaluation.status,
+                "runtime_s": tr.evaluation.max_runtime_s_observed or 0.0,
+                "max_error": tr.evaluation.max_max_error_observed,
+                "steps": tr.evaluation.total,
+                "message": tr.evaluation.message,
+            }
+            for tr in tier_runs
+        ]
+        _print_results_table(console, tier_rows, title="Stress Tiers")
+        all_scenarios = [
+            {
+                "benchmark_id": r.benchmark_id,
+                "scenario": r.scenario,
+                "status": r.status,
+                "runtime_s": r.runtime_s,
+                "max_error": r.max_error,
+                "message": r.message,
+            }
+            for tr in tier_runs
+            for r in tr.results
+        ]
+        _print_results_summary(console, all_scenarios, runtime_s=elapsed)
+    else:
+        print(json.dumps(summary, indent=2))
+
     return 0
 
 

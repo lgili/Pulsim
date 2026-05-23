@@ -14,7 +14,7 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from benchmark_runner import (
     apply_runtime_defaults,
@@ -27,6 +27,28 @@ from benchmark_runner import (
     run_pulsim,
     yaml,
 )
+
+# Onda 1.5: shared rich-based terminal UI.
+if TYPE_CHECKING:
+    from _console import (  # type: ignore[import-not-found]
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+
+try:
+    from _console import (  # type: ignore[import-not-found]
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+    _HAS_CONSOLE = True
+except ImportError:  # pragma: no cover
+    _HAS_CONSOLE = False
 
 PARITY_SCHEMA_VERSION = "pulsim-parity-v1"
 SUPPORTED_BACKENDS = {"ngspice", "ltspice"}
@@ -1094,6 +1116,37 @@ def _resolve_spice_netlist(
     return None
 
 
+def count_parity_scenarios(
+    manifest_path: Path,
+    only: Optional[List[str]] = None,
+    matrix: bool = False,
+    force_scenario: Optional[str] = None,
+) -> int:
+    """Pre-compute the parity scenario count so a progress bar knows its
+    denominator. Mirrors the filtering of `run_manifest`."""
+    manifest = load_yaml(manifest_path)
+    scenarios = manifest.get("scenarios", {})
+    total = 0
+    for entry in manifest.get("benchmarks", []):
+        circuit_path = (manifest_path.parent / entry["path"]).resolve()
+        try:
+            netlist = load_yaml(circuit_path)
+        except Exception:
+            continue
+        bench_meta = netlist.get("benchmark", {})
+        benchmark_id = bench_meta.get("id", circuit_path.stem)
+        if only and benchmark_id not in only:
+            continue
+        if force_scenario:
+            scenario_names = [force_scenario]
+        elif matrix:
+            scenario_names = list(scenarios.keys())
+        else:
+            scenario_names = entry.get("scenarios", ["default"])
+        total += len(scenario_names)
+    return total
+
+
 def run_manifest(
     manifest_path: Path,
     output_dir: Path,
@@ -1105,10 +1158,26 @@ def run_manifest(
     ngspice_executable: Optional[Path] = None,
     ltspice_executable: Optional[Path] = None,
     backend_args: Optional[List[str]] = None,
+    progress: Optional[Any] = None,
 ) -> List[BenchmarkResult]:
     manifest = load_yaml(manifest_path)
     scenarios = manifest.get("scenarios", {})
     results: List[BenchmarkResult] = []
+
+    def _emit_progress_for_last() -> None:
+        """Stream the most recently appended parity result to the UI.
+        Safe no-op when `progress is None`."""
+        if progress is None or not results:
+            return
+        last = results[-1]
+        progress.case_done(
+            benchmark_id=last.benchmark_id,
+            scenario=last.scenario,
+            status=last.status,
+            runtime_s=float(last.pulsim_runtime_s or 0.0),
+            max_error=last.max_error,
+            message=last.message,
+        )
 
     backend_config = resolve_backend_config(
         backend=backend,
@@ -1163,10 +1232,11 @@ def run_manifest(
                         benchmark_id=benchmark_id,
                         scenario=scenario_name,
                         backend=backend,
-                        message=backend_config.error,
+                        message=backend_config.error or "backend configuration error",
                         failure_reason="configuration_error",
                     )
                 )
+                _emit_progress_for_last()
             continue
 
         if not spice_rel:
@@ -1187,6 +1257,7 @@ def run_manifest(
                 if status == "skipped":
                     entry_result.failure_reason = None
                 results.append(entry_result)
+                _emit_progress_for_last()
             continue
 
         spice_path = (manifest_path.parent / spice_rel).resolve()
@@ -1201,6 +1272,7 @@ def run_manifest(
                         failure_reason="mapping_error",
                     )
                 )
+                _emit_progress_for_last()
             continue
 
         if not observable_specs:
@@ -1218,9 +1290,12 @@ def run_manifest(
                 if status == "skipped":
                     entry_result.failure_reason = None
                 results.append(entry_result)
+                _emit_progress_for_last()
             continue
 
         for scenario_name in scenario_names:
+            if progress is not None:
+                progress.case_start(f"{benchmark_id} · {scenario_name}")
             scenario_override = scenarios.get(scenario_name, {})
             scenario_netlist = deep_merge(netlist, scenario_override)
             preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
@@ -1258,6 +1333,7 @@ def run_manifest(
                     failure_reason="runtime_error",
                 )
             results.append(result)
+            _emit_progress_for_last()
 
     return results
 
@@ -1383,6 +1459,11 @@ def main() -> int:
     )
     parser.add_argument("--pulsim-netlist", type=Path, default=None, help="Single mode: Pulsim YAML netlist")
     parser.add_argument("--spice-netlist", type=Path, default=None, help="Single mode: SPICE netlist")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Disable rich terminal UI. JSON summary still emitted.",
+    )
     args = parser.parse_args()
 
     if yaml is None:
@@ -1400,6 +1481,19 @@ def main() -> int:
         backend_args=args.backend_arg,
     )
 
+    use_ui = _HAS_CONSOLE and not args.quiet
+    console = _make_console(force_plain=args.quiet) if use_ui else None
+    if console is not None:
+        _print_environment_header(
+            console,
+            title=f"Pulsim Bench — parity ({args.backend})",
+            extra={
+                "backend": args.backend,
+                "executable": str(backend_config.executable) if backend_config.executable else "—",
+            },
+        )
+
+    elapsed: Optional[float] = None
     if args.pulsim_netlist is not None or args.spice_netlist is not None:
         if args.pulsim_netlist is None or args.spice_netlist is None:
             raise SystemExit("Single mode requires both --pulsim-netlist and --spice-netlist")
@@ -1411,6 +1505,31 @@ def main() -> int:
             backend=args.backend,
             backend_config=backend_config,
         )
+    elif console is not None:
+        try:
+            total = count_parity_scenarios(
+                args.benchmarks.resolve(),
+                only=args.only,
+                matrix=args.matrix,
+                force_scenario=args.scenario,
+            )
+        except Exception:
+            total = 0
+        with _BenchProgress(console, total=total, description=f"parity-{args.backend}") as prog:
+            results = run_manifest(
+                manifest_path=args.benchmarks.resolve(),
+                output_dir=args.output_dir,
+                only=args.only,
+                matrix=args.matrix,
+                force_scenario=args.scenario,
+                cli_observables=args.observable,
+                backend=args.backend,
+                ngspice_executable=args.ngspice_exe,
+                ltspice_executable=args.ltspice_exe,
+                backend_args=args.backend_arg,
+                progress=prog,
+            )
+            elapsed = prog.elapsed_s
     else:
         results = run_manifest(
             manifest_path=args.benchmarks.resolve(),
@@ -1438,7 +1557,28 @@ def main() -> int:
         "total": len(results),
         "backend": args.backend,
     }
-    print(json.dumps(summary, indent=2))
+
+    if console is not None:
+        # BenchmarkResult exposes pulsim_runtime_s / ngspice_runtime_s
+        # rather than the runtime_s column the shared printer expects.
+        # Flatten into the printer's vocabulary.
+        rows = [
+            {
+                "benchmark_id": r.benchmark_id,
+                "scenario": r.scenario,
+                "status": r.status,
+                "runtime_s": float(r.pulsim_runtime_s or 0.0),
+                "max_error": r.max_error,
+                "steps": int(r.pulsim_steps or 0),
+                "message": r.message,
+            }
+            for r in results
+        ]
+        _print_results_table(console, rows, title=f"Parity Results — {args.backend}")
+        _print_results_summary(console, rows, runtime_s=elapsed)
+    else:
+        print(json.dumps(summary, indent=2))
+
     return 0
 
 

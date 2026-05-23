@@ -10,7 +10,7 @@ import math
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 try:
     import yaml
@@ -25,6 +25,34 @@ except ImportError:  # pragma: no cover - local import fallback
     python_backend_error = None
     python_backend_available = None
     run_pulsim_python = None
+
+# Onda 1 of the bench-tool refresh: optional rich-based terminal UI.
+# `benchmarks/_console.py` exposes BenchProgress + rendering helpers
+# with a plain-text fallback when rich is unavailable. Keeping the
+# import optional means CI environments without rich (and embedded
+# callers like local_limit_suite.py) keep working unchanged.
+if TYPE_CHECKING:
+    # Always visible to type-checkers so the call sites below resolve
+    # even when the runtime import path fails on a minimal env.
+    from _console import (
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+
+try:
+    from _console import (
+        BenchProgress as _BenchProgress,
+        make_console as _make_console,
+        print_environment_header as _print_environment_header,
+        print_results_summary as _print_results_summary,
+        print_results_table as _print_results_table,
+    )
+    _HAS_CONSOLE = True
+except ImportError:  # pragma: no cover
+    _HAS_CONSOLE = False
 
 
 @dataclass
@@ -343,6 +371,35 @@ def apply_validation_window(
     return filtered_times, filtered_values
 
 
+def count_scenarios(
+    benchmarks_path: Path,
+    selected: Optional[List[str]] = None,
+    matrix: bool = False,
+    scenario_filter: Optional[List[str]] = None,
+) -> int:
+    """Pre-compute the total scenario count so a progress bar knows its
+    denominator. Mirrors the filtering logic of `run_benchmarks`."""
+    manifest = load_yaml(benchmarks_path)
+    scenarios = manifest.get("scenarios", {})
+    total = 0
+    for entry in manifest.get("benchmarks", []):
+        circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
+        try:
+            netlist = load_yaml(circuit_path)
+        except Exception:
+            continue
+        bench_meta = netlist.get("benchmark", {})
+        benchmark_id = bench_meta.get("id", circuit_path.stem)
+        if selected and benchmark_id not in selected:
+            continue
+        scenario_names = list(scenarios.keys()) if matrix else entry.get("scenarios", ["default"])
+        if scenario_filter:
+            allow = set(scenario_filter)
+            scenario_names = [n for n in scenario_names if n in allow]
+        total += len(scenario_names)
+    return total
+
+
 def run_benchmarks(
     benchmarks_path: Path,
     output_dir: Path,
@@ -352,10 +409,32 @@ def run_benchmarks(
     simulation_overrides: Optional[Dict[str, Any]] = None,
     scenario_filter: Optional[List[str]] = None,
     adaptive_dt_max_factor: Optional[float] = None,
+    progress: Optional[Any] = None,
 ) -> List[ScenarioResult]:
+    """Execute the benchmark matrix and return per-scenario results.
+
+    `progress`: optional `BenchProgress` (from `_console`) for live
+    terminal output. When `None` the function is silent — callers like
+    `local_limit_suite.py` keep working unchanged.
+    """
     manifest = load_yaml(benchmarks_path)
     scenarios = manifest.get("scenarios", {})
     results: List[ScenarioResult] = []
+
+    def _emit_progress_for_last() -> None:
+        """Tell the progress UI the most recently appended result is
+        done. Safe to call when `progress is None` (no-op)."""
+        if progress is None or not results:
+            return
+        last = results[-1]
+        progress.case_done(
+            benchmark_id=last.benchmark_id,
+            scenario=last.scenario,
+            status=last.status,
+            runtime_s=last.runtime_s,
+            max_error=last.max_error,
+            message=last.message,
+        )
 
     for entry in manifest.get("benchmarks", []):
         circuit_path = (benchmarks_path.parent / entry["path"]).resolve()
@@ -375,6 +454,8 @@ def run_benchmarks(
             scenarios["default"] = {}
 
         for scenario_name in scenario_names:
+            if progress is not None:
+                progress.case_start(f"{benchmark_id} · {scenario_name}")
             scenario_override = scenarios.get(scenario_name, {})
             scenario_netlist = deep_merge(netlist, scenario_override)
             preferred_mode = infer_preferred_mode(scenario_name, scenario_override)
@@ -449,6 +530,7 @@ def run_benchmarks(
                             telemetry={},
                         )
                     )
+                    _emit_progress_for_last()
                     continue
 
                 status = "passed"
@@ -831,6 +913,7 @@ def run_benchmarks(
                         kpis=kpis,
                     )
                 )
+                _emit_progress_for_last()
 
     return results
 
@@ -898,6 +981,12 @@ def main() -> int:
     parser.add_argument("--force-adaptive", action="store_true",
                         help="Force simulation.step_mode=variable (legacy alias: was --force-adaptive)")
     parser.add_argument("--scenario-filter", nargs="*", help="Run only selected scenarios")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Disable rich terminal UI (header, progress, table). Useful for CI logs; "
+             "results are still written to disk and the final JSON summary is printed.",
+    )
     args = parser.parse_args()
 
     if yaml is None:
@@ -917,15 +1006,50 @@ def main() -> int:
             f"Reason: {backend_reason}"
         )
 
-    results = run_benchmarks(
-        args.benchmarks,
-        args.output_dir,
-        selected=args.only,
-        matrix=args.matrix,
-        generate_baselines=args.generate_baselines,
-        simulation_overrides={"step_mode": "variable"} if args.force_adaptive else None,
-        scenario_filter=args.scenario_filter,
-    )
+    use_ui = _HAS_CONSOLE and not args.quiet
+    console = _make_console(force_plain=args.quiet) if use_ui else None
+    if console is not None:
+        _print_environment_header(console, title="Pulsim Bench — runner")
+
+    total = 0
+    progress_ctx = None
+    if console is not None:
+        try:
+            total = count_scenarios(
+                args.benchmarks,
+                selected=args.only,
+                matrix=args.matrix,
+                scenario_filter=args.scenario_filter,
+            )
+        except Exception:
+            total = 0
+        progress_ctx = _BenchProgress(console, total=total, description="benchmarks")
+
+    if progress_ctx is not None:
+        with progress_ctx as prog:
+            results = run_benchmarks(
+                args.benchmarks,
+                args.output_dir,
+                selected=args.only,
+                matrix=args.matrix,
+                generate_baselines=args.generate_baselines,
+                simulation_overrides={"step_mode": "variable"} if args.force_adaptive else None,
+                scenario_filter=args.scenario_filter,
+                progress=prog,
+            )
+            elapsed = prog.elapsed_s
+    else:
+        results = run_benchmarks(
+            args.benchmarks,
+            args.output_dir,
+            selected=args.only,
+            matrix=args.matrix,
+            generate_baselines=args.generate_baselines,
+            simulation_overrides={"step_mode": "variable"} if args.force_adaptive else None,
+            scenario_filter=args.scenario_filter,
+        )
+        elapsed = None
+
     write_results(args.output_dir, results)
 
     summary = {
@@ -934,7 +1058,13 @@ def main() -> int:
         "skipped": sum(1 for item in results if item.status == "skipped"),
         "baseline": sum(1 for item in results if item.status == "baseline"),
     }
-    print(json.dumps(summary, indent=2))
+
+    if console is not None:
+        _print_results_table(console, results, title="Benchmark Results")
+        _print_results_summary(console, results, runtime_s=elapsed)
+    else:
+        print(json.dumps(summary, indent=2))
+
     return 0
 
 
