@@ -228,6 +228,13 @@ from .mmc import (
     ps_pwm_switching_function,
     mmc_arm_multilevel_step,
     simulate_mmc_arm_multilevel,
+    # L2 SM-equivalent arm (dead-time aware) — Phase 20.6.
+    MmcArmEquivalentParams,
+    MmcArmEquivalentState,
+    MmcArmEquivalentResult,
+    make_l2_state,
+    mmc_arm_equivalent_step,
+    simulate_mmc_arm_equivalent,
 )
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
@@ -407,6 +414,13 @@ __all__ = [
     "ps_pwm_switching_function",
     "mmc_arm_multilevel_step",
     "simulate_mmc_arm_multilevel",
+    # MMC L2 — SM-equivalent (dead-time + min-pulse-width).
+    "MmcArmEquivalentParams",
+    "MmcArmEquivalentState",
+    "MmcArmEquivalentResult",
+    "make_l2_state",
+    "mmc_arm_equivalent_step",
+    "simulate_mmc_arm_equivalent",
 ]
 
 if _HAS_SCOPE:

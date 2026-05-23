@@ -77,6 +77,13 @@ __all__ = [
     "ps_pwm_switching_function",
     "mmc_arm_multilevel_step",
     "simulate_mmc_arm_multilevel",
+    # L2 SM-equivalent (dead-time aware) — Phase 20.6.
+    "MmcArmEquivalentParams",
+    "MmcArmEquivalentState",
+    "MmcArmEquivalentResult",
+    "make_l2_state",
+    "mmc_arm_equivalent_step",
+    "simulate_mmc_arm_equivalent",
 ]
 
 
@@ -1084,6 +1091,356 @@ def simulate_mmc_arm_multilevel(
         v_b=v_b_arr,
         m_ref=m_ref_arr,
         s_b=s_b_arr,
+        i_b=i_b_arr,
+        params=params,
+    )
+
+
+# ======================================================================
+# L2 — SM-equivalent arm model (dead-time + current-direction routing)
+# ======================================================================
+#
+# Thesis sec 3.4.2 (eqs 3.95–3.99). Adds two pieces of realism on top
+# of L1:
+#
+# 1. **Dead-time** between the complementary switches of every SM.
+#    After each PS-PWM edge, the SM enters a free-wheel state (both
+#    switches off) for ``t_dead`` seconds. During that window the
+#    arm current is routed through one of the SM's body diodes:
+#
+#       * i_b > 0 ⇒ S2's body diode conducts ⇒ SM is *bypassed*
+#         (effective v_SM = 0).
+#       * i_b < 0 ⇒ S1's body diode conducts ⇒ SM is *inserted*
+#         (effective v_SM = v_C_SM).
+#
+#    The L0 dynamics then take the form
+#
+#       m_b_eff(t) = (s_w(t) + s_u(t) · 1[i_b(t) < 0]) / N
+#       v_b(t)     = m_b_eff(t) · v_C(t)
+#       dv_C/dt    = m_b_eff(t) · i_b(t) / C_arm                 (3.99 simplified)
+#
+#    where ``s_w`` is the count of fully-inserted SMs (S1 closed) and
+#    ``s_u`` is the count of free-wheeling SMs (both switches open).
+#
+# 2. **Minimum pulse width** ``t_min`` (the IGBT spec). Optional —
+#    suppresses any per-SM toggle that would occur within ``t_min``
+#    of the previous toggle of the same SM.
+#
+# The L2 model still carries **one state per arm** (``v_C``) but
+# bookkeeps N · {S1 bit, S2 bit, last-toggle time} *internally* so
+# the next step can resolve dead-time / min-pulse-width events. We do
+# not expose a custom auxiliary-supply load (``p_aux`` in the thesis)
+# at this layer — it is a constant-power loss that can be added as a
+# parallel resistor ``r_p`` instead.
+
+
+@dataclass(frozen=True)
+class MmcArmEquivalentParams:
+    """Configuration for the L2 SM-equivalent arm model.
+
+    Adds dead-time and minimum-pulse-width parameters to L1's set.
+
+    Attributes:
+        n_sm: Number of submodules per arm (≥ 1).
+        c_sm: Per-SM capacitance [F]. ``C_arm = c_sm / n_sm``.
+        sm_type: ``"half_bridge"``. Full-bridge L2 is a follow-up
+            (the dead-time bookkeeping doubles per FB SM).
+        v_c0: Initial capacitor-sum voltage [V].
+        r_p: Optional parallel loss resistance [Ω].
+        f_carrier: PS-PWM carrier frequency per SM [Hz].
+        t_dead: Dead-time between complementary switches [s]. Set to
+            ``0`` to degenerate L2 → L1.
+        t_min: Minimum pulse width [s]. Toggles that would happen
+            within ``t_min`` of the previous toggle of the same SM
+            are suppressed. Default ``0`` (no min-pulse-width).
+    """
+
+    n_sm: int
+    c_sm: float
+    sm_type: SubmoduleType = "half_bridge"
+    v_c0: float = 0.0
+    r_p: float | None = None
+    f_carrier: float = 1000.0
+    t_dead: float = 0.0
+    t_min: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.n_sm < 1:
+            raise ValueError(f"n_sm must be ≥ 1 (got {self.n_sm})")
+        if self.c_sm <= 0:
+            raise ValueError(f"c_sm must be > 0 (got {self.c_sm})")
+        if self.sm_type != "half_bridge":
+            raise ValueError(
+                f"L2 ships half-bridge only for now "
+                f"(got {self.sm_type!r}); full-bridge is a follow-up",
+            )
+        if self.r_p is not None and self.r_p <= 0:
+            raise ValueError(f"r_p must be > 0 when set (got {self.r_p})")
+        if self.f_carrier <= 0:
+            raise ValueError(
+                f"f_carrier must be > 0 (got {self.f_carrier})",
+            )
+        if self.t_dead < 0:
+            raise ValueError(f"t_dead must be ≥ 0 (got {self.t_dead})")
+        if self.t_min < 0:
+            raise ValueError(f"t_min must be ≥ 0 (got {self.t_min})")
+
+    @property
+    def c_arm(self) -> float:
+        return self.c_sm / self.n_sm
+
+    @property
+    def f_switch(self) -> float:
+        return self.n_sm * self.f_carrier
+
+    @property
+    def m_min(self) -> float:
+        return 0.0
+
+    @property
+    def m_max(self) -> float:
+        return 1.0
+
+
+@dataclass
+class MmcArmEquivalentState:
+    """Mutable per-step state for the L2 arm.
+
+    Internally tracks each SM's two-switch state plus the last-toggle
+    time (for min-pulse-width enforcement). Use :func:`make_l2_state`
+    to construct a fresh state from a params object.
+
+    Attributes:
+        v_C: Arm-equivalent capacitor-sum voltage [V].
+        bit_s1: Length-N ``int8`` array — S1 (top switch) on/off per SM.
+        bit_s2: Length-N ``int8`` array — S2 (bottom switch) on/off per SM.
+        in_dead_time_until: Length-N ``float64`` array — if positive,
+            the SM is in dead-time until this absolute time; else
+            ``-inf``.
+        last_toggle_time: Length-N ``float64`` array — time of the
+            *most recent* successful toggle of S1 (for min-pulse-width).
+    """
+
+    v_C: float
+    bit_s1: np.ndarray
+    bit_s2: np.ndarray
+    in_dead_time_until: np.ndarray
+    last_toggle_time: np.ndarray
+
+
+def make_l2_state(params: MmcArmEquivalentParams) -> MmcArmEquivalentState:
+    """Construct a fresh L2 arm state seeded at ``params.v_c0``.
+
+    All SMs start *bypassed* (S1=0, S2=1) with no pending dead-time.
+    """
+    n = params.n_sm
+    return MmcArmEquivalentState(
+        v_C=float(params.v_c0),
+        bit_s1=np.zeros(n, dtype=np.int8),
+        bit_s2=np.ones(n, dtype=np.int8),
+        in_dead_time_until=np.full(n, -np.inf, dtype=np.float64),
+        last_toggle_time=np.full(n, -np.inf, dtype=np.float64),
+    )
+
+
+def _ps_pwm_targets(
+    m_ref: float, t: float, n_sm: int, f_carrier: float,
+) -> np.ndarray:
+    """Per-SM PS-PWM target bits at time t. Returns ``int8`` array."""
+    m = max(0.0, min(1.0, m_ref))
+    targets = np.zeros(n_sm, dtype=np.int8)
+    for k in range(n_sm):
+        phase = (t * f_carrier + k / n_sm) % 1.0
+        tri = 2.0 * phase if phase < 0.5 else 2.0 * (1.0 - phase)
+        if m > tri:
+            targets[k] = 1
+    return targets
+
+
+def mmc_arm_equivalent_step(
+    state: MmcArmEquivalentState,
+    m_ref: float,
+    i_b: float,
+    dt: float,
+    t: float,
+    params: MmcArmEquivalentParams,
+) -> "tuple[float, int, int]":
+    """Advance the L2 SM-equivalent arm by one forward-Euler step.
+
+    Mutates ``state`` in place (advances ``state.v_C`` and the
+    per-SM switching arrays).
+
+    Args:
+        state: Live L2 state (see :func:`make_l2_state`).
+        m_ref: Reference modulation index ``∈ [0, 1]``.
+        i_b: Arm current [A] — sign determines free-wheel routing.
+        dt: Time step [s] (> 0).
+        t: Current time [s].
+        params: Arm configuration (dead-time, min-pulse-width, …).
+
+    Returns:
+        ``(v_b, s_w, s_u)``:
+            * ``v_b`` — arm-generated voltage at this step [V].
+            * ``s_w`` — number of "defined inserted" SMs (S1 closed).
+            * ``s_u`` — number of free-wheeling SMs (both off).
+
+    Notes:
+        ``dt`` must satisfy
+        ``dt ≤ min(t_dead, 1/(N·f_carrier)/10)`` to resolve dead-time
+        events. Coarser ``dt`` collapses the dead-time effect.
+    """
+    if dt <= 0:
+        raise ValueError(f"dt must be > 0 (got {dt})")
+
+    n = params.n_sm
+    targets = _ps_pwm_targets(m_ref, t, n, params.f_carrier)
+
+    # --- Per-SM state machine ---
+    for k in range(n):
+        if state.in_dead_time_until[k] > 0 and t >= state.in_dead_time_until[k]:
+            # Dead-time elapsed → commit the toggle. The target at
+            # this exact moment becomes the new s1; s2 is its complement.
+            state.bit_s1[k] = targets[k]
+            state.bit_s2[k] = 1 - targets[k]
+            state.in_dead_time_until[k] = -np.inf
+        elif state.in_dead_time_until[k] <= 0:
+            # Not currently in dead-time — check whether a toggle is needed.
+            if int(targets[k]) != int(state.bit_s1[k]):
+                # Min-pulse-width guard: suppress if too soon.
+                if params.t_min > 0 and (
+                    t - state.last_toggle_time[k] < params.t_min
+                ):
+                    continue  # suppress this toggle
+                # Begin dead-time: open both switches.
+                state.bit_s1[k] = 0
+                state.bit_s2[k] = 0
+                state.in_dead_time_until[k] = t + params.t_dead
+                state.last_toggle_time[k] = t
+                # If t_dead == 0, the transition completes at this same
+                # instant — emulate by committing here.
+                if params.t_dead == 0.0:
+                    state.bit_s1[k] = targets[k]
+                    state.bit_s2[k] = 1 - targets[k]
+                    state.in_dead_time_until[k] = -np.inf
+
+    s_w = int(state.bit_s1.sum())
+    s_u = int(((state.bit_s1 == 0) & (state.bit_s2 == 0)).sum())
+
+    # Free-wheel SMs route current through the body diodes:
+    #   i_b > 0 ⇒ D2 conducts ⇒ SM bypassed (v_SM = 0)
+    #   i_b < 0 ⇒ D1 conducts ⇒ SM inserted (v_SM = v_C_SM)
+    s_eff = s_w + (s_u if i_b < 0 else 0)
+    m_b_eff = s_eff / float(n)
+    v_b = m_b_eff * state.v_C
+
+    leak = (state.v_C / params.r_p) if params.r_p is not None else 0.0
+    dv_dt = (m_b_eff * i_b - leak) / params.c_arm
+    state.v_C = state.v_C + dt * dv_dt
+    return v_b, s_w, s_u
+
+
+@dataclass(frozen=True)
+class MmcArmEquivalentResult:
+    """Output of :func:`simulate_mmc_arm_equivalent`."""
+
+    t: np.ndarray
+    v_C: np.ndarray
+    v_b: np.ndarray
+    m_ref: np.ndarray
+    s_w: np.ndarray
+    s_u: np.ndarray
+    i_b: np.ndarray
+    params: MmcArmEquivalentParams = field(repr=False)
+
+
+def simulate_mmc_arm_equivalent(
+    *,
+    duration: float,
+    dt: float,
+    m_ref: float | Callable[[float], float],
+    i_b: float | Callable[[float], float],
+    params: MmcArmEquivalentParams,
+) -> MmcArmEquivalentResult:
+    """Run the L2 SM-equivalent arm model over ``[0, duration]``.
+
+    Args:
+        duration: Simulation length [s] (must be > 0).
+        dt: Fixed time step [s]. To resolve dead-time the step must
+            be smaller than ``t_dead`` (and the PS-PWM resolution).
+        m_ref: Reference modulation index. Scalar or callable.
+        i_b: Arm current [A]. Scalar or callable.
+        params: Arm configuration.
+
+    Returns:
+        :class:`MmcArmEquivalentResult` carrying the full trajectories
+        including the running (s_w, s_u) histories.
+    """
+    if duration <= 0:
+        raise ValueError(f"duration must be > 0 (got {duration})")
+    if dt <= 0 or dt > duration:
+        raise ValueError(f"dt must be in (0, duration] (got {dt})")
+    if not callable(m_ref):
+        m0 = float(m_ref)
+        if m0 < params.m_min or m0 > params.m_max:
+            raise ValueError(
+                f"m_ref={m0:.4f} outside valid range "
+                f"[{params.m_min}, {params.m_max}]",
+            )
+
+    m_ref_fn = (
+        (lambda _t, _v=float(m_ref): _v)
+        if not callable(m_ref) else m_ref
+    )
+    i_b_fn = (
+        (lambda _t, _v=float(i_b): _v)
+        if not callable(i_b) else i_b
+    )
+
+    n_steps = int(np.floor(duration / dt))
+    n_points = n_steps + 1
+    t_arr = np.arange(n_points) * dt
+
+    state = make_l2_state(params)
+
+    v_C_arr = np.zeros(n_points)
+    v_b_arr = np.zeros(n_points)
+    m_ref_arr = np.zeros(n_points)
+    s_w_arr = np.zeros(n_points, dtype=np.int64)
+    s_u_arr = np.zeros(n_points, dtype=np.int64)
+    i_b_arr = np.zeros(n_points)
+
+    for k, tk in enumerate(t_arr):
+        m_k = float(m_ref_fn(tk))
+        i_k = float(i_b_fn(tk))
+        m_ref_arr[k] = m_k
+        i_b_arr[k] = i_k
+        v_C_arr[k] = state.v_C
+        if k < n_points - 1:
+            v_b, s_w, s_u = mmc_arm_equivalent_step(
+                state, m_k, i_k, dt, float(tk), params,
+            )
+            v_b_arr[k] = v_b
+            s_w_arr[k] = s_w
+            s_u_arr[k] = s_u
+        else:
+            # Compute v_b at the final sample without advancing v_C.
+            n = params.n_sm
+            s_w = int(state.bit_s1.sum())
+            s_u = int(
+                ((state.bit_s1 == 0) & (state.bit_s2 == 0)).sum()
+            )
+            s_eff = s_w + (s_u if i_k < 0 else 0)
+            v_b_arr[k] = (s_eff / n) * state.v_C
+            s_w_arr[k] = s_w
+            s_u_arr[k] = s_u
+
+    return MmcArmEquivalentResult(
+        t=t_arr,
+        v_C=v_C_arr,
+        v_b=v_b_arr,
+        m_ref=m_ref_arr,
+        s_w=s_w_arr,
+        s_u=s_u_arr,
         i_b=i_b_arr,
         params=params,
     )
