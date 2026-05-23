@@ -4,6 +4,38 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-05-23
+
+### Highlights — JOSS submission release
+
+This release marks the first version of Pulsim accompanied by a
+peer-reviewed publication. The accompanying paper has been submitted
+to the [Journal of Open Source Software (JOSS)](https://joss.theoj.org/);
+the source lives in [`artigos/01_joss_tool_paper/`](artigos/01_joss_tool_paper/).
+Once the JOSS paper is accepted, this version's DOI will be the
+canonical software citation.
+
+### Added
+
+- **`LICENSE`** at repo root — MIT text. The licence was previously
+  only declared in `pyproject.toml`; JOSS (and most academic
+  citation tools) require the licence file at the root.
+- **`CITATION.cff`** at repo root — Citation File Format v1.2.0
+  metadata for automatic citation generation by GitHub and tools
+  like `cffconvert`.
+- **`artigos/` directory** — paper sources for the Pulsim publication
+  campaign, with `README.md` documenting the 4-paper strategic plan
+  (JOSS tool paper → EPE-ECCE Europe 2026 conference →
+  IEEE Open Journal of Power Electronics methods paper →
+  IEEE TPEL / JESTPE application paper).
+
+### Fixed
+
+- **README quick-start example** — `p.scope(...)` updated to
+  `p.plot.scope(...)` to match the actual location of the plot
+  helper in the current Pulsim 1.x API. Verified end-to-end
+  against the installed package.
+
 ## [0.10.0] — 2026-05-19
 
 ### Highlights
