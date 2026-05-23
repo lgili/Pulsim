@@ -1,93 +1,120 @@
 # Build System
 
-> Status: build-bench helper shipped. Full bindings.cpp + modular-
-> CMake split is the mechanical follow-up that benefits from the
-> baseline this change establishes.
+Pulsim is built with CMake. The kernel itself is **header-only**, so
+everything except the Python extension is a chain of INTERFACE
+libraries + Catch2 test executables.
 
-`refactor-modular-build-split` Phase 1: a benchmark harness that
-measures Pulsim's clean + incremental rebuild wallclock so the
-mechanical bindings/modular-CMake split work that follows can prove
-a real wall-clock win.
+## Targets
 
-## TL;DR
-
-```bash
-python3 scripts/build_bench.py --build-dir build --target pulsim_tests
-```
-
-Sample output on Apple Silicon / AppleClang 17 / Release+LTO baseline:
-
-```
-Clean:        39.16 s
-Incremental:  26.13 s
-Ratio:        66.7 %
-```
-
-The Phase 2 target is ≤ 10 % incremental ratio — touching one
-device-header should not trigger half a clean build. Today's 67 %
-ratio is the baseline against which the planned split work will be
-measured.
-
-## What's in baseline today
-
-| Target | Translation units | Notes |
+| Target | Kind | Notes |
 |---|---|---|
-| `pulsim_core` | header-only | All v1/v2 device classes + frequency analysis + magnetic + catalog + templates + motors + grid sit here |
-| `pulsim` | 5 source files | `simulation.cpp`, `simulation_periodic.cpp`, `simulation_step.cpp`, `transient_services.cpp`, `yaml_parser.cpp` + `simulation_control.cpp` |
-| `pulsim_tests` | 21 source files | header-only tests (concepts, devices, stamps, frequency-analysis Phases 1-9, magnetic Phases 1-6, catalog Phases 1-8, motors, grid, robustness) |
-| `pulsim_simulation_tests` | 16 source files | tests that need the compiled `pulsim` lib (transient/PWL/buck benchmarks/AC sweep) |
-| `_pulsim` Python module | 1 source file (`bindings.cpp`, 2857 lines) | the canonical bottleneck — touching anything that bindings.cpp includes triggers a 30+ s rebuild on its own |
+| `pulsim::core` (alias for `pulsim_core`) | INTERFACE | The entire C++23 header tree under `core/include/pulsim/`. Carries the C++23 standard requirement plus `Eigen3::Eigen` + `yaml-cpp::yaml-cpp` + KLU (+ optional HYPRE) link lines. |
+| `pulsim_layer{0..5}_tests`, `pulsim_layer4_v{1..3}_tests`, `pulsim_layer5_v{1..4}_tests`, `pulsim_builder_tests`, `pulsim_yaml_tests`, `pulsim_showcase_tests`, `pulsim_sources_tests`, `pulsim_analysis_tests` | executable | Catch2 test binaries, one per layer / layer-milestone. Each links only `pulsim::core` + `Catch2::Catch2WithMain`. |
+| `_pulsim` | shared module | The pybind11 binding (`python/bindings.cpp`). Links `pulsim::core`; loaded by Python as `pulsim._pulsim`. |
 
-The largest leverage point is `bindings.cpp`: all category bindings
-(devices, control, simulation, parser, solver, frequency analysis,
-templates, motors, grid, ...) live in one TU. Splitting it into
-`bindings/devices.cpp`, `bindings/control.cpp`, etc., each calling
-into a `register_*(m)` function from a thin `bindings/main.cpp`,
-turns "edit one device → recompile bindings.cpp" (~35 s) into
-"recompile only the affected category file" (~5 s).
+Every test binary is registered with `catch_discover_tests(...)`, so
+`ctest` picks them up automatically.
 
-## Running the bench
+## Configure + build
 
 ```bash
-# Baseline (touch a leaf header):
-python3 scripts/build_bench.py --build-dir build --target pulsim_tests \
-    --touch-file core/include/pulsim/v1/numeric_types.hpp
+# Configure (Ninja recommended)
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPULSIM_BUILD_PYTHON=ON
 
-# After a bindings split: touching just one category file
-python3 scripts/build_bench.py --build-dir build --target _pulsim \
-    --touch-file python/bindings/devices.cpp \
-    --json bench.json
+# Build everything
+cmake --build build -j
+
+# Or build just one layer's test binary
+cmake --build build --target pulsim_layer4_tests
+
+# Run the full test harness
+ctest --test-dir build --output-on-failure
 ```
 
-The `--json` artifact is the CI-ratchet hook: regress past the
-recorded baseline by 10 % → fail the build. The CI integration is the
-deferred Phase 1.3 follow-up; the bench tool itself is final today.
+## Build options
 
-## Limitations / follow-ups
+| Option | Default | Effect |
+|---|---|---|
+| `PULSIM_BUILD_TESTS` | `ON` | Build the layer-by-layer Catch2 test binaries. |
+| `PULSIM_BUILD_PYTHON` | `OFF` | Build the `_pulsim` pybind11 extension (in `build/python/pulsim/`). |
+| `PULSIM_BUILD_BENCHMARKS` | `OFF` | Add the `benchmark_compile_time` custom target (clean rebuild timing). |
+| `PULSIM_ENABLE_LTO` | `ON` (Release) | Enable link-time optimization. |
+| `PULSIM_ENABLE_NATIVE` | `OFF` | `-march=native -mtune=native` (don't ship binaries built with this). |
+| `PULSIM_ENABLE_PGO_GENERATE` / `..._USE` | `OFF` | Two-pass PGO workflow (see comments in `CMakeLists.txt`). |
+| `PULSIM_SANITIZERS` | `OFF` | `-fsanitize=address,undefined` (works best with `Debug`). |
+| `PULSIM_USE_HYPRE` | `ON` | Pick up HYPRE AMG if it's installed (optional backend). |
 
-- **bindings.cpp split** (Phases 2-3 of the proposal): mechanical
-  refactor of 2857 lines into category files. Requires care to keep
-  the pybind11 module entry point + every type registration in the
-  right order (some types reference others' bindings during
-  registration). The bench harness is the prerequisite that lets us
-  measure the wall-clock win — without a baseline number the split
-  is blind. Tracked as the next change.
-- **Library-level split** (Phases 4-6 of the proposal): split the
-  `pulsim` static library into `pulsim_core` (no compiled deps) +
-  `pulsim_simulation` (Newton-DAE + LTE) + `pulsim_periodic`
-  (shooting, harmonic balance) — the Newton-DAE consumers pull a
-  smaller graph than today's monolith. Same prerequisite: baseline
-  bench numbers.
-- **CI ratchet**: emit the JSON artifact on every PR build and fail
-  if the incremental ratio regresses past N %. Pairs with the splits
-  above so the gate has somewhere to land.
-- **Unity builds opt-in**: CMake `set(CMAKE_UNITY_BUILD ON)` for
-  release-build CI runs that don't care about incremental rebuild;
-  trades incremental friendliness for ~ 30 % faster clean build.
+## Dependencies
 
-## See also
+All managed through `find_package` first, then `FetchContent` as a
+last resort:
 
-- [`backend-architecture.md`](backend-architecture.md) — the layered
-  TU graph the split work will follow.
-- The `python/bindings.cpp` file itself — start of the largest TU
-  in the project.
+- **Eigen 3.4+** — header-only. System install or fetched from
+  `https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz`.
+- **yaml-cpp 0.8.0** — fetched via `FetchContent` (small, no system
+  variant assumed). Forced to C++17 to dodge GCC 14 + libstdc++
+  regressions when compiled in C++23 mode.
+- **Catch2 v3.8.0+** — fetched. Only built when `PULSIM_BUILD_TESTS=ON`.
+  Same C++17 forcing as yaml-cpp.
+- **SuiteSparse / KLU** — required. System install preferred (`brew
+  install suite-sparse` on macOS, `apt install libsuitesparse-dev`
+  on Linux), falls back to building from source via `FetchContent`.
+- **HYPRE AMG** — optional. Picked up if installed.
+- **pybind11 ≥ 2.10** — only needed when `PULSIM_BUILD_PYTHON=ON`.
+  Picks up `find_package(pybind11)` first (typical when building via
+  `pip install` or `scikit-build-core`); falls back to `FetchContent`
+  pinned at `v2.12.0`.
+
+## Toolchain
+
+C++23 is non-negotiable. The detection in `CMakeLists.txt` warns
+(but does not fail) when:
+
+- AppleClang < 15.0 (Xcode 15+ recommended),
+- LLVM Clang < 17.0,
+- GCC < 13.0,
+- MSVC < 17.7.
+
+For an explicit Clang toolchain (auto-detects Homebrew LLVM on
+macOS, standard paths on Linux/Windows):
+
+```bash
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-clang.cmake
+```
+
+## Build performance
+
+Two knobs that move the needle:
+
+- **Ninja** — parallel scheduler is far better than Make for
+  templated code.
+- **LTO** — on by default in Release. Disabled automatically for
+  Linux Python builds (pybind11 thread-local-storage interaction).
+
+A `PULSIM_BUILD_BENCHMARKS=ON` configure adds the
+`benchmark_compile_time` target, which times a clean rebuild of
+the heaviest test binary (Layer 5 V4 — Newton in run_transient
+pulls the full template tree).
+
+## Editable Python install
+
+For local Python development without `pip install`:
+
+```bash
+cmake -S . -B build -DPULSIM_BUILD_PYTHON=ON
+cmake --build build -j
+export PYTHONPATH="$(pwd)/build/python:$PYTHONPATH"
+python3 -c "import pulsim as p; print(p.__version__)"
+```
+
+For a proper wheel build (used by `pip install .` and by CI):
+
+```bash
+pip install scikit-build-core pybind11
+pip install -e .         # editable; rebuilds on Python import
+```
+
+The wheel is driven by `pyproject.toml` + `scikit-build-core`,
+which runs the same top-level `CMakeLists.txt` with `SKBUILD=ON`.

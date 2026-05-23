@@ -45,7 +45,7 @@ Print a runnable code snippet:
 Calling with an unknown name prints the list of available snippets.
 
 ### `p.tour()`
-One-page walking tour of v2 — six steps from "build a circuit" to
+One-page walking tour of pulsim — six steps from "build a circuit" to
 "auto-tune from a measured Bode". Read top to bottom for the
 end-to-end story.
 
@@ -134,7 +134,7 @@ res = p.simulate(b, t_end=10e-3, dt=1e-7, switch_fn=pwm,
 #   [████████████████░░░░░░░░░░░░░░░░░░░░░░] 41 %   t=4.10 ms (0.8 s)
 ```
 
-Implementation: reuses the v2 `step_observer` callback. If you
+Implementation: reuses the `step_observer` callback. If you
 also pass your own `step_observer=...` (e.g. for a closed-loop PI),
 the progress observer wraps it transparently.
 

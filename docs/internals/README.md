@@ -1,88 +1,126 @@
-# Pulsim — clean-slate kernel
+# Pulsim — internal architecture
 
-`pulsim` is a parallel-namespace kernel rebuild started in May 2026
-to fix seven structural problems in `pulsim::v1` that incremental
-refactor could not address economically. See
-[../architecture-review-v1.md](../architecture-review-v1.md) for the
-detailed diagnosis.
+The Pulsim kernel is structured as **seven strictly-layered C++
+modules** under `core/include/pulsim/`. Each module:
+
+- Lives in its own subfolder (`numeric/`, `sparse/`, `topology/`,
+  `models/`, `stamping/`, `pwl/`, `solver/`, `builder/`, `yaml/`).
+- Depends only on layers strictly below it — compile-time enforced
+  through `#include` discipline.
+- Has its own Catch2 test binary (`pulsim_layerN_tests`) that links
+  only `pulsim::core` + Catch2.
+- Can be replaced wholesale without touching anything else.
+
+This page is the entry point for **understanding how the kernel is
+built**. End users don't need it — `docs/getting-started.md` and
+`docs/mental-model.md` are the public-facing intros. Read on if you
+want to extend the device library, port a new analysis, or audit
+the solver.
 
 ## Layered architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ Layer 6: Frontend  (Python bindings, YAML loader, schematic in)  │
+│ Layer 8: YAML loader        (yaml/loader.hpp)                    │
 ├──────────────────────────────────────────────────────────────────┤
-│ Layer 5: Solver  (per-step segment dispatch, Newton fallback)    │
+│ Layer 7: pybind11 binding   (python/bindings.cpp, outside core/) │
 ├──────────────────────────────────────────────────────────────────┤
-│ Layer 4: PWL State-Space Cache  (the PLECS-killer layer)         │
+│ Layer 6: Builder API        (builder/circuit_builder.hpp)        │
 ├──────────────────────────────────────────────────────────────────┤
-│ Layer 3: Stamping  (one generic stamper, AD-driven)              │
+│ Layer 5: Solver             (solver/run_transient.hpp + events)  │
 ├──────────────────────────────────────────────────────────────────┤
-│ Layer 2: Device Models  (math only, single source of truth, AD)  │
+│ Layer 4: PWL state-space    (pwl/cache.hpp — the PLECS killer)   │
 ├──────────────────────────────────────────────────────────────────┤
-│ Layer 1: Topology  (graph + switch combinatorics + enumeration)  │
+│ Layer 3: Stamping pipeline  (stamping/stamp_device.hpp)          │
 ├──────────────────────────────────────────────────────────────────┤
-│ Layer 0: Numeric Primitives + Sparse Linear Algebra              │
+│ Layer 2: Device models      (models/*.hpp, AD-driven)            │
+│          + motors, blockchain, analysis, switchgear, thermal     │
+├──────────────────────────────────────────────────────────────────┤
+│ Layer 1: Topology           (topology/graph.hpp + switch_state)  │
+├──────────────────────────────────────────────────────────────────┤
+│ Layer 0: Numeric + sparse   (numeric/types.hpp, sparse/*.hpp)    │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-Each layer:
-- Lives in one subfolder under `core/include/pulsim/`.
-- Has its own test binary `pulsim_v2_layerN_tests`.
-- Depends ONLY on layers strictly below (compile-time enforced).
-- Has a small, clean public-API surface.
-- Can be replaced wholesale without touching anything else.
+## Per-layer design docs
 
-## Per-layer status and design docs
+| Layer | Subfolder       | Design doc                                                                            |
+|-------|------------------|---------------------------------------------------------------------------------------|
+| 0     | `numeric/`, `sparse/` | [layer0-numeric-and-sparse.md](layer0-numeric-and-sparse.md)                    |
+| 1     | `topology/`     | [layer1-topology-and-enumeration.md](layer1-topology-and-enumeration.md)              |
+| 2     | `models/`       | [layer2-ad-and-device-models.md](layer2-ad-and-device-models.md) — concept + first 3 devices |
+|       |                 | [layer2-v1-mosfet-igbt.md](layer2-v1-mosfet-igbt.md) — MOSFET + IGBT builders          |
+|       |                 | [layer2-v2-transformer.md](layer2-v2-transformer.md) — two-winding transformer         |
+| 3     | `stamping/`     | [layer3-stamping-pipeline.md](layer3-stamping-pipeline.md)                            |
+| 4     | `pwl/`          | [layer4-pwl-state-space-cache.md](layer4-pwl-state-space-cache.md) — base cache       |
+|       |                 | [layer4-v1-trapezoidal-companion.md](layer4-v1-trapezoidal-companion.md) — dynamic devices |
+|       |                 | [layer4-v2-dc-operating-point.md](layer4-v2-dc-operating-point.md)                    |
+|       |                 | [layer4-v3-nonlinear-newton.md](layer4-v3-nonlinear-newton.md)                        |
+|       |                 | [layer4-v4-newton-globalization.md](layer4-v4-newton-globalization.md) — line search  |
+|       |                 | [layer4-v5-lm-newton.md](layer4-v5-lm-newton.md) — Levenberg-Marquardt                |
+|       |                 | [layer4-v6-lazy-cache.md](layer4-v6-lazy-cache.md)                                    |
+|       |                 | [layer4-v7-multi-dt-cache.md](layer4-v7-multi-dt-cache.md)                            |
+|       |                 | [layer4-v8-continuation.md](layer4-v8-continuation.md) — homotopy                     |
+|       |                 | [layer4-v9-vf0-continuation.md](layer4-v9-vf0-continuation.md)                        |
+|       |                 | [layer4-v10-warm-start.md](layer4-v10-warm-start.md) — pseudo-transient               |
+| 5     | `solver/`       | [layer5-solver-and-events.md](layer5-solver-and-events.md) — fixed-dt + bisection     |
+|       |                 | [layer5-v1-history-state.md](layer5-v1-history-state.md) — dynamic-device history     |
+|       |                 | [layer5-v2-event-detection.md](layer5-v2-event-detection.md) — diode auto-commutation |
+|       |                 | [layer5-v3-substep-correction.md](layer5-v3-substep-correction.md)                    |
+| 6     | `builder/`      | [layer6-builder-api.md](layer6-builder-api.md)                                        |
+| 8     | `yaml/`         | [layer8-yaml-parser.md](layer8-yaml-parser.md)                                        |
+| 9     | n/a (showcases) | [layer9-smps-showcase.md](layer9-smps-showcase.md) — end-to-end converter benchmarks  |
+| 10    | n/a (benchmarks)| [layer10-benchmarks.md](layer10-benchmarks.md)                                        |
 
-| Layer | Subfolder              | OpenSpec change-id                          | Status  | Design doc                                       |
-|-------|------------------------|---------------------------------------------|---------|--------------------------------------------------|
-| 0     | `numeric/` + `sparse/` | `bootstrap-pulsim-kernel`                | ✅      | [layer0-numeric-and-sparse.md](layer0-numeric-and-sparse.md) |
-| 1     | `topology/`            | `pulsim-topology-and-switch-enumeration` | pending | tbd                                              |
-| 2     | `models/`              | `pulsim-device-models-ad-driven`         | pending | tbd                                              |
-| 3     | `stamping/`            | `pulsim-generic-stamping-pipeline`       | pending | tbd                                              |
-| 4     | `pwl_state_space/`     | `pulsim-pwl-state-space-cache`           | pending | tbd                                              |
-| 5     | `solver/`              | `pulsim-solver-and-events`               | pending | tbd                                              |
-| 6     | `runtime/` + `frontend/` | `pulsim-circuit-builder-api` + 2 more  | pending | tbd                                              |
+The "V<n>" milestones under a single layer (e.g. Layer 4 V1..V10)
+are the chronological build-out — each landed an OpenSpec change
+proposal under `openspec/changes/archive/`.
 
-## Why parallel-namespace
+## Five non-negotiable invariants
 
-v1 stays in `pulsim::v1`. v2 lives in `pulsim`. Zero coupling. The
-two namespaces coexist in the same repository and the same shared
-library binary. Users opt in:
+The kernel is built around five constraints that ripple through
+every layer:
 
-```python
-import pulsim
-ckt = pulsim.Circuit()        # v1 default
-ckt2 = pulsim.Circuit()    # explicit v2 (when Layer 6 lands)
-```
-
-When Layer 6b ships feature parity on all `[v1]` tests, Python adds a
-global toggle `pulsim.use_v2 = True` so existing scripts can flip
-without code changes. v1 enters maintenance mode once ≥ 90 % of real
-workloads run on v2.
-
-No flag-day cutover. No "v1 broken for a week while we migrate." v1 is
-NEVER touched during the v2 build-out.
+1. **Header-only.** No `.cpp` translation units in the kernel
+   itself. The pybind11 binding (`python/bindings.cpp`) is the only
+   compiled boundary.
+2. **C++23.** Concepts, ranges, `mdspan`-like buffers,
+   `if consteval`, and `std::expected`-style error returns.
+3. **AD-driven Jacobians.** A single forward-mode AD scalar drives
+   every nonlinear device's stamp; no hand-written Jacobians.
+4. **PLECS-style PWL cache.** Every reachable switch configuration
+   is pre-factored into a (A, B, C, D) state-space tuple; the
+   transient loop is one sparse solve per step in the linear case.
+5. **No globals, no singletons.** Every entity (Graph, DevicePool,
+   PwlStateSpaceCache, SimulationOptions) is value-owned by the
+   caller.
 
 ## Build + test
 
 ```bash
-# Build only Layer 0 (today)
-cmake --build build --target pulsim_v2_layer0_tests
+# Configure
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-# Run Layer 0 tests
-build/core/pulsim_v2_layer0_tests
+# Build everything (all layer test binaries + Python extension)
+cmake --build build -j
+
+# Run only Layer N's test binary
+build/core/pulsim_layerN_tests
+
+# Or run the whole ctest harness
+ctest --test-dir build --output-on-failure
 ```
 
-Each future layer adds its own test binary. The full v2 test surface
-is the union of `pulsim_v2_layerN_tests` for N = 0..6.
+Each layer's test binary is independent — Layer 4 tests don't link
+Layer 5 sources, etc. This is the practical proof that the
+dependency graph really is layered.
 
 ## See also
 
-- [`../architecture-review-v1.md`](../architecture-review-v1.md) — why
-  v2 exists (the seven structural problems in v1).
-- [`layer0-numeric-and-sparse.md`](layer0-numeric-and-sparse.md) —
-  Layer 0 design decisions.
-- `openspec/changes/archive/2026-05-20-bootstrap-pulsim-kernel/` —
-  the OpenSpec proposal that landed Layer 0 (after archive).
+- [`../mental-model.md`](../mental-model.md) — the end-user-facing
+  one-page summary (Graph + DevicePool + PwlStateSpaceCache + Newton).
+- [`../api-reference.md`](../api-reference.md) — the full Python
+  surface in one page.
+- `openspec/changes/archive/` — every OpenSpec proposal that
+  shipped a layer or a layer milestone, with the design rationale
+  and test coverage table.

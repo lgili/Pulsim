@@ -95,7 +95,7 @@ A naive boost-with-IGBT setup using:
 2. **No body diode** means there's no path for the inductor current at the exact instant the IGBT opens. The MNA matrix becomes singular for one Newton step (a row with no entries).
 3. The Newton iteration **overshoots the V_DS smooth-clamp region** and lands in the spurious `V_DS < 0` polynomial root that the SH1 / IGBT formula has but real devices never visit.
 
-### How v2 solves it
+### How Pulsim solves it
 
 - **V13.2 smooth V_DS clamp.** The MOSFET / IGBT current law has an extra sigmoid that drives `I → 0` for `V_DS < −0.5 V`, eliminating the spurious root.
 - **V14 pulse rise/fall ramps.** Set `rise_time = fall_time = 100 ns` (or anything > a few `dt`s). This gives Newton several iterations to "follow" the gate transition smoothly instead of jumping.
@@ -115,7 +115,7 @@ A naive boost-with-IGBT setup using:
 
 ## Where to go from here
 
-You've seen every major v2 feature:
+You've seen every major Pulsim feature:
 - Passive trapezoidal-rule companion (L, C).
 - Switch + event detection.
 - Transformers (single + multi-winding).

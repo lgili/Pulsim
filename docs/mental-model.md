@@ -48,7 +48,7 @@ The `DevicePool` stores **parameters** for each branch in a `std::variant`. The 
 
 You almost never touch `Graph` or `DevicePool` directly — you go through `CircuitBuilder` (or its Python alias) and use `b.add_resistor`, `b.add_mosfet_level1`, etc.
 
-## 2. PwlStateSpaceCache — the trick that makes v2 fast
+## 2. PwlStateSpaceCache — the trick that makes Pulsim fast
 
 A switching converter spends 99 % of its time in just a few **discrete switch configurations** (e.g. "high-side ON, low-side OFF, freewheel diode reverse-blocking" for a buck during the ON portion). For each combination, the MNA matrix is fixed.
 
@@ -89,7 +89,7 @@ These kick in only when needed — most tame circuits converge in 2-5 plain Newt
 
 ## 4. Event detection — bisecting commutations
 
-Diodes and ideal switches change state when a current/voltage crosses zero. v2 detects the crossing within a sample step and **bisects** to find the exact `t_event`, then restarts the integration from that instant with the new switch state. This keeps the simulation accurate even when commutations happen between samples.
+Diodes and ideal switches change state when a current/voltage crosses zero. The kernel detects the crossing within a sample step and **bisects** to find the exact `t_event`, then restarts the integration from that instant with the new switch state. This keeps the simulation accurate even when commutations happen between samples.
 
 ## YAML pathway
 

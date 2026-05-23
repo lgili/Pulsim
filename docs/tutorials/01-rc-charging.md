@@ -3,7 +3,7 @@
 **Goal.** Drive an RC integrator with a `PulseVoltageSource` and check that `v_C(t)` matches the analytical `V · (1 − exp(−t/τ))` exponential.
 
 **Concepts introduced:**
-- The simplest possible v2 setup: one source, one R, one C, one node.
+- The simplest possible Pulsim setup: one source, one R, one C, one node.
 - The `PulseVoltageSource` (Layer 2 V12) — SPICE-style PULSE waveform.
 - Computing the time-constant `τ = R·C` and sanity-checking with three sampled points.
 

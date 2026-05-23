@@ -1,270 +1,157 @@
-# Performance Tuning Guide
+# Performance Tuning
 
-This guide covers optimization techniques for PulsimCore v2 simulations.
+Pulsim is fast by default — the PWL state-space cache pre-factors
+every reachable switch configuration into a sparse LU once, then
+the transient loop is one back-substitution per step. Most circuits
+just work. This guide is for the cases that don't.
 
-## SIMD Optimization
+## Build-time knobs
 
-### Runtime Detection
+Set these on the CMake configure line; details in
+[build-system.md](build-system.md).
 
-PulsimCore automatically detects and uses the best available SIMD instruction set:
+| Flag | Default | Effect |
+|---|---|---|
+| `CMAKE_BUILD_TYPE=Release` | — | Always required for benchmarking. |
+| `PULSIM_ENABLE_LTO` | `ON` (Release) | Link-time optimization; 10–20 % wins on the heavy templated code. Auto-disabled for Linux Python wheels (pybind11 TLS interaction). |
+| `PULSIM_ENABLE_NATIVE` | `OFF` | Adds `-march=native -mtune=native`. Don't ship binaries built with this. |
+| `PULSIM_ENABLE_PGO_GENERATE` / `..._USE` | `OFF` | Two-pass profile-guided optimization; comments in `CMakeLists.txt` explain the workflow. |
+| `PULSIM_USE_HYPRE` | `ON` | Optional AMG backend for very large systems. |
 
-```python
-import pulsim as v2
+## Runtime knobs
 
-level = v1.detect_simd_level()
-width = v1.simd_vector_width()
-
-print(f"SIMD: {level}, Vector width: {width} doubles")
-```
-
-Supported levels (in order of performance):
-- **AVX512**: 8 doubles per operation (Intel Skylake-X+, AMD Zen4+)
-- **AVX2**: 4 doubles per operation (Intel Haswell+, AMD Excavator+)
-- **AVX**: 4 doubles per operation (Intel Sandy Bridge+)
-- **SSE4**: 2 doubles per operation
-- **SSE2**: 2 doubles per operation (baseline x86-64)
-- **NEON**: 2 doubles per operation (ARM64)
-
-### Memory Alignment
-
-For optimal SIMD performance, ensure data is aligned:
-
-```cpp
-// C++ - automatic alignment in v2 containers
-alignas(64) double matrix_data[N];  // 64-byte alignment for AVX512
-```
-
-## Linear Solver Configuration
-
-### Symbolic Factorization Reuse
-
-Enable symbolic reuse for repeated solves with the same matrix pattern:
+All on `SimulationOptions`:
 
 ```python
-cfg = v1.LinearSolverConfig()
-cfg.reuse_symbolic = True  # Reuse symbolic factorization
-cfg.detect_pattern_change = True  # Auto-detect pattern changes
+import pulsim as p
+
+opts = p.SimulationOptions(t_start=0.0, t_end=1e-3, dt=1e-6)
+
+# Nonlinear-device refresh — Newton iteration on top of the cached
+# LU when a smooth-blend diode / MOSFET / IGBT / saturable inductor
+# is in the circuit. ``p.simulate(...)`` auto-detects this; pass
+# explicitly to override.
+opts.enable_nonlinear_refresh = True
+
+# Newton solver tolerances + iteration cap.
+opts.max_newton_iterations = 50
+opts.tol_newton_dx  = 1e-9       # |Δx|∞ termination
+opts.tol_newton_res = 1e-9       # |F(x)|∞ termination
+
+# Globalization strategies (off by default; turn on for stiff
+# converters that diverge from a cold start).
+opts.enable_newton_line_search = True   # Armijo backtracking
+opts.enable_newton_lm = True            # Levenberg-Marquardt trust region
+
+# Sub-step state correction — when a commutation event lands inside
+# a fixed-dt step, split the step in two at the linearly-interpolated
+# crossing instant. Big accuracy win on PWM converters; small cost.
+opts.enable_substep_state_correction = True
+
+# Event-detection iteration cap.
+opts.max_event_iterations = 32
 ```
 
-This provides 2-3x speedup for transient simulations where the matrix structure is constant.
-
-### Pivot Tolerance
-
-Adjust pivot tolerance based on circuit characteristics:
+The ``p.simulate(...)`` ergonomic wrapper accepts each of these as
+a keyword argument:
 
 ```python
-cfg = v1.LinearSolverConfig()
-
-# For well-conditioned circuits (resistive)
-cfg.pivot_tolerance = 1e-13
-
-# For ill-conditioned circuits (power electronics)
-cfg.pivot_tolerance = 1e-10
+res = p.simulate(
+    b, t_end=1e-3, dt=1e-6,
+    enable_nonlinear_refresh=True,
+    enable_newton_line_search=True,
+    enable_substep_state_correction=True,
+    max_newton_iterations=50,
+)
 ```
 
-Lower tolerance = more accurate but slower. Higher tolerance = faster but may fail on ill-conditioned matrices.
+## Cache + scaling
 
-## Newton Solver Tuning
+The PWL cache lives on `PwlStateSpaceCache(graph, pool).build(dt)`.
+Key properties:
 
-### Iteration Limits
+- **One sparse LU per reachable switch combination.** A buck with
+  one switch + one diode = 4 combinations, all 4 factored once at
+  setup. The transient loop never touches a sparse solver again
+  for linear circuits.
+- **Lazy expansion.** Combinations not reached in the simulation
+  are never factored. Cold-start cost ≈ (num reached configs) ×
+  (single LU cost).
+- **Multi-dt cache.** Several `dt` values can coexist in the same
+  cache (`cache.build_at_dt(dt_1)`, `cache.build_at_dt(dt_2)`);
+  the solver picks the right factor by `dt` key.
+
+For circuits with many switches (3-φ VSI with 6 IGBTs has 64
+reachable states; PFC + boost cascade can have hundreds), the
+cache can become memory-heavy. Profile with `cache.num_entries()`
+and `cache.factor_bytes_estimate()`.
+
+## DC operating-point seeding
+
+A converter that doesn't converge from `x=0` often converges from
+its DC OP. Two ways to ask:
 
 ```python
-opts = v1.NewtonOptions()
-opts.max_iterations = 50  # Default: 50
+# 1) p.simulate(...) flag
+res = p.simulate(b, t_end=..., dt=..., start_from_dc_op=True)
 
-# For simple circuits
-opts.max_iterations = 20
-
-# For highly nonlinear circuits (power electronics)
-opts.max_iterations = 100
+# 2) Explicit compute_dc_op with a strategy
+from pulsim import compute_dc_op, PseudoTransientConfig
+x0 = compute_dc_op(
+    b, t_eval=0.0,
+    config=PseudoTransientConfig(num_steps=50, dt_initial=1e-6),
+)
 ```
 
-### Damping Strategy
+The strategies (`compute_dc_op` calls them under the hood):
 
-```python
-opts = v1.NewtonOptions()
-opts.initial_damping = 1.0  # Full Newton step
-opts.min_damping = 0.1      # Minimum damping factor
-opts.auto_damping = True    # Enable automatic damping adjustment
-```
+- **`SourceStepConfig`** — ramp sources from 0 → final value over N
+  steps. Robust for stiff non-linear circuits.
+- **`PseudoTransientConfig`** — Newton iteration with an added
+  pseudo-time damping term that vanishes at convergence; good for
+  systems with multiple Newton basins.
 
-- **initial_damping=1.0**: Full Newton step, fastest for well-behaved circuits
-- **initial_damping=0.5**: Start with half steps for difficult convergence
-- **auto_damping=True**: Automatically reduce damping on non-convergence
+See [gotchas.md](gotchas.md) for which one to reach for first.
 
-### Per-Variable Convergence
+## Profiling
 
-```python
-opts = v1.NewtonOptions()
-opts.check_per_variable = True  # Check each variable separately
-```
+The C++ side has no internal profiling hooks — the kernel is
+header-only and any allocation or branch happens inline. To measure:
 
-Useful for mixed-domain simulations where voltage and current scales differ significantly.
+- **Wall-clock per simulation:** `time.perf_counter()` around
+  `p.simulate(...)`.
+- **Per-step cost:** wrap with a `step_observer` and instrument the
+  callback (note: this re-enters Python per step, biasing the
+  measurement; the C++ path via `MixedDomainBlockChain` is the
+  measurement-quality option).
+- **Compiler-level**: `samply`, `perf`, or Instruments.app on macOS.
+  The hottest function tends to be `pwl::Cache::solve_at`.
 
-## Tolerance Settings
+## Common pitfalls
 
-### Default Tolerances
+- **`dt` too small.** Pulsim doesn't enforce `dt ≪ τ_min`. If `dt`
+  is below `1e-9` you're paying for sub-nanosecond sampling and
+  Newton accuracy with no physical reason. 10 % of the smallest
+  rise/fall time is usually enough.
+- **`dt` too large.** Sub-step event correction patches some
+  inaccuracy, but a `dt` that misses the entire ON portion of a
+  PWM pulse will lose duty cycle. Sample at ≥ 20 points per
+  switching period.
+- **Sat-inductor + nonlinear refresh.** Saturable magnetics need
+  `enable_nonlinear_refresh=True`. ``p.simulate(...)`` detects this
+  automatically; the explicit `run_transient` does not.
+- **Smooth diode + Newton.** Hard-edge `IdealDiode` (PWL `g_on` /
+  `g_off`) doesn't need Newton; the smooth-blend variant
+  (`IdealDiodeParams(blend_width=...)`) does. Enable
+  `enable_nonlinear_refresh` for the latter.
 
-```python
-tols = v1.Tolerances.defaults()
-# voltage_abstol = 1e-6 V
-# current_abstol = 1e-12 A
-# residual_tol = 1e-9
-```
+## Benchmarks
 
-### Accuracy vs Speed Trade-off
+The `benchmark_compile_time` custom target (`PULSIM_BUILD_BENCHMARKS=ON`
+configure) times a clean rebuild of the heaviest test binary
+(`pulsim_layer5_v4_tests` — Newton in run_transient). Useful when
+auditing a kernel-header change for compile-time regressions.
 
-```python
-# High accuracy (slower)
-tols = v1.Tolerances()
-tols.voltage_abstol = 1e-9
-tols.current_abstol = 1e-15
-tols.residual_tol = 1e-12
-
-# Fast simulation (less accurate)
-tols = v1.Tolerances()
-tols.voltage_abstol = 1e-3
-tols.current_abstol = 1e-9
-tols.residual_tol = 1e-6
-```
-
-## Timestep Control
-
-### PI Controller Tuning
-
-The adaptive timestep uses a PI controller:
-
-```python
-cfg = v1.TimestepConfig()
-cfg.k_p = 0.075  # Proportional gain
-cfg.k_i = 0.175  # Integral gain
-cfg.safety_factor = 0.9
-```
-
-- **Higher k_p**: More aggressive timestep changes
-- **Higher k_i**: Smoother timestep adaptation
-- **Lower safety_factor**: More conservative timestep selection
-
-### Preset Configurations
-
-```python
-# Default: balanced accuracy and speed
-cfg = v1.TimestepConfig.defaults()
-
-# Conservative: smaller steps, better accuracy
-cfg = v1.TimestepConfig.conservative()
-
-# Aggressive: larger steps, faster simulation
-cfg = v1.TimestepConfig.aggressive()
-```
-
-### Manual Limits
-
-```python
-cfg = v1.TimestepConfig()
-cfg.dt_min = 1e-15  # Minimum timestep
-cfg.dt_max = 1e-6   # Maximum timestep
-cfg.dt_initial = 1e-9  # Starting timestep
-```
-
-## BDF Order Control
-
-```python
-bdf = v1.BDFOrderConfig()
-bdf.min_order = 1  # BDF1 (backward Euler)
-bdf.max_order = 2  # BDF2
-bdf.initial_order = 1
-bdf.enable_auto_order = True
-```
-
-- **BDF1**: A-stable, more damping, good for stiff circuits
-- **BDF2**: More accurate, good for oscillatory circuits
-
-## DC Convergence Strategies
-
-### Strategy Selection
-
-```python
-dc_cfg = v1.DCConvergenceConfig()
-
-# Let solver choose best strategy
-dc_cfg.strategy = v1.DCStrategy.Auto
-
-# Or specify explicitly
-dc_cfg.strategy = v1.DCStrategy.GminStepping  # Add shunt conductance
-dc_cfg.strategy = v1.DCStrategy.SourceStepping  # Scale sources 0->1
-dc_cfg.strategy = v1.DCStrategy.PseudoTransient  # Fake timestep
-dc_cfg.strategy = v1.DCStrategy.Direct  # No aids (fastest if it works)
-```
-
-### Gmin Stepping Tuning
-
-```python
-gmin = v1.GminConfig()
-gmin.initial_gmin = 1e-3  # Start with large conductance
-gmin.final_gmin = 1e-12   # Target conductance
-gmin.reduction_factor = 10.0  # Reduce by 10x each step
-```
-
-Required steps = log10(initial/final) / log10(reduction_factor)
-
-### Source Stepping Tuning
-
-```python
-src = v1.SourceSteppingConfig()
-src.initial_scale = 0.0  # Start with zero sources
-src.final_scale = 1.0    # End with full sources
-src.initial_step = 0.1   # First step size
-src.min_step = 0.01      # Minimum step size
-```
-
-## Performance Benchmarking
-
-### Measuring Performance
-
-```python
-import time
-
-timing = v1.BenchmarkTiming()
-timing.name = "my_circuit"
-
-start = time.perf_counter()
-# ... run simulation ...
-elapsed = time.perf_counter() - start
-
-timing.iterations = num_timesteps
-print(f"Time per step: {elapsed/num_timesteps*1000:.3f} ms")
-```
-
-### Export Results
-
-```python
-results = [result1, result2, result3]
-
-# CSV for spreadsheets
-csv = v1.export_benchmark_csv(results)
-
-# JSON for automation
-json_str = v1.export_benchmark_json(results)
-```
-
-## Best Practices Summary
-
-1. **Enable symbolic reuse** for repeated matrix solves
-2. **Use deterministic pivoting** for reproducible results
-3. **Start with Auto DC strategy**, tune if needed
-4. **Use BDF2** for most transient simulations
-5. **Set appropriate tolerances** based on accuracy needs
-6. **Use aggressive timestep config** for parameter sweeps
-7. **Profile before optimizing** - identify actual bottlenecks
-
-## Typical Speedup Factors
-
-| Optimization | Speedup |
-|--------------|---------|
-| Symbolic reuse | 2-3x |
-| AVX2 vs SSE2 | 1.5-2x |
-| AVX512 vs AVX2 | 1.2-1.5x |
-| Aggressive timestep | 2-5x |
-| Lower tolerances | 1.5-3x |
-| BDF1 vs BDF2 | 1.1-1.3x |
+There's no in-tree wall-clock harness for transient simulation yet
+— individual test binaries time themselves with
+``BENCHMARK("…") { … }`` macros from Catch2.

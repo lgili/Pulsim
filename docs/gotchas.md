@@ -1,6 +1,6 @@
 # Gotchas
 
-Most v2 simulations Just Work. The handful that don't almost always fail for one of the reasons below. This page is the field-debugging guide.
+Most pulsim simulations Just Work. The handful that don't almost always fail for one of the reasons below. This page is the field-debugging guide.
 
 ## Newton convergence
 
@@ -53,7 +53,7 @@ MOSFETs / IGBTs use sigmoid blending between regions; `kappa` controls how sharp
 
 You hit a Newton "limit cycle" — the iterate ping-pongs between two faces of a non-smooth feature.
 
-**Fix:** the trust-region Newton (V5) and pseudo-transient continuation (V10) are designed for this. Set `opts.max_newton_iterations = 50` and let v2 escalate strategies internally.
+**Fix:** the trust-region Newton (V5) and pseudo-transient continuation (V10) are designed for this. Set `opts.max_newton_iterations = 50` and let the solver escalate strategies internally.
 
 ## Cache size + build time
 
@@ -70,7 +70,7 @@ Cache build fails with `compute_dc_op: DC matrix structurally singular for mask 
 This usually means:
 - A node is dangling (no connection to ground).
 - All sources are current sources and the topology has no DC path to ground.
-- A nonlinear branch (`BranchKind::Nonlinear`) has no diagonal contribution. v2 already adds a 1e-12 G_min for `SaturableInductor`; for other custom devices you may need to add your own.
+- A nonlinear branch (`BranchKind::Nonlinear`) has no diagonal contribution. Pulsim already adds a 1e-12 G_min for `SaturableInductor`; for other custom devices you may need to add your own.
 
 **Fix:** check the topology with a small dump (`pool.state_size(graph)` should equal `num_active_nodes + num_sources + num_inductors`). Add a 1 µΩ resistor between any floating node and ground.
 
@@ -110,7 +110,7 @@ Every isolated subnet must have a path to ground. Even galvanically-isolated tra
 
 ## Python-specific pitfalls
 
-### Symptom: `AttributeError: module 'pulsim.v2' has no attribute 'simulate'`
+### Symptom: `AttributeError: module 'pulsim' has no attribute 'simulate'`
 
 The installed `pulsim` wheel is stale relative to the source tree.
 
