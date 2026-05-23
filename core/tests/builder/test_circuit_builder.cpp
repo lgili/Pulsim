@@ -29,7 +29,10 @@ using Catch::Approx;
 // Unit tests: node mapping, alias, unit conversion
 // -----------------------------------------------------------------------------
 
-TEST_CASE("\"gnd\" alias maps to graph.ground()",
+// NB: the test name avoids embedded double-quotes — CTest passes the
+// name on the command line wrapped in quotes; an embedded `"gnd"`
+// turns into `""gnd""` after shell quoting and CTest fails to match.
+TEST_CASE("gnd alias maps to graph.ground()",
           "[v2][layer6][builder][nodes]") {
     CircuitBuilder b;
     REQUIRE(b.node("gnd") == b.graph().ground());
