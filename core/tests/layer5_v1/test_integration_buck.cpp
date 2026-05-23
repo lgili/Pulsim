@@ -221,6 +221,8 @@ TEST_CASE(
     REQUIRE(delta_i_L  == Approx(dI_L_ana).epsilon(0.15));
     REQUIRE(delta_v_out == Approx(dV_out_ana).epsilon(0.30));
 
-    // Wall-clock budget — generous (Debug builds are slow).
-    REQUIRE(elapsed_ms < 5000);
+    // Wall-clock budget — generous (Debug + sanitizer builds are slow;
+    // the CI's "Linux Debug + Sanitizers" job runs ASan + UBSan, which
+    // bumps the runtime past 5 s on shared GHA runners).
+    REQUIRE(elapsed_ms < 15000);
 }
