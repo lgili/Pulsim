@@ -20,6 +20,7 @@
 // nonlinear devices (per-segment Newton) are V1+ extensions.
 
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -31,7 +32,6 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <stdexcept>
-#include <unordered_map>
 
 namespace pulsim::pwl {
 
@@ -220,7 +220,7 @@ private:
 
     const topology::Graph& graph_;
     const DevicePool& pool_;
-    std::unordered_map<topology::SwitchStateMask, PwlSegment>
+    numeric::Dictionary<topology::SwitchStateMask, PwlSegment>
         segments_;
     Real dt_ = Real{0};   // 0 = static-only build (V0)
     bool lazy_mode_ = false;
@@ -229,7 +229,7 @@ private:
     // bisection state correction (`solve_at`). Keyed first by
     // dt then by mask. `mutable` so `solve_at` (const) can
     // populate on demand.
-    mutable std::unordered_map<Real, std::unordered_map<
+    mutable numeric::Dictionary<Real, numeric::Dictionary<
         topology::SwitchStateMask, PwlSegment>> alt_segments_;
 };
 
