@@ -234,6 +234,30 @@ from .v2_periodic import (
     PeriodicShootingResult,
     run_periodic_shooting,
 )
+from .v2_fra import (
+    FraResult,
+    run_fra,
+)
+from .v2_harmonic import (
+    HarmonicAnalysisResult,
+    analyze_harmonics,
+    run_harmonic_balance,
+)
+from .v2_hysteresis import (
+    BHLoopResult,
+    JilesAthertonModel,
+    JilesAthertonParams,
+    compute_bh_loop,
+    core_loss_jiles_atherton,
+    reference_material as _ja_reference_material,
+)
+from .v2_motor_singlephase import (
+    PSCOperatingPoint,
+    SinglePhaseIMParams,
+    compute_psc_operating_point,
+    psc_torque_speed_curve,
+    reference_psc_motor,
+)
 
 # LiveScope is an optional import — only available when pyqtgraph
 # is installed. We tolerate the absence so headless environments
@@ -408,6 +432,25 @@ __all__ = [
     # Periodic-steady-state solver (Phase 2 of v1→v2 closure).
     "PeriodicShootingResult",
     "run_periodic_shooting",
+    # Frequency Response Analyzer (swept-sine, time-domain).
+    "FraResult",
+    "run_fra",
+    # Harmonic-balance / harmonic-spectrum analysis.
+    "HarmonicAnalysisResult",
+    "analyze_harmonics",
+    "run_harmonic_balance",
+    # Jiles-Atherton magnetic hysteresis (Phase 2 closure).
+    "BHLoopResult",
+    "JilesAthertonModel",
+    "JilesAthertonParams",
+    "compute_bh_loop",
+    "core_loss_jiles_atherton",
+    # Single-phase induction motor (PSC steady-state).
+    "PSCOperatingPoint",
+    "SinglePhaseIMParams",
+    "compute_psc_operating_point",
+    "psc_torque_speed_curve",
+    "reference_psc_motor",
 ]
 
 if _HAS_SCOPE:
