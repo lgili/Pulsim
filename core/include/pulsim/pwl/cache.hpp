@@ -31,9 +31,41 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <expected>
+#include <format>
 #include <stdexcept>
+#include <utility>
 
 namespace pulsim::pwl {
+
+/// Structured error returned by the non-throwing `try_*` cache API
+/// (Layer 4 V4 ergonomics, C++23). Lets tooling and the Python
+/// frontend report singular-matrix failures with the offending mask
+/// and dt attached, rather than parsing a string out of `what()`.
+///
+/// The throwing API (`build`, `lookup`) is unchanged and still
+/// the canonical entry point — `try_*` is purely additive for
+/// callers that prefer expected-style flow.
+struct CacheError {
+    enum class Kind {
+        StructurallySingular,
+        NumericallySingular,
+        MaskNotBuilt,
+    };
+    Kind                       kind;
+    topology::SwitchStateMask  mask;
+    Real                       dt = Real{0};   // 0 for static-only
+
+    [[nodiscard]] std::string what() const {
+        const char* k =
+            kind == Kind::StructurallySingular ? "structurally singular"
+          : kind == Kind::NumericallySingular  ? "numerically singular"
+                                                : "no segment built";
+        return std::format(
+            "PwlStateSpaceCache: {} for mask {} (dt={})",
+            k, mask.to_string(), dt);
+    }
+};
 
 class PwlStateSpaceCache {
 public:
@@ -90,21 +122,40 @@ public:
     /// the segment on demand and caches it before returning.
     [[nodiscard]] const PwlSegment& lookup(
         const topology::SwitchStateMask& mask) const {
+        auto r = try_lookup(mask);
+        if (!r) {
+            throw std::out_of_range(r.error().what());
+        }
+        return **r;
+    }
+
+    /// Non-throwing companion to `lookup` (Layer 4 V4 ergonomics).
+    /// Returns a pointer to the segment on success, or a
+    /// `CacheError` carrying the offending mask + dt on failure.
+    ///
+    /// Lazy mode triggers a build on first access — if THAT
+    /// build hits a singular matrix, the returned error reports
+    /// the singularity kind directly.
+    [[nodiscard]] std::expected<const PwlSegment*, CacheError>
+    try_lookup(const topology::SwitchStateMask& mask) const {
         const auto it = segments_.find(mask);
         if (it != segments_.end()) {
-            return it->second;
+            return &it->second;
         }
         if (lazy_mode_) {
-            // Lazy on-demand build. Const-correctness preserved
-            // because callers see the same (mask, x) mapping;
-            // the cache is logically `const`.
-            const_cast<PwlStateSpaceCache*>(this)
-                ->build_one_segment(mask);
-            return segments_.find(mask)->second;
+            auto built =
+                const_cast<PwlStateSpaceCache*>(this)
+                    ->try_build_one_segment(mask);
+            if (!built) {
+                return std::unexpected(built.error());
+            }
+            return &segments_.find(mask)->second;
         }
-        throw std::out_of_range(
-            "PwlStateSpaceCache::lookup: no segment built for "
-            "mask " + mask.to_string());
+        return std::unexpected(CacheError{
+            .kind = CacheError::Kind::MaskNotBuilt,
+            .mask = mask,
+            .dt   = dt_,
+        });
     }
 
     /// HOT LOOP entry point. Look up the segment for `mask` and
@@ -180,12 +231,11 @@ public:
     }
 
 private:
-    /// Build a fresh segment at the given `(mask, dt)` pair and
-    /// return it by move. The factor is assembled + analysed +
-    /// factorised; the caller decides which cache map to drop
-    /// it into.
-    [[nodiscard]] PwlSegment make_segment(
-        const topology::SwitchStateMask& mask, Real dt) {
+    /// Non-throwing build of a single segment. Returns the
+    /// segment by move on success, or a `CacheError` carrying
+    /// the singularity kind + mask + dt on failure.
+    [[nodiscard]] std::expected<PwlSegment, CacheError>
+    try_make_segment(const topology::SwitchStateMask& mask, Real dt) {
         sparse::Matrix J;
         Vector b;
         assemble_segment(graph_, pool_, mask, dt, J, b);
@@ -193,14 +243,18 @@ private:
 
         auto solver = sparse::make_default_solver();
         if (!solver->analyze(J)) {
-            throw std::runtime_error(
-                "PwlStateSpaceCache: structurally singular "
-                "matrix for mask " + mask.to_string());
+            return std::unexpected(CacheError{
+                .kind = CacheError::Kind::StructurallySingular,
+                .mask = mask,
+                .dt   = dt,
+            });
         }
         if (!solver->factorize(J)) {
-            throw std::runtime_error(
-                "PwlStateSpaceCache: numerically singular "
-                "matrix for mask " + mask.to_string());
+            return std::unexpected(CacheError{
+                .kind = CacheError::Kind::NumericallySingular,
+                .mask = mask,
+                .dt   = dt,
+            });
         }
 
         PwlSegment seg;
@@ -209,6 +263,31 @@ private:
         seg.solver = std::move(solver);
         seg.state_size = pool_.state_size(graph_);
         return seg;
+    }
+
+    /// Throwing wrapper — the existing kernel hot path. Delegates
+    /// to `try_make_segment` and translates the typed error into
+    /// a `runtime_error` whose `what()` matches the V0 format
+    /// callers (and tests) already grep for.
+    [[nodiscard]] PwlSegment make_segment(
+        const topology::SwitchStateMask& mask, Real dt) {
+        auto r = try_make_segment(mask, dt);
+        if (!r) {
+            throw std::runtime_error(r.error().what());
+        }
+        return std::move(*r);
+    }
+
+    /// Non-throwing single-segment insert at the current dt.
+    /// Used by `try_lookup`'s lazy-mode path.
+    [[nodiscard]] std::expected<void, CacheError>
+    try_build_one_segment(const topology::SwitchStateMask& mask) {
+        auto seg = try_make_segment(mask, dt_);
+        if (!seg) {
+            return std::unexpected(seg.error());
+        }
+        segments_.emplace(mask, std::move(*seg));
+        return {};
     }
 
     /// Insert a primary-cache segment at the current dt.

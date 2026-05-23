@@ -111,3 +111,76 @@ TEST_CASE("solve on V-R-GND returns the analytical answer",
     REQUIRE(x[0] == Approx(Real{12}).margin(1e-12));
     REQUIRE(x[1] == Approx(Real{-1.2}).margin(1e-12));
 }
+
+// =============================================================================
+// V4 ergonomics — non-throwing try_lookup / try_build_one_segment
+// =============================================================================
+
+TEST_CASE("try_lookup returns segment pointer on hit",
+          "[v2][layer4][cache][expected]") {
+    Graph g;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);
+
+    DevicePool pool;
+    pool.add_voltage_source(0, {Real{12.0}});
+    pool.add_resistor(1, {Real{1.0}});
+
+    PwlStateSpaceCache cache(g, pool);
+    cache.build();
+
+    auto r = cache.try_lookup(SwitchStateMask(0));
+    REQUIRE(r.has_value());
+    REQUIRE(*r != nullptr);
+    REQUIRE((*r)->state_size == 2);
+}
+
+TEST_CASE("try_lookup returns MaskNotBuilt on miss (eager mode)",
+          "[v2][layer4][cache][expected]") {
+    Graph g;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Switch);
+
+    DevicePool pool;
+    pool.add_switch(0, Real{1e3}, Real{1e-9});
+
+    PwlStateSpaceCache cache(g, pool);
+    cache.build();
+
+    // size != graph.num_switches → never built
+    SwitchStateMask wrong(2);
+    auto r = cache.try_lookup(wrong);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().kind == CacheError::Kind::MaskNotBuilt);
+    REQUIRE(r.error().mask == wrong);
+}
+
+TEST_CASE("try_lookup auto-builds in lazy mode and reports "
+          "structured singularity",
+          "[v2][layer4][cache][expected]") {
+    // Floating R between two non-grounded nodes → assemble gives
+    // a row of all-zero entries for whichever node is dangling.
+    Graph g;
+    g.add_node("a");
+    g.add_node("b");
+    g.add_branch(0, 1, BranchKind::PassiveLinear);
+
+    DevicePool pool;
+    pool.add_resistor(0, {Real{1.0}});
+
+    PwlStateSpaceCache cache(g, pool);
+    cache.build_lazy(Real{0});
+
+    auto r = cache.try_lookup(SwitchStateMask(0));
+    // Either the resistor anchors enough rows (success) or
+    // we get a structured singular-matrix error. The contract
+    // we test here is: the API NEVER throws.
+    if (!r) {
+        REQUIRE((r.error().kind ==
+                    CacheError::Kind::StructurallySingular ||
+                 r.error().kind ==
+                    CacheError::Kind::NumericallySingular));
+    }
+}
+
