@@ -31,13 +31,13 @@
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/models/vcvs.hpp"
 #include "pulsim/models/voltage_source.hpp"
+#include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -647,17 +647,17 @@ private:
         return std::get<SwitchParams>(entry);
     }
 
-    std::unordered_map<Index, Entry> entries_;
+    numeric::Dictionary<Index, Entry> entries_;
     // Sources also get a relative branch-current-row offset assigned
     // at insertion time. The absolute index is offset by
     // graph.num_nodes() at lookup time.
-    std::unordered_map<Index, Index> source_branch_var_id_;
+    numeric::Dictionary<Index, Index> source_branch_var_id_;
     Size num_sources_ = 0;
 
     // Inductors live AFTER sources in the state vector:
     //   [v_0 .. v_{N-1}]  [i_src_0 .. i_src_{M-1}]  [i_L_0 .. i_L_{K-1}]
     // The absolute index = num_nodes + num_sources + relative_offset.
-    std::unordered_map<Index, Index> inductor_branch_var_id_;
+    numeric::Dictionary<Index, Index> inductor_branch_var_id_;
     Size num_inductors_ = 0;
 
     // Diode branches in insertion order. Layer 5 V2's
@@ -669,15 +669,15 @@ private:
     // gate node id per drain→source branch. The branch
     // itself lives in `entries_` as a `MosfetLevel1::Params`
     // entry; the gate node is a separate associative lookup.
-    std::unordered_map<Index, Index> mosfet_level1_gate_node_id_;
+    numeric::Dictionary<Index, Index> mosfet_level1_gate_node_id_;
 
     // Layer 2 V14: IGBT Level 1 — same gate-node lookup
     // pattern as MOSFET. The branch is collector→emitter.
-    std::unordered_map<Index, Index> igbt_level1_gate_node_id_;
+    numeric::Dictionary<Index, Index> igbt_level1_gate_node_id_;
 
     // Layer 2 V15: VCVS — per-branch (in_pos, in_neg) node
     // references for the sense inputs.
-    std::unordered_map<Index, std::pair<Index, Index>>
+    numeric::Dictionary<Index, std::pair<Index, Index>>
         vcvs_input_nodes_;
 
     // Layer 2 V17: SaturableInductor branches, in insertion
