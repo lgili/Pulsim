@@ -61,7 +61,7 @@ b.add_resistor      ("R1", "n0", "vc",   1000.0)
 b.add_capacitor     ("C1", "vc", "gnd",  1e-6)
 
 res = p.simulate(b, t_end=5e-3, dt=1e-5)
-p.scope(b, res, signals=["vc"])           # one-liner plot
+p.plot.scope(b, res, signals=["vc"])      # one-liner plot
 ```
 
 ### What ships
