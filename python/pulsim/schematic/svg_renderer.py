@@ -652,6 +652,72 @@ def _ground_symbol(x: float, y: float) -> str:
     )
 
 
+def _detect_coupled_inductors(
+        layout: SchematicLayout) -> list[tuple[ComponentPlacement, ComponentPlacement]]:
+    """Find pairs of inductor placements that look like a transformer:
+    same y-center (±2 mm) and within 20–80 mm horizontally.
+
+    The renderer draws two short vertical bars between such pairs to
+    indicate magnetic coupling. Without this, flyback / forward show
+    two unconnected coils with confusing "floating" leads."""
+    inductors = [
+        p for p in layout.components.values()
+        if p.kind in ("inductor", "saturable_inductor")
+    ]
+    pairs: list[tuple[ComponentPlacement, ComponentPlacement]] = []
+    seen: set[str] = set()
+    for i, a in enumerate(inductors):
+        if a.name in seen:
+            continue
+        for b in inductors[i + 1:]:
+            if b.name in seen:
+                continue
+            if abs(a.y - b.y) > 2.0:
+                continue
+            dx = abs(a.x - b.x)
+            if 20.0 <= dx <= 80.0:
+                pairs.append((a, b))
+                seen.add(a.name)
+                seen.add(b.name)
+                break
+    return pairs
+
+
+def _transformer_coupling_glyph(a: ComponentPlacement,
+                                 b: ComponentPlacement) -> str:
+    """Two closely-spaced vertical bars centered between a transformer's
+    primary and secondary coils — the standard "magnetic core" indicator.
+
+    Bars are 8 mm tall and 1.5 mm apart, centered on the gap midpoint.
+    Also drops two small polarity dots (one per coil) on the side
+    facing the other winding — the convention for showing winding
+    polarity."""
+    cy = (a.y + b.y) / 2.0
+    midpoint = (a.x + b.x) / 2.0
+    bar_dx = 1.0  # half-distance between the two bars
+    bar_half_h = 4.0  # bar half-length
+    bars = [
+        _line(midpoint - bar_dx, cy - bar_half_h,
+              midpoint - bar_dx, cy + bar_half_h),
+        _line(midpoint + bar_dx, cy - bar_half_h,
+              midpoint + bar_dx, cy + bar_half_h),
+    ]
+    # Polarity dots, on the inside top of each coil (relative to the
+    # other coil). Coil bodies are roughly 6 mm wide and ~12 mm tall;
+    # place the dot 2 mm in from the inner edge and 4 mm above center.
+    left, right = (a, b) if a.x < b.x else (b, a)
+    dot_y = cy - 5.0
+    dot_left = (
+        f'<circle cx="{_fmt(left.x + 3.5)}" cy="{_fmt(dot_y)}" '
+        f'r="0.9" fill="{_STROKE}"/>'
+    )
+    dot_right = (
+        f'<circle cx="{_fmt(right.x - 3.5)}" cy="{_fmt(dot_y)}" '
+        f'r="0.9" fill="{_STROKE}"/>'
+    )
+    return "<g>" + "".join(bars + [dot_left, dot_right]) + "</g>"
+
+
 def _detect_ground_rail(layout: SchematicLayout) -> tuple[float, float, float] | None:
     """Inspect ``layout.wires`` for synthetic ``<gnd-rail>`` endpoints
     and return ``(rail_y, x_min, x_max)``. None if no rail is present.
@@ -744,6 +810,14 @@ def render_svg(layout: SchematicLayout, path: Any) -> Path:
     for placement in layout.components.values():
         chunks.append(_draw_component(placement) + "\n")
     chunks.append('</g>\n')
+
+    # Layer 3b: transformer coupling bars between paired inductors.
+    coupled = _detect_coupled_inductors(layout)
+    if coupled:
+        chunks.append('<g id="transformer-couplings">\n')
+        for a, b in coupled:
+            chunks.append(_transformer_coupling_glyph(a, b) + "\n")
+        chunks.append('</g>\n')
 
     # Layer 4: ground symbol(s) on the rail. Renders ONE IEC ground glyph
     # at the leftmost rail x (offset 2 mm out so it doesn't overlap a
