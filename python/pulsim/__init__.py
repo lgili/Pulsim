@@ -214,6 +214,11 @@ from .mmc import (
     MmcArmAverageResult,
     mmc_arm_average_step,
     simulate_mmc_arm_average,
+    # Builder-side wiring (Phase 20.4).
+    MmcArmAverage,
+    add_mmc_arm_average,
+    make_mmc_arm_observer,
+    make_mmc_arms_observer,
 )
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
@@ -379,6 +384,11 @@ __all__ = [
     "MmcArmAverageResult",
     "mmc_arm_average_step",
     "simulate_mmc_arm_average",
+    # MMC L0 CircuitBuilder integration (Phase 20.4).
+    "MmcArmAverage",
+    "add_mmc_arm_average",
+    "make_mmc_arm_observer",
+    "make_mmc_arms_observer",
 ]
 
 if _HAS_SCOPE:

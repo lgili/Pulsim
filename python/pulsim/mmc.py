@@ -63,6 +63,11 @@ __all__ = [
     "MmcArmAverageResult",
     "mmc_arm_average_step",
     "simulate_mmc_arm_average",
+    # Builder-side wiring (Phase 20.4).
+    "MmcArmAverage",
+    "add_mmc_arm_average",
+    "make_mmc_arm_observer",
+    "make_mmc_arms_observer",
 ]
 
 
@@ -266,3 +271,248 @@ def simulate_mmc_arm_average(
         i_b=i_b_arr,
         params=params,
     )
+
+
+# ----------------------------------------------------------------------
+# CircuitBuilder integration — Phase 20.4
+# ----------------------------------------------------------------------
+#
+# Wiring strategy
+# ---------------
+# pulsim's VCVS has a constant gain. To express `v_b(t) = m_b(t)·v_C(t)`
+# as a *time-varying* controlled source we follow the same trick the
+# motor observers use (see ``motors.py``):
+#
+#   1. ``add_mmc_arm_average`` inserts a regular voltage source between
+#      ``node_a`` (arm top) and ``node_b`` (arm bottom) with a baseline
+#      of 0 V. The source records its branch ID so the observer can
+#      later locate (a) its constraint row in the RHS vector, and
+#      (b) its branch-current state index.
+#
+#   2. ``make_mmc_arm_observer`` returns a ``(step_observer, b_extra_fn)``
+#      pair. At each simulation step:
+#        * ``step_observer(t, x)`` reads the arm current from
+#          ``x[src_idx]`` (the v-source branch variable), advances
+#          ``v_C`` by one forward-Euler tick of eq (2.14), and stashes
+#          ``v_b(t+dt) = m_b(t+dt) · v_C(t+dt)`` in a closure.
+#        * ``b_extra_fn(t)`` returns a vector whose ``src_idx`` entry
+#          equals ``−v_b(t)`` — pulsim's MNA convention is that adding
+#          ``+X`` to the source's constraint row shifts the source
+#          voltage by ``−X`` (see motor-observer doc-comment).
+#
+# This is *co-simulation* with the kernel rather than a stamped
+# device — fine for L0 (one-pole capacitor, no event detection). L2+
+# will need a proper C++ device because the dead-time monostables
+# need sub-step resolution.
+
+
+@dataclass
+class MmcArmAverage:
+    """Runtime state for an MMC average-value arm added to a circuit.
+
+    Attributes are mutated by :func:`make_mmc_arm_observer` as the
+    simulation progresses; user code can read ``v_C`` (and ``v_b``)
+    at any point after a ``simulate()`` call.
+
+    Attributes:
+        params: Static configuration (capacitance, type, …).
+        m_b_fn: Modulation-index signal ``t -> m_b ∈ [m_min, m_max]``.
+        v_C: Live arm-equivalent capacitor voltage [V] (mutated each
+            step). Starts at ``params.v_c0``.
+        v_b: Live arm-generated voltage [V] (== m_b(t) · v_C). Mirrors
+            what the observer stashes for the *next* simulation step.
+        name: Prefix used for the underlying voltage-source name.
+        source_branch_id: Graph branch id of the v-source added by
+            :func:`add_mmc_arm_average` — needed to locate the state
+            index of i_b.
+    """
+
+    params: MmcArmAverageParams
+    m_b_fn: Callable[[float], float]
+    v_C: float = 0.0
+    v_b: float = 0.0
+    name: str = ""
+    source_branch_id: int = -1
+
+
+def add_mmc_arm_average(
+    builder,
+    *,
+    name: str,
+    node_a: str,
+    node_b: str,
+    params: MmcArmAverageParams,
+    m_b: float | Callable[[float], float],
+) -> MmcArmAverage:
+    """Add an MMC average-value arm to ``builder``.
+
+    Topology:
+
+        node_a ── (V_arm controlled = m_b·v_C) ── node_b
+
+    The arm is exposed as a *single* voltage source whose value is
+    updated each simulation step by the observer / b_extra_fn pair
+    returned by :func:`make_mmc_arm_observer`. The user is
+    responsible for adding any series arm inductor (``L_b``) and
+    completing the rest of the topology.
+
+    Args:
+        builder: A populated ``pulsim.CircuitBuilder``.
+        name: Prefix for the underlying voltage source — the source
+            is registered as ``f"{name}_Varm"`` in the builder.
+        node_a: Top terminal of the arm.
+        node_b: Bottom terminal of the arm.
+        params: Static arm configuration.
+        m_b: Modulation-index signal. Scalar (constant) or callable
+            ``t -> float``.
+
+    Returns:
+        An :class:`MmcArmAverage` carrying the live capacitor-voltage
+        state and the source branch id.
+
+    Notes:
+        Pair the returned object with :func:`make_mmc_arm_observer`:
+
+        .. code-block:: python
+
+            arm = p.add_mmc_arm_average(b, ..., params=params, m_b=...)
+            obs, bex = p.make_mmc_arm_observer(b, arm, dt=dt)
+            res = p.simulate(b, t_end=..., dt=dt,
+                             step_observer=obs, b_extra_fn=bex)
+            print(arm.v_C)   # final capacitor voltage
+    """
+    m_b_fn: Callable[[float], float]
+    if callable(m_b):
+        m_b_fn = m_b
+    else:
+        m_b_const = float(m_b)
+        m_b_fn = lambda _t, _v=m_b_const: _v  # noqa: E731
+
+    # Validate the initial modulation index (cheap sanity check —
+    # catches sign / topology mismatches at build time rather than
+    # at first step).
+    m0 = float(m_b_fn(0.0))
+    if m0 < params.m_min or m0 > params.m_max:
+        raise ValueError(
+            f"m_b(t=0)={m0:.4f} outside valid range "
+            f"[{params.m_min}, {params.m_max}] for "
+            f"sm_type={params.sm_type!r}",
+        )
+
+    # Record branch id before adding (it equals the current branch
+    # count — same trick motors.py uses).
+    src_id = builder.graph.num_branches
+    builder.add_voltage_source(f"{name}_Varm", node_a, node_b, 0.0)
+
+    return MmcArmAverage(
+        params=params,
+        m_b_fn=m_b_fn,
+        v_C=float(params.v_c0),
+        v_b=m0 * float(params.v_c0),
+        name=name,
+        source_branch_id=src_id,
+    )
+
+
+def make_mmc_arm_observer(builder, arm: MmcArmAverage, *, dt: float):
+    """Convenience single-arm wrapper around
+    :func:`make_mmc_arms_observer`."""
+    return make_mmc_arms_observer(builder, [arm], dt=dt)
+
+
+def make_mmc_arms_observer(
+    builder,
+    arms: "list[MmcArmAverage]",
+    *,
+    dt: float,
+):
+    """Build a ``(step_observer, b_extra_fn)`` pair for one or more
+    average-value MMC arms sharing the same simulation step.
+
+    Args:
+        builder: The :class:`pulsim.CircuitBuilder` that already has
+            every arm registered via :func:`add_mmc_arm_average`.
+        arms: Sequence of :class:`MmcArmAverage` objects (one per
+            arm). Their order is irrelevant — each carries its own
+            branch id.
+        dt: Mechanical/electrical step in seconds. Must equal the
+            ``dt`` you pass to :func:`pulsim.simulate`.
+
+    Returns:
+        ``(step_observer, b_extra_fn)`` ready to plug into
+        :func:`pulsim.simulate`.
+
+    Raises:
+        ValueError: If ``dt`` is non-positive or ``arms`` is empty.
+
+    Notes
+    -----
+
+    **Sign convention for ``i_b``.** pulsim's voltage-source branch
+    variable carries the current that enters the source at its
+    ``from`` node. The MMC convention used in
+    :func:`mmc_arm_average_step` defines ``i_b`` as the current
+    flowing in the *opposite* direction (out of ``node_a`` through
+    the arm); the observer negates ``x[src_idx]`` accordingly.
+
+    **Step-counting bias.** ``step_observer`` fires *once per sample*
+    (``N + 1`` calls for ``N`` integration steps), advancing
+    ``arm.v_C`` on every call. With ``start_from_dc_op=True`` the
+    final value of ``arm.v_C`` therefore represents
+    ``v_C(t_end + dt)`` rather than ``v_C(t_end)`` — a one-step
+    forward-Euler offset (typically ≤ 0.1 % of the swing at L0 step
+    rates). The pure-Python :func:`simulate_mmc_arm_average` does
+    not have this bias because it doesn't hook into the kernel.
+
+    **Runtime ``m_b`` range validation.** ``add_mmc_arm_average``
+    validates ``m_b(0)`` at build time. The kernel silently swallows
+    any :class:`ValueError` raised from inside ``step_observer``, so
+    we do *not* re-check the range at every step — the cost would be
+    paid in vain. Users with time-varying ``m_b`` are responsible
+    for keeping it in range; mis-clamped values just produce
+    physically inconsistent ``v_C`` evolution but won't crash.
+    """
+    if dt <= 0:
+        raise ValueError(f"dt must be > 0 (got {dt})")
+    if not arms:
+        raise ValueError("arms must contain at least one element")
+
+    state_size = builder.pool.state_size(builder.graph)
+    src_indices = [
+        builder.pool.branch_var_id_for_source(
+            arm.source_branch_id, builder.graph,
+        )
+        for arm in arms
+    ]
+
+    def step_observer(t, x):
+        for k, arm in enumerate(arms):
+            # pulsim's voltage-source branch-current convention sees
+            # `x[src_idx]` as the current entering the source at its
+            # ``from`` node (== node_a). The L0 ``i_b`` is conventionally
+            # defined as the current flowing *out* of node_a through the
+            # arm (i.e. into the cap+SM stack), which is the opposite
+            # sign — hence the negation. Empirically verified with a
+            # constant-current probe (see commit message for details).
+            i_b = -float(x[src_indices[k]])
+            m_now = float(arm.m_b_fn(t))
+            v_C_next, _ = mmc_arm_average_step(
+                arm.v_C, m_now, i_b, dt, arm.params,
+            )
+            arm.v_C = v_C_next
+            # Stash the value of v_b for the *next* sample (t + dt).
+            # The b_extra_fn convention reads this stash one step later.
+            m_next = float(arm.m_b_fn(t + dt))
+            arm.v_b = m_next * v_C_next
+
+    def b_extra_fn(_t):
+        out = [0.0] * state_size
+        # Convention (matches motors.py): the constraint row reads
+        # ``(V_from − V_to) − V_source = 0``. Adding ``+X`` to b
+        # shifts V_source by ``−X``, so we inject ``−v_b`` to set the
+        # source's terminal voltage to ``+v_b``.
+        for k, arm in enumerate(arms):
+            out[src_indices[k]] = -arm.v_b
+        return out
+
+    return step_observer, b_extra_fn
