@@ -20,8 +20,6 @@ import pytest
 import pulsim as p
 from pulsim.schematic.topology_recognizer import (
     KNOWN_TOPOLOGIES,
-    MIN_CONFIDENCE,
-    RecognizedTopology,
     recognize,
     detect_buck,
     detect_boost,

@@ -109,11 +109,30 @@ foreach(_pulsim_file IN LISTS _pulsim_top_level_files)
     )
 endforeach()
 
-# pulsim 1.0.0 retired every v1-era submodule (codegen, fmu, sweep,
-# schematic). The v2 surface is now flat — all helpers live as
-# top-level ``pulsim/v2_*.py`` modules, picked up by the top-level
-# glob above. If a future v2-native submodule directory lands,
-# re-introduce the per-submodule glob here.
+# Schematic renderer (Phase 1-17 of the v2 schematic-rendering effort):
+# the ``pulsim.schematic`` subpackage ships Python modules + YAML
+# topology templates + a JS bridge to ELK. Copy the whole subdirectory
+# into the build tree so ``PYTHONPATH=build/python python -c "import
+# pulsim"`` actually finds it; the previous "v1 was retired, flat
+# layout only" comment was outdated and stopped this from happening,
+# which broke CI's `from . import schematic` after the v2 merge.
+file(GLOB_RECURSE _pulsim_schematic_files
+    LIST_DIRECTORIES false
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.pyi
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.svg
+)
+foreach(_pulsim_file IN LISTS _pulsim_schematic_files)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/${_pulsim_file}
+        ${CMAKE_BINARY_DIR}/python/${_pulsim_file}
+        COPYONLY
+    )
+endforeach()
 
 # =============================================================================
 # Install targets
@@ -135,7 +154,21 @@ install(FILES ${_pulsim_top_files}
     DESTINATION pulsim
 )
 
-# No Python submodule directories remain after the v1 retirement — the
-# install above (top-level ``pulsim/*.py``) covers everything pulsim 1.0.0
-# ships. Re-introduce a per-submodule install loop here when a v2-native
-# directory (e.g. ``pulsim/visualization/``) lands.
+# Install the schematic submodule alongside the top-level Python
+# files. Mirrors the build-tree copy above so wheel users get the
+# subpackage + YAML templates.
+file(GLOB_RECURSE _pulsim_schematic_install_files
+    LIST_DIRECTORIES false
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/pulsim
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.pyi
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/schematic/*.svg
+)
+foreach(_rel_path IN LISTS _pulsim_schematic_install_files)
+    get_filename_component(_rel_dir ${_rel_path} DIRECTORY)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pulsim/${_rel_path}
+            DESTINATION pulsim/${_rel_dir})
+endforeach()

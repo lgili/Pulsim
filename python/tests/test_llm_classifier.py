@@ -14,13 +14,11 @@ import json
 import os
 import sys
 import types
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 import pulsim as p
-from pulsim.schematic import llm_classifier as llm
 from pulsim.schematic.llm_classifier import (
     CACHE_SCHEMA_VERSION,
     LLM_KNOWN_TOPOLOGIES,

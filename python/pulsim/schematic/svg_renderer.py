@@ -25,10 +25,8 @@ from pathlib import Path
 from typing import Any
 
 from .types import (
-    BoundingBox,
     ComponentPlacement,
     SchematicLayout,
-    TerminalAnchor,
     Wire,
 )
 

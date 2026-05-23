@@ -177,7 +177,17 @@ def test_compute_layout_uses_template_for_recognized(topo, builder):
 
 def test_compute_layout_falls_back_for_unrecognized():
     """A random circuit must still get a layout — the spring
-    fallback should fire."""
+    fallback should fire. Skipped when networkx is missing (the
+    spring backend needs it; without it the fallback path raises a
+    clear ImportError that's exercised by a separate test)."""
+    try:
+        import networkx  # noqa: F401
+    except ImportError:
+        pytest.skip(
+            "networkx not installed — spring fallback requires the "
+            "[schematic] extras. Recognized topologies still work via "
+            "the template path covered by the other tests in this file."
+        )
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "n0", "gnd", 1.0)
     for i in range(8):

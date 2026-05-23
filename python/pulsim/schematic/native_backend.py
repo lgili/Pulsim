@@ -290,7 +290,7 @@ def _auto_hints(
             abs_layer = rel_layer + layer_offset
             auto[comp_name] = (abs_layer * LAYER_PX, slot * SLOT_PX)
         # Shift the next matched topology rightward by (max rel layer + 2).
-        max_layer = max(l for (l, _) in layout.values())
+        max_layer = max(layer for (layer, _) in layout.values())
         layer_offset += max_layer + 2
 
     return auto
