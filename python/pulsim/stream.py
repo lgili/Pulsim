@@ -64,7 +64,217 @@ from typing import Callable, List, Optional, Tuple
 import numpy as np
 
 
-__all__ = ["LiveStream"]
+__all__ = ["LiveStream", "NativeLiveStream"]
+
+
+class NativeLiveStream:
+    """Live data stream backed by a C++ lock-free ring buffer.
+
+    This is the high-performance alternative to :class:`LiveStream` for
+    the live-scope use case. Instead of going through a Python
+    ``step_observer`` callback every kernel step (with GIL acquire/
+    release) and a ``queue.Queue`` for batching, the kernel writes
+    samples directly to a preallocated numpy array shared with Python.
+    The GUI reads from that array as a numpy view — zero copies, zero
+    Python in the kernel hot loop.
+
+    Architecture::
+
+        ┌──────────────────────────┐
+        │  C++ run_transient_      │
+        │  with_chain (no GIL)     │
+        │                          │  every `decimate` steps:
+        │   chain.step(t, x)       │    ring.t_data[head%cap] = t
+        │   if(++c >= decimate):   │    memcpy(ring.x_data + ..., x)
+        │     ring.push(t, x)      │    head.store(h+1, release)
+        │   if ring.stopped():     │
+        │     break  ───────────────────────────────────►
+        └──────────────────────────┘                    │
+                                                        │ atomic
+                ┌───────────────────────────────────────┘
+                │
+        ┌───────▼──────────────────┐
+        │  Python LiveScope tick   │   head = ring.get_head()  [atomic acq]
+        │  (60 Hz, GIL-held)       │   slice = t_buf[last:head]
+        │                          │   xs    = x_buf[last:head]
+        │   stream.get_new_samples │   redraw, advance last
+        └──────────────────────────┘
+
+    The ring is a single-producer, single-consumer (SPSC) lock-free
+    queue. Synchronisation is provided by a single ``std::atomic<int64_t>``
+    write head with ``memory_order_release`` on push and
+    ``memory_order_acquire`` on read. The reader is guaranteed to see
+    all data writes that happened before the head increment.
+
+    Drop-in compatible with :class:`LiveStream`'s consumer surface for
+    use with :class:`LiveScope`: it exposes ``stop()``,
+    ``n_steps_received``, ``n_steps_kept``, etc. — but the GUI
+    additionally checks for an ``is_native`` flag and switches to
+    ``get_new_samples()`` instead of queue draining.
+
+    Parameters
+    ----------
+    capacity, default 1_000_000
+        Number of (t, x) slots in the ring buffer. At ``decimate=100``
+        and the default 100 ns kernel dt, that covers ~10 s of visual
+        sample history before the head wraps and oldest samples are
+        overwritten. Memory: ``(1 + state_size) * 8 * capacity`` bytes
+        (e.g. ~80 MB for capacity=1M with a 10-state circuit).
+    decimate, default 100
+        Kernel-side decimation factor. Every ``decimate`` steps the
+        kernel pushes one sample. Use 1 to capture every step, higher
+        values for finer-grained downsampling at the source (no Python
+        overhead).
+    """
+
+    is_native = True
+
+    def __init__(self, *, capacity: int = 1_000_000,
+                  decimate: int = 100):
+        if capacity < 1:
+            raise ValueError("capacity must be >= 1")
+        if decimate < 1:
+            raise ValueError("decimate must be >= 1")
+        self._capacity = int(capacity)
+        self._decimate = int(decimate)
+        self._ring = None                  # set by attach()
+        self._state_size = -1
+        self._last_read = 0                # reader's monotonic counter
+        self._dropped_samples = 0          # samples we missed (ring overflow)
+
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
+
+    def attach(self, state_size: int) -> None:
+        """Allocate the ring buffer for the given state vector size.
+        Called automatically by ``simulate(live_stream=…)`` before the
+        kernel runs."""
+        from ._pulsim import v2_kernel as _k  # type: ignore[import-not-found]
+        self._state_size = int(state_size)
+        self._ring = _k.LiveRingHandle(
+            capacity=self._capacity,
+            state_size=self._state_size,
+            decimate=self._decimate)
+
+    @property
+    def native_ring(self):
+        """The underlying C++ ``LiveRingHandle`` (or None if not
+        attached). Passed to ``run_transient_with_chain(live_ring=…)``."""
+        return self._ring
+
+    @property
+    def attached(self) -> bool:
+        return self._ring is not None
+
+    # ------------------------------------------------------------------
+    # Consumer API (used by LiveScope)
+    # ------------------------------------------------------------------
+
+    def get_new_samples(self):
+        """Return ``(t_view, x_view)`` of new samples written since the
+        last call. Both are zero-copy numpy slices of the ring (unless
+        the read wraps the ring boundary, in which case a single
+        ``np.concatenate`` is done — still one allocation, no per-sample
+        cost). Returns ``None`` if no new samples.
+        """
+        if self._ring is None:
+            return None
+        head = self._ring.get_head()
+        if head <= self._last_read:
+            return None
+        # If the kernel got more than ``capacity`` ahead of us, the
+        # oldest samples were overwritten — we accept the loss and
+        # only see the latest ``capacity`` samples.
+        gap = head - self._last_read
+        if gap > self._capacity:
+            self._dropped_samples += (gap - self._capacity)
+            self._last_read = head - self._capacity
+        t_buf = self._ring.t_buf
+        x_buf = self._ring.x_buf
+        start_slot = int(self._last_read % self._capacity)
+        end_slot = int(head % self._capacity)
+        if end_slot > start_slot:
+            t_view = t_buf[start_slot:end_slot]
+            x_view = x_buf[start_slot:end_slot]
+        elif end_slot == 0:
+            # Exact wrap to start — tail to end of buffer.
+            t_view = t_buf[start_slot:]
+            x_view = x_buf[start_slot:]
+        else:
+            # Wraparound — one concat (still cheap relative to the
+            # per-tick budget).
+            t_view = np.concatenate(
+                [t_buf[start_slot:], t_buf[:end_slot]])
+            x_view = np.concatenate(
+                [x_buf[start_slot:], x_buf[:end_slot]])
+        self._last_read = head
+        return t_view, x_view
+
+    def stop(self) -> None:
+        """Signal the kernel to stop at the next step boundary."""
+        if self._ring is not None:
+            self._ring.request_stop()
+
+    def stopped(self) -> bool:
+        if self._ring is None:
+            return False
+        return self._ring.stopped()
+
+    @property
+    def should_continue(self):
+        """For symmetry with :class:`LiveStream`. The C++
+        run_transient_with_chain already wires the ring's stop flag
+        into the kernel's should_continue check — this is the
+        explicit Python-side hook for callers that don't use the
+        chain path."""
+        return lambda: not self.stopped()
+
+    # ------------------------------------------------------------------
+    # Stats — names compatible with LiveStream so LiveScope can poll
+    # them generically.
+    # ------------------------------------------------------------------
+
+    @property
+    def n_steps_received(self) -> int:
+        if self._ring is None:
+            return 0
+        return self._ring.get_head() * self._decimate
+
+    @property
+    def n_steps_kept(self) -> int:
+        if self._ring is None:
+            return 0
+        return self._ring.get_head()
+
+    @property
+    def n_batches_emitted(self) -> int:
+        # Ring-mode doesn't use batches; report the number of fresh
+        # samples since attach as a useful proxy.
+        return self.n_steps_kept
+
+    @property
+    def n_batches_dropped(self) -> int:
+        return self._dropped_samples
+
+    def qsize(self) -> int:
+        if self._ring is None:
+            return 0
+        return int(self._ring.get_head() - self._last_read)
+
+    def empty(self) -> bool:
+        return self.qsize() == 0
+
+    def flush_pending(self) -> None:
+        # No-op — the ring is always "flushed" by definition (writes
+        # are visible to the reader as soon as the atomic head moves).
+        pass
+
+    # Misc compatibility shims (some scope code calls these).
+    def add_inline_consumer(self, _callback) -> None:  # noqa: D401
+        raise NotImplementedError(
+            "NativeLiveStream doesn't support inline consumers — the "
+            "kernel writes directly to shared memory.")
 
 
 class LiveStream:

@@ -274,10 +274,23 @@ class LiveScope:
     # =====================================================================
 
     def start(self) -> None:
-        pg.setConfigOptions(antialias=True,
-                              background=_BG_COLOR,
-                              foreground=_TEXT_COLOR,
-                              useOpenGL=False)
+        # ``useOpenGL=True`` moves curve rendering to the GPU — combined
+        # with ``setDownsampling(auto=True)`` on each plot, GL upload
+        # per redraw drops to ~visible-pixel-count regardless of how
+        # many samples the ring holds. We try OpenGL first; if Qt's
+        # OpenGL stack isn't available on this system the user is
+        # silently dropped back to the raster path.
+        try:
+            pg.setConfigOptions(antialias=True,
+                                  background=_BG_COLOR,
+                                  foreground=_TEXT_COLOR,
+                                  useOpenGL=True,
+                                  enableExperimental=True)
+        except Exception:  # noqa: BLE001
+            pg.setConfigOptions(antialias=True,
+                                  background=_BG_COLOR,
+                                  foreground=_TEXT_COLOR,
+                                  useOpenGL=False)
         self._app = pg.mkQApp(self.title)
         self._build_window()
         self._build_panels()
@@ -827,51 +840,61 @@ class LiveScope:
             self._fps_ema = 0.85 * self._fps_ema + 0.15 * fps
         self._last_tick = now
 
-        # Drain queue → list of (t_arr, x_arr). Cheap.
-        batches: List[tuple] = []
-        while True:
-            b = self.stream.get_batch(timeout=0.0)
-            if b is None:
-                break
-            batches.append(b)
-        n_batches = len(batches)
+        # Acquire new data. Native stream → one atomic read + numpy
+        # view, no queue. Legacy stream → drain the queue.Queue.
         t_latest = 0.0
+        is_native = getattr(self.stream, "is_native", False)
+        n_batches = 0
+        x_all = None
+        t_all = None
+        if is_native:
+            samples = self.stream.get_new_samples()
+            if samples is not None and not self._paused:
+                t_all, x_all = samples
+                n_batches = 1   # for status display
+            elif samples is not None:
+                n_batches = 1   # data drained but display paused
+        else:
+            # Drain legacy queue.
+            batches: List[tuple] = []
+            while True:
+                b = self.stream.get_batch(timeout=0.0)
+                if b is None:
+                    break
+                batches.append(b)
+            n_batches = len(batches)
+            if n_batches > 0 and not self._paused:
+                t_all = np.concatenate(
+                    [b[0] for b in batches]
+                ).astype(np.float64, copy=False)
+                x_all = np.concatenate(
+                    [b[1] for b in batches]
+                ).astype(np.float64, copy=False)
 
-        if n_batches > 0 and not self._paused:
-            # One concat for all batches. ``t_all`` shape (N,),
-            # ``x_all`` shape (N, state_size).
-            t_all = np.concatenate(
-                [b[0] for b in batches]).astype(np.float64, copy=False)
-            x_all = np.concatenate(
-                [b[1] for b in batches]).astype(np.float64, copy=False)
+        # Vectorized extraction (same code path for both stream types).
+        if t_all is not None and x_all is not None and not self._paused:
             t_latest = float(t_all[-1])
-            n_new = t_all.size
+            n_new = t_all.shape[0]
 
-            # Vectorized extraction per signal.
             for sig in self._signals:
                 if sig.kind == "state":
                     # ONE numpy slice — no Python per-sample work.
                     y_new = x_all[:, sig.state_idx]
                 elif sig.kind == "chain":
                     # Chain channel — only one current value per
-                    # tick, broadcast across the batch's time
-                    # samples. Visually identical to per-sample
-                    # sampling (the chain doesn't have per-sample
-                    # history exposed) but ~1000× cheaper.
+                    # tick, broadcast across the batch's time samples.
                     val = float(sig.chain.get(sig.chain_name))
                     y_new = np.full(n_new, val, dtype=np.float64)
                 else:
-                    # Slow path — generic extractor (used only by
-                    # ``add_signal(extractor=…)`` callers).
+                    # Slow path — generic extractor.
                     y_new = np.fromiter(
                         (sig.extractor(t_all[i], x_all[i])
                           for i in range(n_new)),
                         dtype=np.float64, count=n_new)
                 self._ring_push(sig.name, t_all, y_new)
 
-            # Window trim: drop everything older than t_latest
-            # minus window_seconds. Same cutoff for every signal
-            # so curves stay aligned.
+            # Window trim — same cutoff for every signal so curves
+            # stay aligned.
             self._ring_trim_window(t_latest - self.window_seconds)
 
         # Redraw curves + value readouts.
