@@ -44,28 +44,29 @@ ctest --test-dir build --output-on-failure
 | `PULSIM_ENABLE_NATIVE` | `OFF` | `-march=native -mtune=native` (don't ship binaries built with this). |
 | `PULSIM_ENABLE_PGO_GENERATE` / `..._USE` | `OFF` | Two-pass PGO workflow (see comments in `CMakeLists.txt`). |
 | `PULSIM_SANITIZERS` | `OFF` | `-fsanitize=address,undefined` (works best with `Debug`). |
-| `PULSIM_USE_HYPRE` | `ON` | Pick up HYPRE AMG if it's installed (optional backend). |
 
 ## Dependencies
 
 All managed through `find_package` first, then `FetchContent` as a
 last resort:
 
-- **Eigen 3.4+** — header-only. System install or fetched from
+- **Eigen 3.4+** — header-only matrix/vector library. Also provides
+  `Eigen::SparseLU`, the direct sparse solver used by every Pulsim
+  transient + DC solve. System install or fetched from
   `https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz`.
-- **yaml-cpp 0.8.0** — fetched via `FetchContent` (small, no system
-  variant assumed). Forced to C++17 to dodge GCC 14 + libstdc++
-  regressions when compiled in C++23 mode.
+- **yaml-cpp 0.8.0** — fetched via `FetchContent`. Used only by the
+  YAML circuit loader (`pulsim/yaml/loader.hpp`). Forced to C++17 to
+  dodge GCC 14 + libstdc++ regressions when compiled in C++23 mode.
 - **Catch2 v3.8.0+** — fetched. Only built when `PULSIM_BUILD_TESTS=ON`.
   Same C++17 forcing as yaml-cpp.
-- **SuiteSparse / KLU** — required. System install preferred (`brew
-  install suite-sparse` on macOS, `apt install libsuitesparse-dev`
-  on Linux), falls back to building from source via `FetchContent`.
-- **HYPRE AMG** — optional. Picked up if installed.
 - **pybind11 ≥ 2.10** — only needed when `PULSIM_BUILD_PYTHON=ON`.
   Picks up `find_package(pybind11)` first (typical when building via
   `pip install` or `scikit-build-core`); falls back to `FetchContent`
   pinned at `v2.12.0`.
+
+Pulsim does **not** depend on SuiteSparse / KLU, HYPRE, BLAS, LAPACK,
+MKL, PETSc, SUNDIALS, or any other external solver library. The
+direct sparse path is `Eigen::SparseLU` (header-only).
 
 ## Toolchain
 

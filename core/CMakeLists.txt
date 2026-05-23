@@ -20,8 +20,6 @@ target_link_libraries(pulsim_core
     INTERFACE
         Eigen3::Eigen
         yaml-cpp::yaml-cpp
-        ${PULSIM_KLU_LIBRARIES}
-        ${PULSIM_HYPRE_LIBRARIES}
 )
 add_library(pulsim::core ALIAS pulsim_core)
 
