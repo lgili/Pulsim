@@ -527,6 +527,12 @@ sits comfortably below the cap (typically $D \\le 0.45$).
 
 Math validated by three checks (poles, DC gains, ss2tf round-trip).
 
+**Cross-validation against Pulsim**: open
+[`00_forward_pulsim_validation.ipynb`](00_forward_pulsim_validation.ipynb)
+for an executed notebook that builds the forward in Pulsim
+(transformer + rectifier diode + freewheel diode + LC filter) and
+overlays the steady-state output voltage.
+
 **Next**: open `02_forward_controller.ipynb` for the controller
 design + switched closed-loop proof.
 
