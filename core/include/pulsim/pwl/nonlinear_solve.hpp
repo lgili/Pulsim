@@ -32,6 +32,7 @@
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <format>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -172,10 +173,10 @@ using NonlinearRefreshFn = std::function<
                     // Singular at this λ — grow and retry.
                     lm_lambda *= lm_grow;
                     if (lm_lambda > lm_max) {
-                        throw std::runtime_error(
+                        throw std::runtime_error(std::format(
                             "solve_with_newton (LM): factor "
-                            "failed at λ = " +
-                            std::to_string(lm_lambda));
+                            "failed at λ = {}",
+                            lm_lambda));
                     }
                     continue;
                 }
@@ -201,32 +202,32 @@ using NonlinearRefreshFn = std::function<
                 // Reject; grow λ.
                 lm_lambda *= lm_grow;
                 if (lm_lambda > lm_max) {
-                    throw std::runtime_error(
+                    throw std::runtime_error(std::format(
                         "solve_with_newton (LM): λ exceeded "
-                        "limit at iter " +
-                        std::to_string(iter));
+                        "limit at iter {}",
+                        iter));
                 }
             }
             if (!accepted) {
-                throw std::runtime_error(
+                throw std::runtime_error(std::format(
                     "solve_with_newton (LM): "
-                    "no improving step at iter " +
-                    std::to_string(iter));
+                    "no improving step at iter {}",
+                    iter));
             }
         } else {
             // Plain Newton + optional line search.
             auto solver = sparse::make_default_solver();
             if (!solver->analyze(J_combined)) {
-                throw std::runtime_error(
+                throw std::runtime_error(std::format(
                     "solve_with_newton: combined matrix is "
-                    "structurally singular at iter " +
-                    std::to_string(iter));
+                    "structurally singular at iter {}",
+                    iter));
             }
             if (!solver->factorize(J_combined)) {
-                throw std::runtime_error(
+                throw std::runtime_error(std::format(
                     "solve_with_newton: combined matrix is "
-                    "numerically singular at iter " +
-                    std::to_string(iter));
+                    "numerically singular at iter {}",
+                    iter));
             }
             Vector neg_f = -f_combined;
             solver->solve(neg_f, dx);
@@ -270,13 +271,10 @@ using NonlinearRefreshFn = std::function<
         }
     }
 
-    throw std::runtime_error(
-        "solve_with_newton: failed to converge after " +
-        std::to_string(max_iters) +
-        " iterations (||dx||_inf = " +
-        std::to_string(last_dx_norm) +
-        ", ||residual||_inf = " +
-        std::to_string(last_res_norm) + ")");
+    throw std::runtime_error(std::format(
+        "solve_with_newton: failed to converge after {} iterations "
+        "(||dx||_inf = {}, ||residual||_inf = {})",
+        max_iters, last_dx_norm, last_res_norm));
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion

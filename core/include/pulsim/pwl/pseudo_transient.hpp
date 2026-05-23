@@ -47,6 +47,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <algorithm>
+#include <format>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -131,10 +132,10 @@ namespace pulsim::pwl {
         // 5. Solve J_pt · dx = -F.
         auto solver = sparse::make_default_solver();
         if (!solver->analyze(J_pt)) {
-            throw std::runtime_error(
+            throw std::runtime_error(std::format(
                 "pseudo_transient_solve: J_pt is "
-                "structurally singular at iter " +
-                std::to_string(iter));
+                "structurally singular at iter {}",
+                iter));
         }
         if (!solver->factorize(J_pt)) {
             // Shrink dt and retry (J_pt should ALWAYS be
@@ -185,11 +186,10 @@ namespace pulsim::pwl {
         F_norm_prev = F_norm;
     }
 
-    throw std::runtime_error(
-        "pseudo_transient_solve: failed to converge after " +
-        std::to_string(max_iters) +
-        " iterations (last ||F||_inf = " +
-        std::to_string(F_norm_prev) + ")");
+    throw std::runtime_error(std::format(
+        "pseudo_transient_solve: failed to converge after {} iterations "
+        "(last ||F||_inf = {})",
+        max_iters, F_norm_prev));
 }
 
 }  // namespace pulsim::pwl

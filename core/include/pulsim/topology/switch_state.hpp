@@ -26,6 +26,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -41,65 +42,69 @@ public:
     /// Build a mask of `num_switches` bits, all initialised to 0
     /// (every switch open). Throws `std::invalid_argument` if
     /// `num_switches > 64` — Layer 1 doesn't support wider masks yet.
-    explicit SwitchStateMask(Size num_switches) : size_{num_switches} {
+    constexpr explicit SwitchStateMask(Size num_switches)
+        : size_{num_switches} {
         if (num_switches > 64) {
-            throw std::invalid_argument(
-                "SwitchStateMask supports at most 64 switches; got " +
-                std::to_string(num_switches) +
-                ". Larger circuits need the (future) dynamic-bitset path.");
+            throw std::invalid_argument(std::format(
+                "SwitchStateMask supports at most 64 switches; got {}. "
+                "Larger circuits need the (future) dynamic-bitset path.",
+                num_switches));
         }
     }
 
-    SwitchStateMask() = default;
+    constexpr SwitchStateMask() = default;
 
     // -------------------------------------------------------------------------
-    // Bit ops
+    // Bit ops — all constexpr to enable compile-time mask construction
+    // and let the optimizer fold known-at-compile-time queries.
     // -------------------------------------------------------------------------
 
-    [[nodiscard]] bool get(Size i) const noexcept {
+    [[nodiscard]] constexpr bool get(Size i) const noexcept {
         return ((bits_ >> i) & 1ULL) != 0ULL;
     }
 
-    void set(Size i, bool v) noexcept {
+    constexpr void set(Size i, bool v) noexcept {
         const std::uint64_t one_at_i = (1ULL << i);
         if (v) bits_ |= one_at_i;
         else   bits_ &= ~one_at_i;
     }
 
-    void flip(Size i) noexcept {
+    constexpr void flip(Size i) noexcept {
         bits_ ^= (1ULL << i);
     }
 
-    [[nodiscard]] Size count() const noexcept {
+    [[nodiscard]] constexpr Size count() const noexcept {
         return static_cast<Size>(std::popcount(bits_));
     }
 
-    [[nodiscard]] Size size() const noexcept { return size_; }
+    [[nodiscard]] constexpr Size size() const noexcept { return size_; }
 
     /// Raw backing bits — used by the Gray-code enumerator and by
     /// Layer 4 for fast XOR-based delta detection between adjacent
     /// states.
-    [[nodiscard]] std::uint64_t bits() const noexcept { return bits_; }
-    void set_bits(std::uint64_t b) noexcept { bits_ = b; }
+    [[nodiscard]] constexpr std::uint64_t bits() const noexcept {
+        return bits_;
+    }
+    constexpr void set_bits(std::uint64_t b) noexcept { bits_ = b; }
 
     // -------------------------------------------------------------------------
     // Equality, ordering, hash
     // -------------------------------------------------------------------------
 
-    friend bool operator==(const SwitchStateMask& a,
-                           const SwitchStateMask& b) noexcept {
+    friend constexpr bool operator==(const SwitchStateMask& a,
+                                      const SwitchStateMask& b) noexcept {
         return a.size_ == b.size_ && a.bits_ == b.bits_;
     }
 
-    friend bool operator!=(const SwitchStateMask& a,
-                           const SwitchStateMask& b) noexcept {
+    friend constexpr bool operator!=(const SwitchStateMask& a,
+                                      const SwitchStateMask& b) noexcept {
         return !(a == b);
     }
 
     /// Lexicographic total order: smaller size first, then smaller
     /// bit pattern. Used by `std::set<SwitchStateMask>`.
-    friend bool operator<(const SwitchStateMask& a,
-                          const SwitchStateMask& b) noexcept {
+    friend constexpr bool operator<(const SwitchStateMask& a,
+                                     const SwitchStateMask& b) noexcept {
         if (a.size_ != b.size_) return a.size_ < b.size_;
         return a.bits_ < b.bits_;
     }
@@ -107,7 +112,7 @@ public:
     /// Deterministic 64-bit-mixed hash. Mixes size and bits so masks
     /// of different sizes with coincidentally-equal bit patterns
     /// don't collide unnecessarily.
-    [[nodiscard]] std::size_t hash() const noexcept {
+    [[nodiscard]] constexpr std::size_t hash() const noexcept {
         // splitmix64 on (size_ << 56) | bits_. Cheap, well-mixed.
         std::uint64_t x = (static_cast<std::uint64_t>(size_) << 56) ^ bits_;
         x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
@@ -131,7 +136,7 @@ public:
                 bin += (get(i) ? '1' : '0');
             }
         }
-        bin += " N=" + std::to_string(size_);
+        bin += std::format(" N={}", size_);
         return bin;
     }
 

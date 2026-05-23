@@ -46,6 +46,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <format>
 #include <functional>
 #include <stdexcept>
 
@@ -84,7 +85,7 @@ namespace pulsim::solver {
 // crossing), returns t_curr (the dt-grid time — the V0
 // fallback).
 // -----------------------------------------------------------------------------
-[[nodiscard]] inline Real interp_commutation_time(
+[[nodiscard]] constexpr Real interp_commutation_time(
     Real t_prev, Real t_curr,
     Real s_prev, Real s_curr) noexcept {
     // Same sign → no crossing in the interval; clamp.
@@ -92,7 +93,11 @@ namespace pulsim::solver {
         return t_curr;
     }
     const Real denom = s_prev - s_curr;
-    if (std::abs(denom) < std::numeric_limits<Real>::min()) {
+    // Hand-rolled absolute value — std::abs(double) is not
+    // constexpr until C++26, so use a branchless ternary that
+    // works in constant evaluation.
+    const Real abs_denom = denom < Real{0} ? -denom : denom;
+    if (abs_denom < std::numeric_limits<Real>::min()) {
         return t_curr;
     }
     const Real frac = s_prev / denom;   // ∈ [0, 1] when signs differ
@@ -574,11 +579,11 @@ inline SimulationResult run_transient(
             } while (flipped && iters < max_iters);
 
             if (flipped) {
-                throw std::runtime_error(
+                throw std::runtime_error(std::format(
                     "run_transient: event-iteration limit "
-                    "reached without convergence at t = " +
-                    std::to_string(t) + "; raise "
-                    "max_event_iterations or reduce dt");
+                    "reached without convergence at t = {}; "
+                    "raise max_event_iterations or reduce dt",
+                    t));
             }
 
             // 4. Sub-step commutation timing (Layer 5 V2.2) +
@@ -838,10 +843,10 @@ inline SimulationResult run_transient(
             } while (flipped && iters < max_iters);
 
             if (flipped) {
-                throw std::runtime_error(
+                throw std::runtime_error(std::format(
                     "run_transient: event-iteration limit "
-                    "reached without convergence at t = " +
-                    std::to_string(t));
+                    "reached without convergence at t = {}",
+                    t));
             }
 
             // Sub-step bisection on the static path too.

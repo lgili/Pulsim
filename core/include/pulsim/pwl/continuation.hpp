@@ -34,6 +34,7 @@
 #include "pulsim/pwl/segment.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <format>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -97,12 +98,10 @@ namespace pulsim::pwl {
                 enable_line_search,
                 enable_lm);
         } catch (const std::runtime_error& e) {
-            throw std::runtime_error(
+            throw std::runtime_error(std::format(
                 "continuation_solve: inner Newton failed at "
-                "continuation step " +
-                std::to_string(step) + " of " +
-                std::to_string(refresh_sequence.size()) +
-                " — " + e.what());
+                "continuation step {} of {} — {}",
+                step, refresh_sequence.size(), e.what()));
         }
     }
     return x;

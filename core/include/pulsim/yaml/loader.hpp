@@ -43,6 +43,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <format>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -62,19 +63,19 @@ namespace detail {
     const YAML::Node& dev, std::size_t idx,
     const std::string& fallback_type = {}) {
     if (dev["name"] && dev["name"].IsScalar()) {
-        return "'" + dev["name"].as<std::string>() + "'";
+        return std::format("'{}'", dev["name"].as<std::string>());
     }
-    return "#" + std::to_string(idx) +
-           (fallback_type.empty() ? std::string{}
-            : (" (" + fallback_type + ")"));
+    return fallback_type.empty()
+        ? std::format("#{}", idx)
+        : std::format("#{} ({})", idx, fallback_type);
 }
 
 [[noreturn]] inline void throw_missing_field(
     const YAML::Node& dev, std::size_t idx,
     const std::string& type, const std::string& field) {
-    throw std::runtime_error(
-        "yaml::load: device " + device_label(dev, idx, type) +
-        " is missing required field '" + field + "'");
+    throw std::runtime_error(std::format(
+        "yaml::load: device {} is missing required field '{}'",
+        device_label(dev, idx, type), field));
 }
 
 [[nodiscard]] inline Real require_real(
@@ -127,9 +128,9 @@ inline void load_device(
     builder::CircuitBuilder& b, const YAML::Node& dev,
     std::size_t idx) {
     if (!dev["type"] || !dev["type"].IsScalar()) {
-        throw std::runtime_error(
-            "yaml::load: device #" + std::to_string(idx) +
-            " is missing required field 'type'");
+        throw std::runtime_error(std::format(
+            "yaml::load: device #{} is missing required field 'type'",
+            idx));
     }
     const std::string type = dev["type"].as<std::string>();
     const std::string name = dev["name"] && dev["name"].IsScalar()
