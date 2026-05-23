@@ -1,361 +1,153 @@
-# Migration Guide: Python-Only v1 Runtime
+# Migration Guide — v1 → v2 (pulsim 1.0.0)
 
-This guide documents the migration to the unified v1 kernel with a Python-only user-facing runtime.
+`pulsim` 1.0.0 ships only the v2 kernel. The legacy v1 surface
+(``Circuit``, ``Simulator``, ``YamlParser``, ``Preset``, ``codegen``,
+``fmu``, ``schematic``, ``templates``, ``robust=True``, …) was
+retired during the 1.0 cycle.
 
-## 1. What Changed
+This guide maps every v1 idiom you might have to its v2 equivalent.
+If you're hitting an ``AttributeError: pulsim.Foo was a v1 symbol``
+at runtime, look up ``Foo`` below.
 
-### Removed / Unsupported User Surfaces
+## At a glance
 
-- Legacy CLI execution flow
-- Legacy gRPC server/client workflow
-- JSON netlist loading path
+| Aspect | v1 | v2 |
+|---|---|---|
+| Top-level import | `import pulsim as ps` | `import pulsim as p` (same alias works) |
+| Build a circuit | `ps.Circuit()` + `ps.Resistor()` + `ps.add_component(...)` | `p.CircuitBuilder()` + `b.add_resistor(...)` |
+| Run a transient | `ps.Simulator(ckt, opts).run_transient(x0)` | `p.simulate(b, t_end=..., dt=...)` |
+| Load from YAML | `ps.YamlParser(opts).load("foo.yaml")` | `p.load_yaml("foo.yaml")` → returns a `CircuitBuilder` |
+| AC sweep / Bode | `Simulator.run_ac_sweep(AcSweepOptions(...))` | `p.run_ac_sweep(b, …)` (MNA, fast) or `p.run_fra(b, …)` (swept-sine) |
+| Closed-loop control | Hand-rolled callbacks | `p.MixedDomainBlockChain` with `PIController`, `PIDController`, etc. |
+| Plot | matplotlib by hand | `p.scope(b, res, signals=[...])`, `p.plot_bode(...)` |
+| Discovery | n/a | `p.catalog()`, `p.example("buck_open_loop")` |
 
-### Supported User Surface
+## Top-level objects
 
-- Python package `pulsim`
-- YAML netlists (`schema: pulsim-v1`)
-- Python benchmark/parity/stress tooling in `benchmarks/`
-
-## 2. Netlist Migration (JSON -> YAML)
-
-JSON loaders are no longer part of the supported runtime path.
-
-Use versioned YAML:
-
-```yaml
-schema: pulsim-v1
-version: 1
-components:
-  - type: resistor
-    name: R1
-    nodes: [in, out]
-    value: 1k
-```
-
-## 3. Runtime Migration
-
-### Before (removed)
-
-- `pulsim` CLI command flows
-- Remote gRPC client/server product workflow
-
-### After (supported)
+### `pulsim.Circuit` → `pulsim.CircuitBuilder`
 
 ```python
-import pulsim as ps
+# v1
+ckt = ps.Circuit()
+r1 = ckt.add_node("n1")          # node names were integer IDs returned by add_node
+gnd = ckt.add_node("gnd")
+ckt.add_component(ps.Resistor("R1", r1, gnd, 100.0))
 
+# v2 — string node names; helpers per device kind
+b = p.CircuitBuilder()
+b.add_resistor("R1", "n1", "gnd", 100.0)
+```
+
+### `pulsim.Simulator` → `pulsim.simulate(...)`
+
+```python
+# v1
+opts = ps.SimulationOptions(t_end=1e-3, dt=1e-5)
+sim = ps.Simulator(ckt, opts)
+res = sim.run_transient(ckt.initial_state())
+
+# v2
+res = p.simulate(b, t_end=1e-3, dt=1e-5)
+```
+
+For full control over the cache/solver/options pipeline, the
+explicit form is still available:
+
+```python
+cache = p.PwlStateSpaceCache(b.graph, b.pool)
+cache.build(dt=1e-5)
+opts = p.SimulationOptions(t_start=0.0, t_end=1e-3, dt=1e-5)
+res  = p.run_transient(cache, b.graph, b.pool, opts,
+                       switch_fn=lambda t: p.SwitchStateMask(0))
+```
+
+### `pulsim.YamlParser` → `pulsim.load_yaml(...)`
+
+```python
+# v1
 parser = ps.YamlParser(ps.YamlParserOptions())
-circuit, options = parser.load("circuit.yaml")
+ckt, opts = parser.load("circuit.yaml")
 
-options.newton_options.num_nodes = int(circuit.num_nodes())
-options.newton_options.num_branches = int(circuit.num_branches())
-
-sim = ps.Simulator(circuit, options)
-result = sim.run_transient(circuit.initial_state())
+# v2
+b = p.load_yaml("circuit.yaml")
+res = p.simulate(b, t_end=..., dt=...)
 ```
 
-### Legacy transient backend keys
+### `pulsim.Preset` / `pulsim.AdvancedOptions` → explicit `SimulationOptions`
 
-No runtime suportado, a escolha de caminho transiente é canônica por modo:
+No global presets in v2. Set what you need on `SimulationOptions`
+directly. Solver kind, Newton tolerance, line-search globalization,
+event-bisection thresholds — all explicit knobs.
 
-- `simulation.step_mode: fixed`
-- `simulation.step_mode: variable`
+## Device models
 
-As chaves legadas `simulation.backend` / `simulation.sundials` (e equivalentes em
-`simulation.advanced`) são tratadas apenas para diagnóstico de migração.
+| v1 | v2 |
+|---|---|
+| `ps.Resistor("R", a, b, R)` | `b.add_resistor("R", a, b, R)` |
+| `ps.Capacitor("C", a, b, C)` | `b.add_capacitor("C", a, b, C)` |
+| `ps.Inductor("L", a, b, L)` | `b.add_inductor("L", a, b, L)` |
+| `ps.VoltageSource("V", a, b, V)` | `b.add_voltage_source("V", a, b, V)` |
+| `ps.CurrentSource("I", a, b, I)` | `b.add_current_source("I", a, b, I)` |
+| `ps.Diode("D", a, k, ...)` | `b.add_diode("D", anode, cathode, g_on=..., g_off=..., V_th=...)` |
+| `ps.MOSFET(...)` | `b.add_mosfet_with_body_diode(...)` or `b.add_mosfet_level1(...)` (Shichman-Hodges) |
+| `ps.IGBT(...)` | `b.add_igbt_level1(...)` |
+| `ps.VoltageControlledSwitch(...)` | gate via `p.SwitchStateMask` + `switch_fn(t)` |
+| `ps.Transformer(...)` | `b.add_two_winding_transformer(...)` or `b.add_multi_winding_transformer(...)` |
+| `ps.SineParams(...)` / `ps.PulseParams(...)` | `b.add_sine_voltage_source(...)` / `b.add_pulse_voltage_source(...)` |
+| `ps.PWMVoltageSource(...)` | `b.add_pwm_voltage_source(...)` |
 
-### Before/After: legacy backend -> canonical mode
+## Control surfaces
 
-Before (legacy, removed in strict migration path):
-
-```yaml
-simulation:
-  backend: auto
-  sundials:
-    enabled: true
-    family: ida
-  adaptive_timestep: true
-  dt: 1e-7
-```
-
-After (canonical fixed-step native core):
-
-```yaml
-simulation:
-  step_mode: fixed
-  dt: 1e-7
-  dt_min: 1e-9
-  dt_max: 1e-7
-```
-
-After (canonical variable-step native core):
-
-```yaml
-simulation:
-  step_mode: variable
-  dt: 1e-7
-  dt_min: 1e-9
-  dt_max: 2e-6
-  timestep:
-    preset: power_electronics
-```
-
-If `strict = True`, legacy backend keys produce parser diagnostic
-`PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND`.
-
-### Schema Evolution Policy (v1)
-
-- Deprecated (migration window): `simulation.adaptive_timestep`
-  - Accepted in schema `pulsim-v1`, but emits warning
-    `PULSIM_YAML_W_DEPRECATED_FIELD` with replacement guidance to
-    `simulation.step_mode: fixed|variable`.
-- Removed (strict migration path): `simulation.backend`,
-  `simulation.sundials`, `simulation.advanced.backend`,
-  `simulation.advanced.sundials`
-  - In strict mode, parser fails deterministically with
-    `PULSIM_YAML_E_LEGACY_TRANSIENT_BACKEND` and migration guidance.
-
-### Before/After: procedural compatibility and canonical runtime
-
-Before (procedural path, still supported in migration window):
+The hand-rolled v1 step-callback / `signal_evaluator.py` flows are
+replaced by the `MixedDomainBlockChain` executor (runs in C++, no
+Python interpreter cost per step):
 
 ```python
-import pulsim as ps
+chain = p.MixedDomainBlockChain()
+pi    = chain.add_block(p.PIController(kp=0.5, ki=1200.0))
+chain.wire(source="vout", to=pi.input)
+chain.wire(source=pi.output, to="duty")
 
-times, states, ok, msg = ps.run_transient(
-    circuit, 0.0, 1e-3, 1e-6, circuit.initial_state()
+res = p.run_transient_with_chain(
+    cache, b.graph, b.pool, opts,
+    switch_fn, chain, chain_dt=1e-5,
 )
 ```
 
-After (canonical class/runtime surface):
+Available blocks: `PIController`, `PIDController`, `Comparator`,
+`RateLimiter`, `FirstOrderLowPass`, `Clarke`/`Park`/inverse,
+``ThyristorBlock``, ``FuseBlock``, ``FosterThermalNetwork``, …
 
-```python
-import pulsim as ps
+## Analyses
 
-opts = ps.SimulationOptions()
-opts.tstart = 0.0
-opts.tstop = 1e-3
-opts.dt = 1e-6
-
-sim = ps.Simulator(circuit, opts)
-result = sim.run_transient(circuit.initial_state())
-```
-
-Both paths share the same v1 kernel semantics; prefer `Simulator` for new code.
-
-### Before/After: expert override location
-
-Before (mixed top-level knobs):
-
-```yaml
-simulation:
-  step_mode: variable
-  integrator: trbdf2
-  solver:
-    order: [gmres]
-```
-
-After (canonical mode + explicit expert section):
-
-```yaml
-simulation:
-  step_mode: variable
-  advanced:
-    integrator: trbdf2
-    solver:
-      order: [gmres]
-      iterative:
-        preconditioner: ilut
-        max_iterations: 300
-        tolerance: 1e-8
-```
-
-## 4. Removed API/Workflow Mapping
-
-| Removed workflow | Replacement |
-| --- | --- |
-| CLI `run/validate/info/sweep` | Python runtime + `benchmarks/*.py` runners |
-| gRPC remote simulation docs | Local Python runtime usage |
-| JSON netlist loader docs/tests | YAML parser (`YamlParser`) |
-| Planned placeholder high-level suites | Active runtime/benchmark/validation suites |
-
-## 5. Versioned Deprecation Timeline
-
-| Version | Status | Notes |
-| --- | --- | --- |
-| `v0.2.0` | Deprecation window | Python-only surface declared; legacy docs marked stale |
-| `v0.3.0` | Removal | Legacy CLI/gRPC/JSON user-facing guidance removed from primary docs |
-| `v0.4.0` | Enforcement | Supported workflows restricted to Python + YAML + benchmark/parity/stress toolchain |
-
-## 6. Migration Notes: PulsimGui Converter Integration
-
-### Canonicalização de tipos
-
-O conversor do PulsimGui deve emitir tipos que o parser normaliza para IDs
-canônicos (ex.: `OP_AMP` -> `op_amp`, `PI_CONTROLLER` -> `pi_controller`,
-`CIRCUIT_BREAKER` -> `circuit_breaker`).
-
-Recomendação: sempre serializar o tipo canônico em minúsculo para reduzir
-ambiguidade no pipeline GUI -> YAML -> backend.
-
-### Regras de modelagem no backend
-
-- `bjt_npn` e `bjt_pnp`: surrogate interno baseado em `mosfet`.
-- `thyristor`, `triac`, `fuse`, `circuit_breaker`: composição com `switch` e
-  controlador virtual/event-driven.
-- `relay`: composição com dois `switch` (`NO`/`NC`) + controlador virtual da bobina.
-- `saturable_inductor`: `inductor` elétrico + controlador virtual de indutância efetiva.
-- `coupled_inductor`: dois ramos `inductor` + controlador virtual de acoplamento.
-- `voltage_probe/current_probe/power_probe/scope/mux/demux`: componentes
-  virtuais (não estampam MNA).
-
-### Pinagem e validação
-
-Ative strict mode no parser durante integração:
-
-```python
-opts = ps.YamlParserOptions()
-opts.strict = True
-parser = ps.YamlParser(opts)
-```
-
-Isso garante diagnóstico estável para:
-
-- pinagem inválida (ex.: `relay` sem `COM/NO/NC`);
-- parâmetros fora de faixa (ex.: `duty_min > duty_max`);
-- blocos de controle com configuração inconsistente.
-
-### Gate mínimo para CI do conversor
-
-```bash
-PYTHONPATH=build/python pytest -q python/tests/test_gui_component_parity.py
-PYTHONPATH=build/python pytest -q python/tests/test_runtime_bindings.py
-./build-test/core/pulsim_simulation_tests "[v1][yaml][gui-parity]"
-```
-
-## 7. Upgrade Checklist
-
-1. Replace any JSON netlist assets with YAML `pulsim-v1` netlists.
-2. Remove CLI automation and migrate to Python runners.
-3. Remove gRPC-dependent user scripts from active workflows.
-4. Update CI jobs to run Python benchmark/parity/stress scripts.
-5. Add GUI parity regression gate (`test_gui_component_parity.py`) in CI.
-6. Validate with `openspec validate refactor-python-only-v1-hardening --strict`.
-
-## 8. Numerical Surface — v0.10 → v0.11
-
-The `simplify-and-harden-numerical-surface` change collapses the
-50-field tuning surface into a single `Preset` enum + four
-profiles, deprecates dead integrators + redundant booleans, and adds
-four automatic convergence aids (Armijo line search, simultaneous
-event coalescence, iterative refinement, homotopy continuation) that
-all engage by default.
-
-Full reference: [Numerical Configuration](numerical-configuration.md).
-The migration recipes below cover only the changes that affect
-existing user code.
-
-### 8.1 `make_robust_options(...)` → `SimulationOptions.from_preset(...)`
-
-```python
-# Before (still works):
-opts = ps.make_robust_options(circuit, 0.0, 1e-3, 1e-6,
-                                ps.NewtonOptions(),
-                                ps.LinearSolverStackConfig.defaults())
-
-# After (recommended):
-opts = ps.SimulationOptions.from_preset(ps.Preset.Robust,
-                                          dt=1e-6, tstop=1e-3)
-```
-
-The two paths produce numerically identical configurations for the
-Robust profile. `from_preset()` adds three more named profiles
-(`Auto`, `Fast`, `HighFidelity`) on the same surface.
-
-### 8.2 `adaptive_timestep` → `step_mode`
-
-YAML:
-```yaml
-# Before (emits PULSIM_YAML_W_DEPRECATED_FIELD):
-simulation:
-  adaptive_timestep: true
-
-# After:
-simulation:
-  step_mode: variable        # or "fixed"
-```
-
-Python:
-```python
-# Before (still works, will be removed in next major release):
-opts.adaptive_timestep = True
-
-# After:
-opts.step_mode = ps.StepMode.Variable   # or StepMode.Fixed
-```
-
-### 8.3 `direct_formulation_fallback` → just remove it
-
-The DAE fallback is now **unconditionally on internally**. The field
-is a no-op.
-
-YAML:
-```yaml
-# Before (emits PULSIM_YAML_W_DEPRECATED_FIELD):
-simulation:
-  direct_formulation_fallback: true
-
-# After: just remove the field.
-```
-
-### 8.4 Deprecated integrators
-
-| Removed (warning in v0.11, error in next major) | Replacement |
+| v1 | v2 |
 |---|---|
-| `Integrator.BDF3` / `BDF4` / `BDF5` | `Integrator.BDF2`, `TRBDF2`, or `RosenbrockW` |
-| `Integrator.Gear` | `Integrator.BDF2` (literal alias) |
-| `Integrator.SDIRK2` | `Integrator.TRBDF2` |
+| `Simulator.run_ac_sweep(...)` | `p.run_ac_sweep(b, f_start=..., f_stop=..., n_points=...)` (MNA, fast) |
+| `Simulator.run_fra(...)` | `p.run_fra(b, ...)` — swept-sine FRA (closed-loop and nonlinear-friendly) |
+| `Simulator.run_periodic_steady_state(...)` | `p.run_periodic(b, ...)` (Newton-based shooting) |
+| `pulsim.sweep.run(...)` (Monte-Carlo / LHS / Cartesian) | `p.run_parameter_sweep(b_factory, samples, metrics)` |
 
-YAML:
-```yaml
-# Before:
-simulation:
-  integrator: bdf5
+## Features that did NOT migrate
 
-# After:
-simulation:
-  integrator: trbdf2     # for stiff dynamics with order ≥ 2
-  # or: bdf2 / rosenbrockw
-```
+| Feature | Status on 1.0.0 |
+|---|---|
+| `pulsim.codegen` (C99 codegen) | not in v2 |
+| `pulsim.fmu` (FMI 2.0 CS export) | not in v2 |
+| `pulsim.schematic` (ELK + netlistsvg auto-layout) | not in v2 |
+| `pulsim.templates.{buck,boost,buckboost,…}` (converter auto-design) | not in v2 |
+| `pulsim.Preset` / `AdvancedOptions` global presets | replaced by explicit `SimulationOptions` knobs |
+| `compressor_load` + R600a/R134a refrigerants | not in v2 |
+| MMC arm templates | not in v2 (single-arm helper deferred) |
+| `RobustnessProfile` retry-loop | not in v2 (use `enable_nonlinear_refresh=True` + DC-OP strategies) |
+| Single-phase induction motor (PSC) | not in v2 (DC motor, BLDC, PMSM, induction are) |
 
-### 8.5 New telemetry counters (additive — no migration needed)
+If you need any of these on v2, pin pulsim ``0.10.x`` or open an
+issue on the tracker — the v2 architecture supports each of them as
+a future increment, none was retired for technical reasons.
 
-Four new diagnostic counters appear in `result.backend_telemetry` /
-`result.linear_solver_telemetry` / `result.dc_result`:
+## See also
 
-| Counter | Where | Meaning |
-|---|---|---|
-| `simultaneous_event_groups` | `backend_telemetry` | Steps where ≥ 2 PWL devices commuted atomically |
-| `linear_refinement_steps` | `linear_solver_telemetry` | Direct-solve residual exceeded threshold; one round of iterative refinement fired |
-| `homotopy_steps` | `dc_result` | Lambda increments executed in the homotopy continuation |
-| `homotopy_ladder_completed` | `dc_result` | True if homotopy reached `λ = 1` |
-| `line_search_backtracks` | `newton_result.telemetry` | Already existed; now reflects Armijo backtracks |
-
-If you have CI gates that pin telemetry-counter values, audit them
-against the new fields.
-
-### 8.6 Convergence improvements are silent (no migration needed)
-
-The four convergence aids (Armijo line search inside Newton,
-simultaneous PWL event coalescence, KLU iterative refinement,
-homotopy DC OP) all engage **automatically** when their trigger
-conditions are met. No user-facing knobs to flip. Circuits that
-previously failed convergence on a cold-start may now succeed; that's
-the intended improvement.
-
-If a benchmark of yours regresses because the new behavior produces
-a numerically slightly-different trajectory, set
-`opts.newton_options.armijo_line_search = False` and
-`opts.dc_config.homotopy_config.enable = False` to reproduce the
-v0.10 behavior. Reach out via the issue tracker so we can pin the
-regression as a parity test.
+- ``examples/v2/scripts/`` — 20 runnable v2 reference scripts.
+- ``docs/v2/tutorials/`` — six narrative tutorials.
+- ``docs/v2/api-reference.md`` — the v2 surface.
+- ``docs/v2/gotchas.md`` — every footgun we've hit so far.

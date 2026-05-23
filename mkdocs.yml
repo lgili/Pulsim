@@ -1,5 +1,5 @@
-site_name: PulsimCore
-site_description: High-performance backend for power electronics simulation (Python-first + YAML netlists)
+site_name: Pulsim
+site_description: Power-electronics circuit simulator — C++23 kernel with a Python-first API
 site_url: https://lgili.github.io/Pulsim/
 repo_url: https://github.com/lgili/Pulsim
 repo_name: lgili/Pulsim
@@ -9,13 +9,6 @@ exclude_docs: |
   Doxyfile
   __pycache__/
   python/
-  refactor-python-only-v1-hardening/
-  cpp-v1-layer-map.md
-  solver-refactor-phase0-baseline.md
-  solver-refactor-phase11-electrothermal-gate.md
-  convergence-algorithms.md
-  determinism.md
-  performance-tuning.md
   mainpage.md
 
 theme:
@@ -103,12 +96,8 @@ extra_css:
   - assets/stylesheets/extra.css
 
 nav:
-  - Overview:
-      - Documentation Home: index.md
-      - Backend Architecture: backend-architecture.md
-      - Getting Started: getting-started.md
-      - User Guide: user-guide.md
-  - Pulsim v2 Guide:
+  - Home: index.md
+  - User Guide:
       - Overview: v2/index.md
       - Getting Started: v2/getting-started.md
       - Mental Model: v2/mental-model.md
@@ -121,49 +110,20 @@ nav:
       - API Reference: v2/api-reference.md
       - UX Helpers (discover, plot, monitor): v2/helpers.md
       - Gotchas: v2/gotchas.md
-  - Reference:
-      - Components Reference: components-reference.md
-      - Control Blocks Reference: control-blocks-reference.md
-      - KPI Reference: kpi-reference.md
-      - Netlist YAML Format: netlist-format.md
-      - Device Models: device-models.md
-      - API Reference: api-reference.md
-      - Python API (Legacy Notes): python-api.md
-  - Guides:
-      - Examples and Results: examples-and-results.md
-      - Notebooks: notebooks.md
-      - Numerical Configuration: numerical-configuration.md
-      - AC Analysis: ac-analysis.md
-      - Frequency Response Analysis (FRA): fra.md
-      - Electrothermal Workflow: electrothermal-workflow.md
-      - Parameter Sweep: parameter-sweep.md
-      - Schematic Rendering: schematic-rendering.md
-      - Real-Time Code Generation: code-generation.md
-      - FMI Export: fmi-export.md
-      - Automatic Differentiation: automatic-differentiation.md
-      - PWL Switching Engine: pwl-switching-migration.md
-      - Component Models Audit: component-models-audit.md
-      - Thermal + Loss Models Audit: thermal-and-loss-models-audit.md
-      - Convergence Tuning: convergence-tuning-guide.md
-      - Linear-Solver Cache: linear-solver-cache.md
-      - Robustness Policy: robustness-policy.md
-      - Troubleshooting: troubleshooting.md
-  - Domain Libraries:
-      - Magnetic Models: magnetic-models.md
-      - Motor Models: motor-models.md
-      - Compressor + Refrigerant Load: compressor-and-refrigerant-load.md
-      - Multilevel Converters: multilevel-converters.md
-      - Three-Phase Grid Library: three-phase-grid.md
-      - Catalog Devices: catalog-devices.md
-      - Converter Templates: converter-templates.md
-  - Quality Gates:
-      - Benchmarks and Parity: benchmarks-and-parity.md
-      - SPICE Parity Dashboard: spice-parity-dashboard.md
-      - Property-Based Testing: property-based-testing.md
-      - Build System: build-system.md
-  - Compatibility:
-      - GUI Backend Parity: gui-component-parity.md
-      - Migration Guide: migration-guide.md
+  - Internals:
+      - Architecture (Layer-by-Layer): pulsim-v2/README.md
+      - 'Layer 0 — Numeric + Sparse': pulsim-v2/layer0-numeric-and-sparse.md
+      - 'Layer 1 — Topology + Enumeration': pulsim-v2/layer1-topology-and-enumeration.md
+      - 'Layer 2 — AD + Device Models': pulsim-v2/layer2-ad-and-device-models.md
+      - 'Layer 2 V1 — MOSFET / IGBT': pulsim-v2/layer2-v1-mosfet-igbt.md
+      - 'Layer 2 V2 — Transformer': pulsim-v2/layer2-v2-transformer.md
+      - 'Layer 3 — Stamping Pipeline': pulsim-v2/layer3-stamping-pipeline.md
+      - 'Layer 4 — PWL State-Space Cache': pulsim-v2/layer4-pwl-state-space-cache.md
+      - 'Layer 4 V1 — Trapezoidal Companion': pulsim-v2/layer4-v1-trapezoidal-companion.md
+      - 'Layer 10 — Benchmarks': pulsim-v2/layer10-benchmarks.md
   - Operations:
-      - Configuration: configuration.md
+      - Build System: build-system.md
+      - Performance Tuning: performance-tuning.md
+      - Troubleshooting: troubleshooting.md
+      - Migration Guide (v1 → v2): migration-guide.md
       - Docs Versioning and Release: versioning-and-release.md
