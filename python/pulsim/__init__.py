@@ -630,8 +630,11 @@ _V1_SYMBOL_HINTS = {
     "RobustnessProfile":  "no equivalent — use enable_nonlinear_refresh + DC-OP strategies",
     "codegen":            "no equivalent in 1.0.0",
     "fmu":                "no equivalent in 1.0.0",
-    "templates":          "no equivalent in 1.0.0",
-    "schematic":          "no equivalent in 1.0.0",
+    "templates":          "moved to pulsim.schematic.templates",
+    # schematic intentionally NOT listed here — `pulsim.schematic` is
+    # the restored subpackage (Phase 1-17 of the schematic-renderer-v2
+    # effort), so attribute access resolves normally and never falls
+    # through to this hint dict.
     "parse_netlist":      "p.parse_spice_netlist (SPICE subset)",
 }
 
