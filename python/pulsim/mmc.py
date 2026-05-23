@@ -505,14 +505,25 @@ def make_mmc_arms_observer(
 
     def step_observer(t, x):
         for k, arm in enumerate(arms):
-            # pulsim's voltage-source branch-current convention sees
-            # `x[src_idx]` as the current entering the source at its
-            # ``from`` node (== node_a). The L0 ``i_b`` is conventionally
-            # defined as the current flowing *out* of node_a through the
-            # arm (i.e. into the cap+SM stack), which is the opposite
-            # sign — hence the negation. Empirically verified with a
-            # constant-current probe (see commit message for details).
-            i_b = -float(x[src_indices[k]])
+            # pulsim's voltage-source branch-current convention:
+            # ``x[src_idx]`` is positive when the internal current
+            # flows in the ``from → to`` direction. The L0 physical
+            # ``i_b`` (current charging the SM caps when m_b > 0) is
+            # defined as the current entering the arm at ``node_a``
+            # and exiting at ``node_b``, which is also the
+            # ``from → to`` direction. So no negation is needed:
+            # ``i_b`` is read directly from ``x[src_idx]``.
+            #
+            # Pinned down empirically with two probes:
+            #   1. V-source / resistor pair under known V/R → x[src]
+            #      = -I_R (positive when internal current is gnd→top
+            #      for V("top","gnd",V), i.e. "from→to" wrt the
+            #      source from=top, to=gnd ⇒ x[src] tracks
+            #      "from→to" sign).
+            #   2. 3-phase MMC at DC OP: x[src] on arm_b_p comes out
+            #      with sign matching the analytically computed
+            #      load-driven current.
+            i_b = float(x[src_indices[k]])
             m_now = float(arm.m_b_fn(t))
             v_C_next, _ = mmc_arm_average_step(
                 arm.v_C, m_now, i_b, dt, arm.params,

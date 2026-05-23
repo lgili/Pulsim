@@ -52,7 +52,7 @@ def _build_arm_with_current_source(
         b, name="A1", node_a="top", node_b="gnd",
         params=params, m_b=m_b,
     )
-    b.add_current_source("I_drive", "gnd", "top", i_const)
+    b.add_current_source("I_drive", "top", "gnd", i_const)
     return b, arm
 
 
@@ -158,7 +158,7 @@ def test_kernel_path_matches_standalone_simulate():
         b, name="A", node_a="top", node_b="gnd",
         params=params, m_b=m,
     )
-    b.add_current_source("Id", "gnd", "top", i_const)
+    b.add_current_source("Id", "top", "gnd", i_const)
     obs, bex = p.make_mmc_arm_observer(b, arm, dt=dt)
     p.simulate(b, t_end=duration, dt=dt,
                   step_observer=obs, b_extra_fn=bex,
@@ -185,8 +185,8 @@ def test_two_arms_share_observer():
         b, name="A2", node_a="top2", node_b="gnd",
         params=params_b_, m_b=0.25,
     )
-    b.add_current_source("Id1", "gnd", "top1", 4.0)
-    b.add_current_source("Id2", "gnd", "top2", 8.0)
+    b.add_current_source("Id1", "top1", "gnd", 4.0)
+    b.add_current_source("Id2", "top2", "gnd", 8.0)
 
     dt = 1e-6
     duration = 1e-3
@@ -230,7 +230,7 @@ def test_sinusoidal_current_produces_expected_ripple():
     )
     if hasattr(b, "add_sine_current_source"):
         b.add_sine_current_source(
-            "I_sine", "gnd", "top",
+            "I_sine", "top", "gnd",
             i_dc=0.0, i_amplitude=I_hat, frequency=f, phase=0.0,
         )
     else:
