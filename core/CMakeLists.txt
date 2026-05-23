@@ -62,6 +62,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer1/test_enumerator.cpp
         tests/layer1/test_node_equivalence.cpp
         tests/layer1/test_key.cpp
+        tests/layer1/test_identifiers.cpp
     )
     target_link_libraries(pulsim_core_layer1_tests
         PRIVATE
