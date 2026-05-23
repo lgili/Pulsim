@@ -9,7 +9,7 @@ This guide covers optimization techniques for PulsimCore v2 simulations.
 PulsimCore automatically detects and uses the best available SIMD instruction set:
 
 ```python
-import pulsim.v2 as v2
+import pulsim as v2
 
 level = v1.detect_simd_level()
 width = v1.simd_vector_width()

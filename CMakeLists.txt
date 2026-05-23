@@ -684,7 +684,7 @@ if(PULSIM_BUILD_BENCHMARKS)
         COMMAND ${CMAKE_COMMAND} -E echo "Cleaning build..."
         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
         COMMAND ${CMAKE_COMMAND} -E echo "Timing full rebuild..."
-        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_v2_layer5_v4_tests -- -j1
+        COMMAND ${CMAKE_COMMAND} -E time ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target pulsim_layer5_v4_tests -- -j1
         COMMENT "Measuring compile time (single-threaded for consistency)"
     )
 endif()

@@ -147,7 +147,7 @@ a future increment, none was retired for technical reasons.
 
 ## See also
 
-- ``examples/v2/scripts/`` — 20 runnable v2 reference scripts.
-- ``docs/v2/tutorials/`` — six narrative tutorials.
-- ``docs/v2/api-reference.md`` — the v2 surface.
-- ``docs/v2/gotchas.md`` — every footgun we've hit so far.
+- ``examples/scripts/`` — 20 runnable v2 reference scripts.
+- ``docs/tutorials/`` — six narrative tutorials.
+- ``docs/api-reference.md`` — the v2 surface.
+- ``docs/gotchas.md`` — every footgun we've hit so far.

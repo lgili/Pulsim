@@ -2,23 +2,23 @@
 
 Power-electronics circuit simulator — C++23 kernel with a Python-first API.
 
-Pulsim is a header-only C++ simulation engine (`pulsim::v2`) wrapped by a
+Pulsim is a header-only C++ simulation engine (`pulsim`) wrapped by a
 flat Python module (`import pulsim`). It is built around a PWL
 state-space cache (for fast switched-converter dynamics), a Newton
 refinement on top of the cached linear factor (for non-linear devices),
 and a built-in event detector for diode/MOSFET commutations.
 
-Pulsim 1.0.0 ships the v2 surface only — the legacy v1 kernel was
-retired during the 1.0 cycle. If you have v1 code, see
-[`docs/migration-guide.md`](docs/migration-guide.md) or run
-``scripts/migrate_v1_to_v2.py`` for a mechanical conversion.
+If you have legacy code from the pre-1.0 cycle (the old
+``Circuit`` / ``Simulator`` / ``YamlParser`` surface), see
+[`docs/migration-guide.md`](docs/migration-guide.md) for the
+device / analysis mapping table.
 
 ## Why Pulsim
 
 - **PLECS-style PWL cache** — switched-converter steady-state in
   milliseconds instead of minutes.
-- **Header-only C++23 kernel** — drop `pulsim/v2/` into your own CMake
-  target via `pulsim::v2`; no static-library link step.
+- **Header-only C++23 kernel** — drop `pulsim/` into your own CMake
+  target via `pulsim::core`; no static-library link step.
 - **Python-first ergonomics** — `CircuitBuilder` API takes string node
   names and SI-unit parameters, returns the same `SimulationResult` whether
   you run a transient, an AC sweep, or a parameter sweep.
@@ -44,7 +44,7 @@ cmake --build build -j
 export PYTHONPATH="$(pwd)/build/python:$PYTHONPATH"
 
 # First run — open-loop buck
-python3 examples/v2/scripts/run_buck.py
+python3 examples/scripts/run_buck.py
 
 # Print available components + helpers
 python3 -c "import pulsim as p; p.catalog()"
@@ -70,7 +70,7 @@ p.scope(b, res, signals=["vc"])           # one-liner plot
   sources, MOSFETs (SH1), IGBTs (Level 1), saturable inductors,
   transformers, op-amps, three-phase sources, …
 - **YAML loader**: same surface, 13 ready-made example circuits in
-  `examples/v2/`.
+  `examples/`.
 - **Solver**: PWL state-space cache + Newton refresh + event detection +
   optional state-aware `step_observer(t, x)` callback for closed loops.
 - **Control library**: `PIController`, `PIDController`, `Comparator`,
@@ -84,11 +84,11 @@ p.scope(b, res, signals=["vc"])           # one-liner plot
 
 ### Where to learn more
 
-- 6 narrative tutorials: [`docs/v2/tutorials/`](docs/v2/tutorials/)
-- Mental model: [`docs/v2/mental-model.md`](docs/v2/mental-model.md)
-- API reference: [`docs/v2/api-reference.md`](docs/v2/api-reference.md)
-- Gotchas: [`docs/v2/gotchas.md`](docs/v2/gotchas.md)
-- 20 runnable scripts: [`examples/v2/scripts/`](examples/v2/scripts/)
+- 6 narrative tutorials: [`docs/tutorials/`](docs/tutorials/)
+- Mental model: [`docs/mental-model.md`](docs/mental-model.md)
+- API reference: [`docs/api-reference.md`](docs/api-reference.md)
+- Gotchas: [`docs/gotchas.md`](docs/gotchas.md)
+- 20 runnable scripts: [`examples/scripts/`](examples/scripts/)
 
 ## Validation and performance
 
@@ -106,7 +106,7 @@ PYTHONPATH=build/python python3 benchmarks/benchmark_runner.py --output-dir benc
 ## Documentation
 
 - Documentation site: [https://lgili.github.io/Pulsim/](https://lgili.github.io/Pulsim/)
-- v1 → v2 migration guide: [`docs/migration-guide.md`](docs/migration-guide.md)
+- Migration guide (from the pre-1.0 surface): [`docs/migration-guide.md`](docs/migration-guide.md)
 
 ## Docs deployment (GitHub Pages)
 

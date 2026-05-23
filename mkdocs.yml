@@ -98,32 +98,32 @@ extra_css:
 nav:
   - Home: index.md
   - User Guide:
-      - Overview: v2/index.md
-      - Getting Started: v2/getting-started.md
-      - Mental Model: v2/mental-model.md
-      - 'Tutorial 01 — RC Charging': v2/tutorials/01-rc-charging.md
-      - 'Tutorial 02 — Buck Converter': v2/tutorials/02-buck-converter.md
-      - 'Tutorial 03 — Isolated Flyback': v2/tutorials/03-flyback-isolated.md
-      - 'Tutorial 04 — Three-Phase VSI': v2/tutorials/04-3phase-vsi.md
-      - 'Tutorial 05 — LDO with Op-Amp': v2/tutorials/05-ldo-feedback.md
-      - 'Tutorial 06 — IGBT Boost': v2/tutorials/06-igbt-boost.md
-      - API Reference: v2/api-reference.md
-      - UX Helpers (discover, plot, monitor): v2/helpers.md
-      - Gotchas: v2/gotchas.md
+      - Overview: index.md
+      - Getting Started: getting-started.md
+      - Mental Model: mental-model.md
+      - 'Tutorial 01 — RC Charging': tutorials/01-rc-charging.md
+      - 'Tutorial 02 — Buck Converter': tutorials/02-buck-converter.md
+      - 'Tutorial 03 — Isolated Flyback': tutorials/03-flyback-isolated.md
+      - 'Tutorial 04 — Three-Phase VSI': tutorials/04-3phase-vsi.md
+      - 'Tutorial 05 — LDO with Op-Amp': tutorials/05-ldo-feedback.md
+      - 'Tutorial 06 — IGBT Boost': tutorials/06-igbt-boost.md
+      - API Reference: api-reference.md
+      - UX Helpers (discover, plot, monitor): helpers.md
+      - Gotchas: gotchas.md
   - Internals:
-      - Architecture (Layer-by-Layer): pulsim-v2/README.md
-      - 'Layer 0 — Numeric + Sparse': pulsim-v2/layer0-numeric-and-sparse.md
-      - 'Layer 1 — Topology + Enumeration': pulsim-v2/layer1-topology-and-enumeration.md
-      - 'Layer 2 — AD + Device Models': pulsim-v2/layer2-ad-and-device-models.md
-      - 'Layer 2 V1 — MOSFET / IGBT': pulsim-v2/layer2-v1-mosfet-igbt.md
-      - 'Layer 2 V2 — Transformer': pulsim-v2/layer2-v2-transformer.md
-      - 'Layer 3 — Stamping Pipeline': pulsim-v2/layer3-stamping-pipeline.md
-      - 'Layer 4 — PWL State-Space Cache': pulsim-v2/layer4-pwl-state-space-cache.md
-      - 'Layer 4 V1 — Trapezoidal Companion': pulsim-v2/layer4-v1-trapezoidal-companion.md
-      - 'Layer 10 — Benchmarks': pulsim-v2/layer10-benchmarks.md
+      - Architecture (Layer-by-Layer): internals/README.md
+      - 'Layer 0 — Numeric + Sparse': internals/layer0-numeric-and-sparse.md
+      - 'Layer 1 — Topology + Enumeration': internals/layer1-topology-and-enumeration.md
+      - 'Layer 2 — AD + Device Models': internals/layer2-ad-and-device-models.md
+      - 'Layer 2 V1 — MOSFET / IGBT': internals/layer2-v1-mosfet-igbt.md
+      - 'Layer 2 V2 — Transformer': internals/layer2-v2-transformer.md
+      - 'Layer 3 — Stamping Pipeline': internals/layer3-stamping-pipeline.md
+      - 'Layer 4 — PWL State-Space Cache': internals/layer4-pwl-state-space-cache.md
+      - 'Layer 4 V1 — Trapezoidal Companion': internals/layer4-v1-trapezoidal-companion.md
+      - 'Layer 10 — Benchmarks': internals/layer10-benchmarks.md
   - Operations:
       - Build System: build-system.md
       - Performance Tuning: performance-tuning.md
       - Troubleshooting: troubleshooting.md
-      - Migration Guide (v1 → v2): migration-guide.md
+      - Migration Guide (legacy → 1.0): migration-guide.md
       - Docs Versioning and Release: versioning-and-release.md

@@ -1,55 +1,44 @@
-# Pulsim Documentation
+# Pulsim — User Guide
 
-<div class="pulsim-hero">
-  <h1>Pulsim</h1>
-  <p>Power-electronics circuit simulator — C++23 header-only kernel with a Python-first API.</p>
-  <p>Recommended surface: <code>import pulsim as p</code> + the <code>CircuitBuilder</code> + <code>p.simulate(...)</code> pipeline.</p>
-  <div class="pulsim-hero-actions">
-    <a class="md-button md-button--primary" href="v2/getting-started/">Get Started</a>
-    <a class="md-button" href="v2/mental-model/">Mental Model</a>
-    <a class="md-button" href="v2/api-reference/">API Reference</a>
-    <a class="md-button" href="v2/helpers/">UX Helpers</a>
-  </div>
-</div>
+Pulsim is a header-only C++23 circuit simulator with a Python frontend, designed for **power electronics and SMPS** workloads. The whole solver lives in a few `.hpp` files; the engine pre-factors every reachable switch configuration into a piecewise-linear state-space cache, then steps through time at near-machine-speed.
 
-## What's in the box
+If you've used SPICE before, the mental model is similar but the implementation is very different — see [the mental model page](mental-model.md) for the one-page summary.
 
-Pulsim 1.0.0 retired the legacy v1 kernel; the v2 kernel is the only
-shipped surface.
+## When to use Pulsim
 
-- **PLECS-style PWL cache** — switched-converter steady-state in
-  milliseconds instead of minutes via a state-space cache indexed by
-  the switch combinatorics + Newton refresh on top of the cached
-  linear factor for nonlinear devices.
-- **Header-only C++23 kernel** — drop ``pulsim/v2/`` into your CMake
-  target via ``pulsim::v2``; no static-library link step.
-- **Python-first ergonomics** — ``CircuitBuilder`` takes string node
-  names and SI-unit parameters; ``p.simulate(b, t_end=, dt=)``
-  returns a ``SimulationResult`` whether you ran a transient, an AC
-  sweep, or a parameter sweep.
-- **MixedDomainBlockChain** — PI/PID, comparators, rate limiters,
-  op-amps, FOC blocks, thermal Foster networks composed at kernel
-  speed (no Python interpreter cost per step).
-- **Frequency-domain** — small-signal MNA Bode + swept-sine FRA +
-  closed-loop GM/PM measurement, all in the same surface.
+- You're building **power-electronics converters** (buck, boost, flyback, full-bridge, 3-φ VSI, LDO, …).
+- You want a **scriptable, Python-first** workflow with full access to the solver internals.
+- You need to **run thousands of duty-cycle / load-line sweeps** quickly — the kernel's PWL cache makes each switch combo essentially free after the first solve.
+- You're OK driving things from a `CircuitBuilder` (Python or C++) or YAML — there is no schematic GUI yet.
 
-## Where to start
+## When NOT to use Pulsim
 
-If you're new: ``v2/getting-started.md`` walks you from ``cmake -S
-. -B build`` to a closed-loop buck Bode plot in ten minutes.
+- You need a full SPICE language frontend with `.MODEL` cards — Pulsim has its own device catalogue, not SPICE-compatible.
+- You're doing **RF / high-frequency PCB** simulations with distributed elements — Pulsim is lumped-only.
+- You need built-in convergence retries that mask physically dubious circuits — the kernel's Newton is principled but unforgiving; expect to think about your circuit.
 
-If you're porting v1 code: ``migration-guide.md`` maps every v1
-idiom to its v2 equivalent (and lists the handful of features that
-didn't migrate).
+## Reading order
 
-If you're writing your own helpers: ``pulsim-v2/`` has the layer-by-layer
-internal architecture (Layer 0 numeric primitives all the way up to
-the high-level builder API and YAML loader).
+1. [**Getting started**](getting-started.md) — install, run the first transient, see a plot.
+2. [**Mental model**](mental-model.md) — what the Graph, DevicePool, PwlStateSpaceCache, and Newton refresh do.
+3. **Tutorials** — six walk-throughs from simplest to most involved:
+   - [01 — RC charging from a pulse source](tutorials/01-rc-charging.md)
+   - [02 — Buck converter (YAML + switch_fn)](tutorials/02-buck-converter.md)
+   - [03 — Isolated flyback (transformer + commutation)](tutorials/03-flyback-isolated.md)
+   - [04 — Three-phase voltage-source inverter (SPWM)](tutorials/04-3phase-vsi.md)
+   - [05 — LDO with op-amp feedback (VCVS + MOSFET)](tutorials/05-ldo-feedback.md)
+   - [06 — IGBT boost with realistic gate drive](tutorials/06-igbt-boost.md)
+4. [**API reference**](api-reference.md) — Python surface, one page.
+5. [**Gotchas**](gotchas.md) — Newton convergence corner cases and the workarounds that ship in 1.0.
 
-## Quality gates
+## Where the source lives
 
-- ``troubleshooting.md`` — common build / import failures.
-- ``v2/gotchas.md`` — every footgun we've hit so far.
-- ``performance-tuning.md`` — SIMD / cache hygiene.
-- ``build-system.md`` — what gets built and why.
-- ``versioning-and-release.md`` — docs publishing setup (MkDocs Material + mike).
+| Tree | What's inside |
+|---|---|
+| `core/include/pulsim/` | The entire C++23 solver (header-only) |
+| `core/tests/` | Catch2 unit + integration tests |
+| `python/pulsim/__init__.py` | Python re-export module + `simulate()` helper |
+| `python/bindings.cpp` | pybind11 bindings |
+| `examples/*.yaml` | YAML showcases referenced from these tutorials |
+| `openspec/specs/pulsim-*` | Authoritative capability specs |
+| `openspec/changes/pulsim-*` | Historical change proposals |
