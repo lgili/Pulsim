@@ -58,13 +58,15 @@ jobs:
           node-version: '20'
 
       - name: Install Python dependencies
-        # `pulsim/__init__.py` imports numpy at module load; the schematic
-        # render path itself does not need scipy/networkx but the package
-        # import must succeed before `pulsim.schematic.render(...)` can
-        # be called.
+        # `pulsim/__init__.py` imports numpy at module load. PyYAML is
+        # required by the template_instantiator (each canonical
+        # topology ships a YAML template); without it the dispatcher
+        # silently falls through to the spring backend which then
+        # raises about networkx. cairosvg is optional but cheap to
+        # install — gives us PNG output alongside the SVG.
         run: |
           python -m pip install --upgrade pip
-          pip install numpy
+          pip install numpy pyyaml cairosvg
 
       - name: Install elkjs (+ legacy netlistsvg for backward compat)
         # The Phase 5 default is python_native — only elkjs is actually
