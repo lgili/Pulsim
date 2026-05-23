@@ -222,6 +222,12 @@ from .mmc import (
     # Three-phase DC/AC topology helper (Phase 20.4 step 2).
     MmcThreePhaseDcAc,
     add_mmc_three_phase_dc_ac,
+    # L1 multilevel arm — Phase 20.5.
+    MmcArmMultilevelParams,
+    MmcArmMultilevelResult,
+    ps_pwm_switching_function,
+    mmc_arm_multilevel_step,
+    simulate_mmc_arm_multilevel,
 )
 
 # Schematic renderer — optional, gated behind `[schematic]` extras
@@ -395,6 +401,12 @@ __all__ = [
     # MMC three-phase DC/AC topology helper.
     "MmcThreePhaseDcAc",
     "add_mmc_three_phase_dc_ac",
+    # MMC L1 — discrete multilevel arm (PS-PWM).
+    "MmcArmMultilevelParams",
+    "MmcArmMultilevelResult",
+    "ps_pwm_switching_function",
+    "mmc_arm_multilevel_step",
+    "simulate_mmc_arm_multilevel",
 ]
 
 if _HAS_SCOPE:
