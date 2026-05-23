@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V3: Nonlinear Newton on cached linear factor
+// Pulsim — Layer 4 V3: Nonlinear Newton on cached linear factor
 // =============================================================================
 //
 // `pulsim-v2-nonlinear-segment-newton` Phase 1.

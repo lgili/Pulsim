@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 1: SwitchStateMask
+// Pulsim — Layer 1: SwitchStateMask
 // =============================================================================
 //
 // `pulsim-v2-topology-and-switch-enumeration` Phase 2.

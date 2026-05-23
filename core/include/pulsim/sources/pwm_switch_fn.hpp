@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — PWM helper: `make_pwm_switch_fn`
+// Pulsim — PWM helper: `make_pwm_switch_fn`
 // =============================================================================
 //
 // SMPS users typically drive a controlled switch (MOSFET,

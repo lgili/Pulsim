@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — 3-phase voltage-source inverter: `make_three_phase_spwm_fn`
+// Pulsim — 3-phase voltage-source inverter: `make_three_phase_spwm_fn`
 // =============================================================================
 //
 // The 3-phase two-level voltage-source inverter is the

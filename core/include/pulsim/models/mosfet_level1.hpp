@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V13: MOSFET Shichman-Hodges Level 1
+// Pulsim — Layer 2 V13: MOSFET Shichman-Hodges Level 1
 // =============================================================================
 //
 // 3-terminal MOSFET model with the classic SH1 quadratic

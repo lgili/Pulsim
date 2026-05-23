@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — BlockChain adapter factories.
+// Pulsim — BlockChain adapter factories.
 //
 // One `make_<block>_step()` factory per POD block in `blocks.hpp`.
 // Each factory returns a `BlockStepFn` (closure) that:

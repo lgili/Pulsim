@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase D / C++ port: motor → BlockChain adapters.
+// Pulsim — Phase D / C++ port: motor → BlockChain adapters.
 //
 // Each `add_<motor>_to_chain(...)` factory:
 //   1. Stores the motor parameters (R, L, K, Mechanical) in a

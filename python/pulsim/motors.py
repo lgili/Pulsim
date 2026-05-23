@@ -1,4 +1,4 @@
-"""Pulsim v2 — electromechanical motor models (Phase D).
+"""Pulsim — electromechanical motor models (Phase D).
 
 Pure-Python motor helpers built on top of v2's R/L/voltage-source
 primitives plus the step_observer + b_extra_fn pair. Each motor is

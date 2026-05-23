@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 1: Gray-code enumeration over switch states
+// Pulsim — Layer 1: Gray-code enumeration over switch states
 // =============================================================================
 //
 // `pulsim-v2-topology-and-switch-enumeration` Phase 3.

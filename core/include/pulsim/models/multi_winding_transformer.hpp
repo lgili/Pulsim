@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V16: Multi-winding (N=2..6) linear transformer
+// Pulsim — Layer 2 V16: Multi-winding (N=2..6) linear transformer
 // =============================================================================
 //
 // Generalisation of TwoWindingTransformer (V2) to N windings:

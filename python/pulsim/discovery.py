@@ -1,4 +1,4 @@
-"""Pulsim v2 — discovery helpers.
+"""Pulsim — discovery helpers.
 
 Interactive helpers that print the v2 catalogue + code snippets so
 users can answer questions like:

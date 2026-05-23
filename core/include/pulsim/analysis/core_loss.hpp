@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 11 V18: Steinmetz / iGSE core-loss estimator
+// Pulsim — Layer 11 V18: Steinmetz / iGSE core-loss estimator
 // =============================================================================
 //
 // Post-process analysis: given a simulation result and the

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 5: SimulationOptions (fixed-dt time-stepping inputs)
+// Pulsim — Layer 5: SimulationOptions (fixed-dt time-stepping inputs)
 // =============================================================================
 //
 // `pulsim-v2-solver-and-events` Phase 1.

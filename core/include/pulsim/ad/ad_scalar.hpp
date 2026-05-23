@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2: forward-mode AD scalar
+// Pulsim — Layer 2: forward-mode AD scalar
 // =============================================================================
 //
 // `pulsim-v2-device-models-ad-driven` Phase 1.

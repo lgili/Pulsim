@@ -1,4 +1,4 @@
-"""Pulsim v2 — discrete-time control building blocks.
+"""Pulsim — discrete-time control building blocks.
 
 These are pure Python stateful classes that mirror v1's
 `control.hpp` C++ helpers (PIController, PIDController,

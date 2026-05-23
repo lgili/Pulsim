@@ -1,4 +1,4 @@
-"""Pulsim v2 — thermal Foster networks + electro-thermal co-simulation.
+"""Pulsim — thermal Foster networks + electro-thermal co-simulation.
 
 Junction-temperature tracking for power devices, in two flavours:
 

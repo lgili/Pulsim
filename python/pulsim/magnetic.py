@@ -1,4 +1,4 @@
-"""Pulsim v2 — magnetic core-loss models (Phase C.3).
+"""Pulsim — magnetic core-loss models (Phase C.3).
 
 Three loss formulas for soft-magnetic cores (ferrites, nano-
 crystalline, powder), plus a small built-in material catalog with

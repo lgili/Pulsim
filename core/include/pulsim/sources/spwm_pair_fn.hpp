@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Sine-modulated PWM half-bridge: `make_spwm_pair_fn`
+// Pulsim — Sine-modulated PWM half-bridge: `make_spwm_pair_fn`
 // =============================================================================
 //
 // Voltage-source inverters (single-phase, motor drives,

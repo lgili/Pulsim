@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V2: DC operating-point MNA assembly
+// Pulsim — Layer 4 V2: DC operating-point MNA assembly
 // =============================================================================
 //
 // `pulsim-v2-dc-operating-point` Phase 1.

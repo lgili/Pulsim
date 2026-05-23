@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2: Inductor device model (trap companion, branch-current)
+// Pulsim — Layer 2: Inductor device model (trap companion, branch-current)
 // =============================================================================
 //
 // `pulsim-v2-trapezoidal-companion` Phase 1.

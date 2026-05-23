@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: CurrentSource MNA stamping
+// Pulsim — Layer 3: CurrentSource MNA stamping
 // =============================================================================
 //
 // `pulsim-v2-current-source` Phase 2.

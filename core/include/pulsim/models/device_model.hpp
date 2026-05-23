@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2: DeviceModel concept + Jacobian helper
+// Pulsim — Layer 2: DeviceModel concept + Jacobian helper
 // =============================================================================
 //
 // `pulsim-v2-device-models-ad-driven` Phase 2.

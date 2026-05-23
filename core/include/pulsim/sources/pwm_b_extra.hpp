@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V4: PWM b_extra computation helper
+// Pulsim — Layer 2 V4: PWM b_extra computation helper
 // =============================================================================
 //
 // At each `run_transient` time step, this helper walks the

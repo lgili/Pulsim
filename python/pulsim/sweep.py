@@ -1,4 +1,4 @@
-"""Pulsim v2 — parameter sweep + Monte Carlo helpers (Phase E.3).
+"""Pulsim — parameter sweep + Monte Carlo helpers (Phase E.3).
 
 Turns ``simulate()`` into a design-exploration tool. The user supplies:
   * A `builder_factory(**params) -> CircuitBuilder` that constructs a

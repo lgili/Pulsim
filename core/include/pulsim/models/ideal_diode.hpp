@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2: IdealDiode device model
+// Pulsim — Layer 2: IdealDiode device model
 // =============================================================================
 //
 // `pulsim-v2-device-models-ad-driven` Phase 5.

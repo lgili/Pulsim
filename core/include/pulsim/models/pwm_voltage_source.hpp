@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V4: PWMVoltageSource device model
+// Pulsim — Layer 2 V4: PWMVoltageSource device model
 // =============================================================================
 //
 // First-class PWM voltage source: a square-wave switching

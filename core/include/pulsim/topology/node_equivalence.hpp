@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 1: Node equivalence under switch state
+// Pulsim — Layer 1: Node equivalence under switch state
 // =============================================================================
 //
 // `pulsim-v2-topology-and-switch-enumeration` Phase 4.

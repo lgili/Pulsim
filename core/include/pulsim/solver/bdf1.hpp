@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase B.2: BDF1 (implicit Euler) integrator.
+// Pulsim — Phase B.2: BDF1 (implicit Euler) integrator.
 //
 // The trap (Tustin) companion in the existing kernel is 2nd-order
 // and A-stable, but NOT L-stable: a stiff system with a fast pole

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: Fixed-state switch stamper
+// Pulsim — Layer 3: Fixed-state switch stamper
 // =============================================================================
 //
 // `pulsim-v2-generic-stamping-pipeline` Phase 4.

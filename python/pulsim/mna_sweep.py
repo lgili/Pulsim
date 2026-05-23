@@ -1,4 +1,4 @@
-"""Pulsim v2 — fast frequency sweep via impulse response + FFT.
+"""Pulsim — fast frequency sweep via impulse response + FFT.
 
 The swept-sine `run_ac_sweep` is robust but expensive: each test
 frequency takes its own multi-cycle transient. For LINEAR (or

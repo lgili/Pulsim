@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2: Capacitor device model (trap companion)
+// Pulsim — Layer 2: Capacitor device model (trap companion)
 // =============================================================================
 //
 // `pulsim-v2-trapezoidal-companion` Phase 1.

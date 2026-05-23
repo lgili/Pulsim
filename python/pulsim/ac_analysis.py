@@ -1,4 +1,4 @@
-"""Pulsim v2 — small-signal AC analysis via swept-sine excitation.
+"""Pulsim — small-signal AC analysis via swept-sine excitation.
 
 Pure-Python implementation that reuses the existing transient
 solver: at each test frequency f, run the plant for several

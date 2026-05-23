@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V17: Saturable-inductor Newton refresh
+// Pulsim — Layer 4 V17: Saturable-inductor Newton refresh
 // =============================================================================
 //
 // Per-Newton-iteration stamping for `SaturableInductor` branches.

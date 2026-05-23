@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4: DevicePool (branch_id → params registry)
+// Pulsim — Layer 4: DevicePool (branch_id → params registry)
 // =============================================================================
 //
 // `pulsim-v2-pwl-state-space-cache` Phase 1.

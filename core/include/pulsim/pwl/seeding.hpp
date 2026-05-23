@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V2: Seed HistoryState + DiodeEventState from DC OP
+// Pulsim — Layer 4 V2: Seed HistoryState + DiodeEventState from DC OP
 // =============================================================================
 //
 // `pulsim-v2-dc-operating-point` Phase 2.

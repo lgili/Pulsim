@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 0: numeric scalar + index types
+// Pulsim — Layer 0: numeric scalar + index types
 // =============================================================================
 //
 // `bootstrap-pulsim-v2-kernel` Phase 1. The two-page-summary version:
@@ -30,7 +30,7 @@ namespace pulsim {
 // -----------------------------------------------------------------------------
 // Real — the simulator's working floating-point precision.
 //
-// Default `double`. To build a single-precision Pulsim v2 (e.g. for an
+// Default `double`. To build a single-precision Pulsim (e.g. for an
 // embedded HIL target), pass `-DPULSIM_V2_REAL_TYPE=float` at CMake
 // configure time and the entire v2 tree compiles in float.
 //

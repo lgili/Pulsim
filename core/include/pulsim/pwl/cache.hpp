@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4: PwlStateSpaceCache (the PLECS-killer)
+// Pulsim — Layer 4: PwlStateSpaceCache (the PLECS-killer)
 // =============================================================================
 //
 // `pulsim-v2-pwl-state-space-cache` Phase 4.

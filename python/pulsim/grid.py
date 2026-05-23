@@ -1,4 +1,4 @@
-"""Pulsim v2 — three-phase grid helpers (Phase C.2).
+"""Pulsim — three-phase grid helpers (Phase C.2).
 
 Building blocks for grid-connected circuits: rectifiers, motor
 drives, PV inverters, grid-tie converters, harmonic analyzers, etc.

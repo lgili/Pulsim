@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 1: TopologyKey for Layer 4 cache lookup
+// Pulsim — Layer 1: TopologyKey for Layer 4 cache lookup
 // =============================================================================
 //
 // `pulsim-v2-topology-and-switch-enumeration` Phase 5.

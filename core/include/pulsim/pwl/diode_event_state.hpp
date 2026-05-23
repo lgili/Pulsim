@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 5 V2: DiodeEventState (per-step diode tracker)
+// Pulsim — Layer 5 V2: DiodeEventState (per-step diode tracker)
 // =============================================================================
 //
 // `pulsim-v2-ideal-diode-auto-commutation` Phase 3.

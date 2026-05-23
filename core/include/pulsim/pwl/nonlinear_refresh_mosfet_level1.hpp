@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V13: SH1 MOSFET Newton refresh
+// Pulsim — Layer 4 V13: SH1 MOSFET Newton refresh
 // =============================================================================
 //
 // Per-Newton-iteration refresh for `models::MosfetLevel1`.

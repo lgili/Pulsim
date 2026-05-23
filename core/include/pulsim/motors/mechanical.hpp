@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase D / C++ port: shared rotational-mechanical base
+// Pulsim — Phase D / C++ port: shared rotational-mechanical base
 // for all motor models.
 //
 // Forward-Euler integration of J·dω/dt = T_em − T_load − B·ω, plus

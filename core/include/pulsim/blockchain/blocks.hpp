@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase A.1: C++ control blocks (mixed-domain BlockChain).
+// Pulsim — Phase A.1: C++ control blocks (mixed-domain BlockChain).
 //
 // Header-only implementations of the 27 control blocks exposed by the
 // Python `pulsim.control` module. Each block follows the same

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: MNA convention (documentation header)
+// Pulsim — Layer 3: MNA convention (documentation header)
 // =============================================================================
 //
 // This header has NO executable code beyond a single static_assert.

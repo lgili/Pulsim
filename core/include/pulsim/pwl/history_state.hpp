@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V1: HistoryState (per-step trap-companion history)
+// Pulsim — Layer 4 V1: HistoryState (per-step trap-companion history)
 // =============================================================================
 //
 // `pulsim-v2-trapezoidal-companion` Phase 5.

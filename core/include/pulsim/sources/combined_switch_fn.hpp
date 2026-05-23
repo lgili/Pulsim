@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Compose multiple switch schedulers: `make_combined_switch_fn`
+// Pulsim — Compose multiple switch schedulers: `make_combined_switch_fn`
 // =============================================================================
 //
 // SMPS circuits frequently drive several INDEPENDENT switch

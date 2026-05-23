@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V12: PulseVoltageSource device model
+// Pulsim — Layer 2 V12: PulseVoltageSource device model
 // =============================================================================
 //
 // First-class pulse / step voltage source. Output:

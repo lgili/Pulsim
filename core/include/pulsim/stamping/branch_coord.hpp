@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: BranchCoord + ground-aware helpers
+// Pulsim — Layer 3: BranchCoord + ground-aware helpers
 // =============================================================================
 //
 // `pulsim-v2-generic-stamping-pipeline` Phase 1.

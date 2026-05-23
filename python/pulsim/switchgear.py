@@ -1,4 +1,4 @@
-"""Pulsim v2 — switchgear & protection helpers (Phase C.4).
+"""Pulsim — switchgear & protection helpers (Phase C.4).
 
 Composite device helpers built on top of v2's primitive R/C/switch
 devices. Each one is a thin Python wrapper that wires the right

@@ -7,7 +7,7 @@
 // option/result aggregates and `IdealDiode::Params`.
 //
 // Bound as a Python submodule `pulsim._pulsim`,
-// re-exported nicely via `pulsim.v2` (see
+// re-exported nicely via `pulsim` (see
 // `python/pulsim/v2.py`).
 //
 // The user code looks like:
@@ -63,7 +63,7 @@ namespace py = pybind11;
 namespace pulsim_kernel_bindings {
 
 void init_module(py::module_& m) {
-    m.doc() = "Pulsim v2 kernel — PWL state-space cache, "
+    m.doc() = "Pulsim kernel — PWL state-space cache, "
               "trapezoidal companion, Newton, and the "
               "high-level CircuitBuilder API.";
     m.attr("__version__") = "0.1.0";
@@ -383,7 +383,7 @@ void init_module(py::module_& m) {
     // run_transient. Bind as opaque classes — users don't
     // construct them directly (they go through CircuitBuilder).
     py::class_<topology::Graph>(m, "Graph",
-        "Pulsim v2 topology graph. Build via "
+        "Pulsim topology graph. Build via "
         "CircuitBuilder; access via builder.graph.")
         .def_property_readonly("num_nodes",
               &topology::Graph::num_nodes)
@@ -403,7 +403,7 @@ void init_module(py::module_& m) {
         .def_static("ground", &topology::Graph::ground);
 
     py::class_<pwl::DevicePool>(m, "DevicePool",
-        "Pulsim v2 device parameter pool. Build via "
+        "Pulsim device parameter pool. Build via "
         "CircuitBuilder; access via builder.pool.")
         .def("has_nonlinear_devices",
               &pwl::DevicePool::has_nonlinear_devices,

@@ -1,4 +1,4 @@
-"""Pulsim v2 — SPICE netlist importer.
+"""Pulsim — SPICE netlist importer.
 
 Parses a subset of SPICE (Berkeley / LTspice / ngspice flavour) and
 emits a populated `pulsim.CircuitBuilder`. Goal is to let users

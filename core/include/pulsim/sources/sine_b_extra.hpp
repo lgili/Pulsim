@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V11: Sine b_extra computation helper
+// Pulsim — Layer 2 V11: Sine b_extra computation helper
 // =============================================================================
 //
 // Walks the DevicePool for `SineVoltageSource` entries and

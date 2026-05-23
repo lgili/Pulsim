@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 0: numeric concepts
+// Pulsim — Layer 0: numeric concepts
 // =============================================================================
 //
 // `bootstrap-pulsim-v2-kernel` Phase 1. Two C++20 concepts that higher

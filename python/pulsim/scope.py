@@ -1,4 +1,4 @@
-"""Pulsim v2 — live oscilloscope GUI (pyqtgraph).
+"""Pulsim — live oscilloscope GUI (pyqtgraph).
 
 A polished real-time waveform viewer fed by a ``LiveStream``.
 

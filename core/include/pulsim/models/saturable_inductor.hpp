@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V16: SaturableInductor (model only — V0)
+// Pulsim — Layer 2 V16: SaturableInductor (model only — V0)
 // =============================================================================
 //
 // Nonlinear inductor whose effective inductance smoothly drops

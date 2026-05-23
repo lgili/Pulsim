@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 5: SimulationResult (transient output container)
+// Pulsim — Layer 5: SimulationResult (transient output container)
 // =============================================================================
 //
 // `pulsim-v2-solver-and-events` Phase 1.

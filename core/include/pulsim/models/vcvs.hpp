@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V15: VCVS (voltage-controlled voltage source)
+// Pulsim — Layer 2 V15: VCVS (voltage-controlled voltage source)
 // =============================================================================
 //
 // 4-terminal linear-controlled source:

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase A.3: MNA-linearised AC sweep.
+// Pulsim — Phase A.3: MNA-linearised AC sweep.
 //
 // For LTI (or linearised-at-x_op) plants, the small-signal transfer
 // function H(jω) = C·(jωI − A)⁻¹·B can be evaluated directly from the

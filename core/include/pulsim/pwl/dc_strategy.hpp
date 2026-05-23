@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase A.2: DC operating-point strategies.
+// Pulsim — Phase A.2: DC operating-point strategies.
 //
 // The naive single-shot DC solve in dc_assemble.hpp::compute_dc_op
 // works for most circuits, but fails on stiff nonlinear topologies

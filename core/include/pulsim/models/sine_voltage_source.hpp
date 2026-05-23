@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V11: SineVoltageSource device model
+// Pulsim — Layer 2 V11: SineVoltageSource device model
 // =============================================================================
 //
 // First-class sinusoidal AC voltage source: produces

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V10: pseudo-transient continuation (research)
+// Pulsim — Layer 4 V10: pseudo-transient continuation (research)
 // =============================================================================
 //
 // Solves F(x) = 0 by converting it into the artificial ODE

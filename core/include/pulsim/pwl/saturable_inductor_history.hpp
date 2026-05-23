@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V17: Saturable-inductor history tracker
+// Pulsim — Layer 4 V17: Saturable-inductor history tracker
 // =============================================================================
 //
 // Parallel to `HistoryState` (which tracks linear inductors + capacitors),

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 8: YAML circuit loader
+// Pulsim — Layer 8: YAML circuit loader
 // =============================================================================
 //
 // `pulsim-v2-yaml-parser` Phase 1.

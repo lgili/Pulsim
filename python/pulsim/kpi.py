@@ -1,4 +1,4 @@
-"""Pulsim v2 — KPI gates and baseline checks (Phase E.5).
+"""Pulsim — KPI gates and baseline checks (Phase E.5).
 
 Validation harness for simulation results. Define a `KpiGate` from a
 dict of named bounds or expected values, then `gate.check(measured)`

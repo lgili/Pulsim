@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase A.1 stage 2 / C++ port: BlockChain executor.
+// Pulsim — Phase A.1 stage 2 / C++ port: BlockChain executor.
 //
 // This is the kernel-side BlockChain: a topologically-ordered list
 // of mixed-domain control blocks evaluated per simulation step. The

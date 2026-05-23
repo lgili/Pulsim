@@ -1,4 +1,4 @@
-"""Pulsim v2 — mixed-domain block chain executor.
+"""Pulsim — mixed-domain block chain executor.
 
 Lets users compose closed-loop controllers, signal-processing pipelines,
 or modulators from the building blocks in `control.py` (PIController,

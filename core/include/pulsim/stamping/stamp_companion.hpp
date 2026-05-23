@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: Trapezoidal-companion stampers (Capacitor + Inductor)
+// Pulsim — Layer 3: Trapezoidal-companion stampers (Capacitor + Inductor)
 // =============================================================================
 //
 // `pulsim-v2-trapezoidal-companion` Phase 3.

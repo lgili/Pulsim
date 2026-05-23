@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 0: sparse matrix wrapper
+// Pulsim — Layer 0: sparse matrix wrapper
 // =============================================================================
 //
 // `bootstrap-pulsim-v2-kernel` Phase 2.

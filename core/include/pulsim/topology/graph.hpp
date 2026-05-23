@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 1: Graph (nodes + branches + adjacency)
+// Pulsim — Layer 1: Graph (nodes + branches + adjacency)
 // =============================================================================
 //
 // `pulsim-v2-topology-and-switch-enumeration` Phase 1.

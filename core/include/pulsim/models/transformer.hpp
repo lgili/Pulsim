@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V2: Two-winding linear transformer
+// Pulsim — Layer 2 V2: Two-winding linear transformer
 // =============================================================================
 //
 // `pulsim-v2-transformer` Phase 1.

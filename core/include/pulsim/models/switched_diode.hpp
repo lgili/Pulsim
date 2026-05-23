@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2: SwitchedDiode (binary-state, auto-commutating)
+// Pulsim — Layer 2: SwitchedDiode (binary-state, auto-commutating)
 // =============================================================================
 //
 // `pulsim-v2-ideal-diode-auto-commutation` Phase 1.

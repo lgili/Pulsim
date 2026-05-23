@@ -1,4 +1,4 @@
-"""Pulsim v2 — one-line plot helpers.
+"""Pulsim — one-line plot helpers.
 
 Pre-baked matplotlib wrappers so users can render the most common
 v2 plots (waveform scope, Bode magnitude/phase, branch currents,
@@ -129,7 +129,7 @@ def scope(builder, result, *,
         branch current. Default: just plot the first non-ground
         node ([0]).
     title
-        Plot title. Defaults to "Pulsim v2 — waveform".
+        Plot title. Defaults to "Pulsim — waveform".
     save
         If given, save the figure to this path (creates parent dir).
     stack
@@ -201,7 +201,7 @@ def scope(builder, result, *,
     # x-label only on the last subplot.
     (ax_list[-1] if stack else ax_list[0]).set_xlabel(t_label)
     if title is None:
-        title = "Pulsim v2 — waveform"
+        title = "Pulsim — waveform"
     (ax_list[0] if stack else ax_list[0]).set_title(title)
 
     plt.tight_layout()

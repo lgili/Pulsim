@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 5: run_transient (fixed-dt time-stepping loop)
+// Pulsim — Layer 5: run_transient (fixed-dt time-stepping loop)
 // =============================================================================
 //
 // `pulsim-v2-solver-and-events` Phase 2.

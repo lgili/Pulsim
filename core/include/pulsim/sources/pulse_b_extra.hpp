@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V12: Pulse b_extra computation helper
+// Pulsim — Layer 2 V12: Pulse b_extra computation helper
 // =============================================================================
 //
 // Same overlay pattern as PWM (V4) and Sine (V11): walks the

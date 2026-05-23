@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V14: IGBT Level 1 (nonlinear)
+// Pulsim — Layer 2 V14: IGBT Level 1 (nonlinear)
 // =============================================================================
 //
 // 3-terminal IGBT model with linear-conduction physics:

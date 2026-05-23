@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V8: continuation / homotopy Newton solve
+// Pulsim — Layer 4 V8: continuation / homotopy Newton solve
 // =============================================================================
 //
 // `pulsim-v2-continuation-newton` Phase 1.

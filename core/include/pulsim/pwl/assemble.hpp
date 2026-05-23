@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4: assemble_segment (build one per-state matrix)
+// Pulsim — Layer 4: assemble_segment (build one per-state matrix)
 // =============================================================================
 //
 // `pulsim-v2-pwl-state-space-cache` Phase 3 (Layer 4 V0).

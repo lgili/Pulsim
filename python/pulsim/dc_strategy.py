@@ -1,4 +1,4 @@
-"""Pulsim v2 — DC operating-point strategies (Phase A.2).
+"""Pulsim — DC operating-point strategies (Phase A.2).
 
 The naive single-shot DC solver (`compute_dc_op` inside the kernel,
 exposed via `simulate(..., start_from_dc_op=True)` at `t_end ≈ dt`)

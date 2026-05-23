@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 2 V3: CurrentSource device model
+// Pulsim — Layer 2 V3: CurrentSource device model
 // =============================================================================
 //
 // `pulsim-v2-current-source` Phase 1.

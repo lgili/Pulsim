@@ -1,4 +1,4 @@
-"""Pulsim v2 — adaptive (variable-step) transient driver.
+"""Pulsim — adaptive (variable-step) transient driver.
 
 The v2 kernel's `simulate(...)` runs at a single fixed `dt`. For a
 500 ms RL settling transient with τ = 10 µs and 100 ns initial dt,

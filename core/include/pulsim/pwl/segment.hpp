@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4: PwlSegment (per-state cached record)
+// Pulsim — Layer 4: PwlSegment (per-state cached record)
 // =============================================================================
 //
 // `pulsim-v2-pwl-state-space-cache` Phase 2.

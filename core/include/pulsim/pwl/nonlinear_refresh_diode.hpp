@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V3: Smooth-blend IdealDiode Newton refresh
+// Pulsim — Layer 4 V3: Smooth-blend IdealDiode Newton refresh
 // =============================================================================
 //
 // Built-in `NonlinearRefreshFn` for the smooth-blend

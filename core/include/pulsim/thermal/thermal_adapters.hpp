@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase C.1 / C++ port: thermal observer adapters.
+// Pulsim — Phase C.1 / C++ port: thermal observer adapters.
 //
 // The Foster network itself is built from primitive R/C devices in
 // the builder, so no kernel additions are needed for the topology.

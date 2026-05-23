@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: Generic 2-terminal device stamper
+// Pulsim — Layer 3: Generic 2-terminal device stamper
 // =============================================================================
 //
 // `pulsim-v2-generic-stamping-pipeline` Phase 2.

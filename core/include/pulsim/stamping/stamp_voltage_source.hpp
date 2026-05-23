@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: Voltage-source constraint stamper
+// Pulsim — Layer 3: Voltage-source constraint stamper
 // =============================================================================
 //
 // `pulsim-v2-generic-stamping-pipeline` Phase 3.

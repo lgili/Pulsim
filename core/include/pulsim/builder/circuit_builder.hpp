@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 6 V0: CircuitBuilder (high-level circuit construction)
+// Pulsim — Layer 6 V0: CircuitBuilder (high-level circuit construction)
 // =============================================================================
 //
 // `pulsim-v2-builder-api` Phase 1.

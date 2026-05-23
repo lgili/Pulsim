@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Half-bridge PWM pair: `make_dead_time_pwm_pair_fn`
+// Pulsim — Half-bridge PWM pair: `make_dead_time_pwm_pair_fn`
 // =============================================================================
 //
 // Half-bridge SMPS (synchronous buck/boost, full-bridge,

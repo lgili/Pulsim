@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 0: direct sparse solver interface + reference impl
+// Pulsim — Layer 0: direct sparse solver interface + reference impl
 // =============================================================================
 //
 // `bootstrap-pulsim-v2-kernel` Phase 2.

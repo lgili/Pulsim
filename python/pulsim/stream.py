@@ -1,4 +1,4 @@
-"""Pulsim v2 — live data streaming + cancellation.
+"""Pulsim — live data streaming + cancellation.
 
 Foundation for the live scope GUI. The simulation pushes per-step
 samples into a thread-safe queue; one or more consumers (typically

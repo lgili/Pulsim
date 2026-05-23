@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Phase-shift full-bridge: `make_phase_shift_full_bridge_fn`
+// Pulsim — Phase-shift full-bridge: `make_phase_shift_full_bridge_fn`
 // =============================================================================
 //
 // Full-bridge isolated DC-DC converters (zero-voltage-

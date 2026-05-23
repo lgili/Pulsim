@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 4 V10: smart initial-guess helper
+// Pulsim — Layer 4 V10: smart initial-guess helper
 // =============================================================================
 //
 // `pulsim-v2-pseudo-transient` Phase 2 / 3.

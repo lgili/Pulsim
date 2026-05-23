@@ -1,4 +1,4 @@
-"""Pulsim v2 — snubber advisor for hard-switched topologies.
+"""Pulsim — snubber advisor for hard-switched topologies.
 
 Closed-form sizing rules for the parasitic-resonance snubber that
 sits across a switching device (MOSFET, IGBT, diode) in topologies

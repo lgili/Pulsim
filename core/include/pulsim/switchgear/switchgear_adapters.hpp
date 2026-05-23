@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim v2 — Phase C.4 / C++ port: protection-device chain blocks.
+// Pulsim — Phase C.4 / C++ port: protection-device chain blocks.
 //
 // Two stateful blocks that live entirely in C++:
 //

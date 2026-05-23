@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 0: dense vector + matrix aliases
+// Pulsim — Layer 0: dense vector + matrix aliases
 // =============================================================================
 //
 // `bootstrap-pulsim-v2-kernel` Phase 1. Thin aliases over Eigen.

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// Pulsim v2 — Layer 3: VCVS constraint stamper (V15)
+// Pulsim — Layer 3: VCVS constraint stamper (V15)
 // =============================================================================
 //
 // MNA stamping for the voltage-controlled voltage source:
