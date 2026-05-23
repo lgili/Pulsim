@@ -1,0 +1,11 @@
+* Capacitor natural discharge (IC-only) — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/capacitor_natural_discharge.yaml
+*
+* Pre-charged cap (V_C = 5 V at t=0) discharging through R = 1 kΩ.
+* No source — pure UIC. V(t) = 5 · exp(-t/τ), τ = RC = 1 ms.
+
+C1 node 0 1u IC=5
+R1 node 0 1k
+
+.tran 5u 5m UIC
+.end

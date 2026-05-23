@@ -177,6 +177,37 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
+  # ----- IC/DC/resonance batch (Phase 9 — third validation batch) -----
+  # NOTE: `chopper_inductive_freewheel` was attempted in this batch but
+  # exposed a Pulsim numerical limitation: vcswitch + L + diode in OFF
+  # commutation produces unbounded ringing (±50 kV peaks across the
+  # switch node) that grows with finer dt. Tracked separately as a
+  # known solver-side issue; the four entries below stick to paths
+  # that the solver handles cleanly.
+  - path: circuits/capacitor_natural_discharge.yaml
+    ngspice_netlist: ngspice/capacitor_natural_discharge.cir
+    ngspice_observables:
+      - column: V(node)
+        spice_vector: v(node)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/voltage_divider_3stage.yaml
+    ngspice_netlist: ngspice/voltage_divider_3stage.cir
+    ngspice_observables:
+      - column: V(n_mid)
+        spice_vector: v(n_mid)
+    scenarios: [direct_trap]
+  - path: circuits/bridge_resistive_pure.yaml
+    ngspice_netlist: ngspice/bridge_resistive_pure.cir
+    ngspice_observables:
+      - column: V(a)
+        spice_vector: v(a)
+    scenarios: [direct_trap]
+  - path: circuits/driven_lc_series_resonance.yaml
+    ngspice_netlist: ngspice/driven_lc_series_resonance.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
   - path: circuits/pulse_voltage_rl.yaml
     ngspice_netlist: ngspice/pulse_voltage_rl.cir
     ngspice_observables:
