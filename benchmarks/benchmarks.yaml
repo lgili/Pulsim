@@ -208,6 +208,43 @@ benchmarks:
       - column: V(out)
         spice_vector: v(out)
     scenarios: [gmres_trbdf2]
+  # ----- Stress / bug-hunt batch (Phase 10 — fourth validation batch) -----
+  # Designed to STRESS the solver and expose limits, not just validate
+  # happy paths. Each entry documents the hypothesis being tested.
+  #
+  # NOTE: `chopper_with_rc_snubber` was attempted in this batch and
+  # CONFIRMED the negative finding from batch 3: vcswitch + L + diode
+  # commutation produces EXPONENTIALLY GROWING numerical instability
+  # (V(sw) ringing at ±1 kV → ±24 kV over 1.5 ms; Vcc current reaches
+  # ±15 MA). Adding an RC snubber across the switch did NOT help. The
+  # bug is solver-side, NOT topology-side. See
+  # `benchmarks/circuits/NOTES_known_issues.md` for details. YAML+CIR
+  # files remain on disk as regression-test fixtures for when the
+  # solver gains the fix.
+  - path: circuits/high_q_rlc_ringdown.yaml
+    ngspice_netlist: ngspice/high_q_rlc_ringdown.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/stiff_two_timescale_rc.yaml
+    ngspice_netlist: ngspice/stiff_two_timescale_rc.cir
+    ngspice_observables:
+      - column: V(slow)
+        spice_vector: v(slow)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/back_to_back_diodes_sine.yaml
+    ngspice_netlist: ngspice/back_to_back_diodes_sine.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
+  - path: circuits/rlc_parallel_step.yaml
+    ngspice_netlist: ngspice/rlc_parallel_step.cir
+    ngspice_observables:
+      - column: V(out)
+        spice_vector: v(out)
+    scenarios: [gmres_trbdf2]
   - path: circuits/pulse_voltage_rl.yaml
     ngspice_netlist: ngspice/pulse_voltage_rl.cir
     ngspice_observables:

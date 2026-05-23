@@ -1,0 +1,14 @@
+* Parallel RLC step response — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/rlc_parallel_step.yaml
+*
+* V_step + R_source = 10 Ω feeding parallel branch {R=100, L=1mH, C=1µF}.
+* Tests MNA admittance stamping for 3 parallel branches at a single node.
+
+Vp   in  0   PULSE(0 10 0 1n 1n 10m 20m)
+Rsrc in  out 10
+Rp   out 0   100
+Lp   out 0   1m IC=0
+Cp   out 0   1u IC=0
+
+.tran 5u 5m UIC
+.end

@@ -1,0 +1,62 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: rlc_parallel_step
+  category: linear
+  observables:
+    - column: V(out)
+  expectations:
+    metrics:
+      # V_step + R_source → [R_par || L || C] → ground.
+      # Source impedance R_source = 10 Ω. Parallel branch:
+      #   R = 100 Ω, L = 1 mH, C = 1 µF.
+      # At t=0+: C looks like short, L looks like open. V(0+) = 0 (C clamp).
+      # At t=∞: L looks like short → V(∞) = 0 too (L drains node to ground).
+      # In between: 2nd-order resonance around V_thev / (1 + R_source·G).
+      # STRESS TEST: parallel RLC topology stamps differently from
+      # series RLC. Validates the MNA admittance for multi-branch nodes.
+      max_error: 5e-2
+  validation:
+    type: reference
+    observable: V(out)
+    baseline: baselines/rlc_parallel_step.csv
+# Parallel RLC step response. Most existing RLC tests are SERIES;
+# parallel exercises a different MNA stamping pattern (3 branches
+# at the same node share a single KCL row). Useful coverage gap.
+simulation:
+  tstop: 5e-3
+  dt: 5e-6
+  integrator: trbdf2
+  uic: true
+components:
+  - type: voltage_source
+    name: Vp
+    nodes: [in, 0]
+    waveform:
+      type: pulse
+      v_initial: 0.0
+      v_pulse: 10.0
+      t_delay: 0.0
+      t_rise: 1e-9
+      t_fall: 1e-9
+      t_width: 10e-3
+      period: 20e-3
+  - type: resistor
+    name: Rsrc
+    nodes: [in, out]
+    value: 10.0
+  # Parallel branch at "out" node:
+  - type: resistor
+    name: Rp
+    nodes: [out, 0]
+    value: 100.0
+  - type: inductor
+    name: Lp
+    nodes: [out, 0]
+    value: 1e-3
+    ic: 0.0
+  - type: capacitor
+    name: Cp
+    nodes: [out, 0]
+    value: 1e-6
+    ic: 0.0

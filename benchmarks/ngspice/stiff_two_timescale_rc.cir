@@ -1,0 +1,15 @@
+* Stiff multi-rate RC cascade — ngspice benchmark
+* Matches Pulsim benchmarks/circuits/stiff_two_timescale_rc.yaml
+*
+* Two RC stages: τ_a = 100 ps, τ_b = 100 µs (1e6× spread).
+* ngspice's adaptive timestep handles this naturally — observe how
+* Pulsim's fixed-step trbdf2 compares.
+
+Vp in   0    PULSE(0 5 0 1n 1n 10m 20m)
+Ra in   fast 100
+Ca fast 0    1p IC=0
+Rb fast slow 100
+Cb slow 0    1u IC=0
+
+.tran 100n 1m UIC
+.end
